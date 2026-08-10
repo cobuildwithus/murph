@@ -196,16 +196,19 @@ it has been explicitly elevated to a cross-cutting invariant.
   shorten it. Only the exact assistant retry or follow-up wake projected
   directly by the current foreground assistant phase may run as foreground
   work inside that window without publishing a snapshot. The only other
-  exception is a server-identified, fixed-destination, transport-idempotent
-  phone-call-result or usage-referral-reward notification: after fresh
-  conversation work has priority, the runtime may select that exact durable
-  mailbox family, compose it queue-only, persist its causal outbox intent, and
-  drain it before the idle floor. Generic notifications and unrelated pending
-  outbox work remain excluded. Inherited, committed, durability-gated, and
-  shutdown-time wakes do not otherwise use this exception. If the hot pass
-  dirties state, the full quiet window starts again. An actual host termination
-  may use the separate last-chance durability path, but durably staged
-  foreground work still wins.
+  exception is a server-identified, fixed-destination exact completion: a
+  transport-idempotent phone-call-result or usage-referral-reward notification,
+  or a private Assistant Ask completion whose `aask_done_*` identity binds its
+  exact text, personal member, current direct route, and expiry. After fresh
+  conversation work has priority, the runtime may select only those durable
+  mailbox families, compose them queue-only, and persist their causal outbox
+  intents before the idle floor. Transport-idempotent delivery may drain in the
+  hot pass; non-idempotent provider work remains behind the resulting durable
+  checkpoint. Generic notifications and unrelated pending outbox work remain
+  excluded. Inherited, committed, durability-gated, and shutdown-time wakes do
+  not otherwise use this exception. If the hot pass dirties state, the full
+  quiet window starts again. An actual host termination may use the separate
+  last-chance durability path, but durably staged foreground work still wins.
   Current-turn durability barriers may run only for facts the current reply or
   effect consumes. Before provider start, that is limited to accepted-input and
   turn-ownership proof; before an irreversible send, to the minimal outbox

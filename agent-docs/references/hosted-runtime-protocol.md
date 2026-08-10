@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Decision
 
@@ -40,9 +40,11 @@ The live ownership split is:
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
-  exact phone-call-result and usage-referral-reward notification families may
-  also run queue-only through their causal outbox intent after fresh
-  conversation work has priority; generic notifications remain excluded.
+  exact phone-call-result, usage-referral-reward, and `aask_done_*` private
+  Assistant Ask notification families may also run queue-only through their
+  causal outbox intent after fresh conversation work has priority; generic
+  notifications remain excluded. Non-idempotent provider work still waits for
+  the resulting durable checkpoint.
   Inherited or committed wakes and durability barriers remain checkpoint-first.
   At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
   state before returning success. When Cloudflare reports container activity
@@ -115,9 +117,9 @@ pull pending device-sync dirty rows
 for Linq input with link parts, attachment-bearing non-email input, and direct raw email, run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
 while dirty and before the idle floor, service fresh foreground input, the
-  exact safe Assistant Ask shapes, and only replay-safe phone-call-result or
-  usage-referral-reward notifications without publishing a snapshot; other
-  wakes do not shorten the floor
+  exact safe Assistant Ask shapes, and only replay-safe phone-call-result,
+  usage-referral-reward, or `aask_done_*` private Assistant Ask notifications
+  without publishing a snapshot; other wakes do not shorten the floor
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
@@ -604,13 +606,16 @@ cancellation, or mailbox-budget exhaustion stops the drain.
 
 The same bounded pass admits only
 `assistant.notification.requested:phone-call-result:*` and
-`assistant.notification.requested:usage-referral-reward:*`. Import eligibility
-does not grant dispatch authority: the foreground-causal system-mailbox selector
-must match the exact dedupe-key family again, then collect only the outbox intent
-returned by that mailbox execution. Its persisted `sending` transition precedes
-provider entry, replay observes the same intent, and an older generic
-notification or unrelated pending delivery cannot hitchhike. Fresh conversation
-input continues to preempt this pass.
+`assistant.notification.requested:usage-referral-reward:*`, plus exact private
+Assistant Ask completions under `aask_done_*`. Import eligibility does not grant
+dispatch authority: the foreground-causal system-mailbox selector must match the
+exact dedupe-key family again, then collect only the outbox intent returned by
+that mailbox execution. Its persisted `sending` transition precedes provider
+entry, replay observes the same intent, and an older generic notification or
+unrelated pending delivery cannot hitchhike. Private completions retain their
+Web-owned exact-text, member, expiry, and direct-route assertion at every
+provider attempt; non-idempotent transport work remains checkpoint-gated. Fresh
+conversation input continues to preempt this pass.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks

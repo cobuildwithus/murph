@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Current Guardrails
 
@@ -923,18 +923,21 @@ Last verified: 2026-08-09
   becomes unavailable, and route drift cannot redirect existing work. Neither
   path adds a scheduler, callback wait, status or grant row, retry owner,
   delivery ledger, or second generation.
-- The same dirty-runtime prefix admits only two server-identified,
+- The same dirty-runtime prefix admits only three server-identified,
   replay-safe external-completion notification families:
   `assistant.notification.requested:phone-call-result:*` and
-  `assistant.notification.requested:usage-referral-reward:*`. Their stable
-  mailbox identity and idempotent delivery let them interrupt the idle floor;
-  the foreground-causal selector rechecks those exact dedupe-key families,
-  carries only the just-created causal outbox intent into the existing
-  write-ahead provider drain, and leaves generic notifications or unrelated
-  pending outbox work checkpoint-gated. Fresh conversation input retains
-  priority. Referral recovery also re-signals bounded oldest unconsumed
-  celebration items, so a post-commit signal failure remains recoverable from
-  the existing mailbox without another queue or state machine.
+  `assistant.notification.requested:usage-referral-reward:*`, plus exact private
+  Assistant Ask completions under `aask_done_*`. Their stable mailbox identity
+  lets them interrupt the idle floor; the foreground-causal selector rechecks
+  those exact dedupe-key families and carries only the just-created causal
+  outbox intent into the existing write-ahead provider drain. Private Assistant
+  Ask completion still repeats its Web-owned text, member, expiry, and direct
+  route authority before every provider attempt, and non-idempotent transport
+  work remains checkpoint-gated. Generic notifications or unrelated pending
+  outbox work cannot hitchhike. Fresh conversation input retains priority.
+  Referral recovery also re-signals bounded oldest unconsumed celebration
+  items, so a post-commit signal failure remains recoverable from the existing
+  mailbox without another queue or state machine.
 - A legacy joined-group `cannot_answer` queues the fixed
   unavailable-evidence response exactly. It must not start a private provider
   continuation that can invent an expiry, provider failure, or execution
