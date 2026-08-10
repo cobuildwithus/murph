@@ -46,7 +46,9 @@ const mocks = vi.hoisted(() => ({
   ensureHostedMemberStripeCustomer: vi.fn(),
   getPrisma: vi.fn(),
   hasHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
-  lockHostedMemberRow: vi.fn(async () => {}),
+  lockHostedMemberRow: vi.fn<
+    (tx: unknown, memberId: string) => Promise<void>
+  >(async () => {}),
   readHostedAiUsageGate: vi.fn(),
   readHostedPersonalUsageCreditOfferCodes: vi.fn(),
   readHostedConfiguredUsageCreditOfferCodes: vi.fn(),
@@ -582,6 +584,67 @@ describe("createHostedUsageCreditCheckout", () => {
     });
   });
 
+  it("releases an already expired unpaid Session reservation and admits the next checkout", async () => {
+    const usageCreditEvents: string[] = [];
+    const fake = createFakePrisma({
+      occupiedUsageCreditSlotCount: () =>
+        31 + [...fake.purchases.values()].filter((purchase) =>
+          purchase.status !== "fulfilled" &&
+          purchase.grantSlotReleasedAt === null
+        ).length,
+      usageCreditEvents,
+    });
+    mocks.lockHostedMemberRow.mockImplementation(async (_tx: unknown, memberId: string) => {
+      usageCreditEvents.push(`payer-lock:${String(memberId)}`);
+    });
+    mocks.stripeCheckoutCreate
+      .mockImplementationOnce(async (request) => {
+        usageCreditEvents.length = 0;
+        const locallyExpired = onlyPurchase(fake.purchases);
+        locallyExpired.status = "expired";
+        locallyExpired.terminalAt = NOW;
+        return {
+          ...buildStripeSession(request),
+          payment_status: "unpaid",
+          status: "expired",
+          url: null,
+        };
+      })
+      .mockImplementationOnce(async (request) => buildStripeSession(request));
+
+    const released = await createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(released).toMatchObject({ status: "expired" });
+    expect(usageCreditEvents).toEqual([
+      "beneficiary-lock",
+      `payer-lock:${MEMBER_ID}`,
+      `payer-lock:${MEMBER_ID}`,
+    ]);
+    expect(fake.purchases.get(released.purchaseId)).toMatchObject({
+      grantSlotReleasedAt: NOW,
+      status: "expired",
+      terminalAt: NOW,
+    });
+
+    await expect(createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: "request_key_after_provider_release",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ status: "checkout_open" });
+    expect(fake.purchases.size).toBe(2);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects a new personal checkout at 32 combined slots before creating a purchase", async () => {
     const usageCreditEvents: string[] = [];
     const fake = createFakePrisma({
@@ -610,6 +673,56 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(0);
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
     expect(mocks.encryptHostedWebNullableString).not.toHaveBeenCalled();
+  });
+
+  it("keeps a locally expired purchase reserved at the 32-slot boundary", async () => {
+    const fake = createFakePrisma({
+      occupiedUsageCreditSlotCount: () =>
+        31 + [...fake.purchases.values()].filter((purchase) =>
+          purchase.status !== "fulfilled" &&
+          purchase.grantSlotReleasedAt === null
+        ).length,
+    });
+    mocks.stripeCheckoutCreate.mockRejectedValueOnce(
+      new Error("ambiguous Session creation"),
+    );
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toBeTruthy();
+    const reserved = onlyPurchase(fake.purchases);
+    const afterDeadline = new Date(
+      (reserved.checkoutExpiresAt as Date).getTime() + 1,
+    );
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: afterDeadline,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ status: "expired" });
+    expect(reserved).toMatchObject({
+      grantSlotReleasedAt: null,
+      status: "expired",
+    });
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: "request_key_after_local_expiry",
+      memberId: MEMBER_ID,
+      now: new Date(afterDeadline.getTime() + 1),
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+      httpStatus: 409,
+    });
+    expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
   });
 
   it("returns a matching active purchase at capacity without reserving another slot", async () => {
@@ -1749,6 +1862,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(checkout).not.toHaveProperty("retryAllowed");
     expect(fake.purchases.size).toBe(1);
     expect(onlyPurchase(fake.purchases)).toMatchObject({
+      grantSlotReleasedAt: null,
       status: "checkout_open",
       stripeCheckoutSessionIdEncrypted: expect.any(String),
       stripeCheckoutSessionLookupKey: expect.any(String),
@@ -3014,6 +3128,7 @@ describe("createHostedUsageCreditCheckout", () => {
       expect.any(Object),
     );
     expect(onlyPurchase(fake.purchases)).toMatchObject({
+      grantSlotReleasedAt: null,
       status: "checkout_open",
       stripeChargeIdEncrypted: null,
       stripeChargeLookupKey: null,
@@ -3067,6 +3182,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(2);
     expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
     expect(onlyPurchase(fake.purchases)).toMatchObject({
+      grantSlotReleasedAt: null,
       status: "payment_pending",
       stripeChargeIdEncrypted: "encrypted:ch_saved_card_123",
       stripeChargeLookupKey: "billing:ch_saved_card_123",
@@ -4905,6 +5021,7 @@ describe("automatic group refill saved-card recovery", () => {
       expect.objectContaining({ idempotencyKey: expect.any(String) }),
     );
     expect(fixture.refill).toMatchObject({
+      grantSlotReleasedAt: NOW,
       status: "expired",
       terminalAt: NOW,
     });
@@ -4998,6 +5115,7 @@ describe("automatic group refill saved-card recovery", () => {
     );
     expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
     expect(fixture.refill).toMatchObject({
+      grantSlotReleasedAt: NOW,
       status: "expired",
       stripePaymentIntentIdEncrypted: null,
       stripePaymentIntentLookupKey: null,
@@ -5069,8 +5187,19 @@ describe("expireHostedUsageCreditCheckout", () => {
       "cs_test_usage_credit_123",
     );
     expect(purchase).toMatchObject({
+      grantSlotReleasedAt: new Date(NOW.getTime() + 60_000),
       status: "expired",
     });
+
+    const releasedAt = purchase.grantSlotReleasedAt;
+    await expect(expireHostedUsageCreditCheckout({
+      now: new Date(NOW.getTime() + 120_000),
+      payerMemberId: MEMBER_ID,
+      purchaseId: checkout.purchaseId,
+    })).resolves.toMatchObject({ status: "expired" });
+    expect(purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    expect(mocks.stripeCheckoutRetrieve).toHaveBeenCalledOnce();
+    expect(mocks.stripeCheckoutExpire).toHaveBeenCalledOnce();
   });
 
   it("cancels a payer-owned sessionless direct attempt and releases the purchase fence", async () => {
@@ -5144,6 +5273,7 @@ describe("expireHostedUsageCreditCheckout", () => {
     expect(mocks.stripeCheckoutExpire).not.toHaveBeenCalled();
     expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledOnce();
     expect(purchase).toMatchObject({
+      grantSlotReleasedAt: new Date(NOW.getTime() + 60_000),
       lastReconciledAt: new Date(NOW.getTime() + 60_000),
       status: "expired",
       terminalAt: new Date(NOW.getTime() + 60_000),
@@ -5503,6 +5633,7 @@ describe("usage-credit account-deletion convergence", () => {
       },
     );
     expect(fixture.refill).toMatchObject({
+      grantSlotReleasedAt: deletionAt,
       lastReconciledAt: deletionAt,
       status: "expired",
       terminalAt: deletionAt,
@@ -5546,6 +5677,7 @@ describe("usage-credit account-deletion convergence", () => {
 
     expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(2);
     expect(fixture.refill).toMatchObject({
+      grantSlotReleasedAt: new Date(NOW.getTime() + 1_000),
       status: "expired",
     });
   });
@@ -5622,6 +5754,7 @@ describe("usage-credit account-deletion convergence", () => {
       "cs_test_usage_credit_123",
     );
     expect(purchase).toMatchObject({
+      grantSlotReleasedAt: new Date(NOW.getTime() + 60_000),
       status: "expired",
     });
     await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
@@ -5691,6 +5824,7 @@ describe("usage-credit account-deletion convergence", () => {
     })).resolves.toMatchObject({ status: "expired" });
     expect(purchase).toMatchObject({
       lastReconciledAt: null,
+      grantSlotReleasedAt: null,
       status: "expired",
       stripeCheckoutSessionLookupKey: null,
     });
@@ -5720,6 +5854,7 @@ describe("usage-credit account-deletion convergence", () => {
       mocks.stripeCheckoutCreate.mock.calls[0],
     );
     expect(purchase).toMatchObject({
+      grantSlotReleasedAt: deletionAt,
       lastReconciledAt: deletionAt,
       status: "expired",
       stripeCheckoutSessionLookupKey: expect.any(String),
@@ -5754,6 +5889,14 @@ describe("usage-credit account-deletion convergence", () => {
       now: deletionAt,
       offerCode: "usage_10_usd",
     })).resolves.toMatchObject({ status: "expired" });
+    purchase.lastReconciledAt = deletionAt;
+    await expect(assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+      memberIds: [MEMBER_ID],
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "ACCOUNT_DELETION_USAGE_CREDIT_UNRESOLVED",
+      retryable: true,
+    });
     mocks.stripeCheckoutList.mockResolvedValueOnce({
       data: [],
       has_more: false,
@@ -5776,6 +5919,7 @@ describe("usage-credit account-deletion convergence", () => {
       limit: 100,
     });
     expect(purchase).toMatchObject({
+      grantSlotReleasedAt: deletionAt,
       lastReconciledAt: deletionAt,
       status: "expired",
       stripeCheckoutSessionIdEncrypted: null,
@@ -5817,6 +5961,7 @@ describe("usage-credit account-deletion convergence", () => {
 
     expect(mocks.stripeCheckoutRetrieve).toHaveBeenCalledTimes(2);
     expect(purchase).toMatchObject({
+      grantSlotReleasedAt: new Date(NOW.getTime() + 60_000),
       status: "expired",
     });
   });

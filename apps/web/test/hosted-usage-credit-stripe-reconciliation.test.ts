@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   decryptStripeField: vi.fn(),
   encryptStripeField: vi.fn(),
   grantUsageCredit: vi.fn(),
+  lockPurchaseReservationOwners: vi.fn(),
   readGrantCapacity: vi.fn(),
   reconcileDisputeNetReversal: vi.fn(),
   reconcileRefundNetReversal: vi.fn(),
@@ -81,6 +82,14 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
     run: (tx: UsageCreditStripePrismaHarnessClient) => Promise<unknown>;
   }) => input.prisma.$transaction(input.run),
 }));
+
+vi.mock(
+  "@/src/lib/hosted-onboarding/usage-credit-purchase-reservation-lock",
+  () => ({
+    lockHostedUsageCreditPurchaseReservationOwnersTx:
+      mocks.lockPurchaseReservationOwners,
+  }),
+);
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeApi: () => mocks.stripe,
@@ -716,6 +725,11 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       grantSlotReleasedAt: expect.any(Date),
       status: HostedUsageCreditPurchaseStatus.expired,
     }));
+    expect(mocks.lockPurchaseReservationOwners).toHaveBeenLastCalledWith({
+      beneficiaryMemberId: "member_beneficiary",
+      payerMemberId: "member_payer",
+      tx: harness.client,
+    });
 
     const releasedAt = harness.purchase.grantSlotReleasedAt;
     await expect(reconcileHostedUsageCreditStripeEvent({
@@ -727,14 +741,43 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     });
 
     expect(harness.purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    expect(mocks.lockPurchaseReservationOwners).toHaveBeenCalledOnce();
     const updateMany = vi.mocked(
       harness.client.hostedUsageCreditPurchase.updateMany,
     );
-    expect(updateMany).toHaveBeenCalledTimes(2);
-    expect(updateMany.mock.calls[1]?.[0]?.data).not.toHaveProperty(
-      "grantSlotReleasedAt",
-    );
+    expect(updateMany).toHaveBeenCalledOnce();
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+  });
+
+  it("replays a provider-final release after account deletion detached the payer", async () => {
+    const releasedAt = new Date("2026-07-16T04:55:00.000Z");
+    const harness = createUsageCreditStripePrismaHarness({
+      grantSlotReleasedAt: releasedAt,
+      payerMemberId: null,
+      status: HostedUsageCreditPurchaseStatus.expired,
+      stripeCheckoutSessionIdEncrypted: null,
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue(
+      makeCheckoutSession({
+        paymentIntentId: null,
+        paymentStatus: "unpaid",
+        status: "expired",
+      }),
+    );
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.expired"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: false,
+      handled: true,
+      wakeRequired: false,
+    });
+
+    expect(harness.purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    expect(harness.purchase.payerMemberId).toBeNull();
+    expect(mocks.lockPurchaseReservationOwners).not.toHaveBeenCalled();
   });
 
   it("fails closed when live paid Checkout contradicts provider-final release", async () => {

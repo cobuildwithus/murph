@@ -29,6 +29,10 @@ import {
   type HostedUsageCreditStripePreparationContext,
   type HostedUsageCreditStripePrivateReferences,
 } from "./usage-credit-stripe-reconciliation-context";
+import {
+  lockHostedUsageCreditPurchaseReservationOwnersTx,
+} from "./usage-credit-purchase-reservation-lock";
+import { requireHostedUsageCreditPurchasePayerMemberId } from "./usage-credit-purchase-stripe";
 
 export type HostedUsageCreditPreparedCheckoutEvent = {
   chargeId: string | null;
@@ -212,13 +216,6 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
         "Provider-final usage-credit Checkout release contradicted live Stripe state.",
       );
     }
-    await bindHostedUsageCreditStripeReferencesTx({
-      expectedReconciliationVersion: input.expectedReconciliationVersion,
-      lastReconciledAt: reconciledAt,
-      privateReferences,
-      purchaseId: input.purchase.id,
-      tx: input.tx,
-    });
     return { granted: false, wakeRequired: false };
   }
 
@@ -278,6 +275,13 @@ export async function reconcileHostedUsageCreditCheckoutEventTx(input: {
         "Stripe reported Checkout expiry without provider-final unpaid state.",
       );
     }
+    await lockHostedUsageCreditPurchaseReservationOwnersTx({
+      beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+      payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(
+        input.purchase,
+      ),
+      tx: input.tx,
+    });
     await transitionHostedUsageCreditCheckoutTx({
       expectedReconciliationVersion: input.expectedReconciliationVersion,
       grantSlotReleasedAt: reconciledAt,
@@ -360,7 +364,7 @@ async function transitionHostedUsageCreditCheckoutTx(input: {
       where: {
         id: input.purchaseId,
         ...(input.grantSlotReleasedAt
-          ? { grantSlotReleasedAt: null }
+          ? { grantSlotReleasedAt: null, paidAt: null }
           : {}),
         reconciliationVersion: input.expectedReconciliationVersion,
         status: {

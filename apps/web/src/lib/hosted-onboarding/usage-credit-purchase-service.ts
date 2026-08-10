@@ -59,6 +59,9 @@ import {
   type HostedUsageCreditPurchaseTargetProjection,
 } from "./usage-credit-purchase-status-service";
 import {
+  lockHostedUsageCreditPurchaseReservationOwnersTx,
+} from "./usage-credit-purchase-reservation-lock";
+import {
   assertHostedUsageCreditStripePriceMatchesPurchase,
   assertHostedUsageCreditStripeSessionMatchesPurchase,
   buildHostedUsageCreditCheckoutIdempotencyKey,
@@ -1510,17 +1513,31 @@ async function bindHostedUsageCreditCheckoutSession(input: {
     createHostedStripeCheckoutSessionLookupKey(input.session.id),
     "checkout_session",
   );
-
+  const providerFinalNoPayment = input.session.status === "expired" &&
+    input.session.payment_status === "unpaid";
   const target = projectHostedUsageCreditPurchaseTarget(input.purchase);
+
   return input.prisma.$transaction(async (tx) => {
-    if (target.kind === "group") {
-      await lockHostedMemberRow(tx, target.beneficiaryMemberId);
+    if (providerFinalNoPayment) {
+      await lockHostedUsageCreditPurchaseReservationOwnersTx({
+        beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        payerMemberId,
+        tx,
+      });
+    } else {
+      if (target.kind === "group") {
+        await lockHostedMemberRow(tx, target.beneficiaryMemberId);
+      }
+      await lockHostedMemberRow(tx, payerMemberId);
     }
-    await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });
-    if (!current || current.payerMemberId !== payerMemberId) {
+    if (
+      !current ||
+      current.payerMemberId !== payerMemberId ||
+      current.beneficiaryMemberId !== input.purchase.beneficiaryMemberId
+    ) {
       throw buildHostedUsageCreditPurchaseNotFoundError();
     }
 
@@ -1534,10 +1551,68 @@ async function bindHostedUsageCreditCheckoutSession(input: {
       if (currentSessionId !== input.session.id) {
         throw buildHostedUsageCreditInvariantError("multiple_checkout_sessions");
       }
-      return current;
+      if (!providerFinalNoPayment) {
+        return current;
+      }
+      if (current.grantSlotReleasedAt !== null) {
+        if (
+          current.status !== HostedUsageCreditPurchaseStatus.expired ||
+          current.paidAt !== null
+        ) {
+          throw buildHostedUsageCreditInvariantError(
+            "checkout_release_state_invalid",
+          );
+        }
+        return current;
+      }
+      const released = await tx.hostedUsageCreditPurchase.updateMany({
+        data: {
+          grantSlotReleasedAt: input.now,
+          lastReconciledAt: input.now,
+          reconciliationVersion: { increment: 1n },
+          status: HostedUsageCreditPurchaseStatus.expired,
+          stripeCheckoutUrlEncrypted: null,
+          terminalAt: input.now,
+          updatedAt: input.now,
+        },
+        where: {
+          grantSlotReleasedAt: null,
+          id: current.id,
+          paidAt: null,
+          reconciliationVersion: current.reconciliationVersion,
+          status: {
+            in: [
+              HostedUsageCreditPurchaseStatus.created,
+              HostedUsageCreditPurchaseStatus.checkout_open,
+              HostedUsageCreditPurchaseStatus.payment_pending,
+              HostedUsageCreditPurchaseStatus.expired,
+              HostedUsageCreditPurchaseStatus.payment_failed,
+            ],
+          },
+          stripeCheckoutSessionLookupKey: sessionLookupKey,
+        },
+      });
+      if (released.count !== 1) {
+        throw buildHostedUsageCreditInvariantError(
+          "checkout_attach_release_failed",
+        );
+      }
+      const reconciled = await tx.hostedUsageCreditPurchase.findUnique({
+        where: { id: current.id },
+      });
+      if (!reconciled) {
+        throw buildHostedUsageCreditPurchaseNotFoundError();
+      }
+      return reconciled;
     }
 
-    if (current.status !== HostedUsageCreditPurchaseStatus.created) {
+    if (
+      current.status !== HostedUsageCreditPurchaseStatus.created &&
+      !(
+        providerFinalNoPayment &&
+        current.status === HostedUsageCreditPurchaseStatus.expired
+      )
+    ) {
       return current;
     }
 
@@ -1564,6 +1639,10 @@ async function bindHostedUsageCreditCheckoutSession(input: {
         : HostedUsageCreditPurchaseStatus.checkout_open;
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
+        ...(providerFinalNoPayment
+          ? { grantSlotReleasedAt: input.now }
+          : {}),
+        ...(providerFinalNoPayment ? { lastReconciledAt: input.now } : {}),
         reconciliationVersion: { increment: 1n },
         status,
         stripeCheckoutSessionIdEncrypted,
@@ -1574,8 +1653,19 @@ async function bindHostedUsageCreditCheckoutSession(input: {
       },
       where: {
         id: current.id,
+        ...(providerFinalNoPayment
+          ? {
+              grantSlotReleasedAt: null,
+              paidAt: null,
+              status: {
+                in: [
+                  HostedUsageCreditPurchaseStatus.created,
+                  HostedUsageCreditPurchaseStatus.expired,
+                ],
+              },
+            }
+          : { status: HostedUsageCreditPurchaseStatus.created }),
         reconciliationVersion: current.reconciliationVersion,
-        status: HostedUsageCreditPurchaseStatus.created,
       },
     });
     if (updated.count !== 1) {

@@ -4,6 +4,34 @@ BEGIN;
 ALTER TABLE "hosted_usage_credit_purchase"
 ADD COLUMN "grant_slot_released_at" TIMESTAMP(3);
 
+-- Release only history whose existing durable facts prove that an exact
+-- provider object reached a no-payment terminal state. Durable lookup keys
+-- survive payer detachment. For ordinary/activation purchases, a reference-free
+-- reconciliation timestamp is written only after definitive account-deletion
+-- absence proof; their local deadline writers leave it NULL. Automatic refill
+-- ordinals above zero are excluded: their local deadline owner also writes
+-- last_reconciled_at without provider-final proof.
+UPDATE "hosted_usage_credit_purchase"
+SET "grant_slot_released_at" = COALESCE(
+  "last_reconciled_at",
+  "terminal_at"
+)
+WHERE "grant_slot_released_at" IS NULL
+  AND "status" = 'expired'
+  AND "paid_at" IS NULL
+  AND "terminal_at" IS NOT NULL
+  AND (
+    "stripe_checkout_session_lookup_key" IS NOT NULL
+    OR (
+      "last_reconciled_at" IS NOT NULL
+      AND (
+        "stripe_payment_intent_lookup_key" IS NOT NULL
+        OR "group_sponsorship_charge_ordinal" IS NULL
+        OR "group_sponsorship_charge_ordinal" = 0
+      )
+    )
+  );
+
 ALTER TABLE "hosted_usage_credit_grant"
   ADD COLUMN "beneficiary_member_id" TEXT,
   ADD COLUMN "beneficiary_sequence" BIGINT;

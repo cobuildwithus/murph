@@ -15,7 +15,7 @@ const EXPAND_MIGRATION = readFileSync(
 );
 
 describe("hosted usage-credit grant-slot release migration", () => {
-  it("keeps the provider-final release fact nullable and unreleased by default", () => {
+  it("backfills only provider-verifiable expired reservations and keeps the fact nullable", () => {
     const model = readPrismaModel(
       PRISMA_SCHEMA,
       "HostedUsageCreditPurchase",
@@ -27,11 +27,20 @@ describe("hosted usage-credit grant-slot release migration", () => {
     expect(EXPAND_MIGRATION).toContain(
       'ADD COLUMN "grant_slot_released_at" TIMESTAMP(3);',
     );
-    expect(EXPAND_MIGRATION).not.toMatch(
-      /UPDATE\s+"hosted_usage_credit_purchase"/iu,
+    expect(EXPAND_MIGRATION).toMatch(
+      /UPDATE\s+"hosted_usage_credit_purchase"[\s\S]*?SET "grant_slot_released_at" = COALESCE\([\s\S]*?"last_reconciled_at",[\s\S]*?"terminal_at"[\s\S]*?\)[\s\S]*?WHERE[\s\S]*?"status" = 'expired'[\s\S]*?"paid_at" IS NULL[\s\S]*?"terminal_at" IS NOT NULL/u,
+    );
+    expect(EXPAND_MIGRATION).toMatch(
+      /"stripe_checkout_session_lookup_key" IS NOT NULL/u,
+    );
+    expect(EXPAND_MIGRATION).toMatch(
+      /"last_reconciled_at" IS NOT NULL[\s\S]*?"stripe_payment_intent_lookup_key" IS NOT NULL/u,
+    );
+    expect(EXPAND_MIGRATION).toMatch(
+      /"last_reconciled_at" IS NOT NULL[\s\S]*?"group_sponsorship_charge_ordinal" IS NULL[\s\S]*?"group_sponsorship_charge_ordinal" = 0/u,
     );
     expect(EXPAND_MIGRATION).not.toMatch(
-      /"grant_slot_released_at"[^;]*(?:NOT NULL|DEFAULT)/iu,
+      /WHERE\s+"status" = 'expired'\s*;/u,
     );
   });
 
