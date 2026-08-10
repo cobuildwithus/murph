@@ -1,18 +1,367 @@
-Traceback (most recent call last):
-  File "/home/runner/work/murph/murph/.github/scripts/pr1405-final-cleanup.py", line 230, in <module>
-    raise RuntimeError(f"{SKILL_TEST}: red-light test blocks not found")
-RuntimeError: packages/assistant-engine/test/assistant-skill-assets.test.ts: red-light test blocks not found
+Completed PR #1405 cleanup
 
-apply outcome: failure
-install outcome: skipped
+apply outcome: success
+install outcome: success
+
+===== pnpm --dir packages/health-commons generate =====
+
+> @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
+> pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
+
+(node:2479) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+exit: 0
+
+===== pnpm --dir packages/health-commons typecheck =====
+
+> @murphai/health-commons@1.0.0 typecheck /home/runner/work/murph/murph/packages/health-commons
+> pnpm generate && node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false
+
+
+> @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
+> pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
+
+(node:2571) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[typescript] lane=package profile=default mode=checkers checkers=default builders=default
+
+exit: 0
+
+===== pnpm --dir packages/health-commons test:vitest =====
+
+> @murphai/health-commons@1.0.0 test:vitest /home/runner/work/murph/murph/packages/health-commons
+> pnpm generate && pnpm --dir ../.. exec vitest run --config packages/health-commons/vitest.config.ts --no-coverage
+
+
+> @murphai/health-commons@1.0.0 generate /home/runner/work/murph/murph/packages/health-commons
+> pnpm --dir ../.. exec tsx --tsconfig packages/health-commons/tsconfig.json packages/health-commons/src/build.ts
+
+(node:2676) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/health-commons[39m
+
+ [32m✓[39m [30m[42m health-commons [49m[39m test/runtime.test.ts [2m([22m[2m28 tests[22m[2m)[22m[33m 4700[2mms[22m[39m
+     [33m[2m✓[22m[39m does not publish any explicit draft, deprecated, or hidden protocol route or bundle [33m 4425[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-coverage.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 36[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/requested-biomarker-content.test.ts [2m([22m[2m9 tests[22m[2m)[22m[33m 2784[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/build-determinism.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 49[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.experiment-onboarding.test.ts [2m([22m[2m8 tests[22m[2m)[22m[33m 4423[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps psyllium lab defaults out of daily LDL-C run-in windows [33m 4412[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4417[2mms[22m[39m
+     [33m[2m✓[22m[39m builds a deterministic catalog with protocol revisions and artifact manifests [33m 4415[2mms[22m[39m
+ [31m❯[39m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts [2m([22m[2m39 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 352[2mms[22m[39m
+[31m     [31m×[31m answers a normal sauna question without requiring an exact catalog title[39m[32m 12[2mms[22m[39m
+     [32m✓[39m answers red-light questions through Health Commons without a topic-specific skill[32m 6[2mms[22m[39m
+     [32m✓[39m returns a safety-only hard stop for sauna and fentanyl patches[32m 3[2mms[22m[39m
+     [32m✓[39m keeps caffeine pregnancy safety separate from unrelated safety[32m 3[2mms[22m[39m
+     [32m✓[39m returns the core dry-sauna systematic review[32m 8[2mms[22m[39m
+     [32m✓[39m does not substitute nearby topics for unsupported queries[32m 11[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Daily Vitamin D3 Supplementation[32m 5[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Walking After Every Meal[32m 7[2mms[22m[39m
+     [32m✓[39m preserves the qualifier for Omega-3 Supplementation[32m 8[2mms[22m[39m
+     [32m✓[39m does not route vitamin C through a compound collagen alias[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias UC-II[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias native type-II collagen[32m 3[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias gelatin plus vitamin C[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias bone broth[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias cold shower[32m 2[2mms[22m[39m
+     [32m✓[39m does not substitute a child protocol for the family alias winter swimming[32m 3[2mms[22m[39m
+     [32m✓[39m keeps broad canonical family retrieval and direct child retrieval[32m 28[2mms[22m[39m
+     [32m✓[39m normalizes combining-mark aliases without changing their topic[32m 4[2mms[22m[39m
+     [32m✓[39m does not compose a topic from unrelated sauna citations[32m 5[2mms[22m[39m
+     [32m✓[39m keeps water-fasting evidence and safety on the fasting topic[32m 13[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for recent fainting[32m 2[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for unstable cardiovascular disease[32m 6[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for fever[32m 3[2mms[22m[39m
+     [32m✓[39m returns the focused dry-sauna safety boundary for trying to conceive[32m 2[2mms[22m[39m
+     [32m✓[39m returns dry-sauna immunity evidence from the resolved owner[32m 2[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Finnish Dry Sauna[32m 7[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Caffeine Curfew[32m 7[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Creatine Monohydrate[32m 8[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Omega-3 Supplementation[32m 7[2mms[22m[39m
+     [32m✓[39m returns member-readable broad evidence for Collagen Supplementation[32m 7[2mms[22m[39m
+     [32m✓[39m routes typed source findings to their related protocol[32m 5[2mms[22m[39m
+     [32m✓[39m omits ambiguous multi-target source findings instead of broadcasting them[32m 8[2mms[22m[39m
+     [32m✓[39m routes measurement findings to REM Sleep[32m 4[2mms[22m[39m
+     [32m✓[39m routes measurement findings to HRV / RMSSD[32m 4[2mms[22m[39m
+     [32m✓[39m routes directly sourced SpO2 safety to its measurement owner[32m 8[2mms[22m[39m
+     [32m✓[39m resolves canonical family and protocol title collisions to the family owner[32m 25[2mms[22m[39m
+     [32m✓[39m does not attach page-wide efficacy citations to aggregate safety text[32m 4[2mms[22m[39m
+     [32m✓[39m never returns an unsourced ordinary item or an overview row[32m 102[2mms[22m[39m
+     [32m✓[39m does not return reducer bookkeeping as IT band guidance[32m 6[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/cli-coverage.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 70[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-workflow-content.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 4371[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-fallback-ranges.test.ts [2m([22m[2m5 tests[22m[2m)[22m[33m 2730[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/knowledge-index.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 148[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/protocol-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 13[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/sleep-complaint-publishing-journeys.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 6474[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog.measurement-plan.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/biomarker-web-artifacts.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/pre-sleep-silent-meditation-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4374[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 4373[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/catalog-baseline-policy.test.ts [2m([22m[2m2 tests[22m[2m)[22m[33m 8392[2mms[22m[39m
+     [33m[2m✓[22m[39m uses two-week baselines by default and composes total durations from each plan [33m 4379[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps Daily Step Floor timing exclusively on its fixed two-week test plan [33m 4012[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/load.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 23[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/tabata-20-10-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4355[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the expected signal metadata aligned with the protocol page [33m 4353[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/itbs-signal-cards.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4436[2mms[22m[39m
+     [33m[2m✓[22m[39m keeps the catalog focused on lateral-knee pain and running tolerance [33m 4434[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/bryan-johnson-onboarding.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 4435[2mms[22m[39m
+     [33m[2m✓[22m[39m materializes the structured onboarding contract in the catalog [33m 4433[2mms[22m[39m
+ [32m✓[39m [30m[42m health-commons [49m[39m test/hash-artifact.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 8[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m health-commons [49m[39m test/knowledge-index-full-catalog.test.ts[2m > [22mHealth Commons full-catalog knowledge retrieval[2m > [22manswers a normal sauna question without requiring an exact catalog title
+[31m[1mAssertionError[22m: expected 0 to be greater than 0[39m
+[36m [2m❯[22m test/knowledge-index-full-catalog.test.ts:[2m44:33[22m[39m
+    [90m 42|[39m
+    [90m 43|[39m     [34mexpect[39m(result[33m.[39mtopicResolved)[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m 44|[39m     [34mexpect[39m(result[33m.[39mitems[33m.[39mlength)[33m.[39m[34mtoBeGreaterThan[39m([34m0[39m)[33m;[39m
+    [90m   |[39m                                 [31m^[39m
+    [90m 45|[39m     [34mexpect[39m([34mpacketText[39m(result))[33m.[39m[34mtoMatch[39m([36m/immun/iu[39m)[33m;[39m
+    [90m 46|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m21 passed[39m[22m[90m (22)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m140 passed[39m[22m[90m (141)[39m
+[2m   Start at [22m 11:39:57
+[2m   Duration [22m 66.87s[2m (transform 824ms, setup 124ms, import 7.23s, tests 56.61s, environment 2ms)[22m
+
+
+::error file=/home/runner/work/murph/murph/packages/health-commons/test/knowledge-index-full-catalog.test.ts,title=[health-commons] test/knowledge-index-full-catalog.test.ts > Health Commons full-catalog knowledge retrieval > answers a normal sauna question without requiring an exact catalog title,line=44,column=33::AssertionError: expected 0 to be greater than 0%0A ❯ test/knowledge-index-full-catalog.test.ts:44:33%0A%0A
+ ELIFECYCLE  Command failed with exit code 1.
+
+exit: 1
+
+===== pnpm build =====
+
+> murph-workspace@ build /home/runner/work/murph/murph
+> node scripts/run-with-host-verification-slot.mjs 'workspace package build' -- pnpm -r --sort --workspace-concurrency=${MURPH_BUILD_WORKSPACE_CONCURRENCY:-4} --filter './packages/**' build
+
+Scope: 27 of 30 workspace projects
+packages/contracts build$ node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo tsconfig.scripts.tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json --pretty false && node ../../scripts/run-typescript.mjs package -p tsconfig.scripts.json --pretty false
+packages/exercise-library build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js
+packages/gateway-core build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/health-metrics build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false
+packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/exercise-library build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/gateway-core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/health-metrics build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/gateway-core build: Done
+packages/messaging-ingress build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/health-metrics build: Done
+packages/openclaw-plugin build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/messaging-ingress build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/openclaw-plugin build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/messaging-ingress build: Done
+packages/runtime-state build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/openclaw-plugin build: Done
+packages/runtime-state build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/exercise-library build: Done
+packages/runtime-state build: Done
+packages/contracts build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/contracts build: Done
+packages/clinical-records build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false
+packages/core build$ node ../../scripts/rm-paths.mjs dist tsconfig.build.tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json
+packages/health-commons build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false && node dist/build.js
+packages/query build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/clinical-records build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/core build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/health-commons build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/query build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/clinical-records build: Done
+packages/query build: Done
+packages/core build: Done
+packages/health-commons build: (node:3429) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+packages/health-commons build: (Use `node --trace-warnings ...` to show where the warning was created)
+packages/health-commons build: Done
+packages/importers build$ pnpm --dir ../.. exec tsx --tsconfig tsconfig.base.json packages/importers/scripts/safe-build.ts
+packages/parsers build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/parsers build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/parsers build: Done
+packages/importers build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/importers build: Done
+packages/device-syncd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/inboxd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/device-syncd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/inboxd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/inboxd build: Done
+packages/device-syncd build: Done
+packages/hosted-execution build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/operator-config build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/hosted-execution build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/operator-config build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/hosted-execution build: Done
+packages/operator-config build: Done
+packages/cloudflare-hosted-control build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/hosted-local-harness build$ node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false
+packages/vault-usecases build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/hosted-local-harness build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/cloudflare-hosted-control build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/vault-usecases build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/cloudflare-hosted-control build: Done
+packages/hosted-local-harness build: Done
+packages/vault-usecases build: Done
+packages/inbox-services build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/inbox-services build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/inbox-services build: Done
+packages/assistant-engine build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json && node dist/assistant/generate-cli-surface-contract.js
+packages/assistant-engine build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistant-engine build: Done
+packages/assistant-runtime build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/assistantd build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/setup-cli build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/setup-cli build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistantd build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistant-runtime build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistantd build: Done
+packages/setup-cli build: Done
+packages/assistant-runtime build: Done
+packages/assistant-cli build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json
+packages/assistant-cli build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/assistant-cli build: Done
+packages/cli build$ node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.build.json
+packages/cli build: [typescript] lane=package profile=default mode=checkers checkers=default builders=default
+packages/cli build: Done
+
+exit: 0
+
+===== pnpm --dir packages/cli gen:config-schema =====
+
+> @murphai/murph@1.3.0 gen:config-schema /home/runner/work/murph/murph/packages/cli
+> tsx ./scripts/generate-incur-config-schema.ts
+
+config.schema.json
+src/incur.generated.ts
+src/vault-cli-skill-hash.generated.ts
+
+exit: 0
+
+===== pnpm --dir packages/cli typecheck =====
+
+> @murphai/murph@1.3.0 typecheck /home/runner/work/murph/murph/packages/cli
+> node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false
+
+[typescript] lane=package profile=default mode=checkers checkers=default builders=default
+
+exit: 0
+
+===== pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts --no-coverage test/commons-command-coverage.test.ts =====
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/cli[39m
+
+ [32m✓[39m [30m[42m cli-read-model [49m[39m test/commons-command-coverage.test.ts [2m([22m[2m13 tests[22m[2m)[22m[32m 79[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m13 passed[39m[22m[90m (13)[39m
+[2m   Start at [22m 11:42:11
+[2m   Duration [22m 1.27s[2m (transform 593ms, setup 13ms, import 981ms, tests 79ms, environment 0ms)[22m
+
+
+exit: 0
+
+===== pnpm --dir packages/assistant-engine typecheck =====
+
+> @murphai/assistant-engine@1.0.0 typecheck /home/runner/work/murph/murph/packages/assistant-engine
+> node ../../scripts/run-typescript.mjs package -p tsconfig.typecheck.json --pretty false
+
+[typescript] lane=package profile=default mode=checkers checkers=default builders=default
+test/assistant-skill-assets.test.ts(287,45): error TS2367: This comparison appears to be unintentional because the types '"aerobic-fitness" | "appointment-scheduling" | "automatic-meal-capture" | "behavior-followthrough" | "body-composition" | "cardiometabolic-health" | "chronic-illness-support" | ... 38 more ... | "tracked-table"' and '"red-light-therapy"' have no overlap.
+test/assistant-skill-assets.test.ts(1397,18): error TS2367: This comparison appears to be unintentional because the types '"aerobic-fitness" | "appointment-scheduling" | "automatic-meal-capture" | "behavior-followthrough" | "body-composition" | "cardiometabolic-health" | "chronic-illness-support" | ... 38 more ... | "tracked-table"' and '"red-light-therapy"' have no overlap.
+test/assistant-skill-assets.test.ts(1405,26): error TS2339: Property 'triggerHint' does not exist on type 'never'.
+test/assistant-skill-assets.test.ts(1416,23): error TS2339: Property 'slug' does not exist on type 'never'.
+ ELIFECYCLE  Command failed with exit code 1.
+
+exit: 1
+
+===== pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts test/assistant-skill-assets.test.ts =====
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/home/runner/work/murph/murph/packages/assistant-engine[39m
+
+ [32m✓[39m [30m[46m assistant-engine [49m[39m test/model-behavior.test.ts [2m([22m[2m73 tests[22m[2m)[22m[32m 145[2mms[22m[39m
+ [31m❯[39m [30m[46m assistant-engine [49m[39m test/assistant-skill-assets.test.ts [2m([22m[2m32 tests[22m[2m | [22m[31m1 failed[39m[2m | [22m[33m6 skipped[39m[2m)[22m[32m 120[2mms[22m[39m
+     [32m✓[39m has a valid SKILL.md for every registered assistant skill[32m 18[2mms[22m[39m
+     [32m✓[39m keeps automation command selection in the shared developer prompt[32m 6[2mms[22m[39m
+     [32m✓[39m uses unique safe skill slugs and names[32m 3[2mms[22m[39m
+     [32m✓[39m registers researched health topic skills with stable file references[32m 8[2mms[22m[39m
+     [32m✓[39m keeps private activity interpretation in its owner[32m 1[2mms[22m[39m
+     [2m[90m↓[39m[22m keeps shared activity interpretation in its owner
+     [32m✓[39m routes bedtime transition, external disruption, and sleep-breathing concerns before skill loading[32m 0[2mms[22m[39m
+     [32m✓[39m keeps photobiomodulation knowledge in Health Commons instead of a topic skill[32m 2[2mms[22m[39m
+     [32m✓[39m routes general eye health with evidence and contact-lens safety boundaries[32m 11[2mms[22m[39m
+     [32m✓[39m keeps umbrella skills from duplicating focused health topic owners[32m 2[2mms[22m[39m
+     [2m[90m↓[39m[22m keeps group newsletter setup and opt-out behavior in the group-chat skill
+     [2m[90m↓[39m[22m keeps the new-group contact handoff natural and reactive
+     [2m[90m↓[39m[22m polls scheduled member asks to a terminal result in the current turn
+     [2m[90m↓[39m[22m registers a dedicated group newsletter editorial skill
+     [2m[90m↓[39m[22m keeps group challenge guidance aligned with selectable scoring projections
+     [32m✓[39m builds stable symbolic skill file references[32m 0[2mms[22m[39m
+     [32m✓[39m keeps hosted computer-use guidance on decision-bounded browser macro-steps and the health playbook[32m 4[2mms[22m[39m
+     [32m✓[39m honors an explicit MURPH_ASSISTANT_SKILLS_ROOT process env override[32m 0[2mms[22m[39m
+     [32m✓[39m uses the canonical package skill root in process env[32m 0[2mms[22m[39m
+     [32m✓[39m keeps assistant prompt and skills on remaining Commons protocol commands[32m 7[2mms[22m[39m
+     [32m✓[39m keeps experiment onboarding details in the skill file, not the prompt[32m 1[2mms[22m[39m
+[31m     [31m×[31m keeps red light therapy registered with dose math and device seeds[39m[32m 9[2mms[22m[39m
+     [32m✓[39m keeps behavior follow-through policy in the skill file with only compact bridges elsewhere[32m 11[2mms[22m[39m
+     [32m✓[39m keeps strength training guidance in the package skill route[32m 2[2mms[22m[39m
+     [32m✓[39m keeps pain-driven restrictions evidence-gated and durable-rehab answers durable[32m 1[2mms[22m[39m
+     [32m✓[39m keeps exercise lookup and presentation in one shared domain reference[32m 1[2mms[22m[39m
+     [32m✓[39m keeps supplement label identity, persistence, and evidence limits in its skill[32m 1[2mms[22m[39m
+     [32m✓[39m ships Murph onboarding as a compact progressive-disclosure skill with single-owned rules[32m 5[2mms[22m[39m
+     [32m✓[39m keeps aspiration-anchored, foundation-complete Murph onboarding details in the skill asset[32m 9[2mms[22m[39m
+     [32m✓[39m keeps route hints and SKILL.md descriptions under parser limits[32m 14[2mms[22m[39m
+     [32m✓[39m publishes static skill assets with the assistant-engine package[32m 1[2mms[22m[39m
+     [32m✓[39m keeps the skill env-name contract dependency-free for hosted runtime boundaries[32m 1[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[46m assistant-engine [49m[39m test/assistant-skill-assets.test.ts[2m > [22massistant skill assets[2m > [22mkeeps red light therapy registered with dose math and device seeds
+[31m[1mAssertionError[22m: expected undefined to be truthy[39m
+
+[32m- Expected:[39m
+true
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/assistant-skill-assets.test.ts:[2m1399:27[22m[39m
+    [90m1397|[39m       (skill) => skill.slug === 'red-light-therapy',
+    [90m1398|[39m     )
+    [90m1399|[39m     expect(redLightSkill).toBeTruthy()
+    [90m   |[39m                           [31m^[39m
+    [90m1400|[39m     if (!redLightSkill) {
+    [90m1401|[39m       return
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m98 passed[39m[22m[2m | [22m[33m6 skipped[39m[90m (105)[39m
+[2m   Start at [22m 11:42:18
+[2m   Duration [22m 2.62s[2m (transform 1.05s, setup 18ms, import 2.03s, tests 265ms, environment 0ms)[22m
+
+
+::error file=/home/runner/work/murph/murph/packages/assistant-engine/test/assistant-skill-assets.test.ts,title=[assistant-engine] test/assistant-skill-assets.test.ts > assistant skill assets > keeps red light therapy registered with dose math and device seeds,line=1399,column=27::AssertionError: expected undefined to be truthy%0A%0A- Expected:%0Atrue%0A%0A+ Received:%0Aundefined%0A%0A ❯ test/assistant-skill-assets.test.ts:1399:27%0A%0A
+
+exit: 1
+
+===== git diff --check =====
+
+exit: 0
 
 ===== changed files =====
  M .github/pr1405-isolated-validation.txt
- M packages/assistant-engine/skills/general-eye-health/SKILL.md
- M packages/assistant-engine/skills/recovery-modalities/SKILL.md
- M packages/assistant-engine/src/assistant-skill-assets.ts
- M packages/assistant-engine/src/assistant/system-prompt.ts
- M packages/assistant-engine/test/model-behavior.test.ts
- M packages/cli/src/commands/commons.ts
- M packages/cli/test/commons-command-coverage.test.ts
- M packages/health-commons/src/knowledge-index.ts
+ M agent-docs/exec-plans/active/2026-08-07-health-commons-agent-knowledge.md
+ D packages/assistant-engine/skills/red-light-therapy/SKILL.md
+ D packages/assistant-engine/skills/red-light-therapy/device-seeds.json
+ M packages/assistant-engine/test/assistant-skill-assets.test.ts
+ M packages/cli/config.schema.json
+ M packages/cli/src/incur.generated.ts
+ M packages/cli/src/vault-cli-skill-hash.generated.ts
+ M packages/health-commons/test/knowledge-index-full-catalog.test.ts

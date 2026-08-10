@@ -3594,21 +3594,7 @@
                       "properties": {
                         "search": {
                           "type": "object",
-                          "additionalProperties": false,
-                          "properties": {
-                            "options": {
-                              "type": "object",
-                              "additionalProperties": false,
-                              "properties": {
-                                "limit": {
-                                  "default": 3,
-                                  "type": "integer",
-                                  "exclusiveMinimum": 0,
-                                  "maximum": 3
-                                }
-                              }
-                            }
-                          }
+                          "additionalProperties": false
                         }
                       }
                     }

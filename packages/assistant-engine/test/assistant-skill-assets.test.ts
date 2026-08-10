@@ -237,10 +237,6 @@ describe('assistant skill assets', () => {
       expect(raw).not.toMatch(/^\+\d+\s*$/mu)
     }
 
-    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(true)
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
   })
 
   it('keeps private activity interpretation in its owner', async () => {
@@ -287,7 +283,9 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('routes red light dose ownership to the dedicated red-light skill', async () => {
+  it('keeps photobiomodulation knowledge in Health Commons instead of a topic skill', async () => {
+    expect(ASSISTANT_SKILLS.some((skill) => skill.slug === 'red-light-therapy')).toBe(false)
+
     const recoverySkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'recovery-modalities',
     )
@@ -296,54 +294,21 @@ describe('assistant skill assets', () => {
       return
     }
 
-    expect(recoverySkill.triggerHint).toContain('Use red-light-therapy')
-    expect(recoverySkill.triggerHint).not.toContain('device dosing')
-
+    expect(recoverySkill.triggerHint).toContain('Health Commons')
     const recoveryText = await readSkillFile(recoverySkill)
-    expect(recoveryText).toContain('Use red-light-therapy for red/NIR photobiomodulation dose')
-    expect(recoveryText).toContain('does not own PBM device-dose math')
+    expect(recoveryText).toContain('Health Commons')
+    expect(recoveryText).not.toContain('Use red-light-therapy')
     expect(recoveryText).not.toContain('device-seeds.json')
-  })
-
-  it('keeps red light therapy registered with device seed data', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
-    )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
-      return
-    }
-
-    expect(redLightSkill.triggerHint).toContain('red light therapy')
-    expect(redLightSkill.triggerHint).toContain('device irradiance')
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
-
-    const redLightText = await readSkillFile(redLightSkill)
-    expect(redLightText).toContain('device-seeds.json')
-    expect(redLightText).toContain('activeModeLabel')
-    expect(redLightText).toContain('manufacturer-claim duration estimate')
-
-    const deviceSeedsRaw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'red-light-therapy',
-        'device-seeds.json',
+    await expect(
+      readFile(
+        path.join(
+          resolveAssistantSkillsRoot(),
+          'red-light-therapy',
+          'SKILL.md',
+        ),
+        'utf8',
       ),
-      'utf8',
-    )
-    const deviceSeeds: unknown = JSON.parse(deviceSeedsRaw)
-    expectRecord(deviceSeeds, 'red-light device seeds')
-    expect(deviceSeeds.schemaVersion).toBe(
-      'murph.assistant.skill.red-light-device-seeds.v1',
-    )
-    const devices = deviceSeeds.devices
-    expect(Array.isArray(devices)).toBe(true)
-    if (!Array.isArray(devices)) {
-      return
-    }
-    expect(devices.length).toBeGreaterThan(0)
+    ).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
   it('routes general eye health with evidence and contact-lens safety boundaries', async () => {

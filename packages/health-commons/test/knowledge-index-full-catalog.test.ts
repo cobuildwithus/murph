@@ -45,6 +45,15 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     expect(packetText(result)).toMatch(/immun/iu);
   });
 
+  it("answers red-light questions through Health Commons without a topic-specific skill", () => {
+    const result = searchQuestion("Does red light for skin improve wrinkles?");
+
+    expect(result.topicResolved).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items.every((item) => item.sources.length > 0)).toBe(true);
+    expect(packetText(result)).toMatch(/red|photo|skin|wrinkl/iu);
+  });
+
   it("returns a safety-only hard stop for sauna and fentanyl patches", () => {
     const result = search("Finnish Dry Sauna", "fentanyl patch");
 

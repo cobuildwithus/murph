@@ -160,3 +160,13 @@ Updated: 2026-08-07
   packet limits stay behind the Health Commons runtime boundary.
 - The stable assistant rule is one lookup before substantive health claims, with
   no experiment suggestion unless the member asks to try or track something.
+
+
+## Agent-facing cleanup
+
+- The CLI exposes one fixed-size result with only `ok`, `no_match`, or
+  `unavailable`; catalog hashes and resolver bookkeeping remain internal.
+- The dedicated red-light-therapy skill and manufacturer device-seed mirror were
+  removed. Photobiomodulation evidence now follows the same Health Commons path
+  as every other ordinary health topic; current device documentation supplies
+  model-specific inputs when needed.
