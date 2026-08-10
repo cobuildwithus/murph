@@ -40,6 +40,16 @@ then drains older containers immediately. This contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Managed OpenAI standalone web search uses the existing signed provider boundary
+for exact `POST /v1/alpha/search` requests. The Worker revalidates the active
+provider, user, and runner before injecting its OpenAI credential, strips
+runtime authority before forwarding, and rejects every other search method or
+path. Provider failures do not create a Murph-side retry, fallback provider, or
+durable search state. This contract is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
+`agent-docs/references/hosted-runtime-protocol.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 The public footer's fixed, bodyless incident.io status-summary read, strict-origin
 transport boundary, display-only authority, and subprocessor disclosure are
 jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and

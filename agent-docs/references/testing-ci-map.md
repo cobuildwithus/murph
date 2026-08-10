@@ -89,9 +89,11 @@ without forwarding raw Worker credentials. Hosted Web tests cover the nullable
 preference, rollout flag, Settings route/component, workspace projection, and
 expand-only migration. Cloudflare tests cover signed credential minting,
 all-or-none deploy preflight, exact Responses path/method allowlisting, bounded
-body parsing, canonical product-model validation, fixed model rewriting, and
-real-key injection only at Worker egress. Routine tests use synthetic keys and
-do not call Venice.
+body parsing, the exact Codex-native managed OpenAI standalone-search
+method/path plus wrong-method rejection and header stripping, canonical
+product-model validation, fixed model rewriting, and real-key injection only
+at Worker egress. Routine tests use synthetic keys and do not call OpenAI or
+Venice.
 
 Clinical-record execution coverage is split at its owners: hosted-execution
 tests lock the pointer/run/page/outcome codecs, vault-usecases tests prove

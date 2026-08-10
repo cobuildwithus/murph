@@ -1,4 +1,7 @@
-import type { ChangelogEdition } from "@/src/lib/changelog";
+import {
+  listChangelogEditions,
+  type ChangelogEdition,
+} from "@/src/lib/changelog";
 
 import { ChangelogEditionSection } from "../changelog/changelog-edition-section";
 import { PhoneMock } from "../changelog/phone-mock";
@@ -142,6 +145,18 @@ const DESIGN_VISUALS = {
   ),
 } as const;
 
+const WEB_SEARCH_SOURCE_EDITION = listChangelogEditions().find((edition) =>
+  edition.items.some((item) => item.id === "web-search-restored")
+);
+const WEB_SEARCH_CHANGELOG_EDITION = WEB_SEARCH_SOURCE_EDITION
+  ? {
+      ...WEB_SEARCH_SOURCE_EDITION,
+      items: WEB_SEARCH_SOURCE_EDITION.items.filter(
+        (item) => item.id === "web-search-restored",
+      ),
+    }
+  : null;
+
 export function ChangelogArchiveStudy() {
   return (
     <div
@@ -151,12 +166,27 @@ export function ChangelogArchiveStudy() {
       inert
     >
       <div className="mx-auto max-w-[1080px]">
-        <ChangelogEditionSection
-          buildItemHref={(itemId) => `#${itemId}`}
-          edition={DESIGN_CHANGELOG_EDITION}
-          isFirst
-          visuals={DESIGN_VISUALS}
-        />
+        {WEB_SEARCH_CHANGELOG_EDITION ? (
+          <div
+            data-design-state="latest-production-edition"
+            id="changelog-archive-latest"
+          >
+            <ChangelogEditionSection
+              buildItemHref={(itemId) => `#${itemId}`}
+              edition={WEB_SEARCH_CHANGELOG_EDITION}
+              isFirst
+              visuals={{}}
+            />
+          </div>
+        ) : null}
+        <div className="mt-20 border-t border-[#c4a882]/35 pt-20">
+          <ChangelogEditionSection
+            buildItemHref={(itemId) => `#${itemId}`}
+            edition={DESIGN_CHANGELOG_EDITION}
+            isFirst
+            visuals={DESIGN_VISUALS}
+          />
+        </div>
       </div>
     </div>
   );

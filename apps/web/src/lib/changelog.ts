@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Companion access, patterns, and local-time reminders",
+    title: "Companion access, patterns, reminders, and web search",
     summary:
-      "The companion now stays usable through a billing pause, Patterns can compare repeated actions with next-day sleep and recovery, and recurring reminders keep the local time and timezone you asked for.",
+      "The companion stays usable through a billing pause, Patterns compares repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "companion-access-during-billing-pause",
@@ -124,6 +124,18 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
+      },
+      {
+        id: "web-search-restored",
+        kind: "improvement",
+        priority: 5,
+        title: "Managed OpenAI web search works again",
+        summary:
+          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
+        details:
+          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
+        relevanceTags: ["assistant", "search", "research", "reliability"],
+        sourcePullRequests: [1583],
       },
     ],
   },
