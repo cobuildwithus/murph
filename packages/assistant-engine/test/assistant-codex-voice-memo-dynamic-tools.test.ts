@@ -1,8 +1,8 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_GENERATE_VOICE_MEMO_TOOL,
@@ -50,7 +50,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('rejects voice memo payloads on the image-only attach response media tool', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 10,
       method: 'item/tool/call',
       params: {
@@ -100,7 +100,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('returns an invalid-arguments result for malformed voice memo tool calls', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 11,
       method: 'item/tool/call',
       params: {
@@ -141,7 +141,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('rejects voice memo generation when response media is already attached', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 12,
       method: 'item/tool/call',
       params: {
@@ -234,7 +234,7 @@ describe('murph.generate_voice_memo dynamic tool execution', () => {
   })
 
   it('parses voice memo arguments and appends generated response media', async () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       id: 13,
       method: 'item/tool/call',
       params: {

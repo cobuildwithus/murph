@@ -14,6 +14,14 @@
 
 <!-- List the smallest correctness, privacy, security, and operational invariants this PR must preserve. -->
 
+## Changelog
+
+<!-- Use `$write-changelog` for member-visible features and improvements. Choose exactly one disposition. For `updated`, name the edition date and stable item IDs. For `not applicable`, explain concretely why no member-visible behavior changed. -->
+
+- Changelog: <!-- updated OR not applicable -->
+- Items: <!-- 2026-08-09 · stable-item-id; remove this bullet when not applicable -->
+- Reason: <!-- Required only when not applicable; remove this bullet when updated -->
+
 ## ReviewGPT later-round context
 
 <!-- Replace the placeholder below with exactly `routine` or `sensitive`. Use `sensitive` for any product-critical flow; auth, privacy, security, billing, health-safety, persisted-state, public API, runtime/deploy, ordering/retry/concurrency/idempotency, broad refactor, cross-owner, external-boundary, or other cross-cutting change. A cosmetic change or small bug fix is `routine` only when none of those conditions apply. Missing, malformed, or duplicate declarations default later ReviewGPT rounds to a full ZIP. -->
