@@ -417,7 +417,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-08-07",
     title: "A personal first read, richer automations, clearer trends",
     summary:
-      "Murph can offer one useful personal read after onboarding, use normal tools in scheduled work, send an approved email, research a focused public question, and show repeated experiments and biomarker ranges more clearly.",
+      "Murph can offer one useful personal read after onboarding, keep scheduled work within its supported delivery route, send a bounded email from a connected account in a current private conversation, research a focused public question, and show repeated experiments and biomarker ranges more clearly.",
     items: [
       {
         id: "first-personal-health-read",
@@ -444,16 +444,52 @@ const RAW_CHANGELOG_EDITIONS = [
         sourcePullRequests: [1337],
       },
       {
-        id: "scheduled-turn-tool-parity",
+        id: "scheduled-direct-call",
         kind: "feature",
         priority: 5,
-        title: "Scheduled help can complete real tasks",
+        title: "A scheduled private call can run when it is due",
         summary:
-          "Scheduled Murph work can now use the same approved tools as an ordinary private conversation, including placing an approved call or sending an approved connected-app email.",
+          "When a saved private conversation supports scheduled calling, its automation can place the exact requested phone call when the occurrence is due and return the result there.",
         details:
-          "Each action keeps its own confirmation and audience rules. Group call previews were removed rather than exposing private call setup, and an uncertain email send is reconciled before Murph suggests another attempt.",
-        relevanceTags: ["automations", "calls", "email", "connected-apps"],
-        sourcePullRequests: [1336, 1367, 1386, 1392],
+          "Email, Telegram, and group conversations are not eligible. Manual or mismatched occurrences also fail closed, and an uncertain call start is not automatically repeated.",
+        relevanceTags: ["automations", "calls", "privacy", "reliability"],
+        sourcePullRequests: [1336],
+      },
+      {
+        id: "scheduled-tools-follow-the-route",
+        kind: "improvement",
+        priority: 4,
+        title: "Scheduled tools follow the delivery route",
+        summary:
+          "Scheduled work can generate an image where the route supports image delivery, show an explicitly requested response card in a private direct chat, and offer a Clinical Records handoff that begins only after you open it.",
+        details:
+          "Email delivery stays text-only, private and group boundaries stay intact, and Clinical Records sign-in does not start until you open its launcher.",
+        relevanceTags: ["automations", "images", "cards", "health-data"],
+        sourcePullRequests: [1367],
+      },
+      {
+        id: "group-calls-without-redundant-preview",
+        kind: "improvement",
+        priority: 4,
+        title: "Group calls can start without a duplicate preview",
+        summary:
+          "In an authenticated group chat, a current participant can ask Murph to make one bounded public-venue or service call for the room without a special second approval step when the request is already complete.",
+        details:
+          "Murph still asks for any missing commitment bound or requester fact. Participant, current-message, membership, privacy, and transfer checks remain in place, and a call start never claims the later outcome.",
+        relevanceTags: ["groups", "calls", "privacy", "assistant"],
+        sourcePullRequests: [1386],
+      },
+      {
+        id: "connected-email-from-private-chat",
+        kind: "feature",
+        priority: 5,
+        title: "Send a bounded email from your connected account",
+        summary:
+          "In a current private conversation, you can ask Murph to send an ordinary email from an active Gmail or Outlook connection when the sender, recipients, and content are clear.",
+        details:
+          "Attachments and scheduled sends are not included. A send completes only after the email service confirms success; if the result is uncertain, Murph checks Sent mail narrowly and never automatically repeats the send.",
+        relevanceTags: ["email", "connected-apps", "privacy", "reliability"],
+        sourcePullRequests: [1392],
       },
       {
         id: "focused-current-research",

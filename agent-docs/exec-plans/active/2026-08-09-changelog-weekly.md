@@ -91,7 +91,7 @@ Updated: 2026-08-10
   archive now cites 57 member-facing merges; the remaining eight are limited to
   operator logging/telemetry, an internal ops chart, test-only coverage, a
   dormant persistence path, deploy verification, and incident-process docs.
-- Added or expanded the August 5-9 editions to 57 new catch-up items across the
+- Added or expanded the August 5-9 editions to 60 new catch-up items across the
   current seven-day window, with stable item IDs and source-PR attribution.
 - Added reusable compact-table and reference-band visuals, a synthetic contact
   avatar state, and explanatory production visuals for the priority and
@@ -137,6 +137,15 @@ Updated: 2026-08-10
   the personal or group Murph where the mission was accepted. Deleted the
   visual and added render-level assertions against unconditional beneficiary
   language; `/refer` remains the sole owner of current reward destinations.
+- Final ReviewGPT round 4 verified all prior corrections, then found that the
+  scheduled-tools item and its email visual promised a connected-account email
+  send from scheduled automation even though the production authorization
+  boundary permits that write only from current accepted input in a private
+  conversation. Deleted the impossible visual and split the bundled entry into
+  four exact outcomes: scheduled calling on its supported direct route,
+  route-safe scheduled tools, same-turn bounded group calls, and current-private
+  connected email. Focused registry and render assertions reject the old
+  scheduled-email claims.
 
 ## Decisions
 
@@ -164,12 +173,13 @@ Updated: 2026-08-10
   changelog fixture a live-state owner. Default to shrinking: delete a factual
   visual unless it reuses canonical data/components or has a focused contract
   assertion against the owner. Do not add synchronization machinery.
-- Re-audited all 57 catch-up items and 51 associated visuals under that rule.
-  Six items were intentionally text-only. Deleted two contradictory
+- Re-audited all 60 catch-up items and the 51 original associated visuals under
+  that rule. Six original items were intentionally text-only. Deleted two contradictory
   health-route/status visuals and the unconditional referral-beneficiary
-  visual. The retained 48 are bounded as 20 synthetic output examples
+  visual, then deleted the scheduled connected-email completion visual. The
+  retained 47 are bounded as 20 synthetic output examples
   (message, table, card, chart, or artifact shape), 15 sequence/recovery
-  diagrams (ordering and negative branches), and 13
+  diagrams (ordering and negative branches), and 12
   choice/handoff/consent illustrations tied to the existing referral, billing,
   message-routing, authorization, settings, and automation owners. The Apple
   Health entry now has a focused test derived from the production relay-source
@@ -177,6 +187,11 @@ Updated: 2026-08-10
 - Extended `$write-changelog` and the completion workflow with the same
   production-owner gate so future visual work deletes parallel factual state
   instead of inventing another authority.
+- Extended that gate after round 4 so asynchronous, scheduled, and detached
+  claims must trace their exact invocation scope, channel, audience,
+  current-input requirement, final destination, and retry or reconciliation
+  behavior. Ordinary private-turn tool availability never implies scheduled or
+  cross-channel availability.
 
 ## Verification
 
@@ -196,6 +211,9 @@ Updated: 2026-08-10
   all exact-head GitHub Actions; 47 focused registry/page/design assertions;
   19 PR/design guard tests; Web typecheck; scoped lint; browser proof; skill and
   docs validation.
-- Pending: commit and push the retrospective correction, refresh exact-head
-  visual and CI proof, complete the next final ReviewGPT round, confirm merge
-  readiness, and close this plan.
+- Passed after the round-4 correction: 41 focused changelog registry/page/route
+  tests, Web typecheck, scoped lint, docs drift, skill validation, and diff
+  checks.
+- Pending: commit and push the round-4 correction, refresh exact-head visual
+  and CI proof, complete final ReviewGPT round 5, confirm merge readiness, and
+  close this plan.

@@ -193,6 +193,11 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Current browser task");
     expect(markup).not.toContain("Polar via Apple Health");
     expect(markup).not.toContain("Via Apple Health");
+    expect(markup).not.toContain("Murph via your connected email");
+    expect(markup).not.toContain("Approved follow-up");
+    expect(markup).not.toContain(
+      "The exact email you approved was sent from the connected account.",
+    );
     expect(markup).toContain("Conversation handoff");
     expect(markup).toContain("Paused-member privacy cleanup");
     expect(markup).toContain("Daily nutrition card");

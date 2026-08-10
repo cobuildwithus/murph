@@ -59,6 +59,12 @@ Exclude draft plans, unmerged work, future foundations with no usable behavior,
 internal metrics, and implementation details that do not change the member's
 experience.
 
+For asynchronous, scheduled, or detached work, trace the exact invocation
+scope, channel, audience, current-input requirement, final destination, and
+retry or reconciliation behavior through their production owners. A tool that
+is available in a current private conversation is not automatically available
+to scheduled work, groups, another channel, or a detached continuation.
+
 ## 3. Shape editions around member outcomes
 
 Use one dated `ChangelogEdition` per release day. Preserve stable edition IDs,
@@ -126,6 +132,9 @@ Visual rules:
 - Never give a guide-only integration a connected, syncing, disconnected, or
   reconnect state. Never use a generic action visual for a channel-specific
   capability unless the action is mechanically limited to that channel.
+- Never depict an asynchronous or scheduled effect as completed unless the
+  production authorization and delivery owners prove that exact invocation
+  scope can perform it and return the result to the stated audience.
 - Keep it legible at mobile and desktop widths and within the established
   320-pixel visual frame.
 - Preserve semantic text, table headings, labels, and useful accessible names.
@@ -192,6 +201,8 @@ reason such as "not needed."
 
 - Every member-visible outcome in the diff is represented or grouped honestly.
 - Every claim is supported by shipped code, tests, and the owning contract.
+- Scheduled and asynchronous claims match the exact invocation scope, route,
+  audience, current-input requirement, destination, and recovery contract.
 - Every source PR is present, with no unmerged or unrelated PRs.
 - Copy describes outcomes, limits, and recovery without internal leakage.
 - Visual facts are derived from or mechanically checked against their existing

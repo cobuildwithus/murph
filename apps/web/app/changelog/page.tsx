@@ -273,13 +273,6 @@ const VISUALS: Record<string, ReactNode> = {
       ]}
     />
   ),
-  "scheduled-turn-tool-parity": (
-    <EmailMock
-      from="Murph via your connected email"
-      subject="Approved follow-up"
-      body="The exact email you approved was sent from the connected account."
-    />
-  ),
   "focused-current-research": (
     <ReasoningSteps
       label="Focused current research"

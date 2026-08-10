@@ -311,9 +311,27 @@ describe("changelog registry", () => {
         "does not automatically create a plan, habit, experiment, or reminder",
       ),
     });
-    expect(items.get("scheduled-turn-tool-parity")).toMatchObject({
-      sourcePullRequests: [1336, 1367, 1386, 1392],
-      details: expect.stringContaining("confirmation and audience rules"),
+    expect(items.get("scheduled-direct-call")).toMatchObject({
+      sourcePullRequests: [1336],
+      summary: expect.stringContaining(
+        "When a saved private conversation supports scheduled calling",
+      ),
+      details: expect.stringContaining(
+        "Email, Telegram, and group conversations are not eligible",
+      ),
+    });
+    expect(items.get("scheduled-tools-follow-the-route")).toMatchObject({
+      sourcePullRequests: [1367],
+      details: expect.stringContaining("Email delivery stays text-only"),
+    });
+    expect(items.get("group-calls-without-redundant-preview")).toMatchObject({
+      sourcePullRequests: [1386],
+      details: expect.stringContaining("a call start never claims the later outcome"),
+    });
+    expect(items.get("connected-email-from-private-chat")).toMatchObject({
+      sourcePullRequests: [1392],
+      summary: expect.stringContaining("current private conversation"),
+      details: expect.stringContaining("scheduled sends are not included"),
     });
     expect(items.get("focused-current-research")).toMatchObject({
       sourcePullRequests: [1393],
@@ -365,6 +383,17 @@ describe("changelog registry", () => {
       ),
     });
     expect(relayEntry?.summary).not.toContain("Polar");
+
+    const augustSevenCopy = listPublishedChangelogItems()
+      .filter((item) => item.publishedOn === "2026-08-07")
+      .map((item) => `${item.summary} ${item.details ?? ""}`)
+      .join(" ");
+    expect(augustSevenCopy).not.toContain(
+      "sending an approved connected-app email",
+    );
+    expect(augustSevenCopy).not.toContain(
+      "same approved tools as an ordinary private conversation",
+    );
   });
 
   it("keeps the August 5 through August 9 copy outcome-oriented", () => {
@@ -462,7 +491,10 @@ describe("changelog registry", () => {
         itemIds: [
           "first-personal-health-read",
           "reusable-referral-links",
-          "scheduled-turn-tool-parity",
+          "scheduled-direct-call",
+          "scheduled-tools-follow-the-route",
+          "group-calls-without-redundant-preview",
+          "connected-email-from-private-chat",
           "focused-current-research",
           "repeated-experiment-cadence",
           "biomarker-reference-bands",
