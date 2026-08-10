@@ -109,7 +109,7 @@ import {
 } from '../assistant/group-challenge-response-card.js'
 import {
   groupChallengeResponseCardToolInputSchema,
-  readGroupChallengeDefinition,
+  readGroupChallengeDefinitionSnapshot,
   type GroupChallengeResponseCardToolInput,
   upsertGroupChallengeStandingsSnapshot,
 } from '../assistant/group-challenge-response-card-schema.js'
@@ -3589,7 +3589,18 @@ async function executeGroupChallengeResponseCardAttachment(input: {
     if (pageResult.page.pageType !== 'challenge') {
       throw new TypeError('Challenge standings require a challenge knowledge page.')
     }
-    const definition = readGroupChallengeDefinition(pageResult.page.body)
+    const definitionSnapshot = readGroupChallengeDefinitionSnapshot(
+      pageResult.page.body,
+    )
+    if (
+      input.request.definitionDigest
+      !== definitionSnapshot.definitionDigest
+    ) {
+      throw new TypeError(
+        'Challenge observations must use the current page definition digest.',
+      )
+    }
+    const definition = definitionSnapshot.definition
     const challengeParticipants = definition.participants.filter(
       (participant) => participant.state === 'in',
     )
@@ -3689,6 +3700,7 @@ async function executeGroupChallengeResponseCardAttachment(input: {
       normalizeKnowledgeBody(pageResult.page.body),
       {
         componentProjectionScopeKeys,
+        definitionDigest: definitionSnapshot.definitionDigest,
         readProjectionScopeKeyBatches:
           proof.readProjectionScopeKeyBatches,
         rulesRevision: definition.rulesRevision,

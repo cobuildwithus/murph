@@ -63,6 +63,7 @@ import {
   upsertKnowledgePage,
 } from '../src/knowledge/service.ts'
 import {
+  digestGroupChallengeDefinition,
   renderGroupChallengeDefinitionSection,
 } from '../src/assistant/group-challenge-response-card-schema.ts'
 import {
@@ -120,6 +121,7 @@ const GROUP_CHALLENGE_DEFINITION = {
 
 const GROUP_CHALLENGE_AUTHORING_INPUT = {
   challengeSlug: 'weird-health-week',
+  definitionDigest: digestGroupChallengeDefinition(GROUP_CHALLENGE_DEFINITION),
   participantObservations: [
     {
       components: [{

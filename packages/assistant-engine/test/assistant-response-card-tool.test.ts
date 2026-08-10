@@ -24,6 +24,7 @@ import type {
   AssistantHostedGroupSharedReadResponse,
 } from '../src/assistant/execution-context.ts'
 import {
+  digestGroupChallengeDefinition,
   renderGroupChallengeDefinitionSection,
 } from '../src/assistant/group-challenge-response-card-schema.ts'
 
@@ -103,6 +104,7 @@ const CHALLENGE_DEFINITION = {
 
 const CHALLENGE_CARD_AUTHORING_INPUT = {
   challengeSlug: 'weird-health-week',
+  definitionDigest: digestGroupChallengeDefinition(CHALLENGE_DEFINITION),
   participantObservations: [{
     components: [{
       componentId: 'steps',
@@ -377,6 +379,7 @@ describe('murph.attach_response_card', () => {
     expect(privateSchema).not.toContain('challenge_standings')
     expect(groupSchema).toContain('participantObservations')
     expect(groupSchema).toContain('challengeSlug')
+    expect(groupSchema).toContain('definitionDigest')
     expect(groupSchema).not.toContain('componentProjectionScopeKeys')
     expect(groupSchema).not.toContain('scoreInput')
     expect(groupSchema).not.toContain('participantLabels')
@@ -413,6 +416,9 @@ describe('murph.attach_response_card', () => {
       'one complete stable room-member and authorized-label roster',
     )
     expect(groupTool!.description).toContain('capacity-omitted')
+    expect(groupTool!.description).toContain(
+      'rejects observations when its digest changed after normalization',
+    )
     expect(groupTool!.description).toContain('Collective cards have no row cap')
   })
 
@@ -462,6 +468,13 @@ describe('murph.attach_response_card', () => {
     expect(readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT)).toEqual({
       input: CHALLENGE_CARD_AUTHORING_INPUT,
       kind: 'attach-group-challenge-response-card',
+    })
+    expect(readCardToolRequest({
+      challengeSlug: CHALLENGE_CARD_AUTHORING_INPUT.challengeSlug,
+      participantObservations:
+        CHALLENGE_CARD_AUTHORING_INPUT.participantObservations,
+    })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     expect(readCardToolRequest({
       ...CHALLENGE_CARD_AUTHORING_INPUT,
@@ -605,6 +618,27 @@ describe('murph.attach_response_card', () => {
       throw new TypeError('Expected a page-authorized challenge card request.')
     }
     const vaultRoot = await createChallengeVault()
+    const unbackedScopeDefinition = {
+      ...CHALLENGE_DEFINITION,
+      scorecard: {
+        components: [{
+          ...CHALLENGE_DEFINITION.scorecard.components[0],
+          projectionScopeKeys: ['sleep-times.v0'],
+        }],
+      },
+    }
+    const unbackedScopeRequest = readCardToolRequest({
+      ...CHALLENGE_CARD_AUTHORING_INPUT,
+      definitionDigest: digestGroupChallengeDefinition(
+        unbackedScopeDefinition,
+      ),
+    })
+    if (
+      !unbackedScopeRequest
+      || unbackedScopeRequest.kind !== 'attach-group-challenge-response-card'
+    ) {
+      throw new TypeError('Expected a page-authorized challenge card request.')
+    }
     const cases = [
       {
         state: createEmptyGroupReadState(),
@@ -618,18 +652,10 @@ describe('murph.attach_response_card', () => {
         vaultRoot,
       },
       {
-        request,
+        request: unbackedScopeRequest,
         state: COMPLETE_GROUP_READ_STATE,
         vaultRoot: await createChallengeVault({
-          definition: {
-            ...CHALLENGE_DEFINITION,
-            scorecard: {
-              components: [{
-                ...CHALLENGE_DEFINITION.scorecard.components[0],
-                projectionScopeKeys: ['sleep-times.v0'],
-              }],
-            },
-          },
+          definition: unbackedScopeDefinition,
         }),
       },
       {
@@ -667,6 +693,12 @@ describe('murph.attach_response_card', () => {
     if (!request || request.kind !== 'attach-group-challenge-response-card') {
       throw new TypeError('Expected a page-authorized group-card request.')
     }
+    const mismatchedDigestSection = renderGroupChallengeDefinitionSection(
+      CHALLENGE_DEFINITION,
+    ).replace(
+      digestGroupChallengeDefinition(CHALLENGE_DEFINITION),
+      'f'.repeat(64),
+    )
     const vaults = [
       await createChallengeVault({ pageType: 'concept' }),
       await createChallengeVault({
@@ -683,6 +715,13 @@ describe('murph.attach_response_card', () => {
           '{"version":1}',
           '```',
           '<!-- murph:group-challenge-definition:v1:end -->',
+        ].join('\n'),
+      }),
+      await createChallengeVault({
+        body: [
+          'A challenge page with a mismatched definition digest.',
+          '',
+          mismatchedDigestSection,
         ].join('\n'),
       }),
     ]
@@ -709,12 +748,23 @@ describe('murph.attach_response_card', () => {
     }
   })
 
-  it('does not emit or persist stale standings when the page changes during its read', async () => {
+  it('binds normalized observations to one exact same-shape definition revision', async () => {
     const request = readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT)
     if (!request || request.kind !== 'attach-group-challenge-response-card') {
       throw new TypeError('Expected a page-authorized group-card request.')
     }
     const vaultRoot = await createChallengeVault()
+    const revisionBDefinition = {
+      ...CHALLENGE_DEFINITION,
+      rulesRevision: 2,
+      scorecard: {
+        components: [{
+          ...CHALLENGE_DEFINITION.scorecard.components[0],
+          evaluationRule: 'Sum settled shared steps in the revised window.',
+          points: 4,
+        }],
+      },
+    }
     let winningMarkdown: string | null = null
     let replaced = false
     const result = await executeCardTool({
@@ -727,14 +777,7 @@ describe('murph.attach_response_card', () => {
             body: [
               'A concurrent ruling changed the challenge.',
               '',
-              renderGroupChallengeDefinitionSection({
-                ...CHALLENGE_DEFINITION,
-                participants: [{
-                  participantId: 'participant_maya',
-                  state: 'declined',
-                }],
-                rulesRevision: 2,
-              }),
+              renderGroupChallengeDefinitionSection(revisionBDefinition),
             ].join('\n'),
             pageType: 'challenge',
             slug: 'weird-health-week',
@@ -763,6 +806,45 @@ describe('murph.attach_response_card', () => {
     expect(current.page.body).not.toContain(
       'murph:challenge-standings-snapshot:v1:start',
     )
+
+    const revisionBRequest = readCardToolRequest({
+      ...CHALLENGE_CARD_AUTHORING_INPUT,
+      definitionDigest: digestGroupChallengeDefinition(revisionBDefinition),
+      participantObservations: [{
+        components: [{
+          componentId: 'steps',
+          quantity: 5_000,
+          status: 'available',
+        }],
+        participantId: 'participant_maya',
+      }],
+    })
+    if (
+      !revisionBRequest
+      || revisionBRequest.kind !== 'attach-group-challenge-response-card'
+    ) {
+      throw new TypeError('Expected a revision-bound group-card request.')
+    }
+    const retried = await executeCardTool({
+      groupChallengeResponseCardAllowed: true,
+      groupSharedReadTurnState: COMPLETE_GROUP_READ_STATE,
+      privateDirectResponseCardAllowed: false,
+      request: revisionBRequest,
+      vaultRoot,
+    })
+    expect(retried.responseCardPatch?.card).toMatchObject({
+      entries: [{ label: 'Maya', points: 200 }],
+      kind: 'challenge_standings',
+      title: 'Updated Weird Health Week',
+    })
+    const retriedPage = await getKnowledgePage({
+      slug: 'weird-health-week',
+      vault: vaultRoot,
+    })
+    expect(retriedPage.page.body).toContain(
+      `"definitionDigest": "${digestGroupChallengeDefinition(revisionBDefinition)}"`,
+    )
+    expect(retriedPage.page.body).toContain('"rulesRevision": 2')
   })
 
   it('keeps page-owned participants as a scorer-ordered subset of a larger room', async () => {
@@ -774,8 +856,16 @@ describe('murph.attach_response_card', () => {
       }],
       participantId: `participant_${index + 1}`,
     }))
+    const subsetDefinition = {
+      ...CHALLENGE_DEFINITION,
+      participants: participantObservations.map((participant) => ({
+        participantId: participant.participantId,
+        state: 'in' as const,
+      })),
+    }
     const request = readCardToolRequest({
       ...CHALLENGE_CARD_AUTHORING_INPUT,
+      definitionDigest: digestGroupChallengeDefinition(subsetDefinition),
       participantObservations: [...participantObservations].reverse(),
     })
     if (!request || request.kind !== 'attach-group-challenge-response-card') {
@@ -792,13 +882,7 @@ describe('murph.attach_response_card', () => {
       })),
     ]
     const vaultRoot = await createChallengeVault({
-      definition: {
-        ...CHALLENGE_DEFINITION,
-        participants: participantObservations.map((participant) => ({
-          participantId: participant.participantId,
-          state: 'in',
-        })),
-      },
+      definition: subsetDefinition,
     })
     const result = await executeCardTool({
       groupChallengeResponseCardAllowed: true,
@@ -869,14 +953,15 @@ describe('murph.attach_response_card', () => {
       expect(result.rpcResult.success).toBe(false)
     }
 
+    const waitingDefinition = {
+      ...CHALLENGE_DEFINITION,
+      participants: [
+        CHALLENGE_DEFINITION.participants[0],
+        { participantId: 'participant_jon', state: 'in' as const },
+      ],
+    }
     const waitingVault = await createChallengeVault({
-      definition: {
-        ...CHALLENGE_DEFINITION,
-        participants: [
-          CHALLENGE_DEFINITION.participants[0],
-          { participantId: 'participant_jon', state: 'in' },
-        ],
-      },
+      definition: waitingDefinition,
     })
     const missingWaiting = await executeCardTool({
       groupChallengeResponseCardAllowed: true,
@@ -888,7 +973,10 @@ describe('murph.attach_response_card', () => {
         ],
       },
       privateDirectResponseCardAllowed: false,
-      request: readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT) ?? undefined,
+      request: readCardToolRequest({
+        ...CHALLENGE_CARD_AUTHORING_INPUT,
+        definitionDigest: digestGroupChallengeDefinition(waitingDefinition),
+      }) ?? undefined,
       vaultRoot: waitingVault,
     })
     expect(missingWaiting).not.toHaveProperty('responseCardPatch')
@@ -950,8 +1038,27 @@ describe('murph.attach_response_card', () => {
       }),
       state,
     })
+    const multiBatchDefinition = {
+      ...CHALLENGE_DEFINITION,
+      scorecard: {
+        components: [
+          CHALLENGE_DEFINITION.scorecard.components[0],
+          {
+            evaluationRule: 'Use settled shared sleep duration.',
+            id: 'sleep',
+            label: 'Sleep',
+            perQuantity: 1,
+            points: 5,
+            projectionScopeKeys: ['sleep-times.v0'],
+            quantityUnit: 'hours',
+            settlementMode: 'window-total' as const,
+          },
+        ],
+      },
+    }
     const request = readCardToolRequest({
       challengeSlug: 'weird-health-week',
+      definitionDigest: digestGroupChallengeDefinition(multiBatchDefinition),
       participantObservations: [{
         components: [
           {
@@ -972,24 +1079,7 @@ describe('murph.attach_response_card', () => {
       throw new TypeError('Expected a multi-batch group-card request.')
     }
     const vaultRoot = await createChallengeVault({
-      definition: {
-        ...CHALLENGE_DEFINITION,
-        scorecard: {
-          components: [
-            CHALLENGE_DEFINITION.scorecard.components[0],
-            {
-              evaluationRule: 'Use settled shared sleep duration.',
-              id: 'sleep',
-              label: 'Sleep',
-              perQuantity: 1,
-              points: 5,
-              projectionScopeKeys: ['sleep-times.v0'],
-              quantityUnit: 'hours',
-              settlementMode: 'window-total',
-            },
-          ],
-        },
-      },
+      definition: multiBatchDefinition,
     })
     const result = await executeCardTool({
       groupChallengeResponseCardAllowed: true,

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import {
   challengeStandingsCardV1Bounds,
 } from '@murphai/contracts'
@@ -50,6 +52,8 @@ const challengeSlugSchema = z
   .max(160)
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
 
+const definitionDigestSchema = z.string().regex(/^[0-9a-f]{64}$/u)
+
 const projectionScopeKeySchema = z.string().trim().min(1).max(500)
 
 const componentProjectionScopeKeysSchema = z.object({
@@ -59,6 +63,7 @@ const componentProjectionScopeKeysSchema = z.object({
 
 export const groupChallengeResponseCardToolInputSchema = z.object({
   challengeSlug: challengeSlugSchema,
+  definitionDigest: definitionDigestSchema,
   participantObservations: groupChallengeParticipantObservationsSchema,
 }).strict()
 
@@ -76,6 +81,7 @@ export const groupChallengeResponseCardToolInputJsonSchema = (() => {
 
 const groupChallengeStandingsSnapshotSchema = z.object({
   componentProjectionScopeKeys: z.array(componentProjectionScopeKeysSchema),
+  definitionDigest: definitionDigestSchema,
   readProjectionScopeKeyBatches: z
     .array(z.array(projectionScopeKeySchema).min(1).max(3))
     .min(1),
@@ -126,6 +132,11 @@ export type GroupChallengeDefinition = z.infer<
   typeof groupChallengeDefinitionSchema
 >
 
+export interface GroupChallengeDefinitionSnapshot {
+  definition: GroupChallengeDefinition
+  definitionDigest: string
+}
+
 const DEFINITION_START = '<!-- murph:group-challenge-definition:v1:start -->'
 const DEFINITION_END = '<!-- murph:group-challenge-definition:v1:end -->'
 
@@ -134,9 +145,12 @@ const SNAPSHOT_END = '<!-- murph:challenge-standings-snapshot:v1:end -->'
 
 export function renderGroupChallengeDefinitionSection(value: unknown): string {
   const definition = groupChallengeDefinitionSchema.parse(value)
+  const definitionDigest = digestGroupChallengeDefinition(definition)
   return [
     DEFINITION_START,
     '## Challenge definition',
+    '',
+    `Definition digest: \`${definitionDigest}\``,
     '',
     '```json',
     JSON.stringify(definition, null, 2),
@@ -145,7 +159,16 @@ export function renderGroupChallengeDefinitionSection(value: unknown): string {
   ].join('\n')
 }
 
-export function readGroupChallengeDefinition(body: string): GroupChallengeDefinition {
+export function digestGroupChallengeDefinition(value: unknown): string {
+  const definition = groupChallengeDefinitionSchema.parse(value)
+  return createHash('sha256')
+    .update(JSON.stringify(definition))
+    .digest('hex')
+}
+
+export function readGroupChallengeDefinitionSnapshot(
+  body: string,
+): GroupChallengeDefinitionSnapshot {
   const start = body.indexOf(DEFINITION_START)
   const end = body.indexOf(DEFINITION_END)
   if (
@@ -157,17 +180,22 @@ export function readGroupChallengeDefinition(body: string): GroupChallengeDefini
     throw new TypeError('Expected exactly one complete challenge definition section.')
   }
   const section = body.slice(start + DEFINITION_START.length, end).trim()
-  const match = /^## Challenge definition\n\n```json\n([\s\S]+)\n```$/u.exec(section)
-  if (!match?.[1]) {
+  const match = /^## Challenge definition\n\nDefinition digest: `([0-9a-f]{64})`\n\n```json\n([\s\S]+)\n```$/u.exec(section)
+  if (!match?.[1] || !match[2]) {
     throw new TypeError('Expected one closed JSON challenge definition block.')
   }
   let value: unknown
   try {
-    value = JSON.parse(match[1])
+    value = JSON.parse(match[2])
   } catch {
     throw new TypeError('Expected valid JSON in the challenge definition section.')
   }
-  return groupChallengeDefinitionSchema.parse(value)
+  const definition = groupChallengeDefinitionSchema.parse(value)
+  const definitionDigest = digestGroupChallengeDefinition(definition)
+  if (match[1] !== definitionDigest) {
+    throw new TypeError('Challenge definition digest does not match its JSON.')
+  }
+  return { definition, definitionDigest }
 }
 
 export function upsertGroupChallengeStandingsSnapshot(

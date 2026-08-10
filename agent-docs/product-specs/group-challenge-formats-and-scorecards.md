@@ -233,18 +233,20 @@ A command failure is an invalid normalized input or ruling. Murph fixes that inp
 instead of silently falling back to model arithmetic.
 
 When a requested Linq group update is eligible for the native standings card, the
-attachment tool accepts only the challenge-page slug and normalized observations,
-rather than accepting a model-authored definition or scoreboard. The host reads the
-closed definition from that typed challenge page, derives the complete scorer input
-and component scopes, requires every successful batch to share the same ordered
-current-room-member and authorized-label roster, requires exact observations for
-every page participant in state `in`, verifies that every definition scope was read,
-runs the scorer, and compare-and-set persists the exact page-derived input and result
-before attaching. Card participants, format, objective, teams, rates, caps, units,
-points, target, order, coverage, counts, ranks, and ties therefore cannot drift from
-the page at the irreversible effect boundary. The model still owns authorized record
-interpretation; the trusted host owns definition authority, read proof, arithmetic,
-and canonical persistence.
+attachment tool accepts only the challenge-page slug, its exact displayed definition
+digest, and normalized observations, rather than accepting a model-authored definition
+or scoreboard. The digest comes from the page revision used to normalize those
+observations. The host reads the closed definition from the current typed challenge
+page, rejects a changed digest, derives the complete scorer input and component
+scopes, requires every successful batch to share the same ordered current-room-member
+and authorized-label roster, requires exact observations for every page participant
+in state `in`, verifies that every definition scope was read, runs the scorer, and
+compare-and-set persists the exact page-derived input and result before attaching.
+Card participants, format, objective, teams, rates, caps, units, points, target,
+order, coverage, counts, ranks, and ties therefore cannot drift from the page at the
+irreversible effect boundary. The model still owns authorized record interpretation;
+the trusted host owns definition authority, revision consistency, read proof,
+arithmetic, and canonical persistence.
 
 ## Durable ownership
 
@@ -277,6 +279,8 @@ exactly one closed definition section:
 <!-- murph:group-challenge-definition:v1:start -->
 ## Challenge definition
 
+Definition digest: `1dcd0de56109132f36094973559cfcf289530dfe1f4d28b5cd8780e6d5be0840`
+
 ```json
 {
   "version": 1,
@@ -307,8 +311,12 @@ exactly one closed definition section:
 The JSON is closed and bounded: one to five components, one to three exact scopes per
 component, positive integer rates, optional non-negative caps, a positive integer
 `rulesRevision`, and participation states `in`, `pending`, `declined`, or
-`withdrawn`. A malformed, duplicate, missing, generic-page, or legacy unstructured
-definition is ordinary-text-only. Attachment never creates or repairs this section.
+`withdrawn`. The lowercase digest is SHA-256 over the compact schema-normalized JSON
+and is recomputed whenever any definition field changes. The model copies it only as
+a consistency precondition; the host validates it against the JSON and continues to
+derive all authority from that JSON. A malformed, mismatched-digest, duplicate,
+missing, generic-page, or legacy unstructured definition is ordinary-text-only.
+Attachment never creates or repairs this section.
 
 ## Long-running cumulative settlement
 
