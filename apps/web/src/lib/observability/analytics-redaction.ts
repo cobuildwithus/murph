@@ -42,6 +42,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/settings",
   "/settings/data-privacy",
   "/subprocessors",
+  "/training",
 ] as const;
 const VERCEL_TELEMETRY_PATHNAME_SET = new Set<string>(
   VERCEL_TELEMETRY_PATHNAMES,

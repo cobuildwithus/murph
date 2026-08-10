@@ -316,6 +316,11 @@ test("Training design study renders the production dashboard with synthetic data
   assert.match(markup, /Recent workouts/);
   assert.match(markup, /Exercise progress/);
   assert.match(markup, /135 lb × 10/);
+  assert.match(markup, /data-training-study-state="loading"/);
+  assert.match(markup, /Loading your training log/);
+  assert.match(markup, /Could not refresh your training log/);
+  assert.match(markup, /Log in to start training/);
+  assert.match(markup, /Set up messaging/);
   assert.doesNotMatch(markup, /<picture|<img|design-proof/);
 });
 

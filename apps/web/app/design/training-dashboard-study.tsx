@@ -1,4 +1,9 @@
-import { TrainingDashboard } from "@/app/(dashboard)/training/training-page-client";
+"use client";
+
+import type { ReactNode } from "react";
+
+import { TrainingPageView } from "@/app/(dashboard)/training/training-page-client";
+import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
   BrowserTrainingView,
   TrainingSetView,
@@ -72,6 +77,12 @@ const lateralBest = studySet({
   reps: 10,
   weight: 25,
 });
+
+const STUDY_CONTACT_OPTION: MurphContactOption = {
+  href: "sms:+15555550100?body=Continue%20my%20workout.",
+  kind: "text",
+  label: "Text Murph",
+};
 
 const TRAINING_STUDY_VIEW: BrowserTrainingView = {
   activeSession: {
@@ -240,6 +251,132 @@ const TRAINING_STUDY_VIEW: BrowserTrainingView = {
   ],
 };
 
+const COMPLETED_TRAINING_STUDY_VIEW: BrowserTrainingView = {
+  ...TRAINING_STUDY_VIEW,
+  activeSession: null,
+};
+
+const ZERO_SET_TRAINING_STUDY_VIEW: BrowserTrainingView = {
+  ...TRAINING_STUDY_VIEW,
+  activeSession: {
+    ...TRAINING_STUDY_VIEW.activeSession!,
+    completedSetCount: 0,
+    exerciseCount: 0,
+    exercises: [],
+    setCount: 0,
+    title: "Workout",
+  },
+};
+
 export function TrainingDashboardStudy() {
-  return <TrainingDashboard training={TRAINING_STUDY_VIEW} />;
+  return (
+    <div className="flex flex-col gap-16">
+      <TrainingStudyPage
+        id="populated-active"
+        status="ready"
+        title="Populated · active workout"
+        training={TRAINING_STUDY_VIEW}
+      />
+      <TrainingStudyPage
+        id="completed-history"
+        status="ready"
+        title="Completed history · no active workout"
+        training={COMPLETED_TRAINING_STUDY_VIEW}
+      />
+      <TrainingStudyPage
+        id="active-zero-set"
+        status="ready"
+        title="Active workout · ready for first set"
+        training={ZERO_SET_TRAINING_STUDY_VIEW}
+      />
+      <TrainingStudyPage
+        id="loading"
+        status="loading"
+        title="Loading"
+        training={null}
+      />
+      <TrainingStudyPage
+        id="empty"
+        status="empty"
+        title="Empty history"
+        training={null}
+      />
+      <TrainingStudyPage
+        error="Your saved workouts could not be refreshed."
+        id="error"
+        status="error"
+        title="Vault error · retry available"
+        training={null}
+      />
+      <TrainingStudyPage
+        authenticated={false}
+        id="signed-out"
+        messagingConfigured={false}
+        status="empty"
+        title="Signed out"
+        training={null}
+      />
+      <TrainingStudyPage
+        id="no-messaging"
+        messagingConfigured={false}
+        status="ready"
+        title="Authenticated · messaging not configured"
+        training={TRAINING_STUDY_VIEW}
+      />
+    </div>
+  );
+}
+
+function TrainingStudyPage({
+  authenticated = true,
+  error = null,
+  id,
+  messagingConfigured = true,
+  status,
+  title,
+  training,
+}: {
+  authenticated?: boolean;
+  error?: string | null;
+  id: string;
+  messagingConfigured?: boolean;
+  status: "empty" | "error" | "loading" | "ready";
+  title: string;
+  training: BrowserTrainingView | null;
+}) {
+  const contactOptions = messagingConfigured ? [STUDY_CONTACT_OPTION] : [];
+
+  return (
+    <TrainingStudyState id={id} title={title}>
+      <TrainingPageView
+        authenticated={authenticated}
+        continueContactOptions={contactOptions}
+        error={error}
+        onRefresh={() => undefined}
+        refreshPending={false}
+        startContactOptions={contactOptions}
+        status={status}
+        training={training}
+      />
+    </TrainingStudyState>
+  );
+}
+
+function TrainingStudyState({
+  children,
+  id,
+  title,
+}: {
+  children: ReactNode;
+  id: string;
+  title: string;
+}) {
+  return (
+    <section data-training-study-state={id}>
+      <p className="mb-5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+        {title}
+      </p>
+      {children}
+    </section>
+  );
 }

@@ -269,7 +269,7 @@ test("browser training projection fails closed on impractically large sessions",
   assert.ok(projected);
   assert.equal("training" in projected.attributes, false);
   assert.deepEqual(projected.attributes, {
-    activityKind: "strength",
+    activityKind: "strength-training",
     source: "manual",
   });
 });

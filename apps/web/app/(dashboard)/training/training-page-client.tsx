@@ -46,6 +46,40 @@ export default function TrainingPageClient({
 }) {
   const { error, refresh, refreshPending, status } = useBrowserVault();
   const training = useBrowserVaultSelector(selectBrowserVaultTraining);
+
+  return (
+    <TrainingPageView
+      authenticated={authenticated}
+      continueContactOptions={continueContactOptions}
+      error={error}
+      onRefresh={() => void refresh()}
+      refreshPending={refreshPending}
+      startContactOptions={startContactOptions}
+      status={status}
+      training={training}
+    />
+  );
+}
+
+export function TrainingPageView({
+  authenticated,
+  continueContactOptions,
+  error,
+  onRefresh,
+  refreshPending,
+  startContactOptions,
+  status,
+  training,
+}: {
+  authenticated: boolean;
+  continueContactOptions: readonly MurphContactOption[];
+  error: string | null;
+  onRefresh: () => void;
+  refreshPending: boolean;
+  startContactOptions: readonly MurphContactOption[];
+  status: ReturnType<typeof useBrowserVault>["status"];
+  training: BrowserTrainingView | null;
+}) {
   const activeSession = training?.activeSession ?? null;
   const primaryContactOption = activeSession
     ? continueContactOptions[0] ?? null
@@ -90,7 +124,7 @@ export default function TrainingPageClient({
                 size="sm"
                 type="button"
                 variant="outline"
-                onClick={() => void refresh()}
+                onClick={onRefresh}
               >
                 <RefreshCw aria-hidden="true" />
                 Retry
