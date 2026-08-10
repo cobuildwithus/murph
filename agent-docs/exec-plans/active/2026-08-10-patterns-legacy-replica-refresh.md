@@ -15,7 +15,7 @@ Updated: 2026-08-10
   as stale.
 - Opening the signed-in app schedules the existing Browser Vault refresh path.
 - The current polling flow replaces the preparing state when the refreshed
-  replica is ready.
+  replica is ready, including when publication takes more than 20 seconds.
 - Focused generation, freshness, Web session, and Patterns page tests pass.
 - Exact-head CI and required ReviewGPT checks pass.
 
@@ -24,6 +24,8 @@ Updated: 2026-08-10
 - In scope:
   - Advance the Browser Vault replica generation for the new Patterns
     projection.
+  - Continue the existing browser-owned polling at a slower interval after its
+    fast window until the pending refresh completes.
   - Update focused generation expectations and legacy-refresh coverage.
 - Out of scope:
   - New refresh routes, queues, cron jobs, or persisted state.
@@ -52,15 +54,25 @@ Updated: 2026-08-10
   signal.
 - Do not add a feature-specific refresh request. The existing freshness owner
   already schedules and deduplicates refresh work for an older generation.
+- Keep the existing 1.5-second fast polling window, then slow to 15-second
+  checks. This retains automatic completion without indefinite fast polling or
+  a new continuation owner.
 
 ## Verification
 
 - Query and hosted-execution focused Vitest suite: 4 files, 58 tests passed.
-- Browser Vault Web session, dashboard, and polling suite: 3 files, 98 tests
+- Browser Vault Web session, dashboard, and polling suite: 3 files, 99 tests
   passed after the standard Prisma client generation step.
 - Contracts, Query, Hosted Execution, and Web typechecks passed.
 - Direct contract proof: a generation-4 replica is readable but the Web session
   classifies it as `generation_mismatch`, schedules the existing refresh
   control event, and returns `refreshPending: true` for browser polling.
+- Preliminary ReviewGPT returned two accepted findings with one mechanism: the
+  fast browser polling owner stopped after 20 seconds, and no test proved the
+  terminal generation-4 to generation-5 journey. The browser now continues at
+  a 15-second slow interval while refresh remains pending. A fake-timer
+  BrowserVaultProvider test delays publication beyond the fast window and
+  proves the open page adopts a generation-5 replica with Personal Patterns
+  without focus, navigation, or a manual action.
 - Pending: pushed-head ReviewGPT, exact-head CI, parent final review, and plan
   closure.
