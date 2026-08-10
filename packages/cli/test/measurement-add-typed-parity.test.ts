@@ -590,7 +590,7 @@ test('measurement import-json preserves nested links and import metadata', async
 
   assert.deepEqual(added.measurements, [
     {
-      metric: 'body-fat-pct',
+      metric: 'body-fat-percentage',
       value: 18.4,
       unit: 'percent',
       qualifiers: {
