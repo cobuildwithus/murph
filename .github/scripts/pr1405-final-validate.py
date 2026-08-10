@@ -106,18 +106,7 @@ function entityTopicText(entity: HealthCommonsCatalogEntity): string {
 ''',
 )
 
-# Route-intent words and temporal filler should not narrow the packet itself.
-replace_once(
-    INDEX,
-    '''  "research",
-  "safe",
-''',
-    '''  "research",
-  "recent",
-  "recently",
-  "safe",
-''',
-)
+# Route-intent words should not narrow the packet itself.
 replace_once(
     INDEX,
     '''  return searchTokens(normalizedQuestion).filter((token) =>
