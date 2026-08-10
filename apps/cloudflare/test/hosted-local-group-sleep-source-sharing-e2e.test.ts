@@ -49,7 +49,7 @@ const linqWebhookSecret = "linq-local-group-sleep-source-webhook-secret";
 const offerRequestText = "Share my deep sleep from every source with this room.";
 const readRequestText = "Compare the deep sleep sources that I shared.";
 const offerReplyText = "The exact by-source sharing choice is ready.";
-const readReplyText = "The three stored source values are available to this room.";
+const readReplyText = "The four stored source values are available to this room.";
 const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
 const projectionKind = "deep-sleep-sources-days.v1";
 
@@ -105,7 +105,7 @@ describe("hosted local group sleep-source sharing e2e", () => {
     ));
   }, 180_000);
 
-  it("projects three stored sources through exact consent into only the authorized room", async () => {
+  it("projects wearable and manual sources through exact consent into only the authorized room", async () => {
     await requireScenario().seedActiveHostedLinqMember({
       homePhone,
       memberId: ownerMemberId,
@@ -235,8 +235,11 @@ describe("hosted local group sleep-source sharing e2e", () => {
     expect(toolOutputs).toHaveLength(1);
     expect(toolOutputs[0]).toContain('"source":"fitbit"');
     expect(toolOutputs[0]).toContain('"source":"garmin"');
+    expect(toolOutputs[0]).toContain('"source":"manual"');
+    expect(toolOutputs[0]).toContain('"label":"Manual"');
     expect(toolOutputs[0]).toContain('"source":"oura"');
     expect(toolOutputs[0]).toContain('"selected":true');
+    expect(toolOutputs[0]).toContain('"value":125');
     expect(toolOutputs[0]).not.toContain('"source":"junction"');
   }, 600_000);
 });
@@ -270,7 +273,7 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
     { provider: "garmin", value: 91 },
     { provider: "oura", value: 108 },
   ] as const;
-  const records = providers.flatMap(({ provider, value }, index) => {
+  const wearableRecords = providers.flatMap(({ provider, value }, index) => {
     const recordedAt = `${sleepDate}T07:0${index}:00.000Z`;
     const externalRef = {
       system: "junction",
@@ -316,6 +319,22 @@ async function seedPersonalSleepSourceSnapshot(): Promise<void> {
       },
     ];
   });
+  const records = [
+    ...wearableRecords,
+    {
+      schemaVersion: "murph.event.v1",
+      id: `evt_group_sleep_source_manual_${runId}`,
+      kind: "observation",
+      occurredAt: `${sleepDate}T07:00:00.000Z`,
+      recordedAt: `${sleepDate}T12:00:00.000Z`,
+      dayKey: sleepDate,
+      source: "manual",
+      title: "Deep sleep",
+      metric: "sleep-deep-minutes",
+      value: 125,
+      unit: "minutes",
+    },
+  ];
   await mkdir(path.join(vaultRoot, "ledger", "events", sleepDate.slice(0, 4)), {
     recursive: true,
   });

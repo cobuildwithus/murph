@@ -1504,10 +1504,11 @@ function parseHostedVaultShareSleepMetricSource(
     );
   }
   const providerDescriptor = resolveWearableProviderDescriptor(sourceKey);
-  if (
-    sourceKey === "junction"
-    || (providerDescriptor?.displayName ?? sourceKey) !== sourceLabel
-  ) {
+  const hasCanonicalPublicIdentity = sourceKey === "manual"
+    ? sourceLabel === "Manual"
+    : sourceKey !== "junction"
+      && (providerDescriptor?.displayName ?? sourceKey) === sourceLabel;
+  if (!hasCanonicalPublicIdentity) {
     throw new TypeError(
       `Vault share ${spec.projectionKind} sources must use canonical public provider keys and labels.`,
     );

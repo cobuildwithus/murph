@@ -517,19 +517,31 @@ export async function readProjectableDailyMetricDays(
     || spec.metricKey === "rem-sleep-minutes";
   const projectionPoints = acceptsManualSleepStage
     ? points.map((point) =>
-        point.provenance.provider === null
-          && point.provenance.sourceLabel === "Manual"
-          && (point.grain === "event" || point.grain === "instant")
+        isManualSleepStageCorrection(point)
+          && point.grain === "event"
           ? { ...point, grain: "day" as const }
           : point
       )
     : points;
+  const manualCorrectionDates = acceptsManualSleepStage
+    ? new Set(projectionPoints
+        .filter((point) =>
+          point.grain === "day" && isManualSleepStageCorrection(point)
+        )
+        .map((point) => point.effectiveDate))
+    : new Set<string>();
+  const selectionPoints = manualCorrectionDates.size > 0
+    ? projectionPoints.filter((point) =>
+        !manualCorrectionDates.has(point.effectiveDate)
+        || isManualSleepStageCorrection(point)
+      )
+    : projectionPoints;
   const series = selectMetricSeries({
     duplicatePolicy: "selection-policy",
     from: cutoffDate,
     grain: "day",
     metricKey: spec.metricKey,
-    points: projectionPoints,
+    points: selectionPoints,
     statistic: "value",
   });
   let rows: readonly DailyMetricProjectionPoint[] = series.rows;
@@ -565,6 +577,13 @@ export async function readProjectableDailyMetricDays(
     const currentDate = formatTimeZoneDateTimeParts(nowMs, timeZone).dayKey;
     return row.date > currentDate ? [] : [row];
   }), spec, nowMs);
+}
+
+function isManualSleepStageCorrection(point: MetricPoint): boolean {
+  return point.source.family === "event"
+    && point.source.kind === "observation"
+    && point.provenance.provider === null
+    && point.provenance.sourceLabel === "Manual";
 }
 
 async function readProjectableSleepMetricSourcesByDate(input: {
@@ -652,10 +671,7 @@ async function readProjectableSleepMetricSourcesByDate(input: {
     }
   }
 
-  const manualPoints = input.points.filter((point) =>
-    point.provenance.provider === null
-    && point.provenance.sourceLabel === "Manual"
-  );
+  const manualPoints = input.points.filter(isManualSleepStageCorrection);
   const manualSeries = selectMetricSeries({
     duplicatePolicy: "selection-policy",
     from: input.cutoffDate,
@@ -674,25 +690,29 @@ async function readProjectableSleepMetricSourcesByDate(input: {
       || value < input.spec.minValue
       || value > input.spec.maxValue
     ) {
-      return null;
+      sourcesByDate.delete(row.date);
+      continue;
     }
     const unit = sanitizeProjectionUnit(row.unit);
     if (
       input.spec.expectedUnit !== undefined
       && unit !== input.spec.expectedUnit
     ) {
-      return null;
+      sourcesByDate.delete(row.date);
+      continue;
     }
     const pointIds = row.pointIds ?? [];
     const selectedPoint = pointIds.length === 1
       ? manualPointsById.get(pointIds[0] ?? "")
       : undefined;
     if (!selectedPoint) {
-      return null;
+      sourcesByDate.delete(row.date);
+      continue;
     }
     const recordedAt = selectedPoint.recordedAt;
     if (recordedAt !== null && !isStrictIsoDateTime(recordedAt)) {
-      return null;
+      sourcesByDate.delete(row.date);
+      continue;
     }
 
     const sources = sourcesByDate.get(row.date) ?? [];

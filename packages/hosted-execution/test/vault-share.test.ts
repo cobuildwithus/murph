@@ -965,6 +965,33 @@ describe("daily metric vault-share delivery records", () => {
       projectionKind: REM_SLEEP_SOURCES_SCOPE.projectionKind,
       records: [remRecord],
     }).records).toEqual([remRecord]);
+
+    for (const [projectionScope, metricKey] of [
+      [DEEP_SLEEP_SOURCES_SCOPE, "deep-sleep-minutes"],
+      [REM_SLEEP_SOURCES_SCOPE, "rem-sleep-minutes"],
+    ] as const) {
+      const manualRecord = {
+        ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD,
+        data: {
+          ...VALID_SOURCE_AWARE_DEEP_SLEEP_RECORD.data,
+          metricKey,
+          sources: [{
+            label: "Manual",
+            recordedAt: "2026-07-03T12:00:00.000Z",
+            selected: true as const,
+            source: "manual",
+            unit: "minutes",
+            value: 91,
+          }],
+          sourcesDisagree: false,
+          value: 91,
+        },
+      };
+      expect(parseHostedVaultShareDeliverRequest({
+        projectionKind: projectionScope.projectionKind,
+        records: [manualRecord],
+      }).records).toEqual([manualRecord]);
+    }
   });
 
   it("keeps legacy sleep grants provider-neutral", () => {
@@ -1054,6 +1081,12 @@ describe("daily metric vault-share delivery records", () => {
       ...validData,
       sources: validData.sources.map((source, index) => index === 0
         ? { ...source, label: "Bedroom Fitbit" }
+        : source),
+    }, /canonical public provider keys and labels/u);
+    expectInvalidSources({
+      ...validData,
+      sources: validData.sources.map((source, index) => index === 0
+        ? { ...source, label: "manual", source: "manual" }
         : source),
     }, /canonical public provider keys and labels/u);
     expectInvalidSources({

@@ -376,6 +376,7 @@ async function createSleepSourceProjectionVault(
   days: readonly {
     date: string;
     providers: readonly string[];
+    stage?: "deep" | "rem";
   }[],
 ): Promise<string> {
   const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-source-window-"));
@@ -393,6 +394,7 @@ async function createSleepSourceProjectionVault(
   );
   const records = days.flatMap((day, dayIndex) =>
     day.providers.flatMap((provider, providerIndex) => {
+      const stage = day.stage ?? "deep";
       const suffix = `${dayIndex}_${providerIndex}`;
       const recordedAt = `${day.date}T07:0${providerIndex}:00.000Z`;
       const externalRef = {
@@ -424,14 +426,16 @@ async function createSleepSourceProjectionVault(
         },
         {
           schemaVersion: "murph.event.v1",
-          id: `evt_sleep_source_window_deep_${suffix}`,
+          id: `evt_sleep_source_window_${stage}_${suffix}`,
           kind: "observation",
           occurredAt: `${day.date}T07:00:00.000Z`,
           recordedAt,
           dayKey: day.date,
           source: "device",
-          title: "Deep sleep",
-          metric: "sleep-deep-minutes",
+          title: stage === "deep" ? "Deep sleep" : "REM sleep",
+          metric: stage === "deep"
+            ? "sleep-deep-minutes"
+            : "sleep-rem-minutes",
           value: 70 + dayIndex * 10 + providerIndex,
           unit: "minutes",
           dataOrigin,
@@ -921,73 +925,183 @@ describe("selectProjectableDailyMetricDays", () => {
     }
   });
 
-  it("projects a manual sleep-stage correction as an explicit source", async () => {
-    const vaultRoot = await createSleepSourceProjectionVault([]);
-    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+  it.each([
+    {
+      legacyProjectionKind: "deep-sleep-days.v0" as const,
+      metric: "sleep-deep-minutes",
+      metricKey: "deep-sleep-minutes",
+      sourceProjectionKind: "deep-sleep-sources-days.v1" as const,
+      stage: "deep" as const,
+      title: "Deep sleep",
+    },
+    {
+      legacyProjectionKind: "rem-sleep-days.v0" as const,
+      metric: "sleep-rem-minutes",
+      metricKey: "rem-sleep-minutes",
+      sourceProjectionKind: "rem-sleep-sources-days.v1" as const,
+      stage: "rem" as const,
+      title: "REM sleep",
+    },
+  ])("makes a manual $stage correction authoritative with and without wearable evidence", async ({
+    legacyProjectionKind,
+    metric,
+    metricKey,
+    sourceProjectionKind,
+    stage,
+    title,
+  }) => {
+    for (const includesWearable of [false, true]) {
+      const vaultRoot = await createSleepSourceProjectionVault(includesWearable
+        ? [{ date: ACTIVITY_DAY.date, providers: ["garmin"], stage }]
+        : []);
+      const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
-    try {
-      await writeFile(
-        join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
-        `${JSON.stringify({
-          schemaVersion: "murph.event.v1",
-          id: "evt_manual_deep_sleep",
-          kind: "observation",
-          occurredAt: "2026-07-03T07:00:00.000Z",
-          recordedAt: "2026-07-03T12:00:00.000Z",
-          dayKey: ACTIVITY_DAY.date,
-          source: "manual",
-          title: "Deep sleep",
-          metric: "sleep-deep-minutes",
-          value: 91,
-          unit: "minutes",
-        })}\n`,
-        "utf8",
-      );
-
-      const selected = await readProjectableDailyMetricDays(
-        vaultRoot,
-        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
-      );
-      const legacySelected = await readProjectableDailyMetricDays(
-        vaultRoot,
-        requireDailyMetricSpec("deep-sleep-days.v0"),
-      );
-
-      expect(legacySelected).toEqual([
-        expect.objectContaining({
-          data: expect.objectContaining({
-            metricKey: "deep-sleep-minutes",
-            unit: "minutes",
+      try {
+        const eventsPath = join(
+          vaultRoot,
+          "ledger",
+          "events",
+          "2026",
+          "2026-07.jsonl",
+        );
+        const existingRecords = await readFile(eventsPath, "utf8");
+        await writeFile(
+          eventsPath,
+          `${existingRecords}${JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: `evt_manual_${stage}_sleep`,
+            kind: "observation",
+            occurredAt: "2026-07-03T07:00:00.000Z",
+            recordedAt: "2026-07-03T12:00:00.000Z",
+            dayKey: ACTIVITY_DAY.date,
+            source: "manual",
+            title,
+            metric,
             value: 91,
-          }),
-          recordKey: ACTIVITY_DAY.date,
-        }),
-      ]);
-      expect(selected).toEqual([
-        expect.objectContaining({
-          data: expect.objectContaining({
-            date: ACTIVITY_DAY.date,
-            metricKey: "deep-sleep-minutes",
-            sources: [{
-              label: "Manual",
-              recordedAt: "2026-07-03T12:00:00.000Z",
-              selected: true,
-              source: "manual",
+            unit: "minutes",
+          })}\n`,
+          "utf8",
+        );
+
+        const selected = await readProjectableDailyMetricDays(
+          vaultRoot,
+          requireDailyMetricSpec(sourceProjectionKind),
+        );
+        const legacySelected = await readProjectableDailyMetricDays(
+          vaultRoot,
+          requireDailyMetricSpec(legacyProjectionKind),
+        );
+
+        expect(legacySelected).toEqual([
+          expect.objectContaining({
+            data: expect.objectContaining({
+              metricKey,
               unit: "minutes",
               value: 91,
-            }],
-            sourcesDisagree: false,
-            unit: "minutes",
-            value: 91,
+            }),
+            recordKey: ACTIVITY_DAY.date,
           }),
-          recordKey: ACTIVITY_DAY.date,
-        }),
-      ]);
-    } finally {
-      dateNow.mockRestore();
-      await rm(vaultRoot, { recursive: true, force: true });
+        ]);
+        expect(selected).toEqual([
+          expect.objectContaining({
+            data: expect.objectContaining({
+              date: ACTIVITY_DAY.date,
+              metricKey,
+              sources: includesWearable
+                ? [
+                    expect.objectContaining({
+                      label: "Garmin",
+                      source: "garmin",
+                      unit: "minutes",
+                      value: 70,
+                    }),
+                    {
+                      label: "Manual",
+                      recordedAt: "2026-07-03T12:00:00.000Z",
+                      selected: true,
+                      source: "manual",
+                      unit: "minutes",
+                      value: 91,
+                    },
+                  ]
+                : [{
+                    label: "Manual",
+                    recordedAt: "2026-07-03T12:00:00.000Z",
+                    selected: true,
+                    source: "manual",
+                    unit: "minutes",
+                    value: 91,
+                  }],
+              sourcesDisagree: includesWearable,
+              unit: "minutes",
+              value: 91,
+            }),
+            recordKey: ACTIVITY_DAY.date,
+          }),
+        ]);
+        expect(parseHostedVaultShareDeliverRequest({
+          projectionKind: sourceProjectionKind,
+          records: selected,
+        }).records).toEqual(selected);
+      } finally {
+        dateNow.mockRestore();
+        await rm(vaultRoot, { recursive: true, force: true });
+      }
     }
   });
+
+  it.each([false, true])(
+    "omits an invalid manual sleep-stage date without erasing valid source-aware history (history=%s)",
+    async (includesValidHistory) => {
+      const vaultRoot = await createSleepSourceProjectionVault(includesValidHistory
+        ? [{ date: "2026-07-02", providers: ["garmin"] }]
+        : []);
+      const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+      try {
+        const eventsPath = join(
+          vaultRoot,
+          "ledger",
+          "events",
+          "2026",
+          "2026-07.jsonl",
+        );
+        const existingRecords = await readFile(eventsPath, "utf8");
+        await writeFile(
+          eventsPath,
+          `${existingRecords}${JSON.stringify({
+            schemaVersion: "murph.event.v1",
+            id: "evt_invalid_manual_deep_sleep",
+            kind: "observation",
+            occurredAt: "2026-07-03T07:00:00.000Z",
+            recordedAt: "2026-07-03T12:00:00.000Z",
+            dayKey: ACTIVITY_DAY.date,
+            source: "manual",
+            title: "Deep sleep",
+            metric: "sleep-deep-minutes",
+            value: 1_500,
+            unit: "minutes",
+          })}\n`,
+          "utf8",
+        );
+
+        const selected = await readProjectableDailyMetricDays(
+          vaultRoot,
+          requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+        );
+        expect(selected.map((record) => record.recordKey)).toEqual(
+          includesValidHistory ? ["2026-07-02"] : [],
+        );
+        expect(parseHostedVaultShareDeliverRequest({
+          projectionKind: "deep-sleep-sources-days.v1",
+          records: selected,
+        }).records).toEqual(selected);
+      } finally {
+        dateNow.mockRestore();
+        await rm(vaultRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("keeps valid dates when more than four providers appear across the window", async () => {
     const vaultRoot = await createSleepSourceProjectionVault([

@@ -140,7 +140,10 @@ and a literal `sourcesDisagree` flag. Source-aware records fail closed instead o
 truncating when the source bound is exceeded or the selected source cannot be
 proved. A canonical manually entered sleep-stage event is projected onto its
 member-local day and disclosed as the explicit `manual` / `Manual` source; it is
-never attributed to a connected wearable or aggregator. The legacy
+never attributed to a connected wearable or aggregator, and it is authoritative
+for that day while wearable values remain visible as disagreeing sources. An
+invalid manual sleep-stage value omits only its affected day instead of erasing
+other valid shared days. The legacy
 provider-neutral `deep-sleep-days.v0` and
 `rem-sleep-days.v0` scopes remain read-only compatibility contracts for
 existing policies and grants, disclosing one canonical daily value only. A new
