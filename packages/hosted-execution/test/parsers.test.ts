@@ -3821,6 +3821,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
   });
 
   it("parses exact member and invite tiers with per-tier capacity", () => {
+    const maxMember = {
+      isOwner: false,
+      label: "Mom",
+      planCode: "max",
+      role: "member",
+      status: "active",
+    } as const;
+
+    expect(() => parsePreMaxHostedRuntimeFamilyPlanCode(maxMember.planCode)).toThrow(
+      /plan code is not supported/u,
+    );
+
     expect(parseHostedRuntimeFamilyPlanToolResponse({
       action: "read_status",
       result: {
@@ -3829,6 +3841,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         members: [
           { isOwner: true, label: null, planCode: "pulse", role: "owner", status: "active" },
           { isOwner: false, label: "Dad", planCode: "edge", role: "member", status: "active" },
+          maxMember,
         ],
         owner: true,
         pendingInvites: [
@@ -3844,18 +3857,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         ],
         plans: {
           edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
-          max: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
+          max: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
           pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
         },
-        seats: { active: 2, billed: 3, invited: 1, max: 6, min: 2, remaining: 0, used: 3 },
+        seats: { active: 3, billed: 4, invited: 1, max: 6, min: 2, remaining: 0, used: 4 },
       },
     })).toMatchObject({
       result: {
-        members: [{ planCode: "pulse" }, { planCode: "edge" }],
+        members: [{ planCode: "pulse" }, { planCode: "edge" }, { planCode: "max" }],
         pendingInvites: [{ planCode: "edge" }],
         plans: {
           edge: { billed: 2, used: 2 },
-          max: { billed: 1, used: 0 },
+          max: { billed: 1, used: 1 },
           pulse: { billed: 1, used: 1 },
         },
       },
@@ -4179,3 +4192,11 @@ describe("parseHostedExecutionWake", () => {
     });
   });
 });
+
+function parsePreMaxHostedRuntimeFamilyPlanCode(value: unknown): "edge" | "pulse" {
+  if (value === "edge" || value === "pulse") {
+    return value;
+  }
+
+  throw new TypeError("Pre-Max hosted runtime Family plan code is not supported.");
+}

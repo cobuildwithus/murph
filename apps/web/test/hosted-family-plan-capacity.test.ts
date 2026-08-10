@@ -75,9 +75,13 @@ describe("hosted Family exact-tier capacity", () => {
     const pulseItem = subscriptionItem("si_pulse", PRICE_IDS.pulse, 2);
     const edgeItem = subscriptionItem("si_edge", PRICE_IDS.edge, 1);
     const maxItem = subscriptionItem("si_max", PRICE_IDS.max, 1);
+    const mixedSubscription = subscription([pulseItem, edgeItem, maxItem]);
+
+    expect(readPreMaxHostedFamilyStripePlanState(mixedSubscription)).toBeNull();
+
     const state = readHostedFamilyStripePlanState({
       priceIdsByPlan: PRICE_IDS,
-      subscription: subscription([pulseItem, edgeItem, maxItem]),
+      subscription: mixedSubscription,
     });
 
     expect(state?.capacities).toEqual({ edge: 1, max: 1, pulse: 2 });
@@ -154,6 +158,15 @@ describe("hosted Family exact-tier capacity", () => {
     })).toEqual([{ price: PRICE_IDS.edge, quantity: 1 }]);
   });
 });
+
+function readPreMaxHostedFamilyStripePlanState(
+  value: Stripe.Subscription,
+): Stripe.Subscription | null {
+  const supportedPriceIds = new Set<string>([PRICE_IDS.edge, PRICE_IDS.pulse]);
+  return value.items.data.every((item) => supportedPriceIds.has(item.price.id))
+    ? value
+    : null;
+}
 
 function subscriptionItem(
   id: string,

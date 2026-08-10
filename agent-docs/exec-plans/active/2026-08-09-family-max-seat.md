@@ -198,6 +198,23 @@ Updated: 2026-08-09
   the focused Web component suite passes 26 tests, the focused Family skill
   suite passes 4 tests, both Web and Assistant Engine typechecks pass, focused
   Web lint passes without findings, and `git diff --check` passes.
-- Pending: commit and push the specialist remediation, update the PR contract,
-  then run final ReviewGPT concurrently with exact-head CI. Merge and worktree
-  retirement remain gated on a final pass and green required checks.
+- The specialist remediation was committed and pushed. Final ReviewGPT round 3
+  rechecked the migration and all specialist corrections, then returned one
+  necessary-but-undisclosed Purpose Drift finding: after the first durable Max
+  item or assignment, pre-Max Web and hosted-execution artifacts are unsafe
+  rollback targets. The PR intent contract and durable Family deployment owner
+  now state the hard rollback floors, coordinated roll-forward recovery, and
+  the exact legacy-rejection/current-acceptance proof. No compatibility shim,
+  repair path, or new state owner was added.
+- GitHub's round-3 merge candidate exposed one Release app verification failure:
+  current `main` had added the static Family setup route without registering it
+  in the telemetry inventory. All other required jobs were green. A normal
+  conflict-free merge of `main` supplied the route, and this candidate adds its
+  missing telemetry entry so exact-head CI can verify the combined tree.
+- The rollback-floor correction passes 15 focused Web capacity and telemetry
+  tests plus 4 focused hosted-runtime parser tests. Web and hosted-execution
+  typechecks pass; changed Web files pass ESLint with zero errors and one
+  unrelated existing warning; `git diff --check` passes.
+- Pending: commit and push the rollback-floor and merged-base correction, update
+  the PR intent contract, run final ReviewGPT round 4 concurrently with exact-
+  head CI, then archive the plan, merge, and retire the worktree.

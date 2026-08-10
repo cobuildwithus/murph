@@ -201,6 +201,17 @@ one Pulse-only subscription and one mixed Pulse/Edge/Max subscription, then
 verify settings quantities, member allowances, model eligibility, and Family
 MRR match the Stripe items.
 
+The first Max Stripe item or durable Max membership, invite, or capacity row
+establishes a hard rollback floor for both Web and hosted execution. A pre-Max
+Web build can reject the subscription projection and revoke the whole Family's
+sponsored access; a pre-Max runtime bundle rejects Family responses containing
+Max. Incident recovery after exposure must therefore roll both artifacts
+forward to Max-aware versions. A pre-Max rollback is safe only before exposure,
+or after current artifacts have moved every Max assignment and Stripe item back
+to Pulse or Edge, webhook reconciliation has completed, and operators have
+verified that no Max Stripe item or durable Max row remains. Do not add a
+compatibility state machine for this boundary.
+
 ## Data Ownership
 
 Hosted Family state lives in `apps/web` Postgres as hosted product/control
