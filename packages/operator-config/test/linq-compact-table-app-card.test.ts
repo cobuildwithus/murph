@@ -70,16 +70,12 @@ describe('Linq compact-table app cards', () => {
             fallback_text: 'Ask Murph for this card in text',
             interactive: true,
             layout: {
-              caption:
-                'Eight-exercise workout — Verified canonical workout snapshot for today',
+              caption: 'Eight-exercise workout',
               image_url: expect.stringMatching(
                 /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
               ),
-              subcaption: expect.stringContaining(
-                'Exercise 1 movement pattern: Set 1: 1xxxxxxxxxxxxxxxxxxxxx',
-              ),
-              trailing_caption:
-                'Assists and spotted reps remain on the exact set note.',
+              subcaption:
+                'Verified canonical workout snapshot for today',
             },
             type: 'imessage_app',
             url: encodeCompactTableAppCardUrl(CARD),
@@ -88,5 +84,17 @@ describe('Linq compact-table app cards', () => {
         preferred_service: 'iMessage',
       },
     })
+
+    const layout = (
+      requests[0]?.body as {
+        message: { parts: Array<{ layout: Record<string, string> }> }
+      }
+    ).message.parts[0]?.layout
+    expect(layout).toBeDefined()
+    for (const [key, value] of Object.entries(layout ?? {})) {
+      if (key !== 'image_url') {
+        expect(value.length).toBeLessThanOrEqual(512)
+      }
+    }
   })
 })

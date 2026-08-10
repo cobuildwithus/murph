@@ -162,14 +162,21 @@ export function buildLinqIMessageAppLayout(
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'compact_table') {
-    const semantic = renderCompactTableSemanticPresentation(parsed)
+    const imageUrl = buildLinqIMessageAppCardImageUrl(parsed)
+    if ('workout' in parsed) {
+      const progress = countWorkoutSessionSets(parsed.workout)
+      return {
+        caption: parsed.title,
+        image_url: imageUrl,
+        subcaption: `${progress.completed}/${progress.total} sets complete`,
+      }
+    }
     return {
-      caption: semantic.heading,
-      image_url: buildLinqIMessageAppCardImageUrl(parsed),
-      subcaption: semantic.detailLines.join('\n'),
-      ...(semantic.footer === null
+      caption: parsed.title,
+      image_url: imageUrl,
+      ...(parsed.subtitle === null
         ? {}
-        : { trailing_caption: semantic.footer }),
+        : { subcaption: parsed.subtitle }),
     }
   }
 
@@ -802,6 +809,7 @@ function createAssistantResponseCardJsonSchema() {
           },
           {
             properties: {
+              subtitle: { type: 'null' },
               tracking: { type: 'object' },
             },
             required: ['workout'],

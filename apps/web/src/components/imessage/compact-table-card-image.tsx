@@ -67,7 +67,7 @@ export function CompactTableCardImage({
         >
           {card.title}
         </div>
-        {card.subtitle === null ? null : (
+        {"workout" in card || card.subtitle === null ? null : (
           <div
             style={{
               display: "flex",
@@ -136,7 +136,9 @@ function WorkoutSnapshot({
             letterSpacing: "0.08em",
           }}
         >
-          {card.workout.state === "active" ? "TODAY" : "WORKOUT COMPLETE"}
+          {card.workout.state === "active"
+            ? "IN PROGRESS"
+            : "WORKOUT COMPLETE"}
         </div>
         <div
           style={{

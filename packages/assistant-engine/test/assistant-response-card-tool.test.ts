@@ -48,7 +48,7 @@ const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
   kind: 'compact_table',
   version: 1,
   title: 'Lower body strength',
-  subtitle: '18 of 24 sets complete',
+  subtitle: null,
   footer: 'Tap an exercise to log or correct a set.',
   tracking: {
     kind: 'workout',

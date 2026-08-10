@@ -72,8 +72,10 @@ Card values are immutable message content owned by the existing outbox effect. V
 Generic compact tables use V3 and workout tables use the compact V4 tuple wire.
 Both reuse their exact authority-free native presentation envelope in the same
 bounded queryless image path. The static renderer mirrors the native table or
-workout summary, while Linq captions independently preserve every cell or every
-workout state, set status, target, and actual value. V3 tracking stays only in
+workout summary. Linq provider chrome stays bounded to the title plus an
+optional generic subtitle or derived workout progress instead of repeating the
+rendered rows and sets. Complete semantics remain available through the
+deterministic text renderer and value-free text-recovery fallback. V3 tracking stays only in
 the semantic transcript and is stripped before both encodings; V4 contains no
 tracking or canonical event reference. The shared image route accepts only
 strict V1-V4 presentation envelopes and otherwise fails closed without weakening

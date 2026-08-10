@@ -328,10 +328,12 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.equal(init.height, 580);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /Push day/u);
+  assert.match(serialized, /IN PROGRESS/u);
   assert.match(serialized, /Bench press/u);
   assert.match(serialized, /Next: 185 lb × 6–8/u);
   assert.match(serialized, /data-workout-progress="0\.5000"/u);
   assert.match(serialized, /data-exercise-state="in-progress"/u);
+  assert.doesNotMatch(serialized, /3 of 6 sets complete|TODAY/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
 });
 
