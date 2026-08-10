@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from 'node:util'
+
 import { upsertAutomation } from '@murphai/core'
 import {
   formatTimeZoneDateTimeParts,
@@ -164,6 +166,7 @@ export async function addAssistantCronJob(
     const created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
         vault: resolvedCreation.vault,
+        now: resolvedCreation.now,
         automationId: existingAutomation?.automationId,
         automation: existingAutomation,
         title: resolvedCreation.name,
@@ -267,30 +270,45 @@ export async function upsertAssistantCronAutomation(
           })
     const materializeOneShot =
       input.firstOccurrencePolicy === 'once-after-current-local-day'
-    const recurringFirstOccurrenceNeedsBinding =
-      input.firstOccurrencePolicy === 'after-current-local-day' &&
-      (
-        existingAutomation?.schedule.kind === 'at' ||
-        existingRuntimeState === null
-      )
     const deferredSchedule = firstOccurrenceAt === null
       ? null
       : {
           kind: 'at' as const,
           at: firstOccurrenceAt,
         }
-    const bindRecurringFirstOccurrence =
-      recurringFirstOccurrenceNeedsBinding && deferredSchedule !== null
     const desiredSchedule = materializeOneShot && deferredSchedule
       ? deferredSchedule
       : resolvedCreation.schedule
+    const existingAssistantSchedule = existingAutomation
+      ? assistantCronScheduleSchema.safeParse(existingAutomation.schedule)
+      : null
+    const transferExistingPendingOccurrence =
+      input.firstOccurrencePolicy === 'after-current-local-day' &&
+      existingAssistantSchedule?.success === true &&
+      requestedFirstOccurrenceAt !== null &&
+      existingRuntimeState?.state.pendingOccurrenceAt ===
+      requestedFirstOccurrenceAt &&
+      !isDeepStrictEqual(existingAssistantSchedule.data, desiredSchedule)
+    const recurringFirstOccurrenceNeedsBinding =
+      input.firstOccurrencePolicy === 'after-current-local-day' &&
+      (
+        existingAutomation?.schedule.kind === 'at' ||
+        existingRuntimeState === null ||
+        transferExistingPendingOccurrence
+      )
+    const bindRecurringFirstOccurrence =
+      recurringFirstOccurrenceNeedsBinding && deferredSchedule !== null
     // Until the canonical runtime cursor durably owns the first occurrence,
-    // keep a recurring seed as the finite one-shot it is replacing. A failed
-    // runtime-state write can therefore under-send, but it cannot expose the
-    // recurring source early on the current local day.
-    const initialSchedule = bindRecurringFirstOccurrence
-      ? deferredSchedule
-      : desiredSchedule
+    // preserve an existing source or keep a new recurring seed as its finite
+    // one-shot. A failed runtime-state write can therefore under-send, but it
+    // cannot expose the replacement recurrence early on the current local day.
+    const initialSchedule =
+      transferExistingPendingOccurrence &&
+        existingAssistantSchedule?.success === true
+        ? existingAssistantSchedule.data
+        : bindRecurringFirstOccurrence
+          ? deferredSchedule
+          : desiredSchedule
     const activeWindowFirstOccurrenceAt =
       requestedFirstOccurrenceAt ?? firstOccurrenceAt
     const activeUntil =
@@ -316,6 +334,7 @@ export async function upsertAssistantCronAutomation(
       buildCanonicalAutomationUpsertInput({
         activeUntil,
         vault: resolvedCreation.vault,
+        now: resolvedCreation.now,
         automationId: existingAutomation?.automationId,
         automation: existingAutomation,
         title: resolvedCreation.name,
@@ -354,6 +373,12 @@ export async function upsertAssistantCronAutomation(
             updatedAt: resolvedCreation.now.toISOString(),
             state: {
               ...runtimeState.state,
+              // The runtime now owns this occurrence across the intentional
+              // source schedule transition below. Advancing the existing
+              // cadence-reset cursor before exposing the recurring source
+              // distinguishes that transfer from an ordinary user schedule
+              // edit, which must invalidate pre-transition unclaimed work.
+              activatedAt: resolvedCreation.now.toISOString(),
               pendingOccurrenceAt: deferredSchedule.at,
             },
           }
@@ -369,6 +394,7 @@ export async function upsertAssistantCronAutomation(
         buildCanonicalAutomationUpsertInput({
           activeUntil,
           vault: resolvedCreation.vault,
+          now: resolvedCreation.now,
           automationId: source.automationId,
           automation: created.record,
           title: resolvedCreation.name,
@@ -501,10 +527,11 @@ function resolveFirstOccurrenceActiveUntil(input: {
     | ({ kind: 'cron'; expression: string; timeZone: string })
     | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
 }): string {
-  if (
-    input.resolvedSchedule.kind !== 'dailyLocal' ||
-    !('timeZone' in input.resolvedSchedule)
-  ) {
+  const timeZone =
+    input.resolvedSchedule.kind === 'dailyLocal'
+      ? input.resolvedSchedule.timeZone
+      : undefined
+  if (timeZone === undefined) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
       'A finite local cutoff requires a daily-local occurrence.',
@@ -529,7 +556,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
   const cutoffSchedule = {
     kind: 'dailyLocal' as const,
     localTime: input.activeUntilLocalTime,
-    timeZone: input.resolvedSchedule.timeZone,
+    timeZone,
   }
   let activeUntilAnchor = firstOccurrenceAt
   let activeUntil: string | null = null
@@ -555,7 +582,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
 
   const occurrenceDay = formatTimeZoneDateTimeParts(
     firstOccurrenceAt,
-    input.resolvedSchedule.timeZone,
+    timeZone,
   ).dayKey
   const firstCutoff = computeAssistantCronNextRunAt(
     cutoffSchedule,
@@ -564,7 +591,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
   const firstCutoffDay = firstCutoff
     ? formatTimeZoneDateTimeParts(
         firstCutoff,
-        input.resolvedSchedule.timeZone,
+        timeZone,
       ).dayKey
     : null
   if (firstCutoffDay !== occurrenceDay) {
@@ -575,7 +602,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
   }
   const activeUntilDay = formatTimeZoneDateTimeParts(
     activeUntil,
-    input.resolvedSchedule.timeZone,
+    timeZone,
   ).dayKey
   if (activeUntilDay < occurrenceDay) {
     throw new VaultCliError(

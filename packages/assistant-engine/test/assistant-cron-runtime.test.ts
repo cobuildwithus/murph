@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type {
@@ -45,6 +46,7 @@ type MockAutomationRecord = {
   } | null
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
+  scheduleAnchorAt?: string
   instructions: string
   route: AutomationRoute
   schedule: AutomationSchedule
@@ -167,6 +169,7 @@ vi.mock('@murphai/operator-config/operator-config', () => ({
 import {
   addAssistantCronJob,
   getAssistantCronJob,
+  getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
   listAssistantCronJobs,
   listAssistantCronPendingDeliveryIntentIds,
@@ -477,6 +480,7 @@ beforeEach(() => {
       assistantTargetOverride?: MockAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
       instructions: string
+      now?: Date
       route: MockAutomationRecord['route']
       schedule: AutomationSchedule
       slug?: string
@@ -487,13 +491,18 @@ beforeEach(() => {
       vaultRoot: string
     }) => {
       const records = getVaultAutomationStore(input.vaultRoot)
-      const now = new Date().toISOString()
+      const now = (input.now ?? new Date()).toISOString()
       const existingIndex = input.automationId
         ? records.findIndex((record) => record.automationId === input.automationId)
         : -1
 
       if (existingIndex >= 0) {
         const existing = records[existingIndex] as MockAutomationRecord
+        const scheduleAnchorAt =
+          !isDeepStrictEqual(existing.schedule, input.schedule) ||
+            (existing.status !== 'active' && input.status === 'active')
+            ? now
+            : existing.scheduleAnchorAt ?? existing.createdAt
         const updated: MockAutomationRecord = {
           ...existing,
           activeUntil:
@@ -508,6 +517,7 @@ beforeEach(() => {
           instructions: input.instructions,
           route: { ...input.route },
           schedule: input.schedule,
+          scheduleAnchorAt,
           slug: input.slug,
           status: input.status,
           summary: input.summary,
@@ -521,13 +531,16 @@ beforeEach(() => {
         }
       }
 
+      const automationId = `automation-${cronMocks.nextAutomationId++}`
       const created: MockAutomationRecord = {
         activeUntil: input.activeUntil ?? null,
-        automationId: `automation-${cronMocks.nextAutomationId++}`,
+        automationId,
         assistantTargetOverride: input.assistantTargetOverride ?? null,
         continuityPolicy: input.continuityPolicy ?? 'preserve',
         createdAt: now,
+        scheduleAnchorAt: now,
         instructions: input.instructions,
+        relativePath: `bank/automations/${input.slug ?? automationId}.md`,
         route: { ...input.route },
         schedule: input.schedule,
         slug: input.slug,
@@ -777,6 +790,450 @@ describe('assistant cron runtime orchestration', () => {
       'archived',
     )
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps an explicit recurring timezone instead of reinterpreting its wall clock in the vault timezone', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-explicit-automation-timezone-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const job = await upsertAssistantCronAutomation({
+      activeUntil: '2026-08-16T04:59:59.000Z',
+      instructions: 'Send the daily group update.',
+      now: new Date('2026-08-09T23:27:19.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'cron',
+        expression: '0 21 * * *',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'daily-group-update',
+      title: 'Daily group update',
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected explicit-timezone automation to be saved.')
+    }
+
+    expect(job.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 21 * * *',
+      timeZone: 'America/Chicago',
+    })
+    expect(job.state.nextRunAt).toBe('2026-08-10T02:00:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'daily-group-update')?.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 21 * * *',
+      timeZone: 'America/Chicago',
+    })
+  })
+
+  it('reanchors reactivated and revised recurring sources to an exact future occurrence', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-revised-automation-timezone-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const created = await upsertAssistantCronAutomation({
+      instructions: 'Send the daily group update.',
+      now: new Date('2026-08-01T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'revised-daily-group-update',
+      title: 'Revised daily group update',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected revised recurring automation to be saved.')
+    }
+
+    await setAssistantCronJobEnabled(vaultRoot, created.jobId, false)
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-02T02:00:01.000Z',
+      state: {
+        ...record.state,
+        activatedAt: '2026-08-01T12:00:00.000Z',
+        lastRunAt: '2026-08-02T02:00:00.000Z',
+        lastSucceededAt: '2026-08-02T02:00:00.000Z',
+      },
+    }))
+
+    vi.setSystemTime(new Date('2026-08-10T00:27:19.000Z'))
+    const reactivated = await setAssistantCronJobEnabled(
+      vaultRoot,
+      created.jobId,
+      true,
+    )
+    expect(reactivated.state.nextRunAt).toBe('2026-08-10T02:00:00.000Z')
+
+    vi.setSystemTime(new Date('2026-08-10T00:28:19.000Z'))
+    const source = findCanonicalAutomation(vaultRoot, created.jobId)
+    if (!source) {
+      throw new Error('Expected revised recurring automation source.')
+    }
+    source.schedule = {
+      kind: 'dailyLocal',
+      localTime: '22:00',
+      timeZone: 'America/Chicago',
+    }
+    source.scheduleAnchorAt = '2026-08-10T00:28:19.000Z'
+    source.updatedAt = '2026-08-10T00:28:19.000Z'
+
+    const revised = await getAssistantCronJob(vaultRoot, created.jobId)
+    expect(revised.updatedAt).toBe('2026-08-10T00:28:19.000Z')
+    expect(revised.schedule).toEqual({
+      kind: 'dailyLocal',
+      localTime: '22:00',
+      timeZone: 'America/Chicago',
+    })
+    expect(revised.state.nextRunAt).toBe('2026-08-10T03:00:00.000Z')
+
+    const { claimed } = await claimFirstCanonicalCronJob(vaultRoot)
+    expect(claimed.runtimeState.state.pendingOccurrenceAt).toBe(
+      '2026-08-10T03:00:00.000Z',
+    )
+  })
+
+  it('preserves due work across non-timing edits and replaces it on schedule edits', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-timing-transition-pending-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const created = await upsertAssistantCronAutomation({
+      instructions: 'Send the scheduled summary.',
+      now: new Date('2026-08-01T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'timing-transition-pending',
+      title: 'Timing transition pending',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected timing-transition automation to be saved.')
+    }
+
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-10T02:00:01.000Z',
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-08-10T02:00:00.000Z',
+      },
+    }))
+    const source = findCanonicalAutomation(vaultRoot, created.jobId)
+    if (!source) {
+      throw new Error('Expected timing-transition automation source.')
+    }
+
+    source.instructions = 'Send the refreshed scheduled summary.'
+    source.updatedAt = '2026-08-10T02:05:00.000Z'
+    await expect(getAssistantCronJob(vaultRoot, created.jobId)).resolves
+      .toMatchObject({
+        state: { nextRunAt: '2026-08-10T02:00:00.000Z' },
+      })
+
+    source.schedule = {
+      kind: 'dailyLocal',
+      localTime: '22:00',
+      timeZone: 'America/Chicago',
+    }
+    source.scheduleAnchorAt = '2026-08-10T02:06:00.000Z'
+    source.updatedAt = '2026-08-10T02:06:00.000Z'
+    await expect(getAssistantCronJob(vaultRoot, created.jobId)).resolves
+      .toMatchObject({
+        state: { nextRunAt: '2026-08-10T03:00:00.000Z' },
+      })
+  })
+
+  it('separates deliverable occurrences from finite cutoffs and retry wakes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-09T12:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-deliverable-occurrence-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const created = await upsertAssistantCronAutomation({
+      activeUntil: '2026-08-10T17:00:00.000Z',
+      instructions: 'Send the finite daily update.',
+      now: new Date('2026-08-09T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'finite-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'finite-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+        timeZone: 'America/New_York',
+      },
+      slug: 'finite-daily-update',
+      title: 'Finite daily update',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected finite recurring automation to be saved.')
+    }
+    await setAssistantCronJobEnabled(vaultRoot, created.jobId, false)
+    await setAssistantCronJobEnabled(vaultRoot, created.jobId, true)
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-10T13:00:01.000Z',
+      state: {
+        ...record.state,
+        lastRunAt: '2026-08-10T13:00:00.000Z',
+        lastSucceededAt: '2026-08-10T13:00:00.000Z',
+      },
+    }))
+    const source = findCanonicalAutomation(vaultRoot, created.jobId)
+    if (!source?.relativePath) {
+      throw new Error('Expected finite recurring automation source.')
+    }
+    source.instructions = 'Send the revised finite daily update.'
+    source.updatedAt = '2026-08-10T16:00:00.000Z'
+
+    const completed = await getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      source.relativePath,
+      'America/New_York',
+    )
+    expect(completed.job.state.nextRunAt).toBe('2026-08-10T17:00:00.000Z')
+    expect(completed).toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-10T16:05:00.000Z',
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-08-10T13:00:00.000Z',
+        retryAfterAt: '2026-08-10T16:30:00.000Z',
+      },
+    }))
+    const retrying = await getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      source.relativePath,
+      'America/New_York',
+    )
+    expect(retrying.job.state.nextRunAt).toBe('2026-08-10T16:30:00.000Z')
+    expect(retrying).toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: false,
+    })
+  })
+
+  it('projects one-shot occurrences with the same freshness boundaries as execution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-10T06:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-one-shot-projection-freshness-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const route = {
+      channel: 'linq' as const,
+      deliverySource: null,
+      deliveryTarget: 'projection-room',
+      identityId: null,
+      participantId: null,
+      threadId: 'projection-room',
+      threadIsDirect: false,
+    }
+    const saveOneShot = async (input: {
+      activeUntil?: string
+      at: string
+      slug: string
+    }) => {
+      const job = await upsertAssistantCronAutomation({
+        ...(input.activeUntil === undefined
+          ? {}
+          : { activeUntil: input.activeUntil }),
+        instructions: 'Send the one-time check-in.',
+        now: new Date('2026-08-10T06:00:00.000Z'),
+        route,
+        schedule: { at: input.at, kind: 'at' },
+        slug: input.slug,
+        title: 'One-time check-in',
+        vault: vaultRoot,
+      })
+      if (!job) {
+        throw new Error('Expected one-shot automation to be saved.')
+      }
+      const source = findCanonicalAutomation(vaultRoot, job.jobId)
+      if (!source?.relativePath) {
+        throw new Error('Expected one-shot automation source.')
+      }
+      return { job, relativePath: source.relativePath }
+    }
+
+    const future = await saveOneShot({
+      at: '2026-08-10T09:30:00.000Z',
+      slug: 'future-one-shot-projection',
+    })
+    const boundary = await saveOneShot({
+      at: '2026-08-10T08:00:00.000Z',
+      slug: 'boundary-one-shot-projection',
+    })
+    const stale = await saveOneShot({
+      at: '2026-08-10T07:59:59.999Z',
+      slug: 'stale-one-shot-projection',
+    })
+    const finite = await saveOneShot({
+      activeUntil: '2026-08-10T11:00:00.000Z',
+      at: '2026-08-10T07:00:00.000Z',
+      slug: 'finite-one-shot-projection',
+    })
+    const elapsedFinite = await saveOneShot({
+      activeUntil: '2026-08-10T08:45:00.000Z',
+      at: '2026-08-10T08:30:00.000Z',
+      slug: 'elapsed-finite-one-shot-projection',
+    })
+    vi.setSystemTime(new Date('2026-08-10T09:00:00.000Z'))
+
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      future.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T09:30:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      boundary.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T08:00:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      stale.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      finite.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T07:00:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      elapsedFinite.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+  })
+
+  it('does not certify a stale recurring occurrence that execution will consume', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-recurring-projection-freshness-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const job = await upsertAssistantCronAutomation({
+      instructions: 'Send the daily check-in.',
+      now: new Date('2026-08-01T09:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'recurring-projection-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'recurring-projection-room',
+        threadIsDirect: false,
+      },
+      schedule: { everyMs: 86_400_000, kind: 'every' },
+      slug: 'stale-recurring-projection',
+      title: 'Daily check-in',
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected recurring automation to be saved.')
+    }
+    const source = findCanonicalAutomation(vaultRoot, job.jobId)
+    if (!source?.relativePath) {
+      throw new Error('Expected recurring automation source.')
+    }
+
+    vi.setSystemTime(new Date('2026-08-03T12:00:00.000Z'))
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      source.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: false,
+    })
   })
 
   it('materializes a finite latest-slot occurrence with execution budget and preserves it on reseed', async () => {
@@ -5013,6 +5470,7 @@ describe('assistant cron runtime orchestration', () => {
           kind: 'cron',
           expression: '0 * * * *',
         },
+        scheduleAnchorAt: '2026-07-06T10:00:00.000Z',
         slug: 'group-health-newsletter',
         status: 'active',
         summary: null,

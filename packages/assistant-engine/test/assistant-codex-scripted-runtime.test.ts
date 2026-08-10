@@ -521,6 +521,9 @@ text(JSON.stringify(result));
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             expect((await readFile(commandLog, 'utf8')).trim()).toBe(
               'assistant onboarding complete --reason user_answered',
             )
@@ -529,9 +532,13 @@ text(JSON.stringify(result));
               action: 'save',
               automationId: 'automation-first-personal-read',
               created: true,
+              effectiveTimeZone: null,
               lookupId: 'onboarding-first-personal-read',
+              nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },
@@ -1423,14 +1430,21 @@ if (!tool) {
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             automationRequests.push(request)
             return {
               action: 'save',
               automationId: 'automation-native-deferred',
               created: true,
+              effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
+              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },
@@ -1502,6 +1516,328 @@ if (!tool) {
       (directSummary?.providerRequestDiagnostics?.bytes ?? 0)
         - deferredRequestBytes,
     ).toBeGreaterThan(4_000)
+  })
+
+  it('preserves the stored timezone through a separate schedule-patch turn', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  lookup: "evening-reminder",
+  schedule: { kind: "dailyLocal", localTime: "22:00" },
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'Updated your evening reminder to 10 PM Central.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'patch',
+              automationId: 'automation-central-evening',
+              created: false,
+              effectiveTimeZone: 'America/Chicago',
+              lookupId: 'evening-reminder',
+              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              routeBinding: 'preserved',
+              schedule: {
+                kind: 'dailyLocal',
+                localTime: '22:00',
+                timeZone: 'America/Chicago',
+              },
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Move my evening reminder to 10 PM. Save the change now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'patch',
+      lookup: 'evening-reminder',
+      schedule: { kind: 'dailyLocal', localTime: '22:00' },
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('America/Chicago')
+    expect(toolOutputs).toContain('2026-08-11T03:00:00.000Z')
+    expect(result.finalMessage).toBe(
+      'Updated your evening reminder to 10 PM Central.',
+    )
+  })
+
+  it('reports a reactivated stale one-shot as needing a new time', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  lookup: "one-time-evening-reminder",
+  status: "active",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'That reminder is active, but its requested time has already passed and is no longer deliverable. Tell me a new time and I can reschedule it.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'patch',
+              automationId: 'automation-one-time-evening',
+              created: false,
+              effectiveTimeZone: null,
+              lookupId: 'one-time-evening-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved',
+              schedule: {
+                at: '2026-08-01T13:00:00.000Z',
+                kind: 'at',
+              },
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Reactivate my one-time evening reminder. Save the change now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'patch',
+      lookup: 'one-time-evening-reminder',
+      status: 'active',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"at"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(result.finalMessage).toMatch(/already passed|no longer deliverable/iu)
+    expect(result.finalMessage).toMatch(/new time|reschedule/iu)
+  })
+
+  it('does not describe an unverified stale recurrence as exhausted', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'The reminder wording was updated, but I could not verify its next occurrence. I can inspect or update the schedule if you want.',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch',
+              automationId: 'automation-daily-interval',
+              created: false,
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved',
+              schedule: { everyMs: 86_400_000, kind: 'every' },
+              status: 'active',
+              timingVerified: false,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my daily interval reminder now.',
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"every"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":false')
+    expect(result.finalMessage).toMatch(/could not verify/iu)
+    expect(result.finalMessage).toMatch(/inspect|update/iu)
+    expect(result.finalMessage).not.toMatch(
+      /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+    )
+  })
+
+  it('keeps active device-triggered saves distinct from exhausted clock schedules', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    const baseInstructions = buildScriptedHostedSystemPrompt('direct', true)
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__automation({
+    action: "save",
+    instructions: "Ask how the next workout felt.",
+    schedule: {
+      activityKind: "workout",
+      after: "2026-08-10T12:00:00.000Z",
+      kind: "deviceActivity",
+      source: "whoop",
+    },
+    title: "Next workout check-in",
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "Saved. I'll check in after your next workout. There isn't a clock time to confirm until that workout arrives.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-next-workout',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'next-workout-check-in',
+              nextOccurrenceAt: null,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'After my next WHOOP workout, ask how it felt. Save it now.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Ask how the next workout felt.',
+      schedule: {
+        activityKind: 'workout',
+        after: '2026-08-10T12:00:00.000Z',
+        kind: 'deviceActivity',
+        source: 'whoop',
+      },
+      title: 'Next workout check-in',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"deviceActivity"')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":null')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(result.finalMessage).toContain('after your next workout')
+    expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
 
   it('preserves both response-card shapes through the real App Server boundary', {
@@ -1648,14 +1984,21 @@ if (!tool) {
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
             automationRequests.push(request)
             return {
               action: 'save',
               automationId: 'automation-native-search',
               created: true,
+              effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
+              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
               routeBinding: 'current_conversation',
+              schedule: request.schedule,
               status: 'active',
+              timingVerified: true,
             }
           },
         },

@@ -31,7 +31,7 @@ recognize a newsletter.
 | --- | --- |
 | Setup and edits | Any current group member may request them. One stable `group-health-newsletter` automation per group; later requests edit that recipe. |
 | Delivery | One normal current-chat response or one shared reply-all email to eligible members. Never both for one occurrence. |
-| Default schedule | Sunday morning in the group vault timezone unless the group chooses another cron schedule. |
+| Default schedule | Sunday morning in the group vault timezone unless the group chooses another cron schedule. When a member names a timezone, preserve the requested wall clock and persist its IANA `timeZone`. |
 | Tone | Supportive by default. Roast only after explicit group opt-in and within group-chat safety limits. |
 | Email permission | `group-email.v0` means “share my email with this group.” It is reusable and not newsletter-specific. |
 | Health permission | Every fact requires the matching active group projection grant. Email permission alone grants no health data. |
@@ -49,7 +49,7 @@ runtime's vault. The `group-newsletter` skill saves it with
 ```text
 slug: group-health-newsletter
 title: <group-chosen newsletter name>
-schedule: <chosen cron expression>
+schedule: <chosen cron expression, with explicit IANA timeZone when requested>
 continuityPolicy: fresh
 instructions:
   Open and follow the group-newsletter skill before doing anything else.
