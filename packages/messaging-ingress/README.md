@@ -25,7 +25,11 @@ broader privacy redaction policy above that transport-level sanitization.
 
 - Linq: webhook signature verification, `message.received`, versioned
   `message.edited`, and participant add/remove parsing, summaries, and sparse
-  raw minimization that omits edited replacement text
+  raw minimization that omits edited replacement text. Signed
+  `message.received` payloads with absent or null `parts` normalize to an empty
+  message for compatibility, while non-array values and unsupported part types
+  remain invalid. Documented `imessage_app` parts retain only their fallback
+  text; provider app, layout, and URL metadata are discarded.
 - Telegram: webhook secret-token verification, preverified update parsing, thread-target grammar, message extraction/summaries, and sparse raw minimization
 
 ## Non-goals

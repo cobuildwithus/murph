@@ -2,6 +2,9 @@ import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
   HostedRuntimeEnsureProcessingRequest,
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -17,7 +20,11 @@ import type {
 import {
   destroyHostedExecutionContainer,
   type HostedExecutionContainerNamespaceLike,
+  type RunnerContainerShellPrewarmObservation,
 } from "../runner-container.js";
+import {
+  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
+} from "../workspace-snapshot-store.ts";
 import {
   readHostedRunnerContainerIdentity,
   resolveHostedExecutionRunnerContainerName,
@@ -94,6 +101,7 @@ type FreshRuntimeStartPreparation =
       prepared: PreparedRuntimeInvocation;
       preparedAtEpochMs: number;
       runtimePreparationWaitAfterContainerReadyMs: number;
+      shellPrewarmOrchestration: RuntimeProcessingOrchestrationDiagnostics | null;
     }
   | {
       kind: "retry";
@@ -119,6 +127,28 @@ function withRuntimeProcessingOrchestration(
       ...(input.orchestration ?? {}),
       ...orchestration,
     },
+  };
+}
+
+function toShellPrewarmOrchestrationDiagnostics(
+  observation: RunnerContainerShellPrewarmObservation | undefined,
+): RuntimeProcessingOrchestrationDiagnostics | null {
+  if (!observation) {
+    return null;
+  }
+  return {
+    shellPrewarmFirstHintAtEpochMs: observation.firstHintAtEpochMs,
+    shellPrewarmHintCount: observation.hintCount,
+    ...(observation.finishedAtEpochMs === undefined ? {} : {
+      shellPrewarmFinishedAtEpochMs: observation.finishedAtEpochMs,
+    }),
+    ...(observation.operationElapsedMs === undefined ? {} : {
+      shellPrewarmOperationElapsedMs: observation.operationElapsedMs,
+    }),
+    ...(observation.outcome === undefined ? {} : {
+      shellPrewarmOutcome: observation.outcome,
+    }),
+    shellPrewarmSource: observation.source,
   };
 }
 
@@ -153,6 +183,14 @@ export class RuntimeProcessingController {
       env: HostedExecutionEnvironment;
       invocationService: RuntimeInvocationService;
       runnerContainerNamespace: HostedExecutionContainerNamespaceLike | null;
+      readCheckpointHandoff?: (input: {
+        attemptId: string;
+        leaseGeneration: string;
+        userId: string;
+      }) => Promise<{
+        completedAt: string | null;
+        heartbeatAt: string;
+      } | null>;
       runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
       runtimeRetryAnalytics?: WorkerAnalyticsEngineDatasetLike | null;
       stateStore: RunnerStateStore;
@@ -169,7 +207,10 @@ export class RuntimeProcessingController {
     });
   }
 
-  async beginShellPrewarmForUser(userId: string): Promise<void> {
+  async beginShellPrewarmForUser(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void> {
     const namespace = this.input.runnerContainerNamespace;
     if (!namespace) {
       throw new Error("Runner container namespace is unavailable.");
@@ -188,10 +229,31 @@ export class RuntimeProcessingController {
         userId,
       });
     if (!reserved) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_runtime_busy",
+          shellPrewarmSource: source ?? "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
       return;
     }
     await container.beginShellPrewarm({
+      ...(source === undefined ? {} : { source }),
       timeoutMs: RUNTIME_SHELL_PREWARM_TIMEOUT_MS,
+      userId,
+    });
+    emitHostedExecutionStructuredLog({
+      component: "hosted.runner",
+      details: {
+        shellPrewarmAdmissionOutcome: "scheduled",
+        shellPrewarmSource: source ?? "unknown",
+      },
+      message: "Hosted runner shell prewarm admission decided.",
+      phase: "scheduled",
       userId,
     });
   }
@@ -520,6 +582,7 @@ export class RuntimeProcessingController {
     activeFence: NonNullable<RunnerStateRecord["writeFence"]>;
     commandBudget: RuntimeProcessingCommandBudget;
     input: RuntimeProcessingInput;
+    preserveCheckpointHandoff?: boolean;
     preserveStartingFence?: boolean;
     record: RunnerStateRecord;
     replacedStaleFence?: boolean;
@@ -532,6 +595,16 @@ export class RuntimeProcessingController {
     ) {
       return this.createRetryLater({
         reason: "starting_fence_preserved",
+        userId: input.input.userId,
+      });
+    }
+
+    if (
+      input.preserveCheckpointHandoff !== false
+      && await this.hasLiveCheckpointHandoff(activeFence, record.userId)
+    ) {
+      return this.createRetryLater({
+        reason: "checkpoint_handoff_pending",
         userId: input.input.userId,
       });
     }
@@ -606,6 +679,7 @@ export class RuntimeProcessingController {
       activeFence,
       commandBudget: input.commandBudget,
       input: input.input,
+      preserveCheckpointHandoff: false,
       preserveStartingFence: false,
       record,
       replacedStaleFence: false,
@@ -889,6 +963,7 @@ export class RuntimeProcessingController {
         freshStartContainerReadyAtEpochMs: preparation.containerReadyAtEpochMs,
       }),
       freshStartInvocationPreparedAtEpochMs: preparation.preparedAtEpochMs,
+      ...(preparation.shellPrewarmOrchestration ?? {}),
     });
     const preparationOrchestration =
       preparation.prepared.input.orchestration ?? {};
@@ -1074,6 +1149,9 @@ export class RuntimeProcessingController {
       prepared: preparation.prepared,
       preparedAtEpochMs: preparation.preparedAtEpochMs,
       runtimePreparationWaitAfterContainerReadyMs,
+      shellPrewarmOrchestration: toShellPrewarmOrchestrationDiagnostics(
+        startupConfirmed.shellPrewarmObservation,
+      ),
     };
   }
 
@@ -1106,7 +1184,10 @@ export class RuntimeProcessingController {
     runnerContainerName: string;
     token: RunnerWriteFenceToken;
   }): Promise<
-    | { confirmed: true }
+    | {
+        confirmed: true;
+        shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
+      }
     | {
         confirmed: false;
         response: HostedRuntimeEnsureProcessingResponse;
@@ -1136,7 +1217,7 @@ export class RuntimeProcessingController {
 
     try {
       let timeoutMs = RUNTIME_PROCESSING_STARTUP_CONFIRM_TIMEOUT_MS;
-      await runRuntimeProcessingCommandStep({
+      const readinessResult = await runRuntimeProcessingCommandStep({
         budget: input.commandBudget,
         operation: async () => {
           timeoutMs = readRuntimeProcessingCommandStepTimeoutMs({
@@ -1161,7 +1242,12 @@ export class RuntimeProcessingController {
         phase: "runtime.starting",
         userId: input.input.userId,
       });
-      return { confirmed: true };
+      return {
+        confirmed: true,
+        ...(readinessResult.shellPrewarmObservation === undefined ? {} : {
+          shellPrewarmObservation: readinessResult.shellPrewarmObservation,
+        }),
+      };
     } catch (error) {
       return await this.clearWriteFenceAfterStartupConfirmationFailure({
         error,
@@ -1239,6 +1325,31 @@ export class RuntimeProcessingController {
       return false;
     }
     return Date.now() - startedAtMs < RUNTIME_PROCESSING_STARTUP_GRACE_MS;
+  }
+
+  private async hasLiveCheckpointHandoff(
+    fence: NonNullable<RunnerStateRecord["writeFence"]>,
+    userId: string,
+  ): Promise<boolean> {
+    const readHandoff = this.input.readCheckpointHandoff;
+    if (!readHandoff) {
+      return false;
+    }
+    const handoff = await readHandoff({
+      attemptId: fence.attemptId,
+      leaseGeneration: String(fence.generation),
+      userId,
+    });
+    if (!handoff || handoff.completedAt !== null) {
+      return false;
+    }
+    const heartbeatAtMs = Date.parse(handoff.heartbeatAt);
+    if (!Number.isFinite(heartbeatAtMs)) {
+      return false;
+    }
+    const ageMs = Date.now() - heartbeatAtMs;
+    return ageMs >= 0
+      && ageMs < HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS;
   }
 }
 

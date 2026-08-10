@@ -3,6 +3,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  readHostedIngressLatencyTraceForTest,
+  readHostedMailboxItemForTest,
+} from "#hosted-web-testing";
+
+import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
@@ -31,6 +36,7 @@ const hostedLinqCometRiderAssistantReplyText =
   "Got it - I'll call you Comet Rider.\n\nWhat are your health goals right now?";
 const hostedLinqImageAssistantReplyText = "Reviewed the image attachment.";
 const hostedLinqPdfAssistantReplyText = "Read the PDF attachment.";
+const hostedLinqAppCardAssistantReplyText = "Handled the app card.";
 const hostedLinqTypingPrewarmAssistantReplyText =
   "The typing prewarm kept the normal reply path intact.";
 const hostedLinqParticipantAdditionGroupContext =
@@ -148,6 +154,65 @@ describe("hosted local Linq webhook e2e", () => {
     ).toBe(true);
   }, 300_000);
 
+  it("reduces an inbound iMessage app card to fallback text and replies in the same chat", async () => {
+    const { chatId, replyChatPath, userId } =
+      await createActiveLinqWebhookMember("app-card");
+    const outboundCountBeforeReply = requireLinqStub().countObservedSends(replyChatPath);
+    const assistantProviderCountBeforeReply = requireScenario().assistantProviderRequests.length;
+    const fallbackText = "Completed the check-in from the app card.";
+    const privateCardSentinel = "private-card-metadata-sentinel";
+
+    requireScenario().queueAssistantResponses([hostedLinqAppCardAssistantReplyText], {
+      matchInputContains: fallbackText,
+    });
+    const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_app_card_${userId}`,
+        messageId: `msg_app_card_${userId}`,
+        parts: [{
+          app: {
+            bundle_id: `com.example.${privateCardSentinel}`,
+            name: privateCardSentinel,
+            team_id: "TESTTEAM01",
+          },
+          fallbackText,
+          layout: {
+            caption: privateCardSentinel,
+          },
+          type: "imessage_app",
+          url: `https://example.test/${privateCardSentinel}`,
+        }],
+        service: "iMessage",
+      },
+    ));
+    expect(webhookResponse.status).toBe(202);
+    await expect(webhookResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+
+    await requireScenario().waitForLatestPendingWake(userId);
+    await requireScenario().waitForHostedCompletion(userId);
+
+    const replySend = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: outboundCountBeforeReply,
+      expectedPath: replyChatPath,
+      scenario: requireScenario(),
+      userId,
+    });
+    expect(requireLinqStub().readObservedMessageText(replySend)).toBe(
+      hostedLinqAppCardAssistantReplyText,
+    );
+    const assistantProviderBody = requireSingleAssistantProviderRequestBody(
+      requireScenario().assistantProviderRequests.slice(assistantProviderCountBeforeReply),
+      "iMessage app-card provider request",
+    );
+    expect(assistantProviderBody).toContain(fallbackText);
+    expect(assistantProviderBody).not.toContain(privateCardSentinel);
+  }, 300_000);
+
   it("prewarms from signed typing before the later durable message and reply", async () => {
     const { chatId, replyChatPath, userId } =
       await createActiveLinqWebhookMember("typing-prewarm");
@@ -201,6 +266,7 @@ describe("hosted local Linq webhook e2e", () => {
     );
 
     const messageText = "Does the normal reply still arrive after typing?";
+    const messageEventId = `evt_after_typing_prewarm_${userId}`;
     requireScenario().queueAssistantResponses([
       hostedLinqTypingPrewarmAssistantReplyText,
     ], {
@@ -208,7 +274,7 @@ describe("hosted local Linq webhook e2e", () => {
     });
     const messageResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_after_typing_prewarm_${userId}`,
+        eventId: messageEventId,
         messageId: `msg_after_typing_prewarm_${userId}`,
         text: messageText,
       }),
@@ -236,6 +302,18 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerCountBeforeTyping + 1,
     );
+    const latencyTrace = await waitForTypingPrewarmLatencyTrace({
+      mailboxDedupeKey: messageEventId,
+      userId,
+    });
+    expect(latencyTrace.phaseBreakdown?.orchestration).toMatchObject({
+      shellPrewarmFirstHintAtEpochMs: expect.any(Number),
+      shellPrewarmHintCount: expect.any(Number),
+      shellPrewarmOutcome: expect.stringMatching(
+        /^(?:cold_start_observed|start_issued_warm)$/u,
+      ),
+      shellPrewarmSource: "linq-typing-started",
+    });
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
@@ -873,6 +951,41 @@ async function waitForHostedRuntimeShellPrewarmAccepted(
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for the typing-start shell prewarm acceptance.",
   ]));
+}
+
+async function waitForTypingPrewarmLatencyTrace(input: {
+  mailboxDedupeKey: string;
+  userId: string;
+}) {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+  while (Date.now() - startedAt < 30_000) {
+    try {
+      const mailboxItem = await readHostedMailboxItemForTest({
+        dedupeKey: input.mailboxDedupeKey,
+        environment: requireScenario().runtimeEnv,
+        userId: input.userId,
+      });
+      const trace = await readHostedIngressLatencyTraceForTest({
+        environment: requireScenario().runtimeEnv,
+        mailboxItemId: mailboxItem.id,
+        userId: input.userId,
+      });
+      if (
+        trace.phaseBreakdown?.orchestration?.shellPrewarmOutcome
+        && trace.phaseBreakdown.orchestration.shellPrewarmSource
+      ) {
+        return trace;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(
+    `Timed out waiting for the typing-prewarm latency trace: ${String(lastError)}`,
+  );
 }
 
 function countTextOccurrences(value: string, needle: string): number {

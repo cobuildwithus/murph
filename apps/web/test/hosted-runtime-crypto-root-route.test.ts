@@ -1,5 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+
 const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   readHostedDomainRootEnvelopeByRootKeyIdOrThrow: vi.fn(),
@@ -42,12 +44,6 @@ describe("hosted runtime crypto root route", () => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.getPrisma.mockReturnValue(createPrisma({
-      member: {
-        accountGroupMemberships: [],
-        billingStatus: "active",
-        suspendedAt: null,
-        threadContainer: null,
-      },
       workspace: {
         userId: "member_123",
       },
@@ -92,21 +88,8 @@ describe("hosted runtime crypto root route", () => {
     });
   });
 
-  it("allows crypto root reads when an active participant keeps an inactive-owner group alive", async () => {
+  it("returns historical workspace roots without repeating caller admission", async () => {
     const prisma = createPrisma({
-      member: {
-        accountGroupMemberships: [],
-        billingStatus: "not_started",
-        suspendedAt: null,
-        threadContainer: {
-          owner: {
-            accountGroupMemberships: [],
-            billingStatus: "paused",
-            suspendedAt: null,
-          },
-        },
-      },
-      participantActive: true,
       workspace: {
         userId: "member_123",
       },
@@ -124,14 +107,9 @@ describe("hosted runtime crypto root route", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(prisma.hostedThreadContainerParticipant.findFirst).toHaveBeenCalledWith({
-      select: {
-        participantMemberId: true,
-      },
-      where: expect.objectContaining({
-        containerMemberId: "member_123",
-        removedAt: null,
-      }),
+    expect(prisma.hostedWorkspace.findUnique).toHaveBeenCalledWith({
+      select: { userId: true },
+      where: { userId: "member_123" },
     });
     expect(mocks.readHostedDomainRootEnvelopeByRootKeyIdOrThrow).toHaveBeenCalledWith({
       domain: "runtime",
@@ -140,27 +118,55 @@ describe("hosted runtime crypto root route", () => {
       userId: "member_123",
     });
   });
+
+  it("rejects callbacks that do not have a provisioned hosted workspace", async () => {
+    mocks.getPrisma.mockReturnValue(createPrisma({ workspace: null }));
+
+    const response = await hostedRuntimeCryptoRootRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-runtime/crypto-context/root", {
+        body: JSON.stringify({
+          domain: "runtime",
+          rootKeyId: "udrk:runtime:test-root",
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "hosted_workspace_not_provisioned",
+    });
+    expect(mocks.readHostedDomainRootEnvelopeByRootKeyIdOrThrow).not.toHaveBeenCalled();
+  });
+
+  it("rejects unauthenticated callbacks before reading workspace or crypto state", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
+      code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+      httpStatus: 401,
+      message: "Unauthorized hosted Cloudflare callback request.",
+      retryable: false,
+    }));
+
+    const response = await hostedRuntimeCryptoRootRoute.POST(
+      new Request("https://join.example.test/api/internal/hosted-runtime/crypto-context/root", {
+        body: JSON.stringify({
+          domain: "runtime",
+          rootKeyId: "udrk:runtime:test-root",
+        }),
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.readHostedDomainRootEnvelopeByRootKeyIdOrThrow).not.toHaveBeenCalled();
+  });
 });
 
 function createPrisma(input: {
-  member: {
-    accountGroupMemberships: unknown[];
-    billingStatus: string;
-    suspendedAt: Date | null;
-    threadContainer: null | { owner: unknown };
-  } | null;
-  participantActive?: boolean;
   workspace: { userId: string } | null;
 }) {
   return {
-    hostedMember: {
-      findUnique: vi.fn().mockResolvedValue(input.member),
-    },
-    hostedThreadContainerParticipant: {
-      findFirst: vi.fn(async () => input.participantActive
-        ? { participantMemberId: "member_active_participant" }
-        : null),
-    },
     hostedWorkspace: {
       findUnique: vi.fn().mockResolvedValue(input.workspace),
     },
