@@ -1807,8 +1807,11 @@ export type HostedRuntimeFamilyPlanToolAction =
 export const HOSTED_PLAN_CODES = ["pulse", "edge"] as const;
 export type HostedPlanCode = (typeof HOSTED_PLAN_CODES)[number];
 
+export const HOSTED_FAMILY_PLAN_CODES = ["pulse", "edge", "max"] as const;
+export type HostedFamilyPlanCode = (typeof HOSTED_FAMILY_PLAN_CODES)[number];
+
 export interface HostedRuntimeFamilyPlanCreateInviteRequest {
-  planCode?: HostedPlanCode;
+  planCode?: HostedFamilyPlanCode;
   targetEmail?: string | null;
   targetLabel?: string | null;
   targetPhoneNumber?: string | null;
@@ -1825,7 +1828,6 @@ export type HostedRuntimeFamilyPlanToolRequest =
     }
   | {
       action: "start_checkout";
-      invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
     };
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
@@ -1841,7 +1843,7 @@ export interface HostedRuntimeFamilyPlanToolSeatStatus {
 export interface HostedRuntimeFamilyPlanToolMember {
   isOwner: boolean;
   label: string | null;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   role: string;
   status: string;
 }
@@ -1849,7 +1851,7 @@ export interface HostedRuntimeFamilyPlanToolMember {
 export interface HostedRuntimeFamilyPlanToolInvite {
   acceptUrl: string | null;
   expiresAt: string;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetLabel: string | null;
   targetPhoneHint: string | null;
@@ -1865,7 +1867,7 @@ export interface HostedRuntimeFamilyPlanToolPlanStatus {
 }
 
 export type HostedRuntimeFamilyPlanToolPlans = Record<
-  HostedPlanCode,
+  HostedFamilyPlanCode,
   HostedRuntimeFamilyPlanToolPlanStatus
 >;
 
@@ -1892,8 +1894,6 @@ export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
   billingStatus: string;
   checkoutUrl: string | null;
   owner: boolean;
-  preparedInvite: HostedRuntimeFamilyPlanToolInvite | null;
-  preparedInviteReplyText: string | null;
   plans: HostedRuntimeFamilyPlanToolPlans;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
   unavailableReason: "already_sponsored" | null;

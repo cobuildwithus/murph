@@ -432,6 +432,7 @@ test("HostedFamilyManager requires an open seat in the selected tier at maximum 
       ...baseFamilyManagerProps(),
       plans: {
         edge: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
+        max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
         pulse: { active: 1, billed: 5, invited: 4, remaining: 0, used: 5 },
       },
       seats: {
@@ -483,6 +484,7 @@ test("HostedFamilyManager confirms a member move to Edge", async () => {
       ],
       plans: {
         edge: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
+        max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
         pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
       },
       seats: {
@@ -713,6 +715,7 @@ test("HostedFamilyManager offers one-click downgrade copy for an Edge member", a
       members: props.members.map((member) => ({ ...member, planCode: "edge" as const })),
       plans: {
         edge: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
+        max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
         pulse: { active: 0, billed: 1, invited: 0, remaining: 1, used: 0 },
       },
     }),
@@ -722,6 +725,7 @@ test("HostedFamilyManager offers one-click downgrade copy for an Edge member", a
 
   try {
     await clickButton(container, window, "Manage");
+    await clickButton(container, window, "Pulse · $7/mo");
     assert.match(
       container.textContent ?? "",
       /Downgrade your plan from Edge to Pulse at \$7\/mo\. Any prorated credit will apply to your next invoice\./,
@@ -730,6 +734,100 @@ test("HostedFamilyManager offers one-click downgrade copy for an Edge member", a
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "PATCH",
       payload: { planCode: "pulse" },
+      url: "/api/settings/billing/family/members/member_owner",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test.each([
+  { sourceName: "Pulse", sourcePlanCode: "pulse" as const },
+  { sourceName: "Edge", sourcePlanCode: "edge" as const },
+])("HostedFamilyManager can move $sourceName access to Max", async ({
+  sourceName,
+  sourcePlanCode,
+}) => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: props.members.map((member) => ({
+        ...member,
+        planCode: sourcePlanCode,
+      })),
+    }),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
+
+  try {
+    await clickButton(container, window, "Manage");
+    await clickButton(container, window, "Max · $49/mo");
+    assert.match(
+      container.textContent ?? "",
+      new RegExp(
+        `Upgrade your plan from ${sourceName} to Max at \\$49/mo\\. The prorated difference will appear on your next invoice\\.`,
+      ),
+    );
+    await clickButton(container, window, "Upgrade to Max");
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: "max" },
+      url: "/api/settings/billing/family/members/member_owner",
+    });
+  } finally {
+    await cleanup();
+  }
+});
+
+test.each([
+  {
+    expectedCopy:
+      /Downgrade your plan from Max to Edge at \$19\/mo\. Any prorated credit will apply to your next invoice\./,
+    targetName: "Edge",
+    targetPlanCode: "edge" as const,
+  },
+  {
+    expectedCopy:
+      /Downgrade your plan from Max to Pulse at \$7\/mo\. Any prorated credit will apply to your next invoice\./,
+    targetName: "Pulse",
+    targetPlanCode: "pulse" as const,
+  },
+])("HostedFamilyManager can move Max access to $targetName", async ({
+  expectedCopy,
+  targetName,
+  targetPlanCode,
+}) => {
+  const { HostedFamilyManager } = await import(
+    "@/src/components/settings/hosted-family-settings-actions"
+  );
+  const props = baseFamilyManagerProps();
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(HostedFamilyManager, {
+      ...props,
+      members: props.members.map((member) => ({
+        ...member,
+        planCode: "max" as const,
+      })),
+    }),
+    { requireButton: false },
+  );
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ syncing: false });
+
+  try {
+    await clickButton(container, window, "Manage");
+    if (targetPlanCode === "pulse") {
+      await clickButton(container, window, "Pulse · $7/mo");
+    }
+    assert.match(container.textContent ?? "", expectedCopy);
+    await clickButton(container, window, `Downgrade to ${targetName}`);
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "PATCH",
+      payload: { planCode: targetPlanCode },
       url: "/api/settings/billing/family/members/member_owner",
     });
   } finally {
@@ -755,6 +853,7 @@ test("HostedFamilyManager disables paid-seat submit for an invalid email", async
       },
       plans: {
         edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+        max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
         pulse: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
       },
     }),
@@ -797,6 +896,7 @@ test("HostedFamilyManager requires a stable target before adding a paid seat", a
       },
       plans: {
         edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+        max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
         pulse: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
       },
     }),
@@ -1102,6 +1202,7 @@ function baseFamilyManagerProps() {
     ],
     plans: {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
     },
     payerMemberId: "member_owner",
@@ -1115,8 +1216,24 @@ function baseFamilyManagerProps() {
       used: 1,
     },
     tiers: [
-      { name: "Pulse", planCode: "pulse" as const, priceLabel: "$7/mo" },
-      { name: "Edge", planCode: "edge" as const, priceLabel: "$19/mo" },
+      {
+        name: "Pulse",
+        planCode: "pulse" as const,
+        priceLabel: "$7/mo",
+        recurringAmountUsdCents: 700,
+      },
+      {
+        name: "Edge",
+        planCode: "edge" as const,
+        priceLabel: "$19/mo",
+        recurringAmountUsdCents: 1_900,
+      },
+      {
+        name: "Max",
+        planCode: "max" as const,
+        priceLabel: "$49/mo",
+        recurringAmountUsdCents: 4_900,
+      },
     ],
   };
 }

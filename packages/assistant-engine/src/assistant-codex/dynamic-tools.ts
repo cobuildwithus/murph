@@ -12,7 +12,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -660,18 +660,11 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
-      invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
-        targetEmail: z.string().trim().email().max(320).nullable().default(null),
-        targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
-        targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
-        targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
-      }).strict().nullable().default(null),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
+        planCode: z.enum(HOSTED_FAMILY_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -680,11 +673,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
   ])
   .superRefine((value, context) => {
-    const invite = value.action === 'create_invite'
-      ? value.invite
-      : value.action === 'start_checkout'
-        ? value.invite
-        : null
+    const invite = value.action === 'create_invite' ? value.invite : null
     if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername && !invite.targetEmail) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -2933,7 +2922,16 @@ async function executeFamilyPlanTool(input: {
     const result = await familyPlanTool.request(input.request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
-    return toolTextResult(false, 'family plan tool request failed')
+    if (input.request.action === 'read_status') {
+      return toolTextResult(
+        false,
+        'Family status could not be read; no change was attempted; retry the status read',
+      )
+    }
+    return toolTextResult(
+      false,
+      'family plan request was not confirmed; check Family Settings before retrying to avoid a duplicate request',
+    )
   }
 }
 
@@ -5389,24 +5387,9 @@ function parseFamilyPlanArguments(
   if (parsed.data.action === 'start_checkout') {
     return {
       ok: true,
-      request: parsed.data.invite
-        ? {
-            action: 'start_checkout',
-            invite: {
-              ...(parsed.data.invite.planCode
-                ? { planCode: parsed.data.invite.planCode }
-                : {}),
-              ...(parsed.data.invite.targetEmail
-                ? { targetEmail: parsed.data.invite.targetEmail }
-                : {}),
-              targetLabel: parsed.data.invite.targetLabel,
-              targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
-              targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
-            },
-          }
-        : {
-            action: 'start_checkout',
-          },
+      request: {
+        action: 'start_checkout',
+      },
     }
   }
 
