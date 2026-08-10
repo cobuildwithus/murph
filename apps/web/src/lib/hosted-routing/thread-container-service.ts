@@ -3,14 +3,24 @@ import "server-only";
 import {
   HostedBillingStatus,
   Prisma,
+  type PrismaClient,
 } from "@prisma/client";
 import {
   buildHostedExecutionMemberActivatedWake,
   type HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
+import {
+  getHostedCryptoDomainForLane,
+  parseSerializedHostedSecureBoxEnvelope,
+} from "@murphai/runtime-state";
 
 import {
-  provisionHostedCryptoDomainRootsForUserTx,
+  prepareHostedCryptoDomainRootCandidates,
+  prewarmPreparedHostedCryptoDomainRootForWeb,
+  provisionPreparedHostedCryptoDomainRootsTx,
+  type PreparedHostedCryptoDomainRootCandidates,
+  unwrapHostedDomainRootForWeb,
+  unwrapHostedDomainRootForWebByRootKeyId,
 } from "../hosted-crypto/domain-root-store";
 import {
   appendHostedMailboxEnvelopeTx,
@@ -47,6 +57,7 @@ import {
   openHostedThreadDeliveryRoute,
   projectHostedThreadDeliveryRouteAccountLookupKey,
   sealHostedThreadDeliveryRoute,
+  serializeHostedThreadDeliveryRouteV1,
   type HostedThreadDeliveryRouteChannel,
   type HostedThreadDeliveryRouteV1,
 } from "./thread-delivery-route";
@@ -70,6 +81,125 @@ export interface HostedThreadContainerDeliveryRouteRefreshResult {
   demotedMailboxConsumedAt: Date | null;
 }
 
+export interface PreparedHostedThreadContainerDeliveryRoute {
+  containerMemberId: string;
+  deliveryRoute: HostedThreadDeliveryRouteV1;
+  deliveryRouteEncrypted: string;
+  /**
+   * Exact ciphertext observed before `BEGIN`. Existing-route refresh requires
+   * this field; new-container preparation has no stored ciphertext to observe.
+   */
+  observedDeliveryRouteEncrypted: string | null;
+}
+
+export interface PreparedHostedThreadContainerCreation
+  extends PreparedHostedThreadContainerDeliveryRoute {
+  cryptoDomainRoots: PreparedHostedCryptoDomainRootCandidates;
+}
+
+/**
+ * Builds every variable crypto input for a possible synthetic container before
+ * its transaction opens. Preparation is speculative and never grants route or
+ * owner authority; the transaction repeats those checks and the unique
+ * external-thread identity decides a creation race.
+ */
+export async function prepareHostedThreadContainerCreation(input: {
+  accountLookupKey: string | null | undefined;
+  channel: HostedThreadDeliveryRouteChannel;
+  containerMemberId?: string | null;
+  prisma: PrismaClient;
+  threadId: string | number;
+}): Promise<PreparedHostedThreadContainerCreation> {
+  const containerMemberId =
+    normalizeHostedThreadContainerMemberId(input.containerMemberId)
+    ?? generateHostedMemberId();
+  const cryptoDomainRoots = await prepareHostedCryptoDomainRootCandidates({
+    prisma: input.prisma,
+    userId: containerMemberId,
+  });
+  const preparedDeliveryRoute =
+    await prepareHostedThreadContainerDeliveryRoute({
+      accountLookupKey: input.accountLookupKey,
+      channel: input.channel,
+      containerMemberId,
+      observedDeliveryRouteEncrypted: null,
+      preparedCryptoDomainRoots: cryptoDomainRoots,
+      prisma: input.prisma,
+      threadId: input.threadId,
+    });
+  await prewarmPreparedHostedCryptoDomainRootForWeb({
+    domain: getHostedCryptoDomainForLane("mailbox-payload"),
+    prepared: cryptoDomainRoots,
+    userId: containerMemberId,
+  });
+  return {
+    ...preparedDeliveryRoute,
+    cryptoDomainRoots,
+  };
+}
+
+/**
+ * Seals replacement route material before `BEGIN`. For an existing container,
+ * the retained prewarm also makes any in-transaction validation local AES
+ * work. A new container supplies its not-yet-inserted prepared roots instead.
+ */
+export async function prepareHostedThreadContainerDeliveryRoute(input: {
+  accountLookupKey: string | null | undefined;
+  channel: HostedThreadDeliveryRouteChannel;
+  containerMemberId: string;
+  observedDeliveryRouteEncrypted: string | null;
+  preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
+  prisma: PrismaClient;
+  threadId: string | number;
+}): Promise<PreparedHostedThreadContainerDeliveryRoute> {
+  const containerMemberId = normalizeHostedThreadContainerMemberId(
+    input.containerMemberId,
+  );
+  if (!containerMemberId) {
+    throw new TypeError("Hosted thread delivery-route preparation requires a container member id.");
+  }
+  const controlDomain = getHostedCryptoDomainForLane(
+    "hosted-member-private-field",
+  );
+  let activeRootKeyId: string | null;
+  if (input.preparedCryptoDomainRoots) {
+    await prewarmPreparedHostedCryptoDomainRootForWeb({
+      domain: controlDomain,
+      prepared: input.preparedCryptoDomainRoots,
+      userId: containerMemberId,
+    });
+    activeRootKeyId = input.preparedCryptoDomainRoots.get(controlDomain)
+      ?.rootKeyId ?? null;
+  } else {
+    const root = await unwrapHostedDomainRootForWeb({
+      domain: controlDomain,
+      prisma: input.prisma,
+      retainFailureInScopedCache: true,
+      userId: containerMemberId,
+    });
+    activeRootKeyId = root.envelope.rootKeyId;
+    root.rootKey.fill(0);
+  }
+  await prewarmHostedThreadDeliveryRouteDecryptRoot({
+    activeRootKeyId,
+    containerMemberId,
+    deliveryRouteEncrypted: input.observedDeliveryRouteEncrypted,
+    prisma: input.prisma,
+  });
+  const deliveryRoute = buildHostedThreadDeliveryRoute(input);
+  const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+    containerMemberId,
+    prisma: input.prisma,
+    route: deliveryRoute,
+  });
+  return {
+    containerMemberId,
+    deliveryRoute,
+    deliveryRouteEncrypted,
+    observedDeliveryRouteEncrypted: input.observedDeliveryRouteEncrypted,
+  };
+}
+
 /**
  * Repairs delivery material only when the current provider account proves it
  * owns the existing account-scoped route. Owning ingress opens and validates
@@ -82,6 +212,7 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
   accountLookupKey: string | null | undefined;
   accountLookupKeys?: readonly (string | null | undefined)[];
   mailboxDedupeKey?: string | null;
+  preparedDeliveryRoute: PreparedHostedThreadContainerDeliveryRoute;
   prisma: Prisma.TransactionClient;
   route: HostedThreadRouteSnapshot;
   threadId: string | number;
@@ -108,6 +239,16 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
       "Hosted thread delivery route refresh requires a non-empty thread identity.",
     );
   }
+  const deliveryRoute = buildHostedThreadDeliveryRoute({
+    accountLookupKey: input.accountLookupKey,
+    channel: input.route.channel,
+    threadId,
+  });
+  assertPreparedHostedThreadDeliveryRoute({
+    containerMemberId: input.route.containerMemberId,
+    deliveryRoute,
+    prepared: input.preparedDeliveryRoute,
+  });
 
   await acquireHostedThreadContainerRouteWriteLockTx({
     channel: input.route.channel,
@@ -156,6 +297,18 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
     });
   }
 
+  if (
+    row.deliveryRouteEncrypted
+      !== input.preparedDeliveryRoute.observedDeliveryRouteEncrypted
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted thread delivery-route preparation is required.",
+      retryable: true,
+    });
+  }
+
   const demotion = input.route.channel === "linq"
     ? await demoteHostedMemberLinqGroupChatBindingsTx({
         linqChatId: threadId,
@@ -194,11 +347,6 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
     };
   }
 
-  const deliveryRoute = buildHostedThreadDeliveryRoute({
-    accountLookupKey: input.accountLookupKey,
-    channel: input.route.channel,
-    threadId,
-  });
   const threadLookupKey = createHostedExternalThreadLookupKey({
     accountLookupKey: input.accountLookupKey,
     channel: input.route.channel,
@@ -225,17 +373,13 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
         threadLookupKey: row.threadLookupKey,
       });
   if (authorityChanged || !existingDeliveryRoute) {
-    const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
-      containerMemberId: input.route.containerMemberId,
-      prisma: input.prisma,
-      route: deliveryRoute,
-    });
     await updateHostedThreadRouteRowTx({
       accountLookupKey:
         projectHostedThreadDeliveryRouteAccountLookupKey(deliveryRoute),
       authorityChanged,
       channel: input.route.channel,
-      deliveryRouteEncrypted,
+      deliveryRouteEncrypted:
+        input.preparedDeliveryRoute.deliveryRouteEncrypted,
       previousThreadIdentityLookupKey: row.threadIdentityLookupKey,
       prisma: input.prisma,
       threadIdentityLookupKey,
@@ -259,6 +403,8 @@ export async function ensureHostedThreadContainerRouteTx(input: {
   monthlyUsageLimitUsdMicros?: bigint | null;
   occurredAt: Date;
   ownerMemberId: string;
+  preparedCreation?: PreparedHostedThreadContainerCreation;
+  preparedDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
   prisma: Prisma.TransactionClient;
   threadId: string | number;
 }): Promise<HostedThreadContainerRouteEnsureResult> {
@@ -330,14 +476,23 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     channel: input.channel,
     threadId: input.threadId,
   });
-  await acquireHostedThreadContainerRouteWriteLockTx({
-    channel: input.channel,
-    prisma: input.prisma,
-    threadId: input.threadId,
-  });
 
-  const requestedContainerMemberId =
+  const explicitContainerMemberId =
     normalizeHostedThreadContainerMemberId(input.containerMemberId);
+  if (
+    explicitContainerMemberId
+    && input.preparedCreation
+    && explicitContainerMemberId !== input.preparedCreation.containerMemberId
+  ) {
+    throw new TypeError(
+      "Hosted thread container id does not match its prepared creation.",
+    );
+  }
+  // A prepared creation is speculative until the route transaction observes
+  // the version-stable external-thread lock. A winner that committed after
+  // preparation requires a fresh attempt for its container; only an explicitly
+  // requested container id makes that winner a non-retryable mismatch.
+  const requestedContainerMemberId = explicitContainerMemberId;
   const accountLookupKeys = normalizeHostedThreadAccountLookupKeys([
     ...(input.accountLookupKeys ?? []),
     input.accountLookupKey,
@@ -359,26 +514,38 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       threadId: input.threadId,
     }),
   ]);
-  const existingRows = await input.prisma.hostedThreadRoute.findMany({
-    orderBy: { createdAt: "asc" },
-    select: {
-      container: {
-        select: {
-          ownerMemberId: true,
+  const readExistingRows = () =>
+    input.prisma.hostedThreadRoute.findMany({
+      orderBy: { createdAt: "asc" },
+      select: {
+        container: {
+          select: {
+            ownerMemberId: true,
+          },
+        },
+        containerMemberId: true,
+        deliveryRouteEncrypted: true,
+        threadIdentityLookupKey: true,
+        threadLookupKey: true,
+      },
+      where: {
+        channel: input.channel,
+        threadIdentityLookupKey: {
+          in: threadIdentityLookupKeys,
         },
       },
-      containerMemberId: true,
-      deliveryRouteEncrypted: true,
-      threadIdentityLookupKey: true,
-      threadLookupKey: true,
-    },
-    where: {
-      channel: input.channel,
-      threadIdentityLookupKey: {
-        in: threadIdentityLookupKeys,
-      },
-    },
+    });
+  // Privacy rotation versions the stored identity lookup key. Serialize both
+  // creation and refresh on the raw external-thread identity so concurrent
+  // writers using different key versions cannot create separate containers.
+  // Any variable envelope and route sealing required by a successful write has
+  // already completed before this short transaction acquires the lock.
+  await acquireHostedThreadContainerRouteWriteLockTx({
+    channel: input.channel,
+    prisma: input.prisma,
+    threadId: input.threadId,
   });
+  const existingRows = await readExistingRows();
 
   if (existingRows.length > 0) {
     const distinctContainerIds = new Set(existingRows.map((row) => row.containerMemberId));
@@ -404,6 +571,17 @@ export async function ensureHostedThreadContainerRouteTx(input: {
         retryable: false,
       });
     }
+    if (
+      input.preparedCreation
+      && input.preparedCreation.containerMemberId !== existing.containerMemberId
+    ) {
+      throw hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        httpStatus: 503,
+        message: "Hosted thread delivery-route preparation is required.",
+        retryable: true,
+      });
+    }
 
     const demotion = input.channel === "linq"
       ? await demoteHostedMemberLinqGroupChatBindingsTx({
@@ -424,17 +602,26 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       currentIdentityRow.threadIdentityLookupKey !== threadIdentityLookupKey
       || currentIdentityRow.threadLookupKey !== threadLookupKey;
     if (authorityChanged || !currentIdentityRow.deliveryRouteEncrypted) {
-      const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
+      if (!input.preparedDeliveryRoute) {
+        throw hostedOnboardingError({
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+          httpStatus: 503,
+          message: "Hosted thread delivery-route preparation is required.",
+          retryable: true,
+        });
+      }
+      assertPreparedHostedThreadDeliveryRoute({
         containerMemberId: existing.containerMemberId,
-        prisma: input.prisma,
-        route: deliveryRoute,
+        deliveryRoute,
+        prepared: input.preparedDeliveryRoute,
       });
       await updateHostedThreadRouteRowTx({
         accountLookupKey:
           projectHostedThreadDeliveryRouteAccountLookupKey(deliveryRoute),
         authorityChanged,
         channel: input.channel,
-        deliveryRouteEncrypted,
+        deliveryRouteEncrypted:
+          input.preparedDeliveryRoute.deliveryRouteEncrypted,
         prisma: input.prisma,
         previousThreadIdentityLookupKey: currentIdentityRow.threadIdentityLookupKey,
         threadIdentityLookupKey,
@@ -465,7 +652,21 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       })
     : { mailboxConsumedAt: null };
 
-  const containerMemberId = requestedContainerMemberId ?? generateHostedMemberId();
+  const preparedCreation = input.preparedCreation;
+  if (!preparedCreation) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted thread-container preparation is required.",
+      retryable: true,
+    });
+  }
+  assertPreparedHostedThreadDeliveryRoute({
+    containerMemberId: preparedCreation.containerMemberId,
+    deliveryRoute,
+    prepared: preparedCreation,
+  });
+  const containerMemberId = preparedCreation.containerMemberId;
   const monthlyUsageLimitUsdMicros = normalizeHostedThreadContainerUsageLimit(
     input.monthlyUsageLimitUsdMicros,
   );
@@ -479,7 +680,8 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     prisma: input.prisma,
   });
 
-  await provisionHostedCryptoDomainRootsForUserTx({
+  await provisionPreparedHostedCryptoDomainRootsTx({
+    prepared: preparedCreation.cryptoDomainRoots,
     reason: "hosted-thread-container.ensure-route",
     tx: input.prisma,
     userId: containerMemberId,
@@ -493,17 +695,12 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     },
   });
 
-  const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
-    containerMemberId,
-    prisma: input.prisma,
-    route: deliveryRoute,
-  });
   await createHostedThreadRouteRowTx({
     accountLookupKey:
       projectHostedThreadDeliveryRouteAccountLookupKey(deliveryRoute),
     channel: input.channel,
     containerMemberId,
-    deliveryRouteEncrypted,
+    deliveryRouteEncrypted: preparedCreation.deliveryRouteEncrypted,
     prisma: input.prisma,
     threadIdentityLookupKey,
     threadLookupKey,
@@ -580,6 +777,49 @@ async function tryOpenHostedThreadContainerDeliveryRoute(input: {
     }).includes(input.threadLookupKey);
 
   return matchesStoredAuthority ? deliveryRoute : null;
+}
+
+async function prewarmHostedThreadDeliveryRouteDecryptRoot(input: {
+  activeRootKeyId: string | null;
+  containerMemberId: string;
+  deliveryRouteEncrypted: string | null;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const rootKeyId = readHostedThreadDeliveryRouteRootKeyId(
+    input.deliveryRouteEncrypted,
+  );
+  if (!rootKeyId || rootKeyId === input.activeRootKeyId) {
+    return;
+  }
+  const root = await unwrapHostedDomainRootForWebByRootKeyId({
+    domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+    prisma: input.prisma,
+    rootKeyId,
+    userId: input.containerMemberId,
+  });
+  root.rootKey.fill(0);
+}
+
+function readHostedThreadDeliveryRouteRootKeyId(
+  deliveryRouteEncrypted: string | null,
+): string | null {
+  if (!deliveryRouteEncrypted?.trim()) {
+    return null;
+  }
+  try {
+    const envelope = parseSerializedHostedSecureBoxEnvelope(
+      deliveryRouteEncrypted,
+    );
+    return envelope.domain === getHostedCryptoDomainForLane(
+        "hosted-member-private-field",
+      )
+      ? envelope.rootKeyId
+      : null;
+  } catch {
+    // Owning ingress repairs structurally corrupt ciphertext. Preserve that
+    // path without turning a parse failure into speculative KMS work.
+    return null;
+  }
 }
 
 async function createHostedThreadRouteRowTx(input: {
@@ -687,6 +927,23 @@ function resolveHostedThreadContainerMemberChannels(
     linq: channel === "linq",
     telegram: channel === "telegram",
   };
+}
+
+function assertPreparedHostedThreadDeliveryRoute(input: {
+  containerMemberId: string;
+  deliveryRoute: HostedThreadDeliveryRouteV1;
+  prepared: PreparedHostedThreadContainerDeliveryRoute;
+}): void {
+  if (
+    input.prepared.containerMemberId !== input.containerMemberId
+    || serializeHostedThreadDeliveryRouteV1(input.prepared.deliveryRoute)
+      !== serializeHostedThreadDeliveryRouteV1(input.deliveryRoute)
+    || input.prepared.deliveryRouteEncrypted.trim().length === 0
+  ) {
+    throw new TypeError(
+      "Prepared hosted thread delivery route does not match its write target.",
+    );
+  }
 }
 
 function buildHostedThreadContainerActivationEventId(input: {

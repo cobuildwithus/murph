@@ -71,7 +71,13 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // baseline + ~25-30% headroom. If a violation fires, investigate the listed
 // largest inputs first; only raise the budget deliberately for growth that
 // is understood and intended.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_000;
+//
+// Composing the managed voice-memo tool with 2026-08-10 main measured
+// 9,012,019 B total. The tool stays in the existing assistant-engine chunks;
+// no optional output or MCP dependency entered the graph. Ratchet to that
+// exact combined measurement with a 32 KiB allowance for small reviewed
+// additions.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_012_019 + 32_768;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live

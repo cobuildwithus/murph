@@ -80,6 +80,7 @@ import {
   stopCodexAppServerChild,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -20045,6 +20046,11 @@ describe('steered final segments', () => {
         id: number
         kind: 'list-memberships'
       }
+    | {
+        expectedText: string
+        id: number
+        kind: 'offer-access'
+      }
 
   function isAttachResponseMediaStep(
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
@@ -20068,6 +20074,12 @@ describe('steered final segments', () => {
     step: Record<string, unknown> | ScriptedSteeredFinalStep,
   ): step is Extract<ScriptedSteeredFinalStep, { kind: 'list-memberships' }> {
     return 'kind' in step && step.kind === 'list-memberships'
+  }
+
+  function isOfferAccessStep(
+    step: Record<string, unknown> | ScriptedSteeredFinalStep,
+  ): step is Extract<ScriptedSteeredFinalStep, { kind: 'offer-access' }> {
+    return 'kind' in step && step.kind === 'offer-access'
   }
 
   function isSendVaultFileStep(
@@ -20293,6 +20305,32 @@ describe('steered final segments', () => {
               continue
             }
 
+            if (isOfferAccessStep(step)) {
+              child.stdout.write(jsonLine({
+                id: step.id,
+                method: 'item/tool/call',
+                params: {
+                  namespace: 'murph',
+                  tool: 'group',
+                  arguments: { action: 'offer_access' },
+                  turnId: 'turn-steered-finals',
+                },
+              }))
+              await expect(waitForRpcResponse(child, step.id)).resolves.toEqual({
+                id: step.id,
+                result: {
+                  success: true,
+                  contentItems: [
+                    {
+                      type: 'inputText',
+                      text: step.expectedText,
+                    },
+                  ],
+                },
+              })
+              continue
+            }
+
             if (isReactToMessageStep(step)) {
               child.stdout.write(jsonLine({
                 id: step.id,
@@ -20403,6 +20441,99 @@ describe('steered final segments', () => {
       },
     }
   }
+
+  function createFreshNativeAccessOfferGroupTool() {
+    return {
+      request: vi.fn(async () => ({
+        action: 'post_join_offer' as const,
+        result: {
+          group: {
+            displayName: null,
+            id: 'group_test',
+            kind: 'friends' as const,
+            memberCount: 1,
+            members: [],
+            requestedVaultShareProjectionKinds: ['steps-days.v0' as const],
+            requestedVaultShareProjectionScopes: [
+              { projectionKind: 'steps-days.v0' as const },
+            ],
+            status: 'active' as const,
+          },
+          joinUrl: 'https://example.test/groups/join/fresh-offer',
+          offeredAt: '2026-08-08T12:00:00.000Z',
+          offerState: 'posted' as const,
+          status: 'sent' as const,
+        },
+      })),
+    }
+  }
+
+  const freshNativeAccessOfferToolText = JSON.stringify({
+    action: 'offer_access',
+    result: {
+      offeredAt: '2026-08-08T12:00:00.000Z',
+      recencyEvidence: 'eligible',
+      responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
+      presentation: 'native',
+      status: 'ok',
+    },
+  })
+
+  it('preserves remaining output after a fresh native access offer', async () => {
+    const groupTool = createFreshNativeAccessOfferGroupTool()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: freshNativeAccessOfferToolText,
+        id: 82,
+        kind: 'offer-access',
+      },
+      completedItemEvent({
+        id: 'assistant-remaining-answer',
+        type: 'assistant_message',
+        message: 'The weekly update is scheduled for Monday.',
+      }),
+    ], {
+      hostedToolContext: createHostedToolContext({ groupTool }),
+    })
+
+    expect(groupTool.request).toHaveBeenCalledWith(
+      {
+        action: 'post_join_offer',
+        joinOffer: {
+          messageTemplate: expect.any(String),
+        },
+      },
+      { signal: expect.any(AbortSignal) },
+    )
+    expect(result.finalAction).toBeNull()
+    expect(result.finalMessage).toBe('The weekly update is scheduled for Monday.')
+  })
+
+  it('finishes without a companion reply when a fresh offer completes the request', async () => {
+    const groupTool = createFreshNativeAccessOfferGroupTool()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: freshNativeAccessOfferToolText,
+        id: 83,
+        kind: 'offer-access',
+      },
+      {
+        expectedText: 'finished without reply',
+        id: 84,
+        kind: 'finish-without-reply',
+      },
+      completedItemEvent({
+        id: 'assistant-suppressed-offer-acknowledgment',
+        type: 'assistant_message',
+        message: 'The consent message is ready.',
+      }),
+    ], {
+      hostedToolContext: createHostedToolContext({ groupTool }),
+    })
+
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+  })
 
   it('returns successful membership reads while preserving Codex continuity', async () => {
     const response = {

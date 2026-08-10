@@ -124,6 +124,34 @@ describe('assistant dynamic context prompt blocks', () => {
     },
   )
 
+  it('keeps the explicit group-email usage-progress contract resident', () => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      channel: 'email',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    })
+
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Group email has no filesystem access. Do not try to read a usage skill.',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'call `murph.group action="read_usage"` exactly once',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'For an integer from 0 through 99, answer exactly',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'For 100, answer exactly',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'authoritative included-usage progress figure for this room is unavailable right now',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
+    )
+  })
+
   it('keeps selector-bearing add-usage routes exclusive in the assembled billing prompt stack', async () => {
     const layers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
