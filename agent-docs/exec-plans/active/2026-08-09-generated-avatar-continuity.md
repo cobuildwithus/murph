@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — round-7 hard-cap remediation pending explicit continuation
+Status: active — ReviewGPT round 8 authorized; exact-head packaging retry
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -367,7 +367,15 @@ Updated: 2026-08-10
   assembly passes without a ratchet change at 8,999,924-byte vault CLI total,
   1,659,616-byte runner entry, 8,019,965-byte static closure, and 9,997,465-byte
   runner total.
-- The seven-round hard cap is now active. The remediation is pushed, focused
-  local proof and parent review are clean, and exact-head CI is running. No
-  eighth substantive ReviewGPT round may start until the explicit continuation
-  decision required by the review-loop contract is recorded.
+- The seven-round hard-cap retrospective and explicit continuation decision are
+  recorded at https://github.com/cobuildwithus/murph/pull/1533#issuecomment-5241117061.
+  The decision is to continue because reverting or splitting would leave the
+  exact generated-image journey or a proven authority/delivery invariant
+  unresolved, while the current shape reuses existing owners and adds no queue,
+  state machine, reconciliation service, database owner, or compatibility
+  subsystem.
+- The first round-8 invocation was invalid and does not advance the substantive
+  counter. A concurrent docs-only plan commit advanced the checkout while the
+  packager was building the preceding behavior head, so the ZIP correctly
+  rejected its old diff/new plan-file mismatch before substantive review. Retry
+  round 8 only from one clean, stable, exact pushed head.
