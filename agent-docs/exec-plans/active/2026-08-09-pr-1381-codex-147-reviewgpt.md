@@ -88,11 +88,31 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Commands to run: focused Vitest projects/files for assistant-engine,
-  assistant-runtime, CLI, Cloudflare container contracts, and hosted-control;
-  relevant workspace typechecks/builds; pnpm dependency guards; provider-input
-  measurement; `scripts/review-gpt-pr-head-preflight.sh`; exact-head GitHub
-  checks and both ReviewGPT phases.
-- Expected outcomes: all commands pass, valid `0.147.0` events retain their
-  semantic data, invalid envelopes fail closed, both ReviewGPT markers pass,
-  required checks are green, and GitHub reports the PR mergeable.
+- Merged current `origin/main` without conflicts after preserving the protocol
+  repair in scoped commit `40bea9d6fb1d`.
+- Passed the full fake App Server runtime suite (248 tests) and the full real
+  pinned-binary scripted App Server suite (32 tests).
+- Passed 231 adjacent assistant protocol/usage/tool/notification tests, 268
+  hosted-runtime entrypoint tests, 287 Cloudflare runner/container tests, 154
+  Web settings/control tests, nine CLI tests, 23 hosted-execution usage tests,
+  and 52 hosted-control tests.
+- Passed scoped typechecks for assistant-engine, hosted-execution,
+  cloudflare-hosted-control, Cloudflare, and Web. `pnpm install
+  --frozen-lockfile`, `pnpm deps:guard`, and the blocked-install-script review
+  passed; the exact package binary reports `codex-cli 0.147.0` and App Server
+  help exits successfully.
+- `pnpm deps:audit` remains red on 77 repository advisories (one critical, 32
+  high, 38 moderate, six low). The lockfile delta changes only the Codex package
+  and its six platform packages from `0.145.0` to `0.147.0`; no reported
+  vulnerable path traverses that dependency.
+- Complete first-provider requests were captured twice through the real
+  `0.145.0` and `0.147.0` App Servers with identical synthetic direct/group
+  fixtures, `gpt-5.6-terra`, low reasoning, production code mode, and
+  `gpt-tokenizer` 3.4.0 `o200k_harmony`. Normalized repeats were identical:
+  direct grew from 121,482 bytes / 26,531 tokens to 121,604 / 26,767 (+122
+  bytes, +236 tokens, +0.89%); group grew from 104,218 / 22,666 to 104,340 /
+  22,902 (+122 bytes, +236 tokens, +1.04%). All change is in Codex-generated
+  `input`; Murph prompt builders and dynamic-tool definitions are unchanged.
+- Parent candidate review found no unresolved local issue. Remaining proof is
+  the pushed-head preliminary specialist pass, final ReviewGPT gate, exact-head
+  GitHub checks, merge cleanliness, and plan closure.
