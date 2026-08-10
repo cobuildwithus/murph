@@ -194,6 +194,7 @@ export function AuthDialog({
     useState<HostedAuthPanelModule | null>(() => hostedAuthPanelModule);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [panelView, setPanelView] = useState<HostedAuthPanelView>("auth");
+  const [phoneInputAutoFocus, setPhoneInputAutoFocus] = useState(true);
   const dialogContentRef = useRef<HTMLDivElement | null>(null);
   const loadedPanelRef = useRef<HTMLDivElement | null>(null);
   const restorePanelFocusRef = useRef(false);
@@ -222,6 +223,7 @@ export function AuthDialog({
               || !content.contains(activeElement)
             ),
           );
+          setPhoneInputAutoFocus(false);
           setLoadError(null);
           setAuthPanelModule(module);
         }
@@ -299,6 +301,7 @@ export function AuthDialog({
     if (!nextOpen) {
       setPanelView("auth");
       restorePanelFocusRef.current = false;
+      setPhoneInputAutoFocus(true);
     }
     onOpenChange(nextOpen);
   }
@@ -307,6 +310,7 @@ export function AuthDialog({
     autoSendPastedPhoneNumber,
     methods,
     onViewChange: setPanelView,
+    phoneInputAutoFocus,
     requireLaunchConsentOnCompletion,
     showPassiveLegalNotice,
     size: "compact" as const,
@@ -318,6 +322,12 @@ export function AuthDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         ref={dialogContentRef}
+        initialFocus={
+          privyRuntime === undefined && !AuthPanelModule
+            ? dialogContentRef
+            : undefined
+        }
+        tabIndex={-1}
         className={cn(
           "max-w-md gap-6 p-6 md:p-7",
           consentPresentation ? "rounded-2xl" : null,

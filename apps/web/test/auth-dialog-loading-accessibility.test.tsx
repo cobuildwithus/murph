@@ -11,8 +11,10 @@ import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => {
   const state = {
+    dialogInitialFocus: null as null | { current: HTMLElement | null },
     moduleGate: Promise.resolve(),
     panelRender: vi.fn(),
+    panelProps: null as null | { phoneInputAutoFocus?: boolean },
     releaseModule: () => {},
     resetModuleGate() {
       state.moduleGate = new Promise<void>((resolve) => {
@@ -27,10 +29,12 @@ const mocks = vi.hoisted(() => {
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-panel-island", async () => {
   await mocks.moduleGate;
   return {
-    HostedAuthPanelIsland() {
+    HostedAuthPanelIsland(props: { phoneInputAutoFocus?: boolean }) {
       mocks.panelRender();
+      mocks.panelProps = props;
       return createElement("input", {
         "aria-label": "Phone number",
+        autoFocus: props.phoneInputAutoFocus,
         type: "tel",
       });
     },
@@ -43,9 +47,11 @@ vi.mock("@/src/components/ui/dialog", () => ({
   },
   DialogContent(props: {
     children: ReactNode;
+    initialFocus?: { current: HTMLElement | null };
     ref?: Ref<HTMLDivElement>;
     showCloseButton?: boolean;
   }) {
+    mocks.dialogInitialFocus = props.initialFocus ?? null;
     return createElement(
       "div",
       {
@@ -80,6 +86,8 @@ beforeEach(() => {
   vi.resetModules();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  mocks.dialogInitialFocus = null;
+  mocks.panelProps = null;
   mocks.resetModuleGate();
 });
 
@@ -105,6 +113,7 @@ test("announces cold auth loading and restores focus when the panel becomes usab
     "motion-reduce:animate-none",
   );
   expect(content).toBeTruthy();
+  expect(mocks.dialogInitialFocus?.current).toBe(content);
 
   const focus = installFocusTracking(rendered.window);
   content?.focus();
@@ -117,6 +126,7 @@ test("announces cold auth loading and restores focus when the panel becomes usab
     'input[aria-label="Phone number"]',
   );
   expect(input).toBeTruthy();
+  expect(mocks.panelProps?.phoneInputAutoFocus).toBe(false);
   expect(focus.mock.instances).toContain(input);
   expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   expect(rendered.window.document.activeElement).toBe(input);
@@ -137,8 +147,37 @@ test("does not steal focus from the surviving close control", async () => {
   await releaseAuthPanelModule();
 
   expect(rendered.container.querySelector('input[aria-label="Phone number"]')).toBeTruthy();
+  expect(mocks.panelProps?.phoneInputAutoFocus).toBe(false);
   expect(focus).not.toHaveBeenCalled();
   expect(rendered.window.document.activeElement).toBe(close);
+});
+
+test("preserves phone autofocus when the auth panel is ready before open", async () => {
+  mocks.releaseModule();
+  await mocks.moduleGate;
+  const {
+    AuthDialog,
+    preloadHostedAuthPanelIsland,
+    readLoadedHostedAuthPanelIsland,
+  } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog"
+  );
+  preloadHostedAuthPanelIsland();
+  await vi.waitFor(() => {
+    expect(readLoadedHostedAuthPanelIsland()).not.toBeNull();
+  });
+  const rendered = await renderClientComponent(
+    createElement(AuthDialog, {
+      onOpenChange: () => {},
+      open: true,
+    }),
+    { requireButton: false },
+  );
+  cleanupRender = rendered.cleanup;
+
+  expect(mocks.dialogInitialFocus).toBeNull();
+  expect(mocks.panelProps?.phoneInputAutoFocus).toBe(true);
+  expect(rendered.container.querySelector('input[aria-label="Phone number"]')).toBeTruthy();
 });
 
 async function renderPendingAuthDialog() {
