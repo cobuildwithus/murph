@@ -141,30 +141,38 @@ required to drain already-created provider objects.
 
 Use this rollout order:
 
-1. prepare the new Web release, then use an atomic traffic cutover or a brief
-   affected-usage maintenance window so no old Web deployment can serve usage
-   after the Starter backfill becomes visible;
-2. while the affected path is no longer routed to old Web, apply the additive
-   ledger-kind/check-constraint migration and Starter backfill, route traffic
-   exclusively to the new Web release, and only then resume affected usage;
-3. confirm every old Web deployment capable of creating a Stripe trial is
+1. before starting the main-branch Vercel deployment, the release operator
+   suspends the existing Render `murph-temporal-worker` service and keeps it
+   suspended through the cutover. Wait until both worker instances have stopped
+   polling and their accepted Cloudflare runtime work has drained; mailbox
+   appends remain durable while execution is paused;
+2. while that single execution-admission owner remains suspended, apply the
+   additive ledger-kind/check-constraint migration and Starter backfill, deploy
+   Web and the Cloudflare Worker/runner bundle from the same commit, and use
+   `container_rollout=immediate`. Do not resume after only one plane succeeds;
+3. after managed-container smoke reports that commit's exact runner-bundle
+   fingerprint, prove a signed `murph.plan_usage` Starter read and one eligible
+   subscription quote through the deployed adapter, then resume the Render
+   `murph-temporal-worker` service;
+4. confirm every old Web deployment capable of creating a Stripe trial is
    drained, then let delayed Stripe events and the runtime compatibility owner
    convert exact post-migration legacy objects through the canonical Starter
    grant path;
-4. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
+5. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
    in dry-run mode and review the aggregate candidate and provider-status
    counts;
-5. apply only with the exact observed count using `--apply
+6. apply only with the exact observed count using `--apply
    --expected-candidates=<count>`; any potentially paid provider state aborts
    the entire preflight before mutation;
-6. rerun the dry-run until it reports zero candidates; and
-7. after the delayed-event horizon has passed, remove the legacy offer fields,
+7. rerun the dry-run until it reports zero candidates; and
+8. after the delayed-event horizon has passed, remove the legacy offer fields,
    wire actions, cleanup owner, and operator command together.
 
-No Cloudflare tandem deploy is required: the runtime consumes the existing
-Web-owned access-and-usage decision. The operator command requires an explicit
-Stripe mode and verifies that it matches the configured credential, defaults to
-dry-run, prevalidates every candidate before applying, and is safe to rerun.
+The Render service suspension is the existing operator-owned traffic-pause
+control; do not add an application feature flag or a second pause owner for this
+cutover. The operator command requires an explicit Stripe mode and verifies that
+it matches the configured credential, defaults to dry-run, prevalidates every
+candidate before applying, and is safe to rerun.
 
 After deploy, verify:
 
@@ -187,6 +195,11 @@ creators are gone, the operator dry-run reports zero, and the maximum delayed
 Stripe event horizon has elapsed. Analytics-only cohort names and immutable
 historical records are not runtime compatibility and may remain.
 
-Rollback Web before reverting schema assumptions. The additive ledger kind and
-historical entries may remain; reverting the migration would destroy accounting
-history and is not a supported rollback.
+Before the Starter migration commits, the release operator may restore the
+previous Web and Cloudflare pair and resume the Render worker. After the
+migration commits, that pair is below the rollback floor: old Web adds the
+legacy trial allowance to the new Starter projection and cannot settle usage
+against `starter_grant` entries. Keep the Render worker suspended and
+forward-fix or finish deploying the current Web and Cloudflare pair. Never
+resume on the old pair, and never revert the additive migration or its
+accounting history.

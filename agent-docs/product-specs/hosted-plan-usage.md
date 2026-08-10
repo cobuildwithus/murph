@@ -556,15 +556,23 @@ The non-expiring Starter contract is a strict Web/runtime schema hard cut. The
 new Web response uses `accessKind: starter`, `planName: Starter`, and
 `periodKind: lifetime`; the new runner no longer accepts the retired trial
 values. Neither direction is compatible across the cut. Pause affected hosted
-usage before applying the Starter migrations, then deploy Web and the
-Cloudflare Worker/runner bundle from the same commit while the path remains
-paused. The Cloudflare deploy must use `container_rollout=immediate`. Resume
-only after managed-container smoke reports that commit's exact runner-bundle
-fingerprint and a signed `murph.plan_usage` read proves an active or exhausted
-Starter response through the deployed adapter. Also verify one exact eligible
-subscription quote before normal processing resumes. If the cutover fails,
-keep the path paused and roll Web and Cloudflare back to the same compatible
-pair; never roll back either plane independently.
+usage before applying the Starter migrations: the release operator suspends
+the existing Render `murph-temporal-worker` service, waits for both instances
+and their already-accepted Cloudflare runtime work to drain, and keeps that
+single execution-admission owner suspended through the cutover. Mailbox appends
+remain durable during the pause. Deploy Web and the Cloudflare Worker/runner
+bundle from the same commit while the path remains paused. The Cloudflare deploy
+must use `container_rollout=immediate`. Resume only after managed-container
+smoke reports that commit's exact runner-bundle fingerprint, a signed
+`murph.plan_usage` read proves an active or exhausted Starter response through
+the deployed adapter, and one exact eligible subscription quote succeeds.
+Before the Starter migration commits, the previous Web and Cloudflare pair is a
+valid rollback. After it commits, that pair is below the rollback floor because
+old Web double-counts legacy trial allowance with the Starter projection and
+cannot debit `starter_grant` entries. Keep execution paused and forward-fix or
+finish deploying the current pair; never resume on the old pair or roll back
+either plane independently. Do not add an application feature flag or a second
+pause owner.
 
 For the capacity-epoch change, deploy the assistant runtime that timestamps
 every provider operation at its own request start, then wait for work accepted
