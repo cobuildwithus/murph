@@ -63,6 +63,31 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-10",
+    publishedOn: "2026-08-10",
+    title: "Murph field notes are now public",
+    summary:
+      "A new public blog shares practical health guides, product field notes, and case studies only when their evidence is ready.",
+    items: [
+      {
+        id: "public-health-guides-and-field-notes",
+        kind: "feature",
+        priority: 4,
+        title: "Read Murph's health guides and field notes",
+        summary:
+          "The new public blog brings together practical guides and notes about turning health context into useful next steps.",
+        details:
+          "Blog articles have stable links, RSS and sitemap discovery, and clear educational-health boundaries. Future case studies must publish their evidence basis, verification date, and limitations alongside the result.",
+        relevanceTags: ["blog", "guides", "health", "education"],
+        sourcePullRequests: [1569],
+        tryIt: {
+          href: "/blog",
+          label: "Read the field notes",
+        },
+      },
+    ],
+  },
+  {
     id: "2026-08-06",
     publishedOn: "2026-08-06",
     title: "Murph can understand media in X posts",

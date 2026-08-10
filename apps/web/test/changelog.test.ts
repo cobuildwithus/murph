@@ -275,13 +275,17 @@ describe("changelog registry", () => {
     );
   });
 
-  it("publishes the complete July 20 through August 6 shipment set", () => {
+  it("publishes the complete July 20 through August 10 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 18).map((edition) => ({
+      listChangelogEditions().slice(0, 19).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-08-10",
+        itemIds: ["public-health-guides-and-field-notes"],
+      },
       {
         id: "2026-08-06",
         itemIds: ["x-post-media-understanding"],
@@ -667,8 +671,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-06");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-07-31");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-01");
   });
 
   it("resolves only known canonical edition cursors", () => {
