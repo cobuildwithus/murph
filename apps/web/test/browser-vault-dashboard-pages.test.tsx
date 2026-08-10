@@ -174,7 +174,7 @@ test("Personal Patterns comparison controls name their factor and next-day outco
   assert.match(markup, /aria-label="Sauna, next-day Total sleep\./);
 });
 
-test("PatternsPage asks for a refresh when a legacy replica has no patterns projection", async () => {
+test("PatternsPage explains the bounded wait when a legacy replica has no patterns projection", async () => {
   const legacyReplica = { ...clientFixture.replica };
   delete legacyReplica.personalPatterns;
   const legacyClient = createBrowserVaultQueryClient(legacyReplica);
@@ -187,19 +187,16 @@ test("PatternsPage asks for a refresh when a legacy replica has no patterns proj
     refresh: mocks.refresh,
     status: "ready",
   });
-  const rendered = await renderClientComponent(createElement(PatternsPageClient));
+  const rendered = await renderClientComponent(
+    createElement(PatternsPageClient),
+    { requireButton: false },
+  );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Patterns need a refresh/u);
+    assert.match(rendered.container.textContent ?? "", /Patterns are getting ready/u);
+    assert.match(rendered.container.textContent ?? "", /within 24 hours/u);
     assert.doesNotMatch(rendered.container.textContent ?? "", /No clear comparison is ready/u);
-    const refreshButton = [...rendered.container.querySelectorAll("button")].find(
-      (button) => button.textContent === "Refresh now",
-    );
-    assert.ok(refreshButton);
-    await act(async () => {
-      refreshButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-    });
-    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Refresh now/u);
   } finally {
     await rendered.cleanup();
   }

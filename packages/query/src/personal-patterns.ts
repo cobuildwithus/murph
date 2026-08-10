@@ -4,13 +4,20 @@ import {
 } from "@murphai/contracts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
+import {
+  resolveActivityEvidenceLocalDate,
+  resolveInterventionSessionLocalDate,
+} from "./experiment-adherence.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import { buildWearableSummaryBundle } from "./wearables.ts";
 import type {
   WearableResolvedMetric,
   WearableSummaryBundle,
 } from "./wearables.ts";
-import { resolveWearableSleepAnalysisDate } from "./wearables/sleep-pattern.ts";
+import {
+  isWearableSleepPatternEligibleNight,
+  resolveWearableSleepAnalysisDate,
+} from "./wearables/sleep-pattern.ts";
 
 const DEFAULT_WINDOW_DAYS = 120;
 const MAX_FACTORS = 6;
@@ -211,11 +218,12 @@ function collectFactorAccumulators(
   const factors = new Map<string, FactorAccumulator>();
 
   for (const event of events) {
-    const date = event.date ?? event.occurredAt?.slice(0, 10) ?? null;
-    if (!date || date < fromDate || date > toDate) continue;
-
     const candidate = readFactorCandidate(event);
     if (!candidate) continue;
+    const date = candidate.kind === "intervention"
+      ? resolveInterventionSessionLocalDate(event)
+      : resolveActivityEvidenceLocalDate(event);
+    if (!date || date < fromDate || date > toDate) continue;
 
     const existing = factors.get(candidate.token);
     if (existing) {
@@ -266,10 +274,12 @@ function collectOutcomeSeries(
   toDate: string,
   fallbackTimeZone: string | null,
 ): OutcomeSeries[] {
-  const sleep = wearableBundle.sleepNights.filter((day) => {
-    const outcomeDate = resolveWearableSleepAnalysisDate(day, fallbackTimeZone);
-    return outcomeDate >= fromDate && outcomeDate <= toDate;
-  });
+  const sleep = wearableBundle.sleepNights
+    .filter(isWearableSleepPatternEligibleNight)
+    .filter((day) => {
+      const outcomeDate = resolveWearableSleepAnalysisDate(day, fallbackTimeZone);
+      return outcomeDate >= fromDate && outcomeDate <= toDate;
+    });
   const recovery = wearableBundle.recoveryDays.filter((day) => day.date >= fromDate && day.date <= toDate);
 
   return [

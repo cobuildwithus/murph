@@ -58,6 +58,12 @@ export interface WearableSleepPatternBuildContext {
   >;
 }
 
+export function isWearableSleepPatternEligibleNight(
+  night: { sleepType: WearableSleepSessionType },
+): boolean {
+  return night.sleepType !== "nap";
+}
+
 export function resolveWearableSleepAnalysisDate(
   night: Pick<WearableSleepNight, "date" | "sleepEndAt" | "timeZone">,
   fallbackTimeZone: string | null,
@@ -126,7 +132,7 @@ export function buildWearableSleepPatternSummary(
   const preparedInWindow = prepared.filter((night) =>
     night.analysisDate >= window.from && night.analysisDate <= window.to
   );
-  const nonNapPreparedInWindow = preparedInWindow.filter((night) => night.sleepType !== "nap");
+  const nonNapPreparedInWindow = preparedInWindow.filter(isWearableSleepPatternEligibleNight);
   const collapsed = collapseDuplicateAndOverlappingNights(nonNapPreparedInWindow);
   const sameDateCollapsed = selectOneNightPerAnalysisDate(collapsed.nights);
   const nights = sameDateCollapsed.nights;
@@ -137,7 +143,7 @@ export function buildWearableSleepPatternSummary(
       asOf.getTime(),
     ))
     .filter((night) => night.analysisDate >= window.from && night.analysisDate <= window.to)
-    .filter((night) => night.sleepType !== "nap");
+    .filter(isWearableSleepPatternEligibleNight);
   const suppressionCollapsed = collapseDuplicateAndOverlappingNights(suppressionPreparedInWindow);
   const suppressionSameDateCollapsed = selectOneNightPerAnalysisDate(suppressionCollapsed.nights);
   const omittedEvidenceCount = preparedInWindow.reduce(

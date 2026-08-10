@@ -78,13 +78,11 @@ export function PersonalPatternsSection({
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Patterns need a refresh</CardTitle>
+          <CardTitle>Patterns are getting ready</CardTitle>
           <CardDescription>
-            Murph needs to refresh your private health data before it can check your history.
+            Murph will check your history after your private data refreshes. This normally happens
+            within 24 hours or after your health data changes.
           </CardDescription>
-          <div className="pt-2">
-            <Button size="sm" variant="outline" onClick={onRetry}>Refresh now</Button>
-          </div>
         </CardHeader>
       </Card>
     );

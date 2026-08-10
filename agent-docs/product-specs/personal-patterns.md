@@ -21,7 +21,8 @@ new collection window when the feature ships.
 - The default lookback is 120 days ending on the report date.
 - Existing members can receive a result from data that predates deployment.
 - Overview reads a derived report from the encrypted Browser Vault replica.
-- An older replica has no Personal Patterns field and reads as an empty report.
+- An older replica has no Personal Patterns field. The web keeps that state
+  separate from a calculated empty report and explains the bounded wait.
 - On the member's next runtime execution, the hosted runtime rebuilds a replica
   after source data changes or after its normal 24-hour maximum age is exceeded.
 - A code deployment alone does not force every inactive member's replica to
@@ -33,6 +34,13 @@ new collection window when the feature ships.
 
 Eligible factors come from completed activity and intervention sessions.
 Missed and skipped intervention sessions do not count.
+
+Activity days use the existing canonical activity-evidence date. Intervention
+days use the existing scheduled/session local date before the generic event
+date. This keeps retroactively logged sessions on their intended day.
+
+Sleep outcomes use the sleep-analysis date and eligibility policy. Explicit
+naps do not count as next-day sleep outcomes.
 
 Names that describe an outcome rather than an action are not eligible factors.
 This includes sleep, sleep score, sleep efficiency, HRV, resting heart rate,

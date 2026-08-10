@@ -319,6 +319,92 @@ test("Personal Patterns anchors sleep outcomes to the localized sleep-end date i
   }
 });
 
+test("Personal Patterns uses the intended local date for retroactively logged interventions", () => {
+  const start = "2026-01-05";
+  const sessionDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const entities: CanonicalEntity[] = [
+    ...sessionDates.map((sessionLocalDate, index) =>
+      event(
+        `sauna_local_date_${index}`,
+        addDays(sessionLocalDate, 1),
+        "intervention_session",
+        {
+          interventionType: "dry-sauna",
+          sessionLocalDate,
+          sessionStatus: "completed",
+        },
+      )
+    ),
+    ...Array.from({ length: 112 }, (_, index) => {
+      const date = addDays(start, index);
+      return observation(
+        `hrv_local_date_${index}`,
+        date,
+        "hrv",
+        sessionDates.includes(addDays(date, -1)) ? 70 : 50,
+        "ms",
+      );
+    }),
+  ];
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities,
+    vaultRoot: "test://personal-pattern-intervention-local-date",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+  const hrv = report.cells.find((cell) => cell.factorId === "dry-sauna" && cell.outcomeId === "hrv");
+
+  assert.ok(hrv);
+  assert.equal(hrv.exposedMean, 70);
+  assert.equal(hrv.comparisonMean, 50);
+  assert.equal(hrv.stage, "seen_again");
+});
+
+test("Personal Patterns excludes explicit nap-only days from sleep outcomes", () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const entities: CanonicalEntity[] = [
+    ...runningDates.map((date, index) => event(`run_nap_${index}`, date, "activity_session", {
+      activityType: "running",
+    })),
+  ];
+
+  for (let index = 0; index < 112; index += 1) {
+    const date = addDays(start, index);
+    entities.push(
+      event(`nap_${index}`, date, "sleep_session", {
+        durationMinutes: 60,
+        endAt: `${date}T14:00:00.000Z`,
+        externalRef: {
+          resourceId: `nap-${index}`,
+          resourceType: "sleep",
+          system: "oura",
+        },
+        sleepType: "nap",
+        startAt: `${date}T13:00:00.000Z`,
+        timeZone: "UTC",
+      }),
+      observation(
+        `nap_score_${index}`,
+        date,
+        "sleep-score",
+        runningDates.includes(addDays(date, -1)) ? 90 : 70,
+        "score",
+      ),
+    );
+  }
+
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities,
+    vaultRoot: "test://personal-pattern-nap-only",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+
+  assert.equal(report.outcomes.some((outcome) => outcome.id === "sleep-score"), false);
+  assert.equal(report.cells.some((cell) => cell.outcomeId === "sleep-score"), false);
+});
+
 test("Personal Patterns reports a tested but unclear link without calling it a finding", () => {
   const start = "2026-01-05";
   const saunaDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
