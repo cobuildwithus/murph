@@ -1515,7 +1515,10 @@ the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
 Nutrition images retain the calorie ring and metric row while remaining
-rectangular and badge-free so the provider owns the app icon and outer mask.
+rectangular and badge-free so the provider owns the outer mask. The installed
+Messages extension retains its native icon and interactive identity. The
+provider request omits the optional App Store id so app-absent static cards do
+not substitute square App Store artwork into the wider Messages icon slot.
 Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. A short subcaption appears only
 when some totals are partial or an assessed V2 goal needs its directional

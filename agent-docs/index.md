@@ -96,8 +96,9 @@ docs.
 
 Response-card request eligibility, multi-input live-turn invalidation,
 whole-response semantics, delivery ownership, interactive Messages-extension
-transcript rendering with a truthful provider-static fallback, provider-owned
-nutrition app icon and card masking, a concise date-and-meal-count nutrition
+transcript rendering with a truthful provider-static fallback,
+installed-extension nutrition identity, App-Store-icon-free static fallback,
+provider-owned card masking, a concise date-and-meal-count nutrition
 caption with conditional partial-state and assessed-goal-direction subcaptions,
 one trusted provider reply-thread binding, bounded offline V3
 compact-table plus V4 workout-session fragments, and the shared strict
