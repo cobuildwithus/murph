@@ -1161,6 +1161,103 @@ test("canonical event availability collapses blood-test tombstones", async () =>
   });
 });
 
+test("canonical event availability reads supported legacy provider day grains", async () => {
+  const vaultRoot = await makeTempDirectory("murph-canonical-availability-legacy-grain");
+  await initializeVault({ vaultRoot });
+  const occurredAt = "2026-07-15T12:00:00.000Z";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath(
+      VAULT_LAYOUT.eventLedgerDirectory,
+      occurredAt,
+      "occurredAt",
+    ),
+    record: {
+      dayKey: "2026-07-15",
+      externalRef: {
+        resourceId: "legacy-body-summary-2026-07-15",
+        resourceType: "daily-summary",
+        system: "junction",
+      },
+      id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F7",
+      kind: "observation",
+      metric: "body-fat-pct",
+      observationGrain: "daily_timeseries_aggregate",
+      occurredAt,
+      recordedAt: "2026-07-15T12:05:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Legacy body composition summary",
+      unit: "%",
+      value: 18.4,
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath(
+      VAULT_LAYOUT.eventLedgerDirectory,
+      occurredAt,
+      "occurredAt",
+    ),
+    record: {
+      dayKey: "2026-07-15",
+      id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F5",
+      kind: "observation",
+      metric: "daily-steps",
+      occurredAt,
+      recordedAt: "2026-07-15T12:06:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Unrelated malformed activity summary",
+      value: 7000,
+    },
+  });
+
+  const summary = await readCanonicalEventAvailabilityInterruptible({
+    vaultRoot,
+  });
+  assert.equal(summary.interrupted, false);
+  assert.equal(summary.latestBodyMeasurementDayKey, "2026-07-15");
+  assert.equal(summary.latestBodyMeasurementOccurredAt, occurredAt);
+});
+
+test("canonical event availability still fails closed for malformed relevant records", async () => {
+  const vaultRoot = await makeTempDirectory("murph-canonical-availability-malformed-body");
+  await initializeVault({ vaultRoot });
+  const occurredAt = "2026-07-15T12:00:00.000Z";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath(
+      VAULT_LAYOUT.eventLedgerDirectory,
+      occurredAt,
+      "occurredAt",
+    ),
+    record: {
+      dayKey: "2026-07-15",
+      id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F6",
+      kind: "measurement",
+      measurements: [{
+        metric: "body-weight",
+        unit: "kg",
+      }],
+      occurredAt,
+      recordedAt: "2026-07-15T12:05:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Malformed body measurement",
+    },
+  });
+
+  await assert.rejects(
+    () => readCanonicalEventAvailabilityInterruptible({ vaultRoot }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "EVENT_CONTRACT_INVALID",
+  );
+});
+
 test("canonical event availability collapses revisions before filtering by kind", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary-kind-revision");
   await initializeVault({ vaultRoot });

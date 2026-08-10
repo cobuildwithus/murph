@@ -139,11 +139,11 @@ const CANONICAL_BODY_MEASUREMENT_TYPES = new Set([
   "waist",
   "weight",
 ]);
-const CANONICAL_AVAILABILITY_EVENT_KINDS = new Set([
-  "body_measurement",
-  "measurement",
-  "observation",
-  "test",
+const STORED_DAY_GRAIN_OBSERVATION_ALIASES = new Set([
+  "day",
+  "daily-summary",
+  "daily-timeseries-aggregate",
+  "summary",
 ]);
 
 type EncounterHistoryFields = Pick<
@@ -1354,13 +1354,16 @@ export async function readCanonicalEventAvailabilityInterruptible(
         if (storedHistoryRecord) {
           record = storedHistoryRecord;
         } else {
-          const parsed = safeParseContract(eventRecordSchema, shardRecord);
+          const normalizedShardRecord =
+            normalizeStoredAvailabilityEvent(shardRecord);
+          const parsed = safeParseContract(
+            eventRecordSchema,
+            normalizedShardRecord,
+          );
           if (!parsed.success) {
-            if (
-              isPlainRecord(shardRecord)
-              && typeof shardRecord.kind === "string"
-              && CANONICAL_AVAILABILITY_EVENT_KINDS.has(shardRecord.kind)
-            ) {
+            if (storedEventMayContributeToCanonicalAvailability(
+              normalizedShardRecord,
+            )) {
               throw new VaultError(
                 "EVENT_CONTRACT_INVALID",
                 "Stored availability event record is invalid.",
@@ -1465,6 +1468,67 @@ function isCanonicalBodyMeasurementMetric(metric: string): boolean {
   const canonicalMetricKey = resolveWearableCanonicalMetricKey(metric);
   return canonicalMetricKey !== null
     && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey);
+}
+
+function normalizeStoredAvailabilityEvent(value: unknown): unknown {
+  if (
+    !isPlainRecord(value)
+    || value.kind !== "observation"
+    || typeof value.observationGrain !== "string"
+  ) {
+    return value;
+  }
+
+  const observationGrain = value.observationGrain
+    .trim()
+    .toLowerCase()
+    .replace(/_/gu, "-");
+  if (!STORED_DAY_GRAIN_OBSERVATION_ALIASES.has(observationGrain)) {
+    return value;
+  }
+
+  // The query read model has always treated these persisted provider-day
+  // spellings as summary grain. Normalize only at this stored-read boundary;
+  // current writes remain constrained by the current event contract.
+  return {
+    ...value,
+    observationGrain: "summary",
+  };
+}
+
+function storedEventMayContributeToCanonicalAvailability(
+  value: unknown,
+): boolean {
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+
+  if (value.kind === "body_measurement") {
+    return true;
+  }
+  if (value.kind === "observation") {
+    return typeof value.metric === "string"
+      && isCanonicalBodyMeasurementMetric(value.metric);
+  }
+  if (value.kind === "test") {
+    return value.testCategory === BLOOD_TEST_CATEGORY
+      || (
+        typeof value.specimenType === "string"
+        && KNOWN_BLOOD_TEST_SPECIMEN_TYPES.has(value.specimenType)
+      );
+  }
+  if (value.kind !== "measurement" || !Array.isArray(value.measurements)) {
+    return false;
+  }
+
+  return value.measurements.some((measurement) => {
+    if (!isPlainRecord(measurement) || typeof measurement.metric !== "string") {
+      return false;
+    }
+    return isCanonicalBodyMeasurementMetric(measurement.metric)
+      || measurement.metric === "systolic-blood-pressure"
+      || measurement.metric === "diastolic-blood-pressure";
+  });
 }
 
 function canonicalEventContainsPairedBloodPressure(record: EventRecord): boolean {

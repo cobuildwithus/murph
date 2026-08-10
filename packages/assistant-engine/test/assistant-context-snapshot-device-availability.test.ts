@@ -443,8 +443,39 @@ describe('assistant context snapshot device availability', () => {
 
   it('rebuilds snapshots written with the previous schema version', async () => {
     const { parentRoot, vaultRoot } = await createDeviceMeasurementVault()
+    const queryProjectionPath = path.join(
+      vaultRoot,
+      '.runtime/projections/query.sqlite',
+    )
 
     try {
+      await appendJsonlRecord({
+        vaultRoot,
+        relativePath: toMonthlyShardRelativePath(
+          VAULT_LAYOUT.eventLedgerDirectory,
+          '2026-08-08T12:01:00.000Z',
+          'occurredAt',
+        ),
+        record: {
+          dayKey: '2026-08-08',
+          externalRef: {
+            resourceId: 'daily-hrv-2026-08-08',
+            resourceType: 'daily-summary',
+            system: 'oura',
+          },
+          id: 'evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F9',
+          kind: 'observation',
+          metric: 'hrv',
+          observationGrain: 'daily-summary',
+          occurredAt: '2026-08-08T12:01:00.000Z',
+          recordedAt: '2026-08-08T12:02:00.000Z',
+          schemaVersion: 'murph.event.v1',
+          source: 'device',
+          title: 'Legacy provider HRV summary',
+          unit: 'ms',
+          value: 47,
+        },
+      })
       await appendJsonlRecord({
         vaultRoot,
         relativePath: toMonthlyShardRelativePath(
@@ -504,9 +535,20 @@ describe('assistant context snapshot device availability', () => {
       expect(prompt).toContain('Body/scale measurement history is present')
       expect(prompt).toContain('Blood-pressure measurement history is present')
       expect(prompt).not.toContain('Legacy context snapshot.')
+      expect(prompt).not.toContain('47')
       await expect(
         isAssistantContextSnapshotRefreshPending({ vaultRoot }),
       ).resolves.toBe(false)
+      await expect(access(queryProjectionPath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+      await expect(createIntegratedVaultServices().query.listWearableRecovery({
+        from: '2026-08-08',
+        limit: 30,
+        requestId: null,
+        to: '2026-08-08',
+        vault: vaultRoot,
+      })).resolves.toMatchObject({ count: 1 })
     } finally {
       await rm(parentRoot, {
         force: true,
