@@ -18,7 +18,7 @@ Murph already has canonical owners for the underlying facts:
 - wearable and connected-device data
 - automations and tracked-table presentation
 
-The first missing capability was a small, generic **measurement-entry read projection**. A measurement event can contain several scalar entries, while the event-level `measurement list` compacts nested object arrays and therefore cannot reliably return the individual values needed for filtering or trend math. The lossless `measurement entry list` projection now exists without changing that event-list contract. Build a deterministic generic trend read on the same use case before considering a thin `body-composition` composition.
+The first missing capability was a small, generic **measurement-entry read projection**. A measurement event can contain several scalar entries, while the event-level `measurement list` compacts nested object arrays and therefore cannot reliably return the individual values needed for filtering or trend math. The lossless `measurement entry list` projection now composes those event entries with canonical scalar observation entries without changing the event-list contract. Build a deterministic generic trend read on the same use case before considering a thin `body-composition` composition.
 
 Keep the skill as the strategy owner and the CLI as deterministic data access. Do not encode nutrition coaching inside command handlers. The remaining slices are future work; this document does not authorize hidden runtime behavior or a second canonical store.
 
@@ -31,7 +31,7 @@ What exists:
 - `measurement add` records one or more open scalar entries with canonical metric slugs, values, units, optional qualifiers and notes, occurrence time, source, media, tags, and timezone.
 - `measurement import-json` preserves richer nested imports and raw provenance.
 - `measurement show`, `list`, and `manifest` expose canonical events and immutable import provenance.
-- `measurement entry list` returns lossless, exact-metric scalar rows with parent event identity and original entry indexes.
+- `measurement entry list` returns lossless, exact-metric scalar rows from canonical `measurement`, legacy `body_measurement`, and scalar `observation` events, preserving parent-event identity and honest source shape.
 
 What works for body composition:
 
@@ -39,7 +39,7 @@ What works for body composition:
 - waist and other circumferences
 - body-fat or lean-mass estimates, provided the vendor metric and source remain explicit
 - grouped manual check-ins
-- direct or device-derived source labeling
+- direct or device-derived source labeling, including canonical connected-device observations
 
 Gap:
 
@@ -82,7 +82,7 @@ Any new surface must:
 
 - compose canonical owners rather than create a second store
 - preserve direct measurement, estimate, device, unit, timestamp, and provenance
-- preserve the parent `evt_*` event ID and the matched entry’s original array index
+- preserve the parent `evt_*` event ID and record kind; preserve the matched entry’s original array index for array-backed records and use `null` for scalar observations
 - use the existing canonical metric-slug normalization contract
 - avoid silently merging different BIA devices or treating estimated tissue as measured tissue
 - avoid fuzzy metric matching, hidden unit conversion, and silent duplicate deletion
@@ -116,7 +116,8 @@ Recommended behavior:
 - flatten matching canonical entries into a typed read projection; do not persist the projection
 - return one row per matching entry with:
   - parent `eventId`
-  - zero-based `measurementIndex`
+  - canonical `recordKind`
+  - zero-based `measurementIndex` for array-backed measurement records, or `null` for scalar observations
   - `occurredAt`
   - event `source`
   - canonical `metric`
@@ -136,7 +137,8 @@ Suggested row:
 ```json
 {
   "eventId": "evt_01JABCDEF0123456789ABCDEFX",
-  "measurementIndex": 0,
+  "recordKind": "observation",
+  "measurementIndex": null,
   "occurredAt": "2026-07-01T07:15:00-04:00",
   "source": "device",
   "metric": "body-weight",

@@ -35,6 +35,11 @@ import {
 
 const DEFAULT_LIST_LIMIT = 50
 const TRACKED_MEASUREMENT_EVENT_KINDS = ['measurement', 'body_measurement'] as const
+const MEASUREMENT_ENTRY_RECORD_KINDS = [
+  ...TRACKED_MEASUREMENT_EVENT_KINDS,
+  'observation',
+] as const
+const measurementEntryRecordKindSchema = z.enum(MEASUREMENT_ENTRY_RECORD_KINDS)
 
 type TrackedMeasurementEventKind = (typeof TRACKED_MEASUREMENT_EVENT_KINDS)[number]
 
@@ -54,7 +59,8 @@ export const measurementImportManifestResultSchema = z.object({
 
 export const measurementEntryListItemSchema = measurementEntrySchema.extend({
   eventId: measurementLookupSchema,
-  measurementIndex: z.number().int().nonnegative(),
+  recordKind: measurementEntryRecordKindSchema,
+  measurementIndex: z.number().int().nonnegative().nullable(),
   occurredAt: isoTimestampSchema,
   source: eventSourceSchema.nullable(),
 })
@@ -169,7 +175,6 @@ export async function listMeasurementEntries(input: {
   limit?: number
 }) {
   const query = await loadQueryRuntime('measurement entry query reads')
-  const readModel = await query.readVault(input.vault)
   const metrics = [
     ...new Set(
       input.metrics.map((metric, index) =>
@@ -188,7 +193,16 @@ export async function listMeasurementEntries(input: {
     typeof input.limit === 'number' && Number.isFinite(input.limit)
       ? Math.max(1, Math.min(DEFAULT_LIST_LIMIT * 4, Math.round(input.limit)))
       : DEFAULT_LIST_LIMIT
-  const items = query
+  const [readModel, observationEntries] = await Promise.all([
+    query.readVault(input.vault),
+    query.listCanonicalObservationMetricEntries(input.vault, {
+      from: input.from,
+      metrics,
+      to: input.to,
+      limit: null,
+    }),
+  ])
+  const measurementItems = query
     .listEntities(readModel, {
       families: ['event'],
       kinds: [...TRACKED_MEASUREMENT_EVENT_KINDS],
@@ -196,20 +210,31 @@ export async function listMeasurementEntries(input: {
       to: input.to,
     })
     .flatMap((record: QueryRecord) => {
-      if (!record.occurredAt || !Array.isArray(record.attributes.measurements)) {
+      if (!record.occurredAt) {
         return []
       }
 
+      const parsedRecordKind = measurementEntryRecordKindSchema.safeParse(record.kind)
+      if (!parsedRecordKind.success) {
+        throw new VaultCliError(
+          'invalid_payload',
+          `Event "${record.entityId}" is not a supported scalar measurement record.`,
+        )
+      }
+      const recordKind = parsedRecordKind.data
       const occurredAt = record.occurredAt
       const parsedSource = eventSourceSchema.safeParse(record.attributes.source)
-      return record.attributes.measurements.flatMap((rawEntry, measurementIndex) => {
+      const rawEntries = Array.isArray(record.attributes.measurements)
+        ? record.attributes.measurements
+        : []
+      return rawEntries.flatMap((rawEntry, entryIndex) => {
         let entry: MeasurementEntry
-        if (record.kind === 'body_measurement') {
+        if (recordKind === 'body_measurement') {
           const parsedEntry = bodyMeasurementEntrySchema.safeParse(rawEntry)
           if (!parsedEntry.success) {
             throw new VaultCliError(
               'invalid_payload',
-              `Measurement "${record.entityId}" entry ${measurementIndex} is not a valid canonical body-measurement entry.`,
+              `Measurement "${record.entityId}" entry ${entryIndex} is not a valid canonical body-measurement entry.`,
             )
           }
           entry = {
@@ -223,7 +248,7 @@ export async function listMeasurementEntries(input: {
           if (!parsedEntry.success) {
             throw new VaultCliError(
               'invalid_payload',
-              `Measurement "${record.entityId}" entry ${measurementIndex} is not a valid canonical measurement entry.`,
+              `Measurement "${record.entityId}" entry ${entryIndex} is not a valid canonical measurement entry.`,
             )
           }
           entry = parsedEntry.data
@@ -234,13 +259,28 @@ export async function listMeasurementEntries(input: {
 
         return [{
           eventId: record.entityId,
-          measurementIndex,
+          recordKind,
+          measurementIndex: entryIndex,
           occurredAt,
           source: parsedSource.success ? parsedSource.data : null,
           ...entry,
         }]
       })
     })
+  const observationItems = observationEntries.map((entry) => {
+    const parsedSource = eventSourceSchema.safeParse(entry.source)
+    return {
+      eventId: entry.eventId,
+      recordKind: 'observation' as const,
+      measurementIndex: null,
+      occurredAt: entry.occurredAt,
+      source: parsedSource.success ? parsedSource.data : null,
+      metric: entry.metric,
+      value: entry.value,
+      unit: entry.unit,
+    }
+  })
+  const items = [...measurementItems, ...observationItems]
     .sort((left, right) => {
       const occurredAtOrder = Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
       if (occurredAtOrder !== 0) {
@@ -250,7 +290,7 @@ export async function listMeasurementEntries(input: {
       const eventOrder = left.eventId.localeCompare(right.eventId)
       return eventOrder !== 0
         ? eventOrder
-        : left.measurementIndex - right.measurementIndex
+        : (left.measurementIndex ?? -1) - (right.measurementIndex ?? -1)
     })
     .slice(0, limit)
 

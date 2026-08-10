@@ -105,7 +105,8 @@ interface MeasurementEntryListResult {
   }
   items: Array<{
     eventId: string
-    measurementIndex: number
+    recordKind: 'measurement' | 'body_measurement' | 'observation'
+    measurementIndex: number | null
     occurredAt: string
     source: string | null
     metric: string
@@ -192,6 +193,30 @@ async function initVault(cli: Cli.Cli, vaultRoot: string) {
   assert.equal(requireData(initResult.envelope).created, true)
 }
 
+async function importEventPayload(input: {
+  cli: Cli.Cli
+  parentRoot: string
+  vaultRoot: string
+  fileName: string
+  payload: Record<string, unknown>
+}) {
+  const payloadPath = path.join(input.parentRoot, input.fileName)
+  await writeFile(payloadPath, JSON.stringify(input.payload), 'utf8')
+
+  return requireData(
+    (
+      await runInProcessJsonCli<{ eventId: string }>(input.cli, [
+        'event',
+        'import-json',
+        '--vault',
+        input.vaultRoot,
+        '--input',
+        `@${payloadPath}`,
+      ])
+    ).envelope,
+  )
+}
+
 test('measurement add schema exposes typed single-record and grouped-event fields', async () => {
   const schema = await readCommandSchema(createMeasurementCli(), ['measurement', 'add'])
 
@@ -251,7 +276,7 @@ test('measurement entry list schema requires exact metric filters and preserves 
   assert.match(getOptionDescription(schema, 'metric'), /matching is exact, not fuzzy/u)
 })
 
-test('measurement entry list returns primary and legacy scalar entries without changing event list', async () => {
+test('measurement entry list returns primary, legacy, and device-observation scalars without changing event list', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext('murph-measurement-entry-list-')
   cleanupPaths.push(parentRoot)
   const cli = createMeasurementCli()
@@ -321,10 +346,12 @@ test('measurement entry list returns primary and legacy scalar entries without c
       ])
     ).envelope,
   )
-  const bodyMeasurementPayloadPath = path.join(parentRoot, 'body-measurement.json')
-  await writeFile(
-    bodyMeasurementPayloadPath,
-    JSON.stringify({
+  const bodyMeasurement = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'body-measurement.json',
+    payload: {
       kind: 'body_measurement',
       occurredAt: '2026-07-05T07:30:00.000Z',
       source: 'manual',
@@ -336,39 +363,98 @@ test('measurement entry list returns primary and legacy scalar entries without c
           unit: 'kg',
         },
       ],
-    }),
-    'utf8',
-  )
-  const bodyMeasurement = requireData(
-    (
-      await runInProcessJsonCli<{ eventId: string }>(cli, [
-        'event',
-        'import-json',
-        '--vault',
-        vaultRoot,
-        '--input',
-        `@${bodyMeasurementPayloadPath}`,
-      ])
-    ).envelope,
-  )
-  requireData(
-    (
-      await runInProcessJsonCli<MeasurementAddResult>(cli, [
-        'measurement',
-        'add',
-        '--vault',
-        vaultRoot,
-        '--metric',
-        'body-weight',
-        '--value',
-        '58',
-        '--unit',
-        'kg',
-        '--occurred-at',
-        '2026-05-01T07:30:00.000Z',
-      ])
-    ).envelope,
-  )
+    },
+  })
+  const junctionWeight = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'junction-weight.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-06T07:30:00.000Z',
+      source: 'device',
+      title: 'Junction body weight',
+      metric: 'weight',
+      value: 48.5,
+      unit: 'kg',
+      observationGrain: 'summary',
+      externalRef: {
+        system: 'junction',
+        resourceType: 'junction-body',
+        resourceId: 'body-2026-07-06',
+        facet: 'weight',
+      },
+    },
+  })
+  const whoopBmi = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'whoop-bmi.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-07T07:30:00.000Z',
+      source: 'device',
+      title: 'WHOOP BMI',
+      metric: 'bmi',
+      value: 16.8,
+      unit: 'kg_m2',
+      observationGrain: 'summary',
+      externalRef: {
+        system: 'whoop',
+        resourceType: 'body-measurement',
+        resourceId: 'body-2026-07-07',
+        facet: 'bmi',
+      },
+    },
+  })
+  const normalBmi = await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'normal-bmi.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-01T07:30:00.000Z',
+      source: 'device',
+      title: 'Earlier device BMI',
+      metric: 'bmi',
+      value: 22.1,
+      unit: 'kg/m2',
+      observationGrain: 'summary',
+    },
+  })
+  await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'stale-observation.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-05-01T07:30:00.000Z',
+      source: 'device',
+      title: 'Stale device BMI',
+      metric: 'bmi',
+      value: 16.4,
+      unit: 'kg_m2',
+    },
+  })
+  await importEventPayload({
+    cli,
+    parentRoot,
+    vaultRoot,
+    fileName: 'unrelated-observation.json',
+    payload: {
+      kind: 'observation',
+      occurredAt: '2026-07-08T07:30:00.000Z',
+      source: 'device',
+      title: 'Device resting heart rate',
+      metric: 'resting-heart-rate',
+      value: 52,
+      unit: 'bpm',
+    },
+  })
 
   const entries = requireData(
     (
@@ -402,11 +488,32 @@ test('measurement entry list returns primary and legacy scalar entries without c
     to: '2026-07-31',
     limit: 200,
   })
-  assert.equal(entries.count, 4)
+  assert.equal(entries.count, 7)
   assert.equal(entries.nextCursor, null)
   assert.deepEqual(entries.items, [
     {
+      eventId: whoopBmi.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-07T07:30:00.000Z',
+      source: 'device',
+      metric: 'bmi',
+      value: 16.8,
+      unit: 'kg_m2',
+    },
+    {
+      eventId: junctionWeight.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-06T07:30:00.000Z',
+      source: 'device',
+      metric: 'weight',
+      value: 48.5,
+      unit: 'kg',
+    },
+    {
       eventId: bodyMeasurement.eventId,
+      recordKind: 'body_measurement',
       measurementIndex: 0,
       occurredAt: '2026-07-05T07:30:00.000Z',
       source: 'manual',
@@ -416,6 +523,7 @@ test('measurement entry list returns primary and legacy scalar entries without c
     },
     {
       eventId: grouped.eventId,
+      recordKind: 'measurement',
       measurementIndex: 0,
       occurredAt: '2026-07-03T07:30:00.000Z',
       source: 'manual',
@@ -425,6 +533,7 @@ test('measurement entry list returns primary and legacy scalar entries without c
     },
     {
       eventId: grouped.eventId,
+      recordKind: 'measurement',
       measurementIndex: 1,
       occurredAt: '2026-07-03T07:30:00.000Z',
       source: 'manual',
@@ -434,6 +543,7 @@ test('measurement entry list returns primary and legacy scalar entries without c
     },
     {
       eventId: directBmi.eventId,
+      recordKind: 'measurement',
       measurementIndex: 0,
       occurredAt: '2026-07-02T07:30:00.000Z',
       source: 'device',
@@ -441,7 +551,39 @@ test('measurement entry list returns primary and legacy scalar entries without c
       value: 17.2,
       unit: 'kg_m2',
     },
+    {
+      eventId: normalBmi.eventId,
+      recordKind: 'observation',
+      measurementIndex: null,
+      occurredAt: '2026-07-01T07:30:00.000Z',
+      source: 'device',
+      metric: 'bmi',
+      value: 22.1,
+      unit: 'kg/m2',
+    },
   ])
+
+  const saturated = requireData(
+    (
+      await runInProcessJsonCli<MeasurementEntryListResult>(cli, [
+        'measurement',
+        'entry',
+        'list',
+        '--vault',
+        vaultRoot,
+        '--metric',
+        'bmi',
+        '--from',
+        '2026-07-01',
+        '--to',
+        '2026-07-31',
+        '--limit',
+        '1',
+      ])
+    ).envelope,
+  )
+  assert.equal(saturated.count, 1)
+  assert.deepEqual(saturated.items, [entries.items[0]])
 
   const events = requireData(
     (
@@ -463,6 +605,8 @@ test('measurement entry list returns primary and legacy scalar entries without c
   assert.ok(groupedEvent)
   assert.equal(groupedEvent.data.measurementsCount, 2)
   assert.equal('measurements' in groupedEvent.data, false)
+  assert.equal(events.items.some((item) => item.id === whoopBmi.eventId), false)
+  assert.equal(events.items.some((item) => item.id === junctionWeight.eventId), false)
 })
 
 test('measurement import-json schema exposes the structured payload escape hatch', async () => {
