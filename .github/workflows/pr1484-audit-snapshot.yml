@@ -1,4 +1,4 @@
-name: PR 1484 audit snapshots
+name: Rebase PR 1484 onto audited main
 
 on:
   push:
@@ -6,42 +6,30 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  snapshot:
+  rebase:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Check out latest main
+      - name: Check out exact PR branch
         uses: actions/checkout@v4
         with:
-          ref: 5cfb1d36c54440d0453ee5b86cfa736a201c5db5
-          path: main
+          ref: agent/member-owned-provider-applications
+          fetch-depth: 0
 
-      - name: Check out PR merge base
-        uses: actions/checkout@v4
-        with:
-          ref: 337a75888b8c8046b208a75195d3e787dec83834
-          path: base
-
-      - name: Check out PR head
-        uses: actions/checkout@v4
-        with:
-          ref: ee78d0004d070d0e9aa422f20b603a826f085545
-          path: pr
-
-      - name: Package snapshots
+      - name: Rebase exact audited head
         shell: bash
         run: |
           set -euo pipefail
-          tar --exclude=.git --exclude=node_modules --exclude=.next \
-            -czf /tmp/pr1484-audit-snapshots.tar.gz main base pr
-
-      - name: Upload snapshots
-        uses: actions/upload-artifact@v4
-        with:
-          name: pr1484-audit-snapshots
-          path: /tmp/pr1484-audit-snapshots.tar.gz
-          retention-days: 1
-          if-no-files-found: error
+          expected_head=ee78d0004d070d0e9aa422f20b603a826f085545
+          audited_main=5cfb1d36c54440d0453ee5b86cfa736a201c5db5
+          merge_base=337a75888b8c8046b208a75195d3e787dec83834
+          test "$(git rev-parse HEAD)" = "$expected_head"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rebase --onto "$audited_main" "$merge_base"
+          git diff --check "$audited_main"..HEAD
+          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:"$expected_head" \
+            origin HEAD:refs/heads/agent/member-owned-provider-applications
