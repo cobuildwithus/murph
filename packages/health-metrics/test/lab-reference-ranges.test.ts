@@ -18,6 +18,11 @@ const PAGE_AUTHORED_STATUS_MIRRORS = [
 ] as const;
 
 const DISPLAY_CATALOG_KEYS = [
+  "biomarker:absolute-basophils",
+  "biomarker:absolute-eosinophils",
+  "biomarker:absolute-lymphocytes",
+  "biomarker:absolute-monocytes",
+  "biomarker:absolute-neutrophils",
   "biomarker:albumin",
   "biomarker:anion-gap",
   "biomarker:apolipoprotein-b",
@@ -32,6 +37,7 @@ const DISPLAY_CATALOG_KEYS = [
   "biomarker:ldl-calculated",
   "biomarker:ldl-chol-calc-nih",
   "biomarker:lipoprotein-a",
+  "biomarker:mean-corpuscular-volume",
   "biomarker:methylmalonic-acid",
   "biomarker:non-hdl-cholesterol",
   "biomarker:rheumatoid-factor",
@@ -42,18 +48,19 @@ const DISPLAY_CATALOG_KEYS = [
   "biomarker:total-cholesterol",
   "biomarker:total-iron-binding-capacity",
   "biomarker:triglycerides",
+  "biomarker:white-blood-cell-count",
   "biomarker:zinc",
 ] as const;
 
 describe("reviewed lab reference range runtime catalog", () => {
-  it("covers 33 canonical identities through 36 exact-unit records", () => {
+  it("covers 40 canonical identities through 43 exact-unit records", () => {
     const entries = listReviewedBiomarkerFallbackRanges();
     expect(entries.map((entry) => entry.entityKey).sort()).toEqual([
       ...PAGE_AUTHORED_STATUS_MIRRORS,
       ...DISPLAY_CATALOG_KEYS,
     ].sort());
-    expect(entries).toHaveLength(33);
-    expect(entries.reduce((count, entry) => count + entry.ranges.length, 0)).toBe(36);
+    expect(entries).toHaveLength(40);
+    expect(entries.reduce((count, entry) => count + entry.ranges.length, 0)).toBe(43);
 
     for (const entry of entries) {
       expect(new Set(entry.ranges.map(({ range }) => range.unit)).size).toBe(
@@ -93,6 +100,15 @@ describe("reviewed lab reference range runtime catalog", () => {
         upperBound: { inclusive: true, value: 1.7 },
       }),
     ]);
+    expect(resolveReviewedBiomarkerFallbackRanges("biomarker:white-blood-cell-count"))
+      .toEqual([
+        expect.objectContaining({
+          eligibleSpecimenKinds: ["whole_blood"],
+          lowerBound: { inclusive: true, value: 3.4 },
+          unit: "10^3/uL",
+          upperBound: { inclusive: true, value: 9.6 },
+        }),
+      ]);
   });
 
   it("derives status only from ranges that are safe to classify", () => {
@@ -104,6 +120,8 @@ describe("reviewed lab reference range runtime catalog", () => {
       .toEqual({ above: "above_range", below: "below_range", within: "in_range" });
     expect(resolveBiomarkerFallbackStatusRanges("biomarker:ferritin")[0]?.statusMapping)
       .toEqual({ above: "reported", below: "reported", within: "reported" });
+    expect(resolveBiomarkerFallbackStatusRanges("biomarker:white-blood-cell-count")[0]?.statusMapping)
+      .toEqual({ above: "above_range", below: "below_range", within: "in_range" });
   });
 
   it("resolves stable metric-key aliases without duplicating catalog entries", () => {
