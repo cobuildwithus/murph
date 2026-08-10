@@ -4421,8 +4421,10 @@ test("Junction direct Apple Health canonical delivery records history despite th
 });
 
 test("Junction data webhooks name the delivering source and lifecycle events do not", async () => {
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
     const url = new URL(readUrl(input));
+    requests.push(url.toString());
     if (url.pathname === "/v2/user/providers/junction-user-1") {
       return createJsonResponse({
         providers: [{
@@ -4532,13 +4534,38 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
   assert.equal(lifecycle.dataSourceProviderSlug, null);
   assert.equal(lifecycle.sourceProviderSlug, "garmin");
   assert.equal(lifecycle.occurredAt, "2026-03-20T14:30:00.000Z");
-  const sourceBloodPressureHistory = requireValue(
-    lifecycle.jobs.find((job) =>
+  assert.deepEqual(lifecycle.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
+  const garminSource = {
+    displayName: "Garmin",
+    firstSeenAt: "2026-03-20T14:30:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    resourceCount: 1,
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  };
+  const schedulerAccount = createStoredAccount({
+    metadata: {
+      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+    },
+    nextReconcileAt: "2026-04-03T00:00:00.000Z",
+    sources: [garminSource],
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const findScheduledHistoryJob = (now: string) => requireValue(
+    executor.createScheduledJobs?.(
+      schedulerAccount,
+      now,
+    ).jobs.find((job) =>
       job.kind === "resource"
       && job.payload?.resource === "blood_pressure"
+      && job.payload?.sourceProviderSlug === "garmin"
     ),
   );
-  assert.deepEqual(sourceBloodPressureHistory.payload, {
+  const schedulerJob = findScheduledHistoryJob("2026-04-03T00:00:00.000Z");
+  assert.deepEqual(schedulerJob.payload, {
     historicalBackfill: true,
     historicalWindowStart: "2026-03-18T00:00:00.000Z",
     resource: "blood_pressure",
@@ -4547,29 +4574,69 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     windowEnd: "2026-03-20T00:00:00.000Z",
     windowStart: "2026-03-18T00:00:00.000Z",
   });
-
-  const lifecycleJob = createJob(
-    "resource",
-    sourceBloodPressureHistory.payload ?? {},
+  assert.equal(
+    findScheduledHistoryJob("2026-04-04T00:00:00.000Z").dedupeKey,
+    schedulerJob.dedupeKey,
   );
-  lifecycleJob.dedupeKey = sourceBloodPressureHistory.dedupeKey ?? null;
-  const postMigrationResult = await executeJunctionJob(
+
+  const updateCases = [
+    {
+      data: {
+        provider: "garmin",
+        updated_at: "2026-04-03T00:00:00.000Z",
+      },
+      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      messageId: "msg_lifecycle_update_timestamp",
+    },
+    {
+      data: { provider: "garmin" },
+      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      messageId: "msg_lifecycle_update_now_fallback",
+    },
+  ] as const;
+
+  for (const updateCase of updateCases) {
+    const update = await parseWebhook({
+      body: {
+        event_type: "provider.connection.updated",
+        user_id: "junction-user-1",
+        data: updateCase.data,
+      },
+      messageId: updateCase.messageId,
+    });
+    assert.equal(update.occurredAt, updateCase.expectedOccurredAt);
+    assert.deepEqual(update.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
+  }
+
+  requests.length = 0;
+  const scheduledResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
       account: createAccount({
         metadata: {
           junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
         },
+        sources: [garminSource],
       }),
       importSnapshot: async () => ({
         canonicalEventCount: 1,
         durableDeliveryAccepted: true,
       }),
     }),
-    lifecycleJob,
+    {
+      ...createJob("resource", schedulerJob.payload ?? {}),
+      dedupeKey: schedulerJob.dedupeKey ?? null,
+    },
+  );
+
+  assert.equal(
+    requests.some((request) =>
+      new URL(request).searchParams.get("start_date") === "2026-03-18T00:00:00.000Z"
+    ),
+    true,
   );
   assert.equal(
-    postMigrationResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
+    scheduledResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
     "v1|garmin,omron",
   );
 });

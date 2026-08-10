@@ -2276,9 +2276,6 @@ export function createJunctionDeviceSyncProvider(
       sourceProviderSlug,
     });
     const jobs = buildJunctionWebhookJobs({
-      extendedBloodPressureBackfillEnabled:
-        extendedBackfillTimeseriesResources.includes("blood_pressure"),
-      extendedTimeseriesBackfillDays,
       eventType,
       objectId,
       occurredAt,
@@ -5585,8 +5582,6 @@ function buildExtendedTimeseriesBackfillJob(input: {
 }
 
 function buildJunctionWebhookJobs(input: {
-  extendedBloodPressureBackfillEnabled: boolean;
-  extendedTimeseriesBackfillDays: number;
   eventType: string;
   objectId: string | null;
   occurredAt: string;
@@ -5598,20 +5593,6 @@ function buildJunctionWebhookJobs(input: {
 }): DeviceSyncJobInput[] {
   if (isJunctionProviderConnectionEvent(input.eventType)) {
     const backfillWindowStart = subtractDays(input.window.windowEnd, input.summaryBackfillDays);
-    const sourceHistoricalWindowStart = floorUtcDayTimestamp(
-      subtractDays(input.occurredAt, input.extendedTimeseriesBackfillDays),
-    );
-    const sourceHistoricalBloodPressureJob =
-      input.extendedBloodPressureBackfillEnabled && input.sourceProviderSlug
-        ? buildExtendedTimeseriesBackfillJob({
-            availableAt: input.occurredAt,
-            historicalWindowStart: sourceHistoricalWindowStart,
-            resource: "blood_pressure",
-            sourceProviderSlug: input.sourceProviderSlug,
-            windowEnd: floorUtcDayTimestamp(input.occurredAt),
-            windowStart: sourceHistoricalWindowStart,
-          })
-        : null;
 
     return [
       buildExactWindowJob({
@@ -5620,9 +5601,6 @@ function buildJunctionWebhookJobs(input: {
         windowEnd: input.window.windowEnd,
         priority: 35,
       }),
-      ...(sourceHistoricalBloodPressureJob
-        ? [sourceHistoricalBloodPressureJob]
-        : []),
       {
         kind: "reconcile",
         payload: {
