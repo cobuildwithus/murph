@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 8 finding and current-main conflicts under remediation
+Status: active — exact-head round 9 candidate ready for push
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -419,3 +419,9 @@ Updated: 2026-08-10
   bytes, static closure 8,045,861 bytes, and total 10,026,794 bytes. The current
   exact total is the final measured runner baseline with the same 32 KiB
   allowance.
+- Final focused proof on the exact candidate passes: 439 Assistant Engine tests
+  with 47 credential-gated live-provider cases skipped, 66 Operator Config Linq
+  tests, 42 runner bundle-policy tests, CLI package-shape verification, Assistant
+  Engine/Operator Config/Cloudflare typechecks, docs drift, whitespace checks,
+  merge-tree proof, and candidate privacy/secret scans. The worktree is clean;
+  push, exact-head CI, and substantive ReviewGPT round 9 remain.
