@@ -171,17 +171,15 @@ count_record() {
         if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
           current_worktree_unauthorized=1
         fi
-        if (( guard_is_primary == 1 )); then
-          # Retire the bounded state published by an earlier rejected guard.
-          # Authorization must disappear first so every older guard fails
-          # closed if cleanup is interrupted. Never follow marker symlinks.
-          if [[ -f "$authorization_marker" || -L "$authorization_marker" ]]; then
-            rm -f -- "$authorization_marker"
-          fi
-          if [[ ! -e "$authorization_marker" && ! -L "$authorization_marker" \
-            && -f "$isolation_marker" && ! -L "$isolation_marker" ]]; then
-            rm -f -- "$isolation_marker"
-          fi
+        # Retire the bounded state published by an earlier rejected guard.
+        # Authorization must disappear first so every older guard fails
+        # closed if cleanup is interrupted. Never follow marker symlinks.
+        if [[ -f "$authorization_marker" || -L "$authorization_marker" ]]; then
+          rm -f -- "$authorization_marker"
+        fi
+        if [[ ! -e "$authorization_marker" && ! -L "$authorization_marker" \
+          && -f "$isolation_marker" && ! -L "$isolation_marker" ]]; then
+          rm -f -- "$isolation_marker"
         fi
       else
         admin_dirs+=("$admin_dir")

@@ -699,8 +699,8 @@ done
       { cwd: sanctioned, encoding: 'utf8', env: environment },
     )
     expect(taskScoped.status, taskScoped.stderr).toBe(0)
-    expect(existsSync(authorizationMarker)).toBe(true)
-    expect(existsSync(isolationMarker)).toBe(true)
+    expect(existsSync(authorizationMarker)).toBe(false)
+    expect(existsSync(isolationMarker)).toBe(false)
 
     const rawScoped = spawnSync(
       'bash',
@@ -709,8 +709,8 @@ done
     )
     expect(rawScoped.status).toBe(1)
     expect(rawScoped.stderr).toContain('current worktree bypassed scripts/create-worktree')
-    expect(existsSync(authorizationMarker)).toBe(true)
-    expect(existsSync(isolationMarker)).toBe(true)
+    expect(existsSync(authorizationMarker)).toBe(false)
+    expect(existsSync(isolationMarker)).toBe(false)
 
     const currentAudit = runScript(harness, 'worktree-storage-guard', [], {
       MURPH_WORKTREE_MAX_LIVE: '4',
@@ -790,7 +790,7 @@ done
         { cwd: sanctioned, encoding: 'utf8', env: environment },
       )
       expect(taskScoped.status, taskScoped.stderr).toBe(0)
-      expect(existsSync(authorizationMarker)).toBe(true)
+      expect(existsSync(authorizationMarker)).toBe(false)
       expect(lstatSync(isolationMarker).isSymbolicLink()).toBe(
         markerKind === 'dangling-symlink',
       )
@@ -1019,6 +1019,9 @@ done
       rawAdminDir,
       'murph-storage-guard-authorized',
     )
+    const rawIsolationMarker = path.join(rawAdminDir, 'murph-storage-guard-isolated')
+    writeFileSync(rawAuthorizationMarker, '')
+    writeFileSync(rawIsolationMarker, '')
     const taskLocalScoped = spawnSync(
       'bash',
       [path.join('scripts', 'worktree-storage-guard'), '--current-worktree', headSibling],
@@ -1026,6 +1029,7 @@ done
     )
     expect(taskLocalScoped.status, taskLocalScoped.stderr).toBe(0)
     expect(existsSync(rawAuthorizationMarker)).toBe(false)
+    expect(existsSync(rawIsolationMarker)).toBe(false)
 
     const baseAuditAfterTaskScan = runScript(harness, 'worktree-storage-guard', [], {
       MURPH_WORKTREE_MAX_LIVE: '7',

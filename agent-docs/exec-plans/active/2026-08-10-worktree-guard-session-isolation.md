@@ -25,9 +25,10 @@ Updated: 2026-08-10
   the older primary remains globally fail-closed if a raw sibling exists.
 - No guard publishes authorization for a raw checkout, so a later primary
   downgrade cannot reinterpret durable compatibility state as authority.
-- The current primary retires the exact authorization-plus-isolation state
-  written by the rejected intermediate guard, authorization first, while
-  task-local guards remain read-only and malformed nodes fail closed.
+- Any current guard scan retires the exact authorization-plus-isolation state
+  written by the rejected intermediate guard, authorization first under the
+  shared guard lock; task-local scans never publish it and malformed nodes fail
+  closed.
 - A preceding-version creator remains globally fail-closed around a raw
   sibling until it advances; current-version creation remains checkout-scoped.
 - The explicit no-argument guard continues to fail when any unauthorized
@@ -55,8 +56,9 @@ Updated: 2026-08-10
 - Focused worktree-guard coverage passed: 29 tests, including both
   mixed-version directions, hook/guard update ordering, downgrade safety, and
   scoped resource-budget coverage. The added regressions seed the exact
-  intermediate marker pair, prove task-local non-mutation, primary retirement,
-  downgrade rejection, and malformed-node fail-closed behavior.
+  intermediate marker pair, prove current task-first retirement against the
+  exact preceding primary and hook, downgrade rejection, and malformed-node
+  fail-closed behavior.
 - The first simplified scoped `pnpm test:diff` run passed syntax, source guards,
   repo-tools typechecking, dependency policy, and 519 of 520 repo-tools tests.
   Its unrelated signal-forwarding timing test then passed directly in
@@ -67,7 +69,9 @@ Updated: 2026-08-10
   The first complete serialized diff run then passed 521 of 522 tests before
   the unrelated signal-forwarding timing test failed; that exact test passed
   all 5 tests in isolation, and the complete serialized rerun passed all 522
-  tests and every preceding check.
+  tests and every preceding check. After the task-first retirement correction,
+  the focused suite passed all 29 tests and the complete serialized diff suite
+  passed all 522 tests plus every preceding check again.
 - The current-main merge had one documentation conflict. Its resolution keeps
   the upstream changelog and shared-guard requirements together with this
   change's scoped rollout and downgrade guarantees; no code conflict occurred.
@@ -86,8 +90,12 @@ Updated: 2026-08-10
   publication and its isolation state instead of adding another migration
   protocol. Round 4 then found that an exact previously published head could
   have left both markers behind before that deletion. The recorded correction
-  adds bounded retirement under the existing primary guard and lock: remove
-  authorization first, remove only a regular non-symlink isolation marker
-  after authorization is absent, and never mutate from a task-local guard.
+  added bounded retirement under the existing primary guard and lock. Round 5
+  then proved that primary-only retirement left the exact preceding primary
+  trusting persisted authorization during a task-first rollout. The recorded
+  correction allows any successfully completed current guard scan to delete
+  that exact rejected authority state under the shared lock: remove
+  authorization first and remove only a regular non-symlink isolation marker
+  after authorization is absent. Task-local guards still never publish state.
   All accepted findings await exact-head reruns.
 - Pending: exact-head ReviewGPT and GitHub Actions.

@@ -95,13 +95,14 @@ branch-independent hook supplies the committing checkout, so a raw worktree
 fails its own commit without blocking an authorized sibling. Sanctioned
 creation may also continue while a raw sibling exists because every registered
 worktree still consumes the global numeric and disk budget. No guard publishes
-legacy authorization for a raw checkout. During upgrade, the current primary
-guard treats any isolation marker from the rejected intermediate guard as
-unauthorized and retires its paired authorization under the existing guard
-lock. It removes a regular-file or symlink authorization node first and removes
-a regular non-symlink isolation marker only after authorization is absent;
-task-local guards never mutate this state. Interruption and malformed marker
-nodes therefore remain fail-closed for both current and preceding guards. The
+legacy authorization for a raw checkout. During upgrade, any current guard
+scan treats an isolation marker from the rejected intermediate guard as
+unauthorized and retires its paired authorization under the existing shared
+guard lock. It removes a regular-file or symlink authorization node first and
+removes a regular non-symlink isolation marker only after authorization is
+absent. Task-local guards may delete only this rejected authority state and
+never publish it. Interruption and malformed marker nodes therefore remain
+fail-closed for both current and preceding guards. The
 shared hook and installer pass the current checkout through an environment hint
 while retaining the preceding guard's no-argument command surface, so either
 the primary or task checkout may advance first without an argument outage. An
