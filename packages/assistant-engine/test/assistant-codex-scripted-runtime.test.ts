@@ -1520,6 +1520,30 @@ if (!tool) {
         tracking: null,
       },
       {
+        kind: 'compact_table',
+        version: 1,
+        title: 'Push day',
+        subtitle: null,
+        footer: null,
+        tracking: {
+          kind: 'workout',
+          entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+          snapshotAt: '2026-08-09T19:45:00.000Z',
+        },
+        workout: {
+          version: 1,
+          state: 'active',
+          exercises: [{
+            name: 'Bench press',
+            sets: [{
+              status: 'pending',
+              target: '185 lb × 6–8',
+              actual: null,
+            }],
+          }],
+        },
+      },
+      {
         kind: 'daily_nutrition',
         version: 2,
         localDate: '2026-08-08',
