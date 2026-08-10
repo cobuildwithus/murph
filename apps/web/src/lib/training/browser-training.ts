@@ -358,11 +358,13 @@ function buildExerciseProgress(
         setCount: 0,
       };
       const latestSet = completedSets.at(-1) ?? null;
-      const representativeSet = completedSets.reduce<TrainingSetView | null>(
-        (best, set) =>
-          best === null || compareTrainingSets(set, best) > 0 ? set : best,
-        null,
-      );
+      const representativeSet = completedSets
+        .filter(hasComparableBestMeasurement)
+        .reduce<TrainingSetView | null>(
+          (best, set) =>
+            best === null || compareTrainingSets(set, best) > 0 ? set : best,
+          null,
+        );
 
       current.sessionIds.add(session.id);
       current.setCount += completedSets.length;
@@ -482,9 +484,20 @@ function normalizedLoadKg(set: TrainingSetView): number {
   return 0;
 }
 
+function hasComparableBestMeasurement(set: TrainingSetView): boolean {
+  return set.weight === null
+    || isPoundUnit(set.weightUnit)
+    || isKilogramUnit(set.weightUnit);
+}
+
 function isPoundUnit(value: string | null): boolean {
   return value !== null
     && ["lb", "lbs", "pound", "pounds"].includes(value.toLowerCase());
+}
+
+function isKilogramUnit(value: string | null): boolean {
+  return value !== null
+    && ["kg", "kgs", "kilogram", "kilograms"].includes(value.toLowerCase());
 }
 
 function progressExerciseKey(exercise: TrainingExerciseView): string {

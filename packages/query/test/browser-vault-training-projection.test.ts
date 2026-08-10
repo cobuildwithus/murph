@@ -227,6 +227,55 @@ test("browser vault replicas expose a bounded sanitized training projection with
   assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 4);
 });
 
+test("browser training projection preserves completed next-local-day sessions before UTC midnight", async () => {
+  const createReplica = (endedAt?: string) => createBrowserVaultReplica({
+    generatedAt: "2026-08-09T23:30:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: endedAt
+      ? "training-next-local-day-completed"
+      : "training-next-local-day-active",
+    vault: createVaultReadModel({
+      entities: [
+        createEntity("event", "next_local_day", {
+          attributes: {
+            activityType: "strength-training",
+            workout: {
+              ...(endedAt ? { endedAt } : {}),
+              exercises: [
+                {
+                  name: "Bench press",
+                  order: 1,
+                  sets: [{ order: 1, reps: 8, weight: 60, weightUnit: "kg" }],
+                },
+              ],
+              sourceApp: "murph-live",
+              startedAt: "2026-08-09T23:00:00.000Z",
+            },
+          },
+          date: "2026-08-10",
+          kind: "activity_session",
+          occurredAt: "2026-08-09T23:00:00.000Z",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const activeReplica = await createReplica();
+  const completedReplica = await createReplica("2026-08-09T23:25:00.000Z");
+  const active = activeReplica.entities.find(
+    (entity) => entity.id === "next_local_day",
+  );
+  const completed = completedReplica.entities.find(
+    (entity) => entity.id === "next_local_day",
+  );
+  assert.ok(active);
+  assert.ok(completed);
+  assert.equal(requireRecord(active.attributes.training).state, "in_progress");
+  assert.equal(requireRecord(completed.attributes.training).state, "completed");
+});
+
 test("browser training projection fails closed on impractically large sessions", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-08-09T12:00:00.000Z",

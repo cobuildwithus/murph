@@ -366,11 +366,118 @@ test("Training treats less assistance as stronger progress", async () => {
 });
 
 
-test("Training includes a next-local-day workout before UTC midnight", async () => {
+test("Training ranks only explicitly unit-bearing weights as best sets", async () => {
   const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T18:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-comparable-loads",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "comparable_loads_older",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-07T18:00:00.000Z",
+              exercises: [
+                {
+                  name: "Bench press",
+                  order: 1,
+                  sets: [{ order: 1, reps: 8, weight: 135 }],
+                  sourceExerciseId: "EX_BENCH",
+                },
+                {
+                  name: "Shoulder press",
+                  order: 2,
+                  sets: [{ order: 1, reps: 8, weight: 150, weightUnit: "lb" }],
+                  sourceExerciseId: "EX_PRESS",
+                },
+                {
+                  name: "Row",
+                  order: 3,
+                  sets: [{ order: 1, reps: 8, weight: 60 }],
+                  sourceExerciseId: "EX_OVERRIDE",
+                  unitOverride: "kg",
+                },
+                {
+                  name: "Curl",
+                  order: 4,
+                  sets: [{ order: 1, reps: 10, weight: 100 }],
+                  sourceExerciseId: "EX_AMBIGUOUS",
+                },
+              ],
+              startedAt: "2026-08-07T17:00:00.000Z",
+            },
+          },
+          "2026-08-07T17:00:00.000Z",
+        ),
+        createWorkoutEntity(
+          "comparable_loads_latest",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-09T18:00:00.000Z",
+              exercises: [
+                {
+                  name: "Bench press",
+                  order: 1,
+                  sets: [{ order: 1, reps: 8, weight: 155, weightUnit: "lb" }],
+                  sourceExerciseId: "EX_BENCH",
+                },
+                {
+                  name: "Shoulder press",
+                  order: 2,
+                  sets: [{ order: 1, reps: 8, weight: 70, weightUnit: "kg" }],
+                  sourceExerciseId: "EX_PRESS",
+                },
+                {
+                  name: "Row",
+                  order: 3,
+                  sets: [{ order: 1, reps: 8, weight: 130, weightUnit: "lb" }],
+                  sourceExerciseId: "EX_OVERRIDE",
+                },
+                {
+                  name: "Curl",
+                  order: 4,
+                  sets: [{ order: 1, reps: 12, weight: 110 }],
+                  sourceExerciseId: "EX_AMBIGUOUS",
+                },
+              ],
+              startedAt: "2026-08-09T17:00:00.000Z",
+            },
+          },
+          "2026-08-09T17:00:00.000Z",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
+  const progress = new Map(
+    view.exerciseProgress.map((entry) => [entry.id, entry]),
+  );
+
+  assert.equal(progress.get("EX_BENCH")?.bestSet?.weight, 155);
+  assert.equal(progress.get("EX_BENCH")?.bestSet?.weightUnit, "lb");
+  assert.equal(progress.get("EX_PRESS")?.bestSet?.weight, 70);
+  assert.equal(progress.get("EX_PRESS")?.bestSet?.weightUnit, "kg");
+  assert.equal(progress.get("EX_OVERRIDE")?.bestSet?.weight, 60);
+  assert.equal(progress.get("EX_OVERRIDE")?.bestSet?.weightUnit, "kg");
+  assert.equal(progress.get("EX_AMBIGUOUS")?.bestSet, null);
+  assert.equal(progress.get("EX_AMBIGUOUS")?.lastSet?.weight, 110);
+});
+
+
+test("Training preserves a completed next-local-day workout before UTC midnight", async () => {
+  const createReplica = (endedAt?: string) => createBrowserVaultReplica({
     generatedAt: "2026-08-09T23:30:00.000Z",
     metricPoints: [],
-    sourceBundleHash: "training-positive-time-zone",
+    sourceBundleHash: endedAt
+      ? "training-positive-time-zone-completed"
+      : "training-positive-time-zone-active",
     vault: createVaultReadModel({
       entities: [
         createWorkoutEntity(
@@ -378,11 +485,12 @@ test("Training includes a next-local-day workout before UTC midnight", async () 
           {
             activityType: "strength-training",
             workout: {
+              ...(endedAt ? { endedAt } : {}),
               exercises: [
                 {
                   name: "Bench press",
                   order: 1,
-                  sets: [{ order: 1, reps: 8, weight: 60 }],
+                  sets: [{ order: 1, reps: 8, weight: 60, weightUnit: "kg" }],
                 },
               ],
               sourceApp: "murph-live",
@@ -397,12 +505,23 @@ test("Training includes a next-local-day workout before UTC midnight", async () 
       vaultRoot: "browser://vault",
     }),
   });
-  const view = selectBrowserVaultTraining(
-    createBrowserVaultQueryClient(replica),
+  const activeView = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(await createReplica()),
+  );
+  const completedView = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(
+      await createReplica("2026-08-09T23:25:00.000Z"),
+    ),
   );
 
-  assert.equal(view.summary.workoutCount, 1);
-  assert.equal(view.summary.trainingDayCount, 1);
-  assert.equal(view.weeks.at(-1)?.count, 1);
-  assert.equal(view.exerciseProgress[0]?.lastPerformedDate, "2026-08-10");
+  assert.equal(activeView.activeSession?.id, "tokyo_monday_workout");
+  assert.equal(completedView.activeSession, null);
+  assert.equal(completedView.recentSessions[0]?.id, "tokyo_monday_workout");
+  assert.equal(completedView.summary.workoutCount, 1);
+  assert.equal(completedView.summary.trainingDayCount, 1);
+  assert.equal(completedView.weeks.at(-1)?.count, 1);
+  assert.equal(
+    completedView.exerciseProgress[0]?.lastPerformedDate,
+    "2026-08-10",
+  );
 });

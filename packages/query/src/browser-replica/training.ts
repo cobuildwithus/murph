@@ -250,8 +250,9 @@ function isWithinLookback(
     return false;
   }
   const currentDate = generatedAt.slice(0, 10);
-  const cutoff = subtractDays(currentDate, TRAINING_LOOKBACK_DAYS - 1);
-  return localDate >= cutoff && localDate <= currentDate;
+  const cutoff = addDays(currentDate, -(TRAINING_LOOKBACK_DAYS - 1));
+  const latestDate = addDays(currentDate, 1);
+  return localDate >= cutoff && localDate <= latestDate;
 }
 
 function normalizeActivityType(value: string | null): string | null {
@@ -262,9 +263,9 @@ function normalizeActivityType(value: string | null): string | null {
   return normalized || null;
 }
 
-function subtractDays(value: string, days: number): string {
+function addDays(value: string, days: number): string {
   const date = new Date(`${value}T12:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() - days);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
 

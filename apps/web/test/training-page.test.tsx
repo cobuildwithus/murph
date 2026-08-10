@@ -282,6 +282,7 @@ test("Training gives a zero-data member one clear conversational start", () => {
     markup,
     /href="sms:\+15555550100\?body=Start%20a%20workout%20with%20me\."/,
   );
+  assert.equal((markup.match(/body=Start%20a%20workout/g) ?? []).length, 1);
   assert.doesNotMatch(markup, /Last 30 days/);
   assert.equal((markup.match(/Just tell Murph what happened/g) ?? []).length, 0);
 });
@@ -343,6 +344,37 @@ test("Training exposes workout actions only when vault state is known", () => {
   );
   assert.match(resolvedEmptyMarkup, /Start workout/);
   assert.match(resolvedEmptyMarkup, /body=Start%20a%20workout/);
+
+  const signedOutMarkup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: false,
+      continueContactOptions: [],
+      error: null,
+      onRefresh: () => {},
+      refreshPending: false,
+      startContactOptions: [],
+      status: "empty",
+      training: null,
+    }),
+  );
+  assert.equal(
+    (signedOutMarkup.match(/Log in to start training/g) ?? []).length,
+    1,
+  );
+
+  const noMessagingMarkup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions: [],
+      error: null,
+      onRefresh: () => {},
+      refreshPending: false,
+      startContactOptions: [],
+      status: "empty",
+      training: null,
+    }),
+  );
+  assert.equal((noMessagingMarkup.match(/href="\/settings"/g) ?? []).length, 1);
 });
 
 test("Training handles an empty active workout without presenting false zero-percent failure", () => {
