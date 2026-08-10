@@ -52,6 +52,7 @@ import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
+import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -238,19 +239,9 @@ export function SectionsContent() {
         <div
           id="private-training-dashboard"
           data-design-section="private-training-dashboard"
+          inert
         >
-          <picture>
-            <source
-              media="(max-width: 640px)"
-              srcSet="/design-proof/training-dashboard-mobile.svg"
-            />
-            <img
-              alt="Murph Training dashboard with an active workout, training consistency, recent sets, and exercise progress"
-              className="w-full rounded-2xl border border-border/70 shadow-sm"
-              loading="lazy"
-              src="/design-proof/training-dashboard-desktop.svg"
-            />
-          </picture>
+          <TrainingDashboardStudy />
         </div>
       </StudySection>
 

@@ -116,7 +116,7 @@ export default function TrainingPageClient({
   );
 }
 
-function TrainingDashboard({ training }: { training: BrowserTrainingView }) {
+export function TrainingDashboard({ training }: { training: BrowserTrainingView }) {
   return (
     <div className="flex flex-col gap-8">
       {training.activeSession ? (

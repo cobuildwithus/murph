@@ -22,6 +22,7 @@ vi.mock("@/src/components/ui/auth-button", () => ({
 }));
 
 import TrainingPageClient from "../app/(dashboard)/training/training-page-client";
+import { TrainingDashboardStudy } from "../app/design/training-dashboard-study";
 
 const trainingFixture: BrowserTrainingView = {
   activeSession: {
@@ -308,6 +309,15 @@ test("Training handles an empty active workout without presenting false zero-per
   assert.doesNotMatch(markup, /role="progressbar"/);
 });
 
+test("Training design study renders the production dashboard with synthetic data", () => {
+  const markup = renderToStaticMarkup(createElement(TrainingDashboardStudy));
+
+  assert.match(markup, /58%/);
+  assert.match(markup, /Recent workouts/);
+  assert.match(markup, /Exercise progress/);
+  assert.match(markup, /135 lb × 10/);
+  assert.doesNotMatch(markup, /<picture|<img|design-proof/);
+});
 
 test("Training offers a clear setup path when no messaging channel is available", () => {
   const markup = renderToStaticMarkup(
