@@ -3650,6 +3650,9 @@ describe("runHostedAssistantAutomationLane", () => {
       preProviderPhase: {
         workspaceAssistantPreAutomationMs: 11,
       },
+      providerStartCriticalPath: {
+        mailboxImportDoneAtMonotonicMs: 0,
+      },
       vaultRoot: "/tmp/vault-root",
     });
 
@@ -3695,6 +3698,12 @@ describe("runHostedAssistantAutomationLane", () => {
       onProviderRequestStarted: expect.any(Function),
       onTerminalNonReplyCommitted: expect.any(Function),
       onTraceEvent: expect.any(Function),
+      providerStartCriticalPath: {
+        automationInputSelectionDoneAtMonotonicMs: 0,
+        automationLaneStartedAtMonotonicMs: 0,
+        automationReadinessDoneAtMonotonicMs: 0,
+        mailboxImportDoneAtMonotonicMs: 0,
+      },
       requestId: "req_123",
       shouldDeferCron: expect.any(Function),
       shouldYieldBackgroundMaintenance: null,
@@ -3731,7 +3740,17 @@ describe("runHostedAssistantAutomationLane", () => {
       codexAppServerWarmReuseMs: 0,
       providerStartCriticalPath: {
         assistantServicePreLockMs: 5,
+        automationCandidateScanMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationGroupAndOperationScopeMs: 1,
+        automationInputSelectionMs: 1,
         automationLaneToAssistantServiceMs: 7,
+        automationPassSetupMs: 1,
+        automationPromptPreparationMs: 0,
+        automationReadinessMs: 1,
+        automationServiceHandoffMs: 0,
+        automationSessionPreflightMs: 1,
+        automationTerminalEvidenceMs: 1,
         codexAppServerPreProviderMs: 19,
         codexProcessPreparationMs: 3,
         mailboxImportDoneToAssistantPhaseMs: 29,
@@ -3751,6 +3770,10 @@ describe("runHostedAssistantAutomationLane", () => {
         at: "2026-04-08T00:00:01.000Z",
         phaseBreakdown: {
           preProvider: {
+            automationCandidateScanMs: 1,
+            automationCrossSessionContextMs: 0,
+            automationGroupAndOperationScopeMs: 1,
+            automationInputSelectionMs: 1,
             outboxScanBytesRead: 8_192,
             outboxScanElapsedMs: 23,
             outboxScanFilesRead: 10,
@@ -3761,6 +3784,12 @@ describe("runHostedAssistantAutomationLane", () => {
             receiptScanLockWaitMs: 3,
             receiptScanPerformed: true,
             automationLaneToAssistantServiceMs: 7,
+            automationPassSetupMs: 1,
+            automationPromptPreparationMs: 0,
+            automationReadinessMs: 1,
+            automationServiceHandoffMs: 0,
+            automationSessionPreflightMs: 1,
+            automationTerminalEvidenceMs: 1,
             mailboxImportDoneToAssistantPhaseMs: 29,
             workspaceAssistantPreAutomationMs: 17,
           },
@@ -3848,6 +3877,72 @@ describe("runHostedAssistantAutomationLane", () => {
         source: "telegram",
         type: "provider_started",
       },
+    });
+    const canonicalCriticalPath = {
+      assistantServicePreLockMs: 5,
+      automationLaneToAssistantServiceMs: 7,
+      codexAppServerPreProviderMs: 19,
+      codexProcessPreparationMs: 3,
+      mailboxImportDoneToAssistantPhaseMs: 29,
+      preProviderSetupMs: 11,
+      providerPlanAndGateMs: 13,
+      turnLockWaitMs: 2,
+      workspaceAssistantPreAutomationMs: 17,
+    };
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_partial_subdivision"],
+      providerRequestOrdinal: 1,
+      providerStartCriticalPath: {
+        ...canonicalCriticalPath,
+        automationReadinessMs: 7,
+      },
+      source: "linq",
+      startedAt: "2026-04-08T00:00:03.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(5);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        phaseBreakdown: expect.objectContaining({
+          preProvider: {
+            automationLaneToAssistantServiceMs: 7,
+            mailboxImportDoneToAssistantPhaseMs: 29,
+            workspaceAssistantPreAutomationMs: 17,
+          },
+        }),
+      }),
+    });
+    automationPassInput.onProviderRequestStarted?.({
+      assistantInputIds: ["input_mismatched_subdivision"],
+      providerRequestOrdinal: 2,
+      providerStartCriticalPath: {
+        ...canonicalCriticalPath,
+        automationCandidateScanMs: 1,
+        automationCrossSessionContextMs: 0,
+        automationGroupAndOperationScopeMs: 1,
+        automationInputSelectionMs: 1,
+        automationPassSetupMs: 1,
+        automationPromptPreparationMs: 0,
+        automationReadinessMs: 2,
+        automationServiceHandoffMs: 0,
+        automationSessionPreflightMs: 1,
+        automationTerminalEvidenceMs: 1,
+      },
+      source: "linq",
+      startedAt: "2026-04-08T00:00:04.000Z",
+    });
+    await Promise.resolve();
+    expect(latencyTraceRecord).toHaveBeenCalledTimes(6);
+    expect(latencyTraceRecord).toHaveBeenLastCalledWith({
+      event: expect.objectContaining({
+        phaseBreakdown: expect.objectContaining({
+          preProvider: {
+            automationLaneToAssistantServiceMs: 7,
+            mailboxImportDoneToAssistantPhaseMs: 29,
+            workspaceAssistantPreAutomationMs: 17,
+          },
+        }),
+      }),
     });
     expect(mocks.createHostedRuntimeDeviceSyncService).not.toHaveBeenCalled();
   });

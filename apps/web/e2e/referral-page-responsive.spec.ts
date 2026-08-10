@@ -6,8 +6,8 @@ const OVERFLOW_TOLERANCE_PX = 1;
 const REFERRAL_STUDIES = [
   {
     dayLabels: [
-      { count: 2, label: "10 days of Murph" },
-      { count: 1, label: "14 days of Murph" },
+      { count: 2, label: "About 10 more days of Murph usage" },
+      { count: 1, label: "About 14 more days of Murph usage" },
     ],
     description: "Share your link or start a group with Murph.",
     rewardCount: 3,
@@ -21,8 +21,8 @@ const REFERRAL_STUDIES = [
   },
   {
     dayLabels: [
-      { count: 1, label: "10 days of Murph" },
-      { count: 1, label: "14 days of Murph" },
+      { count: 1, label: "About 10 more days of Murph usage" },
+      { count: 1, label: "About 14 more days of Murph usage" },
     ],
     description: "Start a fresh group with Murph.",
     rewardCount: 2,
@@ -32,7 +32,9 @@ const REFERRAL_STUDIES = [
     titles: ["Bring someone new to Murph", "Start an active group"],
   },
   {
-    dayLabels: [{ count: 1, label: "10 days of Murph" }],
+    dayLabels: [
+      { count: 1, label: "About 10 more days of Murph usage" },
+    ],
     description: "Share your personal link with someone new.",
     rewardCount: 1,
     selector:
@@ -112,9 +114,47 @@ test("referral page stays contained and actionable at every marketing breakpoint
       }),
     ).toBeVisible();
     await expect(
-      page.getByText("$3.50 of cost-weighted usage credit", { exact: true }),
+      page.getByText("About 14 more days of Murph usage", { exact: true }),
     ).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(
+      /\$|≈|cost-weighted|usage credit/i,
+    );
   }
+});
+
+test("referral design study hydrates without reading a member referral link", async ({
+  page,
+}) => {
+  const referralLinkRequests: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/settings/signup-referral-link") {
+      referralLinkRequests.push(request.url());
+    }
+  });
+  await page.route("**/*", (route) => {
+    if (isLoopbackUrl(route.request().url())) {
+      route.continue();
+    } else {
+      route.abort();
+    }
+  });
+
+  const response = await page.goto(
+    "/design?tab=sections#referral-rewards-page",
+    { waitUntil: "networkidle" },
+  );
+  expect(response?.status()).toBe(200);
+
+  const study = page.locator("#referral-rewards-page");
+  await expect(study).toBeVisible();
+  await expect(
+    study.getByText("About 10 more days of Murph usage", { exact: true }).first(),
+  ).toBeVisible();
+  await expect(
+    study.getByRole("button", { name: /Join Murph to start referring/ }).first(),
+  ).toBeVisible();
+  await expect(study).not.toContainText(/\$|≈|cost-weighted|usage credit/i);
+  expect(referralLinkRequests).toEqual([]);
 });
 
 test.describe("homepage referral design proof", () => {
@@ -176,7 +216,9 @@ test.describe("homepage referral design proof", () => {
           ).toHaveCount(dayLabel.count);
         }
         await expect(study.getByText(/If eligible/)).toHaveCount(0);
-        await expect(study.getByText(/≈|\$[0-9]/)).toHaveCount(0);
+        await expect(study).not.toContainText(
+          /\$|≈|cost-weighted|usage credit/i,
+        );
 
         const overflowPx = await study.evaluate((element) =>
           element.scrollWidth - element.clientWidth
