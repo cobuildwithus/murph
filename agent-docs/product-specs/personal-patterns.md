@@ -22,11 +22,18 @@ new collection window when the feature ships.
 - Existing members can receive a result from data that predates deployment.
 - Overview reads a derived report from the encrypted Browser Vault replica.
 - An older replica has no Personal Patterns field. The web keeps that state
-  separate from a calculated empty report and explains the bounded wait.
-- On the member's next runtime execution, the hosted runtime rebuilds a replica
-  after source data changes or after its normal 24-hour maximum age is exceeded.
-- A code deployment alone does not force every inactive member's replica to
-  rebuild immediately.
+  separate from a calculated empty report and shows preparation while an
+  automatic refresh remains pending.
+- The shared Browser Vault projection generation advances when a new projection
+  makes an otherwise current replica incomplete. The next authenticated
+  dashboard session marks the older generation stale and schedules the existing
+  low-priority refresh through the runtime mailbox and Temporal workflow.
+- The browser checks quickly for 20 seconds, then every 15 seconds while the
+  refresh remains pending. A delayed or initially failed refresh can therefore
+  complete on the open page without a health-data change or manual action.
+- A generation advance does not rebuild every inactive member at deploy time.
+  It refreshes each member when their next authenticated dashboard session uses
+  the existing Browser Vault path.
 - The Weekly health insight reads the query through `vault-cli` and does not
   depend on the browser replica.
 
