@@ -28,7 +28,8 @@ Updated: 2026-08-09
 ## Scope
 
 - In scope: the product-feedback cron schedule, exact cron config guards,
-  truthful referral scheduler ownership docs, and review-remediation evidence.
+  truthful referral scheduler ownership docs, review-remediation evidence, and
+  the one-line current-main telemetry census repair required for green CI.
 - Out of scope: referral cadence or business rules, a new immediate signup
   settlement handoff, Stripe route behavior, retention behavior, and every
   other cron cadence.
@@ -57,6 +58,10 @@ Updated: 2026-08-09
 3. Risk: a deployment rollback restores code but not the old Vercel schedule.
    Mitigation: retain every route and auth contract, and verify the active cron
    configuration after deployment or rollback.
+4. Risk: the newly added static Family setup page leaves current-main Web
+   verification red because it is absent from the fail-closed telemetry census.
+   Mitigation: register only its canonical static pathname with the existing
+   query/fragment-stripping owner and keep the focused census test green.
 
 ## Tasks
 
@@ -69,9 +74,8 @@ Updated: 2026-08-09
    path normally settles through the fixed 50-row cron scan.
 5. [x] Restore referral cadence to every minute and remove unsupported
    immediate-or-fallback-only claims from durable docs and PR intent.
-6. [x] Run focused Web tests, diff, privacy, and schedule-math checks; Web
-   typecheck is still running.
-7. [ ] Commit and push the remediation, then update the PR body and finding
+6. [x] Run focused Web tests, typecheck, diff, privacy, and schedule-math checks.
+7. [x] Commit and push the remediation, then update the PR body and finding
    ledger for the exact corrected head.
 8. [ ] Complete final review, exact-head CI, ReviewGPT, and plan closure.
 
@@ -114,9 +118,13 @@ Updated: 2026-08-09
   speculative immediate-handoff test or abstraction was added.
 - The first preliminary capture returned this evidence but did not satisfy the
   ReviewGPT trust floor, so it does not count as the required pass. Parent
-  inspection independently reproduced and accepted both findings. A valid
-  corrected-head preliminary pass, final ReviewGPT, final parent review, and
-  exact-head CI remain pending.
+  inspection independently reproduced and accepted both findings.
+- The valid corrected-head preliminary specialist pass returned no findings
+  and confirmed the referral minute owner, feedback DST window, recovery
+  semantics, and executable schedule proof.
+- The first final round-1 response completed below the repository trust floor
+  and was discarded. A fresh same-head round-1 audit and current-head round 2
+  remain pending.
 
 ## Verification
 
@@ -124,5 +132,7 @@ Updated: 2026-08-09
   digest-window, and production cron config suite: 5 files and 71 tests.
 - Passed `git diff --check`, direct schedule arithmetic (3,517/day, saving
   132/day or 3.6%), and the changed-line privacy scan.
-- Web typecheck is still running.
+- Web typecheck passed.
+- After merging current main, the exact production cron guard passed 50 tests
+  and the Family telemetry census/redaction repair passed 10 tests.
 - Pending exact-head GitHub Actions and required review gates.
