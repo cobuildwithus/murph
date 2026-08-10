@@ -424,7 +424,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Family billing recovery on Join">
+      <StudySection title="Family billing recovery and management on Join">
         <JoinFamilyBillingRecoveryStudy />
       </StudySection>
 
@@ -466,7 +466,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings and Family sign-in handoffs">
+      <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
         <SettingsAuthRequiredStudy />
       </StudySection>
 
@@ -514,7 +514,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group sponsorship with optional creative response">
+      <StudySection title="Group sponsorship purchase and cancel-only management">
         <GroupUsageFundingStudy />
       </StudySection>
 

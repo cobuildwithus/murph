@@ -472,8 +472,7 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             cancelOnly
-            endpoint={endpoint}
-            inert
+            endpoint="/api/groups/fund/design/sponsorship"
             management={{
               authorizationId: "hgsa_design_cancel_only",
               chargedThisPeriodMinor: 500,

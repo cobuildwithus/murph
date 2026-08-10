@@ -86,8 +86,12 @@ Success means:
   and sponsorship cancellation. The separate Claude UI check could not run
   because the required local `claude` command is not installed; the tooling gap
   is recorded rather than treated as a product failure.
-- [ ] Push the exact candidate, open the PR, run preliminary and final
-  ReviewGPT with CI, resolve findings, close this plan, and merge.
+- [x] Push the exact candidate and open the PR. The first preliminary review
+  rejected incomplete rendered evidence rather than the implementation: the
+  catalog had made the cancel-only proof inert and had not exercised Portal
+  failure or the signed-out usage-return handoff.
+- [ ] Push the evidence remediation, rerun preliminary and final ReviewGPT with
+  exact-head CI, resolve findings, close this plan, and merge.
 - [ ] Confirm the main-only live Stripe browser matrix and cleanup result on the
   merged commit, then retire the task worktree.
 
@@ -129,5 +133,14 @@ function-state matrix and verification ledger. The accepted defects are:
   and that Linq/Telegram treat the same-group acceptance backstop as a
   permanent invite miss instead of retrying it indefinitely.
 - Design catalog evidence (desktop and mobile) was captured and inspected for
-  both new recovery states. The required Claude UI double-check was unavailable
-  because the local CLI is not installed.
+  Family management, enabled sponsorship cancellation, cancellation failure,
+  Portal failure inside its confirmation dialog, and the signed-out
+  usage-credit return screen. Focused remediation tests pass (18 tests), as do
+  the Web TypeScript check, scoped lint, and frontend-design-proof unit suite.
+  The required Claude UI double-check was unavailable because the local CLI is
+  not installed.
+- The first exact-head CI run passed the hermetic billing, Stripe boundary,
+  build/typecheck, package-coverage, artifact, overflow, and deployment lanes.
+  Its release-app failure was an inventory assertion for the new canonical
+  migration; the inventory now includes that migration and the focused
+  migration suite passes.
