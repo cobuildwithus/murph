@@ -47,6 +47,7 @@ import {
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook as planHostedOnboardingLinqWebhookWithoutPreparedCrypto,
+  shouldPrepareHostedLinqThreadContainerCrypto,
 } from "../src/lib/hosted-onboarding/webhook-provider-linq";
 import {
   resolveHostedOnboardingLinqMessageContext,
@@ -5501,6 +5502,125 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
+  it("prepares new-container crypto for an active pending-contact sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    vi.mocked(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).mockResolvedValue({
+      core: senderCore,
+      matchedBy: "pendingLinqParticipantContactLookupKey",
+      routing: {
+        memberId: senderCore.id,
+      },
+    } as never);
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({
+        sender: "pending-sender@example.test",
+      }),
+      participantMemberIds: [],
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+
+    expect(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).toHaveBeenCalledExactlyOnceWith({
+      contact: expect.objectContaining({
+        kind: "email",
+        value: "pending-sender@example.test",
+      }),
+      linqChatId: "chat_group_123",
+      prisma,
+      recipientPhone: "+15550000000",
+    });
+  });
+
+  it("does not let stale pending-contact preparation grant container authority", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const pendingSenderLookup = {
+      core: senderCore,
+      matchedBy: "pendingLinqParticipantContactLookupKey",
+      routing: {
+        memberId: senderCore.id,
+      },
+    } as never;
+    vi.mocked(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    )
+      .mockResolvedValueOnce(pendingSenderLookup)
+      .mockResolvedValue(null);
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+    const event = buildLinqMessageReceivedEvent({
+      sender: "pending-sender@example.test",
+    });
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event,
+      participantMemberIds: [],
+      prisma: prisma as never,
+    })).resolves.toBe(true);
+
+    const accountLookupKey = createHostedPhoneLookupKey("+15550000000");
+    if (!accountLookupKey) {
+      throw new Error("Expected a Linq account lookup key.");
+    }
+    const preparedThreadContainerCreation =
+      await prepareThreadContainerCreationForTest({
+        accountLookupKey,
+        channel: "linq",
+        containerMemberId: "member_stale_prepared_container",
+        prisma: prisma as never,
+        threadId: "chat_group_123",
+      });
+    const plan = await planHostedOnboardingLinqWebhookWithoutPreparedCrypto({
+      event,
+      pendingGroupParticipantMemberIds: [],
+      preparedThreadContainerCreation,
+      preparedThreadDeliveryRoute: preparedThreadContainerCreation,
+      prisma: prisma as never,
+    });
+
+    expect(plan.response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not prepare new-container crypto for an inactive pending-contact sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.canceled,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+    vi.mocked(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).mockResolvedValue({
+      core: {
+        ...senderCore,
+        billingStatus: HostedBillingStatus.canceled,
+      },
+      matchedBy: "pendingLinqParticipantContactLookupKey",
+      routing: {
+        memberId: senderCore.id,
+      },
+    } as never);
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({
+        sender: "pending-sender@example.test",
+      }),
+      participantMemberIds: [],
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+  });
+
   it.each([
     {
       description: "echoed own messages",
@@ -6818,6 +6938,77 @@ describe("Linq group chat auto-provision", () => {
       },
     });
     expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("admits a first group message from an active pending-contact-only sender", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    let transactionOpen = false;
+    prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
+      transactionOpen = true;
+      try {
+        return await callback(prisma);
+      } finally {
+        transactionOpen = false;
+      }
+    });
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({
+        sender: "pending-sender@example.test",
+      }) as never);
+    vi.mocked(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).mockResolvedValue({
+      core: senderCore,
+      matchedBy: "pendingLinqParticipantContactLookupKey",
+      routing: {
+        memberId: senderCore.id,
+      },
+    } as never);
+    vi.mocked(domainRootStore.prepareHostedCryptoDomainRootCandidates)
+      .mockImplementationOnce(async () => {
+        expect(transactionOpen).toBe(false);
+        return new Map();
+      });
+    mockSuccessfulGroupProvision({ prisma, senderCore });
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockImplementation(async () => {
+      expect(transactionOpen).toBe(false);
+      return {
+        handles: [
+          { handle: "+15550000000", isMe: true, status: "active" },
+          {
+            handle: "pending-sender@example.test",
+            isMe: false,
+            status: "active",
+          },
+        ],
+        isGroup: true,
+      };
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+    expect(domainRootStore.prepareHostedCryptoDomainRootCandidates)
+      .toHaveBeenCalledTimes(1);
+    expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "member.activated",
+      }),
+      tx: prisma,
+    });
+    expect(
+      memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
+    ).toHaveBeenCalledTimes(2);
   });
 
   it("reconciles a new group roster after the provisioning transaction commits", async () => {

@@ -544,6 +544,69 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       ]);
     });
 
+    it("does not retry a failed Linq crypto preparation as a route race", async () => {
+      const { hostedOnboardingError } = await import(
+        "@/src/lib/hosted-onboarding/errors"
+      );
+      const { planHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-provider-linq"
+      );
+      const { prepareHostedThreadContainerDeliveryRoute } = await import(
+        "@/src/lib/hosted-routing/thread-container-service"
+      );
+      const prepareRoute = vi.mocked(prepareHostedThreadContainerDeliveryRoute);
+      const defaultPrepareRoute = prepareRoute.getMockImplementation();
+      if (!defaultPrepareRoute) {
+        throw new Error("Expected the default Linq route preparation mock.");
+      }
+      const preparationError = new Error("kms preparation unavailable");
+      const prisma = buildPrewarmPrisma();
+
+      try {
+        prepareRoute.mockImplementation(async () => {
+          calls.push("prepare-route");
+          throw preparationError;
+        });
+        vi.mocked(planHostedOnboardingLinqWebhook).mockImplementation(
+          async (input) => {
+            calls.push("plan");
+            if (!input.preparedThreadDeliveryRoute) {
+              throw hostedOnboardingError({
+                code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+                httpStatus: 503,
+                message: "Prepared route required.",
+                retryable: true,
+              });
+            }
+            return {
+              desiredSideEffects: [],
+              response: { ok: true, reason: "unexpected-prepared-plan" },
+            };
+          },
+        );
+
+        await expect(handleHostedOnboardingLinqWebhook({
+          prisma: prisma as never,
+          rawBody: buildLinqMessageWebhookBody(),
+          signature: null,
+          timestamp: null,
+        })).rejects.toBe(preparationError);
+
+        expect(prepareRoute).toHaveBeenCalledTimes(1);
+        expect(planHostedOnboardingLinqWebhook).toHaveBeenCalledTimes(1);
+        expect(calls).toEqual([
+          "read-route",
+          "read-route",
+          "prepare-route",
+          "unwrap",
+          "begin",
+          "plan",
+        ]);
+      } finally {
+        prepareRoute.mockImplementation(defaultPrepareRoute);
+      }
+    });
+
     it("warms before the classifier-allow replan transaction", async () => {
       const {
         claimHostedLinqFirstContactAdmissionBudget,

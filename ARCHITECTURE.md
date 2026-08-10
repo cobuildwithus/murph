@@ -1621,8 +1621,10 @@ external-thread identity, rather than an absent-row advisory lock, selects the
 winner of concurrent creation; existing-row refresh still takes the route lock.
 If the route changes after preparation, Web rolls back and performs at most one
 fresh prepare-before-transaction attempt. Thread-container creation therefore
-does not use the legacy all-domain provisioning bridge or perform KMS work while
-holding its route transaction.
+does not use the legacy all-domain provisioning bridge or perform domain-root
+provisioning, delivery-route sealing, or activation-mailbox root unwraps while
+holding its route transaction. Transaction-owned authority reads remain inside
+that boundary and may reuse request-scoped root prewarms when available.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The

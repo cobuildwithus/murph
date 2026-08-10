@@ -79,6 +79,13 @@ Updated: 2026-08-09
 - Retain route-update serialization for existing rows unless focused
   concurrency evidence proves it redundant; remove the advisory lock only from
   the absent-row creation path.
+- Include the existing line/chat-scoped pending-contact resolver in Linq's
+  speculative preparation candidates, but repeat that resolver in the
+  transaction so prepared material never grants authority after the contact
+  becomes stale.
+- Preserve a failed preparation's original provider/KMS error when the planner
+  proves that material was required. Retry only a successfully prepared stale
+  candidate or the existing unique route-write conflict.
 
 ## Verification
 
@@ -90,3 +97,15 @@ Updated: 2026-08-09
   KMS operation begins after transaction open, one concurrent external thread
   route wins with no orphaned synthetic state, and all existing routing,
   activation, privacy-rotation, and mailbox assertions remain green.
+- Local proof on the remediated candidate: the Linq/Telegram routing slice
+  passed 177 tests; the isolated crypto-domain store passed 28 tests; the
+  PostgreSQL concurrency lane passed 8 tests; app-local typecheck and scoped
+  lint passed; `git diff --check` passed. A combined crypto-domain/routing run
+  caused two shared-fixture interference failures, while the four routing files
+  and the same crypto-domain file in its isolated lane passed.
+- Review remediation: the preliminary specialist and final round 1 both found
+  the pending-contact preparation gap; final round 1 also found failed KMS work
+  being misclassified as a route race and an overbroad documentation claim.
+  All were accepted and covered by the scoped resolver recheck, one-attempt
+  error propagation tests for Linq and Telegram, and narrowed architecture/test
+  wording. The preliminary pass supplied no patch artifact.

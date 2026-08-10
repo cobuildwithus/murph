@@ -565,6 +565,76 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
   });
 
+  it("does not retry a failed Telegram crypto preparation as a route race", async () => {
+    const { hostedOnboardingError } = await import(
+      "@/src/lib/hosted-onboarding/errors"
+    );
+    const defaultPrepareCreation =
+      mocks.prepareHostedThreadContainerCreation.getMockImplementation();
+    const defaultEnsureRoute =
+      mocks.ensureHostedThreadContainerRouteTx.getMockImplementation();
+    if (!defaultPrepareCreation || !defaultEnsureRoute) {
+      throw new Error("Expected the default Telegram thread-route mocks.");
+    }
+    const preparationError = new Error("kms preparation unavailable");
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const prisma = withPrismaTransaction({
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          member: {
+            billingStatus: HostedBillingStatus.active,
+            id: "member_telegram_owner",
+            suspendedAt: null,
+          },
+          memberId: "member_telegram_owner",
+        }),
+      },
+    });
+
+    try {
+      mocks.prepareHostedThreadContainerCreation.mockImplementation(async () => {
+        throw preparationError;
+      });
+      mocks.ensureHostedThreadContainerRouteTx.mockImplementation(async () => {
+        throw hostedOnboardingError({
+          code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+          httpStatus: 503,
+          message: "Prepared container required.",
+          retryable: true,
+        });
+      });
+
+      await expect(handleHostedOnboardingTelegramWebhook({
+        prisma,
+        rawBody: JSON.stringify({
+          message: {
+            chat: {
+              id: -100123,
+              title: "Family chat",
+              type: "group",
+            },
+            date: 1_774_522_600,
+            from: {
+              first_name: "Alice",
+              id: 456,
+            },
+            message_id: 2,
+            text: "hello",
+          },
+          update_id: 325,
+        }),
+        secretToken: "telegram-secret",
+      })).rejects.toBe(preparationError);
+
+      expect(mocks.prepareHostedThreadContainerCreation).toHaveBeenCalledTimes(1);
+      expect(mocks.ensureHostedThreadContainerRouteTx).toHaveBeenCalledTimes(1);
+    } finally {
+      mocks.prepareHostedThreadContainerCreation
+        .mockImplementation(defaultPrepareCreation);
+      mocks.ensureHostedThreadContainerRouteTx.mockImplementation(defaultEnsureRoute);
+    }
+  });
+
   it("counts an unlinked group sender only as bounded referral evidence", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({

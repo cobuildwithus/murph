@@ -1985,9 +1985,13 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
   return { preparedSenderMemberId, preparedThreadDeliveryRoute };
 }
 
-const HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES = new Set([
+const HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES = new Set([
   "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
   "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+]);
+
+const HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES = new Set([
+  ...HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES,
   "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
 ]);
 
@@ -2001,15 +2005,33 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
 }): Promise<TResult> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let preparation: HostedThreadRoutingCryptoPreparation = {};
+    const preparationFailures: unknown[] = [];
     try {
       return await runHostedOnboardingWebhookTransaction(
         input.prisma,
         (transaction) => input.plan({ preparation, transaction }),
         async () => {
-          preparation = await input.prepare();
+          try {
+            preparation = await input.prepare();
+          } catch (error) {
+            preparationFailures.push(error);
+            throw error;
+          }
         },
       );
     } catch (error) {
+      if (
+        preparationFailures.length > 0
+        && isHostedOnboardingError(error)
+        && HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES.has(error.code)
+      ) {
+        // The transaction helper deliberately suppresses an irrelevant warm
+        // failure so ignored branches can still complete. If the planner then
+        // proves that this exact package was required, preserve the original
+        // provider/KMS failure instead of misclassifying it as a route race and
+        // repeating slow external work inside the same webhook response window.
+        throw preparationFailures[0];
+      }
       if (
         attempt === 0
         && isHostedOnboardingError(error)

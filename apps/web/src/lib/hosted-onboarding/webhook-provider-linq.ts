@@ -346,9 +346,21 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
     contact: participantContact,
     prisma: input.prisma,
   });
+  const recipientPhone = normalizePhoneNumber(context.recipientPhoneNumber);
+  const pendingSenderMemberId = senderMemberId || !recipientPhone
+    ? null
+    : (await lookupHostedMemberRoutingByPendingLinqParticipantContact({
+        contact: participantContact,
+        linqChatId: summary.chatId,
+        prisma: input.prisma,
+        recipientPhone,
+      }))?.core.id ?? null;
   const candidates = new Set(input.participantMemberIds);
   if (senderMemberId) {
     candidates.add(senderMemberId);
+  }
+  if (pendingSenderMemberId) {
+    candidates.add(pendingSenderMemberId);
   }
   const eligibility = await Promise.all(
     [...candidates].map((memberId) =>
