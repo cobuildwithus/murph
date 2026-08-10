@@ -78,6 +78,19 @@ Updated: 2026-08-09
   presentation/prompt-primary and does not change runtime ownership or behavior;
   the mandatory preliminary specialist lenses remain applicable.
 
+## Review progress
+
+- The preliminary specialist review found no product-experience, prompt, or
+  frontend defect in the pushed candidate.
+- Its three coverage findings were accepted: the referral design-state browser
+  proof still targeted the removed full-page study, assistant coverage no longer
+  rejected the retired phrase from the assembled skill and provider outputs,
+  and changelog coverage did not assert the new semantic labels.
+- The focused corrections now exercise all three synthetic reward states and
+  their applicable receipts, dynamically reject the retired phrase without
+  preserving it in test source, and count all seven rendered `Usage credit`
+  labels at the changelog page boundary.
+
 ## Verification
 
 - Commands to run: focused web and assistant tests; web and assistant-engine

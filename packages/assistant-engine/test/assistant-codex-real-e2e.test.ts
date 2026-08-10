@@ -88,6 +88,7 @@ import type {
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
+const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
 const ONBOARDING_POLICY_PATHS = [
   ['SKILL.md', 'murph-onboarding/SKILL.md'],
@@ -2593,6 +2594,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(privateResult.finalMessage).not.toMatch(
           /\$|exact credit|messages?\b|remaining balance|calendar|trial extension/iu,
         )
+        expect(privateResult.finalMessage.toLowerCase()).not.toContain(
+          RETIRED_USAGE_TERM,
+        )
 
         const groupResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -2691,6 +2695,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         )
         expect(groupResult.finalMessage).not.toMatch(
           /\$|exact credit|messages?\b|remaining balance|calendar|trial extension/iu,
+        )
+        expect(groupResult.finalMessage.toLowerCase()).not.toContain(
+          RETIRED_USAGE_TERM,
         )
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
 
@@ -2926,6 +2933,9 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(second.finalMessage).toMatch(/sponsor|fund/iu)
         expect(second.finalMessage).not.toMatch(
           /\$|exact credit|messages?\b|one-time|monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill|calendar|trial extension/iu,
+        )
+        expect(second.finalMessage.toLowerCase()).not.toContain(
+          RETIRED_USAGE_TERM,
         )
       } finally {
         await removeRealCodexTemporaryPaths([

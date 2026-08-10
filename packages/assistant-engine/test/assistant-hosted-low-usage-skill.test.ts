@@ -9,6 +9,8 @@ import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 
+const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
+
 async function readLowUsageSkill(): Promise<string> {
   return readFile(
     path.join(resolveAssistantSkillsRoot(), 'hosted-low-usage', 'SKILL.md'),
@@ -348,7 +350,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       'Never derive message counts, current balance, or calendar/trial duration from it',
     )
-    expect(normalizedSkill).not.toContain('exact billing labels')
+    expect(normalizedSkill.toLowerCase()).not.toContain(RETIRED_USAGE_TERM)
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
