@@ -108,8 +108,13 @@ import {
   buildGroupChallengeResponseCard,
 } from '../assistant/group-challenge-response-card.js'
 import {
-  groupChallengeResponseCardAuthoringInputSchema,
+  groupChallengeResponseCardToolInputSchema,
+  type GroupChallengeResponseCardToolInput,
+  upsertGroupChallengeStandingsSnapshot,
 } from '../assistant/group-challenge-response-card-schema.js'
+import {
+  scoreGroupChallengeJson,
+} from '../assistant/group-challenge-scorecard-schema.js'
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
@@ -138,6 +143,13 @@ import {
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
+import {
+  getKnowledgePage,
+  upsertKnowledgePage,
+} from '../knowledge.js'
+import {
+  normalizeKnowledgeBody,
+} from '../knowledge/documents.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
@@ -266,7 +278,7 @@ const attachResponseCardArgumentsSchema = z
   .strict()
 
 const attachGroupChallengeResponseCardArgumentsSchema =
-  groupChallengeResponseCardAuthoringInputSchema
+  groupChallengeResponseCardToolInputSchema
 
 const attachResponseMediaArgumentsSchema = z
   .object({
@@ -927,7 +939,12 @@ export interface MurphDynamicToolExecutionResult {
 }
 
 export interface MurphGroupSharedReadTurnState {
-  capacityPartial: boolean
+  invalid: boolean
+  readProjectionScopeKeyBatches: string[][]
+  roster: Array<{
+    displayName: string | null
+    participantId: string
+  }> | null
 }
 
 interface ParsedDynamicToolCallRequest {
@@ -1032,7 +1049,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'attach-group-challenge-response-card'
-      card: AssistantResponseCard
+      input: GroupChallengeResponseCardToolInput
     }
   | {
       kind: 'generate-image'
@@ -1351,10 +1368,15 @@ export function readMurphDynamicToolRequest(
       }
 
       return {
-        kind: parsed.groupChallenge
-          ? 'attach-group-challenge-response-card'
-          : 'attach-response-card',
-        card: parsed.card,
+        ...(parsed.groupChallenge
+          ? {
+              input: parsed.input,
+              kind: 'attach-group-challenge-response-card' as const,
+            }
+          : {
+              card: parsed.card,
+              kind: 'attach-response-card' as const,
+            }),
       }
     }
     case MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name: {
@@ -1855,26 +1877,22 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-group-challenge-response-card':
+      return await executeGroupChallengeResponseCardAttachment({
+        allowed: input.groupChallengeResponseCardAllowed === true,
+        currentResponseCard: input.currentResponseCard ?? null,
+        currentResponseMedia: input.currentResponseMedia ?? [],
+        request: input.request.input,
+        turnState: input.groupSharedReadTurnState ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'attach-response-card': {
-      if (input.request.kind === 'attach-group-challenge-response-card') {
-        if (input.groupChallengeResponseCardAllowed !== true) {
-          return toolTextResult(
-            false,
-            'challenge standings response cards require an authenticated Linq group conversation',
-          )
-        }
-        if (input.groupSharedReadTurnState?.capacityPartial === true) {
-          return toolTextResult(
-            false,
-            'challenge standings response cards are unavailable after an incomplete shared read; answer with a truthful ordinary-text incomplete update',
-          )
-        }
-      } else if (input.request.card.kind === 'challenge_standings') {
+      if (input.request.card.kind === 'challenge_standings') {
         return toolTextResult(
           false,
           'challenge standings response cards require scorer-owned authoring input',
         )
-      } else if (input.privateDirectResponseCardAllowed !== true) {
+      }
+      if (input.privateDirectResponseCardAllowed !== true) {
         return toolTextResult(
           false,
           'response cards require a private direct conversation',
@@ -3507,6 +3525,135 @@ function groupSharedModelResultText(
   }
 }
 
+const GROUP_CHALLENGE_CARD_UNPROVEN_TEXT =
+  'challenge standings response cards require one complete stable shared-read proof and a successfully persisted canonical snapshot; answer with a truthful ordinary-text update'
+
+async function executeGroupChallengeResponseCardAttachment(input: {
+  allowed: boolean
+  currentResponseCard: AssistantResponseCard | null
+  currentResponseMedia: readonly AssistantResponseMedia[]
+  request: GroupChallengeResponseCardToolInput
+  turnState: MurphGroupSharedReadTurnState | null
+  vaultRoot: string | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  if (!input.allowed) {
+    return toolTextResult(
+      false,
+      'challenge standings response cards require an authenticated Linq group conversation',
+    )
+  }
+  if (input.currentResponseCard !== null) {
+    return toolTextResult(false, 'a response card is already attached')
+  }
+  if (input.currentResponseMedia.length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+    )
+  }
+
+  const proof = input.turnState
+  if (
+    !proof
+    || proof.invalid
+    || proof.roster === null
+    || proof.roster.length === 0
+    || proof.readProjectionScopeKeyBatches.length === 0
+    || !input.vaultRoot
+  ) {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
+
+  const participantIds = input.request.scoreInput.participants.map(
+    (participant) => participant.participantId,
+  )
+  if (!hasExactStringEntries(
+    participantIds,
+    proof.roster.map((participant) => participant.participantId),
+  )) {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
+
+  const componentIds = input.request.scoreInput.scorecard.components.map(
+    (component) => component.id,
+  )
+  if (!hasExactStringEntries(
+    input.request.componentProjectionScopeKeys.map((entry) => entry.componentId),
+    componentIds,
+  )) {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
+  const readProjectionScopeKeys = new Set(
+    proof.readProjectionScopeKeyBatches.flat(),
+  )
+  if (input.request.componentProjectionScopeKeys.some((entry) =>
+    new Set(entry.projectionScopeKeys).size !== entry.projectionScopeKeys.length
+    || entry.projectionScopeKeys.some((scopeKey) =>
+      !readProjectionScopeKeys.has(scopeKey)
+    )
+  )) {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
+
+  try {
+    const pageResult = await getKnowledgePage({
+      slug: input.request.challengeSlug,
+      vault: input.vaultRoot,
+    })
+    const participantLabels = input.request.scoreInput.format.kind === 'individual'
+      ? proof.roster.map((participant) => {
+          if (participant.displayName === null) {
+            throw new TypeError(
+              'Every individual challenge participant requires an authorized label.',
+            )
+          }
+          return {
+            label: participant.displayName,
+            participantId: participant.participantId,
+          }
+        })
+      : []
+    const card = buildGroupChallengeResponseCard({
+      footer: null,
+      participantLabels,
+      scoreInput: input.request.scoreInput,
+      subtitle: null,
+      title: pageResult.page.title,
+    })
+    const scoreResult = scoreGroupChallengeJson(input.request.scoreInput)
+    const body = upsertGroupChallengeStandingsSnapshot(
+      normalizeKnowledgeBody(pageResult.page.body),
+      {
+        componentProjectionScopeKeys:
+          input.request.componentProjectionScopeKeys,
+        readProjectionScopeKeyBatches:
+          proof.readProjectionScopeKeyBatches,
+        scoreInput: input.request.scoreInput,
+        scoreResult,
+        version: 1,
+      },
+    )
+    await upsertKnowledgePage({
+      body,
+      expectedMarkdown: pageResult.page.markdown,
+      librarySlugs: pageResult.page.librarySlugs,
+      pageType: pageResult.page.pageType,
+      relatedSlugs: pageResult.page.relatedSlugs,
+      slug: pageResult.page.slug,
+      sourcePaths: pageResult.page.sourcePaths,
+      status: pageResult.page.status,
+      title: pageResult.page.title,
+      vault: input.vaultRoot,
+    })
+    return {
+      ...toolTextResult(true, 'response card attached'),
+      responseCardPatch: { card },
+    }
+  } catch {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
+}
+
 function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
   return {
     displayName: group.displayName,
@@ -3638,6 +3785,9 @@ async function executeGroupSharedRead(input: {
 }): Promise<MurphDynamicToolExecutionResult> {
   const groupSharedReader = input.hostedToolContext?.groupSharedReader ?? null
   if (!groupSharedReader) {
+    if (input.turnState) {
+      input.turnState.invalid = true
+    }
     return groupSharedUnavailableToolResult('group_shared_reader_unavailable')
   }
 
@@ -3646,16 +3796,70 @@ async function executeGroupSharedRead(input: {
       projectionScopes: input.request.projectionScopes,
     })
     const modelResult = groupSharedModelResultText(groupSharedModelResult(result))
-    if (modelResult.capacityPartial && input.turnState) {
-      input.turnState.capacityPartial = true
-    }
+    recordGroupSharedReadProof({
+      capacityPartial: modelResult.capacityPartial,
+      result,
+      turnState: input.turnState,
+    })
     return toolTextResult(
       true,
       modelResult.text,
     )
   } catch {
+    if (input.turnState) {
+      input.turnState.invalid = true
+    }
     return groupSharedUnavailableToolResult('group_shared_read_failed')
   }
+}
+
+function recordGroupSharedReadProof(input: {
+  capacityPartial: boolean
+  result: AssistantHostedGroupSharedReadResponse
+  turnState: MurphGroupSharedReadTurnState | null
+}): void {
+  const state = input.turnState
+  if (!state || state.invalid) {
+    return
+  }
+  if (
+    input.capacityPartial
+    || input.result.status !== 'ok'
+    || input.result.members.length === 0
+    || input.result.requestedProjectionScopeKeys.length === 0
+    || new Set(input.result.requestedProjectionScopeKeys).size
+      !== input.result.requestedProjectionScopeKeys.length
+  ) {
+    state.invalid = true
+    return
+  }
+  const roster = input.result.members.map((member) => ({
+    displayName: member.displayName,
+    participantId: member.participantId,
+  }))
+  if (
+    new Set(roster.map((participant) => participant.participantId)).size
+      !== roster.length
+    || (
+      state.roster !== null
+      && (
+        !hasExactStringEntries(
+          roster.map((participant) => participant.participantId),
+          state.roster.map((participant) => participant.participantId),
+        )
+        || roster.some((participant, index) =>
+          participant.displayName !== state.roster?.[index]?.displayName
+        )
+      )
+    )
+  ) {
+    state.invalid = true
+    return
+  }
+  state.roster ??= roster
+  state.readProjectionScopeKeyBatches.push([
+    ...input.result.requestedProjectionScopeKeys,
+  ])
 }
 
 function hasExactStringEntries(
@@ -6058,7 +6262,12 @@ function parseComputerArguments<TArgs>(input: {
 function parseAttachResponseCardArguments(
   value: unknown,
 ):
-  | { ok: true; card: AssistantResponseCard; groupChallenge: boolean }
+  | { ok: true; card: AssistantResponseCard; groupChallenge: false }
+  | {
+      ok: true
+      groupChallenge: true
+      input: GroupChallengeResponseCardToolInput
+    }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
@@ -6099,25 +6308,10 @@ function parseAttachResponseCardArguments(
     }
   }
 
-  try {
-    return {
-      card: buildGroupChallengeResponseCard(groupChallengeParsed.data),
-      groupChallenge: true,
-      ok: true,
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      validationDigest: buildDynamicToolValidationDigest({
-        error,
-        rawInput: value,
-        schemaName,
-        schemaRootKeys: readZodObjectRootKeys(
-          attachGroupChallengeResponseCardArgumentsSchema,
-        ),
-        toolName,
-      }),
-    }
+  return {
+    groupChallenge: true,
+    input: groupChallengeParsed.data,
+    ok: true,
   }
 }
 

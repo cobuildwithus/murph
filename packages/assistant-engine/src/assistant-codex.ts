@@ -3206,7 +3206,11 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
-  const groupSharedReadTurnState = { capacityPartial: false }
+  const groupSharedReadTurnState = {
+    invalid: false,
+    readProjectionScopeKeyBatches: [],
+    roster: null,
+  }
   const generateSongTurnState = input.generateSongPolicy
     ? {
         attemptCount: 0,

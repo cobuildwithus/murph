@@ -517,6 +517,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const groupChallengeResponseCardsAvailable =
     authenticatedGroupChatRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
+    input.hostedToolContext?.groupSharedReader != null &&
     input.profile.promptProfile === 'conversation' &&
     input.profile.toolProfile === 'provider-turn' &&
     (scheduledInvocationScope !== null ||

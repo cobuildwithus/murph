@@ -233,11 +233,16 @@ A command failure is an invalid normalized input or ruling. Murph fixes that inp
 instead of silently falling back to model arithmetic.
 
 When a requested Linq group update is eligible for the native standings card, the
-attachment tool accepts this same normalized scorer input rather than accepting a
-model-authored scoreboard. It runs the scorer again and maps the result into the
-bounded presentation contract, so card points, target, order, coverage, counts,
-ranks, and ties remain deterministic even though the model still owns authorized
-record interpretation and room-facing labels.
+attachment tool accepts this same normalized scorer input plus the exact canonical
+projection-scope keys used by each component rather than accepting a model-authored
+scoreboard. Its one operation-local proof requires every successful batch to share
+the same ordered participant and authorized-label roster, requires the scorer roster
+and component scopes to match those reads, runs the scorer, and compare-and-set
+persists the exact input and result on the existing challenge page before attaching.
+Card points, target, order, coverage, counts, ranks, and ties therefore remain
+deterministic. The model still owns authorized record interpretation and component-
+to-scope selection; the trusted host owns whether those declared scopes were read,
+whether the roster stayed stable, and whether canonical persistence succeeded.
 
 ## Durable ownership
 
@@ -344,6 +349,9 @@ points, or long-running cumulative games.
 - Five distinct scopes compose through bounded reads without widening the transport.
 - A `not_granted` batch stops before a later read can replace its offer evidence.
 - Batches with different ordered participant sets are never combined.
+- A native card requires at least one successful read, exact scorer/read roster
+  equality, component scopes backed by those reads, and canonical snapshot
+  persistence before attachment.
 - Only normalized quantities and statuses reach deterministic scoring.
 - Daily-additive settlement cannot count a settled date twice.
 - Missing or pending dates do not advance the cumulative watermark.

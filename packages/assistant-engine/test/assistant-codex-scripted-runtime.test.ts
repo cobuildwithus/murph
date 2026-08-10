@@ -15,6 +15,7 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -58,6 +59,10 @@ import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 import {
+  getKnowledgePage,
+  upsertKnowledgePage,
+} from '../src/knowledge/service.ts'
+import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
 import {
@@ -86,11 +91,11 @@ const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
 
 const GROUP_CHALLENGE_AUTHORING_INPUT = {
-  footer: null,
-  participantLabels: [
-    { label: 'Maya', participantId: 'participant_maya' },
-    { label: 'Jon', participantId: 'participant_jon' },
-  ],
+  challengeSlug: 'weird-health-week',
+  componentProjectionScopeKeys: [{
+    componentId: 'steps',
+    projectionScopeKeys: ['steps-days.v0'],
+  }],
   scoreInput: {
     format: {
       kind: 'individual',
@@ -120,8 +125,6 @@ const GROUP_CHALLENGE_AUTHORING_INPUT = {
       }],
     },
   },
-  subtitle: 'Current verified progress',
-  title: 'Weird Health Week',
 } as const
 
 const GROUP_CHALLENGE_DYNAMIC_TOOLS = [
@@ -131,6 +134,57 @@ const GROUP_CHALLENGE_DYNAMIC_TOOLS = [
     responseCardsAvailable: false,
   }).filter((tool) => tool.name === 'attach_response_card'),
 ]
+
+function buildScriptedChallengeMember(input: {
+  displayName: string
+  participantId: string
+  value: number | null
+}) {
+  return {
+    currentTurnHandles: [],
+    displayName: input.displayName,
+    memberId: `member_${input.participantId}`,
+    participantId: input.participantId,
+    projections: [{
+      dataStatus: input.value === null ? 'missing' as const : 'available' as const,
+      grantStatus: 'granted' as const,
+      projectionScope: {
+        projectionKind: 'steps-days.v0' as const,
+      },
+      projectionScopeKey: 'steps-days.v0',
+      records: input.value === null
+        ? []
+        : [{
+            data: {
+              date: '2026-08-08',
+              metricKey: 'steps' as const,
+              unit: 'count',
+              value: input.value,
+            },
+            occurredAt: '2026-08-08T00:00:00.000Z',
+            recordKey: '2026-08-08',
+          }],
+    }],
+  }
+}
+
+async function prepareGroupChallengeVault(
+  workingDirectory: string,
+): Promise<string> {
+  const vaultRoot = path.join(workingDirectory, 'group-challenge-vault')
+  await createIntegratedVaultServices().core.init({
+    requestId: 'scripted-group-challenge-card',
+    timezone: 'UTC',
+    vault: vaultRoot,
+  })
+  await upsertKnowledgePage({
+    body: 'The current room challenge rules and canon.',
+    slug: 'weird-health-week',
+    title: 'Weird Health Week',
+    vault: vaultRoot,
+  })
+  return vaultRoot
+}
 
 interface ScriptedResponseRoute {
   completionLabel?: string
@@ -1625,6 +1679,9 @@ if (!tool) {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const vaultRoot = await prepareGroupChallengeVault(
+      scenario.turnInput.workingDirectory,
+    )
     scenario.stub.queue(
       {
         customToolCall: {
@@ -1660,30 +1717,18 @@ if (!tool) {
         currentHostedMailboxItemIds: () => [],
         groupSharedReader: {
           request: async () => ({
-            members: [{
-              currentTurnHandles: [],
-              displayName: 'Maya',
-              memberId: 'member_maya',
-              participantId: 'participant_maya',
-              projections: [{
-                dataStatus: 'available' as const,
-                grantStatus: 'granted' as const,
-                projectionScope: {
-                  projectionKind: 'steps-days.v0' as const,
-                },
-                projectionScopeKey: 'steps-days.v0',
-                records: [{
-                  data: {
-                    date: '2026-08-08',
-                    metricKey: 'steps' as const,
-                    unit: 'count',
-                    value: 4_000,
-                  },
-                  occurredAt: '2026-08-08T00:00:00.000Z',
-                  recordKey: '2026-08-08',
-                }],
-              }],
-            }],
+            members: [
+              buildScriptedChallengeMember({
+                displayName: 'Maya',
+                participantId: 'participant_maya',
+                value: 4_000,
+              }),
+              buildScriptedChallengeMember({
+                displayName: 'Jon',
+                participantId: 'participant_jon',
+                value: null,
+              }),
+            ],
             requestedProjectionScopeKeys: ['steps-days.v0'],
             status: 'ok' as const,
           }),
@@ -1694,6 +1739,7 @@ if (!tool) {
         vaultFileSendAvailable: false,
       },
       prompt: 'Read shared steps and attach the requested group challenge card.',
+      vaultRoot,
     })
 
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
@@ -1721,16 +1767,27 @@ if (!tool) {
       format: 'individual',
       kind: 'challenge_standings',
       objective: { kind: 'ranking' },
-      subtitle: 'Current verified progress',
+      subtitle: null,
       title: 'Weird Health Week',
       version: 1,
     })
+    const persisted = await getKnowledgePage({
+      slug: 'weird-health-week',
+      vault: vaultRoot,
+    })
+    expect(persisted.page.body).toContain(
+      'murph:challenge-standings-snapshot:v1:start',
+    )
+    expect(persisted.page.body).toContain('"participant_jon"')
   })
 
   it('withholds a group challenge card after a capacity-partial shared read', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
+    const vaultRoot = await prepareGroupChallengeVault(
+      scenario.turnInput.workingDirectory,
+    )
     const dates = [
       '2026-07-24',
       '2026-07-23',
@@ -1816,6 +1873,7 @@ if (!tool) {
         vaultFileSendAvailable: false,
       },
       prompt: 'Read the shared records and attach the requested standings card.',
+      vaultRoot,
     })
 
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
@@ -1824,7 +1882,7 @@ if (!tool) {
     expect(toolOutputs).toContain('\\"status\\":\\"partial\\"')
     expect(toolOutputs).toContain('\\"omittedParticipantIds\\"')
     expect(toolOutputs).toContain(
-      'response cards are unavailable after an incomplete shared read',
+      'require one complete stable shared-read proof',
     )
     expect(result.responseCard).toBeNull()
     expect(result.finalMessage).toBe(

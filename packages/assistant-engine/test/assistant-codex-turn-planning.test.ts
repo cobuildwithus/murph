@@ -2110,12 +2110,14 @@ describe('assistant Codex turn planning', () => {
     }
     const cardTool = async (options: {
       executionContext?: Parameters<typeof resolveAssistantRouteTurnPlan>[0]['executionContext']
+      hostedToolContext?: AssistantHostedToolContext | null
       input: AssistantMessageInput
       sharedPlan?: AssistantTurnSharedPlan
     }) => {
       const plan = await resolveAssistantRouteTurnPlan({
         ...common,
         executionContext: options.executionContext ?? null,
+        hostedToolContext: options.hostedToolContext ?? null,
         input: options.input,
         sharedPlan: options.sharedPlan ?? createSharedPlan(),
       })
@@ -2146,6 +2148,7 @@ describe('assistant Codex turn planning', () => {
     const hostedExecutionContext = {
       hosted: {
         dynamicContextPrompts: [],
+        groupSharedReader: { request: vi.fn() },
         memberId: 'member-group-challenge-card',
         userEnvKeys: [],
       },
@@ -2164,19 +2167,42 @@ describe('assistant Codex turn planning', () => {
     }
     const groupTool = await cardTool({
       executionContext: hostedExecutionContext,
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupSharedReader: { request: vi.fn() },
+      },
       input: linqGroupInput,
       sharedPlan: linqGroupPlan,
     })
     expect(groupTool).toBeDefined()
     const groupSchema = JSON.stringify(groupTool!.inputSchema)
     expect(groupSchema).toContain('scoreInput')
-    expect(groupSchema).toContain('participantLabels')
+    expect(groupSchema).toContain('challengeSlug')
+    expect(groupSchema).toContain('componentProjectionScopeKeys')
+    expect(groupSchema).not.toContain('participantLabels')
     expect(groupSchema).not.toContain('challenge_standings')
     expect(groupSchema).not.toContain('daily_nutrition')
     expect(groupSchema).not.toContain('compact_table')
 
     await expect(cardTool({
+      executionContext: {
+        hosted: {
+          dynamicContextPrompts: [],
+          memberId: 'member-group-challenge-card-no-reader',
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: createHostedToolContext(),
+      input: linqGroupInput,
+      sharedPlan: linqGroupPlan,
+    })).resolves.toBeUndefined()
+
+    await expect(cardTool({
       executionContext: hostedExecutionContext,
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupSharedReader: { request: vi.fn() },
+      },
       input: {
         ...linqGroupInput,
         scheduledInvocationAuthority: {

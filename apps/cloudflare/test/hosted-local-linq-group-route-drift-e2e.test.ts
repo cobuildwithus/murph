@@ -32,18 +32,14 @@ const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
 const canonicalChatPath = `/chats/${encodeURIComponent(groupChatId)}`;
 const standingsInboundText =
   "Group standings fixture: show the current challenge card.";
-const rejectedStandingsInboundText =
-  "Group standings fixture: try an incomplete card input.";
 const rejectedStandingsReplyText =
   "I could not verify a complete standings card, so I am keeping this update in text.";
-const replacedStandingsReplyText =
-  "This prose must be replaced by the standings card.";
 const challengeCardAuthoringInput = {
-  footer: null,
-  participantLabels: [
-    { label: "Maya", participantId: "participant_maya" },
-    { label: "Jon", participantId: "participant_jon" },
-  ],
+  challengeSlug: "weird-health-week",
+  componentProjectionScopeKeys: [{
+    componentId: "steps",
+    projectionScopeKeys: ["steps-days.v0"],
+  }],
   scoreInput: {
     format: {
       kind: "individual",
@@ -73,8 +69,6 @@ const challengeCardAuthoringInput = {
       }],
     },
   },
-  subtitle: "Current verified progress",
-  title: "Weird Health Week",
 } as const;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
@@ -243,7 +237,7 @@ describe("hosted local Linq group route drift e2e", () => {
     ).every((body) => body.includes("thread is direct: false"))).toBe(true);
   }, 420_000);
 
-  it("scores a group card at attachment and falls back to text when its authoring input is incomplete", async () => {
+  it("withholds a group card when no trusted read and canonical persistence proof exists", async () => {
     requireScenario().queueAssistantResponses([
       buildAssistantProviderMurphToolCall(
         "attach_response_card",
@@ -253,7 +247,7 @@ describe("hosted local Linq group route drift e2e", () => {
       matchInputContains: standingsInboundText,
     });
     requireScenario().queueAssistantResponses([
-      { text: replacedStandingsReplyText },
+      { text: rejectedStandingsReplyText },
     ]);
 
     const sendBaseline = requireLinqStub().countObservedSends(groupReplyPath);
@@ -261,7 +255,7 @@ describe("hosted local Linq group route drift e2e", () => {
       expectedMethod: "POST",
       expectedPath: "/capability/check_imessage",
     });
-    const cardCompletionPromise = requireScenario().waitForHostedCompletion(
+    const completionPromise = requireScenario().waitForHostedCompletion(
       ownerMemberId,
       { timeoutMs: 600_000 },
     );
@@ -283,84 +277,23 @@ describe("hosted local Linq group route drift e2e", () => {
       reason: "wake-appended-thread-route",
     });
 
-    const cardCompletion = await cardCompletionPromise;
-    expectHealthyCompletion(cardCompletion);
+    const completion = await completionPromise;
+    expectHealthyCompletion(completion);
 
-    const cardSend = await requireLinqStub().waitForAdditionalSend({
+    const send = await requireLinqStub().waitForAdditionalSend({
       baselineCount: sendBaseline,
       expectedPath: groupReplyPath,
       scenario: requireScenario(),
       userId: ownerMemberId,
     });
-    expect(requireLinqStub().readObservedMessageText(cardSend)).toBeNull();
-    expect(requireLinqStub().readObservedMessageAppCard(cardSend)).toMatchObject({
-      fallback_text: "Ask Murph for this card in text",
-      interactive: true,
-      layout: {
-        caption: "Weird Health Week — Current verified progress",
-        subcaption: "— Maya: 120 points",
-        trailing_caption: "— Jon: unscored",
-        trailing_subcaption: "Ranks are withheld until every score is complete.",
-      },
-      type: "imessage_app",
-      url: expect.stringMatching(
-        /^https:\/\/www\.withmurph\.ai\/#murph-card=/u,
-      ),
-    });
+    expect(requireLinqStub().readObservedMessageText(send)).toBe(
+      rejectedStandingsReplyText,
+    );
+    expect(requireLinqStub().readObservedMessageAppCard(send)).toBeNull();
     expect(requireLinqStub().countObservedRequests({
       expectedMethod: "POST",
       expectedPath: "/capability/check_imessage",
     })).toBe(capabilityBaseline);
-
-    requireScenario().queueAssistantResponses([
-      buildAssistantProviderMurphToolCall("attach_response_card", {
-        ...challengeCardAuthoringInput,
-        participantLabels: challengeCardAuthoringInput.participantLabels.slice(0, 1),
-      }),
-    ], {
-      matchInputContains: rejectedStandingsInboundText,
-    });
-    requireScenario().queueAssistantResponses([
-      { text: rejectedStandingsReplyText },
-    ]);
-
-    const rejectedSendBaseline =
-      requireLinqStub().countObservedSends(groupReplyPath);
-    const rejectedCompletionPromise = requireScenario().waitForHostedCompletion(
-      ownerMemberId,
-      { timeoutMs: 600_000 },
-    );
-    const rejectedResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      ownerMemberId,
-      groupChatId,
-      {
-        eventId: `evt_group_card_rejected_${runId}`,
-        isGroup: true,
-        messageId: `msg_group_card_rejected_${runId}`,
-        service: "iMessage",
-        text: rejectedStandingsInboundText,
-      },
-    ));
-    expect(rejectedResponse.status).toBe(202);
-    await expect(rejectedResponse.json()).resolves.toMatchObject({
-      ignored: false,
-      ok: true,
-      reason: "wake-appended-thread-route",
-    });
-
-    const rejectedCompletion = await rejectedCompletionPromise;
-    expectHealthyCompletion(rejectedCompletion);
-
-    const rejectedSend = await requireLinqStub().waitForAdditionalSend({
-      baselineCount: rejectedSendBaseline,
-      expectedPath: groupReplyPath,
-      scenario: requireScenario(),
-      userId: ownerMemberId,
-    });
-    expect(requireLinqStub().readObservedMessageText(rejectedSend)).toBe(
-      rejectedStandingsReplyText,
-    );
-    expect(requireLinqStub().readObservedMessageAppCard(rejectedSend)).toBeNull();
   }, 900_000);
 });
 
