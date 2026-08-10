@@ -2033,6 +2033,24 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeEnv: invocationRuntimeEnv,
         vaultRoot: restored.vaultRoot,
       });
+      let systemMailboxPostRecordWake: HostedRuntimeWakeCandidate | null = null;
+      const rememberSystemMailboxPostRecordWake = (
+        candidate: HostedRuntimeWakeCandidate,
+      ) => {
+        if (!candidate.at) {
+          return;
+        }
+        systemMailboxPostRecordWake = selectHostedRuntimeWakeCandidate([
+          systemMailboxPostRecordWake,
+          candidate,
+        ]);
+      };
+      const resolveCurrentSystemMailboxModeWake = async (
+        extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
+      ) => await resolveSystemMailboxModeWake([
+        ...(systemMailboxPostRecordWake?.at ? [systemMailboxPostRecordWake] : []),
+        ...extraCandidates,
+      ]);
       const finishInitialImportEffectsOnce = async () => {
         if (!checkpointed) {
           return;
@@ -2050,7 +2068,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         systemMailboxCheckpointStage: string,
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceCheckpointResponse> => {
-        const checkpointWake = await resolveSystemMailboxModeWake(extraCandidates);
+        const checkpointWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
         emitPhaseLog({
           details: {
             nextWakeAtPresent: checkpointWake.nextWakeAt !== null,
@@ -2098,7 +2116,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const returnSystemMailboxModeResult = async (
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
       ): Promise<HostedWorkspaceInvocationResult> => {
-        const projectedWake = await resolveSystemMailboxModeWake(extraCandidates);
+        const projectedWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
         const returnedWake = selectEarliestHostedRuntimeWake([
           {
             at: projectedWake.nextWakeAt,
@@ -2162,7 +2180,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
         const preparationWake =
           resolveHostedSystemMailboxCheckpointPreparationWake(preparation);
-        const projectedWake = await resolveSystemMailboxModeWake(
+        const projectedWake = await resolveCurrentSystemMailboxModeWake(
           preparationWake ? [preparationWake] : [],
         );
         const mustCheckpoint = importOrStartupCheckpointPending
@@ -2196,6 +2214,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           recordResult.nextWakeAt,
           recordResult.nextWakeReason ?? null,
         );
+        rememberSystemMailboxPostRecordWake(recordWake);
         await checkpointSystemMailboxMode(
           `${inputItem.stagePrefix}.checkpoint.record`,
           recordWake.at ? [recordWake] : [],
@@ -2227,7 +2246,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         }
       }
 
-      const projectedWake = await resolveSystemMailboxModeWake();
+      const projectedWake = await resolveCurrentSystemMailboxModeWake();
       if (
         importOrStartupCheckpointPending
         || hostedSystemMailboxWakeChangedFromWorkspace({
