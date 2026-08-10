@@ -456,3 +456,16 @@ Updated: 2026-08-10
   static boot closure 8,047,551 bytes; total 10,028,548 bytes of 10,059,562;
   no forbidden boot input entered the graph. Round 10 full-patch review,
   exact-head CI, and final mergeability proof remain.
+- `main` advanced again after the remediation push. The ordinary merge retained
+  mainline's recurring-timezone, workout-card, and Codex protocol additions;
+  retained this PR's generated-image continuity; regenerated the CLI skill
+  hash; and resolved the runner ratchets to the larger reviewed values before
+  measurement. The two Assistant Engine regression files pass 176 tests and
+  the runner bundle-policy file passes 42 tests on the combined tree.
+- Exact production assembly of that final combined graph passes: Vault CLI
+  9,039,145 bytes of 9,100,000; runner entry 1,674,361 bytes; static boot closure
+  8,059,710 bytes; and runner total 10,040,819 bytes. The total is the new
+  measured baseline with the established 32 KiB reviewed-addition allowance;
+  entry and static closure remain inside their existing cross-platform
+  tolerances. Round 10 full-patch review, exact-head CI, and final mergeability
+  proof remain.

@@ -490,7 +490,10 @@ describe("changelog registry", () => {
     ).toEqual([
       {
         id: "2026-08-10",
-        itemIds: ["reminders-keep-requested-timezone"],
+        itemIds: [
+          "personal-patterns",
+          "reminders-keep-requested-timezone",
+        ],
       },
       {
         id: "2026-08-09",
@@ -834,6 +837,22 @@ describe("changelog registry", () => {
         ],
       },
     ]);
+  });
+
+  it("keeps Personal Patterns historical and non-causal", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "personal-patterns",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1563],
+      tryIt: {
+        href: "/patterns",
+        label: "View your patterns",
+      },
+    });
+    expect(item?.details).toContain("existing history");
+    expect(item?.details).toContain("association rather than cause");
   });
 
   it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {

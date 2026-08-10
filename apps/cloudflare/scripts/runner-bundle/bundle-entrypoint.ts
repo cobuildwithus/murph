@@ -198,11 +198,11 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // deliverable-occurrence projection, exact local production assembly measured
 // a 1,674,361B entry, 8,046,334B static closure, and 10,024,188B total. The
 // later combined graph measured the same 1,674,361B entry, an 8,044,557B static
-// closure, and a 10,022,523B total. Generated-image continuity measured a
-// 10,026,794B total against its preceding mainline graph. Retain the larger
-// reviewed measurements and established cross-platform tolerances until exact
-// assembly remeasures the combined graph.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_026_794 + 32_768;
+// closure, and a 10,022,523B total. Adding generated-image continuity to that
+// merged graph measured a 1,674,361B entry, 8,059,710B static closure, and
+// 10,040,819B total. Ratchet the total to the exact combined graph and retain
+// the established entry and static cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_040_819 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
@@ -262,6 +262,7 @@ export async function bundleRunnerContainerEntrypoint(
     format: "esm",
     logLevel: "error",
     metafile: true,
+    minifySyntax: true,
     outdir: bundleOutDir,
     platform: "node",
     splitting: true,

@@ -88,6 +88,11 @@ import {
   readWearableSummaryRows,
 } from "./projection/wearable-summary-store.ts";
 import { resolveWearableSleepPatternReadFilters } from "./wearables/sleep-pattern.ts";
+import { createVaultReadModel } from "./read-model.ts";
+import {
+  buildPersonalPatternReportFromWearableBundle,
+  type PersonalPatternReport,
+} from "./personal-patterns.ts";
 
 export type {
   QueryCanonicalEntityFilters,
@@ -273,6 +278,21 @@ export async function summarizeWearableSleepPatternRuntime(
         ? "vault_metadata"
         : undefined,
   });
+}
+
+export async function buildPersonalPatternReportRuntime(
+  vaultRoot: string,
+  options: { asOf?: Date | string; windowDays?: number } = {},
+): Promise<PersonalPatternReport> {
+  const location = await ensureFreshQueryProjection(vaultRoot);
+  const snapshot = readStoredVaultSource(location);
+  const vault = createVaultReadModel({
+    entities: snapshot.entities,
+    metadata: snapshot.metadata,
+    vaultRoot,
+  });
+  const wearableBundle = readStoredPublicWearableSummaryBundle(location, {});
+  return buildPersonalPatternReportFromWearableBundle(vault, wearableBundle, options);
 }
 
 export async function summarizeWearableActivityRuntime(
