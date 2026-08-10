@@ -1,6 +1,6 @@
 # Remove retired referral billing copy
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -103,3 +103,10 @@ Updated: 2026-08-09
   skip explicitly, the stale-copy scan is empty outside immutable completed
   plans, and the specialist response is substantive with no accepted findings
   left unresolved.
+- Completed outcomes: focused web and assistant tests, both typechecks, the
+  three-case referral Playwright proof, frontend-design proof, docs drift,
+  diff/privacy/stale-copy scans, and all required exact-head GitHub checks
+  passed. Preliminary ReviewGPT returned substantive findings; every accepted
+  coverage finding was resolved, while credential-gated provider cases and the
+  live hosted-local Stripe matrix skipped explicitly as designed.
+Completed: 2026-08-09
