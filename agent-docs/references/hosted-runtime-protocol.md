@@ -1061,6 +1061,24 @@ stream EOF. Body consumption overlaps streamed hash/decrypt work and its
 backpressure, so it is not pure network-transfer latency. These two bounded
 numbers are appended to the existing in-memory staged phase breakdown; they do
 not add a request, awaited reporting step, per-chunk timer, or separate log.
+The same existing `provider_started` phase breakdown may subdivide
+`automationLaneToAssistantServiceMs` into ten adjacent monotonic durations:
+readiness, input selection, pass setup, candidate scan, group/operation scope,
+terminal evidence, session preflight, cross-session context, prompt preparation,
+and service handoff. When present, those ten values sum exactly to their parent;
+outbox and receipt-scan timings remain nested within cross-session context, and
+the subdivision adds no I/O or awaited reporting work. The emitter omits a
+partial or non-additive subdivision, and Web's best-effort parser drops the
+malformed phase breakdown without losing the core provider-start milestone.
+The complete subdivision is emitted only when the provider-producing group is
+the first group processed in that automation pass. If an earlier group finishes
+without reaching the provider, later provider starts retain the canonical path
+but omit the subdivision so earlier group work and pass-shared history scans are
+not misattributed; the scan-nesting statement applies only to an emitted complete
+subdivision.
+Because Web strictly parses phase-breakdown leaves, roll this telemetry out
+Web-first so its reader accepts the additive fields before a runner emits them;
+during rollback, remove the runner/Cloudflare emitter before rolling Web back.
 The web-owned `provider_started` field
 means the runtime observed a local Codex `turn/start`; it is not evidence of an
 upstream OpenAI request or first token. The runtime may also emit metadata-only

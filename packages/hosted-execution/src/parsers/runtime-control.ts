@@ -51,6 +51,7 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  inspectHostedRuntimeAutomationLaneTimingSubdivision,
   isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
@@ -5901,10 +5902,20 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.preProvider,
       preProviderLabel,
     );
-    breakdown.preProvider = {
+    const parsedPreProvider = {
       ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationReadinessMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationInputSelectionMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationPassSetupMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationCandidateScanMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationGroupAndOperationScopeMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationTerminalEvidenceMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationSessionPreflightMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationCrossSessionContextMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationPromptPreparationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationServiceHandoffMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "executionTargetHydrateMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
@@ -5919,6 +5930,15 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
+    if (
+      inspectHostedRuntimeAutomationLaneTimingSubdivision(parsedPreProvider).kind
+        === "invalid"
+    ) {
+      throw new TypeError(
+        `${preProviderLabel} automation lane timing subdivision must be absent or contain all ten leaves summing to automationLaneToAssistantServiceMs`,
+      );
+    }
+    breakdown.preProvider = parsedPreProvider;
   }
 
   if (record.assistant !== undefined) {

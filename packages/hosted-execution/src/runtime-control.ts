@@ -2186,6 +2186,18 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     mailboxImportDoneToAssistantPhaseMs?: number;
     workspaceAssistantPreAutomationMs?: number;
     automationLaneToAssistantServiceMs?: number;
+    // These adjacent nested leaves exactly partition
+    // automationLaneToAssistantServiceMs when all are present.
+    automationReadinessMs?: number;
+    automationInputSelectionMs?: number;
+    automationPassSetupMs?: number;
+    automationCandidateScanMs?: number;
+    automationGroupAndOperationScopeMs?: number;
+    automationTerminalEvidenceMs?: number;
+    automationSessionPreflightMs?: number;
+    automationCrossSessionContextMs?: number;
+    automationPromptPreparationMs?: number;
+    automationServiceHandoffMs?: number;
     executionTargetHydrateMs?: number;
     systemMailboxMaintenanceMs?: number;
     memberPreferencesPrePlanningMs?: number;
@@ -2232,6 +2244,106 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     preProviderSetupMs?: number;
     providerPlanAndGateMs?: number;
     linqEgressGuardMs?: number;
+  };
+}
+
+export const HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS = [
+  "automationReadinessMs",
+  "automationInputSelectionMs",
+  "automationPassSetupMs",
+  "automationCandidateScanMs",
+  "automationGroupAndOperationScopeMs",
+  "automationTerminalEvidenceMs",
+  "automationSessionPreflightMs",
+  "automationCrossSessionContextMs",
+  "automationPromptPreparationMs",
+  "automationServiceHandoffMs",
+] as const;
+
+type HostedRuntimeAutomationLaneTimingSubdivision = Required<Pick<
+  NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+  (typeof HOSTED_RUNTIME_AUTOMATION_LANE_TIMING_SUBDIVISION_KEYS)[number]
+>>;
+
+export type HostedRuntimeAutomationLaneTimingSubdivisionInspection =
+  | { kind: "absent" }
+  | { kind: "invalid" }
+  | {
+      kind: "complete";
+      subdivision: HostedRuntimeAutomationLaneTimingSubdivision;
+    };
+
+export function inspectHostedRuntimeAutomationLaneTimingSubdivision(
+  preProvider: NonNullable<HostedRuntimeLatencyPhaseBreakdown["preProvider"]>,
+): HostedRuntimeAutomationLaneTimingSubdivisionInspection {
+  const {
+    automationCandidateScanMs,
+    automationCrossSessionContextMs,
+    automationGroupAndOperationScopeMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationPromptPreparationMs,
+    automationReadinessMs,
+    automationServiceHandoffMs,
+    automationSessionPreflightMs,
+    automationTerminalEvidenceMs,
+  } = preProvider;
+  if (
+    automationCandidateScanMs === undefined
+    && automationCrossSessionContextMs === undefined
+    && automationGroupAndOperationScopeMs === undefined
+    && automationInputSelectionMs === undefined
+    && automationPassSetupMs === undefined
+    && automationPromptPreparationMs === undefined
+    && automationReadinessMs === undefined
+    && automationServiceHandoffMs === undefined
+    && automationSessionPreflightMs === undefined
+    && automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "absent" };
+  }
+  if (
+    automationCandidateScanMs === undefined
+    || automationCrossSessionContextMs === undefined
+    || automationGroupAndOperationScopeMs === undefined
+    || automationInputSelectionMs === undefined
+    || automationPassSetupMs === undefined
+    || automationPromptPreparationMs === undefined
+    || automationReadinessMs === undefined
+    || automationServiceHandoffMs === undefined
+    || automationSessionPreflightMs === undefined
+    || automationTerminalEvidenceMs === undefined
+  ) {
+    return { kind: "invalid" };
+  }
+
+  const subdivision = {
+    automationReadinessMs,
+    automationInputSelectionMs,
+    automationPassSetupMs,
+    automationCandidateScanMs,
+    automationGroupAndOperationScopeMs,
+    automationTerminalEvidenceMs,
+    automationSessionPreflightMs,
+    automationCrossSessionContextMs,
+    automationPromptPreparationMs,
+    automationServiceHandoffMs,
+  };
+  const values = Object.values(subdivision);
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    return { kind: "invalid" };
+  }
+  const sum = values.reduce<number>((total, value) => total + value, 0);
+  if (
+    !Number.isSafeInteger(sum)
+    || !Number.isSafeInteger(preProvider.automationLaneToAssistantServiceMs)
+    || preProvider.automationLaneToAssistantServiceMs !== sum
+  ) {
+    return { kind: "invalid" };
+  }
+  return {
+    kind: "complete",
+    subdivision,
   };
 }
 
@@ -2343,6 +2455,16 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "mailboxImportDoneToAssistantPhaseMs",
     "workspaceAssistantPreAutomationMs",
     "automationLaneToAssistantServiceMs",
+    "automationReadinessMs",
+    "automationInputSelectionMs",
+    "automationPassSetupMs",
+    "automationCandidateScanMs",
+    "automationGroupAndOperationScopeMs",
+    "automationTerminalEvidenceMs",
+    "automationSessionPreflightMs",
+    "automationCrossSessionContextMs",
+    "automationPromptPreparationMs",
+    "automationServiceHandoffMs",
     "executionTargetHydrateMs",
     "systemMailboxMaintenanceMs",
     "memberPreferencesPrePlanningMs",
