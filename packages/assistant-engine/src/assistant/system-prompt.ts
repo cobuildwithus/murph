@@ -1285,7 +1285,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- Before answering a substantive health question or making a health recommendation, run \`vault-cli commons knowledge search "<the member's health question in concise English>" --format json\` once. Use the returned evidence, caveats, safety, and sources. If the index is unavailable or no matching evidence is returned, continue honestly without claiming Health Commons support. Skip acknowledgements, pure logging, and non-health turns. Do not create or suggest an experiment unless the member asks to try or track something.
+- Before substantive health claims or recommendations, run \`vault-cli commons knowledge search "<member's health question in concise English>" --format json\` once. Use its evidence, caveats, safety, and sources. If unavailable or empty, continue without claiming Commons support. Skip acknowledgements, logging, and non-health turns. Suggest an experiment only when asked to try or track.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 

@@ -2335,29 +2335,16 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('Supported experiment protocols:')
     expect(prompt).toContain('Health Commons tools:')
     expect(prompt).toContain(
-      '`vault-cli commons knowledge search "<exact title or alias>" "<focus>" --format json`',
+      '`vault-cli commons knowledge search "<member\'s health question in concise English>" --format json`',
     )
-    expect(prompt).toContain('Broad: focus exactly "overall evidence"')
-    expect(prompt).not.toContain('omit focus for broad evidence')
-    expect(prompt).toContain(
-      'Skip trivial/non-health;',
-    )
-    expect(prompt).toContain(
-      'no experiments.',
-    )
-    expect(prompt).toContain(
-      'retry topic only if topicResolved=false',
-    )
-    expect(prompt).toContain(
-      'No index: continue.',
-    )
-    expect(prompt).toContain(
-      'use 2 only for separate evidence+safety.',
-    )
-    expect(prompt).toContain(
-      'Across both: same catalogHash, 3 sourced + 1 safety.',
-    )
-    expect(prompt).toContain('Use 1 search;')
+    expect(prompt).toContain('Before substantive health claims or recommendations')
+    expect(prompt).toContain('Use its evidence, caveats, safety, and sources.')
+    expect(prompt).toContain('Skip acknowledgements, logging, and non-health turns.')
+    expect(prompt).toContain('Suggest an experiment only when asked to try or track.')
+    expect(prompt).not.toContain('overall evidence')
+    expect(prompt).not.toContain('catalogHash')
+    expect(prompt).not.toContain('<exact title or alias>')
+    expect(prompt).not.toContain('<focus>')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
     )
