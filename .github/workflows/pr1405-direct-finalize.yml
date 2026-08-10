@@ -1,20 +1,20 @@
 name: Direct PR 1405 finalization
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - codex/pr1405-direct-final
 
 permissions:
   contents: write
 
 concurrency:
-  group: pr1405-direct-final-pr
+  group: pr1405-direct-final
   cancel-in-progress: true
 
 jobs:
   finalize:
-    if: github.event.pull_request.head.ref == 'codex/pr1405-direct-final'
+    if: github.event.head_commit.message == 'chore: rerun direct PR 1405 validation 2'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
