@@ -150,6 +150,9 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('`action: "create_invite"`')
     expect(normalized).toContain('before every Family invitation')
     expect(normalized).toContain(
+      'If `read_status` cannot be read, say no change was attempted and that retrying the status read is safe.',
+    )
+    expect(normalized).toContain(
       'Only call `action: "create_invite"` when the status proves all three conditions:',
     )
     expect(normalized).toContain('`plans.<requested plan>.remaining` is greater than zero')

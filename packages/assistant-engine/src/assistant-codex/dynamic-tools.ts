@@ -2932,6 +2932,12 @@ async function executeFamilyPlanTool(input: {
     const result = await familyPlanTool.request(input.request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
+    if (input.request.action === 'read_status') {
+      return toolTextResult(
+        false,
+        'Family status could not be read; no change was attempted; retry the status read',
+      )
+    }
     return toolTextResult(
       false,
       'family plan request was not confirmed; check Family Settings before retrying to avoid a duplicate request',

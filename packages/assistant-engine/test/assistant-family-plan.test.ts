@@ -361,4 +361,60 @@ describe("assistant family plan tool", () => {
       "request failed",
     );
   });
+
+  it("reports a failed Family status read as retry-safe with no possible change", async () => {
+    const request = readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "read_status",
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    });
+    if (!request) {
+      throw new Error("Expected a family plan dynamic tool request.");
+    }
+
+    const familyPlanTool = {
+      request: vi.fn(async () => {
+        throw new Error("status transport unavailable");
+      }),
+    };
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: {
+        computerToolsAvailable: false,
+        familyPlanTool,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: vi.fn(async () => ({
+          approvalUrl: "https://murph.test/approve/unused",
+          filename: "unused.pdf",
+          status: "pending" as const,
+        })),
+        vaultFileSendAvailable: false,
+      },
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    });
+
+    expect(familyPlanTool.request).toHaveBeenCalledWith({
+      action: "read_status",
+    });
+    expect(result.rpcResult.success).toBe(false);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "no change was attempted",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      "retry the status read",
+    );
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain("duplicate");
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      "Family Settings",
+    );
+  });
 });

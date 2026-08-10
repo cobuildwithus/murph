@@ -74,6 +74,12 @@ Updated: 2026-08-10
 - A prior concurrent worker archived the original Family Max plan before this
   later recovery audit returned. That completed snapshot remains immutable;
   this active plan owns only the accepted remediation and completion gate.
+- Round 5 accepted one review-induced wording bug: the shared Family tool catch
+  applied mutation-only duplicate warnings to a failed `read_status`, even
+  though a read cannot create an invite, checkout, or charge. The existing
+  catch now branches on the request action: reads state that no change was
+  attempted and permit a safe status retry, while potentially mutating actions
+  retain the unconfirmed/Settings recovery.
 
 ## Verification
 
@@ -83,4 +89,8 @@ Updated: 2026-08-10
 - The repository exposes no ESLint executable, so the attempted focused ESLint
   command could not run; typecheck and focused Vitest are the next-best local
   validation.
-- Pending: exact pushed-head final ReviewGPT and required GitHub Actions.
+- Round-5 correction rerun: 11 focused Family tool and skill-policy tests
+  passed; Assistant Engine typecheck, `git diff --check`, and the private-
+  identifier diff scan passed.
+- Pending: push the correction, exact pushed-head final ReviewGPT, and required
+  GitHub Actions.

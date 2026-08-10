@@ -23,6 +23,9 @@ runtime/model access; Max adds included usage, not a separate model capability.
 Use `murph.family_plan` with `action: "read_status"` for account-specific
 questions, before every Family invitation, and before a Family-member usage
 handoff. Treat the returned state as authoritative for only that request.
+If `read_status` cannot be read, say no change was attempted and that retrying
+the status read is safe. Do not imply that an invite, checkout, or charge might
+have been duplicated.
 
 For a general explanation of Family, answer from this skill without reading
 private status unless account state would materially help. Do not invent billing
