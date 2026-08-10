@@ -35,8 +35,8 @@ Updated: 2026-08-10
 ## Constraints
 
 - Technical constraints: reuse the workspace CLI installed by the root frozen
-  dependency graph, whose existing runner-image contract owns version
-  alignment; do not add a second installer or version owner.
+  dependency graph. Its current exact pin matches the independently owned
+  runner-base pin; do not add a second installer or workflow-local version.
 - Product/process constraints: keep repository permissions read-only, secrets
   step-scoped, Junction sandbox-only, provider sessions serialized, and all
   browser artifacts disabled.
@@ -44,8 +44,8 @@ Updated: 2026-08-10
 ## Risks and mitigations
 
 1. Risk: a duplicated Codex install path drifts from the hosted runtime.
-   Mitigation: expose the existing exact workspace dependency and retain its
-   runner-image alignment proof rather than fetching another copy.
+   Mitigation: expose the existing exact workspace dependency, keep both
+   current pins visible to review, and avoid fetching another copy.
 2. Risk: clearing the stale queue starts overlapping provider sessions.
    Mitigation: inspect exact run/job state and cancel only an exact proven stale
    pre-authorization run; retain non-canceling concurrency for active work.
@@ -99,5 +99,5 @@ Updated: 2026-08-10
 - Final ReviewGPT round 2 attempt 1 was not attested because its marked response
   completed below the trust floor. Its diagnostic result also identified that
   the declared full snapshot omitted the runner-base Dockerfile required to
-  verify the documented workspace/image version-alignment contract. The audit
+  verify the documented current workspace/image version match. The audit
   context now includes that exact owner path and locks it with packager coverage.
