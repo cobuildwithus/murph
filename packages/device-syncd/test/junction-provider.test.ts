@@ -4422,7 +4422,36 @@ test("Junction direct Apple Health canonical delivery records history despite th
 
 test("Junction data webhooks name the delivering source and lifecycle events do not", async () => {
   const provider = createJunctionProvider(async (input) => {
-    throw new Error(`Unexpected request: ${readUrl(input)}`);
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { blood_pressure: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/blood_pressure/grouped") {
+      const timestamp = url.searchParams.get("start_date")
+        ?? "2026-03-18T00:00:00.000Z";
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              id: `bp-${timestamp}`,
+              timestamp,
+              systolic: 120,
+              diastolic: 80,
+            }],
+            source: { provider: "garmin", type: "cuff" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
     providerFilter: ["garmin"],
     timeseriesResources: ["blood_pressure"],
@@ -4518,6 +4547,31 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     windowEnd: "2026-03-20T00:00:00.000Z",
     windowStart: "2026-03-18T00:00:00.000Z",
   });
+
+  const lifecycleJob = createJob(
+    "resource",
+    sourceBloodPressureHistory.payload ?? {},
+  );
+  lifecycleJob.dedupeKey = sourceBloodPressureHistory.dedupeKey ?? null;
+  const postMigrationResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        },
+      }),
+      importSnapshot: async () => ({
+        canonicalEventCount: 1,
+        durableDeliveryAccepted: true,
+      }),
+    }),
+    lifecycleJob,
+  );
+  assert.equal(
+    postMigrationResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
+    "v1|garmin,omron",
+  );
 });
 
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
