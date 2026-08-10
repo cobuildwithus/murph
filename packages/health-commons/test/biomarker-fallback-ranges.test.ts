@@ -24,8 +24,19 @@ const PAGE_AUTHORED_STATUS_MIRRORS = [
   "biomarker:total-protein",
 ] as const;
 
+const WHOLE_BLOOD_CBC_KEYS = [
+  "biomarker:absolute-basophils",
+  "biomarker:absolute-eosinophils",
+  "biomarker:absolute-lymphocytes",
+  "biomarker:absolute-monocytes",
+  "biomarker:absolute-neutrophils",
+  "biomarker:mean-corpuscular-volume",
+  "biomarker:white-blood-cell-count",
+] as const;
+
 const EXPECTED_ENTITY_KEYS = [
   ...PAGE_AUTHORED_STATUS_MIRRORS,
+  ...WHOLE_BLOOD_CBC_KEYS,
   "biomarker:albumin",
   "biomarker:anion-gap",
   "biomarker:apolipoprotein-b",
@@ -70,8 +81,8 @@ describe("reviewed biomarker fallback range catalog", () => {
     expect(entries.map((entry) => entry.entityKey).sort()).toEqual(
       [...EXPECTED_ENTITY_KEYS].sort(),
     );
-    expect(entries).toHaveLength(33);
-    expect(entries.reduce((count, entry) => count + entry.ranges.length, 0)).toBe(36);
+    expect(entries).toHaveLength(40);
+    expect(entries.reduce((count, entry) => count + entry.ranges.length, 0)).toBe(43);
 
     for (const entry of entries) {
       expect(new Set(entry.ranges.map(({ range }) => range.unit)).size).toBe(
@@ -80,7 +91,14 @@ describe("reviewed biomarker fallback range catalog", () => {
 
       for (const reviewed of entry.ranges) {
         const { range, statusMapping } = reviewed;
-        expect(() => healthCommonsBiomarkerFallbackRangeSchema.parse(range)).not.toThrow();
+        // Page-authored Health Commons frontmatter still owns the legacy
+        // serum/plasma schema. The shared runtime catalog additionally carries
+        // generation-4 whole-blood CBC records, validated explicitly below.
+        if (range.eligibleSpecimenKinds.every((kind) =>
+          kind === "serum" || kind === "plasma"
+        )) {
+          expect(() => healthCommonsBiomarkerFallbackRangeSchema.parse(range)).not.toThrow();
+        }
         expect(range.applicability).toMatch(
           /not the reporting laboratory's range/iu,
         );
@@ -169,6 +187,15 @@ describe("reviewed biomarker fallback range catalog", () => {
       expect.objectContaining({ unit: "mcg/dL" }),
       expect.objectContaining({ unit: "mcg/dL (calc)" }),
     ]);
+    expect(resolveReviewedBiomarkerFallbackRanges("biomarker:white-blood-cell-count"))
+      .toEqual([
+        expect.objectContaining({
+          eligibleSpecimenKinds: ["whole_blood"],
+          lowerBound: { inclusive: true, value: 3.4 },
+          unit: "10^3/uL",
+          upperBound: { inclusive: true, value: 9.6 },
+        }),
+      ]);
     expect(resolveReviewedBiomarkerFallbackRanges("biomarker:poc-troponin-i")).toEqual([]);
     expect(resolveReviewedBiomarkerFallbackRanges("biomarker:hba1c")).toEqual([]);
   });
@@ -180,5 +207,25 @@ describe("reviewed biomarker fallback range catalog", () => {
       .toEqual({ above: "reported", below: "reported", within: "reported" });
     expect(resolveBiomarkerFallbackStatusRanges("biomarker:ferritin")[0]?.statusMapping)
       .toEqual({ above: "reported", below: "reported", within: "reported" });
+  });
+
+  it("keeps the whole-blood CBC extension source-locked and status-eligible", () => {
+    for (const entityKey of WHOLE_BLOOD_CBC_KEYS) {
+      const reviewed = listReviewedBiomarkerFallbackRanges()
+        .find((entry) => entry.entityKey === entityKey)?.ranges[0];
+      expect(reviewed, entityKey).toBeDefined();
+      expect(reviewed?.range.eligibleSpecimenKinds, entityKey).toEqual(["whole_blood"]);
+      expect(reviewed?.range.source, entityKey).toMatchObject({
+        organization: "Mayo Clinic Laboratories",
+        title: "Complete Blood Cell Count with Differential, Blood",
+        url: "https://www.mayocliniclabs.com/test-catalog/Overview/9109",
+        year: 2026,
+      });
+      expect(reviewed?.statusMapping, entityKey).toEqual({
+        above: "above_range",
+        below: "below_range",
+        within: "in_range",
+      });
+    }
   });
 });
