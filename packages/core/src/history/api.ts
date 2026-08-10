@@ -146,6 +146,11 @@ const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
   "waistCircumference",
   "weightKg",
 ]);
+const CANONICAL_BODY_MEASUREMENT_TYPES = new Set([
+  "body_fat_pct",
+  "waist",
+  "weight",
+]);
 const STORED_DAY_GRAIN_OBSERVATION_ALIASES = new Set([
   "day",
   "daily-summary",
@@ -1499,20 +1504,12 @@ function canonicalEventContainsBodyMeasurement(
   }
   if (record.kind === "measurement") {
     return record.measurements.some((measurement) =>
-      isReadableCanonicalBodyMeasurement(
-        measurement.metric,
-        measurement.value,
-        measurement.unit,
-      )
+      isCanonicalBodyMeasurementMetric(measurement.metric)
     );
   }
   if (record.kind === "body_measurement") {
     return record.measurements.some((measurement) =>
-      isReadableCanonicalBodyMeasurement(
-        measurement.type.replace(/_/gu, "-"),
-        measurement.value,
-        measurement.unit,
-      )
+      CANONICAL_BODY_MEASUREMENT_TYPES.has(measurement.type)
     );
   }
   return false;

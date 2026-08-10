@@ -465,7 +465,7 @@ describe('assistant context snapshot device availability', () => {
     }
   })
 
-  it('advertises only body observations that wearable reads can normalize', async () => {
+  it('keeps wearable observation units separate from measurement fallback', async () => {
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), 'assistant-device-context-body-units-'),
     )
@@ -535,7 +535,7 @@ describe('assistant context snapshot device availability', () => {
 
       const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
       expect(prompt).toContain(
-        'Body/scale measurement history is present (latest 2026-08-08)',
+        'Body/scale measurement history is present (latest 2026-08-10)',
       )
       expect(prompt).not.toContain('180')
       expect(prompt).not.toContain('12')
@@ -549,6 +549,15 @@ describe('assistant context snapshot device availability', () => {
       })).resolves.toMatchObject({
         count: 1,
         items: [{ date: '2026-08-08' }],
+      })
+      await expect(listMeasurementRecords({
+        from: '2026-08-10',
+        limit: 100,
+        to: '2026-08-10',
+        vault: vaultRoot,
+      })).resolves.toMatchObject({
+        count: 1,
+        items: [{ data: { dayKey: '2026-08-10' } }],
       })
     } finally {
       await rm(parentRoot, {
