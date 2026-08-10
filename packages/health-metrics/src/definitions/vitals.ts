@@ -2,7 +2,7 @@ import type { MetricDefinition } from "../types.ts";
 
 export const VITAL_METRICS = [
   {
-    aliases: ["systolic-bp", "systolic_bp", "sbp", "systolic", "systolicbloodpressure"],
+    aliases: ["systolic-bp", "systolic_bp", "sbp", "systolic"],
     biomarkerKey: "biomarker:systolic-blood-pressure",
     canonicalUnit: "mmHg",
     category: "vital",
@@ -13,7 +13,7 @@ export const VITAL_METRICS = [
     valuePrecision: 0,
   },
   {
-    aliases: ["diastolic-bp", "diastolic_bp", "dbp", "diastolic", "diastolicbloodpressure"],
+    aliases: ["diastolic-bp", "diastolic_bp", "dbp", "diastolic"],
     biomarkerKey: "biomarker:diastolic-blood-pressure",
     canonicalUnit: "mmHg",
     category: "vital",

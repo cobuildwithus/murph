@@ -1019,6 +1019,9 @@ importers:
       '@murphai/health-commons':
         specifier: workspace:*
         version: link:../health-commons
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:../health-metrics
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers

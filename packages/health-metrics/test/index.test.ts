@@ -348,6 +348,26 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   });
 });
 
+test("resolves every legacy collapsed body and blood-pressure identity from the owning catalog", () => {
+  const relevantDefinitions = listMetricDefinitions().filter((definition) =>
+    definition.category === "body"
+    || definition.key === "systolic-blood-pressure"
+    || definition.key === "diastolic-blood-pressure"
+  );
+
+  assert.ok(relevantDefinitions.length >= 6);
+  for (const definition of relevantDefinitions) {
+    for (const identity of [definition.key, ...definition.aliases]) {
+      const collapsedIdentity = normalizeMetricKey(identity).replace(/-/gu, "");
+      assert.equal(
+        resolveMetricDefinition(collapsedIdentity)?.key,
+        definition.key,
+        `${identity} must retain its canonical identity after legacy writer collapse`,
+      );
+    }
+  }
+});
+
 test("requires exactly one session capture field for a subjective primary metric", () => {
   assert.deepEqual(assessExperimentPrimaryMetricCapture({
     primaryBiomarkerKey: "biomarker:sleep-quality",

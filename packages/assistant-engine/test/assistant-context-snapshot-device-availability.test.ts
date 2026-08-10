@@ -149,18 +149,18 @@ describe('assistant context snapshot device availability', () => {
   it.each([
     {
       metric: 'bodyFat',
-      storedMetric: 'bodyfat',
+      storedMetric: 'body-fat-percentage',
       unit: 'percent',
       value: 18.4,
     },
     {
       metric: 'bodyMassIndex',
-      storedMetric: 'bodymassindex',
+      storedMetric: 'bmi',
       unit: 'kg/m2',
       value: 22.1,
     },
   ] as const)(
-    'advertises writer-normalized $metric measurement history',
+    'advertises writer-canonicalized $metric measurement history',
     async ({ metric, storedMetric, unit, value }) => {
       const parentRoot = await mkdtemp(
         path.join(tmpdir(), `assistant-device-context-writer-${storedMetric}-`),
@@ -372,8 +372,8 @@ describe('assistant context snapshot device availability', () => {
           entity: {
             data: {
               measurements: expect.arrayContaining([
-                expect.objectContaining({ metric: 'systolicbloodpressure' }),
-                expect.objectContaining({ metric: 'diastolicbloodpressure' }),
+                expect.objectContaining({ metric: 'systolic-blood-pressure' }),
+                expect.objectContaining({ metric: 'diastolic-blood-pressure' }),
               ]),
             },
           },
