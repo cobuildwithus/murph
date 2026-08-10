@@ -69,9 +69,11 @@ test.describe("Mobvoi Health Connect design proof", () => {
         const downloadLink = card.locator(
           'a[aria-label="Download app for Mobvoi / TicWatch"]',
         );
+        const status = card.locator('[data-connection-state]');
 
         await expect(cardHeading).toHaveCount(1);
         await expect(card).toBeVisible();
+        await expect(status).toHaveCount(0);
         await expect(
           card.getByText(
             "Supported TicWatch health and activity data through Google Fit and Android Health Connect.",

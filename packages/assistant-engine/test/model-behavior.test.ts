@@ -1518,7 +1518,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
+      `only ${MURPH_PRODUCT_ORIGIN} and both canonical app-store URLs are proof-free`,
     )
     expect(prompt).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md',
@@ -1559,7 +1559,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      `only ${MURPH_PRODUCT_ORIGIN} and https://apps.apple.com/us/app/murph-ai/id6786145859 are proof-free`,
+      `only ${MURPH_PRODUCT_ORIGIN} and both canonical app-store URLs are proof-free`,
     )
   })
 
@@ -2201,7 +2201,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '32daf4a053a3a6fc5221b98400c6e65350983e29c0679d3988f00f4635dbfcd5',
+      '80719222c654afca58b959ff1b74eca15ab46dfc5abc7c562e8c5310d15b6cd2',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',

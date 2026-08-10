@@ -477,6 +477,9 @@ export function listVisibleConnectSources(): ConnectSource[] {
     return ui
       ? [
           {
+            connectionStatusMeaningful: source.routes.some(
+              (route) => route.kind !== "unavailable",
+            ),
             description: ui.description,
             id: source.connectSourceId,
             logo: ui.logo,

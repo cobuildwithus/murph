@@ -26,6 +26,7 @@ const ZEPP_CONNECT_SOURCE: ConnectSource = {
 };
 
 const MOBVOI_CONNECT_SOURCE: ConnectSource = {
+  connectionStatusMeaningful: false,
   description:
     "Supported TicWatch health and activity data through Google Fit and Android Health Connect.",
   id: "mobvoi-health",

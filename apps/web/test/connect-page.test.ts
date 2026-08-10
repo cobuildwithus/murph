@@ -412,7 +412,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.equal(sources.length, 34);
   assert.equal(
     markup.match(/data-connection-state="idle"/gu)?.length,
-    sources.length - 6,
+    sources.length - 7,
   );
   assert.equal(
     markup.match(/>Not available<\/button>/gu)?.length,
@@ -435,6 +435,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     markup,
     /In Mobvoi Health, turn on Google Fit sharing\. In Google Fit, turn on Sync Fit with Health Connect, then connect Health Connect in Murph on Android\. Available categories and history depend on what Mobvoi and Google Fit write\./,
   );
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
@@ -1521,6 +1522,36 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
     sourceHeadingIndex(markup, "Apple Health") <
       sourceHeadingIndex(markup, "Garmin"),
   );
+});
+
+test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async () => {
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_health_connect",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Health Connect",
+            resourceCount: 4,
+            sourceProviderSlug: "health_connect",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(markup, /aria-label="Download app for Mobvoi \/ TicWatch"/u);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
 });
 
 test("ConnectPage shows source-scoped disconnects for multi-source Junction accounts", async () => {

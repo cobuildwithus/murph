@@ -1430,7 +1430,7 @@ function buildAssistantHealthRelayGuidanceText(): string {
 }
 
 function buildAssistantToolTruthfulnessText(): string {
-  return `Claim only runtime-proven actions. Never invent invite/share/auth/wearable URLs; only ${MURPH_PRODUCT_ORIGIN} and ${MURPH_IOS_APP_STORE_URL} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
+  return `Claim only runtime-proven actions. Never invent invite/share/auth/wearable URLs; only ${MURPH_PRODUCT_ORIGIN} and both canonical app-store URLs are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
