@@ -24,13 +24,13 @@ jobs:
         with:
           node-version: 24.14.1
           cache: pnpm
-      - name: Apply final topic-resolution fix
+      - name: Apply final cleanup
         id: apply
         continue-on-error: true
         shell: bash
         run: |
           report=.github/pr1405-isolated-validation.txt
-          python .github/scripts/pr1405-finalize-topic-resolution.py > "$report" 2>&1
+          python .github/scripts/pr1405-final-cleanup.py > "$report" 2>&1
       - name: Install dependencies
         id: install
         if: steps.apply.outcome == 'success'
@@ -60,7 +60,7 @@ jobs:
             run_check pnpm --dir packages/cli typecheck
             run_check pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts --no-coverage test/commons-command-coverage.test.ts
             run_check pnpm --dir packages/assistant-engine typecheck
-            run_check pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts
+            run_check pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts test/assistant-skill-assets.test.ts
             run_check git diff --check
           else
             failures=1
@@ -75,5 +75,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -m 'fix(health-commons): resolve broad authored topics first' || exit 0
+          git commit -m 'refactor(health-commons): remove duplicate agent knowledge paths' || exit 0
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
