@@ -58,6 +58,92 @@ export const HOSTED_MAILBOX_LANES = [
 
 export type HostedMailboxLane = (typeof HOSTED_MAILBOX_LANES)[number];
 
+export const HOSTED_RUNTIME_FAILURE_PHASE_NAMES = [
+  "browser_vault.refresh",
+  "codex.prepare",
+  "foreground.pass",
+  "mailbox.import.initial",
+  "runtime",
+  "runtime.return",
+  "workspace.checkpoint.durable_effect",
+  "workspace.checkpoint.idle_compact",
+  "workspace.checkpoint.idle_shutdown",
+  "workspace.read",
+  "workspace.restore",
+] as const;
+
+export type HostedRuntimeFailurePhaseName =
+  (typeof HOSTED_RUNTIME_FAILURE_PHASE_NAMES)[number];
+export type HostedRuntimeFailurePhaseCode =
+  `runtime_phase:${HostedRuntimeFailurePhaseName}`;
+
+const HOSTED_RUNTIME_FAILURE_PHASE_CODES = new Set<string>(
+  HOSTED_RUNTIME_FAILURE_PHASE_NAMES.map(
+    (phase): HostedRuntimeFailurePhaseCode => `runtime_phase:${phase}`,
+  ),
+);
+
+const HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY =
+  "hostedRuntimeFailurePhaseCode";
+
+export const HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY =
+  "runtimeFailurePhaseCode";
+
+export function buildHostedRuntimeFailurePhaseCode(
+  phase: HostedRuntimeFailurePhaseName,
+): HostedRuntimeFailurePhaseCode {
+  return `runtime_phase:${phase}`;
+}
+
+export function isHostedRuntimeFailurePhaseCode(
+  value: unknown,
+): value is HostedRuntimeFailurePhaseCode {
+  return typeof value === "string"
+    && HOSTED_RUNTIME_FAILURE_PHASE_CODES.has(value);
+}
+
+export function attachHostedRuntimeFailurePhaseCode(
+  error: unknown,
+  phase: HostedRuntimeFailurePhaseName,
+): unknown {
+  if (!(error instanceof Error) || readHostedRuntimeFailurePhaseCode(error)) {
+    return error;
+  }
+
+  try {
+    Object.defineProperty(error, HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY, {
+      configurable: false,
+      enumerable: false,
+      value: buildHostedRuntimeFailurePhaseCode(phase),
+      writable: false,
+    });
+  } catch {
+    // Diagnostics are fail-open: frozen or hostile errors retain their
+    // original behavior when the optional phase cannot be attached.
+  }
+  return error;
+}
+
+export function readHostedRuntimeFailurePhaseCode(
+  error: unknown,
+): HostedRuntimeFailurePhaseCode | null {
+  try {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(
+      error,
+      HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY,
+    );
+    return descriptor && "value" in descriptor
+      && isHostedRuntimeFailurePhaseCode(descriptor.value)
+      ? descriptor.value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
   "member.activated",
