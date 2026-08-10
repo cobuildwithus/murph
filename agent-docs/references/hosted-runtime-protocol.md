@@ -1500,16 +1500,18 @@ readers continue to understand the unchanged failed envelope. The diagnostic may
 structured error message, code, request id, and fixed local context, never an
 authorization header, credential, raw response body, prompt payload, or image
 bytes. The runtime carries the exact ready completion input into the next Codex
-admission instead of rediscovering it through mailbox priority. If newer
-conversation input is already waiting, the same frozen batch places the trusted
-completion immediately before that input; later input still joins through the
-existing live foreground loop. This exact completion match uses authenticated
+admission. If newer conversation input is already waiting, the same frozen
+batch places the trusted completion immediately before that input; later input
+still joins through the existing live foreground loop. This exact completion
+match uses authenticated
 channel/account/thread route identity rather than provider continuation-session
 identity; ordinary batching retains its session boundary. The invocation
 retains that exact ready marker until provider admission accepts it, so
 shutdown, provider handoff, or an earlier failure still projects the existing
-immediate assistant checkpoint wake. The ordinary pending input index owns
-durable completion retry and terminal evidence. Provider
+immediate assistant checkpoint wake. A restored background pass derives the
+same completion-first order directly from structurally trusted completion
+events in the ordinary pending input index, which owns durable completion retry
+and terminal evidence; the wake is not the obligation owner. Provider
 completion starts the existing generic usage recorder without awaiting it, and
 image delivery never waits for accounting or diagnostic writes. When the model
 attaches the private ref, the assistant boundary reloads it and derives

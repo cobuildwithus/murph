@@ -154,6 +154,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   both waiting at the next provider boundary, admit the completion immediately
   before that input in the same frozen batch. Later conversation input may join
   through the existing live foreground loop.
+- This ordering is durable rather than wake-owned. A restored background pass
+  derives the same completion-first batch from structurally trusted completion
+  events already held by the pending-input index; the assistant wake remains a
+  droppable scheduling hint.
 - For that exact trusted-completion match, authenticated group-route identity
   comes from the channel, account, thread, directness, actor boundary, and
   delivery target. A provider continuation session is not route identity;

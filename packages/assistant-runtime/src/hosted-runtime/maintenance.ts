@@ -368,8 +368,7 @@ export async function runHostedAssistantAutomation(
     pendingInputRefreshMode:
       selectedInputIds.mode === "foreground" ? "none" : "compact",
     preserveSelectedInputOrder:
-      selectedInputIds.mode === "foreground"
-      && selectedInputIds.preserveInputOrder,
+      selectedInputIds.preserveInputOrder,
     selectedInputIds: selectedInputIds.inputIds,
     vaultRoot,
   });

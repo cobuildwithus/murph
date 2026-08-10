@@ -1964,14 +1964,15 @@ existing receipt checkpoint onto the latest workspace. The exact private
 ordinary pending assistant-input index before invocation-local completion state
 is released. The existing runtime wake interrupts the dirty idle window, and
 the runtime carries the exact ready completion input into the next Codex
-admission instead of rediscovering it through mailbox selection. When newer
-conversation input is already waiting, the same frozen batch places the trusted
-completion immediately before that input; later input still joins through the
-existing live foreground loop. Invocation-local completion readiness is cleared
-only when the exact input reaches provider admission; shutdown, provider
-handoff, or an earlier failure leaves it visible to the existing immediate
-assistant checkpoint wake. The pending input index owns durable retry and
-terminal evidence. Provider completion starts the existing generic
+admission. When newer conversation input is already waiting, the same frozen
+batch places the trusted completion immediately before that input; later input
+still joins through the existing live foreground loop. Invocation-local
+completion readiness is cleared only when the exact input reaches provider
+admission. After shutdown, provider handoff, or an earlier failure, background
+selection reconstructs the same completion-first batch from structurally
+trusted completion events in the ordinary pending input index. That index owns
+durable retry and terminal evidence; the immediate assistant wake is only a
+scheduling hint. Provider completion starts the existing generic
 usage recorder without awaiting it, and image delivery never waits for
 accounting or diagnostic writes. A provider rejection keeps the exact legacy
 failed result envelope and places its bounded structured OpenAI diagnostic on a

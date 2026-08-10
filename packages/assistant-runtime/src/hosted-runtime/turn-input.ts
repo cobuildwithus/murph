@@ -46,6 +46,7 @@ type HostedAssistantInputSelection =
       inputIds: string[];
       mode: "background";
       pendingInputIds: string[];
+      preserveInputOrder?: true;
     };
 
 export interface HostedAssistantInputSource extends AssistantInputSource {
@@ -147,6 +148,7 @@ export function createHostedAssistantInputSource(input: {
 }): HostedAssistantInputSource {
   const selectedInputIds = uniqueStrings(input.selectedInputIds ?? []);
   const selectedInputIdSet = new Set(selectedInputIds);
+  let preserveSelectedInputOrder = input.preserveSelectedInputOrder === true;
   const observedInputIds = new Set([
     ...(input.initialPendingInputIds ?? []),
     ...selectedInputIds,
@@ -156,14 +158,16 @@ export function createHostedAssistantInputSource(input: {
   const readSelectedCandidates = () => {
     selectedCandidatesPromise ??= readHostedAssistantInputCandidatesById({
       inputIds: selectedInputIds,
-      preserveInputOrder: input.preserveSelectedInputOrder === true,
+      preserveInputOrder: preserveSelectedInputOrder,
       vaultRoot: input.vaultRoot,
     });
     return selectedCandidatesPromise;
   };
 
   return {
-    preserveInputCandidateOrder: input.preserveSelectedInputOrder === true,
+    get preserveInputCandidateOrder() {
+      return preserveSelectedInputOrder;
+    },
     readObservedInputIds() {
       return [...observedInputIds];
     },
@@ -197,18 +201,24 @@ export function createHostedAssistantInputSource(input: {
         inputIds: newPendingInputIds,
         vaultRoot: input.vaultRoot,
       });
-      const appendablePendingInputIds = selectedInputIds.length === 0
-        ? selectHostedAssistantInputEventBatch({
+      const appendablePendingBatch = selectedInputIds.length === 0
+        ? await selectHostedAssistantInputEventBatchWithImageCompletion({
             events: appendablePendingEvents,
             limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-          }).map((event) => event.inputId)
-        : [];
+            vaultRoot: input.vaultRoot,
+          })
+        : null;
+      const appendablePendingInputIds = appendablePendingBatch?.events.map(
+        (event) => event.inputId,
+      ) ?? [];
       const added = appendSelectedHostedAssistantInputIds({
         inputIds: appendablePendingInputIds,
         selectedInputIdSet,
         selectedInputIds,
       });
       if (added > 0) {
+        preserveSelectedInputOrder =
+          appendablePendingBatch?.preserveInputOrder === true;
         selectedCandidatesPromise = null;
       }
       assertHostedAssistantInputQueryNotAborted(refreshInput?.signal);
@@ -224,7 +234,7 @@ export function createHostedAssistantInputSource(input: {
       return filterHostedAssistantInputCandidates({
         candidates,
         emittedCursorKeys: emittedListInputCandidateCursorKeys,
-        preserveInputOrder: input.preserveSelectedInputOrder === true,
+        preserveInputOrder: preserveSelectedInputOrder,
         query,
       });
     },
@@ -319,13 +329,18 @@ export async function selectHostedAssistantInputIds(
       vaultRoot: input.vaultRoot,
     });
     const limit = normalizeHostedAssistantInputBatchLimit(input.limit);
+    const selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
+      events: pendingEvents,
+      limit,
+      vaultRoot: input.vaultRoot,
+    });
     return {
-      inputIds: selectHostedAssistantInputEventBatch({
-        events: pendingEvents,
-        limit,
-      }).map((event) => event.inputId),
+      inputIds: selected.events.map((event) => event.inputId),
       mode: "background",
       pendingInputIds,
+      ...(selected.preserveInputOrder
+        ? { preserveInputOrder: true as const }
+        : {}),
     };
   }
 
@@ -343,24 +358,71 @@ export async function selectHostedAssistantInputIds(
     inputIds: freshInputIds,
     vaultRoot: input.vaultRoot,
   });
-  const hostedImageCompletionEvents =
-    await selectHostedImageCompletionInputEventBatch({
-      events: freshEvents,
-      hostedImageCompletionInputIds:
-        input.hostedImageCompletionInputIds ?? [],
-      vaultRoot: input.vaultRoot,
-    });
+  const selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
+    events: freshEvents,
+    hostedImageCompletionInputIds: input.hostedImageCompletionInputIds ?? [],
+    limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    vaultRoot: input.vaultRoot,
+  });
 
   return {
     freshInputIds,
-    inputIds: (hostedImageCompletionEvents
-      ?? selectHostedAssistantInputEventBatch({
-        events: freshEvents,
-        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-      })).map((event) => event.inputId),
+    inputIds: selected.events.map((event) => event.inputId),
     mode: "foreground",
     pendingInputIds: [],
-    ...(hostedImageCompletionEvents ? { preserveInputOrder: true as const } : {}),
+    ...(selected.preserveInputOrder
+      ? { preserveInputOrder: true as const }
+      : {}),
+  };
+}
+
+async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {
+  events: readonly AssistantInputEventRecord[];
+  hostedImageCompletionInputIds?: readonly string[];
+  limit: number;
+  vaultRoot: string;
+}): Promise<{
+  events: AssistantInputEventRecord[];
+  preserveInputOrder: boolean;
+}> {
+  const completionInputIds = uniqueStrings(
+    input.hostedImageCompletionInputIds
+      ?? input.events
+        .filter(isAssistantHostedImageCompletionEvent)
+        .map((event) => event.inputId),
+  );
+  const completionInputIdSet = new Set(completionInputIds);
+  const cursorOrderedEvents = [...input.events].sort((left, right) =>
+    compareAssistantInputCursors(left.cursor, right.cursor)
+  );
+  const completionFirstEvents = completionInputIds.length === 0
+    ? cursorOrderedEvents
+    : [
+        ...cursorOrderedEvents.filter((event) =>
+          completionInputIdSet.has(event.inputId)
+        ),
+        ...cursorOrderedEvents.filter((event) =>
+          !completionInputIdSet.has(event.inputId)
+        ),
+      ];
+  const hostedImageCompletionEvents =
+    await selectHostedImageCompletionInputEventBatch({
+      events: completionFirstEvents,
+      hostedImageCompletionInputIds: completionInputIds,
+      vaultRoot: input.vaultRoot,
+    });
+  if (hostedImageCompletionEvents) {
+    return {
+      events: hostedImageCompletionEvents.slice(0, input.limit),
+      preserveInputOrder: true,
+    };
+  }
+  return {
+    events: selectHostedAssistantInputEventBatch({
+      events: input.events,
+      limit: input.limit,
+    }),
+    preserveInputOrder: false,
   };
 }
 

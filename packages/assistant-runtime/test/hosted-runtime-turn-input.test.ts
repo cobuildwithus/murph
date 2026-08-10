@@ -951,6 +951,150 @@ describe("selectHostedAssistantInputIds", () => {
     });
   });
 
+  it("restores a pending image completion before a newer authenticated group input", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-23T00:00:06.000Z"));
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const fresh = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        actorId: "actor_restored_fresh",
+        dedupeKey: "dedupe_restored_image_completion_fresh",
+        eventId: "event_restored_image_completion_fresh",
+        itemId: "item_restored_image_completion_fresh",
+        laneSeq: "12",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        routeAuthority: true,
+        threadIsDirect: false,
+      }),
+      now: new Date("2026-04-23T00:00:04.000Z"),
+      vault: vaultRoot,
+    });
+    const completion = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        actorId: null,
+        dedupeKey: "dedupe_restored_image_completion",
+        eventId: "event_restored_image_completion",
+        itemId: "item_restored_image_completion",
+        lane: "system",
+        laneSeq: "image-completion:restored-operation",
+        occurredAt: "2026-04-23T00:00:05.000Z",
+        payloadSchema: "murph.hosted-image-completion.v1",
+        receivedAt: "2026-04-23T00:00:05.000Z",
+        routeAuthority: true,
+        sessionId: "asst_restored_image_completion_group",
+        threadIsDirect: false,
+        wakeSchema: "murph.hosted-image-completion.v1",
+      }),
+      now: new Date("2026-04-23T00:00:05.000Z"),
+      vault: vaultRoot,
+    });
+    const differentRoute = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        actorId: null,
+        dedupeKey: "dedupe_restored_image_completion_other_route",
+        eventId: "event_restored_image_completion_other_route",
+        itemId: "item_restored_image_completion_other_route",
+        lane: "system",
+        laneSeq: "image-completion:restored-other-operation",
+        occurredAt: "2026-04-23T00:00:06.000Z",
+        payloadSchema: "murph.hosted-image-completion.v1",
+        receivedAt: "2026-04-23T00:00:06.000Z",
+        routeAuthority: true,
+        sessionId: "asst_restored_image_completion_other_route",
+        threadId: "thread_restored_other_route",
+        threadIsDirect: false,
+        wakeSchema: "murph.hosted-image-completion.v1",
+      }),
+      now: new Date("2026-04-23T00:00:06.000Z"),
+      vault: vaultRoot,
+    });
+    for (const inputId of [
+      fresh.inputId,
+      completion.inputId,
+      differentRoute.inputId,
+    ]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    const selection = await selectHostedAssistantInputIds({
+      mode: "background",
+      vaultRoot,
+    });
+    const source = createHostedAssistantInputSource({
+      initialPendingInputIds: selection.pendingInputIds,
+      pendingInputRefreshMode: "compact",
+      preserveSelectedInputOrder: selection.preserveInputOrder,
+      selectedInputIds: selection.inputIds,
+      vaultRoot,
+    });
+    const batch = await source.listInputCandidates({
+      limit: 10,
+      sourceId: "linq",
+    });
+
+    expect(selection.inputIds).toEqual([completion.inputId, fresh.inputId]);
+    expect(selection.preserveInputOrder).toBe(true);
+    expect(batch.inputs.map((candidate) => candidate.event.inputId)).toEqual([
+      completion.inputId,
+      fresh.inputId,
+    ]);
+    expect(selection.pendingInputIds).toEqual([
+      fresh.inputId,
+      completion.inputId,
+      differentRoute.inputId,
+    ]);
+  });
+
+  it("keeps ordinary restored group inputs separated by provider session", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-04-23T00:00:06.000Z"));
+    const vaultRoot = await createTempVault();
+    await enableLinqAutoReply(vaultRoot);
+    const first = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        causalSeq: "20",
+        dedupeKey: "dedupe_restored_session_first",
+        eventId: "event_restored_session_first",
+        itemId: "item_restored_session_first",
+        laneSeq: "20",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        routeAuthority: true,
+        sessionId: "asst_restored_session_first",
+        threadIsDirect: false,
+      }),
+      vault: vaultRoot,
+    });
+    const second = await upsertAssistantInputEvent({
+      event: createAssistantInputEvent({
+        causalSeq: "21",
+        dedupeKey: "dedupe_restored_session_second",
+        eventId: "event_restored_session_second",
+        itemId: "item_restored_session_second",
+        laneSeq: "21",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        routeAuthority: true,
+        sessionId: "asst_restored_session_second",
+        threadIsDirect: false,
+      }),
+      vault: vaultRoot,
+    });
+    for (const inputId of [first.inputId, second.inputId]) {
+      await enqueueHostedPendingAssistantInputId({ inputId, vaultRoot });
+    }
+
+    const selection = await selectHostedAssistantInputIds({
+      mode: "background",
+      vaultRoot,
+    });
+
+    expect(selection.inputIds).toEqual([first.inputId]);
+    expect(selection.preserveInputOrder).toBeUndefined();
+  });
+
   it("does not fold a different authenticated group route into an image completion", async () => {
     const vaultRoot = await createTempVault();
     const completion = await upsertAssistantInputEvent({

@@ -69,6 +69,7 @@ import type {
 } from "@murphai/assistant-engine/assistant-ask";
 import {
   readAssistantInputEvent,
+  shouldGroupAdjacentAssistantInputCandidates,
   updateAssistantInputAttachmentEvidence,
   updateAssistantInputProjection,
   upsertAssistantInputEvent,
@@ -19481,7 +19482,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("folds a production-imported group follow-up into image completion delivery", async () => {
+  test("restores a production-imported group follow-up with image completion delivery", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "murph-image-edit-failure-route-"),
     );
@@ -19495,18 +19496,29 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const currentMailboxAt = new Date().toISOString();
     const mailboxItems = [createMailboxItem({
+      createdAt: currentMailboxAt,
       id: "mailbox_item_image_edit_failure_origin",
       laneSeq: "1",
+      occurredAt: currentMailboxAt,
+      updatedAt: currentMailboxAt,
     })];
     const linqRequests: Array<Record<string, unknown>> = [];
     const linqRequestPaths: string[] = [];
+    const firstInvocationAbortController = new AbortController();
+    const firstInvocationInterruption = new Error(
+      "Synthetic interruption before image completion provider admission.",
+    );
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    let activeInvocation = 1;
     let combinedPhaseInputIds: readonly string[] = [];
     let combinedPhaseSessionIds: readonly (string | null)[] = [];
     let currentInputAtProviderAcceptance: string | null = null;
     let freshInputId: string | null = null;
     let imageProviderInvocationCount = 0;
+    let interruptedPhaseInputIds: readonly string[] = [];
+    let snapshotRestoreCount = 0;
 
     const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
       const method =
@@ -19515,10 +19527,13 @@ describe("hosted workspace runtime entrypoint", () => {
       events.push(`provider.fetch:${method}:${new URL(url).pathname}`);
       if (method === "POST" && url.includes("/v1/images/edits")) {
         imageProviderInvocationCount += 1;
+        const followupAt = new Date(Date.now() + 1_000).toISOString();
         mailboxItems.push(createMailboxItem({
+          createdAt: followupAt,
           id: "mailbox_item_image_edit_failure_followup",
           laneSeq: "2",
-          occurredAt: "2026-04-27T00:00:01.000Z",
+          occurredAt: followupAt,
+          updatedAt: followupAt,
         }));
         runtimeWakeSignal.notify();
         return new Response(JSON.stringify({
@@ -19578,6 +19593,10 @@ describe("hosted workspace runtime entrypoint", () => {
             throw new Error("Image failure route should not upload snapshots.");
           },
           async restoreWorkspaceSnapshot(input) {
+            snapshotRestoreCount += 1;
+            if (snapshotRestoreCount > 1) {
+              return;
+            }
             const restoredVaultRoot = path.join(input.durableRoot, "vault");
             await initializeVault({
               createdAt: TEST_NOW,
@@ -19638,7 +19657,10 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         providerFetch,
       };
-      const runtimeJobInput = createWorkspaceRuntimeJobInput({
+      const createRuntimeJobInput = (
+        attemptId: string,
+        leaseGeneration: string,
+      ) => createWorkspaceRuntimeJobInput({
         forwardedEnv: {
           [HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV]: codexCommand,
           LINQ_API_TOKEN: "synthetic-linq-token",
@@ -19657,20 +19679,26 @@ describe("hosted workspace runtime entrypoint", () => {
           }],
         },
         request: {
-          attemptId: "attempt_image_edit_failure_route",
+          attemptId,
           budget: { maxMailboxItems: 10 },
           idleCheckpointDelayMs: 50,
-          leaseGeneration: "8",
+          leaseGeneration,
           userId: TEST_USER_ID,
           workspaceVersion: "0",
         },
       });
+      const firstRuntimeJobInput = createRuntimeJobInput(
+        "attempt_image_edit_failure_route_first",
+        "8",
+      );
       const importRuntime = normalizeHostedAssistantRuntimeConfig(
-        runtimeJobInput.runtime,
+        firstRuntimeJobInput.runtime,
         platform,
       );
-      await withRealTimeout(
-        runHostedWorkspaceRuntimeJobInProcess(
+      const runInvocation = (
+        runtimeJobInput: ReturnType<typeof createRuntimeJobInput>,
+        signal?: AbortSignal,
+      ) => runHostedWorkspaceRuntimeJobInProcess(
           runtimeJobInput,
           {
             async createCheckpointSnapshot() {
@@ -19751,15 +19779,29 @@ describe("hosted workspace runtime entrypoint", () => {
                 phaseInput.initialAssistantInputBatch?.assistantInputIds
                 ?? phaseInput.initialMailboxImport.importResult.assistantInputIds
                 ?? [];
-              events.push(`assistant.phase:${phaseInputIds.length}`);
-              if (phaseInputIds.length === 2) {
-                combinedPhaseInputIds = phaseInputIds;
-                combinedPhaseSessionIds = await Promise.all(
-                  phaseInputIds.map(async (inputId) =>
-                    (await readAssistantInputEvent({ inputId, vault: vaultRoot }))
-                      ?.conversation?.sessionId ?? null
-                  ),
+              events.push(
+                `assistant.phase:${activeInvocation}:${phaseInputIds.length}`,
+              );
+              if (activeInvocation === 1 && phaseInputIds.length === 2) {
+                interruptedPhaseInputIds = phaseInputIds;
+                const interruptedRoles = await Promise.all(
+                  phaseInputIds.map(async (inputId) => {
+                    const event = await readAssistantInputEvent({
+                      inputId,
+                      vault: vaultRoot,
+                    });
+                    return event?.sourceRef.kind === "hosted-mailbox"
+                        && event.sourceRef.payloadSchema
+                          === "murph.hosted-image-completion.v1"
+                      ? `completion:${inputId}`
+                      : `conversation:${inputId}`;
+                  }),
                 );
+                events.push(`interrupted:${interruptedRoles.join("|")}`);
+                firstInvocationAbortController.abort(
+                  firstInvocationInterruption,
+                );
+                throw firstInvocationInterruption;
               }
               const beforeProviderAcceptedInputs =
                 phaseInput.beforeProviderAcceptedInputs;
@@ -19770,7 +19812,30 @@ describe("hosted workspace runtime entrypoint", () => {
                       beforeProviderAcceptedInputs: async (acceptedInput) => {
                         const release =
                           await beforeProviderAcceptedInputs(acceptedInput);
-                        if (phaseInputIds.length === 2) {
+                        const acceptedAssistantInputIds =
+                          acceptedInput.acceptedInputs.flatMap((accepted) =>
+                            accepted.source === "assistant-input"
+                              ? [accepted.id]
+                              : []
+                          );
+                        events.push(
+                          `provider.accept:${activeInvocation}:${acceptedInput.acceptedInputs
+                            .map((accepted) => `${accepted.source}:${accepted.id}`)
+                            .join("|")}`,
+                        );
+                        if (
+                          activeInvocation === 2
+                          && acceptedAssistantInputIds.length === 2
+                        ) {
+                          combinedPhaseInputIds = acceptedAssistantInputIds;
+                          combinedPhaseSessionIds = await Promise.all(
+                            acceptedAssistantInputIds.map(async (inputId) =>
+                              (await readAssistantInputEvent({
+                                inputId,
+                                vault: vaultRoot,
+                              }))?.conversation?.sessionId ?? null
+                            ),
+                          );
                           currentInputAtProviderAcceptance =
                             phaseInput.currentAssistantInputId?.() ?? null;
                         }
@@ -19780,9 +19845,72 @@ describe("hosted workspace runtime entrypoint", () => {
                   : {}),
               });
             },
+            ...(signal ? { signal } : {}),
             vaultRoot,
           },
+        );
+
+      await assert.rejects(
+        withRealTimeout(
+          runInvocation(
+            firstRuntimeJobInput,
+            firstInvocationAbortController.signal,
+          ),
+          30_000,
+          () => events.join(","),
         ),
+        (error: unknown) => error === firstInvocationInterruption,
+      );
+      assert.equal(interruptedPhaseInputIds.length, 2);
+      assert.ok(freshInputId);
+      assert.deepEqual(
+        await compactHostedPendingAssistantInputIds({ vaultRoot }),
+        [...interruptedPhaseInputIds].reverse(),
+      );
+      const restoredSelection = await selectHostedAssistantInputIds({
+        mode: "background",
+        vaultRoot,
+      });
+      const restoredSource = createHostedAssistantInputSource({
+        initialPendingInputIds: restoredSelection.pendingInputIds,
+        pendingInputRefreshMode: "compact",
+        preserveSelectedInputOrder: restoredSelection.preserveInputOrder,
+        selectedInputIds: restoredSelection.inputIds,
+        vaultRoot,
+      });
+      const restoredCandidates = await restoredSource.listInputCandidates({
+        limit: 10,
+        sourceId: "linq",
+      });
+      assert.deepEqual(restoredSelection.inputIds, interruptedPhaseInputIds);
+      assert.equal(restoredSelection.preserveInputOrder, true);
+      assert.deepEqual(
+        restoredCandidates.inputs.map((candidate) => candidate.event.inputId),
+        interruptedPhaseInputIds,
+      );
+      assert.equal(
+        shouldGroupAdjacentAssistantInputCandidates(
+          restoredCandidates.inputs[0]!,
+          restoredCandidates.inputs[1]!,
+        ),
+        true,
+      );
+      for (const inputId of interruptedPhaseInputIds) {
+        assert.equal(
+          await mocks.hasCompleteAssistantAutoReplyDeliveryTerminalEvidence({
+            inputId,
+            vault: vaultRoot,
+          }),
+          false,
+        );
+      }
+
+      activeInvocation = 2;
+      await withRealTimeout(
+        runInvocation(createRuntimeJobInput(
+          "attempt_image_edit_failure_route_second",
+          "9",
+        )),
         30_000,
         () => events.join(","),
       );
@@ -19790,7 +19918,7 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(imageProviderInvocationCount, 1);
       assert.equal(mailboxItems.length, 2);
       assert.ok(freshInputId);
-      assert.equal(combinedPhaseInputIds.length, 2);
+      assert.equal(combinedPhaseInputIds.length, 2, events.join(","));
       assert.equal(combinedPhaseInputIds[1], freshInputId);
       const completionInput = await readAssistantInputEvent({
         inputId: combinedPhaseInputIds[0]!,
@@ -31256,10 +31384,10 @@ for line in sys.stdin:
         })
         params = request.get("params") or {}
         serialized_input = json.dumps(params.get("input", params))
-        if turn_ordinal == 2:
-            completion_index = serialized_input.find("The reference image could not be decoded.")
+        completion_index = serialized_input.find("The reference image could not be decoded.")
+        if completion_index >= 0:
             fresh_index = serialized_input.find(${JSON.stringify(input.freshInputText)})
-            if completion_index < 0 or fresh_index <= completion_index:
+            if fresh_index <= completion_index:
                 sys.exit(4)
             finish_turn(turn_id, ${JSON.stringify(failureExplanation)})
             continue
