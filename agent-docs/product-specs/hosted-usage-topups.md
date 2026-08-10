@@ -37,13 +37,13 @@ The one-time group contribution catalog is:
 Group funding presents capped monthly sponsorship as the primary choice and a
 one-time contribution as the secondary choice. A monthly sponsor selects a
 $5, $10, or $20 maximum; the activation and automatic refills are ordinary
-exact $5 purchases. No public surface converts dollars or cost-weighted usage
+exact $5 purchases. No public surface converts dollars or usage credit
 into an estimated message count. `usage_25_usd` remains parseable for historical
 purchases and available only to current personal and Family surfaces.
 
 The cash subtotal and granted usage value are separate immutable purchase
 facts even when the initial offer is one-for-one. One dollar of v1 usage credit
-is one dollar of capacity under Murph's existing cost-weighted AI usage meter.
+is one dollar of capacity under Murph's existing AI usage meter.
 It is not a token count, bank balance, Stripe customer balance, subscription
 invoice credit, transferable asset, or promise of cash redemption.
 
@@ -1354,7 +1354,7 @@ group wallet, Stripe Meter reporting, or a second usage/accounting service.
 
 - **Stripe Billing Credits:** limited to eligible metered subscription items
   reported through Stripe Meters and applied when invoices finalize. It does
-  not match Murph's existing immediate cost-weighted allowance.
+  not match Murph's existing immediate usage allowance.
 - **Stripe token billing:** the current official docs label it private preview.
   The primitive must not depend on access Murph does not have.
 - **Stripe advanced usage-based billing:** its real-time credit burn and

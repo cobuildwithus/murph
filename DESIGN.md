@@ -432,7 +432,7 @@ check. Keep the semantic radio visually hidden and place the visible check at
 the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
-When a choice materially changes cost-weighted included-capacity drawdown,
+When a choice materially changes included-capacity drawdown,
 state that difference before save and keep it visible beside the saved
 selection. It may appear in the option copy or the immediate pending-selection
 summary; do not hide it in a tooltip or mention it only after save.
