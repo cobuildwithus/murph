@@ -1,6 +1,6 @@
 # iMessage workout-card device remediation
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -84,5 +84,14 @@ Updated: 2026-08-10
 - Package typechecks for operator-config, assistant-engine, and
   hosted-execution: passed. Full Web typecheck, scoped Web lint, and
   `pnpm docs:drift`: passed.
-- Expected remote outcomes: exact-head CI and ReviewGPT confirm the same
-  contract across the broad reverse-dependent surface before merge.
+- Exact-head CI passed across the required remote surface on the reviewed
+  remediation head.
+- Final ReviewGPT round 2 passed after verifying the authoring guard, legacy
+  read compatibility, shared semantic/transcript behavior, generic layout
+  preservation, and rendered evidence. Its sole disclosure finding was
+  corrected in the PR intent contract without changing the code head.
+- Current `main` was merged mechanically after that PASS. The three changelog
+  conflicts preserve both the current-base Starter, web-search, and appointment
+  entries and this reviewed workout entry; the focused changelog lane passed 43
+  tests and the frontend design-proof lane passed 10 tests after resolution.
+Completed: 2026-08-10
