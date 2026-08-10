@@ -50,6 +50,7 @@ import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
 import {
   generateHostedGroupId,
+  generateHostedGroupJoinOfferGeneration,
   generateHostedGroupJoinOfferId,
   generateHostedGroupMemberId,
   generateHostedGroupJoinCode,
@@ -166,6 +167,7 @@ export interface HostedGroupJoinOfferBindingTxResult {
 export type HostedGroupJoinOfferPostPreparation =
   | { kind: "active_offer" }
   | {
+      offerGeneration: string;
       joinCode: string;
       kind: "post";
     }
@@ -245,10 +247,6 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     input.requestedVaultShareProjectionScopes
       ?? fixedProjectionKindsToScopes(input.requestedVaultShareProjectionKinds ?? []),
   );
-  const requestedPolicy = mergeHostedGroupJoinPolicy({
-    existing: null,
-    requestedVaultShareProjectionScopes: requested,
-  });
   const existing = await input.tx.hostedGroup.findUnique({
     where: { runtimeMemberId: container.memberId },
     select: { displayName: true, id: true },
@@ -289,13 +287,16 @@ export async function ensureHostedGroupForThreadContainerTx(input: {
     return summary;
   }
 
+  const requestedPolicy = mergeHostedGroupJoinPolicy({
+    existing: null,
+    offerGeneration: generateHostedGroupJoinOfferGeneration(),
+    requestedVaultShareProjectionScopes: requested,
+  });
   const created = await input.tx.hostedGroup.create({
     data: {
       id: generateHostedGroupId(),
       displayName: normalizeHostedGroupDisplayName(input.displayName ?? null),
-      joinPolicyJson: requested.length > 0
-        ? toHostedGroupJoinPolicyJson(requestedPolicy)
-        : undefined,
+      joinPolicyJson: toHostedGroupJoinPolicyJson(requestedPolicy),
       kind: normalizeHostedGroupKind(input.kind),
       ownerMemberId: container.ownerMemberId,
       runtimeMemberId: container.memberId,
@@ -1621,6 +1622,7 @@ export async function acceptHostedGroupJoinCodeTx(input: {
 }
 
 export async function recordHostedGroupJoinOfferTx(input: {
+  expectedOfferGeneration: string;
   groupId: string;
   message: HostedGroupOfferMessageBinding;
   postedAt: Date;
@@ -1646,13 +1648,28 @@ export async function recordHostedGroupJoinOfferTx(input: {
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
-    select: { joinCode: true },
+    select: { joinCode: true, joinPolicyJson: true },
   });
   if (!group?.joinCode) {
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_JOIN_OFFER_NOT_FOUND",
       httpStatus: 404,
       message: "This group offer is no longer active.",
+      retryable: false,
+    });
+  }
+  const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
+  if (
+    policy.offerGeneration !== input.expectedOfferGeneration
+    || !hostedGroupProjectionScopeSetsEqual(
+      policy.requestedVaultShareProjectionScopes,
+      projectionScopes,
+    )
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_GROUP_JOIN_OFFER_STALE",
+      httpStatus: 409,
+      message: "This group offer was replaced before it could be activated.",
       retryable: false,
     });
   }
@@ -1696,9 +1713,9 @@ export async function recordHostedGroupJoinOfferTx(input: {
 
 /**
  * Resolves the durable no-repost state for one canonical permission snapshot.
- * The group row lock keeps join-code generation and active-offer reads in one
- * transaction. Provider idempotency covers the intentional gap between this
- * transaction and the later provider-message binding transaction.
+ * The group row lock keeps policy generation and active-offer reads in one
+ * transaction. The generation participates in provider idempotency and must
+ * still match when the provider message is bound after the intentional gap.
  */
 export async function prepareHostedGroupJoinOfferPostTx(input: {
   groupId: string;
@@ -1719,9 +1736,19 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   await lockHostedGroupRow(input.tx, input.groupId);
   const group = await input.tx.hostedGroup.findUnique({
     where: { id: input.groupId },
-    select: { joinCode: true },
+    select: { joinCode: true, joinPolicyJson: true },
   });
   if (!group?.joinCode) {
+    return { kind: "unavailable" };
+  }
+  const policy = readHostedGroupJoinPolicy(group.joinPolicyJson);
+  if (
+    !policy.offerGeneration
+    || !hostedGroupProjectionScopeSetsEqual(
+      policy.requestedVaultShareProjectionScopes,
+      projectionScopes,
+    )
+  ) {
     return { kind: "unavailable" };
   }
 
@@ -1762,6 +1789,7 @@ export async function prepareHostedGroupJoinOfferPostTx(input: {
   return {
     joinCode: group.joinCode,
     kind: "post",
+    offerGeneration: policy.offerGeneration,
   };
 }
 
@@ -2402,7 +2430,7 @@ async function replaceHostedGroupRequestedProjectionsTx(
   if (hostedGroupProjectionScopeSetsEqual(
     existing.requestedVaultShareProjectionScopes,
     requested,
-  )) {
+  ) && existing.offerGeneration !== null) {
     return;
   }
   if (requested.length > 0) {
@@ -2417,14 +2445,13 @@ async function replaceHostedGroupRequestedProjectionsTx(
   }
   const replacement = mergeHostedGroupJoinPolicy({
     existing: null,
+    offerGeneration: generateHostedGroupJoinOfferGeneration(),
     requestedVaultShareProjectionScopes: requested,
   });
   await tx.hostedGroup.update({
     where: { id: input.groupId },
     data: {
-      joinPolicyJson: replacement.requestedVaultShareProjectionScopes.length > 0
-        ? toHostedGroupJoinPolicyJson(replacement)
-        : Prisma.DbNull,
+      joinPolicyJson: toHostedGroupJoinPolicyJson(replacement),
     },
   });
   await revokeHostedGroupJoinOffersTx(tx, {

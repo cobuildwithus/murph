@@ -541,20 +541,22 @@ function buildHostedGroupJoinLinkFallbackRequest(
   if (!joinOffer) {
     return { action: "create_join_link" };
   }
+  const projectionScopes = joinOffer.projectionScopes;
+  const projectionKinds = joinOffer.projectionKinds;
   const joinLink = {
     ...(joinOffer.displayName
       ? { displayName: joinOffer.displayName }
       : {}),
-    ...(joinOffer.projectionScopes?.length
+    ...(projectionScopes !== undefined && projectionScopes !== null
       ? {
         requestedVaultShareProjectionScopes: [
-          ...joinOffer.projectionScopes,
+          ...projectionScopes,
         ],
       }
-      : joinOffer.projectionKinds?.length
+      : projectionKinds !== undefined && projectionKinds !== null
         ? {
           requestedVaultShareProjectionKinds: [
-            ...joinOffer.projectionKinds,
+            ...projectionKinds,
           ],
         }
         : {}),

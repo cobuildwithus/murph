@@ -102,5 +102,10 @@ Updated: 2026-08-09
 - Exact-head Ubuntu app verification exposed a stale test mirror of the
   intentionally ratcheted runner total-byte budget. The mirror now matches the
   production constant, and its focused 42-test bundle suite passes.
+- ReviewGPT round 3 found a provider-gap race that scope equality cannot fence
+  across A→B→A and a channel adapter that erased explicit empty arrays. Both are
+  reproduced by the production code paths. The recorded retrospective chooses
+  one opaque generation in the existing policy JSON plus field-preserving
+  adapter forwarding, without a new table, queue, lifecycle, or reconciler.
 - Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
   candidate.

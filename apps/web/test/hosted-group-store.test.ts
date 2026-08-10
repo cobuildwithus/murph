@@ -87,8 +87,11 @@ const DEEP_SLEEP_SOURCES_SCOPE = hostedVaultShareProjectionKindToScope(
   "deep-sleep-sources-days.v1",
 );
 const ACTIVITY_SCOPE = hostedVaultShareProjectionKindToScope("activity-days.v0");
+const OFFER_GENERATION_A = "hgrpjog_aaaaaaaaaaaaaaaa";
+const OFFER_GENERATION_B = "hgrpjog_bbbbbbbbbbbbbbbb";
 
 const JOIN_POLICY = {
+  offerGeneration: OFFER_GENERATION_A,
   requestedVaultShareProjectionKinds: ["sleep-times.v0"],
   schema: "murph.hosted-group.join-policy.v1",
 };
@@ -928,6 +931,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedGroup.update).toHaveBeenCalledWith({
       data: {
         joinPolicyJson: {
+          offerGeneration: OFFER_GENERATION_A,
           requestedVaultShareProjectionKinds: [
             "deep-sleep-days.v0",
             "deep-sleep-sources-days.v1",
@@ -965,6 +969,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     expect(tx.hostedGroup.update).toHaveBeenCalledWith({
       data: {
         joinPolicyJson: {
+          offerGeneration: OFFER_GENERATION_A,
           requestedVaultShareProjectionKinds: [
             "deep-sleep-days.v0",
             "deep-sleep-sources-days.v1",
@@ -1031,6 +1036,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
     const inChat = await recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: "group_1",
       message: { channel: "telegram" as const, chatId: "-100777", messageId: "55" },
       postedAt,
@@ -1038,6 +1044,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     });
     const otherChat = await recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: "group_1",
       message: { channel: "telegram" as const, chatId: "-100888", messageId: "55" },
       postedAt,
@@ -1128,6 +1135,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
 
     await expect(recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: "group_1",
       message: { channel: "linq" as const, messageId: "msg_offer_123" },
       postedAt,
@@ -1153,6 +1161,32 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
+  it("rejects a provider completion from a replaced offer generation", async () => {
+    const tx = buildTx();
+    tx.hostedGroup.findUnique.mockResolvedValueOnce({
+      id: "group_1",
+      joinCode: "join_1",
+      joinPolicyJson: {
+        ...JOIN_POLICY,
+        offerGeneration: OFFER_GENERATION_B,
+      },
+      runtimeMemberId: "member_group_runtime",
+    });
+
+    await expect(recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
+      groupId: "group_1",
+      message: { channel: "linq", messageId: "msg_offer_stale" },
+      postedAt: new Date("2026-07-01T00:00:00.000Z"),
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_JOIN_OFFER_STALE",
+      httpStatus: 409,
+    });
+    expect(tx.hostedGroupJoinOffer.create).not.toHaveBeenCalled();
+  });
+
   it("reuses an active offer whose canonical scope snapshot exactly matches the request", async () => {
     const findMany = vi.fn(async () => [{
       projectionKindsJson: [SLEEP_SCOPE],
@@ -1162,6 +1196,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       hostedGroup: {
         findUnique: vi.fn(async () => ({
           joinCode: "join_generation_1",
+          joinPolicyJson: JOIN_POLICY,
         })),
       },
       hostedGroupJoinOffer: { findMany },
@@ -1188,6 +1223,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       hostedGroup: {
         findUnique: vi.fn(async () => ({
           joinCode: "join_generation_1",
+          joinPolicyJson: JOIN_POLICY,
         })),
       },
       hostedGroupJoinOffer: {
@@ -1206,6 +1242,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     })).resolves.toEqual({
       joinCode: "join_generation_1",
       kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
     });
     expect(updateMany).toHaveBeenCalledWith({
       data: { revokedAt: now },
@@ -1219,6 +1256,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       hostedGroup: {
         findUnique: vi.fn(async () => ({
           joinCode: "join_generation_1",
+          joinPolicyJson: JOIN_POLICY,
         })),
       },
       hostedGroupJoinOffer: {
@@ -1244,7 +1282,10 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = createPrismaStub({
       $queryRaw: vi.fn(async () => []),
       hostedGroup: {
-        findUnique: vi.fn(async () => ({ joinCode: "join_generation_1" })),
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+          joinPolicyJson: JOIN_POLICY,
+        })),
       },
       hostedGroupJoinOffer: { findMany },
     });
@@ -1282,6 +1323,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const tx = buildStatefulJoinOfferTx();
     const postedAt = new Date("2026-07-01T00:00:00.000Z");
     const input = {
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: "group_1",
       message: { channel: "linq" as const, messageId: "msg_offer_same" },
       postedAt,
@@ -1341,6 +1383,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
 
     await expect(recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: inputGroupId,
       message: { channel: "linq" as const, messageId },
       postedAt: new Date("2026-07-03T00:00:00.000Z"),
@@ -1649,6 +1692,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     const now = new Date("2026-07-01T00:06:00.000Z");
 
     const firstOffer = await recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: "group_1",
       message: { channel: "linq" as const, messageId: "msg_offer_a" },
       postedAt: firstPostedAt,
@@ -1656,10 +1700,11 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       tx,
     });
     await recordHostedGroupJoinOfferTx({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: "group_1",
       message: { channel: "linq" as const, messageId: "msg_offer_b" },
       postedAt: secondPostedAt,
-      projectionKinds: ["activity-days.v0"],
+      projectionKinds: ["sleep-times.v0"],
       tx,
     });
 
@@ -2119,7 +2164,10 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
 
     expect(tx.hostedGroup.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        joinPolicyJson: undefined,
+        joinPolicyJson: expect.objectContaining({
+          offerGeneration: expect.stringMatching(/^hgrpjog_/u),
+          requestedVaultShareProjectionScopes: [],
+        }),
       }),
     }));
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
@@ -2159,6 +2207,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         joinPolicyJson: {
+          offerGeneration: expect.stringMatching(/^hgrpjog_/u),
           requestedVaultShareProjectionKinds: [
             "deep-sleep-sources-days.v1",
           ],
@@ -2195,6 +2244,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.update).toHaveBeenCalledWith({
       data: {
         joinPolicyJson: {
+          offerGeneration: expect.stringMatching(/^hgrpjog_/u),
           requestedVaultShareProjectionKinds: ["activity-days.v0"],
           requestedVaultShareProjectionScopes: [ACTIVITY_SCOPE],
           schema: "murph.hosted-group.join-policy.v1",
@@ -2215,6 +2265,39 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalledWith(expect.objectContaining({
       projectionScope: GROUP_EMAIL_SCOPE,
     }));
+  });
+
+  it("backfills a generation before reusing an unchanged legacy policy", async () => {
+    const tx = buildGroupLinkTx({
+      existingGroup: true,
+      joinCode: "join_existing",
+      offerGeneration: null,
+      ownerMemberId: "member_owner",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+
+    await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+      actorMemberId: "member_owner",
+      containerMemberId: "member_group_runtime",
+      now,
+      requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
+      data: {
+        joinPolicyJson: expect.objectContaining({
+          offerGeneration: expect.stringMatching(/^hgrpjog_/u),
+          requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
+        }),
+      },
+      where: { id: "group_1" },
+    });
+    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: now },
+      where: { groupId: "group_1", revokedAt: null },
+    });
   });
 
   it("replaces an existing legacy sleep policy with an explicitly narrower request", async () => {
@@ -2239,6 +2322,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.update).toHaveBeenCalledWith({
       data: {
         joinPolicyJson: {
+          offerGeneration: expect.stringMatching(/^hgrpjog_/u),
           requestedVaultShareProjectionKinds: [
             "sleep-times.v0",
           ],
@@ -2402,6 +2486,7 @@ function buildGroupLinkTx(input: {
   existingGroup?: boolean;
   grantedProjectionKinds?: HostedVaultShareFixedProjectionKind[];
   joinCode?: string | null;
+  offerGeneration?: string | null;
   ownerMemberId: string;
   requestedProjectionKinds?: HostedVaultShareFixedProjectionKind[];
 }): PrismaClient & {
@@ -2419,6 +2504,9 @@ function buildGroupLinkTx(input: {
 } {
   let requestedProjectionKinds: HostedVaultShareFixedProjectionKind[] =
     input.requestedProjectionKinds ?? ["sleep-times.v0"];
+  let offerGeneration = input.offerGeneration === undefined
+    ? OFFER_GENERATION_A
+    : input.offerGeneration;
   let groupCreated = input.existingGroup !== false;
   let groupDisplayName = input.existingDisplayName === undefined
     ? "Sunday sleep crew"
@@ -2433,6 +2521,7 @@ function buildGroupLinkTx(input: {
           displayName?: string | null;
           kind?: string;
           joinPolicyJson?: {
+            offerGeneration?: string;
             requestedVaultShareProjectionKinds?: HostedVaultShareFixedProjectionKind[];
           };
         };
@@ -2443,6 +2532,8 @@ function buildGroupLinkTx(input: {
         requestedProjectionKinds =
           args.data?.joinPolicyJson?.requestedVaultShareProjectionKinds
           ?? [];
+        offerGeneration = args.data?.joinPolicyJson?.offerGeneration
+          ?? offerGeneration;
         return { id: "group_1" };
       }),
       findUnique: vi.fn(async (args: {
@@ -2461,6 +2552,7 @@ function buildGroupLinkTx(input: {
             displayName: groupDisplayName,
             id: "group_1",
             joinPolicyJson: {
+              offerGeneration,
               requestedVaultShareProjectionKinds: requestedProjectionKinds,
               schema: "murph.hosted-group.join-policy.v1",
             },
@@ -2481,6 +2573,7 @@ function buildGroupLinkTx(input: {
             displayName: groupDisplayName,
             id: "group_1",
             joinPolicyJson: {
+              offerGeneration,
               requestedVaultShareProjectionKinds: requestedProjectionKinds,
               schema: "murph.hosted-group.join-policy.v1",
             },
@@ -2496,6 +2589,7 @@ function buildGroupLinkTx(input: {
           displayName?: string | null;
           joinCode?: string;
           joinPolicyJson?: {
+            offerGeneration?: string;
             requestedVaultShareProjectionKinds?: HostedVaultShareFixedProjectionKind[];
           };
         };
@@ -2519,6 +2613,8 @@ function buildGroupLinkTx(input: {
           requestedProjectionKinds =
             args.data.joinPolicyJson?.requestedVaultShareProjectionKinds
             ?? [];
+          offerGeneration = args.data.joinPolicyJson?.offerGeneration
+            ?? offerGeneration;
         }
         return { joinCode: "join_created" };
       }),
@@ -2587,7 +2683,8 @@ function buildStatefulJoinOfferTx(): PrismaClient & {
     id: "group_1",
     joinCode: "join_1",
     joinPolicyJson: {
-      requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
+      offerGeneration: OFFER_GENERATION_A,
+      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
       schema: "murph.hosted-group.join-policy.v1",
     },
     runtimeMemberId: "member_group_runtime",

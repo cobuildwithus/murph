@@ -29,6 +29,7 @@ export const HOSTED_GROUP_JOIN_POLICY_SCHEMA =
   "murph.hosted-group.join-policy.v1" as const;
 
 export interface HostedGroupJoinPolicy {
+  offerGeneration: string | null;
   schema: typeof HOSTED_GROUP_JOIN_POLICY_SCHEMA;
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[];
   /** Compatibility view for fixed-kind callers. Prefer requestedVaultShareProjectionScopes. */
@@ -200,11 +201,12 @@ export function readHostedGroupJoinPolicy(value: unknown): HostedGroupJoinPolicy
       record.requestedVaultShareProjectionScopes
         ?? record.requestedVaultShareProjectionKinds,
     ),
+    normalizeHostedGroupJoinOfferGeneration(record.offerGeneration),
   );
 }
 
 export function emptyHostedGroupJoinPolicy(): HostedGroupJoinPolicy {
-  return hostedGroupJoinPolicyFromScopes([]);
+  return hostedGroupJoinPolicyFromScopes([], null);
 }
 
 /**
@@ -335,6 +337,7 @@ export function includeSourceAwareHostedGroupSleepProjectionScopes(
 
 export function mergeHostedGroupJoinPolicy(input: {
   existing: unknown;
+  offerGeneration?: string | null;
   requestedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
 }): HostedGroupJoinPolicy {
   const existing = readHostedGroupJoinPolicy(input.existing);
@@ -346,6 +349,9 @@ export function mergeHostedGroupJoinPolicy(input: {
       ...existing.requestedVaultShareProjectionScopes,
       ...offered,
     ]),
+    input.offerGeneration === undefined
+      ? existing.offerGeneration
+      : normalizeHostedGroupJoinOfferGeneration(input.offerGeneration),
   );
 }
 
@@ -385,14 +391,26 @@ function collapseLegacySleepProjectionScopes(
 
 function hostedGroupJoinPolicyFromScopes(
   requestedVaultShareProjectionScopes: HostedVaultShareProjectionScope[],
+  offerGeneration: string | null,
 ): HostedGroupJoinPolicy {
   return {
+    offerGeneration,
     schema: HOSTED_GROUP_JOIN_POLICY_SCHEMA,
     requestedVaultShareProjectionKinds: [
       ...new Set(requestedVaultShareProjectionScopes.map((scope) => scope.projectionKind)),
     ],
     requestedVaultShareProjectionScopes,
   };
+}
+
+function normalizeHostedGroupJoinOfferGeneration(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.trim();
+  return /^hgrpjog_[A-Za-z0-9_-]{16}$/u.test(normalized)
+    ? normalized
+    : null;
 }
 
 function hostedVaultShareProjectionScopeDisplay(

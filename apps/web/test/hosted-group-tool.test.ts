@@ -352,6 +352,8 @@ const REM_SLEEP_SOURCES_SCOPE = {
 const WORKOUTS_SCOPE = {
   projectionKind: "workouts.v0",
 } as const;
+const OFFER_GENERATION_A = "hgrpjog_aaaaaaaaaaaaaaaa";
+const OFFER_GENERATION_B = "hgrpjog_bbbbbbbbbbbbbbbb";
 const PROTEIN_SCOPE = { projectionKind: "protein-days.v0" } as const;
 const RUNNING_SCOPE = buildHostedVaultShareActivityMinutesProjectionScope({
   activityKind: "running",
@@ -547,6 +549,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     mocks.prepareHostedGroupJoinOfferPostTx.mockResolvedValue({
       joinCode: "abc123",
       kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
     });
     mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
       undefined,
@@ -1973,6 +1976,24 @@ describe("handleHostedRuntimeGroupTool", () => {
       }));
   });
 
+  it("preserves an explicitly empty standalone permission request", async () => {
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [] },
+      },
+    })).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
+
+    expect(mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        requestedVaultShareProjectionScopes: [],
+      }));
+  });
+
   it("reads the current Linq group title on demand from the durable route", async () => {
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       displayName: "  Weekend   Warriors  ",
@@ -2612,6 +2633,7 @@ describe("hosted group join policy", () => {
       requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       schema: "murph.hosted-group.join-policy.v1",
     })).toEqual({
+      offerGeneration: null,
       requestedVaultShareProjectionKinds: ["sleep-times.v0", "activity-days.v0"],
       requestedVaultShareProjectionScopes: [
         { projectionKind: "sleep-times.v0" },
@@ -2619,6 +2641,17 @@ describe("hosted group join policy", () => {
       ],
       schema: "murph.hosted-group.join-policy.v1",
     });
+
+    expect(readHostedGroupJoinPolicy({
+      offerGeneration: OFFER_GENERATION_A,
+      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      schema: "murph.hosted-group.join-policy.v1",
+    }).offerGeneration).toBe(OFFER_GENERATION_A);
+    expect(readHostedGroupJoinPolicy({
+      offerGeneration: "untrusted-generation",
+      requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+      schema: "murph.hosted-group.join-policy.v1",
+    }).offerGeneration).toBeNull();
 
     expect(mergeHostedGroupJoinPolicy({
       existing: {
@@ -2885,6 +2918,27 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
+    mocks.createHostedGroupJoinLinkForOwnedThreadContainerTx.mockResolvedValue({
+      group: GROUP_SUMMARY,
+      joinCode: "abc123",
+    });
+    mocks.prepareHostedGroupJoinOfferPostTx.mockReset();
+    mocks.prepareHostedGroupJoinOfferPostTx.mockResolvedValue({
+      joinCode: "abc123",
+      kind: "post",
+      offerGeneration: OFFER_GENERATION_A,
+    });
+    mocks.recordHostedGroupJoinOfferTx.mockReset();
+    mocks.recordHostedGroupJoinOfferTx.mockResolvedValue({
+      groupId: GROUP_SUMMARY.id,
+      messageIdSuffix: "offer_msg",
+      messageLookupKey: "hbidx:linq-message:v1:offer",
+      projectionKinds: ["sleep-times.v0"],
+    });
+    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort
+      .mockResolvedValue(undefined);
+    mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockResolvedValue(
@@ -3416,7 +3470,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_group_1",
-        idempotencyKey: expect.stringMatching(/^group-join-offer:v2:[a-f0-9]{40}$/u),
+        idempotencyKey: expect.stringMatching(/^group-join-offer:v3:[a-f0-9]{40}$/u),
         message:
           "Sounds good. Like or heart this message to share your Murph profile name, email address, sleep duration, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
@@ -3432,6 +3486,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: new Date("2026-07-31T12:01:00.000Z"),
@@ -3473,6 +3528,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_without_time" },
       postedAt: expect.any(Date),
@@ -3546,6 +3602,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
@@ -3615,6 +3672,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         tx: fakeTx,
       });
       expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+        expectedOfferGeneration: OFFER_GENERATION_A,
         groupId: GROUP_SUMMARY.id,
         message: { channel: "linq", messageId: "msg_offer_1" },
         postedAt: expect.any(Date),
@@ -3718,6 +3776,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
@@ -3771,6 +3830,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
@@ -3860,6 +3920,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       .toBe(providerCalls[1]?.[0].idempotencyKey);
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledTimes(2);
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(1, {
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: originalCreatedAt,
@@ -3867,6 +3928,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       tx: fakeTx,
     });
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenNthCalledWith(2, {
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: originalCreatedAt,
@@ -3875,10 +3937,109 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
+  it("does not activate a late provider completion from a replaced generation", async () => {
+    const broadScopes = [
+      { projectionKind: "steps-days.v0" as const },
+      { projectionKind: "workouts.v0" as const },
+    ];
+    const narrowScopes = [{ projectionKind: "workouts.v0" as const }];
+    mocks.prepareHostedGroupJoinOfferPostTx
+      .mockResolvedValueOnce({
+        joinCode: "abc123",
+        kind: "post",
+        offerGeneration: OFFER_GENERATION_A,
+      })
+      .mockResolvedValueOnce({
+        joinCode: "abc123",
+        kind: "post",
+        offerGeneration: OFFER_GENERATION_B,
+      });
+
+    let resolveBroadSend!: (value: {
+      chatId: string;
+      messageCreatedAt: string;
+      messageId: string;
+    }) => void;
+    const broadSend = new Promise<{
+      chatId: string;
+      messageCreatedAt: string;
+      messageId: string;
+    }>((resolve) => {
+      resolveBroadSend = resolve;
+    });
+    mocks.sendHostedLinqChatMessage
+      .mockImplementationOnce(async () => await broadSend)
+      .mockResolvedValueOnce({
+        chatId: "chat_group_1",
+        messageCreatedAt: "2026-07-31T12:01:01.000Z",
+        messageId: "msg_offer_narrow",
+      });
+    mocks.recordHostedGroupJoinOfferTx.mockImplementation(async (input) => {
+      if (input.expectedOfferGeneration === OFFER_GENERATION_A) {
+        throw new Error("stale offer generation");
+      }
+      return {
+        groupId: input.groupId,
+        messageIdSuffix: "narrow",
+        messageLookupKey: "hbidx:linq-message:v1:narrow",
+        projectionKinds: ["workouts.v0"],
+        projectionScopes: narrowScopes,
+      };
+    });
+
+    const broadResult = handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionScopes: broadScopes },
+        linqThread: LINQ_THREAD,
+      },
+    });
+    await vi.waitFor(() => {
+      expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "post_join_offer",
+        joinOffer: { projectionScopes: narrowScopes },
+        linqThread: LINQ_THREAD,
+      },
+    })).resolves.toMatchObject({
+      result: { offerState: "posted", status: "sent" },
+    });
+
+    resolveBroadSend({
+      chatId: "chat_group_1",
+      messageCreatedAt: "2026-07-31T12:01:00.000Z",
+      messageId: "msg_offer_broad",
+    });
+    await expect(broadResult).resolves.toEqual({
+      action: "post_join_offer",
+      result: {
+        group: null,
+        status: "unavailable",
+        unavailableReason: "offer_binding_failed",
+      },
+    });
+
+    const providerCalls = mocks.sendHostedLinqChatMessage.mock.calls;
+    expect(providerCalls[0]?.[0].idempotencyKey)
+      .not.toBe(providerCalls[1]?.[0].idempotencyKey);
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedOfferGeneration: OFFER_GENERATION_B }),
+    );
+    expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedOfferGeneration: OFFER_GENERATION_A }),
+    );
+  });
+
   it("changes the hashed provider key when the join-code generation changes", () => {
     const base = {
       groupId: "hgrp_private_identifier",
       joinCode: "private_join_code",
+      offerGeneration: OFFER_GENERATION_A,
       projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
     };
     const first = buildHostedGroupJoinOfferProviderIdempotencyKey(base);
@@ -3888,10 +4049,26 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
 
     expect(next).not.toBe(first);
-    expect(next).toMatch(/^group-join-offer:v2:[a-f0-9]{40}$/u);
+    expect(next).toMatch(/^group-join-offer:v3:[a-f0-9]{40}$/u);
     expect(next).not.toContain("hgrp_private_identifier");
     expect(next).not.toContain("private_join_code");
     expect(next).not.toContain("steps-days.v0");
+  });
+
+  it("changes the provider key when an exact scope set starts a new generation", () => {
+    const base = {
+      groupId: "hgrp_private_identifier",
+      joinCode: "private_join_code",
+      offerGeneration: OFFER_GENERATION_A,
+      projectionScopes: [{ projectionKind: "steps-days.v0" as const }],
+    };
+
+    expect(buildHostedGroupJoinOfferProviderIdempotencyKey({
+      ...base,
+      offerGeneration: OFFER_GENERATION_B,
+    })).not.toBe(buildHostedGroupJoinOfferProviderIdempotencyKey(base));
+    expect(buildHostedGroupJoinOfferProviderIdempotencyKey(base))
+      .toBe(buildHostedGroupJoinOfferProviderIdempotencyKey(base));
   });
 
   it("orders a scoring metric before diagnostics in the canonical frozen offer", async () => {
@@ -3928,6 +4105,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
@@ -3965,6 +4143,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),
@@ -4137,6 +4316,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       }),
     );
     expect(mocks.recordHostedGroupJoinOfferTx).toHaveBeenCalledWith({
+      expectedOfferGeneration: OFFER_GENERATION_A,
       groupId: GROUP_SUMMARY.id,
       message: { channel: "linq", messageId: "msg_offer_1" },
       postedAt: expect.any(Date),

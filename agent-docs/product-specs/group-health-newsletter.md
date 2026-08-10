@@ -1,6 +1,6 @@
 # Group Health Newsletter
 
-Last verified: 2026-07-29
+Last verified: 2026-08-09
 Status: Implemented
 
 ## Current State
@@ -78,6 +78,21 @@ For native reaction offers, Web supplies the only URL and the fixed affirmative
 reaction meaning. The rendered prompt is sent as one reaction-bound provider
 text message, so the stored consent target is the same bubble the member reads
 and reacts to.
+
+Each requested-permission policy carries one opaque offer generation in the
+existing join-policy JSON. Creation, legacy-policy backfill, and every exact
+scope-set replacement mint a new generation; a retry of the same current policy
+keeps it. Native offer preparation freezes both the generation and normalized
+scope set, the provider idempotency key includes the generation, and the later
+binding transaction locks the group row and rechecks both values. Therefore a
+late provider completion from an older policy cannot become the active consent
+target, including an A-to-B-to-A scope sequence. This uses no new table, queue,
+or recovery owner.
+
+Channel fallback adapters preserve whether a projection array was supplied.
+An explicit empty scope or kind array remains empty through Web; only omission
+selects the complete default permission set. This distinction applies equally
+to native offers and standalone join links.
 
 ### Newsletter automation — the schedule + config
 

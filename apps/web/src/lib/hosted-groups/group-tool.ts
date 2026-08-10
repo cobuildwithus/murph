@@ -144,12 +144,13 @@ import {
 export const HOSTED_THREAD_CONTAINER_PARTICIPANT_RECONCILE_MAX =
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX;
 
-const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v2:";
+const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX = "group-join-offer:v3:";
 const HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_DIGEST_LENGTH = 40;
 
 export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   groupId: string;
   joinCode: string;
+  offerGeneration: string;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
   const projectionScopes = normalizeHostedVaultShareProjectionScopes(
@@ -164,6 +165,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
   const digest = sha256Hex(JSON.stringify({
     groupId: input.groupId,
     joinCode: input.joinCode,
+    offerGeneration: input.offerGeneration,
     projectionScopeKeys,
   }));
   return `${HOSTED_GROUP_JOIN_OFFER_IDEMPOTENCY_PREFIX}${digest.slice(
@@ -1314,6 +1316,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       },
     };
   }
+  const offerGeneration = created.offerPost.offerGeneration;
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
@@ -1327,6 +1330,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
       idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey({
         groupId: created.group.id,
         joinCode: created.offerPost.joinCode,
+        offerGeneration,
         projectionScopes,
       }),
       message,
@@ -1362,6 +1366,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   try {
     await prisma.$transaction(async (tx) => {
       await recordHostedGroupJoinOfferTx({
+        expectedOfferGeneration: offerGeneration,
         groupId: created.group.id,
         message: { channel: "linq", messageId: sent.messageId },
         postedAt,
