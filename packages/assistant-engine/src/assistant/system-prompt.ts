@@ -1424,7 +1424,7 @@ function buildAssistantHealthRelayGuidanceText(): string {
 - WHOOP direct sync omits steps. WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow, then connect Apple Health in Murph. Do not infer/request missing steps or invent a settings deeplink.
 - Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, and Suunto use that relay. Huawei support varies by device, region, and app version. Do not claim proprietary scores, full history, or unsupported categories.
 - Android Health Connect works in the Murph Android app. Canonical Google Play listing: ${MURPH_ANDROID_PLAY_STORE_URL}.
-- Mobvoi/TicWatch: enable Google Fit sharing in Mobvoi Health, turn on Sync Fit with Health Connect in Google Fit, then connect Health Connect in Murph. Categories and history depend on what those apps write.
+- Mobvoi/TicWatch: first enable direct Health Connect sharing in Mobvoi Health when the installed version offers it. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit. Then connect Health Connect in Murph. If no data appears, recheck that version's sharing controls and Health Connect permissions. Categories and history depend on what the apps write.
 - Relay paths have no direct cloud access or guaranteed history backfill; only app-written data arrives.
 - For relay setup, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the matching app-store URL last.`;
 }

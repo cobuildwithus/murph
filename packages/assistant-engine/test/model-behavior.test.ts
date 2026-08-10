@@ -1452,7 +1452,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Android Health Connect works in the Murph Android app. Canonical Google Play listing: https://play.google.com/store/apps/details?id=ai.withmurph.app.',
     )
     expect(prompt).toContain(
-      'Mobvoi/TicWatch: enable Google Fit sharing in Mobvoi Health, turn on Sync Fit with Health Connect in Google Fit, then connect Health Connect in Murph. Categories and history depend on what those apps write.',
+      'Mobvoi/TicWatch: first enable direct Health Connect sharing in Mobvoi Health when the installed version offers it. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit. Then connect Health Connect in Murph. If no data appears, recheck that version\'s sharing controls and Health Connect permissions. Categories and history depend on what the apps write.',
     )
     expect(prompt).toContain('Starting Murph: if asked how to begin')
     expect(prompt).toContain(MURPH_PRODUCT_ORIGIN)
@@ -1551,7 +1551,9 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
     expect(prompt).toContain('Huawei support varies by device, region, and app version')
     expect(prompt).toContain('Android Health Connect works in the Murph Android app.')
-    expect(prompt).toContain('Mobvoi/TicWatch: enable Google Fit sharing in Mobvoi Health')
+    expect(prompt).toContain('Mobvoi/TicWatch: first enable direct Health Connect sharing in Mobvoi Health')
+    expect(prompt).toContain('Otherwise, enable Google Fit sharing in Mobvoi Health')
+    expect(prompt).toContain('If no data appears, recheck that version\'s sharing controls and Health Connect permissions')
     expect(prompt).toContain('no direct cloud access or guaranteed history backfill')
     expect(prompt).toContain('accounts are created at')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
@@ -2830,8 +2832,9 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'is the requested canonical public Murph iOS App Store listing',
     )
-    expect(prompt).not.toContain('Apple Health relay:')
-    expect(prompt).not.toContain('WHOOP limits third-party access')
+    expect(prompt).not.toContain('Health data relays:')
+    expect(prompt).not.toContain('Mobvoi/TicWatch:')
+    expect(prompt).not.toContain('https://play.google.com/store/apps/details?id=ai.withmurph.app')
     expect(prompt).not.toContain('Starting Murph:')
     expect(prompt).not.toContain('Computer-use tools:')
     expect(prompt).not.toContain('Phone calls:')

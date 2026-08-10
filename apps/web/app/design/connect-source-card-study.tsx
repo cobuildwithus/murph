@@ -28,20 +28,21 @@ const ZEPP_CONNECT_SOURCE: ConnectSource = {
 const MOBVOI_CONNECT_SOURCE: ConnectSource = {
   connectionStatusMeaningful: false,
   description:
-    "Supported TicWatch health and activity data through Google Fit and Android Health Connect.",
+    "Supported TicWatch data through direct Health Connect sharing or a Google Fit fallback.",
   id: "mobvoi-health",
   logo: {
     className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
     height: 40,
-    src: "/brand-logos/connect/health-connect.png",
+    src: "/brand-logos/connect/health-connect-official.png",
     width: 64,
   },
   name: "Mobvoi / TicWatch",
-  unavailableActionLabel: "Download app",
+  unavailableActionAriaLabel: "Download the Murph Android app",
+  unavailableActionLabel: "Get Murph for Android",
   unavailableActionUrl:
     "https://play.google.com/store/apps/details?id=ai.withmurph.app",
   unavailableMessage:
-    "In Mobvoi Health, turn on Google Fit sharing. In Google Fit, turn on Sync Fit with Health Connect, then connect Health Connect in Murph on Android. Available categories and history depend on what Mobvoi and Google Fit write.",
+    "First, enable direct Health Connect sharing in Mobvoi Health if your installed version offers it. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit. Then connect Health Connect in Murph for Android. If no data appears, recheck Mobvoi Health's sharing controls for your version and Health Connect permissions. Categories and history depend on what the apps write.",
 };
 
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [

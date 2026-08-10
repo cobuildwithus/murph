@@ -246,9 +246,9 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Huawei Health",
     },
     {
-      assetPath: "/brand-logos/connect/health-connect.png",
+      assetPath: "/brand-logos/connect/health-connect-official.png",
       description:
-        "Supported TicWatch health and activity data through Google Fit and Android Health Connect.",
+        "Supported TicWatch data through direct Health Connect sharing or a Google Fit fallback.",
       name: "Mobvoi / TicWatch",
     },
     {
@@ -426,20 +426,23 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
-  assert.match(markup, /aria-label="Download app for Mobvoi \/ TicWatch"/);
+  assert.match(
+    markup,
+    /aria-label="Download the Murph Android app"/,
+  );
   assert.match(
     markup,
     /href="https:\/\/play\.google\.com\/store\/apps\/details\?id=ai\.withmurph\.app"/,
   );
   assert.match(
     markup,
-    /In Mobvoi Health, turn on Google Fit sharing\. In Google Fit, turn on Sync Fit with Health Connect, then connect Health Connect in Murph on Android\. Available categories and history depend on what Mobvoi and Google Fit write\./,
+    /First, enable direct Health Connect sharing in Mobvoi Health if your installed version offers it\. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit\. Then connect Health Connect in Murph for Android\. If no data appears, recheck Mobvoi Health&#x27;s sharing controls for your version and Health Connect permissions\. Categories and history depend on what the apps write\./,
   );
   assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.match(markup, />Download app<\/a>/u);
+  assert.match(markup, />Get Murph for Android<\/a>/u);
   for (const relayName of [
     "Zepp / Amazfit",
     "Xiaomi / Mi Fitness",
@@ -1550,7 +1553,10 @@ test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async 
   );
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.match(markup, /aria-label="Download app for Mobvoi \/ TicWatch"/u);
+  assert.match(
+    markup,
+    /aria-label="Download the Murph Android app"/u,
+  );
   assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
 });
 

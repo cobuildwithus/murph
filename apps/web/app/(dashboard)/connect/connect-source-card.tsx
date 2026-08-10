@@ -169,7 +169,10 @@ export function SourceCard({
                   />
                 )}
                 nativeButton={false}
-                aria-label={`${source.unavailableActionLabel} for ${source.name}`}
+                aria-label={
+                  source.unavailableActionAriaLabel
+                  ?? `${source.unavailableActionLabel} for ${source.name}`
+                }
               >
                 {source.unavailableActionLabel}
               </Button>

@@ -11,7 +11,7 @@ describe("Mobvoi connect routing", () => {
       {
         kind: "unavailable",
         reason:
-          "Supported Mobvoi and TicWatch data can relay through Google Fit and Android Health Connect into the Murph Android app.",
+          "Supported Mobvoi and TicWatch data can share directly with Health Connect when the installed Mobvoi Health version offers it, with Google Fit as a fallback before connecting the Murph Android app.",
       },
     ]);
 

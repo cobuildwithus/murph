@@ -103,13 +103,14 @@ const CONNECT_SOURCE_UI = {
   ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   "mobvoi-health": {
     description:
-      "Supported TicWatch health and activity data through Google Fit and Android Health Connect.",
-    logo: logoAsset("health-connect.png"),
+      "Supported TicWatch data through direct Health Connect sharing or a Google Fit fallback.",
+    logo: logoAsset("health-connect-official.png"),
     name: "Mobvoi / TicWatch",
-    unavailableActionLabel: "Download app",
+    unavailableActionAriaLabel: "Download the Murph Android app",
+    unavailableActionLabel: "Get Murph for Android",
     unavailableActionUrl: MURPH_ANDROID_PLAY_STORE_URL,
     unavailableMessage:
-      "In Mobvoi Health, turn on Google Fit sharing. In Google Fit, turn on Sync Fit with Health Connect, then connect Health Connect in Murph on Android. Available categories and history depend on what Mobvoi and Google Fit write.",
+      "First, enable direct Health Connect sharing in Mobvoi Health if your installed version offers it. Otherwise, enable Google Fit sharing in Mobvoi Health and Sync Fit with Health Connect in Google Fit. Then connect Health Connect in Murph for Android. If no data appears, recheck Mobvoi Health's sharing controls for your version and Health Connect permissions. Categories and history depend on what the apps write.",
   },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
@@ -490,6 +491,9 @@ export function listVisibleConnectSources(): ConnectSource[] {
             ...(ui.setupGuideId ? { setupGuideId: ui.setupGuideId } : {}),
             ...(ui.unavailableActionLabel
               ? { unavailableActionLabel: ui.unavailableActionLabel }
+              : {}),
+            ...(ui.unavailableActionAriaLabel
+              ? { unavailableActionAriaLabel: ui.unavailableActionAriaLabel }
               : {}),
             ...(ui.unavailableActionUrl
               ? { unavailableActionUrl: ui.unavailableActionUrl }
