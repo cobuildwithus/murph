@@ -33,6 +33,9 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
 } from "./usage-credit-purchase-stripe";
 import {
+  lockHostedUsageCreditPurchaseReservationOwnersTx,
+} from "./usage-credit-purchase-reservation-lock";
+import {
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   isHostedUsageCreditSavedCardPolicyVersion,
   type HostedUsageCreditCheckoutRequestPolicyVersion,
@@ -879,14 +882,26 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
           ? input.purchase.beneficiaryMemberId
           : null);
   return input.prisma.$transaction(async (tx) => {
-    if (groupBeneficiaryMemberId) {
-      await lockHostedMemberRow(tx, groupBeneficiaryMemberId);
+    if (input.transition === "release") {
+      if (groupBeneficiaryMemberId) {
+        await lockHostedMemberRow(tx, groupBeneficiaryMemberId);
+      }
+      await lockHostedMemberRow(tx, payerMemberId);
+    } else {
+      await lockHostedUsageCreditPurchaseReservationOwnersTx({
+        beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        payerMemberId,
+        tx,
+      });
     }
-    await lockHostedMemberRow(tx, payerMemberId);
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });
-    if (!current || current.payerMemberId !== payerMemberId) {
+    if (
+      !current ||
+      current.payerMemberId !== payerMemberId ||
+      current.beneficiaryMemberId !== input.purchase.beneficiaryMemberId
+    ) {
       throw buildHostedUsageCreditInvariantError(
         "saved_card_purchase_missing",
       );
@@ -900,6 +915,7 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
       }
       const expired = await tx.hostedUsageCreditPurchase.updateMany({
         data: {
+          grantSlotReleasedAt: input.now,
           lastReconciledAt: input.now,
           reconciliationVersion: { increment: 1n },
           status: HostedUsageCreditPurchaseStatus.expired,
@@ -908,6 +924,8 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
         },
         where: {
           id: current.id,
+          grantSlotReleasedAt: null,
+          paidAt: null,
           reconciliationVersion: current.reconciliationVersion,
           status: HostedUsageCreditPurchaseStatus.created,
           stripePaymentIntentLookupKey: null,
@@ -938,6 +956,9 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
 
     const released = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
+        ...(input.transition === "expire"
+          ? { grantSlotReleasedAt: input.now }
+          : {}),
         lastReconciledAt: input.transition === "expire" ? input.now : null,
         reconciliationVersion: { increment: 1n },
         status: input.transition === "expire"
@@ -955,7 +976,9 @@ async function transitionCanceledHostedUsageCreditDirectPaymentIntent(input: {
         updatedAt: input.now,
       },
       where: {
+        grantSlotReleasedAt: null,
         id: current.id,
+        ...(input.transition === "expire" ? { paidAt: null } : {}),
         reconciliationVersion: current.reconciliationVersion,
         status: HostedUsageCreditPurchaseStatus.payment_pending,
         stripePaymentIntentLookupKey: current.stripePaymentIntentLookupKey,

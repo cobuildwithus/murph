@@ -312,3 +312,11 @@ Updated: 2026-08-10
   tests), Web typecheck, and Web lint with no errors after adding the
   paused-companion recovery to the 2026-08-10 edition. Exact-head CI remains
   required after the changelog commit is pushed.
+- Passed after the next current-main reconciliation: Web, assistant-runtime,
+  and Cloudflare typechecks; 689 affected assistant-runtime tests; 155 focused
+  Web wake and changelog tests; the affected Cloudflare runner-bundle policy
+  suites; agent-docs drift; and full runner-bundle assembly. The reconciled
+  bundle measured a 1,607,412-byte entry, 7,715,221-byte static closure, and
+  9,606,277-byte total under the 10,056,956-byte ceiling. The only merge
+  conflict was the documentation index, resolved by retaining both the newer
+  usage-credit inventory and this change's paused-companion trust boundary.
