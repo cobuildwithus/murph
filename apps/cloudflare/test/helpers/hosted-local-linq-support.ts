@@ -91,6 +91,13 @@ type HostedLinqInboundPartInput =
       value: string;
     }
   | {
+      app: Record<string, unknown>;
+      fallbackText?: string | null;
+      layout: Record<string, unknown>;
+      type: "imessage_app";
+      url: string;
+    }
+  | {
       attachmentId: string;
       fileName?: string;
       mimeType?: string;
@@ -1192,6 +1199,16 @@ function buildHostedLinqInboundPart(part: HostedLinqInboundPartInput): Record<st
     return {
       type: "text",
       value: part.value,
+    };
+  }
+
+  if (part.type === "imessage_app") {
+    return {
+      app: part.app,
+      ...(part.fallbackText ? { fallback_text: part.fallbackText } : {}),
+      layout: part.layout,
+      type: part.type,
+      url: part.url,
     };
   }
 

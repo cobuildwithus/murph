@@ -86,10 +86,10 @@ function buildFaqs(input: {
   signupAvailable: boolean;
 }) {
   const ownerDescription = input.signupAvailable && input.groupAvailable
-    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster."
+    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster."
     : input.signupAvailable
     ? "Signup rewards go to your personal Murph."
-    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster.";
+    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster.";
   const tellMurphAnswer = input.signupAvailable && input.groupAvailable
     ? "Your personal referral link works without asking Murph first. Group missions need one extra step: tell Murph which mission you want, and wait for the confirmation before creating the fresh group."
     : input.signupAvailable
@@ -98,7 +98,7 @@ function buildFaqs(input: {
   const faqs = [
     {
       answer:
-        `Each option above shows its fixed cost-weighted usage credit. Actual message capacity varies with the model, tools, media, task complexity, and response length. ${ownerDescription}`,
+        `Each option above estimates days of Murph usage. Actual capacity varies with the model, tools, media, task complexity, and response length. The reward adds usage capacity; it does not extend a trial or subscription period. ${ownerDescription}`,
       question: "How much usage do I earn?",
     },
     {
@@ -227,9 +227,9 @@ export function ReferralPageContent({
               <ArrowDown aria-hidden="true" className="size-4" />
             </a>
             <p className="mt-6 max-w-[56ch] text-xs leading-[1.7] text-[#f5f0e8]/55">
-              Rewards are usage, not cash. Dollar labels state exact
-              cost-weighted usage credit; message capacity varies with the
-              model, tools, media, and task complexity.
+              Rewards add usage capacity, not cash or extra calendar time. Day
+              estimates reflect typical Murph use; actual capacity varies with
+              the model, tools, media, and task complexity.
             </p>
           </div>
 
@@ -331,7 +331,7 @@ export function ReferralPageContent({
                     }`}
                   >
                     {formatHostedPublicReferralRewardValue(
-                      reward.rewardUsdMicros,
+                      reward,
                     )}
                   </p>
                   <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
@@ -518,11 +518,11 @@ function ReferralHeroArtifact({
 }) {
   const rewardMessage = reward.id === "signup-link"
     ? `Your referral came through. ${formatHostedPublicReferralRewardValue(
-      reward.rewardUsdMicros,
-    )} is already added to your Murph.`
+      reward,
+    )} — already added to your Murph.`
     : `Your group mission is complete. ${formatHostedPublicReferralRewardValue(
-      reward.rewardUsdMicros,
-    )} is already added to the Murph it was accepted for.`;
+      reward,
+    )} — already added to the Murph it was accepted for.`;
   const privacyMessage = reward.id === "signup-link"
     ? "No claim needed. Who joined and what they share privately with Murph stays private."
     : "No claim needed. Private chats and health data stay private. Shared-group messages remain visible to that group.";

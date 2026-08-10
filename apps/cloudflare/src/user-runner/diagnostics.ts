@@ -14,6 +14,7 @@ import type { RunnerStateRecord } from "./types.js";
 
 export type RuntimeProcessingRetryReason =
   | "active_child_rejected"
+  | "checkpoint_handoff_pending"
   | "container_busy"
   | "container_rpc_error"
   | "container_rpc_timeout"
