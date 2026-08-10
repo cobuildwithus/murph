@@ -35,6 +35,42 @@ Updated: 2026-08-10
 - Out of scope: new persisted state, provider routing changes, group fallback,
   first-contact messaging, a second model generation, deployment, or merge.
 
+## Round 2 retrospective decision
+
+- Trigger: final ReviewGPT round 2 returned `RETROSPECTIVE_REQUIRED` because the
+  remediation repeated the preceding accepted mechanism. A Linq phone-based
+  `participant` fallback passed fresh/replay admission, personal work ran, and
+  the existing provider-entry owner then rejected the private-completion key as
+  non-welcome participant egress.
+- Original requirement: the exact group author receives one same-channel
+  private answer through an established direct Murph chat, or the request fails
+  before personal work with the direct-chat-and-retry recovery. A phone fallback
+  that is authorized only for signup welcome does not satisfy that requirement.
+- First-versus-current scope: the first reviewed head had no destination gate;
+  the current remediation added one by reusing the generic notification
+  resolver, but that resolver intentionally includes a first-contact Linq
+  participant route that this private purpose cannot use. Review-driven source
+  growth remains inside the original Web admission and provider-authority
+  boundary and has added no new state owner, queue, service, or lifecycle.
+- Decision: Linq `participant` fallback is out of scope for private continuation
+  and must return the existing pre-work recovery. The existing private-route
+  helper will require the resolver's provider-admissible `thread` delivery kind
+  in addition to its current same-channel/direct-member checks. Established and
+  pending direct Linq threads remain eligible because the existing provider
+  authority already admits both; Telegram direct chats are also thread routes.
+- Ownership: the generic notification resolver keeps its broader notification
+  semantics. The private current-sender helper owns the narrower feature
+  admission/replay/completion predicate, while existing Linq/Telegram provider
+  authority remains the final dispatch owner. No provider exception or new
+  route state is introduced.
+- Required proof matrix: established Linq direct thread accepted through
+  completion/provider authority; Linq participant fallback rejected on fresh
+  and replay admission before another mailbox append; established Telegram
+  direct thread accepted; and missing same-channel destination rejected before
+  personal work. Existing provider-boundary tests must continue proving that a
+  non-welcome Linq participant send is rejected and accepted thread routes can
+  reach dispatch.
+
 ## Tasks
 
 1. Add the current direct-destination check to fresh and replay admission.
@@ -47,6 +83,9 @@ Updated: 2026-08-10
    explicit target-owned mode and focused Engine/Runtime/Web proof.
 6. Complete the parent final review, close this plan, push the final head, and
    prove mergeability without merging the PR.
+7. Apply the completed round-2 retrospective by excluding Linq participant
+   fallback from private admission/replay, add the route matrix proof, and rerun
+   final ReviewGPT on the corrected exact head.
 
 ## Verification
 
@@ -111,3 +150,16 @@ Updated: 2026-08-10
   current `origin/main`, so the next round-2 retry can package one clean exact
   pushed head. That candidate still needs exact-head CI, final ReviewGPT, parent
   final review, plan closure, and clean-merge proof.
+- Exact-head CI at `b3d3209b8c` passed every required workflow and job. The
+  clean round-2 audit ran for more than 26 minutes on the requested Pro model and
+  returned `RETROSPECTIVE_REQUIRED` for the Linq participant-fallback route.
+  Static tracing and the existing Linq egress-authority suite reproduced the
+  accepted-but-terminal-before-provider path, so the retrospective decision
+  above is complete.
+- The correction adds one predicate to the existing private-route helper:
+  accepted destinations must use the provider-admissible `thread` delivery
+  kind. Fresh and replayed Linq participant fallback now use the existing
+  pre-work recovery; the generic notification resolver and provider authority
+  are unchanged. Focused Web route-matrix coverage passed 10/10, existing Linq
+  egress-authority coverage passed 44/44, Web typecheck passed, scoped ESLint
+  passed, and `git diff --check` passed.

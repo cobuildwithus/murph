@@ -134,6 +134,21 @@ const DIRECT_ROUTE = {
   threadId: `hid_${"2".repeat(32)}`,
   threadIsDirect: true,
 };
+const LINQ_PARTICIPANT_ROUTE = {
+  actorId: `hid_${"3".repeat(32)}`,
+  channel: "linq" as const,
+  delivery: {
+    kind: "participant" as const,
+    source: {
+      fromPhoneNumber: "+15550001002",
+      kind: "linq" as const,
+    },
+    target: "+15550001001",
+  },
+  identityId: `hid_${"4".repeat(32)}`,
+  threadId: null,
+  threadIsDirect: true,
+};
 const CURRENT_SENDER_ORIGIN = {
   assistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
   kind: "accepted_input" as const,
@@ -524,7 +539,11 @@ describe("hosted current-sender Assistant Ask authority", () => {
     })).resolves.toEqual(admission);
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(1);
 
-    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValueOnce(null);
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValueOnce({
+      conversationShape: "direct-member",
+      externalThreadRouteAuthority: null,
+      route: LINQ_PARTICIPANT_ROUTE,
+    });
     await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
       groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
       now: NOW,
@@ -739,6 +758,35 @@ describe("hosted current-sender Assistant Ask authority", () => {
       },
     });
     expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a Linq participant fallback before personal work", async () => {
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue({
+      conversationShape: "direct-member",
+      externalThreadRouteAuthority: null,
+      route: LINQ_PARTICIPANT_ROUTE,
+    });
+
+    await expect(requestHostedGroupCurrentSenderPrivateAssistantAsk({
+      groupRuntimeMemberId: GROUP_RUNTIME_MEMBER_ID,
+      now: NOW,
+      origin: CURRENT_SENDER_ORIGIN,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "same_channel_direct_route_unavailable",
+      },
+    });
+
+    expect(
+      mocks.resolveHostedAssistantNotificationDestination,
+    ).toHaveBeenCalledWith({
+      directChannel: "linq",
+      memberId: SENDER_MEMBER_ID,
+      prisma: fakeTx,
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithIdentityTx).not.toHaveBeenCalled();
   });
 
   it("rejects a Telegram group sender without a direct chat before personal work", async () => {

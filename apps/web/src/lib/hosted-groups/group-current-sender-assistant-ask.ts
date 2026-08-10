@@ -987,6 +987,7 @@ async function resolveHostedGroupCurrentSenderPrivateDestination(input: {
     && destination.conversationShape === "direct-member"
     && destination.externalThreadRouteAuthority === null
     && destination.route.channel === input.authority.sourceChannel
+    && destination.route.delivery.kind === "thread"
     && destination.route.threadIsDirect === true
   )
     ? { route: destination.route }
