@@ -37,7 +37,7 @@ describe('assistant food journal skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture/retrospective; nutrition-strategy meals/named diets',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation',
     )
     expect(prompt).toContain(
       'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
