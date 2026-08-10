@@ -11,6 +11,7 @@ export { HOSTED_PLAN_CODES, type HostedPlanCode };
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
+  "launch_max_monthly",
   "launch_group_monthly",
 ] as const;
 
@@ -92,6 +93,7 @@ export interface HostedBillingPlanDefinition {
   readonly code: HostedBillingPlanCode;
   readonly displayName: string;
   readonly interval: HostedBillingPlanInterval;
+  readonly planChangePortalConfigurationIdEnvKey: string | null;
   readonly planCode: HostedPlanCode;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
@@ -113,6 +115,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_group_monthly",
     displayName: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
     interval: "month",
+    planChangePortalConfigurationIdEnvKey: null,
     planCode: "pulse",
     priceIdEnvKey:
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY",
@@ -123,6 +126,8 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_monthly",
     displayName: "Pulse",
     interval: "month",
+    planChangePortalConfigurationIdEnvKey:
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY",
     planCode: "pulse",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
     recurringAmountUsdCents: 800,
@@ -132,9 +137,22 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_edge_monthly",
     displayName: "Edge",
     interval: "month",
+    planChangePortalConfigurationIdEnvKey:
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY",
     planCode: "edge",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
     recurringAmountUsdCents: 2_000,
+  },
+  launch_max_monthly: {
+    badge: "New",
+    code: "launch_max_monthly",
+    displayName: "Max",
+    interval: "month",
+    planChangePortalConfigurationIdEnvKey:
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY",
+    planCode: "edge",
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY",
+    recurringAmountUsdCents: 5_000,
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
@@ -147,6 +165,7 @@ const HOSTED_DIRECT_BILLING_PLAN_RANK = {
   launch_group_monthly: 0,
   launch_monthly: 1,
   launch_edge_monthly: 2,
+  launch_max_monthly: 3,
 } as const satisfies Record<HostedBillingPlanCode, number>;
 
 export interface HostedPlanDefinition {
@@ -256,6 +275,27 @@ export function getHostedBillingPlanDefinition(
   code: HostedBillingPlanCode
 ): HostedBillingPlanDefinition {
   return HOSTED_BILLING_PLAN_DEFINITIONS[code];
+}
+
+export function readHostedBillingPlanChangePortalConfigurationId(
+  code: HostedBillingPlanCode,
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  const environmentKey = getHostedBillingPlanDefinition(code)
+    .planChangePortalConfigurationIdEnvKey;
+  if (!environmentKey) {
+    return null;
+  }
+
+  const value = source[environmentKey]?.trim();
+  return value ? value : null;
+}
+
+export function isHostedBillingPlanChangePortalConfigured(
+  code: HostedBillingPlanCode,
+  source?: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return readHostedBillingPlanChangePortalConfigurationId(code, source) !== null;
 }
 
 export function getHostedDefaultBillingPlanCode(): HostedBillingPlanCode {

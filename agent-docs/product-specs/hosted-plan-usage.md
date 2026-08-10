@@ -581,6 +581,17 @@ claim. Roll back Cloudflare before Web; the nullable column may remain. This
 order also preserves the originating-notice-target compatibility contract
 described in `hosted-plan-downgrades.md`.
 
+For a new personal billing-plan code added to the strict plan-usage and
+subscription response schemas, deploy Cloudflare hosted execution and roll the
+runner bundle out immediately before deploying Web. The new runtime remains
+compatible with old Web responses, while an old runtime rejects a Web response
+that names the new plan code. Verify the serving runner fingerprint and a
+controlled plan-usage read before promoting Web. Configure the new Stripe price
+and Portal transition before the Web deploy exposes the plan, then verify its
+Settings card and conversational quote/confirmation boundary. Roll back Web
+before rolling back Cloudflare so Web stops producing the new code before an
+old strict consumer returns to service.
+
 Existing billing mechanics remain in:
 
 - `agent-docs/product-specs/pulse-trial-start-paid-pulse.md`

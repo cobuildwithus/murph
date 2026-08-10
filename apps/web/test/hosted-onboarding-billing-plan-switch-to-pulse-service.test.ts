@@ -125,12 +125,14 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       billingPlanCode:
         | "launch_group_monthly"
         | "launch_monthly"
-        | "launch_edge_monthly";
+        | "launch_edge_monthly"
+        | "launch_max_monthly";
     }) => ({
       billingPlanCode: input.billingPlanCode,
       priceId: {
         launch_edge_monthly: "price_edge_recurring",
         launch_group_monthly: "price_group_recurring",
+        launch_max_monthly: "price_max_recurring",
         launch_monthly: "price_pulse_recurring",
       }[input.billingPlanCode],
       stripe: mocks.stripe,
@@ -244,6 +246,86 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       memberId: "member_123",
       scheduledBillingEffectiveAt: new Date("2026-05-06T12:00:00.000Z"),
       scheduledBillingPlanCode: "launch_monthly",
+      stripeSubscriptionScheduleId: "sched_123",
+      tx: mocks.prismaClient,
+    });
+  });
+
+  test("keeps Max current until period end and persists an exact Edge future phase", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_max_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    });
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      items: ["price_max_recurring"],
+    }));
+    const createdSchedule = makeSchedule({
+      metadata: {},
+      phases: [
+        makeSchedulePhase({
+          endDate: 1_778_068_800,
+          priceIds: ["price_max_recurring"],
+          startDate: 1_775_606_400,
+        }),
+      ],
+    });
+    mocks.stripe.subscriptionSchedules.create.mockResolvedValueOnce(createdSchedule);
+    mocks.stripe.subscriptionSchedules.retrieve.mockResolvedValueOnce(createdSchedule);
+    mocks.stripe.subscriptionSchedules.update.mockResolvedValueOnce(
+      makeCompatibleMaxToEdgeSchedule(),
+    );
+
+    await expect(scheduleHostedBillingPlanSwitch({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_edge_monthly",
+    })).resolves.toEqual({
+      effectiveAt: "2026-05-06T12:00:00.000Z",
+      scheduledBillingPlanCode: "launch_edge_monthly",
+      status: "scheduled",
+    });
+
+    expect(mocks.stripe.subscriptionSchedules.update).toHaveBeenCalledWith(
+      "sched_123",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          billingPlanCode: "launch_edge_monthly",
+          murphPlanSwitch: "direct_plan_at_period_end_v1",
+        }),
+        phases: [
+          expect.objectContaining({
+            end_date: 1_778_068_800,
+            items: [{
+              price: "price_max_recurring",
+              quantity: 1,
+            }],
+          }),
+          expect.objectContaining({
+            items: [{
+              price: "price_edge_recurring",
+              quantity: 1,
+            }],
+            metadata: expect.objectContaining({
+              billingPlanCode: "launch_edge_monthly",
+            }),
+            start_date: 1_778_068_800,
+          }),
+        ],
+      }),
+      expect.objectContaining({
+        idempotencyKey: expect.stringMatching(
+          /^hosted-billing-switch:update:v1:[a-f0-9]{64}$/u,
+        ),
+      }),
+    );
+    expect(mocks.writeHostedMemberStripeBillingRefTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      scheduledBillingEffectiveAt: new Date("2026-05-06T12:00:00.000Z"),
+      scheduledBillingPlanCode: "launch_edge_monthly",
       stripeSubscriptionScheduleId: "sched_123",
       tx: mocks.prismaClient,
     });
@@ -1014,6 +1096,38 @@ function makeCompatibleGroupSchedule(): Stripe.SubscriptionSchedule {
           trialUsageLimitUsdMicros: "",
         },
         priceIds: ["price_group_recurring"],
+        startDate: 1_778_068_800,
+      }),
+    ],
+  });
+}
+
+function makeCompatibleMaxToEdgeSchedule(): Stripe.SubscriptionSchedule {
+  return makeSchedule({
+    metadata: {
+      billingPlanCode: "launch_edge_monthly",
+      checkoutOffer: "standard",
+      memberId: "member_123",
+      murphPlanSwitch: "direct_plan_at_period_end_v1",
+    },
+    phases: [
+      makeSchedulePhase({
+        endDate: 1_778_068_800,
+        priceIds: ["price_max_recurring"],
+        startDate: 1_775_606_400,
+      }),
+      makeSchedulePhase({
+        endDate: 1_780_790_400,
+        metadata: {
+          billingPlanCode: "launch_edge_monthly",
+          checkoutOffer: "standard",
+          memberId: "member_123",
+          murphPlanSwitch: "direct_plan_at_period_end_v1",
+          trialDurationDays: "",
+          trialPolicyVersion: "",
+          trialUsageLimitUsdMicros: "",
+        },
+        priceIds: ["price_edge_recurring"],
         startDate: 1_778_068_800,
       }),
     ],

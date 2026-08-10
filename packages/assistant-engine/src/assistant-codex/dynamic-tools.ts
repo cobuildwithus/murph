@@ -215,6 +215,7 @@ import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
+  type GenerateSongTurnState,
 } from './dynamic-tools/generate-song.js'
 import {
   executeAskGrokDynamicTool,
@@ -1760,6 +1761,7 @@ export async function executeMurphDynamicToolRequest(input: {
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
+  generateSongTurnState?: GenerateSongTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -2719,6 +2721,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }

@@ -51,6 +51,17 @@ export interface HostedLocalDevHarness {
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   armCanonicalCheckpointLostAckForTest(userId: string): Promise<{ ok: true }>;
+  armTemporalMailboxSignalFaultForTest(
+    userId: string,
+    mailboxItemId: string,
+  ): Promise<{
+    armed: true;
+    deliveredToPendingConsumer: boolean;
+  }>;
+  clearTemporalMailboxSignalFaultForTest(userId: string): Promise<{
+    cleared: boolean;
+    ok: true;
+  }>;
   armForegroundPriorityOrderingObservationForTest(
     userId: string,
     barrierTarget:
@@ -258,8 +269,10 @@ export async function startHostedLocalDevHarness(input: {
       },
       armGeneratedImageProviderBarrierForTest,
       armCanonicalCheckpointLostAckForTest,
+      armTemporalMailboxSignalFaultForTest,
       armForegroundPriorityOrderingObservationForTest,
       clearForegroundPriorityOrderingObservationForTest,
+      clearTemporalMailboxSignalFaultForTest,
       armSnapshotPublicationCorruptionForTest,
       armIdleSnapshotStartBarrierForTest,
       armShutdownCheckpointPublicationBarrierForTest,
@@ -595,6 +608,61 @@ export async function startHostedLocalDevHarness(input: {
     assertHostedLocalTestControlsAvailable("armCanonicalCheckpointLostAckForTest");
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/canonical-checkpoint-lost-ack`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armTemporalMailboxSignalFaultForTest(
+    userId: string,
+    mailboxItemId: string,
+  ): Promise<{
+    armed: true;
+    deliveredToPendingConsumer: boolean;
+  }> {
+    assertHostedLocalTestControlsAvailable(
+      "armTemporalMailboxSignalFaultForTest",
+    );
+    return await requestJsonForRuntime<{
+      armed: true;
+      deliveredToPendingConsumer: boolean;
+    }>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + "/temporal-mailbox-signal-fault/arm",
+      {
+        body: JSON.stringify({ mailboxItemId }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function clearTemporalMailboxSignalFaultForTest(
+    userId: string,
+  ): Promise<{
+    cleared: boolean;
+    ok: true;
+  }> {
+    assertHostedLocalTestControlsAvailable(
+      "clearTemporalMailboxSignalFaultForTest",
+    );
+    return await requestJsonForRuntime<{
+      cleared: boolean;
+      ok: true;
+    }>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + "/temporal-mailbox-signal-fault/clear",
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

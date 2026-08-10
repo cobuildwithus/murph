@@ -163,7 +163,7 @@ import {
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
-import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
   EnvironmentEmptyState,
@@ -598,7 +598,9 @@ export function ComponentsContent() {
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
-  const [garminHistoricalDataDialogOpen, setGarminHistoricalDataDialogOpen] = useState(false);
+  const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
+    Pick<ConnectSource, "id" | "logo" | "name" | "requiresReconnect"> | null
+  >(null);
   const [assistantStylePickerStep, setAssistantStylePickerStep] =
     useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
@@ -1667,21 +1669,91 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Garmin Historical Data Preflight">
+        <Section title="Vital-backed health source handoff">
           <div className="flex flex-col items-start gap-3">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Provider-specific reminder shown before Murph opens Garmin&apos;s
-              authorization screen. It names the default-off permission without
-              claiming Murph can verify the external setting.
+              Reusable handoff shown before every Vital-backed authorization.
+              It leads with the connection, credits Vital underneath with a
+              link, and keeps Garmin&apos;s Historical Data reminder inside
+              the same dialog.
             </p>
-            <Button onClick={() => setGarminHistoricalDataDialogOpen(true)}>
-              Preview Garmin preflight
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {[
+                {
+                  label: "Preview standard handoff",
+                  source: {
+                    id: "fitbit",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/fitbit.svg",
+                      width: 44,
+                    },
+                    name: "Fitbit",
+                  },
+                  variant: "default" as const,
+                },
+                {
+                  label: "Preview Garmin handoff",
+                  source: {
+                    id: "garmin",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/garmin.png",
+                      width: 44,
+                    },
+                    name: "Garmin",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview wide logo",
+                  source: {
+                    id: "runkeeper",
+                    logo: {
+                      className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+                      height: 20,
+                      src: "/brand-logos/connect/runkeeper.svg",
+                      width: 132,
+                    },
+                    name: "Runkeeper",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview long label",
+                  source: {
+                    id: "dexcom-g6-and-older",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/dexcom-g6-and-older.png",
+                      width: 44,
+                    },
+                    name: "Dexcom (G6 and older)",
+                  },
+                  variant: "outline" as const,
+                },
+              ].map((preview) => (
+                <Button
+                  key={preview.source.id}
+                  variant={preview.variant}
+                  onClick={() => setVitalConnectionDialogSource(preview.source)}
+                >
+                  {preview.label}
+                </Button>
+              ))}
+            </div>
           </div>
-          <GarminHistoricalDataDialog
-            open={garminHistoricalDataDialogOpen}
-            onContinue={() => setGarminHistoricalDataDialogOpen(false)}
-            onOpenChange={setGarminHistoricalDataDialogOpen}
+          <VitalConnectionDialog
+            source={vitalConnectionDialogSource}
+            onContinue={() => setVitalConnectionDialogSource(null)}
+            onOpenChange={(open) => {
+              if (!open) {
+                setVitalConnectionDialogSource(null);
+              }
+            }}
           />
         </Section>
 

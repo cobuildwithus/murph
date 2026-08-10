@@ -391,6 +391,10 @@ type HostedEdgeSubscriptionPlan = Extract<
   HostedSubscriptionPlan,
   { code: "launch_edge_monthly" }
 >;
+type HostedMaxSubscriptionPlan = Extract<
+  HostedSubscriptionPlan,
+  { code: "launch_max_monthly" }
+>;
 
 function projectHostedSubscriptionPlan(
   code: "launch_group_monthly",
@@ -401,6 +405,9 @@ function projectHostedSubscriptionPlan(
 function projectHostedSubscriptionPlan(
   code: "launch_edge_monthly",
 ): HostedEdgeSubscriptionPlan;
+function projectHostedSubscriptionPlan(
+  code: "launch_max_monthly",
+): HostedMaxSubscriptionPlan;
 function projectHostedSubscriptionPlan(
   code: HostedRuntimeDirectBillingPlanCode,
 ): HostedSubscriptionPlan;
@@ -430,6 +437,15 @@ function projectHostedSubscriptionPlan(
   }
 
   if (code === "launch_edge_monthly" && definition.displayName === "Edge") {
+    return {
+      code,
+      displayName: definition.displayName,
+      interval: definition.interval,
+      recurringAmountUsdCents: definition.recurringAmountUsdCents,
+    };
+  }
+
+  if (code === "launch_max_monthly" && definition.displayName === "Max") {
     return {
       code,
       displayName: definition.displayName,

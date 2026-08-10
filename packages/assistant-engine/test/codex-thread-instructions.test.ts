@@ -137,6 +137,41 @@ describe('Codex thread instructions', () => {
     expect(appServerInput.prompt).not.toContain('Stable Murph instructions.')
   })
 
+  it('forwards trusted generated-song policy to the app-server turn', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
+      finalMessage: 'done',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'done',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'thread-song-policy',
+      stderr: '',
+      stdout: '',
+      threadId: 'thread-song-policy',
+      turnId: 'turn-song-policy',
+    })
+    const generateSongPolicy = {
+      maxAttempts: 1,
+      requiredDurationSeconds: 15,
+    } as const
+
+    await executeCodexAssistantTurnAttemptUnchecked({
+      providerConfig: normalizeAssistantProviderConfig({
+        provider: 'codex-cli',
+      }),
+      dynamicTools: [],
+      env: {},
+      generateSongPolicy,
+      userPrompt: 'Create the bounded song.',
+      workingDirectory: '/tmp/provider-tests',
+    })
+
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0])
+      .toMatchObject({ generateSongPolicy })
+  })
+
   it('keeps constrained profile inputs at the app-server seam', async () => {
     const scenarios = [
       {

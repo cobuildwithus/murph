@@ -2155,14 +2155,87 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 })
 
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
-  it(
-    'routes a Core quote and confirmed change through the legacy billing code',
-    async () => {
+  it.each([
+    {
+      confirmationPrompt: [
+        'Yes. I explicitly confirm switching from Pulse to Core for',
+        '$3.50/month at the end of my current period on August 30, 2026.',
+        'Apply that exact quoted change now.',
+      ].join(' '),
+      confirmedMessagePattern: /August 30|2026-08-30|scheduled/iu,
+      currentPlanCode: 'launch_monthly',
+      currentPlanName: 'Pulse',
+      quoteId: 'quote_core_plan_e2e',
+      quoteLabel: 'Switch to Group at period end ($3.50/month)',
+      quotePrompt: [
+        'What would switching from Pulse to Core cost?',
+        'Give me the exact price and timing, but do not change anything yet.',
+        'Ask me to confirm the exact quoted change.',
+      ].join(' '),
+      quoteTimingPattern: /August 30|2026-08-30|period end/iu,
+      recurringAmountUsdCents: 350,
+      subscriptionResponse: {
+        action: 'change_plan',
+        effectiveAt: '2026-08-30T12:00:00.000Z',
+        plan: {
+          code: 'launch_group_monthly',
+          displayName: 'Group',
+          interval: 'month',
+          recurringAmountUsdCents: 350,
+        },
+        status: 'scheduled',
+      },
+      targetPlanCode: 'launch_group_monthly',
+      targetPlanName: 'Core',
+      timing: 'period_end',
+      title: 'routes a Core quote and confirmed change through the legacy billing code',
+      unsupportedModelPattern: null,
+      wireOnlyPlanPattern: /\bGroup\b/u,
+      workingDirectoryPrefix: 'murph-core-plan-change-e2e-',
+    },
+    {
+      confirmationPrompt: [
+        'Yes. I explicitly confirm upgrading from Edge to Max for $50/month now.',
+        'Apply that exact quoted change.',
+      ].join(' '),
+      confirmedMessagePattern: /Stripe|payment|billing|confirm/iu,
+      currentPlanCode: 'launch_edge_monthly',
+      currentPlanName: 'Edge',
+      quoteId: 'quote_max_plan_e2e',
+      quoteLabel: 'Upgrade to Max now ($50/month)',
+      quotePrompt: [
+        'I am on Edge and explicitly want Max.',
+        'Give me the exact Max price and timing, but do not change anything yet.',
+        'Ask me to confirm the exact quoted change.',
+      ].join(' '),
+      quoteTimingPattern: /now|immediate/iu,
+      recurringAmountUsdCents: 5_000,
+      subscriptionResponse: {
+        action: 'change_plan',
+        paymentUrl: 'https://billing.stripe.test/max-confirmation',
+        plan: {
+          code: 'launch_max_monthly',
+          displayName: 'Max',
+          interval: 'month',
+          recurringAmountUsdCents: 5_000,
+        },
+        status: 'payment_required',
+      },
+      targetPlanCode: 'launch_max_monthly',
+      targetPlanName: 'Max',
+      timing: 'immediate',
+      title: 'quotes and confirms an explicit Max upgrade without inventing a model',
+      unsupportedModelPattern: /GPT-(?:5\.[7-9]|[6-9])\b|model codename|launch date/iu,
+      wireOnlyPlanPattern: null,
+      workingDirectoryPrefix: 'murph-max-plan-change-e2e-',
+    },
+  ] as const)(
+    '$title',
+    async (scenario) => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
-        path.join(tmpdir(), 'murph-core-plan-change-e2e-'),
+        path.join(tmpdir(), scenario.workingDirectoryPrefix),
       )
-      const quoteId = 'quote_core_plan_e2e'
       const confirmationInputId = `ain_${'c'.repeat(32)}`
       let currentAssistantInputId = `ain_${'b'.repeat(32)}`
       let subscriptionActionClaimed = false
@@ -2213,20 +2286,19 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                   periodEnd: '2026-08-30T12:00:00.000Z',
                   periodKind: 'monthly',
                   periodStart: '2026-07-30T12:00:00.000Z',
-                  planCode: 'launch_monthly',
-                  planName: 'Pulse',
+                  planCode: scenario.currentPlanCode,
+                  planName: scenario.currentPlanName,
                   recommendedAction: null,
                   remainingPercent: 64,
                   status: 'active',
                   subscriptionActionQuote: {
                     action: 'change_plan',
                     expiresAt: '2026-07-30T12:10:00.000Z',
-                    label:
-                      'Switch to Group at period end ($3.50/month)',
-                    monthlyPriceUsdCents: 350,
-                    quoteId,
-                    targetPlanCode: 'launch_group_monthly',
-                    timing: 'period_end',
+                    label: scenario.quoteLabel,
+                    monthlyPriceUsdCents: scenario.recurringAmountUsdCents,
+                    quoteId: scenario.quoteId,
+                    targetPlanCode: scenario.targetPlanCode,
+                    timing: scenario.timing,
                   },
                   usedPercent: 36,
                 }
@@ -2238,17 +2310,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             subscriptionTool: {
               request: async (request) => {
                 subscriptionRequests.push({ ...request })
-                return {
-                  action: 'change_plan',
-                  effectiveAt: '2026-08-30T12:00:00.000Z',
-                  plan: {
-                    code: 'launch_group_monthly',
-                    displayName: 'Group',
-                    interval: 'month',
-                    recurringAmountUsdCents: 350,
-                  },
-                  status: 'scheduled',
-                }
+                return scenario.subscriptionResponse
               },
             },
             vaultFileSendAvailable: false,
@@ -2261,11 +2323,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         }
         const quote = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'What would switching from Pulse to Core cost?',
-            'Give me the exact price and timing, but do not change anything yet.',
-            'Ask me to confirm the exact quoted change.',
-          ].join(' '),
+          prompt: scenario.quotePrompt,
         })
         const quoteActions = readCapabilityRoutingActions(quote.jsonEvents)
         const skillRead = quoteActions.find((action) =>
@@ -2279,38 +2337,50 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         )
 
         expect(skillRead, 'hosted-low-usage skill read').toBeDefined()
-        expect(planUsageAction, 'Core-targeted plan usage read').toBeDefined()
+        expect(
+          planUsageAction,
+          `${scenario.targetPlanName}-targeted plan usage read`,
+        ).toBeDefined()
         if (
           skillRead?.kind !== 'command'
           || planUsageAction?.kind !== 'dynamic'
         ) {
-          throw new Error('Expected skill and Core plan-usage actions.')
+          throw new Error(
+            `Expected skill and ${scenario.targetPlanName} plan-usage actions.`,
+          )
         }
         expect(skillRead.eventIndex).toBeLessThan(planUsageAction.eventIndex)
         expect(planUsageAction.argumentsValue).toEqual({
-          targetPlanCode: 'launch_group_monthly',
+          targetPlanCode: scenario.targetPlanCode,
         })
         expect(planUsageRequests).toEqual([{
           includeSubscriptionActionQuote: true,
-          subscriptionActionTargetPlanCode: 'launch_group_monthly',
+          subscriptionActionTargetPlanCode: scenario.targetPlanCode,
         }])
         expect(subscriptionRequests).toHaveLength(0)
-        expect(quote.finalMessage).toMatch(/\bCore\b/u)
-        expect(quote.finalMessage).toMatch(/\$3\.50(?:\/month)?/u)
         expect(quote.finalMessage).toMatch(
-          /August 30|2026-08-30|period end/iu,
+          new RegExp(`\\b${scenario.targetPlanName}\\b`, 'u'),
         )
+        expect(quote.finalMessage).toMatch(
+          scenario.recurringAmountUsdCents === 350
+            ? /\$3\.50(?:\/month)?/u
+            : /\$50(?:\.00)?(?:\/month)?/u,
+        )
+        expect(quote.finalMessage).toMatch(scenario.quoteTimingPattern)
         expect(quote.finalMessage).toMatch(/confirm/iu)
-        expect(quote.finalMessage).not.toMatch(/\bGroup\b/u)
+        if (scenario.wireOnlyPlanPattern) {
+          expect(quote.finalMessage).not.toMatch(scenario.wireOnlyPlanPattern)
+        }
+        if (scenario.unsupportedModelPattern) {
+          expect(quote.finalMessage).not.toMatch(
+            scenario.unsupportedModelPattern,
+          )
+        }
 
         currentAssistantInputId = confirmationInputId
         const confirmed = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: [
-            'Yes. I explicitly confirm switching from Pulse to Core for',
-            '$3.50/month at the end of my current period on August 30, 2026.',
-            'Apply that exact quoted change now.',
-          ].join(' '),
+          prompt: scenario.confirmationPrompt,
           resumeSessionId: quote.sessionId,
         })
         const confirmedActions = readCapabilityRoutingActions(
@@ -2321,27 +2391,40 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           && action.tool === MURPH_SUBSCRIPTION_TOOL.name
         )
 
-        expect(subscriptionAction, 'confirmed Core subscription action')
-          .toBeDefined()
+        expect(
+          subscriptionAction,
+          `confirmed ${scenario.targetPlanName} subscription action`,
+        ).toBeDefined()
         if (subscriptionAction?.kind !== 'dynamic') {
-          throw new Error('Expected a confirmed Core subscription action.')
+          throw new Error(
+            `Expected a confirmed ${scenario.targetPlanName} subscription action.`,
+          )
         }
         expect(subscriptionAction.argumentsValue).toEqual({
           action: 'change_plan',
-          quoteId,
-          targetPlanCode: 'launch_group_monthly',
+          quoteId: scenario.quoteId,
+          targetPlanCode: scenario.targetPlanCode,
         })
         expect(subscriptionRequests).toEqual([{
           action: 'change_plan',
           assistantInputId: confirmationInputId,
-          quoteId,
-          targetPlanCode: 'launch_group_monthly',
+          quoteId: scenario.quoteId,
+          targetPlanCode: scenario.targetPlanCode,
         }])
-        expect(confirmed.finalMessage).toMatch(/\bCore\b/u)
         expect(confirmed.finalMessage).toMatch(
-          /August 30|2026-08-30|scheduled/iu,
+          new RegExp(`\\b${scenario.targetPlanName}\\b`, 'u'),
         )
-        expect(confirmed.finalMessage).not.toMatch(/\bGroup\b/u)
+        expect(confirmed.finalMessage).toMatch(scenario.confirmedMessagePattern)
+        if (scenario.wireOnlyPlanPattern) {
+          expect(confirmed.finalMessage).not.toMatch(
+            scenario.wireOnlyPlanPattern,
+          )
+        }
+        if (scenario.unsupportedModelPattern) {
+          expect(confirmed.finalMessage).not.toMatch(
+            scenario.unsupportedModelPattern,
+          )
+        }
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -2440,7 +2523,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                         requirementsLabel:
                           'Start a fresh group with one genuinely new person who activates their own Murph and says hi there.',
                         rewardLabel:
-                          '$2.00 of cost-weighted usage credit for your Murph',
+                          'about 10 more days of Murph usage for your Murph',
                       }],
                       trialCreditNotice: null,
                     },
@@ -2504,7 +2587,12 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(privatePlanUsageReads).toBe(1)
         expect(privateGroupActions).toEqual(['read_usage_referral'])
         expect(privateResult.finalMessage).toMatch(/add (?:one-time )?usage/iu)
-        expect(privateResult.finalMessage).toContain('$2.00 of cost-weighted usage credit')
+        expect(privateResult.finalMessage).toContain(
+          'about 10 more days of Murph usage for your Murph',
+        )
+        expect(privateResult.finalMessage).not.toMatch(
+          /\$|cost-weighted|exact credit|messages?\b|remaining balance|calendar|trial extension/iu,
+        )
 
         const groupResult = await executeRealCodexAppServerTurn({
           approvalPolicy: 'never',
@@ -2552,7 +2640,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                           requirementsLabel:
                             'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                           rewardLabel:
-                            '$3.50 of cost-weighted usage credit for your Murph',
+                            'about 14 more days of Murph usage for your Murph',
                         }],
                         trialCreditNotice: null,
                       },
@@ -2598,7 +2686,12 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           'read_usage_referral',
         ]))
         expect(groupResult.finalMessage).toContain(fundingUrl)
-        expect(groupResult.finalMessage).toContain('$3.50 of cost-weighted usage credit')
+        expect(groupResult.finalMessage).toContain(
+          'about 14 more days of Murph usage for your Murph',
+        )
+        expect(groupResult.finalMessage).not.toMatch(
+          /\$|cost-weighted|exact credit|messages?\b|remaining balance|calendar|trial extension/iu,
+        )
         expect(groupResult.finalMessage).not.toMatch(/(?:^|\n)---(?:\n|$)/u)
 
         const fundingPrivacyResult = await executeRealCodexAppServerTurn({
@@ -2752,14 +2845,14 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
                             requirementsLabel:
                               'Bring Murph and one genuinely new person together in a fresh group.',
                             rewardLabel:
-                              '$2.00 of cost-weighted usage credit for your Murph',
+                              'about 10 more days of Murph usage for your Murph',
                           },
                           {
                             code: 'active_group_v1',
                             requirementsLabel:
                               'Start a fresh group and make it genuinely active, with multiple people actually talking.',
                             rewardLabel:
-                              '$3.50 of cost-weighted usage credit for your Murph',
+                              'about 14 more days of Murph usage for your Murph',
                           },
                         ],
                         trialCreditNotice: null,
@@ -2822,11 +2915,17 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         ]))
         expect(newPersonPathIndex).toBeGreaterThanOrEqual(0)
         expect(activeGroupPathIndex).toBeGreaterThanOrEqual(0)
+        expect(second.finalMessage).toContain(
+          'about 10 more days of Murph usage for your Murph',
+        )
+        expect(second.finalMessage).toContain(
+          'about 14 more days of Murph usage for your Murph',
+        )
         expect(fundingUrlIndex).toBeGreaterThan(newPersonPathIndex)
         expect(fundingUrlIndex).toBeGreaterThan(activeGroupPathIndex)
         expect(second.finalMessage).toMatch(/sponsor|fund/iu)
         expect(second.finalMessage).not.toMatch(
-          /messages?\b|one-time|monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill/iu,
+          /\$|cost-weighted|exact credit|messages?\b|one-time|monthly sponsorship|second sponsor|new sponsor|payer|charged|maximum|monthly cap|balance|remaining|percent|refill|calendar|trial extension/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -5496,18 +5595,18 @@ function buildGroupPointOfViewCandidateProbe(): string {
     'B: Stay plain rather than inventing lore.',
     '',
     '49. In an ordinary interactive group, someone directly asks Murph a non-urgent question. No other message arrives.',
-    'A: Run `sleep 4`, then send one text reply in one bubble.',
+    'A: Run `sleep 8`, then send one text reply in one bubble.',
     'B: Reply immediately and split the answer across two short bubbles.',
     '',
-    '50. Murph starts `sleep 4` for an ordinary group question. Another ordinary human message arrives during that pause, and the refreshed beat still calls for a text reply.',
+    '50. Murph starts `sleep 8` for an ordinary group question. Another ordinary human message arrives during that pause, and the refreshed beat still calls for a text reply.',
     'A: Answer the first and second messages separately as soon as the first sleep returns.',
     'B: When the first sleep returns, run one final `sleep 6`, absorb the current beat, then take one terminal action.',
     '',
-    '51. Murph starts `sleep 4` for an ordinary group question. During that pause, a new message introduces genuinely urgent safety information.',
+    '51. Murph starts `sleep 8` for an ordinary group question. During that pause, a new message introduces genuinely urgent safety information.',
     'A: When the first sleep returns, skip the extra six-second sleep and answer the current urgent beat.',
     'B: Always run the final `sleep 6` before addressing the urgent message.',
     '',
-    '52. Murph starts `sleep 4` for an ordinary room question. During that pause, another human fully answers it and takes the floor.',
+    '52. Murph starts `sleep 8` for an ordinary room question. During that pause, another human fully answers it and takes the floor.',
     'A: Run `sleep 6`, then add Murph\'s own version so the original asker gets two answers.',
     'B: When the first sleep returns, re-evaluate the floor and finish without a stale text reply or extra sleep.',
     '',

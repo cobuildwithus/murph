@@ -125,11 +125,17 @@ describe("assistant product feedback", () => {
     const description = MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.description;
     const schema = JSON.stringify(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema);
     expect(MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.required).toEqual(["kind", "summary"]);
+    expect(
+      MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema.properties.summary.maxLength,
+    ).toBe(2_000);
     expect(description).toContain("one structured Murph product-feedback candidate");
     expect(description).toContain("current accepted request");
     expect(description).toContain("optional related changelog item ids");
     expect(description).toContain("accepted, already accepted, or unavailable");
-    expect(description).toContain("Provide the feedback kind, a concise product-only summary");
+    expect(description).toContain("Provide the feedback kind, one concise product-only summary");
+    expect(description).toContain(
+      "append a privacy-safe reproduction recipe in the same summary field",
+    );
     expect(description).toContain(
       'Explicit verified-private human support uses kind "frustration", empty changelog ids',
     );
@@ -150,6 +156,14 @@ describe("assistant product feedback", () => {
     expect(schema).not.toContain('"supportProblem"');
     expect(schema).toContain('generic actor');
     expect(schema).toContain('expected versus observed result');
+    expect(schema).toContain('section beginning exactly \\"Reproduction:\\"');
+    expect(schema).toContain('independently usable without the original conversation');
+    expect(schema).toContain('exact Murph CLI commands or tool calls with synthetic arguments');
+    expect(schema).toContain('sanitized example request or user action');
+    expect(schema).toContain('synthetic placeholders');
+    expect(schema).toContain('insufficient for a complete reproduction');
+    expect(schema).toContain('pure feature interest with no failure or friction to reproduce');
+    expect(schema).toContain("Never copy or closely paraphrase the member's wording");
     expect(schema).toContain('concrete product constraint the source established');
     expect(schema).toContain('instead of replacing them with vague labels');
     expect(schema).toContain('omit it or mark it unclear rather than infer or invent it');
@@ -192,6 +206,9 @@ describe("assistant product feedback", () => {
         automation.automationId === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
     );
     expect(productNotes).toBeDefined();
+    expect(systemPrompt).toContain(
+      "append a privacy-safe `Reproduction:` section in that same summary field",
+    );
 
     const toolSchema = JSON.stringify(
       MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.inputSchema,

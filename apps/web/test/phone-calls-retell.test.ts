@@ -28,20 +28,18 @@ import {
   buildPhoneCallResultNotificationWake,
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
-  HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS,
   mapRetellCallAnalysis,
 } from "@/src/lib/phone-calls/result";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
 type RetellWebhookStore = NonNullable<Parameters<typeof handleRetellCallAnalyzed>[0]["prisma"]>;
-type RetellWebhookTx = Parameters<RetellWebhookStore["$transaction"]>[0] extends (
-  tx: infer Tx,
+type RetellWebhookDatabase = Parameters<RetellWebhookStore["$transaction"]>[0] extends (
+  tx: infer Database,
 ) => Promise<unknown>
-  ? Tx
+  ? Database
   : never;
-type RetellWebhookFindUniqueInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUnique"]>[0];
-type RetellWebhookFindUniqueOrThrowInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["findUniqueOrThrow"]>[0];
-type RetellWebhookUpdateManyInput = Parameters<RetellWebhookTx["hostedPhoneCall"]["updateMany"]>[0];
+type RetellWebhookFindUniqueInput = Parameters<RetellWebhookStore["hostedPhoneCall"]["findUnique"]>[0];
+type RetellWebhookUpdateManyInput = Parameters<RetellWebhookStore["hostedPhoneCall"]["updateMany"]>[0];
 type ConsultationStore = NonNullable<
   Parameters<typeof getHostedPhoneCallForConsultation>[0]["prisma"]
 >;
@@ -123,10 +121,6 @@ describe("Retell phone-call runtime", () => {
       to_number: "+12125550123",
     });
     expect(body).not.toHaveProperty("agent_override");
-  });
-
-  it("budgets the analyzed transaction for every sequential KMS lane", () => {
-    expect(HOSTED_PHONE_CALL_WEBHOOK_TRANSACTION_TIMEOUT_MS).toBe(50_000);
   });
 
   it("passes a configured Retell webhook public base as a per-call agent override", async () => {
@@ -997,7 +991,6 @@ describe("Retell phone-call result handling", () => {
         },
       },
     });
-    expect(store.findUniqueOrThrowCalls).toEqual([]);
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
       "hpc_123",
@@ -1016,6 +1009,285 @@ describe("Retell phone-call result handling", () => {
       outcome: "completed",
       summary: "The appointment is booked for Friday at 3:45 PM.",
     });
+  });
+
+  it("finishes blocked result encryption before the one-shot CAS without opening a transaction", async () => {
+    const encryptionStarted = createDeferred();
+    const releaseEncryption = createDeferred();
+    const phases: string[] = [];
+    const store = createWebhookStore({
+      appendResultNotification: async () => {
+        phases.push("append");
+      },
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      onEncryptResult: async () => {
+        phases.push("encrypt:start");
+        encryptionStarted.resolve();
+        await releaseEncryption.promise;
+        phases.push("encrypt:end");
+        return undefined;
+      },
+      onUpdateMany: async () => {
+        phases.push("cas");
+        return undefined;
+      },
+    });
+
+    const handling = handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    });
+
+    await encryptionStarted.promise;
+    expect(store.transactionOpen()).toBe(false);
+    expect(store.transactionCalls()).toBe(0);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(phases).toEqual(["encrypt:start"]);
+
+    releaseEncryption.resolve();
+    await handling;
+
+    expect(store.transactionCalls()).toBe(0);
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(phases).toEqual(["encrypt:start", "encrypt:end", "cas", "append"]);
+  });
+
+  it("uses the canonical first-writer result after losing the analyzed CAS", async () => {
+    const canonicalResult: HostedPhoneCallResult = {
+      followUp: "Ask whether the alternate date works.",
+      outcome: "needs_user",
+      summary: "The office offered Monday at 9 AM instead.",
+    };
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      onEncryptResult: async (call) => ({
+        ...call,
+        analyzedAt: new Date("2026-06-25T12:00:00.000Z"),
+        resultJson: canonicalResult,
+        status: "needs_user",
+      }),
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "A stale concurrent analysis claimed the call completed.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    })).resolves.toEqual({
+      notificationMailboxItemId: "mailbox_hpc_123",
+      notificationUserId: "member_123",
+    });
+
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: new Date("2026-06-25T12:00:00.000Z"),
+      resultEncrypted: null,
+      resultJson: canonicalResult,
+      status: "needs_user",
+    });
+    expect(store.appendResultNotificationResults).toEqual([undefined]);
+  });
+
+  it("does not overwrite provider authority bound while result encryption is in flight", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({
+        id: "hpc_123",
+        providerCallId: null,
+      }),
+      onEncryptResult: async (call) => ({
+        ...call,
+        providerCallId: "retell_other",
+      }),
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked by stale authority.",
+          },
+        },
+        call_id: "retell_incoming",
+        data_storage_setting: "basic_attributes_only",
+        metadata: {
+          murph_phone_call_id: "hpc_123",
+        },
+      },
+      prisma: store.prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_PHONE_CALL_ANALYSIS_RETRY_REQUIRED",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(store.updateManyCalls[0]).toMatchObject({
+      data: {
+        providerCallId: "retell_incoming",
+      },
+      where: {
+        analyzedAt: null,
+        id: "hpc_123",
+        provider: "retell",
+        providerCallId: null,
+      },
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      providerCallId: "retell_other",
+      resultEncrypted: null,
+      resultJson: null,
+    });
+    expect(store.appendResultNotificationCalls).toEqual([]);
+  });
+
+  it("does not recreate a call deleted while result encryption is in flight", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      onEncryptResult: async () => null,
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    })).resolves.toEqual({
+      notificationMailboxItemId: null,
+      notificationUserId: null,
+    });
+
+    expect(store.currentCall()).toBeNull();
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+  });
+
+  it("treats account deletion during failed result encryption as terminal", async () => {
+    const encryptionError = new Error("result encryption unavailable");
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      encryptResultError: encryptionError,
+      onEncryptResult: async (call) => {
+        expect(call.id).toBe("hpc_123");
+        return null;
+      },
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    })).resolves.toEqual({
+      notificationMailboxItemId: null,
+      notificationUserId: null,
+    });
+
+    expect(store.currentCall()).toBeNull();
+    expect(store.findUniqueCalls).toEqual([
+      { where: { providerCallId: "retell_call_123" } },
+      { where: { id: "hpc_123" } },
+    ]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+    expect(store.transactionCalls()).toBe(0);
+  });
+
+  it("rethrows failed result encryption while the exact call row survives", async () => {
+    const encryptionError = new Error("result encryption unavailable");
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+      encryptResultError: encryptionError,
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    })).rejects.toBe(encryptionError);
+
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: null,
+      id: "hpc_123",
+      resultEncrypted: null,
+      resultJson: null,
+    });
+    expect(store.findUniqueCalls).toEqual([
+      { where: { providerCallId: "retell_call_123" } },
+      { where: { id: "hpc_123" } },
+    ]);
+    expect(store.updateManyCalls).toEqual([]);
+    expect(store.appendResultNotificationCalls).toEqual([]);
+    expect(store.transactionCalls()).toBe(0);
+  });
+
+  it("treats account deletion during the post-commit append as terminal", async () => {
+    const store = createWebhookStore({
+      appendResultNotification: async () => {
+        store.deleteCurrentCall();
+        throw new Error("account deleted during mailbox append");
+      },
+      call: buildHostedPhoneCall({ id: "hpc_123" }),
+    });
+
+    await expect(handleRetellCallAnalyzed({
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "completed",
+            result: "Booked.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      prisma: store.prisma,
+    })).resolves.toEqual({
+      notificationMailboxItemId: null,
+      notificationUserId: null,
+    });
+
+    expect(store.updateManyCalls).toHaveLength(1);
+    expect(store.appendResultNotificationCalls).toHaveLength(1);
+    expect(store.currentCall()).toBeNull();
   });
 
   it("bounds oversized Retell analysis text before finalizing the call", async () => {
@@ -1160,9 +1432,9 @@ describe("Retell phone-call result handling", () => {
         analyzedAt: null,
         id: "hpc_123",
         provider: "retell",
+        providerCallId: null,
       },
     });
-    expect(store.updateManyCalls[0]!.where).not.toHaveProperty("providerCallId");
     expect(store.appendResultNotificationCalls.map((callRecord) => callRecord.id)).toEqual([
       "hpc_123",
     ]);
@@ -1281,13 +1553,13 @@ describe("Retell phone-call result handling", () => {
   it("requires retry when call_ended changes authority during result encryption", async () => {
     const endedAt = new Date("2026-06-25T12:34:56.000Z");
     const onEncryptResult = vi
-      .fn<(call: HostedPhoneCall) => Promise<HostedPhoneCall | null>>()
+      .fn<(call: HostedPhoneCall) => Promise<HostedPhoneCall | null | undefined>>()
       .mockImplementationOnce(async (call) => ({
         ...call,
         endedAt,
         status: "failed",
       }))
-      .mockResolvedValue(null);
+      .mockResolvedValue(undefined);
     const store = createWebhookStore({
       call: buildHostedPhoneCall({
         id: "hpc_123",
@@ -1341,7 +1613,7 @@ describe("Retell phone-call result handling", () => {
     expect(onEncryptResult).toHaveBeenCalledTimes(2);
   });
 
-  it("rolls call_analyzed back when notification enqueue fails so Retell replay can notify", async () => {
+  it("keeps the committed analysis retryable when notification enqueue fails", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
       appendResultNotification: vi
@@ -1366,9 +1638,10 @@ describe("Retell phone-call result handling", () => {
     })).rejects.toThrow("mailbox unavailable");
 
     expect(store.currentCall()).toMatchObject({
-      analyzedAt: null,
+      analyzedAt: expect.any(Date),
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
       resultJson: null,
-      status: "starting",
+      status: "completed",
     });
 
     await handleRetellCallAnalyzed({
@@ -1380,10 +1653,18 @@ describe("Retell phone-call result handling", () => {
       "hpc_123",
       "hpc_123",
     ]);
+    expect(store.appendResultNotificationResults).toEqual([
+      {
+        outcome: "completed",
+        summary: "Booked.",
+      },
+      undefined,
+    ]);
+    expect(store.updateManyCalls).toHaveLength(1);
     expect(store.currentCall()?.analyzedAt).toBeInstanceOf(Date);
   });
 
-  it("does not finalize call_analyzed when no result notification route is available", async () => {
+  it("keeps a finalized analysis retryable when its notification route is unavailable", async () => {
     const store = createWebhookStore({
       call: buildHostedPhoneCall({ id: "hpc_123" }),
       appendResultNotification: async () => {
@@ -1406,9 +1687,10 @@ describe("Retell phone-call result handling", () => {
     })).rejects.toThrow("result notification route unavailable");
 
     expect(store.currentCall()).toMatchObject({
-      analyzedAt: null,
+      analyzedAt: expect.any(Date),
+      resultEncrypted: expect.stringMatching(/^hsb-test:/u),
       resultJson: null,
-      status: "starting",
+      status: "completed",
     });
     expect(store.appendResultNotificationCalls).toHaveLength(1);
   });
@@ -1601,56 +1883,37 @@ function createWebhookStore(input: {
     result?: HostedPhoneCallResult,
   ) => Promise<void>;
   call: HostedPhoneCall;
-  onEncryptResult?: (call: HostedPhoneCall) => Promise<HostedPhoneCall | null>;
+  encryptResultError?: Error;
+  onEncryptResult?: (
+    call: HostedPhoneCall,
+  ) => Promise<HostedPhoneCall | null | undefined>;
+  onUpdateMany?: (
+    call: HostedPhoneCall | null,
+    args: RetellWebhookUpdateManyInput,
+  ) => Promise<HostedPhoneCall | null | undefined>;
 }) {
   let currentCall: HostedPhoneCall | null = input.call;
-  let externallyCommittedCall: HostedPhoneCall | null = null;
+  let openTransactions = 0;
+  let transactionCalls = 0;
   const appendResultNotificationCalls: HostedPhoneCall[] = [];
   const appendResultNotificationResults: Array<HostedPhoneCallResult | undefined> = [];
   const findUniqueCalls: RetellWebhookFindUniqueInput[] = [];
-  const findUniqueOrThrowCalls: RetellWebhookFindUniqueOrThrowInput[] = [];
   const updateManyCalls: RetellWebhookUpdateManyInput[] = [];
 
-  const tx: RetellWebhookTx = {
-    appendResultNotification: async (call, result) => {
-      appendResultNotificationCalls.push(call);
-      appendResultNotificationResults.push(result);
-      await input.appendResultNotification?.(call, result);
-      return {
-        notificationMailboxItemId: `mailbox_${call.id}`,
-        notificationUserId: call.memberId,
-      };
-    },
-    encryptResult: async ({ memberId, value }) => {
-      if (currentCall && input.onEncryptResult) {
-        externallyCommittedCall = await input.onEncryptResult(currentCall);
-        currentCall = externallyCommittedCall ?? currentCall;
-      }
-      return `hsb-test:${Buffer.from(
-        JSON.stringify({
-          lane: "hosted-member-private-field",
-          scope: "hosted-phone-call:result",
-          userId: memberId,
-          value: JSON.stringify(value),
-        }),
-        "utf8",
-      ).toString("base64url")}`;
-    },
+  const database: RetellWebhookDatabase = {
     hostedPhoneCall: {
       findUnique: async (args) => {
         findUniqueCalls.push(args);
         return readCurrentCallByWhere(currentCall, args.where);
       },
-      findUniqueOrThrow: async (args) => {
-        findUniqueOrThrowCalls.push(args);
-        const call = readCurrentCallByWhere(currentCall, args.where);
-        if (!call) {
-          throw new Error("HostedPhoneCall not found.");
-        }
-        return call;
-      },
       updateMany: async (args) => {
         updateManyCalls.push(args);
+        if (input.onUpdateMany) {
+          const externallyCommitted = await input.onUpdateMany(currentCall, args);
+          if (externallyCommitted !== undefined) {
+            currentCall = externallyCommitted;
+          }
+        }
         if (!currentCall || !matchesWebhookUpdateWhere(currentCall, args.where)) {
           return { count: 0 };
         }
@@ -1679,17 +1942,48 @@ function createWebhookStore(input: {
     },
   };
   const prisma: RetellWebhookStore = {
+    ...database,
     $transaction: async (callback) => {
       const before = currentCall;
-      externallyCommittedCall = null;
+      transactionCalls += 1;
+      openTransactions += 1;
       try {
-        return await callback(tx);
+        return await callback(database);
       } catch (error) {
-        currentCall = externallyCommittedCall ?? before;
+        currentCall = before;
         throw error;
       } finally {
-        externallyCommittedCall = null;
+        openTransactions -= 1;
       }
+    },
+    appendResultNotification: async (call, result) => {
+      appendResultNotificationCalls.push(call);
+      appendResultNotificationResults.push(result);
+      await input.appendResultNotification?.(call, result);
+      return {
+        notificationMailboxItemId: `mailbox_${call.id}`,
+        notificationUserId: call.memberId,
+      };
+    },
+    encryptResult: async ({ memberId, value }) => {
+      if (currentCall && input.onEncryptResult) {
+        const externallyCommitted = await input.onEncryptResult(currentCall);
+        if (externallyCommitted !== undefined) {
+          currentCall = externallyCommitted;
+        }
+      }
+      if (input.encryptResultError) {
+        throw input.encryptResultError;
+      }
+      return `hsb-test:${Buffer.from(
+        JSON.stringify({
+          lane: "hosted-member-private-field",
+          scope: "hosted-phone-call:result",
+          userId: memberId,
+          value: JSON.stringify(value),
+        }),
+        "utf8",
+      ).toString("base64url")}`;
     },
   };
 
@@ -1697,16 +1991,34 @@ function createWebhookStore(input: {
     appendResultNotificationCalls,
     appendResultNotificationResults,
     currentCall: () => currentCall,
+    deleteCurrentCall: () => {
+      currentCall = null;
+    },
     findUniqueCalls,
-    findUniqueOrThrowCalls,
     prisma,
+    transactionCalls: () => transactionCalls,
+    transactionOpen: () => openTransactions > 0,
     updateManyCalls,
+  };
+}
+
+function createDeferred(): {
+  promise: Promise<void>;
+  resolve: () => void;
+} {
+  let resolvePromise!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve;
+  });
+  return {
+    promise,
+    resolve: resolvePromise,
   };
 }
 
 function readCurrentCallByWhere(
   call: HostedPhoneCall | null,
-  where: RetellWebhookFindUniqueInput["where"] | RetellWebhookFindUniqueOrThrowInput["where"],
+  where: RetellWebhookFindUniqueInput["where"],
 ): HostedPhoneCall | null {
   if (!call) {
     return null;
