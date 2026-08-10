@@ -566,9 +566,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   });
 
   it("re-prepares for a Telegram route that wins after the transaction route read", async () => {
-    const { hostedOnboardingError } = await import(
-      "@/src/lib/hosted-onboarding/errors"
-    );
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
       channel: "telegram",
@@ -596,14 +593,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null)
       .mockResolvedValue(winnerRoute);
-    mocks.ensureHostedThreadContainerRouteTx.mockRejectedValueOnce(
-      hostedOnboardingError({
-        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-        httpStatus: 503,
-        message: "Fresh route preparation required.",
-        retryable: true,
-      }),
-    );
+    mocks.ensureHostedThreadContainerRouteTx.mockResolvedValueOnce({
+      activationEventId: null,
+      activationMailboxItemId: null,
+      containerMemberId: winnerRoute.containerMemberId,
+      created: false,
+      demotedMailboxConsumedAt: null,
+    });
     const prisma = withPrismaTransaction({
       hostedMemberRouting: {
         findUnique: vi.fn().mockResolvedValue({

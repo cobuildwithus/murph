@@ -292,17 +292,26 @@ export async function planHostedOnboardingTelegramWebhook(input: {
           prisma: input.prisma,
           threadId: telegramMessage.threadId,
         });
-        runtimeMemberId = ensured.containerMemberId;
-        if (ensured.created) {
-          await bindArmedHostedUsageReferralToNewContainerTx({
-            occurredAt: new Date(summary.occurredAt),
-            ownerMemberId: existingMember.id,
-            targetChannel: "telegram",
-            targetLinqService: null,
-            targetContainerMemberId: ensured.containerMemberId,
-            tx: input.prisma,
+        if (!ensured.created) {
+          // This branch began from an observed-absent route and therefore has
+          // only creation material. An existing winner requires its own
+          // delivery-route package and mailbox-root prewarm in a fresh attempt.
+          throw hostedOnboardingError({
+            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+            httpStatus: 503,
+            message: "Hosted thread delivery-route preparation is required.",
+            retryable: true,
           });
         }
+        runtimeMemberId = ensured.containerMemberId;
+        await bindArmedHostedUsageReferralToNewContainerTx({
+          occurredAt: new Date(summary.occurredAt),
+          ownerMemberId: existingMember.id,
+          targetChannel: "telegram",
+          targetLinqService: null,
+          targetContainerMemberId: ensured.containerMemberId,
+          tx: input.prisma,
+        });
       } catch (error) {
         if (!isHostedOnboardingError(error) || error.code !== "HOSTED_THREAD_ROUTE_ALREADY_BOUND") {
           throw error;

@@ -33,7 +33,6 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
   readHostedPhoneHint,
 } from "../src/lib/hosted-onboarding/contact-privacy";
-import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import {
   encryptHostedLinqLinePhoneNumber,
 } from "../src/lib/hosted-onboarding/linq-line-phone-codec";
@@ -7851,12 +7850,16 @@ describe("Linq group chat concurrent provisioning race", () => {
       threadId: "chat_group_123",
     });
     preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
-      .mockRejectedValueOnce(hostedOnboardingError({
-        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-        httpStatus: 503,
-        message: "Fresh route preparation required.",
-        retryable: true,
-      }));
+      .mockResolvedValueOnce({
+        ensure: {
+          activationEventId: null,
+          activationMailboxItemId: null,
+          containerMemberId: "member_thread_container_winner",
+          created: false,
+          demotedMailboxConsumedAt: null,
+        },
+        kind: "ensured",
+      });
     vi.mocked(
       memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber,
     ).mockResolvedValue(null);

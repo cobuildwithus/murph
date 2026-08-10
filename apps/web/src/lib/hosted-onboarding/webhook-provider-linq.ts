@@ -3105,10 +3105,19 @@ async function planHostedLinqGroupChatWebhook(input: {
       // distinct message can append to that winner.
     } else {
       const ensureResult = preparedResult.ensure;
+      if (!ensureResult.created) {
+        // This branch began from an observed-absent route and therefore has
+        // only creation material. An existing winner requires its own
+        // delivery-route package and mailbox-root prewarm in a fresh attempt.
+        throw hostedOnboardingError({
+          code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+          httpStatus: 503,
+          message: "Hosted thread delivery-route preparation is required.",
+          retryable: true,
+        });
+      }
       routeEnsured = true;
-      createdContainerMemberId = ensureResult.created
-        ? ensureResult.containerMemberId
-        : null;
+      createdContainerMemberId = ensureResult.containerMemberId;
       demotedMailboxConsumedAt = ensureResult.demotedMailboxConsumedAt;
     }
   } catch (error) {
