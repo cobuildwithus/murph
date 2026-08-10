@@ -80,7 +80,6 @@ import {
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
-  type AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantResponseCardSchema,
@@ -116,7 +115,10 @@ import {
 import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
-import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
+import {
+  matchesExactAssistantVaultImageResponseMedia,
+  normalizeAssistantResponseMediaList,
+} from '../assistant/response-media.js'
 import {
   buildSafeToolCallValidationDigest,
   type SafeToolCallValidationDigest,
@@ -2140,6 +2142,18 @@ export async function executeMurphDynamicToolRequest(input: {
                 ?? null,
               vault: vaultRoot,
             })
+        if (
+          completionEffectScope !== null
+          && !matchesTrustedHostedImageCompletionScope({
+            completion: trustedCompletion,
+            scope: completionEffectScope,
+          })
+        ) {
+          return toolTextResult(
+            false,
+            'physical-note sending requires the exact trusted hosted image completion authorized for this turn',
+          )
+        }
         const userActionScope = hasExplicitArtwork
           ? hostedToolContext.currentUserActionScope?.() ?? null
           : null
@@ -2887,19 +2901,30 @@ function isHostedImageCompletionToolRequestAllowed(input: {
 
 function matchesExactHostedImageCompletionMedia(input: {
   actual: readonly AssistantResponseMedia[]
-  expected: readonly [AssistantVaultImageResponseMedia] | null
+  expected: AssistantHostedImageCompletionEffectScope['exactMedia']
 }): boolean {
-  const actual = input.actual.length === 1 ? input.actual[0] : null
   const expected = input.expected?.[0] ?? null
-  return actual?.kind === 'vault_image' &&
-    expected !== null &&
-    actual.alt === expected.alt &&
-    actual.contentType === expected.contentType &&
-    actual.filename === expected.filename &&
-    actual.ref === expected.ref &&
-    actual.sha256 === expected.sha256 &&
-    actual.sizeBytes === expected.sizeBytes &&
-    actual.source === expected.source
+  return expected !== null && matchesExactAssistantVaultImageResponseMedia({
+    actual: input.actual,
+    expected,
+  })
+}
+
+function matchesTrustedHostedImageCompletionScope(input: {
+  completion: Awaited<ReturnType<typeof readAssistantHostedImageCompletion>>
+  scope: AssistantHostedImageCompletionEffectScope
+}): boolean {
+  const completion = input.completion
+  const media = input.scope.exactMedia?.[0] ?? null
+  return completion !== null &&
+    completion.originAssistantInputIdExact &&
+    completion.originAssistantInputId ===
+      input.scope.authorizedOriginAssistantInputId &&
+    media !== null &&
+    completion.imageRef === media.ref &&
+    completion.imageSha256 === media.sha256 &&
+    completion.contentType === media.contentType &&
+    completion.sizeBytes === media.sizeBytes
 }
 
 async function resolveAttachedResponseMedia(input: {

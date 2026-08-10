@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — exact candidate ready for PR review gates
+Status: active — accepted review findings remediated locally
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -88,7 +88,7 @@ Updated: 2026-08-09
    capture reuse, and supported-action discovery.
 4. [x] Run focused tests, affected-package typechecks, prompt/input measurement,
    and static diff/privacy checks.
-5. [ ] Commit and push the exact candidate, open a sensitive-context PR, and run
+5. [x] Commit and push the exact candidate, open a sensitive-context PR, and run
    preliminary specialist and final ReviewGPT round 1 concurrently with CI.
 6. [ ] Resolve every accepted finding through fresh exact-head rounds, complete
    the parent review and mergeability proof, then archive this plan.
@@ -116,3 +116,19 @@ Updated: 2026-08-09
 - Durable-doc drift and whitespace checks passed. Exact-head privacy/static
   scans, CI, preliminary specialist ReviewGPT, and final ReviewGPT remain in the
   PR gate.
+- Draft PR #1533 opened at immutable first-reviewed head `ba55cd37241d`.
+  Preliminary specialists and final ReviewGPT round 1 both returned findings.
+  The accepted prompt finding restores conditional required-field guidance for
+  avatar reuse. The accepted coverage findings add one opt-in real App Server
+  journey spanning generation, completion delivery, and the later exact-ref
+  avatar update while feedback is available. The accepted final finding adds a
+  bounded runtime-authored transcript marker rather than making native provider
+  resume an ownership boundary.
+- The remediation keeps the marker inside the existing transcript owner,
+  restores it only as provenance-only fresh-thread history, and binds a native
+  reply only after its sent outbox turn and exact ref/hash/type/size match. It
+  adds no queue, database, media owner, session manager, or effect authority.
+  Focused deterministic verification after remediation passed 317 tests with
+  35 credential-gated live-provider cases skipped; the added finalizer seam
+  passed 68 tests, the live-provider file compiled with 6 deterministic tests
+  passing and 35 gated cases skipped, and the Assistant Engine typecheck passed.

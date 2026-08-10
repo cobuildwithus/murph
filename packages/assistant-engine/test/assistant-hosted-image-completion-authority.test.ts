@@ -21,6 +21,10 @@ import {
 import {
   createAssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
+import {
+  renderAssistantHostedImageCompletionSystemText,
+} from '../src/assistant/hosted-image-completion.js'
+import { upsertAssistantInputEvent } from '../src/assistant/input-store.js'
 import type {
   AssistantMessageInput,
 } from '../src/assistant/service-contracts.js'
@@ -275,6 +279,95 @@ describe('hosted image completion effect authority', () => {
         media: [],
         op: 'replace',
       })
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('rejects a persisted physical-note completion outside the exact in-memory scope', async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-image-completion-physical-note-',
+    ))
+    try {
+      const imagePath = path.join(vaultRoot, EXACT_MEDIA.ref)
+      await mkdir(path.dirname(imagePath), { recursive: true })
+      await writeFile(imagePath, EXACT_IMAGE_BYTES)
+      const completionText = renderAssistantHostedImageCompletionSystemText({
+        originAssistantInputId: LATER_INPUT_ID,
+        originAssistantInputIdExact: true,
+        result: {
+          media: EXACT_MEDIA,
+          runtimeIssue: null,
+          savedImageRef: EXACT_MEDIA.ref,
+        },
+      })
+      const storedCompletion = await upsertAssistantInputEvent({
+        event: {
+          content: { text: completionText },
+          occurredAt: '2026-08-09T12:00:00.000Z',
+          receivedAt: '2026-08-09T12:00:00.000Z',
+          sourceRef: {
+            dedupeKey: 'image-completion-scope-mismatch',
+            eventId: 'image-completion-scope-mismatch',
+            itemId: 'image-completion-scope-mismatch',
+            kind: 'hosted-mailbox',
+            lane: 'system',
+            laneSeq: 'image-completion-scope-mismatch',
+            payloadSchema: 'murph.hosted-image-completion.v1',
+            payloadSource: 'inline',
+            source: 'hosted-mailbox',
+            wakeSchema: 'murph.hosted-image-completion.v1',
+          },
+        },
+        vault: vaultRoot,
+      })
+      const publishPrivateImageUrl = vi.fn()
+      const send = vi.fn()
+      const messageInput = createMessageInput({ vault: vaultRoot })
+      messageInput.hostedImageCompletionEffectRestriction = {
+        authorizedOriginAssistantInputId: ORIGIN_INPUT_ID,
+        completionAssistantInputId: storedCompletion.inputId,
+        exactMedia: [EXACT_MEDIA],
+      }
+      const hostedToolContext = createAssistantHostedToolContext({
+        executionContext: {
+          currentAssistantInputId: () => storedCompletion.inputId,
+          memberId: 'member-completion-physical-note',
+          physicalNotes: { send },
+          privateImageUrlPublisher: { publishPrivateImageUrl },
+          userEnvKeys: [],
+        },
+        getConversationScope: () => 'group',
+        messageInput,
+        session: createSession(),
+      })
+
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request: {
+          kind: 'send-physical-note',
+          recipient: {
+            addressLine1: '123 Main St',
+            city: 'Atlanta',
+            name: 'Sam',
+            postalCode: '30308',
+            state: 'GA',
+          },
+        },
+        vaultRoot,
+      })
+
+      expect(result.rpcResult.success).toBe(false)
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'exact trusted hosted image completion authorized for this turn',
+      )
+      expect(publishPrivateImageUrl).not.toHaveBeenCalled()
+      expect(send).not.toHaveBeenCalled()
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
     }

@@ -204,11 +204,11 @@ describe("murph.group dynamic tool", () => {
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.avatarSource.description)
       .toBe(
-        'Generate a new square avatar or reuse an exact existing private image ref.',
+        'Required for action="set_chat_avatar". Generate a new square avatar or reuse an exact existing private image ref.',
       );
     expect(MURPH_GROUP_TOOL.inputSchema.properties.imageRef.description)
       .toBe(
-        'Exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
+        'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
       );
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
     expect(MURPH_GROUP_TOOL.description)

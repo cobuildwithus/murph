@@ -2607,6 +2607,12 @@ permits only the completion's exact hash-bound media attachment, no reply, or th
 existing exact-origin physical-note continuation until a later accepted foreground
 input becomes current. That later input may use the retained `raw/captures/**` ref
 through an independently authorized action such as the existing group-avatar path.
+Native provider resume is only the fast path: the transcript owner also commits a
+bounded runtime-authored marker for each exact generated-image response. When route
+support or a contract fingerprint prevents resume, planning restores that marker as
+provenance-only history. A native reply is bound to it only after the sent outbox
+delivery matches the same turn, ref, hash, media type, and byte size; neither the
+marker nor the reply relationship grants mutation authority.
 Ephemeral progress updates remain unavailable because queue-only background turns
 have no waiting audience and cannot durably order a progress send before the final
 reply. No scheduler-specific service, persisted authority row, queue, or second

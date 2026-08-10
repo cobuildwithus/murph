@@ -23,6 +23,9 @@ import {
   renderAssistantHostedImageCompletionSystemText,
 } from '../src/assistant/hosted-image-completion.ts'
 import {
+  buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
+} from '../src/assistant/response-media.ts'
+import {
   createAssistantOutboxIntent,
   dispatchAssistantOutboxIntent,
   readAssistantOutboxIntent,
@@ -550,6 +553,109 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).not.toContain('Native reply context:')
     expect(prompt).not.toContain('linq-msg-murph-media-target')
     expect(prompt).not.toContain('memo-1.m4a')
+  })
+
+  it('binds an exact native reply to the first of two generated captures', async () => {
+    const vault = await createTempVault()
+    const firstMedia = {
+      alt: 'First generated avatar',
+      contentType: 'image/png',
+      filename: 'first-avatar.png',
+      kind: 'vault_image',
+      ref: 'raw/captures/2026/08/first-avatar/first-avatar.png',
+      sha256: '1'.repeat(64),
+      sizeBytes: 101,
+      source: 'gpt-image-2',
+    } as const
+    const secondMedia = {
+      ...firstMedia,
+      alt: 'Second generated avatar',
+      filename: 'second-avatar.png',
+      ref: 'raw/captures/2026/08/second-avatar/second-avatar.png',
+      sha256: '2'.repeat(64),
+      sizeBytes: 202,
+    } as const
+    replyEventPathMocks.listAssistantTranscriptEntries.mockResolvedValue([
+      {
+        createdAt: '2026-08-07T21:08:00.000Z',
+        kind: 'status',
+        schema: 'murph.assistant-transcript-entry.v1',
+        text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+          contentType: firstMedia.contentType,
+          deliveryContextOrdinal: 0,
+          ref: firstMedia.ref,
+          sha256: firstMedia.sha256,
+          sizeBytes: firstMedia.sizeBytes,
+          turnId: 'turn-first-generated-avatar',
+        }),
+      },
+      {
+        createdAt: '2026-08-07T21:09:00.000Z',
+        kind: 'status',
+        schema: 'murph.assistant-transcript-entry.v1',
+        text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+          contentType: secondMedia.contentType,
+          deliveryContextOrdinal: 0,
+          ref: secondMedia.ref,
+          sha256: secondMedia.sha256,
+          sizeBytes: secondMedia.sizeBytes,
+          turnId: 'turn-second-generated-avatar',
+        }),
+      },
+    ])
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-first-generated-avatar',
+        media: [firstMedia],
+        message: '',
+        providerMessageId: 'linq-msg-first-generated-avatar',
+        sentAt: '2026-08-07T21:08:00.000Z',
+        sessionId: 'session-generated-avatars',
+        target: 'thread-1',
+        turnId: 'turn-first-generated-avatar',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-second-generated-avatar',
+        media: [secondMedia],
+        message: '',
+        providerMessageId: 'linq-msg-second-generated-avatar',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-generated-avatars',
+        target: 'thread-1',
+        turnId: 'turn-second-generated-avatar',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_17171717171717171717171717171717',
+      messageId: 'linq-msg-use-first-avatar',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-first-generated-avatar',
+      text: 'Use this as the group photo.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'explicitly replied to this exact prior assistant generated-image delivery',
+    )
+    expect(prompt).toContain(firstMedia.ref)
+    expect(prompt).toContain(firstMedia.sha256)
+    expect(prompt).not.toContain(secondMedia.ref)
+    expect(prompt).not.toContain(secondMedia.sha256)
+    expect(prompt).toContain('no effect authority')
+    expect(replyEventPathMocks.listAssistantTranscriptEntries)
+      .toHaveBeenCalledTimes(1)
   })
 
   it('quotes the visible transcript when a media-only voice delivery fell back to text', async () => {
@@ -3791,7 +3897,7 @@ function createOutboxMessage(input: {
   channel?: string
   identityId?: string | null
   intentId: string
-  media?: readonly { filename: string; kind: string }[]
+  media?: readonly unknown[]
   message: string
   providerMessageEffects?: readonly {
     message: string | null
@@ -3805,6 +3911,7 @@ function createOutboxMessage(input: {
   status?: 'pending' | 'sent'
   target?: string
   threadId?: string | null
+  turnId?: string
 }) {
   const status = input.status ?? 'sent'
   const target = input.target ?? 'thread-1'
@@ -3845,6 +3952,7 @@ function createOutboxMessage(input: {
     sessionId: input.sessionId,
     status,
     threadId: input.threadId === undefined ? providerThreadId : input.threadId,
+    turnId: input.turnId ?? `turn-${input.intentId}`,
   }
 }
 

@@ -6,6 +6,7 @@ import type {
   AssistantDeliveryError,
   AssistantBindingDelivery,
   AssistantProviderSessionOptions,
+  AssistantResponseMedia,
   AssistantSession,
   AssistantTranscriptEntry,
 } from "@murphai/operator-config/assistant-cli-contracts";
@@ -21,6 +22,9 @@ import type {
   AssistantTurnSharedPlan,
   ExecutedAssistantProviderTurnResult,
 } from "../src/assistant/service-contracts.ts";
+import type {
+  AssistantTranscriptEntryInput,
+} from "../src/assistant/store/types.ts";
 import { ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE } from "../src/assistant/first-contact-welcome.ts";
 import { createTempVaultContext } from "./test-helpers.ts";
 
@@ -149,6 +153,10 @@ import {
   recordAssistantUsageEvent,
 } from "../src/assistant/service-usage.ts";
 import { ASSISTANT_TRANSCRIPT_AUDIT_TEXT_PREFIX } from "../src/assistant/transcript-audit.ts";
+import {
+  ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_PREFIX,
+  readAssistantGeneratedImageDeliveryTranscriptMarker,
+} from "../src/assistant/response-media.ts";
 import {
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
   buildAssistantNoReplyTranscriptMarkerText,
@@ -3978,6 +3986,137 @@ describe("assistant turn finalizer seam", () => {
     );
   });
 
+  it("persists exact generated completion provenance outside provider-authored transcript text", async () => {
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+    const session = createAssistantSession({ turnCount: 2 });
+    const media = {
+      alt: "Generated group avatar",
+      contentType: "image/png",
+      filename: "generated-avatar.png",
+      kind: "vault_image",
+      ref: "raw/captures/2026/08/generated-avatar/generated-avatar.png",
+      sha256: "a".repeat(64),
+      sizeBytes: 123,
+      source: "gpt-image-2",
+    } as const;
+
+    await persistAssistantTurnAndSession({
+      assistantTranscriptText: "The image is ready.",
+      input: {
+        hostedImageCompletionEffectRestriction: {
+          authorizedOriginAssistantInputId: `ain_${"1".repeat(32)}`,
+          completionAssistantInputId: `ain_${"2".repeat(32)}`,
+          exactMedia: [media],
+        },
+        prompt: "Trusted hosted image completion.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({ persistUserPromptOnFailure: false }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        response: "The image is ready.",
+        responseMedia: [media],
+        session,
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-08-09T12:00:00.000Z",
+      turnId: "turn-generated-avatar-completion",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenNthCalledWith(
+      1,
+      session.sessionId,
+      [
+        { kind: "assistant", text: "The image is ready." },
+        expect.objectContaining({
+          createdAt: "2026-08-09T12:00:00.000Z",
+          kind: "status",
+          text: expect.stringContaining(
+            ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_PREFIX
+          ),
+        }),
+      ]
+    );
+    const markerEntry = runtimeState.transcripts.append.mock.calls[0]?.[1]?.[1];
+    expect(markerEntry).toMatchObject({
+      createdAt: "2026-08-09T12:00:00.000Z",
+      kind: "status",
+      text: expect.stringContaining(
+        ASSISTANT_GENERATED_IMAGE_DELIVERY_TRANSCRIPT_MARKER_PREFIX
+      ),
+    });
+    expect(
+      readAssistantGeneratedImageDeliveryTranscriptMarker(
+        markerEntry?.text ?? ""
+      )
+    ).toEqual({
+      contentType: media.contentType,
+      deliveryContextOrdinal: 0,
+      ref: media.ref,
+      sha256: media.sha256,
+      sizeBytes: media.sizeBytes,
+      turnId: "turn-generated-avatar-completion",
+    });
+    expect(runtimeState.transcripts.append.mock.calls[0]?.[1]?.[0]?.text)
+      .not.toContain(media.ref);
+  });
+
+  it("does not persist generated completion provenance for mismatched response media", async () => {
+    runtimeState.sessions.save.mockImplementation(
+      async (session: AssistantSession) => session
+    );
+    const session = createAssistantSession({ turnCount: 2 });
+    const expectedMedia = {
+      alt: "Generated group avatar",
+      contentType: "image/png",
+      filename: "generated-avatar.png",
+      kind: "vault_image",
+      ref: "raw/captures/2026/08/generated-avatar/generated-avatar.png",
+      sha256: "a".repeat(64),
+      sizeBytes: 123,
+      source: "gpt-image-2",
+    } as const;
+    const mismatchedMedia = {
+      ...expectedMedia,
+      ref: "raw/captures/2026/08/different-avatar/different-avatar.png",
+      sha256: "b".repeat(64),
+    } as const;
+
+    await persistAssistantTurnAndSession({
+      assistantTranscriptText: "The image is ready.",
+      input: {
+        hostedImageCompletionEffectRestriction: {
+          authorizedOriginAssistantInputId: `ain_${"1".repeat(32)}`,
+          completionAssistantInputId: `ain_${"2".repeat(32)}`,
+          exactMedia: [expectedMedia],
+        },
+        prompt: "Trusted hosted image completion.",
+        vault: "/vault",
+      },
+      plan: createSharedPlan({ persistUserPromptOnFailure: false }),
+      persistUserPromptToTranscript: false,
+      providerResult: createProviderResult({
+        response: "The image is ready.",
+        responseMedia: [mismatchedMedia],
+        session,
+      }),
+      providerResumeStateAction: "persist-from-provider-turn",
+      session,
+      turnCreatedAt: "2026-08-09T12:00:00.000Z",
+      turnId: "turn-generated-avatar-completion-mismatch",
+    });
+
+    expect(runtimeState.transcripts.append).toHaveBeenCalledTimes(1);
+    expect(runtimeState.transcripts.append).toHaveBeenCalledWith(
+      session.sessionId,
+      [{ kind: "assistant", text: "The image is ready." }]
+    );
+  });
+
   it("deduplicates accepted no-reply markers within the current turn only", async () => {
     const markerText = buildAssistantNoReplyTranscriptMarkerText({
       deliveryContextOrdinal: 0,
@@ -4406,7 +4545,10 @@ function createRuntimeStateStub() {
       save: vi.fn(),
     },
     transcripts: {
-      append: vi.fn(async () => []),
+      append: vi.fn(async (
+        _sessionId: string,
+        _entries: readonly AssistantTranscriptEntryInput[]
+      ) => [] as AssistantTranscriptEntry[]),
       list: vi.fn(async () => [] as AssistantTranscriptEntry[]),
     },
     turns: {
@@ -4578,6 +4720,7 @@ function createProviderResult(input?: {
   finalAction?: AssistantNoReplyDisposition;
   rawEvents?: unknown[];
   response?: string;
+  responseMedia?: readonly AssistantResponseMedia[] | null;
   route?: CodexThreadIdentity;
   session?: AssistantSession;
   usage?: Partial<AssistantProviderUsage> | null;
@@ -4620,6 +4763,7 @@ function createProviderResult(input?: {
     rawEvents: input?.rawEvents ?? [],
     response: input?.response ?? "provider response",
     responseDeliveryContextOrdinal: 0,
+    responseMedia: input?.responseMedia ?? [],
     route: input?.route ?? createRoute(),
     session,
     stderr: "",

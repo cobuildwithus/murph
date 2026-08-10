@@ -940,7 +940,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: ['generate', 'image_ref'],
         description:
-          'Generate a new square avatar or reuse an exact existing private image ref.',
+          'Required for action="set_chat_avatar". Generate a new square avatar or reuse an exact existing private image ref.',
       },
       prompt: {
         type: 'string',
@@ -954,7 +954,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: 1024,
         description:
-          'Exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
+          'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
       },
       size: {
         type: 'string',

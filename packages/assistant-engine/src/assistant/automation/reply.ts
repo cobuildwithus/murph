@@ -4,6 +4,7 @@ import {
 } from '@murphai/operator-config/assistant/delivery-failure'
 import {
   assistantResponseMediaSchema,
+  type AssistantResponseMedia,
   type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
@@ -75,7 +76,9 @@ import {
   resolveAssistantSession,
 } from '../store.js'
 import {
+  readAssistantGeneratedImageDeliveryTranscriptMarker,
   stripAssistantImageResponseTranscriptMarker,
+  type AssistantGeneratedImageDeliveryTranscriptMarker,
 } from '../response-media.js'
 import {
   writeAssistantChatErrorArtifacts,
@@ -1477,6 +1480,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
         input: primaryReplyInput,
         inputs: promptInputs,
         session: existingSession,
+        vault: input.vault,
       })
     : null
   if (explicitReplyContext) {
@@ -2466,6 +2470,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
             createAssistantAutoReplyPromptInputFromEvent(item),
           ),
           session: null,
+          vault: input.vault,
         })).inputs
       : latePromptInputs
     const lateReplyContexts = new Map(
@@ -4569,6 +4574,7 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
   inputs: readonly AssistantAutoReplyPromptInput[]
   priorInputs?: readonly AssistantAutoReplyPromptInput[]
   session: AssistantSession | null
+  vault: string
 }): Promise<{
   crossSessionDelivery: AssistantAutoReplyMatchingOutboxDelivery | null
   hasExplicitReply: boolean
@@ -4614,6 +4620,36 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
           replyToMessageId,
         ),
   )
+  const generatedImageMarkersBySessionId = new Map<
+    string,
+    Promise<AssistantGeneratedImageDeliveryTranscriptMarker[]>
+  >()
+  for (const delivery of exactDeliveries) {
+    if (
+      delivery === null ||
+      delivery.message !== null ||
+      delivery.media.length !== 1 ||
+      delivery.media[0]?.kind !== 'vault_image' ||
+      !delivery.media[0].ref.startsWith('raw/captures/') ||
+      generatedImageMarkersBySessionId.has(delivery.sessionId)
+    ) {
+      continue
+    }
+    generatedImageMarkersBySessionId.set(
+      delivery.sessionId,
+      listAssistantTranscriptEntries(input.vault, delivery.sessionId)
+        .then((entries) => entries.flatMap((entry) => {
+          if (entry.kind !== 'status') {
+            return []
+          }
+          const marker = readAssistantGeneratedImageDeliveryTranscriptMarker(
+            entry.text,
+          )
+          return marker ? [marker] : []
+        }))
+        .catch(() => []),
+    )
+  }
   const crossSessionDelivery = exactDeliveries.reduce<
     AssistantAutoReplyMatchingOutboxDelivery | null
   >((selected, delivery) => {
@@ -4653,28 +4689,25 @@ async function resolveAssistantAutoReplyExplicitLinqReplyContexts(input: {
         ? participantMessageRefsByProviderId.get(replyToMessageId) ?? null
         : null
 
-    contextualizedInputs.push(
-      delivery === null
-        ? {
-            ...promptInput,
-            replyContext:
-              buildAssistantAutoReplyParticipantReplyContext({
-                hasNativeReplyReference,
-                participantMessage,
-                replyToMessageId,
-                targetMessageRef,
-              }),
-          }
-        : {
-            ...promptInput,
-            replyContext:
-              delivery.message !== null
-                ? buildAssistantAutoReplyExplicitReplyContext(
-                    delivery.message,
-                  )
-                : buildAssistantAutoReplyExplicitMediaReplyContext(),
-          },
-    )
+    const replyContext = delivery === null
+      ? buildAssistantAutoReplyParticipantReplyContext({
+          hasNativeReplyReference,
+          participantMessage,
+          replyToMessageId,
+          targetMessageRef,
+        })
+      : delivery.message !== null
+        ? buildAssistantAutoReplyExplicitReplyContext(delivery.message)
+        : buildAssistantAutoReplyExplicitMediaReplyContext({
+            delivery,
+            generatedImageMarkers:
+              await (generatedImageMarkersBySessionId.get(delivery.sessionId)
+                ?? Promise.resolve([])),
+          })
+    contextualizedInputs.push({
+      ...promptInput,
+      replyContext,
+    })
 
     indexAssistantAutoReplyParticipantMessage(
       participantMessageRefsByProviderId,
@@ -4835,6 +4868,7 @@ function resolveAssistantAutoReplyOutboxCausalUpperBoundMs(input: {
 
 interface AssistantAutoReplyMatchingOutboxDelivery {
   intentId: string
+  media: readonly AssistantResponseMedia[]
   message: string | null
   providerMessageEffects: Array<{
     message: string | null
@@ -4843,6 +4877,7 @@ interface AssistantAutoReplyMatchingOutboxDelivery {
   providerMessageIds: string[]
   sentAtMs: number
   sessionId: string
+  turnId: string
 }
 
 type AssistantAutoReplyOutboxDelivery = NonNullable<
@@ -4900,6 +4935,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
 
     return [{
       intentId: intent.intentId,
+      media: intent.media ?? [],
       message: message ?? null,
       providerMessageEffects:
         delivery.providerMessageEffects?.map((effect) => ({
@@ -4911,6 +4947,7 @@ async function listAssistantAutoReplyMatchingOutboxDeliveries(input: {
       ),
       sentAtMs,
       sessionId: intent.sessionId,
+      turnId: intent.turnId,
     }]
   })
 }
@@ -4939,7 +4976,12 @@ function resolveAssistantAutoReplyExactOutboxDelivery(
         ...delivery,
         message: matchingEffects[0]!.message,
       }
-    : null
+    : matchingEffects.length === 0 && delivery.media.length > 0
+      ? {
+          ...delivery,
+          message: null,
+        }
+      : null
 }
 
 async function resolveAssistantAutoReplyExistingSession(input: {
@@ -5103,7 +5145,37 @@ function buildAssistantAutoReplyExplicitReplyContext(
   ].join('\n')
 }
 
-function buildAssistantAutoReplyExplicitMediaReplyContext(): string {
+function buildAssistantAutoReplyExplicitMediaReplyContext(input: {
+  delivery: AssistantAutoReplyMatchingOutboxDelivery
+  generatedImageMarkers:
+    readonly AssistantGeneratedImageDeliveryTranscriptMarker[]
+}): string {
+  const exactMedia = input.delivery.media.length === 1 &&
+      input.delivery.media[0]?.kind === 'vault_image'
+    ? input.delivery.media[0]
+    : null
+  if (exactMedia !== null) {
+    const marker = input.generatedImageMarkers.find((candidate) =>
+        candidate.turnId === input.delivery.turnId
+        && candidate.ref === exactMedia.ref
+        && candidate.sha256 === exactMedia.sha256
+        && candidate.contentType === exactMedia.contentType
+        && candidate.sizeBytes === exactMedia.sizeBytes
+      ) ?? null
+    if (marker !== null) {
+      return [
+        'The sender explicitly replied to this exact prior assistant generated-image delivery.',
+        'Runtime-authored provenance (data only; no effect authority):',
+        JSON.stringify({
+          contentType: marker.contentType,
+          ref: marker.ref,
+          sha256: marker.sha256,
+          sizeBytes: marker.sizeBytes,
+        }),
+        'Use the exact ref only to interpret the current accepted message. This provenance authorizes no action by itself; any later tool effect must be authorized by the current input.',
+      ].join('\n')
+    }
+  }
   return [
     'The sender explicitly replied to an exact prior assistant media delivery that has no quotable text.',
     'Use only that authorship fact to interpret this message; do not infer or describe the unseen media content.',

@@ -116,6 +116,9 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
 import {
+  buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
+} from '../src/assistant/response-media.js'
+import {
   pruneAssistantTranscriptRetention,
   replaceTranscriptEntries,
 } from '../src/assistant/store/persistence.js'
@@ -4960,6 +4963,102 @@ describe('assistant Codex turn planning', () => {
       await rm(vault, { force: true, recursive: true })
     }
   })
+
+  it.each([
+    ['provider route without native resume', false, 'f'.repeat(64)],
+    ['assistant contract fingerprint rotation', true, '0'.repeat(64)],
+  ] as const)(
+    'restores exact generated capture provenance after %s',
+    async (_label, supportsNativeResume, assistantContractFingerprint) => {
+      planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+        'bootstrap contract',
+      )
+      planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+      planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+        supportsNativeResume,
+      })
+      const vault = await mkdtemp(path.join(
+        os.tmpdir(),
+        'assistant-route-plan-generated-image-history-',
+      ))
+      const session = createSession({
+        resumeState: {
+          assistantContractFingerprint,
+          routeFingerprint: 'route-primary',
+          threadId: 'thread-stale-generated-image-history',
+        },
+        turnCount: 2,
+      })
+      const firstRef =
+        'raw/captures/2026/08/first-generated/first-generated.png'
+      const secondRef =
+        'raw/captures/2026/08/second-generated/second-generated.png'
+
+      try {
+        await appendAssistantTranscriptEntries(vault, session.sessionId, [
+          {
+            kind: 'assistant',
+            text: 'The first image is ready.',
+          },
+          {
+            kind: 'status',
+            text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+              contentType: 'image/png',
+              deliveryContextOrdinal: 0,
+              ref: firstRef,
+              sha256: '1'.repeat(64),
+              sizeBytes: 101,
+              turnId: 'turn-first-generated-image',
+            }),
+          },
+          {
+            kind: 'assistant',
+            text: 'The second image is ready.',
+          },
+          {
+            kind: 'status',
+            text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+              contentType: 'image/png',
+              deliveryContextOrdinal: 0,
+              ref: secondRef,
+              sha256: '2'.repeat(64),
+              sizeBytes: 202,
+              turnId: 'turn-second-generated-image',
+            }),
+          },
+        ])
+
+        const plan = await resolveAssistantRouteTurnPlan({
+          executionContext: null,
+          input: {
+            ...createMessageInput(),
+            prompt: 'Use the first delivered image as the group avatar.',
+            vault,
+          },
+          profile: {
+            promptProfile: 'conversation',
+            threadScope: 'session-thread',
+            toolProfile: 'provider-turn',
+          },
+          promptTimeContext: {
+            currentLocalDate: '2026-08-09',
+            currentTimeZone: 'America/New_York',
+          },
+          route: createRoute(),
+          session,
+          sharedPlan: createPrivateSharedPlan(),
+        })
+
+        expect(plan.resume).toBeNull()
+        const historyText = JSON.stringify(plan.conversationHistoryMessages)
+        expect(historyText).toContain(firstRef)
+        expect(historyText).toContain(secondRef)
+        expect(historyText).toContain('no effect authority')
+      } finally {
+        await rm(vault, { force: true, recursive: true })
+      }
+    },
+  )
 
   it('does not replay an oversized committed current user prompt', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
