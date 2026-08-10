@@ -1,0 +1,29 @@
+name: Agent Source Snapshot
+
+on:
+  push:
+    branches:
+      - agent/persona-settings-and-chat
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Package source
+        run: git archive --format=zip --output=source.zip HEAD
+
+      - name: Upload source
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: agent-source-snapshot-current-main
+          path: source.zip
+          retention-days: 1
+          if-no-files-found: error
