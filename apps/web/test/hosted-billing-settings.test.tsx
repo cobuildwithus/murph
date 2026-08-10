@@ -134,6 +134,48 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /non-expiring starter usage/i);
   });
 
+  test.each([
+    "paused",
+    "past_due",
+    "canceled",
+    "unpaid",
+    "incomplete",
+  ] as const)(
+    "keeps %s existing billing on the portal recovery path",
+    async (billingStatus) => {
+      const { HostedBillingSettings } = await import(
+        "@/src/components/settings/hosted-billing-settings"
+      );
+      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+        authenticated: true,
+        billingStatus,
+        canManageBilling: true,
+        canStartDirectPlan: false,
+      }));
+
+      assert.match(markup, /Manage billing/);
+      assert.doesNotMatch(markup, /data-checkout-plan=/);
+    },
+  );
+
+  test.each(["not_started", "incomplete"] as const)(
+    "keeps %s first-time billing on direct Checkout",
+    async (billingStatus) => {
+      const { HostedBillingSettings } = await import(
+        "@/src/components/settings/hosted-billing-settings"
+      );
+      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+        authenticated: true,
+        billingStatus,
+        canManageBilling: false,
+        canStartDirectPlan: true,
+      }));
+
+      assert.match(markup, /data-checkout-plan="launch_monthly"/);
+      assert.doesNotMatch(markup, /Manage billing/);
+    },
+  );
+
 
   test("lets Starter choose Max directly when the configured plan is visible", async () => {
     const { HostedBillingSettings } = await import(

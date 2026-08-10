@@ -60,6 +60,7 @@ import {
   hasHostedMemberOwnActiveAccess,
   hasHostedMemberOwnPaidBilling,
 } from "@/src/lib/hosted-onboarding/entitlement";
+import { hasHostedRecoverableBilling } from "@/src/lib/hosted-onboarding/lifecycle";
 import {
   readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember,
@@ -321,16 +322,28 @@ export default async function SettingsPage({
       },
       suspendedAt: authenticatedMember.suspendedAt,
     });
+  const hasRecoverableBilling =
+    authenticatedMember !== null &&
+    hasHostedRecoverableBilling({
+      billingStatus: authenticatedMember.billingStatus,
+      hasExistingSubscription: Boolean(billingRef?.stripeSubscriptionId),
+    });
   const canStartDirectPlan =
     !hasScheduledPlanChange &&
     authenticatedMember !== null &&
     !activeFamilyOwner &&
     !sponsoredMember &&
     !authenticatedMember.suspendedAt &&
-    !ownPaidBillingActive;
+    !ownPaidBillingActive &&
+    !hasRecoverableBilling;
   const canManageBilling =
     activeFamilyOwner ||
-    (ownPaidBillingActive && Boolean(billingRef?.stripeCustomerId));
+    (
+      authenticatedMember !== null &&
+      !authenticatedMember.suspendedAt &&
+      Boolean(billingRef?.stripeCustomerId) &&
+      (ownPaidBillingActive || hasRecoverableBilling)
+    );
   const canUpgradeToPulse =
     !hasScheduledPlanChange &&
     authenticatedMember !== null &&

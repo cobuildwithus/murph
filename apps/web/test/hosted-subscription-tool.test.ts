@@ -123,30 +123,42 @@ describe("hosted subscription tool", () => {
     });
   });
 
-  it("uses the same Checkout owner for a quoted Starter-to-Edge change", async () => {
-    mocks.verifyBillingPlanQuote.mockReturnValue("now");
-    mocks.createCheckout.mockResolvedValue({
-      alreadyActive: false,
-      url: "https://checkout.stripe.com/c/pay/cs_edge",
-    });
+  it.each([
+    ["Edge", "launch_edge_monthly", "cs_edge"],
+    ["Max", "launch_max_monthly", "cs_max"],
+  ] as const)(
+    "uses the same Checkout owner for a quoted Starter-to-%s change",
+    async (_planName, targetPlanCode, sessionId) => {
+      mocks.verifyBillingPlanQuote.mockReturnValue("now");
+      mocks.createCheckout.mockResolvedValue({
+        alreadyActive: false,
+        url: `https://checkout.stripe.com/c/pay/${sessionId}`,
+      });
 
-    await expect(handleHostedSubscriptionTool({
-      memberId: "member_123",
-      request: {
+      await expect(handleHostedSubscriptionTool({
+        memberId: "member_123",
+        request: {
+          action: "change_plan",
+          assistantInputId: ASSISTANT_INPUT_ID,
+          quoteId: `quote_${targetPlanCode}`,
+          targetPlanCode,
+        },
+      })).resolves.toMatchObject({
         action: "change_plan",
-        assistantInputId: ASSISTANT_INPUT_ID,
-        quoteId: "quote_edge",
-        targetPlanCode: "launch_edge_monthly",
-      },
-    })).resolves.toMatchObject({
-      action: "change_plan",
-      paymentUrl: "https://checkout.stripe.com/c/pay/cs_edge",
-      plan: { code: "launch_edge_monthly" },
-      status: "payment_required",
-    });
-    expect(mocks.upgradePlan).not.toHaveBeenCalled();
-    expect(mocks.schedulePlanSwitch).not.toHaveBeenCalled();
-  });
+        paymentUrl: `https://checkout.stripe.com/c/pay/${sessionId}`,
+        plan: { code: targetPlanCode },
+        status: "payment_required",
+      });
+      expect(mocks.createCheckout).toHaveBeenCalledWith({
+        billingPlanCode: targetPlanCode,
+        inviteCode: "invite_123",
+        member: { id: "member_123", suspendedAt: null },
+        prisma: { label: "prisma" },
+      });
+      expect(mocks.upgradePlan).not.toHaveBeenCalled();
+      expect(mocks.schedulePlanSwitch).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps paid immediate upgrades on the existing upgrade owner", async () => {
     mocks.readBillingEligibilityState.mockResolvedValue({

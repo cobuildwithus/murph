@@ -67,6 +67,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env[MAX_PORTAL_CONFIGURATION_ENV];
     mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
     mocks.readHostedPersonalUsageCreditOfferCodes.mockResolvedValue([
       "usage_10_usd",
@@ -156,6 +157,12 @@ describe("readHostedPersonalAiUsageStatus", () => {
           code: "launch_monthly",
           displayName: "Pulse",
           monthlyPriceUsdCents: 800,
+          selectable: true,
+        },
+        {
+          code: "launch_edge_monthly",
+          displayName: "Edge",
+          monthlyPriceUsdCents: 2_000,
           selectable: true,
         },
       ],
@@ -562,6 +569,12 @@ describe("readHostedPersonalAiUsageStatus", () => {
           monthlyPriceUsdCents: 800,
           selectable: true,
         },
+        {
+          code: "launch_edge_monthly",
+          displayName: "Edge",
+          monthlyPriceUsdCents: 2_000,
+          selectable: true,
+        },
       ],
       recommendedAction: {
         kind: "change_plan",
@@ -610,6 +623,10 @@ describe("readHostedPersonalAiUsageStatus", () => {
           code: "launch_monthly",
           displayName: "Pulse",
         },
+        {
+          code: "launch_edge_monthly",
+          displayName: "Edge",
+        },
       ],
       recommendedAction: {
         label: "Start Pulse now ($8/month)",
@@ -619,7 +636,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
-  it("does not quote a Starter plan outside the advertised choices", async () => {
+  it("quotes an explicitly requested Edge plan from the Starter catalog", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: null,
       currentBillingPlanCode: null,
@@ -650,9 +667,93 @@ describe("readHostedPersonalAiUsageStatus", () => {
       availablePlans: [
         { code: "launch_group_monthly" },
         { code: "launch_monthly" },
+        { code: "launch_edge_monthly" },
       ],
       recommendedPlanCode: "launch_group_monthly",
+      subscriptionActionQuote: {
+        targetPlanCode: "launch_edge_monthly",
+        timing: "now",
+      },
+    });
+  });
+
+  it("includes and quotes Max only when its direct-plan configuration is visible", async () => {
+    process.env[MAX_PORTAL_CONFIGURATION_ENV] = "bpc_max";
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: false,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_starter",
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 2_250_000n,
+      spentUsdMicros: 2_250_000n,
+      usageCreditLedgerVersion: 1n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_starter_explicit_max",
+      now: NOW,
+      prisma: buildPrisma(null, true) as never,
+      publicBaseUrl: "https://example.test",
+      subscriptionActionTargetPlanCode: "launch_max_monthly",
+    })).resolves.toMatchObject({
+      availablePlans: [
+        { code: "launch_group_monthly" },
+        { code: "launch_monthly" },
+        { code: "launch_edge_monthly" },
+        { code: "launch_max_monthly" },
+      ],
+      recommendedPlanCode: "launch_group_monthly",
+      subscriptionActionQuote: {
+        targetPlanCode: "launch_max_monthly",
+        timing: "now",
+      },
+    });
+  });
+
+  it("does not advertise or quote Max when its direct-plan configuration is hidden", async () => {
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: false,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_starter",
+      usageCreditLedgerVersion: 1n,
+    }));
+
+    const result = await readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_starter_unconfigured_max",
+      now: NOW,
+      prisma: buildPrisma(null, true) as never,
+      publicBaseUrl: "https://example.test",
+      subscriptionActionTargetPlanCode: "launch_max_monthly",
+    });
+
+    expect(result).toMatchObject({
+      availablePlans: [
+        { code: "launch_group_monthly" },
+        { code: "launch_monthly" },
+        { code: "launch_edge_monthly" },
+      ],
       subscriptionActionQuote: null,
+    });
+    expect(result).not.toMatchObject({
+      availablePlans: expect.arrayContaining([
+        expect.objectContaining({ code: "launch_max_monthly" }),
+      ]),
     });
   });
 

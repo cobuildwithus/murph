@@ -15,9 +15,11 @@ import {
   getHostedBillingPlanDefinition,
   isHostedBillingPlanChangePortalConfigured,
   parseHostedBillingPlanCode,
+  type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import {
   hasConfirmedHostedGroupMembership,
+  resolveVisibleHostedBillingPlanCodes,
 } from "../hosted-onboarding/billing-plan-eligibility";
 import {
   buildHostedBillingPlanQuoteState,
@@ -649,35 +651,51 @@ async function resolveAvailableSubscriptionOffer(input: {
       await isHostedBillingPlanSelectionAvailable({
         billingPlanCode: "launch_monthly",
       });
-    const availablePlanCodes = [
-      ...(groupPlanAvailable
-        ? ["launch_group_monthly" as const]
-        : []),
-      ...(pulsePlanAvailable ? ["launch_monthly" as const] : []),
-    ];
+    const edgePlanAvailable =
+      await isHostedBillingPlanSelectionAvailable({
+        billingPlanCode: "launch_edge_monthly",
+      });
+    const maxPlanAvailable =
+      isHostedBillingPlanChangePortalConfigured("launch_max_monthly")
+      && await isHostedBillingPlanSelectionAvailable({
+        billingPlanCode: "launch_max_monthly",
+      });
+    const availablePlanCodes = resolveVisibleHostedBillingPlanCodes({
+      currentPlanCode: null,
+      groupPlanConfigured: groupPlanAvailable,
+      hasConfirmedGroupMembership,
+      maxPlanConfigured: maxPlanAvailable,
+      scheduledPlanCode: null,
+    }).filter((planCode) =>
+      planCode === "launch_group_monthly"
+        ? groupPlanAvailable
+        : planCode === "launch_monthly"
+          ? pulsePlanAvailable
+          : planCode === "launch_edge_monthly"
+            ? edgePlanAvailable
+            : maxPlanAvailable
+    );
     const recommendedPlanCode = groupPlanAvailable
       ? "launch_group_monthly" as const
       : pulsePlanAvailable
         ? "launch_monthly" as const
         : null;
-    if (!recommendedPlanCode) {
+    if (availablePlanCodes.length === 0) {
       return EMPTY_SUBSCRIPTION_OFFER;
     }
 
     const targetPlanCode = input.requestedTargetPlanCode
-      ?? recommendedPlanCode;
-    const targetPlanAvailable = targetPlanCode === "launch_group_monthly"
-      ? groupPlanAvailable
-      : targetPlanCode === "launch_monthly" && pulsePlanAvailable;
+      ?? recommendedPlanCode
+      ?? undefined;
+    const targetPlanAvailable = targetPlanCode !== undefined
+      && availablePlanCodes.includes(targetPlanCode);
 
     return {
       availablePlans: availablePlanCodes.map((planCode) => {
         const definition = getHostedBillingPlanDefinition(planCode);
         return {
           code: planCode,
-          displayName: planCode === "launch_group_monthly"
-            ? "Group" as const
-            : "Pulse" as const,
+          displayName: resolveHostedPlanUsageDisplayName(planCode),
           monthlyPriceUsdCents: definition.recurringAmountUsdCents,
           selectable: true as const,
         };
@@ -694,7 +712,7 @@ async function resolveAvailableSubscriptionOffer(input: {
             timing: "now",
           })
         : null,
-      recommendedPlanCode,
+      ...(recommendedPlanCode ? { recommendedPlanCode } : {}),
     };
   }
 
@@ -780,6 +798,21 @@ async function resolveAvailableSubscriptionOffer(input: {
       })
       : null,
   };
+}
+
+function resolveHostedPlanUsageDisplayName(
+  planCode: HostedBillingPlanCode,
+): "Group" | "Pulse" | "Edge" | "Max" {
+  switch (planCode) {
+    case "launch_group_monthly":
+      return "Group";
+    case "launch_monthly":
+      return "Pulse";
+    case "launch_edge_monthly":
+      return "Edge";
+    case "launch_max_monthly":
+      return "Max";
+  }
 }
 
 function buildRecommendedAction(input: {
