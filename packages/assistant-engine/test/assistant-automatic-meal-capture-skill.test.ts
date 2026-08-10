@@ -166,6 +166,10 @@ describe('assistant automatic meal capture skill', () => {
       'before every `daily_nutrition` attachment',
     )
     expect(compactSafety).toContain('under-fueling or RED-S concern')
+    expect(compactSafety).toContain('known underweight')
+    expect(compactSafety).toContain('frailty, or malnutrition risk')
+    expect(compactSafety).toContain('below 1,200 kcal/day')
+    expect(compactSafety).toContain('active canonical target at card time')
     expect(compactSafety).toContain('pregnancy or breastfeeding')
     expect(compactSafety).toContain('glucose-lowering medication')
     expect(compactSafety).toContain('kidney disease')
