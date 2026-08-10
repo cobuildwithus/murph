@@ -1685,7 +1685,7 @@ function buildAssistantAvailableAutomationGuidanceText(
     return "Group-email replies cannot create, edit, import, pause, reactivate, or reroute automations because the sender is not authenticated. Continue automation changes from the authenticated group chat.";
   }
   if (hostedRuntime && !hostedAutomationAvailable) {
-    return "Scheduled automation changes are unavailable in this turn.";
+    return "Scheduled automation changes are unavailable in this turn. Complete and report a confirmed appointment normally without attempting, promising, or asking about its default reminder.";
   }
   return joinPromptSections(
     hostedRuntime && conversationScope === "group"

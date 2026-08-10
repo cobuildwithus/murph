@@ -69,13 +69,28 @@ describe('assistant appointment reminder policy', () => {
       'For noon or later, schedule 8:00 AM local that day',
     )
     expect(normalizedSkill).toContain(
-      'Reuse one stable automation identity for repeated mentions',
+      'always supply one explicit, privacy-safe stable `slug`',
     )
     expect(normalizedSkill).toContain(
-      'Patch it when a reschedule is confirmed and archive it when cancellation is confirmed',
+      'patch that exact owner with the replacement one-shot schedule and `status: "active"`',
     )
     expect(normalizedSkill).toContain(
-      'follow the existing save-verification rules before claiming it is active',
+      'patch the same exact owner to `status: "archived"`',
+    )
+    expect(normalizedSkill).toContain(
+      'verify the returned automation id, status, stored schedule, and timing result',
+    )
+    expect(normalizedSkill).toContain(
+      'state the verified local reminder time and say that the member can move or cancel it by replying',
+    )
+    expect(normalizedSkill).toContain(
+      'the reminder was saved but no delivery time was verified',
+    )
+    expect(normalizedSkill).toContain(
+      'distinguish the still-confirmed appointment from the reminder that was not created or changed',
+    )
+    expect(normalizedSkill).toContain(
+      'if zero or multiple plausible owners remain, make no mutation',
     )
   })
 
@@ -95,6 +110,9 @@ describe('assistant appointment reminder policy', () => {
     )
     expect(unavailablePrompt).toContain(
       'Scheduled automation changes are unavailable in this turn.',
+    )
+    expect(unavailablePrompt).toContain(
+      'Complete and report a confirmed appointment normally without attempting, promising, or asking about its default reminder.',
     )
   })
 })

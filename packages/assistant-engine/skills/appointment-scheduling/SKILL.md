@@ -282,13 +282,19 @@ place the real call.
 
 ## Create the default private reminder
 
-In a private conversation, a booked or otherwise confirmed future care
-appointment—whether Murph booked it or the user clearly says it exists—is
-explicit owning-tool authorization for exactly one private one-shot reminder.
-A tentative discussion, proposed slot, availability list, waitlist, or
-unverified booking is not enough. Create the reminder before the appointment
-workflow's final report or stop, without separate confirmation unless the user
-opts out.
+In a private conversation where the current prompt exposes `murph.automation`
+or the privileged local `vault-cli automation` surface, a booked or otherwise
+confirmed future care appointment—whether Murph booked it or the user clearly
+says it exists—is explicit owning-tool authorization for exactly one private
+one-shot reminder. A tentative discussion, proposed slot, availability list,
+waitlist, or unverified booking is not enough. Create the reminder before the
+appointment workflow's final report or stop, without separate confirmation
+unless the user opts out. An explicit opt-out authorizes no reminder write.
+
+When the current prompt says scheduled automation changes are unavailable,
+complete and report the appointment normally. Do not attempt, promise, or ask
+about the default reminder, and do not treat its absence as an incomplete
+appointment workflow.
 
 Use the appointment's stated timezone, otherwise the vault timezone. For an
 appointment before noon local, schedule the prior evening at a known pre-bed
@@ -297,19 +303,47 @@ If that default instant is already past while the appointment is still future,
 use the earliest useful future time. If only the date is known, use 8:00 PM the
 prior evening. If no date is known, ask only for it.
 
-Reuse one stable automation identity for repeated mentions. Patch it when a
-reschedule is confirmed and archive it when cancellation is confirmed. Keep
-the subject privacy-safe but unmistakable, include the appointment time when
-known, and follow the existing save-verification rules before claiming it is
-active.
+On the initial save, always supply one explicit, privacy-safe stable `slug`.
+Derive it from immutable, non-sensitive appointment identity available in the
+confirmed record, such as the care destination or service plus the original
+local date; never derive it from a diagnosis, reason for care, confirmation
+code, mutable title, reminder prose, or the rescheduled date. Retain the
+returned `automationId` and `lookupId` in conversation context, not freeform
+memory. A repeated unchanged mention does not authorize a second save.
+
+For every later change, resolve the exact existing owner from its returned
+automation id or unchanged initial slug. In a privileged local route, use the
+read-only `vault-cli automation list` and `vault-cli automation show` commands
+when the exact owner is not already in context. The hosted mutation tool has no
+read action: if its exact id or initial slug is not already established, or if
+zero or multiple plausible owners remain, make no mutation and ask one narrow
+disambiguating question. Never fall back to a new save or infer ownership from
+a mutable title or message text.
+
+When a reschedule is confirmed, patch that exact owner with the replacement
+one-shot schedule and `status: "active"`, including when the old one-shot has
+already fired and is archived. When cancellation is confirmed, patch the same
+exact owner to `status: "archived"`. Keep the notification subject privacy-safe
+but unmistakable and include the appointment time when known.
+
+After every save or patch, verify the returned automation id, status, stored
+schedule, and timing result before reporting completion. After a verified save
+or reschedule, state the verified local reminder time and say that the member
+can move or cancel it by replying. When `timingVerified` is false, say the
+reminder was saved but no delivery time was verified, state no invented time,
+and offer the existing bounded inspect-or-update recovery. When the write
+fails, distinguish the still-confirmed appointment from the reminder that was
+not created or changed. For an opt-out, make no reminder claim.
 
 ## Verify and report
 
 Treat the action as complete only when the tool or destination verifies the
 requested outcome. Report the applicable service, clinician, date, time,
 timezone, location/modality, confirmation status, and any material fee,
-preparation, referral, waitlist, or cancellation terms. If only options were
-requested, report the options without implying a booking.
+preparation, referral, waitlist, or cancellation terms. When the default
+reminder rule applied, include its verified result or truthful reminder-specific
+failure state from the preceding section. If only options were requested,
+report the options without implying a booking.
 
 Stop when the outcome is verified, a specific missing field or authorization
 needs the user, or the destination cannot complete the task. Do not keep trying

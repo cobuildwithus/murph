@@ -65,6 +65,7 @@ import {
 } from '../src/assistant/store.ts'
 import type {
   AssistantHostedAutomationToolRequest,
+  AssistantHostedAutomationToolResponse,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_MANAGED_AUTOMATIONS,
@@ -4396,6 +4397,310 @@ describeRealCodex('real Codex support escalation e2e', () => {
   )
 })
 
+describeRealCodex('real Codex appointment reminder e2e', () => {
+  it(
+    'saves one confirmed appointment reminder with a stable owner and verified control disclosure',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const scenario = await executeRealCodexAppointmentReminderScenario({
+          automationRequest: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an appointment reminder save.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment-1',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: request.slug ?? 'care-appointment-midtown-20260812',
+              nextOccurrenceAt: '2026-08-12T00:00:00.000Z',
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+          config,
+          prompt: [
+            'My Midtown Clinic appointment is confirmed for August 12, 2026',
+            'at 9:30 AM Eastern. Please handle the normal private follow-through',
+            'for this confirmed appointment and tell me what you did.',
+          ].join(' '),
+        })
+
+        expectAppointmentSkillRead(scenario.actions)
+        expect(scenario.requests).toHaveLength(1)
+        expect(scenario.requests[0]).toMatchObject({
+          action: 'save',
+          continuityPolicy: 'preserve',
+          schedule: {
+            at: '2026-08-12T00:00:00.000Z',
+            kind: 'at',
+          },
+          slug: expect.stringMatching(/^care-appointment-[a-z0-9-]+$/u),
+          status: 'active',
+        })
+        expect(scenario.finalMessage).toMatch(
+          /8(?::00)?\s*p\.?m\.?|20:00/iu,
+        )
+        expect(scenario.finalMessage).toMatch(/move|cancel/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'makes no reminder write for opt-out, tentative, or unavailable appointment routes',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const cases = [
+          {
+            automationAvailable: true,
+            automationContext: null,
+            prompt: [
+              'My Midtown Clinic appointment is confirmed for August 12, 2026',
+              'at 9:30 AM Eastern, but do not create a reminder for it.',
+            ].join(' '),
+          },
+          {
+            automationAvailable: true,
+            automationContext: null,
+            prompt: [
+              'Midtown Clinic proposed August 12, 2026 at 9:30 AM Eastern,',
+              'but I have not accepted and the appointment is not confirmed.',
+            ].join(' '),
+          },
+          {
+            automationAvailable: false,
+            automationContext: null,
+            prompt: [
+              'My Midtown Clinic appointment is confirmed for August 12, 2026',
+              'at 9:30 AM Eastern. Report the confirmed appointment normally.',
+            ].join(' '),
+          },
+          {
+            automationAvailable: true,
+            automationContext: [
+              'Exact prior reminder owner automation-care-appointment-1 is',
+              'active for the Midtown Clinic appointment on August 12, 2026',
+              'at 9:30 AM Eastern, with timing already verified.',
+            ].join(' '),
+            prompt: [
+              'My Midtown Clinic appointment is still confirmed for August 12,',
+              '2026 at 9:30 AM Eastern. Nothing about it changed.',
+            ].join(' '),
+          },
+          {
+            automationAvailable: true,
+            automationContext: [
+              'Two exact prior reminder owners are plausible:',
+              'automation-care-appointment-1 for Midtown Clinic and',
+              'automation-care-appointment-2 for Downtown Clinic.',
+              'No evidence resolves which appointment the member means.',
+            ].join(' '),
+            prompt: 'My appointment moved to August 15. Update its reminder.',
+          },
+        ] as const
+
+        for (const testCase of cases) {
+          const scenario = await executeRealCodexAppointmentReminderScenario({
+            automationAvailable: testCase.automationAvailable,
+            automationContext: testCase.automationContext,
+            automationRequest: async () => {
+              throw new Error('This route must not write an automation.')
+            },
+            config,
+            prompt: testCase.prompt,
+          })
+
+          expectAppointmentSkillRead(scenario.actions)
+          expect(scenario.requests).toHaveLength(0)
+          expect(
+            scenario.actions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_AUTOMATION_TOOL.name
+            ),
+          ).toHaveLength(0)
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'reactivates and later archives the exact appointment reminder owner',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const rescheduled = await executeRealCodexAppointmentReminderScenario({
+          automationContext: [
+            'Exact prior appointment reminder tool result:',
+            'automationId=automation-care-appointment-1;',
+            'lookupId=care-appointment-midtown-20260812;',
+            'status=archived. This is the unique owner for the member\'s',
+            'Midtown Clinic appointment originally confirmed for August 12, 2026.',
+          ].join(' '),
+          automationRequest: async (request) => {
+            if (request.action !== 'patch' || !request.schedule) {
+              throw new Error('Expected an appointment reminder schedule patch.')
+            }
+            return {
+              action: 'patch',
+              automationId: 'automation-care-appointment-1',
+              created: false,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-midtown-20260812',
+              nextOccurrenceAt: '2026-08-14T12:00:00.000Z',
+              routeBinding: 'preserved',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: true,
+            }
+          },
+          config,
+          prompt: [
+            'That confirmed Midtown Clinic appointment was rescheduled to',
+            'August 14, 2026 at 3 PM Eastern. Keep its reminder current.',
+          ].join(' '),
+        })
+
+        expect(rescheduled.requests).toHaveLength(1)
+        expect(rescheduled.requests[0]).toMatchObject({
+          action: 'patch',
+          lookup: 'automation-care-appointment-1',
+          schedule: {
+            at: '2026-08-14T12:00:00.000Z',
+            kind: 'at',
+          },
+          status: 'active',
+        })
+        expect(rescheduled.finalMessage).toMatch(
+          /8(?::00)?\s*a\.?m\.?|08:00/iu,
+        )
+        expect(rescheduled.finalMessage).toMatch(/move|cancel/iu)
+
+        const cancelled = await executeRealCodexAppointmentReminderScenario({
+          automationContext: [
+            'Exact prior appointment reminder tool result:',
+            'automationId=automation-care-appointment-1;',
+            'lookupId=care-appointment-midtown-20260812;',
+            'status=active. This is the unique owner for the member\'s',
+            'Midtown Clinic appointment.',
+          ].join(' '),
+          automationRequest: async (request) => {
+            if (request.action !== 'patch') {
+              throw new Error('Expected an appointment reminder archive patch.')
+            }
+            return {
+              action: 'patch',
+              automationId: 'automation-care-appointment-1',
+              created: false,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'care-appointment-midtown-20260812',
+              nextOccurrenceAt: null,
+              routeBinding: 'preserved',
+              schedule: {
+                at: '2026-08-14T12:00:00.000Z',
+                kind: 'at',
+              },
+              status: 'archived',
+              timingVerified: true,
+            }
+          },
+          config,
+          prompt: [
+            'The Midtown Clinic appointment was cancelled.',
+            'Keep its exact reminder owner in sync.',
+          ].join(' '),
+        })
+
+        expect(cancelled.requests).toHaveLength(1)
+        expect(cancelled.requests[0]).toMatchObject({
+          action: 'patch',
+          lookup: 'automation-care-appointment-1',
+          status: 'archived',
+        })
+        expect(cancelled.finalMessage).toMatch(/cancel|archiv|removed/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'reports unverified timing and write failure without weakening the confirmed appointment',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+
+      try {
+        const unverified = await executeRealCodexAppointmentReminderScenario({
+          automationRequest: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an appointment reminder save.')
+            }
+            return {
+              action: 'save',
+              automationId: 'automation-care-appointment-2',
+              created: true,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: request.slug ?? 'care-appointment-midtown-20260813',
+              nextOccurrenceAt: null,
+              routeBinding: 'current_conversation',
+              schedule: request.schedule,
+              status: 'active',
+              timingVerified: false,
+            }
+          },
+          config,
+          prompt: [
+            'My Midtown Clinic appointment is confirmed for August 13, 2026',
+            'at 2 PM Eastern. Handle the normal private follow-through.',
+          ].join(' '),
+        })
+
+        expect(unverified.requests).toHaveLength(1)
+        expect(unverified.finalMessage).toMatch(
+          /could not verify|couldn't verify|unable to verify/iu,
+        )
+        expect(unverified.finalMessage).toMatch(/inspect|check|update|change/iu)
+
+        const failed = await executeRealCodexAppointmentReminderScenario({
+          automationRequest: async () => {
+            throw new Error('appointment reminder storage unavailable')
+          },
+          config,
+          prompt: [
+            'My Midtown Clinic appointment is confirmed for August 13, 2026',
+            'at 2 PM Eastern. Handle the normal private follow-through.',
+          ].join(' '),
+        })
+
+        expect(failed.requests).toHaveLength(1)
+        expect(failed.finalMessage).toMatch(/appointment.{0,80}confirmed/iu)
+        expect(failed.finalMessage).toMatch(
+          /reminder.{0,80}(?:not|failed|could not|couldn't|unable)/iu,
+        )
+        expect(failed.finalMessage).not.toMatch(
+          /reminder (?:is|was) (?:set|scheduled|created|active)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
 describeRealCodex('real Codex app-server cache usage e2e', () => {
   it(
     'loads each moved capability owner before its representative tool call',
@@ -6065,6 +6370,106 @@ async function executeRealCodexAppServerTurn(
   }
 }
 
+async function executeRealCodexAppointmentReminderScenario(input: {
+  automationAvailable?: boolean
+  automationContext?: string | null
+  automationRequest(
+    request: AssistantHostedAutomationToolRequest,
+  ): Promise<AssistantHostedAutomationToolResponse>
+  config: RealCodexE2eConfig
+  prompt: string
+}): Promise<{
+  actions: CapabilityRoutingAction[]
+  finalMessage: string
+  requests: AssistantHostedAutomationToolRequest[]
+}> {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-appointment-reminder-e2e-'),
+  )
+  const requests: AssistantHostedAutomationToolRequest[] = []
+  const automationAvailable = input.automationAvailable ?? true
+
+  try {
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    await materializeAssistantSkill({
+      skillsRoot,
+      slug: 'appointment-scheduling',
+    })
+    const hostedToolContext = {
+      ...(automationAvailable
+        ? {
+            automationTool: {
+              request: async (request: AssistantHostedAutomationToolRequest) => {
+                requests.push(request)
+                return input.automationRequest(request)
+              },
+            },
+          }
+        : {}),
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: ['assistant_input_appointment'],
+        conversationId: 'conversation-appointment-reminder',
+        conversationScope: 'direct' as const,
+        inboundMailboxItemIds: ['mailbox-appointment-reminder'],
+        originSessionId: 'session-appointment-reminder',
+        recipientKey: 'recipient-appointment-reminder',
+      }),
+      sendVaultFile: async () => ({
+        filename: 'unused',
+        status: 'denied' as const,
+      }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions: buildAppointmentReminderDeveloperInstructions({
+        automationAvailable,
+        automationContext: input.automationContext ?? null,
+      }),
+      dynamicTools: automationAvailable ? [MURPH_AUTOMATION_TOOL] : [],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      excludeResumeTurns: true,
+      hostedToolContext,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      prompt: input.prompt,
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    return {
+      actions: readCapabilityRoutingActions(result.jsonEvents),
+      finalMessage: result.finalMessage.trim(),
+      requests,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([workingDirectory])
+  }
+}
+
+function expectAppointmentSkillRead(actions: CapabilityRoutingAction[]): void {
+  expect(
+    actions.find((action) =>
+      action.kind === 'command'
+      && action.command.includes('appointment-scheduling/SKILL.md')
+      && action.output.includes('# Appointment Scheduling')
+    ),
+    'appointment-scheduling skill read',
+  ).toBeDefined()
+}
+
 function createRealCodexSupportHostedToolContext(
   conversationScope: 'direct' | 'group',
 ): AssistantHostedToolContext {
@@ -7089,6 +7494,32 @@ function buildNativeReplyContextCandidateProbe(): string {
     'A: Acknowledge briefly and continue the thread Murph started.',
     'B: SILENT, because short group messages are participant-owned.',
   ].join('\n')
+}
+
+function buildAppointmentReminderDeveloperInstructions(input: {
+  automationAvailable: boolean
+  automationContext: string | null
+}): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: input.automationContext,
+    assistantHostedAutomationAvailable: input.automationAvailable,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-10',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
 }
 
 function buildMidnightLinqReminderDeveloperInstructions(): string {
