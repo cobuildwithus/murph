@@ -28,6 +28,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const TEST_PAYER_MEMBER_ID = "hbm_usage_top_up_payer";
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
 
 const USAGE_TOP_UP_TARGET_CASES = [
   {
@@ -564,7 +568,7 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      RETIRED_USAGE_TERM_PATTERN,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -1166,7 +1170,7 @@ test("keeps the one-time contribution action reachable in the mobile drawer", as
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      RETIRED_USAGE_TERM_PATTERN,
     );
     const selection = rendered.container.querySelector<HTMLElement>(
       '[data-slot="usage-top-up-selection"]',

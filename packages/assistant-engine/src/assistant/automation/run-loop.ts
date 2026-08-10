@@ -72,8 +72,9 @@ import { acquireAssistantAutomationRunLock } from './runtime-lock.js'
 import type { AssistantAutoReplyProviderRequestStartHook } from './reply.js'
 import type { AssistantBeforeProviderAcceptedInputsHook } from '../service-contracts.js'
 import type { AssistantAutomationOperationScope } from './operation-scope.js'
-import type {
-  AssistantProviderStartCriticalPathContext,
+import {
+  stampAssistantProviderStartCriticalPath,
+  type AssistantProviderStartCriticalPathContext,
 } from '../provider-start-critical-path.js'
 
 type AssistantAutomationLoopStateSnapshot = Pick<
@@ -927,6 +928,10 @@ export async function runAssistantAutomationPass(
     }
   }
   let state = await readAssistantAutomationState(input.vault)
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    'automationPassSetupDoneAtMonotonicMs',
+  )
   const stateBeforeScan = snapshotAssistantAutomationLoopState(state)
 
   const scanStartedAt = Date.now()
@@ -936,8 +941,8 @@ export async function runAssistantAutomationPass(
     ...(input.beforeProviderAcceptedInputs
       ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
       : {}),
-    ...(input.providerStartCriticalPath
-      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+    ...(providerStartCriticalPath
+      ? { providerStartCriticalPath }
       : {}),
     deliveryDispatchMode: input.deliveryDispatchMode,
     executionContext,

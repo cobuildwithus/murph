@@ -92,7 +92,7 @@
     "workflow": "4.2.4"
   },
   "devDependencies": {
-    "@linqapp/sdk": "0.28.0",
+    "@linqapp/sdk": "0.34.0",
     "@murphai/hosted-local-harness": "workspace:*",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.3.0",
