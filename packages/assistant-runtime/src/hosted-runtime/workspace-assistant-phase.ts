@@ -940,7 +940,10 @@ function createHostedAssistantAutomationOperationScope(
       operation(
         executionContext: AssistantExecutionContext,
         turnEnvironment: AssistantTurnEnvironment | null,
+        providerStartCriticalPath?:
+          AssistantProviderStartCriticalPathContext | null,
       ): Promise<T>;
+      providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
       turnEnvironment: AssistantTurnEnvironment | null;
     }): Promise<T> {
       const durableContext = await resolveHostedAssistantInputIdsOperationContext({
@@ -969,9 +972,14 @@ function createHostedAssistantAutomationOperationScope(
         route,
         vaultRoot: input.restored.vaultRoot,
       });
+      const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+        scopeInput.providerStartCriticalPath,
+        "automationGroupAndOperationScopeDoneAtMonotonicMs",
+      );
       return await scopeInput.operation(
         scopedExecutionContext,
         scopeInput.turnEnvironment,
+        providerStartCriticalPath,
       );
     },
   };

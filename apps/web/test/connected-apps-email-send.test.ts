@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getHostedConnectedAppsWritePolicy } from "@/src/lib/connected-apps/config";
 import { executeHostedConnectedAppsRequest } from "@/src/lib/connected-apps/service";
+import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 describe("connected-app email sends", () => {
   beforeEach(() => {
@@ -372,15 +373,19 @@ describe("connected-app email sends", () => {
       }
       if (parsed.pathname === "/api/v3.1/tools/execute/GMAIL_SEND_EMAIL") {
         return jsonResponse({
-          data: null,
-          error: "provider outcome unknown",
-          successful: false,
-        });
+          error: {
+            code: 1703,
+            message:
+              "Gmail rejected member@example.test with token=provider-secret.",
+            slug: "PROVIDER_AUTH_FAILED",
+          },
+          token: "provider-secret",
+        }, 400);
       }
       throw new Error(`Unexpected Composio request: ${parsed.pathname}`);
     });
 
-    await expect(executeHostedConnectedAppsRequest({
+    const error = await executeHostedConnectedAppsRequest({
       fetchImpl,
       memberId: "hbm_member",
       prisma: {} as never,
@@ -397,14 +402,31 @@ describe("connected-app email sends", () => {
         },
         operation: "execute",
       },
-    })).rejects.toMatchObject({
+    }).catch((value) => value);
+
+    expect(error).toBeInstanceOf(HostedOnboardingError);
+    if (!(error instanceof HostedOnboardingError)) {
+      throw error;
+    }
+    expect(error).toMatchObject({
       code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      cause: {
+        message:
+          "Composio email sending returned an ambiguous result. Composio request failed with status 400. Provider error: code=1703, slug=PROVIDER_AUTH_FAILED.",
+      },
       details: {
         operationName: "GMAIL_SEND_EMAIL",
-        type: "composio_direct_execute_unsuccessful",
+        statusCode: 400,
+        type: "composio_http_error",
       },
       retryable: false,
     });
+    expect(error.details).not.toHaveProperty("providerErrorMessage");
+    if (!(error.cause instanceof Error)) {
+      throw new Error("Expected connected-app error cause.");
+    }
+    expect(error.cause.message).not.toContain("member@example.test");
+    expect(error.cause.message).not.toContain("provider-secret");
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });

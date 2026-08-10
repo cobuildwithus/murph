@@ -4292,6 +4292,56 @@ describe("handleRunnerOutboundRequest", () => {
     ))).toBe(true);
   });
 
+  it("refreshes only the write-fence-owned workspace snapshot handoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+    const fixture = await createHostedRuntimeCryptoContextFixture();
+    const runner = createWorkspaceVersionAwareUserRunner();
+    const env = createRunnerOutboundEnv({
+      ...fixture.env,
+      USER_RUNNER: { getByName: runner.getByName },
+    });
+    vi.stubGlobal("fetch", fixture.fetchMock);
+    const startResponse = await handleRunnerOutboundRequest(
+      createWorkspaceSnapshotStartRequest({
+        expectedWorkspaceVersion: "4",
+        workspaceVersion: "4",
+      }),
+      env,
+      "member_123",
+    );
+    const startBody = requireTestObject(
+      await startResponse.json(),
+      "workspace snapshot heartbeat start",
+    );
+    const snapshotId = requireTestString(startBody.snapshotId, "snapshotId");
+    vi.setSystemTime(new Date("2026-04-27T00:00:29.000Z"));
+
+    const response = await handleRunnerOutboundRequest(
+      new Request(
+        `http://workspace-snapshots.worker/workspace-snapshots/${snapshotId}/heartbeat`,
+        {
+          body: JSON.stringify({ snapshotId }),
+          headers: createRunnerWriteFenceProxyHeaders(),
+          method: "POST",
+        },
+      ),
+      env,
+      "member_123",
+    );
+
+    expect(response.status).toBe(200);
+    expect(runner.heartbeatHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledWith({
+      attemptId: "attempt_1",
+      leaseGeneration: "9",
+      snapshotId,
+      userId: "member_123",
+    });
+    expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      checkpointHandoffHeartbeatAt: "2026-04-27T00:00:29.000Z",
+    });
+  });
+
   it("keeps workspace snapshot upload-session RPCs bound to the Durable Object stub", async () => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const runner = createWorkspaceVersionAwareUserRunner({
@@ -4398,9 +4448,11 @@ describe("handleRunnerOutboundRequest", () => {
     );
     expect(completeResponse.status).toBe(200);
     expect(runner.workspaceSnapshotUploadSessions.get(snapshotId)).toMatchObject({
+      checkpointHandoffCompletedAt: expect.any(String),
       replacedSnapshotRef,
       snapshotId,
     });
+    expect(runner.completeHostedWorkspaceSnapshotUploadSession).toHaveBeenCalledOnce();
 
     const abortResponse = await handleRunnerOutboundRequest(
       createWorkspaceSnapshotAbortRequest({
@@ -10512,6 +10564,62 @@ function createWorkspaceVersionAwareUserRunner(input: {
     currentWorkspaceSnapshotUploadSessionId = session.snapshotId;
     return session;
   });
+  const heartbeatHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      attemptId: string;
+      leaseGeneration: string;
+      snapshotId: string;
+      userId: string;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
+    const current = workspaceSnapshotUploadSessions.get(request.snapshotId);
+    if (
+      !current
+      || current.attemptId !== request.attemptId
+      || current.leaseGeneration !== request.leaseGeneration
+      || current.userId !== request.userId
+      || request.attemptId !== attemptId
+      || request.leaseGeneration !== leaseGeneration
+    ) {
+      return false;
+    }
+    workspaceSnapshotUploadSessions.set(current.snapshotId, {
+      ...current,
+      checkpointHandoffHeartbeatAt: new Date().toISOString(),
+    });
+    return true;
+  });
+  const completeHostedWorkspaceSnapshotUploadSession = vi.fn(async function (
+    this: WorkerUserRunnerStubLike,
+    request: {
+      attemptId: string;
+      leaseGeneration: string;
+      snapshotId: string;
+      userId: string;
+    },
+  ) {
+    assertSnapshotRpcReceiver(this);
+    const current = workspaceSnapshotUploadSessions.get(request.snapshotId);
+    if (
+      !current
+      || current.attemptId !== request.attemptId
+      || current.leaseGeneration !== request.leaseGeneration
+      || current.userId !== request.userId
+      || request.attemptId !== attemptId
+      || request.leaseGeneration !== leaseGeneration
+    ) {
+      return false;
+    }
+    const completedAt = new Date().toISOString();
+    workspaceSnapshotUploadSessions.set(current.snapshotId, {
+      ...current,
+      checkpointHandoffCompletedAt: completedAt,
+      checkpointHandoffHeartbeatAt: completedAt,
+    });
+    return true;
+  });
   const rememberHostedWorkspaceSnapshotReplacedRef = vi.fn(async function (
     this: WorkerUserRunnerStubLike,
     request: {
@@ -10638,8 +10746,10 @@ function createWorkspaceVersionAwareUserRunner(input: {
 
   userRunnerStub = {
     bindUser,
+    completeHostedWorkspaceSnapshotUploadSession,
     createHostedWorkspaceSnapshotUploadSession,
     deleteHostedWorkspaceSnapshotUploadSession,
+    heartbeatHostedWorkspaceSnapshotUploadSession,
     rememberHostedWorkspaceSnapshotPresignedPut,
     rememberHostedWorkspaceSnapshotReplacedRef,
     publishHostedPrivateMedia,
@@ -10652,11 +10762,13 @@ function createWorkspaceVersionAwareUserRunner(input: {
   return {
     bindUser,
     browserVaultReplicaOrphanCandidates,
+    completeHostedWorkspaceSnapshotUploadSession,
     createHostedWorkspaceSnapshotUploadSession,
     deleteHostedWorkspaceSnapshotUploadSession,
     getByName() {
       return userRunnerStub;
     },
+    heartbeatHostedWorkspaceSnapshotUploadSession,
     ownsActiveInvocationLease,
     publishHostedPrivateMedia,
     readHostedWorkspaceSnapshotUploadSession,

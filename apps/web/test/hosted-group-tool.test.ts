@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
+const deadlineAnchors = vi.hoisted(() => [] as number[]);
+
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
   assertHostedLinqRecentInboundEngagementForRuntime: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
@@ -154,9 +157,27 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  // A plain function, not a spy: the suite resets mock implementations between
+  // tests and a stripped resolver would silently disable the deadline check.
+  // These are the production numbers.
+  resolveHostedLinqPersonalizedContactCardDeadlines: (startedAtMs: number) => {
+    deadlineAnchors.push(startedAtMs);
+    return {
+      operationDeadlineAt: startedAtMs + 20_000,
+      preSendDeadlineAt: startedAtMs + 20_000 - 2 * 7_000,
+    };
+  },
   releaseHostedLinqContactCardShareAttempt: mocks.releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt: mocks.reserveHostedLinqContactCardShareAttempt,
   shareMurphHostedLinqContactCardVcfToChat: mocks.shareMurphHostedLinqContactCardVcfToChat,
+}));
+
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackJsonRequest: mocks.requireHostedCloudflareCallbackJsonRequest,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
+  handoffHostedMailboxWake: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
@@ -4859,6 +4880,41 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     });
   });
 
+  it("charges slow direct authorization against the pre-send deadline", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    // Authorization consumes no abort signal, so a slow one used to leave the
+    // whole send window intact and let this invocation run on after the caller
+    // had already stopped waiting. It is now charged against the deadline.
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockImplementation(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 6_050));
+        return { targetOverride: null, threadIsDirect: true };
+      },
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_first",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "contact_card_presend_deadline_exceeded",
+      },
+    });
+
+    // Refused before any provider work, so this is an ordinary unavailable
+    // rather than uncertainty, and no card can arrive later.
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  }, 20_000);
+
   it("reports an unconfirmed personalized send as unconfirmed, not as a failure", async () => {
     const contactCardImageUrl =
       `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
@@ -4954,5 +5010,90 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+  });
+});
+
+describe("hosted group tool route boundary", () => {
+  const PERSONALIZED_REQUEST = {
+    action: "share_contact_card",
+    contactCardImageUrl: "https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/group-avatar.jpg?exp=2000000000",
+    contactCardShareKey: "input_first",
+    directLinqChatId: "chat_direct_1",
+  } as const;
+
+  const postPersonalizedShare = async () => {
+    const route = await import(
+      "../app/api/internal/hosted-execution/groups/tool/route"
+    );
+    return await route.POST(new Request("https://web.test/api/internal/hosted-execution/groups/tool", {
+      body: JSON.stringify(PERSONALIZED_REQUEST),
+      method: "POST",
+    }));
+  };
+
+  beforeEach(() => {
+    vi.useRealTimers();
+    deadlineAnchors.length = 0;
+    // This file has no global mock clearing, so call counts otherwise carry
+    // over from every earlier test in it.
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockClear();
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockClear();
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
+  });
+
+  it("charges signed-callback verification and nonce time to the send's own budget", async () => {
+    // The runner's hop is already running when the route is entered, so the
+    // body read, signature check, and nonce consumption below have to spend the
+    // same budget as the send. Before this, the clock started after them and
+    // the send could still be running once the caller had given up.
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => {
+        const payload = JSON.parse(await request.text()) as unknown;
+        await new Promise((resolve) => setTimeout(resolve, 6_100));
+        return { payload, userId: "member_container" };
+      },
+    );
+
+    const response = await postPersonalizedShare();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "contact_card_presend_deadline_exceeded",
+      },
+    });
+    // Refused before provider admission, so no card can arrive afterwards.
+    // Refused before provider admission, so no card can arrive afterwards.
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+    // And the budget was anchored before the verification delay, not after it.
+    expect(deadlineAnchors).toHaveLength(1);
+    expect(Date.now() - (deadlineAnchors[0] ?? 0)).toBeGreaterThanOrEqual(6_000);
+  }, 30_000);
+
+  it("admits the send when the boundary work leaves budget", async () => {
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => ({
+        payload: JSON.parse(await request.text()) as unknown,
+        userId: "member_container",
+      }),
+    );
+
+    const response = await postPersonalizedShare();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
+      expect.objectContaining({ operationDeadlineAt: expect.any(Number) }),
+    );
   });
 });
