@@ -45,6 +45,53 @@ describe("buildSharedGroupWeeklyMembers", () => {
     ]));
   });
 
+  it("summarizes completed workout details by kind without exposing event times", () => {
+    const [member] = buildSharedGroupWeeklyMembers({
+      members: [{
+        displayName: "Member A",
+        memberId: "member-a",
+        shares: [
+          {
+            projectionScopeKey: "steps-days.v0",
+            records: [dailyMetric("2026-07-05", "steps", 9_000, "count")],
+          },
+          {
+            projectionScopeKey: "workouts.v0",
+            records: [
+              workoutsDay("2026-06-30", [workout("running", 90, 1_000)]),
+              workoutsDay("2026-07-01", []),
+              workoutsDay("2026-07-04", [
+                workout("running", 20, 2_000),
+                workout("running", 40, 3_000),
+                workout("strength", 30, 4_000),
+              ]),
+              workoutsDay("2026-07-06", [workout("running", 30, 5_000)]),
+              workoutsDay("2026-07-08", [workout("running", 500, 6_000)]),
+            ],
+          },
+        ],
+      }],
+      referenceAt: "2026-07-09T12:00:00.000Z",
+      timeZone: "UTC",
+    });
+
+    expect(member?.weeklyStats).toEqual([
+      weeklyStat("steps", 9_000, ["2026-07-05"], "count"),
+      weeklyStat("workout-kind-running-count", 1.5, [
+        "2026-07-04",
+        "2026-07-06",
+      ], "count"),
+      weeklyStat("workout-kind-running-minutes", 45, [
+        "2026-07-04",
+        "2026-07-06",
+      ], "minutes"),
+      weeklyStat("workout-kind-strength-count", 1, ["2026-07-04"], "count"),
+      weeklyStat("workout-kind-strength-minutes", 30, ["2026-07-04"], "minutes"),
+    ]);
+    expect(JSON.stringify(member)).not.toContain("startLocalMs");
+    expect(JSON.stringify(member)).not.toContain("calendarClosedThroughDate");
+  });
+
   it("exposes exact completed dates for equal-date comparisons and excludes the open local day", () => {
     const records = [
       workoutDay("2022-07-21", 61),
@@ -192,6 +239,24 @@ function dailyMetric(
 
 function unmarkedWorkoutDay(date: string, workoutMinutes: number) {
   return { data: { date, workoutCount: 1, workoutMinutes } };
+}
+
+function workout(kind: string, minutes: number, startLocalMs: number) {
+  return { kind, minutes, startLocalMs };
+}
+
+function workoutsDay(
+  date: string,
+  workouts: ReturnType<typeof workout>[],
+) {
+  return {
+    data: {
+      calendarClosedThroughDate: "2026-07-07",
+      date,
+      timeSemantics: "canonical-event-zone-or-vault-zone.v0",
+      workouts,
+    },
+  };
 }
 
 function weeklyStat(

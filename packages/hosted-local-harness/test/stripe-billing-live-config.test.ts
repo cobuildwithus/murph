@@ -20,6 +20,7 @@ const configuredEnvironment: NodeJS.ProcessEnv = {
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge",
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_familypulse",
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: "price_familyedge",
+  HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: "price_familymax",
   HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY:
     "bpc_edge",
   MURPH_HOSTED_STRIPE_BILLING_RUN_ID: "run_ci_12345678",
@@ -30,6 +31,7 @@ const sharedCatalogEnvironment: NodeJS.ProcessEnv = {
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge",
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_familypulse",
   HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: "price_familyedge",
+  HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: "price_familymax",
   HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY:
     "bpc_edge",
 };
@@ -110,6 +112,7 @@ describe("resolveHostedStripeBillingLiveConfig", () => {
     expect(resolved.config.priceIds).toEqual({
       edge: "price_edge",
       familyEdge: "price_familyedge",
+      familyMax: "price_familymax",
       familyPulse: "price_familypulse",
       pulse: "price_pulse",
     });

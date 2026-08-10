@@ -12,6 +12,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/operator-config/hosted-assistant-config";
+import {
+  attachHostedRuntimeFailurePhaseCode,
+} from "@murphai/hosted-execution/runtime-control";
 
 type MockSpawnedProcess = EventEmitter & {
   kill: () => boolean;
@@ -103,6 +106,7 @@ import {
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
 import { HOSTED_RUNNER_SHUTTING_DOWN_ERROR_CODE } from "../src/runner-container-error-codes.js";
+import { HostedRuntimeControlPlaneFetchError } from "../src/runtime-platform/control-plane-fetch.js";
 import * as hostedInvocation from "../src/hosted-workspace-invocation.js";
 
 const servers: Array<Awaited<ReturnType<typeof startHostedContainerEntrypoint>>> = [];
@@ -2876,6 +2880,49 @@ describe("classifyRunnerJobError", () => {
       statusCode: 500,
     });
     expect(JSON.stringify(classified.payload)).not.toContain("boom");
+  });
+
+  it("transports a phase alongside a generic control-plane failure code", () => {
+    const fetchFailure = new HostedRuntimeControlPlaneFetchError({
+      cause: new TypeError("hidden control-plane transport failure"),
+      description: "Hosted workspace snapshot",
+      signalState: {
+        callerSignalAborted: false,
+        requestSignalAborted: false,
+        timeoutMs: 5_000,
+        timeoutSignalAborted: false,
+      },
+    });
+    const wrappedFailure = Object.assign(
+      new Error("hidden snapshot wrapper at /private/workspace/vault", {
+        cause: fetchFailure,
+      }),
+      { code: "EACCES" },
+    );
+    attachHostedRuntimeFailurePhaseCode(
+      wrappedFailure,
+      "workspace.checkpoint.idle_compact",
+    );
+
+    const classified = classifyRunnerJobError(wrappedFailure);
+
+    expect(classified).toMatchObject({
+      payload: {
+        code: "runtime_error",
+        details: {
+          errorCodeDetail: "EACCES",
+          runtimeFailurePhaseCode:
+            "runtime_phase:workspace.checkpoint.idle_compact",
+        },
+        error: "Hosted execution runtime failed.",
+      },
+      statusCode: 500,
+    });
+    expect(JSON.stringify(classified.payload)).not.toContain(
+      "hidden control-plane transport failure",
+    );
+    expect(JSON.stringify(classified.payload)).not.toContain("hidden snapshot wrapper");
+    expect(JSON.stringify(classified.payload)).not.toContain("/private/workspace/vault");
   });
 
   it("surfaces bundle-validation failures with their dedicated code and safe properties", () => {

@@ -1,6 +1,7 @@
+import { Buffer } from "node:buffer";
 import { randomInt, randomUUID } from "node:crypto";
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedOnboardingLinqConfig: () => ({
@@ -9,37 +10,10 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   }),
 }));
 
-// Pass-through wrapper so the rollback proof can inject a failure mid-way
-// through an otherwise fully real snapshot application.
-const providerStateControl = vi.hoisted(() => ({ calls: 0, failOnCall: 0 }));
-
-vi.mock("@/src/lib/hosted-onboarding/linq-provider-health-store", async (importOriginal) => {
-  const actual = await importOriginal<
-    typeof import("@/src/lib/hosted-onboarding/linq-provider-health-store")
-  >();
-  return {
-    ...actual,
-    projectHostedLinqLineProviderStateTx: async (
-      input: Parameters<typeof actual.projectHostedLinqLineProviderStateTx>[0],
-    ) => {
-      providerStateControl.calls += 1;
-      if (
-        providerStateControl.failOnCall > 0
-        && providerStateControl.calls === providerStateControl.failOnCall
-      ) {
-        throw new Error("injected mid-application failure");
-      }
-      return actual.projectHostedLinqLineProviderStateTx(input);
-    },
-  };
-});
-
-beforeEach(() => {
-  providerStateControl.calls = 0;
-  providerStateControl.failOnCall = 0;
-});
-
-import { createHostedPhoneLookupKeyReadCandidates } from "@/src/lib/hosted-onboarding/contact-privacy-core";
+import {
+  createHostedPhoneLookupKey,
+  createHostedPhoneLookupKeyReadCandidates,
+} from "@/src/lib/hosted-onboarding/contact-privacy-core";
 import { resolveMurphHostedLinqContactCardBackupPhoneNumber } from "@/src/lib/hosted-onboarding/linq-contact-card";
 import { syncHostedLinqPhoneNumberInventory } from "@/src/lib/hosted-onboarding/linq-phone-number-inventory";
 import {
@@ -48,12 +22,15 @@ import {
   syncHostedLinqConfiguredLinesTx,
   upsertHostedLinqLineForPhoneTx,
 } from "@/src/lib/hosted-onboarding/linq-line-store";
-import { encryptHostedLinqLinePhoneNumber } from "@/src/lib/hosted-onboarding/linq-line-phone-codec";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
 const runPostgresProof =
   process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
+const TEST_KEYRING_ENTRIES = {
+  v1: Buffer.from("1".repeat(32), "utf8").toString("base64"),
+  v2: Buffer.from("2".repeat(32), "utf8").toString("base64"),
+};
 
 if (
   runPostgresProof
@@ -67,17 +44,16 @@ if (
 describe.skipIf(!runPostgresProof)(
   "hosted Linq phone-number inventory PostgreSQL proof",
   () => {
-    it("transfers a moved provider id between rows without violating the unique index", async () => {
+    it("converges a moved provider id onto an existing row with exact snapshot fields", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const providerId = `pg-proof-line-${randomUUID()}`;
+      const staleProviderId = `pg-proof-line-${randomUUID()}`;
       const phoneA = buildSyntheticProofPhoneNumber();
       const phoneB = buildSyntheticProofPhoneNumber();
-      const observedAt = new Date();
+      const firstSeenAt = new Date("2026-08-09T12:00:00.000Z");
+      const snapshotObservedAt = new Date("2026-08-09T12:05:00.000Z");
       const createdLookupKeys: string[] = [];
 
-      // The sync revokes every held pairing its snapshot does not confirm, so
-      // capture unrelated held rows up front and restore them afterwards to
-      // keep this proof independent of other suites sharing the database.
       const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
         where: { providerPhoneNumberId: { not: null } },
         select: {
@@ -89,51 +65,79 @@ describe.skipIf(!runPostgresProof)(
 
       try {
         const rowA = await upsertHostedLinqLineForPhoneTx({
-          observedAt,
+          observedAt: firstSeenAt,
           phoneNumber: phoneA,
           prisma,
           providerPhoneNumberId: providerId,
           source: "provider",
         });
-        createdLookupKeys.push(rowA.phoneNumberLookupKey);
+        const rowB = await upsertHostedLinqLineForPhoneTx({
+          observedAt: firstSeenAt,
+          phoneNumber: phoneB,
+          prisma,
+          providerPhoneNumberId: staleProviderId,
+          source: "provider",
+        });
+        createdLookupKeys.push(rowA.phoneNumberLookupKey, rowB.phoneNumberLookupKey);
 
         vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
           phone_numbers: [
             {
               id: providerId,
               phone_number: phoneB,
-              reputation: { status: "HEALTHY" },
-              status: "ACTIVE",
+              reputation: { status: "AT_RISK" },
+              status: "FLAGGED",
             },
           ],
         }), { headers: { "content-type": "application/json" }, status: 200 })));
 
         await expect(syncHostedLinqPhoneNumberInventory({
-          observedAt: new Date(),
+          observedAt: snapshotObservedAt,
           prisma,
         })).resolves.toEqual({ syncedCount: 1 });
 
-        const owners = await prisma.hostedLinqLine.findMany({
-          where: { providerPhoneNumberId: providerId },
+        const owner = await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: rowB.phoneNumberLookupKey },
           select: {
             phoneNumberHint: true,
-            phoneNumberLookupKey: true,
+            providerFirstSeenAt: true,
+            providerInventoryConfirmedAt: true,
+            providerLastSeenAt: true,
+            providerPhoneNumberId: true,
+            providerReputationStatus: true,
+            providerReputationUpdatedAt: true,
+            providerSeenAt: true,
+            providerServiceStatus: true,
+            providerServiceUpdatedAt: true,
           },
         });
-        for (const owner of owners) {
-          if (!createdLookupKeys.includes(owner.phoneNumberLookupKey)) {
-            createdLookupKeys.push(owner.phoneNumberLookupKey);
-          }
-        }
-        expect(owners).toHaveLength(1);
-        expect(owners[0]?.phoneNumberHint).toBe(`*** ${phoneB.slice(-4)}`);
-        expect(owners[0]?.phoneNumberLookupKey).not.toBe(rowA.phoneNumberLookupKey);
+        expect(owner).toEqual({
+          phoneNumberHint: `*** ${phoneB.slice(-4)}`,
+          providerFirstSeenAt: firstSeenAt,
+          providerInventoryConfirmedAt: snapshotObservedAt,
+          providerLastSeenAt: snapshotObservedAt,
+          providerPhoneNumberId: providerId,
+          providerReputationStatus: "AT_RISK",
+          providerReputationUpdatedAt: snapshotObservedAt,
+          providerSeenAt: snapshotObservedAt,
+          providerServiceStatus: "FLAGGED",
+          providerServiceUpdatedAt: snapshotObservedAt,
+        });
+        expect(await prisma.hostedLinqLine.count({
+          where: { providerPhoneNumberId: staleProviderId },
+        })).toBe(0);
 
         const releasedRowA = await prisma.hostedLinqLine.findUnique({
           where: { phoneNumberLookupKey: rowA.phoneNumberLookupKey },
-          select: { providerPhoneNumberId: true },
+          select: {
+            providerInventoryConfirmedAt: true,
+            providerPhoneNumberId: true,
+          },
         });
-        expect(releasedRowA?.providerPhoneNumberId).toBeNull();
+        expect(releasedRowA).toEqual({
+          providerInventoryConfirmedAt: null,
+          providerPhoneNumberId: null,
+        });
       } finally {
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
@@ -147,6 +151,121 @@ describe.skipIf(!runPostgresProof)(
         }
         await prisma.hostedLinqLine.deleteMany({
           where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+        });
+        await prisma.$disconnect();
+      }
+    });
+    it("preserves first seen and orders service and reputation timestamps", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const providerId = `pg-proof-line-${randomUUID()}`;
+      const phone = buildSyntheticProofPhoneNumber();
+      const firstSeenAt = new Date("2026-08-09T10:00:00.000Z");
+      const newerStatusAt = new Date("2026-08-09T12:00:00.000Z");
+      const olderSnapshotAt = new Date("2026-08-09T11:00:00.000Z");
+      const newestSnapshotAt = new Date("2026-08-09T13:00:00.000Z");
+      const proofLookupKeys = createHostedPhoneLookupKeyReadCandidates(phone);
+      const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
+        where: { providerPhoneNumberId: { not: null } },
+        select: {
+          phoneNumberLookupKey: true,
+          providerInventoryConfirmedAt: true,
+          providerPhoneNumberId: true,
+        },
+      });
+
+      try {
+        const row = await upsertHostedLinqLineForPhoneTx({
+          observedAt: firstSeenAt,
+          phoneNumber: phone,
+          prisma,
+          providerPhoneNumberId: providerId,
+          source: "provider",
+        });
+        await prisma.hostedLinqLine.update({
+          data: {
+            lastReputationStatusEventId: "reputation:newer",
+            lastServiceStatusEventId: "service:newer",
+            providerReputationStatus: "HEALTHY",
+            providerReputationUpdatedAt: newerStatusAt,
+            providerServiceStatus: "ACTIVE",
+            providerServiceUpdatedAt: newerStatusAt,
+          },
+          where: { phoneNumberLookupKey: row.phoneNumberLookupKey },
+        });
+
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: [{
+            id: providerId,
+            phone_number: phone,
+            reputation: { status: "AT_RISK" },
+            status: "FLAGGED",
+          }],
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+
+        await syncHostedLinqPhoneNumberInventory({
+          observedAt: olderSnapshotAt,
+          prisma,
+        });
+        expect(await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: row.phoneNumberLookupKey },
+          select: {
+            lastReputationStatusEventId: true,
+            lastServiceStatusEventId: true,
+            providerFirstSeenAt: true,
+            providerReputationStatus: true,
+            providerReputationUpdatedAt: true,
+            providerServiceStatus: true,
+            providerServiceUpdatedAt: true,
+          },
+        })).toEqual({
+          lastReputationStatusEventId: "reputation:newer",
+          lastServiceStatusEventId: "service:newer",
+          providerFirstSeenAt: firstSeenAt,
+          providerReputationStatus: "HEALTHY",
+          providerReputationUpdatedAt: newerStatusAt,
+          providerServiceStatus: "ACTIVE",
+          providerServiceUpdatedAt: newerStatusAt,
+        });
+
+        await syncHostedLinqPhoneNumberInventory({
+          observedAt: newestSnapshotAt,
+          prisma,
+        });
+        expect(await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: row.phoneNumberLookupKey },
+          select: {
+            lastReputationStatusEventId: true,
+            lastServiceStatusEventId: true,
+            providerFirstSeenAt: true,
+            providerLastSeenAt: true,
+            providerReputationStatus: true,
+            providerReputationUpdatedAt: true,
+            providerServiceStatus: true,
+            providerServiceUpdatedAt: true,
+          },
+        })).toEqual({
+          lastReputationStatusEventId: null,
+          lastServiceStatusEventId: null,
+          providerFirstSeenAt: firstSeenAt,
+          providerLastSeenAt: newestSnapshotAt,
+          providerReputationStatus: "AT_RISK",
+          providerReputationUpdatedAt: newestSnapshotAt,
+          providerServiceStatus: "FLAGGED",
+          providerServiceUpdatedAt: newestSnapshotAt,
+        });
+      } finally {
+        vi.unstubAllGlobals();
+        for (const heldRow of preexistingHeldRows) {
+          await prisma.hostedLinqLine.updateMany({
+            data: {
+              providerInventoryConfirmedAt: heldRow.providerInventoryConfirmedAt,
+              providerPhoneNumberId: heldRow.providerPhoneNumberId,
+            },
+            where: { phoneNumberLookupKey: heldRow.phoneNumberLookupKey },
+          });
+        }
+        await prisma.hostedLinqLine.deleteMany({
+          where: { phoneNumberLookupKey: { in: proofLookupKeys } },
         });
         await prisma.$disconnect();
       }
@@ -189,9 +308,8 @@ describe.skipIf(!runPostgresProof)(
         createdLookupKeys.push(rowA.phoneNumberLookupKey);
 
         // One overlapping run still sees the old X→A snapshot while the other
-        // sees the new X→B snapshot; both apply concurrently. The advisory
-        // lock must serialize them so neither hits the unique index, in
-        // either commit order.
+        // sees the new X→B snapshot. Serializable retries plus the existing
+        // unique indexes must converge without duplicate ownership.
         let fetchCalls = 0;
         vi.stubGlobal("fetch", vi.fn(async () => {
           fetchCalls += 1;
@@ -455,7 +573,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("serves the member backup without waiting on an in-flight ownership move", async () => {
+    it("keeps the authoritative move atomically invisible until commit", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
       const providerId = `pg-proof-line-${randomUUID()}`;
       const otherProviderId = `pg-proof-line-${randomUUID()}`;
@@ -474,10 +592,9 @@ describe.skipIf(!runPostgresProof)(
           providerPhoneNumberId: true,
         },
       });
+      let releaseCommit: () => void = () => undefined;
 
       try {
-        // Seed A as a confirmed configured owner plus one other owned line,
-        // so backup resolution has a real choice.
         for (const [phone, id] of [[phoneA, providerId], [phoneOther, otherProviderId]] as const) {
           const seeded = await upsertHostedLinqLineForPhoneTx({
             activeMemberLimit: null,
@@ -496,77 +613,59 @@ describe.skipIf(!runPostgresProof)(
           });
         }
 
-        // Hold the authoritative move X: A→B open under the inventory lock.
-        let releaseMove: () => void = () => undefined;
-        const moveHold = new Promise<void>((resolve) => {
-          releaseMove = resolve;
+        vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+          phone_numbers: [
+            {
+              id: providerId,
+              phone_number: phoneB,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+            {
+              id: otherProviderId,
+              phone_number: phoneOther,
+              reputation: { status: "HEALTHY" },
+              status: "ACTIVE",
+            },
+          ],
+        }), { headers: { "content-type": "application/json" }, status: 200 })));
+
+        const commitHold = new Promise<void>((resolve) => {
+          releaseCommit = resolve;
         });
-        let movePid: (pid: number) => void = () => undefined;
-        const moveLocked = new Promise<number>((resolve) => {
-          movePid = resolve;
+        let snapshotApplied: () => void = () => undefined;
+        const applied = new Promise<void>((resolve) => {
+          snapshotApplied = resolve;
         });
         const moveTransaction = prisma.$transaction(async (tx) => {
-          await tx.$executeRaw`
-            SELECT pg_advisory_xact_lock(
-              hashtext('hosted_linq_phone_number_inventory'),
-              hashtext('snapshot')
-            )
-          `;
-          const revokedKeys = createHostedPhoneLookupKeyReadCandidates(phoneA);
-          await tx.hostedLinqLine.updateMany({
-            data: {
-              providerInventoryConfirmedAt: null,
-              providerPhoneNumberId: null,
-            },
-            where: { phoneNumberLookupKey: { in: revokedKeys } },
+          await syncHostedLinqPhoneNumberInventory({
+            observedAt: new Date(),
+            prisma: tx,
           });
-          const claimed = createHostedPhoneLookupKeyReadCandidates(phoneB);
-          await tx.hostedLinqLine.create({
-            data: {
-              assignmentWeight: 100,
-              egressPolicy: "enabled",
-              healthStatus: "unknown",
-              phoneNumberEncrypted: encryptHostedLinqLinePhoneNumber(phoneB),
-              phoneNumberHint: `*** ${phoneB.slice(-4)}`,
-              phoneNumberLookupKey: claimed[0] as string,
-              providerInventoryConfirmedAt: new Date(),
-              providerPhoneNumberId: providerId,
-              providerSeenAt: new Date(),
-              source: "provider",
-            },
-          });
-          const pidRows = await tx.$queryRaw<Array<{ pid: number }>>`
-            SELECT pg_backend_pid() AS pid
-          `;
-          movePid(Number(pidRows[0]?.pid ?? 0));
-          await moveHold;
+          snapshotApplied();
+          await commitHold;
         });
 
-        await moveLocked;
-
-        // The member-facing resolver must never queue behind the writer: it
-        // resolves while the move is still open, omitting the optional backup
-        // rather than delaying the member's primary card.
+        await applied;
         await expect(Promise.race([
           resolveMurphHostedLinqContactCardBackupPhoneNumber({
             excludePhoneNumber: phoneOther,
             prisma,
           }),
           new Promise((_resolve, reject) => {
-            setTimeout(() => reject(new Error("backup resolution blocked on the inventory lock")), 5_000);
+            setTimeout(() => reject(new Error("backup resolution blocked on bulk inventory apply")), 5_000);
           }),
-        ])).resolves.toBeNull();
+        ])).resolves.toBe(phoneA);
 
-        releaseMove();
+        releaseCommit();
         await moveTransaction;
-
-        // After the move commits, the relinquished line is never offered and
-        // the new owner is.
         await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
           excludePhoneNumber: phoneOther,
           prisma,
         })).resolves.toBe(phoneB);
       } finally {
+        releaseCommit();
+        vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
           await prisma.hostedLinqLine.updateMany({
             data: {
@@ -583,13 +682,16 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("blocks a concurrent sync on the inventory-wide advisory lock until the owner commits", async () => {
-      const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
-      const observer = createPrismaClient({ databaseUrl, poolMax: 2 });
-      const providerId = `pg-proof-line-${randomUUID()}`;
-      const phoneB = buildSyntheticProofPhoneNumber();
-      const createdLookupKeys: string[] = [];
-
+    it("executes one bulk database statement for a multi-line provider snapshot", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const providerIds = [
+        `pg-proof-line-${randomUUID()}`,
+        `pg-proof-line-${randomUUID()}`,
+      ];
+      const phones = [buildSyntheticProofPhoneNumber(), buildSyntheticProofPhoneNumber()];
+      const proofLookupKeys = phones.flatMap(
+        (phone) => createHostedPhoneLookupKeyReadCandidates(phone),
+      );
       const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
         where: { providerPhoneNumberId: { not: null } },
         select: {
@@ -598,80 +700,37 @@ describe.skipIf(!runPostgresProof)(
           providerPhoneNumberId: true,
         },
       });
+      let statementCount = 0;
 
       try {
         vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-          phone_numbers: [
-            {
-              id: providerId,
-              phone_number: phoneB,
-              reputation: { status: "HEALTHY" },
-              status: "ACTIVE",
-            },
-          ],
+          phone_numbers: phones.map((phoneNumber, index) => ({
+            id: providerIds[index],
+            phone_number: phoneNumber,
+            reputation: { status: "HEALTHY" },
+            status: "ACTIVE",
+          })),
         }), { headers: { "content-type": "application/json" }, status: 200 })));
 
-        let releaseOwner: () => void = () => undefined;
-        const ownerHold = new Promise<void>((resolve) => {
-          releaseOwner = resolve;
-        });
-        let ownerHasLock: (backendPid: number) => void = () => undefined;
-        const ownerLocked = new Promise<number>((resolve) => {
-          ownerHasLock = resolve;
-        });
-        const ownerTransaction = prisma.$transaction(async (tx) => {
-          await tx.$executeRaw`
-            SELECT pg_advisory_xact_lock(
-              hashtext('hosted_linq_phone_number_inventory'),
-              hashtext('snapshot')
-            )
-          `;
-          const pidRows = await tx.$queryRaw<Array<{ pid: number }>>`
-            SELECT pg_backend_pid() AS pid
-          `;
-          ownerHasLock(Number(pidRows[0]?.pid ?? 0));
-          await ownerHold;
+        await prisma.$transaction(async (tx) => {
+          await expect(syncHostedLinqPhoneNumberInventory({
+            observedAt: new Date(),
+            prisma: {
+              $queryRaw: async (query: unknown) => {
+                statementCount += 1;
+                return tx.$queryRaw(query as never);
+              },
+            } as never,
+          })).resolves.toEqual({ syncedCount: 2 });
         });
 
-        const ownerBackendPid = await ownerLocked;
-        expect(ownerBackendPid).toBeGreaterThan(0);
-        const contender = syncHostedLinqPhoneNumberInventory({
-          observedAt: new Date(),
-          prisma,
+        expect(statementCount).toBe(1);
+        const rows = await prisma.hostedLinqLine.findMany({
+          where: { providerPhoneNumberId: { in: providerIds } },
+          select: { providerPhoneNumberId: true },
         });
-
-        // The production sync must be observably blocked on the advisory lock
-        // held by this exact owner backend — this assertion fails if the lock
-        // is removed from the sync, and an unrelated suite's advisory waiter
-        // cannot satisfy it.
-        let blockedBackends = 0;
-        for (let attempt = 0; attempt < 40 && blockedBackends === 0; attempt += 1) {
-          const rows = await observer.$queryRaw<Array<{ blocked: bigint | number }>>`
-            SELECT count(*) AS blocked
-            FROM pg_stat_activity
-            WHERE wait_event_type = 'Lock'
-              AND wait_event = 'advisory'
-              AND ${ownerBackendPid} = ANY(pg_blocking_pids(pid))
-          `;
-          blockedBackends = Number(rows[0]?.blocked ?? 0);
-          if (blockedBackends === 0) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
-        }
-        expect(blockedBackends).toBeGreaterThan(0);
-
-        releaseOwner();
-        await ownerTransaction;
-        await expect(contender).resolves.toEqual({ syncedCount: 1 });
-
-        const owners = await prisma.hostedLinqLine.findMany({
-          where: { providerPhoneNumberId: providerId },
-          select: { phoneNumberLookupKey: true },
-        });
-        for (const owner of owners) {
-          createdLookupKeys.push(owner.phoneNumberLookupKey);
-        }
-        expect(owners).toHaveLength(1);
+        expect(new Set(rows.map((row) => row.providerPhoneNumberId)))
+          .toEqual(new Set(providerIds));
       } finally {
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
@@ -684,21 +743,22 @@ describe.skipIf(!runPostgresProof)(
           });
         }
         await prisma.hostedLinqLine.deleteMany({
-          where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+          where: { phoneNumberLookupKey: { in: proofLookupKeys } },
         });
         await prisma.$disconnect();
-        await observer.$disconnect();
       }
     });
 
-    it("rolls the whole snapshot application back when a line fails mid-way", async () => {
+    it("rolls the whole snapshot application back when the bulk statement fails", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const providerIdX = `pg-proof-line-${randomUUID()}`;
       const providerIdY = `pg-proof-line-${randomUUID()}`;
       const phoneA = buildSyntheticProofPhoneNumber();
       const phoneB = buildSyntheticProofPhoneNumber();
       const phoneC = buildSyntheticProofPhoneNumber();
-      const createdLookupKeys: string[] = [];
+      const proofLookupKeys = [phoneA, phoneB, phoneC].flatMap(
+        (phone) => createHostedPhoneLookupKeyReadCandidates(phone),
+      );
 
       const preexistingHeldRows = await prisma.hostedLinqLine.findMany({
         where: { providerPhoneNumberId: { not: null } },
@@ -717,12 +777,7 @@ describe.skipIf(!runPostgresProof)(
           providerPhoneNumberId: providerIdX,
           source: "provider",
         });
-        createdLookupKeys.push(rowA.phoneNumberLookupKey);
 
-        // Snapshot: new line C first, then X moved from A to B. Failing the
-        // second line's application (after the stale revoke and a full first
-        // line) must roll the entire replacement back.
-        providerStateControl.failOnCall = 2;
         vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
           phone_numbers: [
             {
@@ -740,21 +795,26 @@ describe.skipIf(!runPostgresProof)(
           ],
         }), { headers: { "content-type": "application/json" }, status: 200 })));
 
-        await expect(syncHostedLinqPhoneNumberInventory({
-          observedAt: new Date(),
-          prisma,
-        })).rejects.toThrow("injected mid-application failure");
+        await expect(prisma.$transaction(async (tx) =>
+          syncHostedLinqPhoneNumberInventory({
+            observedAt: new Date(),
+            prisma: {
+              $queryRaw: async (query: unknown) => {
+                await tx.$queryRaw(query as never);
+                throw new Error("injected post-statement failure");
+              },
+            } as never,
+          })
+        )).rejects.toThrow("injected post-statement failure");
 
         const rowAAfter = await prisma.hostedLinqLine.findUnique({
           where: { phoneNumberLookupKey: rowA.phoneNumberLookupKey },
           select: { providerPhoneNumberId: true },
         });
         expect(rowAAfter?.providerPhoneNumberId).toBe(providerIdX);
-        const strayRows = await prisma.hostedLinqLine.findMany({
+        expect(await prisma.hostedLinqLine.count({
           where: { providerPhoneNumberId: providerIdY },
-          select: { phoneNumberLookupKey: true },
-        });
-        expect(strayRows).toHaveLength(0);
+        })).toBe(0);
       } finally {
         vi.unstubAllGlobals();
         for (const heldRow of preexistingHeldRows) {
@@ -767,7 +827,7 @@ describe.skipIf(!runPostgresProof)(
           });
         }
         await prisma.hostedLinqLine.deleteMany({
-          where: { phoneNumberLookupKey: { in: createdLookupKeys } },
+          where: { phoneNumberLookupKey: { in: proofLookupKeys } },
         });
         await prisma.$disconnect();
       }
@@ -797,10 +857,8 @@ describe.skipIf(!runPostgresProof)(
       });
 
       try {
-        // The follower's transaction lifetime covers both the advisory-lock
-        // wait behind the leader's full apply and its own 250-line apply;
-        // both overlapping minute-zero crons must still finish without
-        // hitting the shared 15s transaction timeout (P2028).
+        // Two full authoritative replacements overlap without a process-wide
+        // lock; each still finishes within the default transaction budget.
         let fetchCalls = 0;
         vi.stubGlobal("fetch", vi.fn(async () => {
           fetchCalls += 1;
@@ -857,6 +915,73 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("updates a legacy configured row and fills its active-member limit in one bulk apply", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const phone = buildSyntheticProofPhoneNumber();
+      const configuredAt = new Date("2026-08-09T15:00:00.000Z");
+      const restoreKeyring = configureHostedContactPrivacyKeyringForTest({
+        currentVersion: "v1",
+        entries: TEST_KEYRING_ENTRIES,
+      });
+      let lookupKeys: string[] = [];
+
+      try {
+        const legacyLookupKey = createHostedPhoneLookupKey(phone);
+        if (!legacyLookupKey) {
+          throw new Error("Expected a legacy lookup key.");
+        }
+        await upsertHostedLinqLineForPhoneTx({
+          activeMemberLimit: null,
+          observedAt: new Date("2026-08-09T14:00:00.000Z"),
+          phoneNumber: phone,
+          prisma,
+          source: "configured",
+        });
+
+        process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = "v2";
+        clearHostedOnboardingEnvCache();
+        const currentLookupKey = createHostedPhoneLookupKey(phone);
+        lookupKeys = createHostedPhoneLookupKeyReadCandidates(phone);
+        if (!currentLookupKey || currentLookupKey === legacyLookupKey) {
+          throw new Error("Expected distinct current and legacy lookup keys.");
+        }
+
+        await expect(syncHostedLinqConfiguredLinesTx({
+          activeMemberLimit: 175,
+          observedAt: configuredAt,
+          phoneNumbers: [phone],
+          prisma,
+        })).resolves.toBeUndefined();
+
+        expect(await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: legacyLookupKey },
+          select: {
+            activeMemberLimit: true,
+            configuredAt: true,
+            phoneNumberHint: true,
+            source: true,
+          },
+        })).toEqual({
+          activeMemberLimit: 175,
+          configuredAt,
+          phoneNumberHint: `*** ${phone.slice(-4)}`,
+          source: "configured",
+        });
+        expect(await prisma.hostedLinqLine.findUnique({
+          where: { phoneNumberLookupKey: currentLookupKey },
+          select: { phoneNumberLookupKey: true },
+        })).toBeNull();
+      } finally {
+        restoreKeyring();
+        if (lookupKeys.length > 0) {
+          await prisma.hostedLinqLine.deleteMany({
+            where: { phoneNumberLookupKey: { in: lookupKeys } },
+          });
+        }
+        await prisma.$disconnect();
+      }
+    });
+
     it("races configured-line sync against inventory application in reverse phone order without deadlock", async () => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 8 });
       const providerIdOne = `pg-proof-line-${randomUUID()}`;
@@ -877,10 +1002,8 @@ describe.skipIf(!runPostgresProof)(
       });
 
       try {
-        // Both multi-phone writers touch the same two phones in opposite
-        // orders; without the shared inventory-wide first lock their
-        // per-phone advisory locks can invert and PostgreSQL aborts one
-        // participant as a deadlock.
+        // Both set-based writers touch the same two phones in opposite input
+        // orders. Deterministic row ordering must avoid a lock-order deadlock.
         vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
           phone_numbers: [
             {
@@ -899,11 +1022,11 @@ describe.skipIf(!runPostgresProof)(
         }), { headers: { "content-type": "application/json" }, status: 200 })));
 
         await expect(Promise.all([
-          prisma.$transaction((tx) => syncHostedLinqConfiguredLinesTx({
+          syncHostedLinqConfiguredLinesTx({
             activeMemberLimit: null,
             phoneNumbers: [phoneOne, phoneTwo],
-            prisma: tx,
-          })),
+            prisma,
+          }),
           syncHostedLinqPhoneNumberInventory({ observedAt: new Date(), prisma }),
         ])).resolves.toEqual([undefined, { syncedCount: 2 }]);
 
@@ -1013,4 +1136,40 @@ function isClearlyLocalPostgresUrl(value: string): boolean {
   const effectiveHost = (hostOverrides[0] || parsed.hostname).toLowerCase();
   return ["127.0.0.1", "::1", "[::1]", "localhost"].includes(effectiveHost)
     || effectiveHost.startsWith("/");
+}
+
+function configureHostedContactPrivacyKeyringForTest(input: {
+  currentVersion: string;
+  entries: Record<string, string>;
+}): () => void {
+  const previousKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
+  const previousCurrentVersion = process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
+
+  process.env.HOSTED_CONTACT_PRIVACY_KEYS = Object.entries(input.entries)
+    .map(([version, key]) => `${version}:${key}`)
+    .join(",");
+  process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION = input.currentVersion;
+  clearHostedOnboardingEnvCache();
+
+  return () => {
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_KEYS", previousKeys);
+    restoreEnvValue("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", previousCurrentVersion);
+    clearHostedOnboardingEnvCache();
+  };
+}
+
+function clearHostedOnboardingEnvCache(): void {
+  delete (
+    globalThis as typeof globalThis & {
+      __murphHostedOnboardingEnv?: unknown;
+    }
+  ).__murphHostedOnboardingEnv;
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
 }

@@ -1,10 +1,22 @@
 import type {
   AssistantHostedImageGenerationResult,
 } from './execution-context.js'
-import { readAssistantInputEvent } from './input-store.js'
+import {
+  readAssistantInputEvent,
+  type AssistantInputSourceRef,
+} from './input-store.js'
 
 export const ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA =
   'murph.hosted-image-completion.v1'
+
+export function isAssistantHostedImageCompletionEvent(event: {
+  sourceRef: AssistantInputSourceRef
+}): boolean {
+  return event.sourceRef.kind === 'hosted-mailbox' &&
+    event.sourceRef.lane === 'system' &&
+    event.sourceRef.payloadSchema === ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA &&
+    event.sourceRef.wakeSchema === ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA
+}
 
 const HOSTED_IMAGE_RESULT_OPEN = '<hosted_image_result>'
 const HOSTED_IMAGE_RESULT_CLOSE = '</hosted_image_result>'
@@ -21,6 +33,12 @@ export interface AssistantHostedImageCompletion {
   originAssistantInputId: string
   originAssistantInputIdExact: boolean
   sizeBytes: number
+}
+
+export interface AssistantHostedImageCompletionOrigin {
+  originAssistantInputId: string
+  originAssistantInputIdExact: boolean
+  status: 'failed' | 'ready'
 }
 
 export function renderAssistantHostedImageCompletionSystemText(input: {
@@ -79,6 +97,43 @@ function normalizeHostedImageFailureDiagnostic(
 export function parseAssistantHostedImageCompletionText(
   text: string,
 ): AssistantHostedImageCompletion | null {
+  const parsed = parseAssistantHostedImageCompletionEnvelope(text)
+  if (!parsed || parsed.origin.status !== 'ready') {
+    return null
+  }
+  const { origin, value } = parsed
+  const savedImageRef = readString(value.savedImageRef)
+  const media = Array.isArray(value.media) && value.media.length === 1
+    ? readVaultImage(value.media[0])
+    : null
+  if (
+    !savedImageRef
+    || !media
+    || media.ref !== savedImageRef
+  ) {
+    return null
+  }
+
+  return {
+    contentType: media.contentType,
+    imageRef: media.ref,
+    imageSha256: media.sha256,
+    originAssistantInputId: origin.originAssistantInputId,
+    originAssistantInputIdExact: origin.originAssistantInputIdExact,
+    sizeBytes: media.sizeBytes,
+  }
+}
+
+export function parseAssistantHostedImageCompletionOriginText(
+  text: string,
+): AssistantHostedImageCompletionOrigin | null {
+  return parseAssistantHostedImageCompletionEnvelope(text)?.origin ?? null
+}
+
+function parseAssistantHostedImageCompletionEnvelope(text: string): {
+  origin: AssistantHostedImageCompletionOrigin
+  value: Record<string, unknown>
+} | null {
   const openIndex = text.indexOf(HOSTED_IMAGE_RESULT_OPEN)
   const closeIndex = text.indexOf(
     HOSTED_IMAGE_RESULT_CLOSE,
@@ -97,31 +152,27 @@ export function parseAssistantHostedImageCompletionText(
   } catch {
     return null
   }
-  if (!isObject(value) || value.status !== 'ready') {
+  if (
+    !isObject(value)
+    || (value.status !== 'ready' && value.status !== 'failed')
+  ) {
     return null
   }
   const originAssistantInputId = readString(value.originAssistantInputId)
-  const savedImageRef = readString(value.savedImageRef)
-  const media = Array.isArray(value.media) && value.media.length === 1
-    ? readVaultImage(value.media[0])
-    : null
   if (
     !originAssistantInputId
     || !ACCEPTED_INPUT_ID_PATTERN.test(originAssistantInputId)
-    || !savedImageRef
-    || !media
-    || media.ref !== savedImageRef
   ) {
     return null
   }
 
   return {
-    contentType: media.contentType,
-    imageRef: media.ref,
-    imageSha256: media.sha256,
-    originAssistantInputId,
-    originAssistantInputIdExact: value.originAssistantInputIdExact === true,
-    sizeBytes: media.sizeBytes,
+    origin: {
+      originAssistantInputId,
+      originAssistantInputIdExact: value.originAssistantInputIdExact === true,
+      status: value.status,
+    },
+    value,
   }
 }
 
@@ -138,10 +189,7 @@ export async function readAssistantHostedImageCompletion(input: {
   })
   if (
     !event
-    || event.sourceRef.kind !== 'hosted-mailbox'
-    || event.sourceRef.lane !== 'system'
-    || event.sourceRef.payloadSchema !== ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA
-    || event.sourceRef.wakeSchema !== ASSISTANT_HOSTED_IMAGE_COMPLETION_SCHEMA
+    || !isAssistantHostedImageCompletionEvent(event)
   ) {
     return null
   }

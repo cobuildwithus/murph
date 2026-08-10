@@ -19,7 +19,7 @@ export function appendLegacyGroupNewsletterSkillInstructions(
   }
   return [
     'Compatibility instructions for a newsletter automation saved before newsletters became skill-authored group automations:',
-    '- Open and follow `$MURPH_SKILLS_ROOT/group-newsletter/SKILL.md` before doing anything else.',
+    '- Read and follow the group-newsletter skill before doing anything else.',
     '- Treat the saved configuration below as the requested recipe. The skill owns execution; the runtime does not append a newsletter contract.',
     '- Use only the ordinary group/shared-data and group-email actions described by that skill.',
     '',
