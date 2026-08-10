@@ -1,8 +1,8 @@
 # Complete PR 1381 with Codex 0.147.0 and ReviewGPT
 
-Status: active
+Status: completed
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -154,10 +154,38 @@ Updated: 2026-08-09
   focused failing test reproduced both Luna-to-Sol and Sol-to-Luna
   misattribution. The correction derives served-model identity and token
   pricing only from a post-`turn/started` canonical reroute and preserves the
-  reused-process stale-event fence; focused verification and a new exact-head
-  review remain pending.
+  reused-process stale-event fence. Focused verification passes the six
+  reroute-attribution, pricing, and warm-process fence cases, both affected
+  package typechecks, and the allowance-rate proof for both reroute directions.
 - Exact-head GitHub Actions also exposed an inherited `main` regression from
   the newly added static Family setup route: the fail-closed Vercel telemetry
   allowlist had not added that literal pathname. The route and failing contract
   both predate this remediation; the smallest CI repair adds the missing
   sanitized static pathname without changing the page or telemetry payload.
+- Final ReviewGPT round 3 audited the full 74-file snapshot at
+  `78f5f0501542603d9707c4a5b809b7711f59e97a` after the behavior-changing
+  remediation and returned `ROUND_OUTCOME: PASS` with `REVIEW_COMPLETE` and no
+  findings. The managed response sidecar verified the requested
+  `gpt-5.6-sol` review target as response slug `gpt-5-6-pro`; the accepted turn
+  ran for roughly 57 minutes on the Mountain recovery lane after the prior
+  thread failed attachment staging before send.
+- All required GitHub Actions passed on that exact reviewed head, including
+  release build/typecheck, app verification, assistant/CLI/platform coverage,
+  fixture coverage, CLI host matrices, billing, sandbox, artifact, and frontend
+  checks. After review, current `main` was merged without conflicts; its only
+  new source delta was the already-reviewed upstream runner-bundle repair, so
+  the ReviewGPT baseline remains valid and required CI owns the final pushed
+  merge/plan-closure head.
+- Post-merge local proof passed the exact six-case reroute slice, assistant and
+  Cloudflare typechecks, the full Web suite (9,320 passed, 357 skipped), and the
+  full Cloudflare node suite (2,360 passed, two skipped). An accidentally
+  over-expanded parallel assistant run reached 3,370 passing tests with no
+  assertion failure before one worker exceeded Node's 4 GB heap; the isolated
+  affected slice then passed under an explicit heap budget, while the reviewed
+  head's assistant coverage job remained green.
+- Final parent inspection found no unresolved protocol, attribution, privacy,
+  or state-consistency issue and confirmed that the rejected custom-inference
+  recovery compatibility path remains deleted. The PR is ready for its final
+  plan-closure push and exact-head CI gate; deployment remains an operator-owned
+  paired runner/Worker/Web rollout rather than part of this task.
+Completed: 2026-08-10
