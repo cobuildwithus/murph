@@ -100,13 +100,15 @@ or advance the final gate's baseline.
 
 Run the preliminary preset with exact-head packaging:
 
+The repo config defaults response capture to 180 minutes. The workflow commands
+inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
+
 ```bash
 REVIEW_GPT_PR_URL=<pr-url-or-number> \
 REVIEW_GPT_REVIEW_PHASE=preliminary \
 REVIEW_GPT_RENDERED_EVIDENCE_PATHS=$'audit-packages/<desktop>.png\naudit-packages/<mobile>.png' \
   pnpm review:gpt completion-specialists \
     --wait \
-    --wait-timeout 120m \
     --response-marker SPECIALIST_REVIEW_COMPLETE \
     --response-file audit-packages/pr-<number>-specialists.md \
     --prompt "Preliminary specialist review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). Apply the product-experience, prompt, frontend, and coverage lenses declared in the PR body."
@@ -278,7 +280,6 @@ requires it or the current user explicitly asks for it.
    REVIEW_GPT_ROUND_NUMBER=1 \
      pnpm review:gpt pr-review \
        --wait \
-       --wait-timeout 120m \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
        --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: $(git rev-parse HEAD). Round 1 full-patch audit. Use the PR body as the intent contract and immutable first-review change-shape baseline."
@@ -294,7 +295,6 @@ requires it or the current user explicitly asks for it.
    REVIEW_GPT_THREAD_URL=<current-context-chatgpt-url> \
      pnpm review:gpt pr-review \
        --wait \
-       --wait-timeout 120m \
        --response-marker REVIEW_COMPLETE \
        --response-file audit-packages/pr-<number>-round-<k>.md \
        --prompt "Review target: <pr-url-or-number>. Checked commit: $(git rev-parse --short HEAD). First-reviewed head: <round-1-full-sha>. Substantive round <k>; follow review-round.json for full-audit versus correction scope. Prior findings, dispositions, landed fixes, and mechanisms: <compact-summary>. Retrospective status: <not-required-or-current-decision>."
