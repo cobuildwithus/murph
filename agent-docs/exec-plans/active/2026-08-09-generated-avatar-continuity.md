@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — round 10 findings remediated locally; round 11 candidate verification
+Status: active — round 11 diagnostic finding remediated; valid round 11 and final base reconciliation pending
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -544,3 +544,23 @@ Updated: 2026-08-10
   1,596,168-byte runner entry, 7,727,794-byte static boot closure, and
   9,619,462-byte runner total without a ratchet change. The full Web typecheck,
   docs drift, whitespace, and candidate privacy/static checks pass.
+- A latest-package ReviewGPT 0.5.124 round-11 attempt ran for roughly 66 minutes
+  against exact pushed head `409d0da7baba`. The wrapper verified requested
+  `gpt-5.6-sol` and response `gpt-5-6-pro`, but the response emitted unsupported
+  `ROUND_OUTCOME: FAIL` rather than an allowed final-gate token, so it does not
+  advance the substantive counter or satisfy the merge gate. Its single
+  diagnostic finding was nevertheless reproduced against the production turn
+  runner: the completion restriction denied Murph dynamic effects while the
+  provider attempt still inherited the foreground native Codex sandbox and
+  capability set.
+- The accepted correction reuses the turn runner's existing read-only sandbox
+  and native-capabilities-disabled thread config only while the trusted image
+  completion scope is current. It deliberately preserves native resume, the
+  hosted tool context, workspace materializer, progress delivery, private-image
+  requirement, and exact media or physical-note dynamic paths. When a later
+  accepted foreground input is already current, the existing scope reader
+  restores the ordinary native route. No owner, queue, state machine,
+  compatibility path, or alternate authority source was added. The provider-
+  boundary regression failed before the source correction with
+  `danger-full-access` and no thread config, then passed with all 23 focused
+  tests.

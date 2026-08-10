@@ -494,9 +494,21 @@ async function executeAssistantCodexAttempt(input: {
     const readOnlyAutomationTurn =
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
-    const nativeCapabilitiesRestrictedTurn =
+    const hostedRuntimeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
+    const readCurrentHostedImageCompletionEffectScope =
+      executionPlan.hostedToolContext
+        ?.currentHostedImageCompletionEffectScope
+    const hostedImageCompletionNativeCapabilitiesRestrictedTurn =
+      executionPlan.input.hostedImageCompletionEffectRestriction != null &&
+      (
+        readCurrentHostedImageCompletionEffectScope == null ||
+        readCurrentHostedImageCompletionEffectScope() !== null
+      )
+    const nativeCapabilitiesRestrictedTurn =
+      hostedRuntimeCapabilitiesRestrictedTurn ||
+      hostedImageCompletionNativeCapabilitiesRestrictedTurn
     const creativeNotificationSongTurn =
       executionPlan.profile.promptProfile === 'creative-notification' &&
       executionPlan.profile.toolProfile === 'provider-turn'
@@ -585,11 +597,11 @@ async function executeAssistantCodexAttempt(input: {
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         hostedToolContext:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
         materializeWorkspaceArtifacts:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onboardingFirstReadCompletionTransitionAvailable:
@@ -628,7 +640,7 @@ async function executeAssistantCodexAttempt(input: {
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
           ? null
           : executionPlan.progressDelivery ?? null,
         permissions:
@@ -654,7 +666,7 @@ async function executeAssistantCodexAttempt(input: {
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
-          !nativeCapabilitiesRestrictedTurn &&
+          !hostedRuntimeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&
           Boolean(executionPlan.executionContext?.hosted),
         runtimeWorkspaceRoots: restrictedOneShotTurn
