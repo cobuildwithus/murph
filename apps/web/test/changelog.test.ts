@@ -276,11 +276,20 @@ describe("changelog registry", () => {
     );
   });
 
-  it("keeps the August 7 through August 9 feature claims bounded", () => {
+  it("keeps the August 7 through August 10 feature claims bounded", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
+      sourcePullRequests: [1546],
+      summary: expect.stringContaining("preserves that local time"),
+      details: expect.stringContaining("next deliverable occurrence"),
+      tryIt: {
+        label: "Schedule a local-time reminder",
+        prompt: "Remind me every day at 9 PM Central to wind down.",
+      },
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -481,7 +490,10 @@ describe("changelog registry", () => {
     ).toEqual([
       {
         id: "2026-08-10",
-        itemIds: ["personal-patterns"],
+        itemIds: [
+          "personal-patterns",
+          "reminders-keep-requested-timezone",
+        ],
       },
       {
         id: "2026-08-09",

@@ -15095,9 +15095,16 @@ describe('assistant codex runtime', () => {
         action: 'patch' as const,
         automationId: 'automation-hidden',
         created: false,
+        effectiveTimeZone: 'America/New_York',
         lookupId: 'hidden',
+        nextOccurrenceAt: null,
         routeBinding: 'preserved' as const,
+        schedule: {
+          kind: 'dailyLocal' as const,
+          localTime: '09:00',
+        },
         status: 'paused' as const,
+        timingVerified: true,
       })),
     }
 

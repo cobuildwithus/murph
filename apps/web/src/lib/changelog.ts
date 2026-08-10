@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns connect actions with next-day recovery",
+    title: "Patterns and reminders that keep their local time",
     summary:
-      "Murph can now compare repeated activities and logged experiment actions with next-day sleep and recovery in one private view.",
+      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
     items: [
       {
         id: "personal-patterns",
@@ -89,6 +89,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/patterns",
           label: "View your patterns",
+        },
+      },
+      {
+        id: "reminders-keep-requested-timezone",
+        kind: "improvement",
+        priority: 4,
+        title: "Reminders keep the time you asked for",
+        summary:
+          "When you schedule a recurring reminder in a named timezone, Murph now preserves that local time through saving and later edits.",
+        details:
+          "The confirmation comes from the saved schedule and scheduler's next deliverable occurrence. If timing cannot be verified, or an old one-time reminder can no longer fire, Murph says so and offers a bounded recovery instead of inventing a time.",
+        relevanceTags: ["reminders", "automations", "timezones", "reliability"],
+        sourcePullRequests: [1546],
+        tryIt: {
+          label: "Schedule a local-time reminder",
+          prompt: "Remind me every day at 9 PM Central to wind down.",
         },
       },
     ],

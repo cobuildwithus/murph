@@ -59,7 +59,9 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Patterns connect actions with next-day recovery");
+    expect(markup).toContain(
+      "Patterns and reminders that keep their local time",
+    );
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
@@ -148,6 +150,12 @@ describe("ChangelogPage", () => {
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
       expect.arrayContaining([
+        {
+          message: {
+            body: "Remind me every day at 9 PM Central to wind down.",
+            subject: "Try it: Reminders keep the time you asked for",
+          },
+        },
         {
           message: {
             body: "Look at the images or video in this X post and tell me what they show: [paste X post URL]",

@@ -1383,7 +1383,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     ])
   })
 
-  it('preserves the signup schedule minute and pending first occurrence during same-pass reconciliation', async () => {
+  it('preserves the signup schedule minute and pending first occurrence without a redundant reconciliation write', async () => {
     const vaultRoot = await createVaultRoot()
     const vault = await loadVault({ vaultRoot })
     const vaultStableKey = vault.metadata.vaultId ?? 'vault-fallback'
@@ -1428,7 +1428,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toEqual({
       created: 5,
       skipped: 0,
-      updated: 1,
+      updated: 0,
     })
 
     await expect(showAutomation({
