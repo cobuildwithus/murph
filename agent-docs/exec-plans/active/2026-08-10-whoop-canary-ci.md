@@ -25,7 +25,8 @@ Updated: 2026-08-10
 ## Scope
 
 - In scope: `.github/workflows/junction-wearable-canary.yml`, its focused
-  workflow contract test, the CI/verification owner docs, and operational
+  workflow contract test, the CI/verification owner docs, the ReviewGPT audit
+  manifest needed to inspect the workflow's version source, and operational
   inspection of the canary queue.
 - Out of scope: provider implementation, production Junction credentials,
   GitHub secret values, Oura browser automation, and weakening protected-main
@@ -89,3 +90,7 @@ Updated: 2026-08-10
   failure boundary.
 - Confirmed ReviewGPT dependency: npm `latest`, the manifest/lockfile, and the
   installed package all resolve to `@cobuild/review-gpt@0.5.124`.
+- Preliminary ReviewGPT attempt 1 was tooling-invalid because the guarded ZIP
+  omitted `Dockerfile.cloudflare-hosted-runner-base`. The audit manifest now
+  includes that root version owner; retry the same preliminary pass after the
+  corrected exact head is pushed.
