@@ -53,6 +53,8 @@ describe('assistant manual provider export guidance', () => {
     const connectedAppsSkill = ASSISTANT_SKILLS.find(
       (candidate) => candidate.slug === 'connected-apps',
     )
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+    const normalizedReference = reference.replace(/\s+/gu, ' ')
 
     expect(connectedAppsSkill).toBeTruthy()
     expect(connectedAppsSkill?.triggerHint).toContain(
@@ -65,15 +67,12 @@ describe('assistant manual provider export guidance', () => {
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
     )
     expect(skill).toContain('references/provider-data-exports.md')
-    expect(skill).toContain(
+    expect(normalizedSkill).toContain(
       'manual export or one-time import rather than a live sync',
     )
-    expect(skill).toContain(
+    expect(normalizedSkill).toContain(
       'does not make that service a connected-app provider',
     )
-
-    const normalizedSkill = skill.replace(/\s+/gu, ' ')
-    const normalizedReference = reference.replace(/\s+/gu, ' ')
 
     expect(normalizedSkill).toContain(
       'verified fallback routes for Function Health, Livongo/Teladoc Condition Management, Strong, and Hevy',
