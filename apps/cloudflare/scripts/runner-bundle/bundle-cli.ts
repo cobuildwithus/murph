@@ -71,6 +71,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // baseline + ~25-30% headroom. If a violation fires, investigate the listed
 // largest inputs first; only raise the budget deliberately for growth that
 // is understood and intended.
+// Personal Patterns pushed uncompressed syntax to 9,000,920B on 2026-08-10.
+// esbuild syntax minification reduced the exact bundle to 8,635,698B without
+// changing identifiers, import boundaries, or budgets.
 const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_000;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
@@ -125,6 +128,7 @@ export async function bundleInstalledVaultCliBinary(
     format: "esm",
     logLevel: "error",
     metafile: true,
+    minifySyntax: true,
     outdir: bundleOutDir,
     platform: "node",
     splitting: true,
