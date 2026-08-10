@@ -2634,6 +2634,42 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
+  it("opens a fresh paid allowance when an exhausted Starter member begins paying", async () => {
+    const paidPeriodStart = new Date("2026-08-09T12:00:00.000Z");
+    const paidPeriodEnd = new Date("2026-09-09T12:00:00.000Z");
+    const now = new Date("2026-08-09T12:01:00.000Z");
+    const prisma = createGatePrisma({
+      billingPhase: "paid",
+      billingPlanCode: "launch_monthly",
+      checkoutOffer: "standard",
+      findUniquePeriod: null,
+      periodEnd: paidPeriodEnd,
+      periodStart: paidPeriodStart,
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+      usageCreditLedgerVersion: 2n,
+    });
+
+    await expect(reconcileHostedAiUsageGateForBillingModeChangeTx({
+      memberId: "member_123",
+      now,
+      tx: prisma as never,
+    })).resolves.toBeUndefined();
+
+    expect(prisma.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith({
+      data: {
+        billingPlanCode: "launch_monthly",
+        highestBillingPlanCode: "launch_monthly",
+        limitUsdMicros: DIRECT_PULSE_ALLOWANCE_USD_MICROS,
+        memberId: "member_123",
+        periodEnd: paidPeriodEnd,
+        periodStart: paidPeriodStart,
+        spentUsdMicros: 0n,
+      },
+      skipDuplicates: true,
+    });
+  });
+
   it("allows Family-sponsored members regardless of legacy direct trial timestamps", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",

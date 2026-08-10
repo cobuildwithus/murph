@@ -75,7 +75,13 @@ A starter member may begin an eligible paid direct plan through the existing
 subscription quote and Stripe checkout owners. Paid access is positive only
 from accepted paid Stripe evidence; starter activation cannot imitate a paid
 phase. Existing starter, purchase, and referral credit remains ordinary credit
-and is not deleted merely because a subscription begins.
+and is not deleted merely because a subscription begins. The first accepted
+subscription or positive-invoice event that changes the locked member snapshot
+from no direct paid billing to direct paid billing reconciles the ordinary paid
+usage gate and enters the existing retry-owned runtime-recheck path. Either
+provider-event ordering therefore resumes already accepted work after Starter
+exhaustion; the second event and later replays observe paid state and do not
+repeat the transition.
 
 Legacy Stripe trial subscriptions may still emit delayed events after rollout.
 The retained compatibility code may identify, cancel, or reconcile those exact
@@ -164,7 +170,10 @@ After deploy, verify:
   deterministic-debit history and the correct remaining balance;
 - elapsed historical trial dates do not block execution;
 - starter exhaustion produces the starter recovery copy;
-- paid checkout still activates only from accepted Stripe paid evidence; and
+- paid checkout still activates only from accepted Stripe paid evidence and
+  resumes already accepted Starter-exhausted work without another inbound;
+- subscription-first and invoice-first paid-event orderings each produce one
+  retry-owned runtime recheck, while replay produces none; and
 - delayed legacy trial events cannot recreate or extend free access.
 
 Compatibility is removable only when all three conditions hold: old trial

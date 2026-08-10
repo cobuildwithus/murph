@@ -32,9 +32,7 @@ import {
   parseHostedBillingPlanCode,
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
-import {
-  isHostedAccessBlockedBillingStatus,
-} from "./entitlement";
+import { isHostedAccessBlockedBillingStatus } from "./entitlement";
 import { HostedOnboardingError, hostedOnboardingError } from "./errors";
 import {
   activateHostedMemberForPositiveSourceTx,
@@ -1305,6 +1303,7 @@ export async function applyStripeSubscriptionUpdated(
   const runtimeRecheckMemberId = await reconcileHostedMemberUsagePlanTransitionTx({
     dispatchContext,
     memberId: member.core.id,
+    previousMember: member,
     tx: prisma,
     updatedMember,
   });
@@ -1444,6 +1443,7 @@ export async function applyStripeInvoicePaid(
   const runtimeRecheckMemberId = await reconcileHostedMemberUsagePlanTransitionTx({
     dispatchContext,
     memberId: member.core.id,
+    previousMember: member,
     tx: prisma,
     updatedMember,
   });
@@ -1619,6 +1619,7 @@ function buildEmptyHostedStripeActivationOutcome(): HostedStripeActivationOutcom
 async function reconcileHostedMemberUsagePlanTransitionTx(input: {
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt">;
   memberId: string;
+  previousMember: HostedMemberBillingSnapshot;
   tx: Prisma.TransactionClient;
   updatedMember: HostedMemberBillingSnapshot | null;
 }): Promise<string | null> {
@@ -1627,11 +1628,14 @@ async function reconcileHostedMemberUsagePlanTransitionTx(input: {
     prisma: input.tx,
   });
   const transitionKind = currentMember?.billingRef?.usagePlanTransitionKind;
-  if (
-    (transitionKind !== "plan_upgrade" && transitionKind !== "trial_conversion")
-    || currentMember?.billingRef?.usagePlanTransitionAt?.getTime()
-      !== input.dispatchContext.eventCreatedAt.getTime()
-  ) {
+  const isCurrentUsagePlanTransition =
+    (transitionKind === "plan_upgrade" || transitionKind === "trial_conversion")
+    && currentMember?.billingRef?.usagePlanTransitionAt?.getTime()
+      === input.dispatchContext.eventCreatedAt.getTime();
+  const startedDirectPaidBilling =
+    input.previousMember.billingRef?.currentBillingPhase !== "paid"
+    && currentMember?.billingRef?.currentBillingPhase === "paid";
+  if (!isCurrentUsagePlanTransition && !startedDirectPaidBilling) {
     return null;
   }
 

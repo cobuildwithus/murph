@@ -1862,12 +1862,91 @@ describe("hosted onboarding stripe billing events", () => {
       });
   });
 
+  it.each([
+    ["subscription-first", ["subscription", "invoice"]],
+    ["invoice-first", ["invoice", "subscription"]],
+  ] as const)(
+    "wakes a Starter member once when direct paid billing begins %s",
+    async (_label, eventOrder) => {
+      const starterMember = makeMemberSnapshot({
+        billingStatus: HostedBillingStatus.active,
+        billingRef: {
+          currentBillingPhase: null,
+          currentCheckoutOffer: "standard",
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+        },
+      });
+      const paidMember = makeMemberSnapshot({
+        billingStatus: HostedBillingStatus.active,
+        billingRef: {
+          currentBillingPhase: "paid",
+          currentBillingPlanCode: "launch_monthly",
+          currentCheckoutOffer: "standard",
+          memberId: "member_123",
+          stripeCustomerId: "cus_123",
+          stripeSubscriptionId: "sub_123",
+        },
+      });
+      let currentMember = starterMember;
+      mocks.findMemberForStripeInvoice.mockImplementation(async () => currentMember);
+      mocks.findMemberForStripeSubscription.mockImplementation(async () => currentMember);
+      mocks.writeHostedMemberStripeBillingTx.mockImplementation(async () => {
+        currentMember = paidMember;
+        return paidMember;
+      });
+
+      const runtimeRechecks: string[][] = [];
+      for (const [index, eventType] of eventOrder.entries()) {
+        const eventCreatedAt = new Date(`2026-08-09T12:0${index}:00.000Z`);
+        const outcome = eventType === "subscription"
+          ? await applyStripeSubscriptionUpdated(
+              makeStripeSubscription({ status: "active" }),
+              {
+                eventCreatedAt,
+                occurredAt: eventCreatedAt.toISOString(),
+                sourceEventId: `evt_starter_paid_subscription_${index}`,
+                sourceType: "stripe.customer.subscription.updated",
+              },
+              {} as never,
+            )
+          : await applyStripeInvoicePaid(
+              makeStripeInvoice({
+                billingReason: "subscription_create",
+                id: `in_starter_paid_${index}`,
+              }),
+              {
+                eventCreatedAt,
+                occurredAt: eventCreatedAt.toISOString(),
+                sourceEventId: `evt_starter_paid_invoice_${index}`,
+                sourceType: "stripe.invoice.paid",
+              },
+              {} as never,
+              HostedBillingStatus.active,
+              makeStripeSubscription({ status: "active" }),
+            );
+        runtimeRechecks.push(outcome.runtimeRecheckMemberIds ?? []);
+      }
+
+      expect(runtimeRechecks).toEqual([["member_123"], []]);
+      expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx)
+        .toHaveBeenCalledOnce();
+      expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx)
+        .toHaveBeenCalledWith({
+          memberId: "member_123",
+          now: new Date("2026-08-09T12:00:00.000Z"),
+          tx: {},
+        });
+    },
+  );
+
   it("does not replay a trial-conversion wake for a different event timestamp", async () => {
     const eventCreatedAt = new Date("2026-04-19T00:00:00.000Z");
     mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
       billingStatus: HostedBillingStatus.active,
       billingRef: {
-        currentBillingPhase: "trial",
+        currentBillingPhase: "paid",
         currentBillingPlanCode: "launch_monthly",
         currentCheckoutOffer: "pulse_trial_7d",
         memberId: "member_123",
