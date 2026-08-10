@@ -1153,8 +1153,10 @@ test("canonical event availability collapses blood-test tombstones", async () =>
   });
   assert.deepEqual(summary, {
     interrupted: false,
+    latestBloodPressureMeasurementDayKey: null,
     latestBloodPressureMeasurementOccurredAt: null,
     latestBloodTestOccurredAt: older.record.occurredAt,
+    latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
   });
 });
@@ -1195,8 +1197,10 @@ test("canonical event availability collapses revisions before filtering by kind"
   });
   assert.deepEqual(summary, {
     interrupted: false,
+    latestBloodPressureMeasurementDayKey: null,
     latestBloodPressureMeasurementOccurredAt: null,
     latestBloodTestOccurredAt: null,
+    latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
   });
 });
@@ -1243,8 +1247,10 @@ test("canonical event availability stops between JSONL records", async () => {
 
   assert.deepEqual(interrupted, {
     interrupted: true,
+    latestBloodPressureMeasurementDayKey: null,
     latestBloodPressureMeasurementOccurredAt: null,
     latestBloodTestOccurredAt: null,
+    latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
   });
   assert.equal(continuationChecks, walkContinuationChecks + 3);

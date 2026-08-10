@@ -119,8 +119,10 @@ export interface ReadCanonicalEventAvailabilityInput {
 
 export interface CanonicalEventAvailabilitySummary {
   interrupted: boolean;
+  latestBloodPressureMeasurementDayKey: string | null;
   latestBloodPressureMeasurementOccurredAt: string | null;
   latestBloodTestOccurredAt: string | null;
+  latestBodyMeasurementDayKey: string | null;
   latestBodyMeasurementOccurredAt: string | null;
 }
 
@@ -1347,22 +1349,28 @@ export async function readCanonicalEventAvailabilityInterruptible(
       signal: input.signal,
       vaultRoot: input.vaultRoot,
       visit: (shardRecord) => {
-        const parsed = safeParseContract(eventRecordSchema, shardRecord);
-        if (!parsed.success) {
-          if (
-            isPlainRecord(shardRecord)
-            && typeof shardRecord.kind === "string"
-            && CANONICAL_AVAILABILITY_EVENT_KINDS.has(shardRecord.kind)
-          ) {
-            throw new VaultError(
-              "EVENT_CONTRACT_INVALID",
-              "Stored availability event record is invalid.",
-              { errors: parsed.errors },
-            );
+        const storedHistoryRecord = parseStoredHistoryEvent(shardRecord);
+        let record: EventRecord;
+        if (storedHistoryRecord) {
+          record = storedHistoryRecord;
+        } else {
+          const parsed = safeParseContract(eventRecordSchema, shardRecord);
+          if (!parsed.success) {
+            if (
+              isPlainRecord(shardRecord)
+              && typeof shardRecord.kind === "string"
+              && CANONICAL_AVAILABILITY_EVENT_KINDS.has(shardRecord.kind)
+            ) {
+              throw new VaultError(
+                "EVENT_CONTRACT_INVALID",
+                "Stored availability event record is invalid.",
+                { errors: parsed.errors },
+              );
+            }
+            return;
           }
-          return;
+          record = parsed.data;
         }
-        const record = parsed.data;
 
         const candidate = { relativePath, record };
         const current = latestByEventId.get(record.id);
@@ -1376,8 +1384,10 @@ export async function readCanonicalEventAvailabilityInterruptible(
     }
   }
 
+  let latestBloodPressureMeasurementDayKey: string | null = null;
   let latestBloodPressureMeasurementOccurredAt: string | null = null;
   let latestBloodTestOccurredAt: string | null = null;
+  let latestBodyMeasurementDayKey: string | null = null;
   let latestBodyMeasurementOccurredAt: string | null = null;
   for (const { record } of latestByEventId.values()) {
     if (!shouldContinue()) {
@@ -1405,6 +1415,7 @@ export async function readCanonicalEventAvailabilityInterruptible(
       )
     ) {
       latestBodyMeasurementOccurredAt = record.occurredAt;
+      latestBodyMeasurementDayKey = record.dayKey;
     }
     if (
       canonicalEventContainsPairedBloodPressure(record)
@@ -1414,20 +1425,28 @@ export async function readCanonicalEventAvailabilityInterruptible(
       )
     ) {
       latestBloodPressureMeasurementOccurredAt = record.occurredAt;
+      latestBloodPressureMeasurementDayKey = record.dayKey;
     }
   }
 
   return {
     interrupted: false,
+    latestBloodPressureMeasurementDayKey,
     latestBloodPressureMeasurementOccurredAt,
     latestBloodTestOccurredAt,
+    latestBodyMeasurementDayKey,
     latestBodyMeasurementOccurredAt,
   };
 }
 
 function canonicalEventContainsBodyMeasurement(record: EventRecord): boolean {
   if (record.kind === "observation") {
-    return CANONICAL_BODY_MEASUREMENT_METRICS.has(record.metric);
+    return CANONICAL_BODY_MEASUREMENT_METRICS.has(record.metric)
+      && record.externalRef !== undefined
+      && (
+        record.observationGrain === undefined
+        || record.observationGrain === "summary"
+      );
   }
   if (record.kind === "measurement") {
     return record.measurements.some((measurement) =>
@@ -1454,8 +1473,10 @@ function canonicalEventContainsPairedBloodPressure(record: EventRecord): boolean
 function interruptedCanonicalEventAvailability(): CanonicalEventAvailabilitySummary {
   return {
     interrupted: true,
+    latestBloodPressureMeasurementDayKey: null,
     latestBloodPressureMeasurementOccurredAt: null,
     latestBloodTestOccurredAt: null,
+    latestBodyMeasurementDayKey: null,
     latestBodyMeasurementOccurredAt: null,
   };
 }

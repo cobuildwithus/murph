@@ -762,14 +762,16 @@ async function collectAssistantSnapshotCanonicalEventCoverage(input: {
 
   return {
     bloodTestsPresent: summary.latestBloodTestOccurredAt !== null,
-    latestBloodPressureMeasurementDate: canonicalEventDate(
-      summary.latestBloodPressureMeasurementOccurredAt,
-    ),
+    latestBloodPressureMeasurementDate:
+      canonicalEventDayKey(summary.latestBloodPressureMeasurementDayKey),
     latestBloodTestDate: canonicalEventDate(summary.latestBloodTestOccurredAt),
-    latestBodyMeasurementDate: canonicalEventDate(
-      summary.latestBodyMeasurementOccurredAt,
-    ),
+    latestBodyMeasurementDate:
+      canonicalEventDayKey(summary.latestBodyMeasurementDayKey),
   }
+}
+
+function canonicalEventDayKey(dayKey: string | null): string | null {
+  return dayKey && isStrictIsoDate(dayKey) ? dayKey : null
 }
 
 function canonicalEventDate(timestamp: string | null): string | null {

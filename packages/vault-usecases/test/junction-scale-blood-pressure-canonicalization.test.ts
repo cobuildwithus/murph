@@ -7,6 +7,9 @@ import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { listMetricPointsBatch } from '@murphai/query'
 import { expect, test } from 'vitest'
 
+import { listMeasurementRecords } from '../src/usecases/measurement-read.js'
+import { createIntegratedVaultServices } from '../src/vault-services.js'
+
 function isCanonicalMeasurementValue(
   value: unknown,
 ): value is Record<'metric' | 'unit' | 'value', unknown> {
@@ -127,13 +130,87 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
     })
     expect(systolic?.source.recordId).toBe(diastolic?.source.recordId)
 
+    const bodyRead = await createIntegratedVaultServices()
+      .query.listWearableBodyState({
+        limit: 30,
+        requestId: null,
+        vault: vaultRoot,
+      })
+    expect(bodyRead.count).toBe(1)
+    expect(JSON.stringify(bodyRead.items)).toContain('leanBodyMass')
+
     await expect(
       coreRuntime.readCanonicalEventAvailabilityInterruptible({ vaultRoot }),
     ).resolves.toEqual({
       interrupted: false,
+      latestBloodPressureMeasurementDayKey: '2026-08-08',
       latestBloodPressureMeasurementOccurredAt: '2026-08-08T12:05:00.000Z',
       latestBloodTestOccurredAt: null,
+      latestBodyMeasurementDayKey: '2026-08-08',
       latestBodyMeasurementOccurredAt: '2026-08-08T12:00:00.000Z',
+    })
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    })
+  }
+})
+
+test('Junction offset blood pressure keeps the local day used by measurement reads', async () => {
+  const parentRoot = await mkdtemp(
+    path.join(tmpdir(), 'junction-offset-blood-pressure-'),
+  )
+  const vaultRoot = path.join(parentRoot, 'vault')
+
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: '2026-08-07T00:00:00.000Z',
+      timezone: 'America/Los_Angeles',
+      vaultRoot,
+    })
+    await importDeviceProviderSnapshot(
+      {
+        provider: 'junction',
+        sourceKind: 'poll',
+        deliveryMode: 'scheduled_reconcile',
+        vaultRoot,
+        snapshot: {
+          accountId: 'junction-offset-device-account',
+          importedAt: '2026-08-08T02:00:00.000Z',
+          summaries: {},
+          timeseries: {
+            blood_pressure: [{
+              sourceProviderSlug: 'omron',
+              timestamp: '2026-08-07T18:30:00-07:00',
+              systolic: 118,
+              diastolic: 76,
+            }],
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    )
+
+    const availability = await coreRuntime
+      .readCanonicalEventAvailabilityInterruptible({ vaultRoot })
+    expect(availability).toMatchObject({
+      latestBloodPressureMeasurementDayKey: '2026-08-07',
+      latestBloodPressureMeasurementOccurredAt: '2026-08-08T01:30:00.000Z',
+    })
+
+    const measurementRead = await listMeasurementRecords({
+      from: availability.latestBloodPressureMeasurementDayKey ?? undefined,
+      limit: 100,
+      vault: vaultRoot,
+    })
+    expect(measurementRead.count).toBe(1)
+    expect(measurementRead.items[0]).toMatchObject({
+      data: {
+        dayKey: '2026-08-07',
+        measurementsCount: 2,
+      },
+      kind: 'measurement',
     })
   } finally {
     await rm(parentRoot, {
