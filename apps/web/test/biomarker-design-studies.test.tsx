@@ -126,7 +126,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "Group sponsorship purchase, signed-out management, cancellation, and completion",
   );
   expect(sectionsMarkup).toContain(
-    "Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status",
+    "Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status",
   );
   expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
@@ -165,7 +165,6 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-state="monthly-management-sign-in"');
   expect(sectionsMarkup).toContain('data-design-state="monthly-canceled"');
   expect(sectionsMarkup).toContain('data-design-state="sponsored-one-time-recovery"');
-  expect(sectionsMarkup).toContain('data-design-state="trial-family-confirmation"');
   expect(sectionsMarkup).toContain('data-design-state="family-billing-recovery"');
   expect(sectionsMarkup).toContain("Your Family plan needs billing attention");
   expect(sectionsMarkup).toContain("Monthly sponsorship canceled");
