@@ -58,7 +58,7 @@ const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_ASSISTANT_ASK_REQUEST_ID_NAMESPACE =
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_NOTIFICATION_INSTRUCTIONS =
   "Private current-sender Assistant Ask completion; exact reviewed text is in responsePolicy.";
 const HOSTED_GROUP_CURRENT_SENDER_PRIVATE_UNAVAILABLE_TEXT =
-  "I couldn't find enough in your private Murph context to answer that yet.";
+  "I don't have enough context to answer that privately yet.";
 const HOSTED_ASSISTANT_ASK_ADVISORY_LOCK_NAMESPACE = "hosted-assistant-ask";
 const HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS = 256;
 const HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u;

@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -16,6 +16,11 @@ Updated: 2026-08-09
   current same-channel direct-member destination exists.
 - The unavailable result gives the group Murph one precise recovery action:
   ask the sender to open a direct Murph chat on that channel and retry.
+- The private target selects a self-contained direct-recipient answer contract;
+  caller-handoff instructions remain limited to group-bound consented asks.
+- Missing public group context produces either a truthful limitation with only
+  independently useful authorized private information or truthful unavailable
+  copy, never an unfinished fact fragment delivered as the final message.
 - Existing completion-time and provider-entry authority checks remain intact.
 - Focused tests and typechecks pass, the preliminary specialist result is
   resolved, final ReviewGPT reaches `ROUND_OUTCOME: PASS`, exact-head CI is
@@ -24,8 +29,9 @@ Updated: 2026-08-09
 ## Scope
 
 - In scope: the existing Web admission/replay owner, focused Web and Assistant
-  Engine coverage, the group-tool recovery instruction, PR evidence, ReviewGPT,
-  CI, and mergeability proof.
+  Engine coverage, the group-tool recovery instruction, the consented Assistant
+  Ask answer profile selected by the trusted target kind, PR evidence,
+  ReviewGPT, CI, and mergeability proof.
 - Out of scope: new persisted state, provider routing changes, group fallback,
   first-contact messaging, a second model generation, deployment, or merge.
 
@@ -37,7 +43,9 @@ Updated: 2026-08-09
 3. Run focused verification and inspect the complete corrected candidate.
 4. Commit and push the candidate, run the missing preliminary specialist pass,
    final ReviewGPT round 2, and exact-head CI, then resolve any accepted issue.
-5. Complete the parent final review, close this plan, push the final head, and
+5. Resolve the specialist's recipient-ready answer-contract finding with one
+   explicit target-owned mode and focused Engine/Runtime/Web proof.
+6. Complete the parent final review, close this plan, push the final head, and
    prove mergeability without merging the PR.
 
 ## Verification
@@ -64,7 +72,29 @@ Updated: 2026-08-09
   the changed TypeScript.
 - The first preliminary specialist attempt was tooling-invalid: it returned a
   completion marker after 77 seconds, below the required five-minute credibility
-  floor. Its result is untrusted and does not count; retry the same pass on the
-  corrected exact head using the retained review thread.
-- Preliminary specialist ReviewGPT, final ReviewGPT round 2, exact-head CI,
-  parent final review, and clean-merge proof remain pending.
+  floor. Its result is untrusted and does not count. The valid same-thread retry
+  returned two connected findings: the private target inherited caller-handoff
+  instructions despite having no second generation, and the tests assumed
+  recipient-ready text instead of proving it. Both findings are accepted.
+- The correction adds an explicit `caller_handoff` / `direct_recipient` answer
+  mode selected by the server-owned Assistant Ask target kind. The direct mode
+  requires self-contained recipient-ready text, states missing group context
+  truthfully, and forbids raw facts for another assistant to finish. Fixed
+  unavailable copy no longer attributes missing evidence specifically to the
+  private vault.
+- Corrected focused proof passed: Assistant Engine 21/21, Assistant Runtime 2/2,
+  and Web 14/14; all three package typechecks and scoped Web ESLint passed.
+  Rebuilt Engine/Runtime production artifacts passed the runner byte/boot probe
+  at a 1,672,907B entry, 7,998,431B static closure, and 9,975,922B total.
+- The existing `caller_handoff` consented-answer instruction profile remains
+  byte-for-byte unchanged at 1,497 bytes / 268 `o200k_harmony` tokens. Only the
+  opt-in `direct_recipient` profile changes, measuring 1,643 bytes / 286 tokens
+  (+146 bytes / +18 tokens) so the later private answer is self-contained.
+- Exact-head CI at `ee06af0e53` passed every required workflow and job before
+  the specialist correction. The first final-round-2 attempt reached a managed
+  lane request limit before generation, and the cross-profile same-thread
+  recovery failed before staging because that thread was not readable there;
+  neither attempt counts as a review round. A fresh exact-snapshot recovery on
+  the healthy lane remains active. The corrected candidate still needs its next
+  final round, exact-head CI, parent final review, plan closure, and clean-merge
+  proof.

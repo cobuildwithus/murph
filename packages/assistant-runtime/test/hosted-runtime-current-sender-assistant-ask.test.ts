@@ -126,6 +126,7 @@ describe("hosted current-sender Assistant Ask execution", () => {
       assert.equal(executeConsentedAsk.mock.calls.length, 1);
       const reviewedInput = executeConsentedAsk.mock.calls[0]?.[0];
       assert.ok(reviewedInput);
+      assert.equal(reviewedInput.answerMode, "caller_handoff");
       assert.equal(reviewedInput.permissionText, "One-time self-only group disclosure.");
       assert.equal(reviewedInput.question, "Murph tell them about my sleep");
       assert.deepEqual(completedResult, {
@@ -199,6 +200,10 @@ describe("hosted current-sender Assistant Ask execution", () => {
 
       assert.equal(executeAsk.mock.calls.length, 0);
       assert.equal(executeConsentedAsk.mock.calls.length, 1);
+      assert.equal(
+        executeConsentedAsk.mock.calls[0]?.[0].answerMode,
+        "direct_recipient",
+      );
       assert.equal(
         executeConsentedAsk.mock.calls[0]?.[0].permissionText,
         "One-time private owner-only answer.",

@@ -480,6 +480,7 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
 
     await expect(
       executeConsentedReadOnlyAssistantAsk({
+        answerMode: 'caller_handoff',
         beforeProviderEntry,
         codexCommand: '/runtime/codex',
         codexHome: '/runtime/codex-home',
@@ -533,6 +534,9 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
       'When the private subject itself is deictic or ambiguous, including a bare “mine too?”, return outcome "cannot_answer" with answer null.',
     )
     expect(answerInput.baseInstructions).not.toContain(
+      'There is no caller Murph or second generation after this answer',
+    )
+    expect(answerInput.baseInstructions).not.toContain(
       'group-only context such as “that”, “mine too”, or a comparison',
     )
     expect(answerInput.prompt).toContain([
@@ -575,6 +579,45 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
     ])
   })
 
+  it('assembles a self-contained direct-recipient answer contract', async () => {
+    const workspaceRoot = await createTempRoot('murph-consented-direct-ask-')
+    const answer = [
+      "I don't have the group comparison point in this private context.",
+      'Your recent activity trend is independently available here.',
+    ].join(' ')
+    askMocks.buildEvidence.mockResolvedValue(
+      '## Conversation evidence\n\nThe member has a recent activity trend.',
+    )
+    askMocks.executeTurn
+      .mockResolvedValueOnce({
+        finalMessage: JSON.stringify({ answer, outcome: 'answered' }),
+      })
+      .mockResolvedValueOnce({
+        finalMessage: JSON.stringify({ decision: 'allow' }),
+      })
+
+    await expect(executeConsentedReadOnlyAssistantAsk({
+      answerMode: 'direct_recipient',
+      permissionText: 'Answer the owner privately about their activity trend.',
+      question: 'Compare that with my recent activity trend and send it privately.',
+      workspaceRoot,
+    })).resolves.toEqual({ answer, outcome: 'answered' })
+
+    const answerInput = askMocks.executeTurn.mock.calls[0]?.[0]
+    expect(answerInput.baseInstructions).toContain(
+      'Return one self-contained, recipient-ready private message to the person who asked.',
+    )
+    expect(answerInput.baseInstructions).toContain(
+      'When the request depends on public group context that is unavailable, state that limitation plainly',
+    )
+    expect(answerInput.baseInstructions).toContain(
+      'Never return raw facts for another assistant to finish.',
+    )
+    expect(answerInput.baseInstructions).not.toContain(
+      'the caller Murph needs to finish the response',
+    )
+  })
+
   it('rechecks provider authority before the disclosure reviewer', async () => {
     const workspaceRoot = await createTempRoot('murph-consented-authority-')
     const beforeProviderEntry = vi.fn()
@@ -589,6 +632,7 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
     })
 
     await expect(executeConsentedReadOnlyAssistantAsk({
+      answerMode: 'caller_handoff',
       beforeProviderEntry,
       permissionText: 'Share workout completion status only.',
       question: 'Is the workout complete?',
@@ -612,6 +656,7 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
         askMocks.executeTurn.mockResolvedValueOnce({ finalMessage: JSON.stringify(review) })
       }
       await expect(executeConsentedReadOnlyAssistantAsk({
+        answerMode: 'caller_handoff',
         permissionText: 'Share completion status only.',
         question: 'What happened?',
         workspaceRoot,
@@ -638,6 +683,7 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
 
     await expect(
       executeConsentedReadOnlyAssistantAsk({
+        answerMode: 'caller_handoff',
         permissionText: 'Share workout completion status only.',
         question: 'Is the workout complete?',
         workspaceRoot,
@@ -658,6 +704,7 @@ describe('executeConsentedReadOnlyAssistantAsk', () => {
     for (const permissionText of ['   ', 'p'.repeat(1_001)]) {
       await expect(
         executeConsentedReadOnlyAssistantAsk({
+          answerMode: 'caller_handoff',
           permissionText,
           question: 'What happened?',
           workspaceRoot,

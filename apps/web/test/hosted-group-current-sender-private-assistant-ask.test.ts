@@ -158,7 +158,7 @@ describe("hosted private current-sender Assistant Ask completion", () => {
       answer: null,
       outcome: "cannot_answer",
     })).toBe(
-      "I couldn't find enough in your private Murph context to answer that yet.",
+      "I don't have enough context to answer that privately yet.",
     );
   });
 
