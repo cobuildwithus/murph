@@ -1740,12 +1740,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       input.request.processingMode === "system_mailbox"
         ? (["system"] as const)
         : initialMailboxImportPlan.lanes;
+    const initialPendingRuntimeWake = consumePendingHostedRuntimeWake(
+      options.runtimeWakeSignal ?? null,
+      options.shutdownSignal ?? null,
+    );
+    const systemMailboxInitialForegroundWakeObserved =
+      input.request.processingMode === "system_mailbox"
+      && initialPendingRuntimeWake !== null;
     const initialMailboxImportContext = createHostedRuntimeWakeInitialImportContext(
       mergeHostedRuntimeWakeLatencySeeds(
-        consumePendingHostedRuntimeWake(
-          options.runtimeWakeSignal ?? null,
-          options.shutdownSignal ?? null,
-        ),
+        initialPendingRuntimeWake,
         invocationOrchestrationLatencySeed,
       ),
     );
@@ -2007,7 +2011,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         initialMailboxImport.checkpointDeferred && initialMailboxImport.stateChanged
         || hostedVaultStartupPreparation.mutated;
       let checkpointed = false;
-      let foregroundWakeObserved = false;
+      let foregroundWakeObserved = systemMailboxInitialForegroundWakeObserved;
       const consumeForegroundWake = (): boolean => {
         if (foregroundWakeObserved) {
           return true;
@@ -2110,6 +2114,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         importOrStartupCheckpointPending = false;
         activeWorkspace = checkpoint.workspace;
         currentRedactedStatus = checkpoint.workspace.redactedStatus ?? currentRedactedStatus;
+        if (checkpoint.conversationInputAhead === true) {
+          foregroundWakeObserved = true;
+        }
         await finishInitialImportEffectsOnce();
         return checkpoint;
       };

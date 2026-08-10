@@ -10061,6 +10061,7 @@ describe("hosted workspace runtime entrypoint", () => {
         fetchRequests,
         items: [],
       });
+      runtimeWakeSignal.notify();
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
@@ -10081,14 +10082,7 @@ describe("hosted workspace runtime entrypoint", () => {
           platform: createPlatform({
             artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
             deviceSyncPort: baseDeviceSyncPort,
-            mailboxPort: {
-              ...baseMailboxPort,
-              async fetch(request) {
-                const response = await baseMailboxPort.fetch(request);
-                runtimeWakeSignal.notify();
-                return response;
-              },
-            },
+            mailboxPort: baseMailboxPort,
             workspacePort: createWorkspacePort({
               checkpointRequests,
               events,
@@ -10203,7 +10197,7 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
-  test("fresh foreground input during system mailbox checkpoint defers post-checkpoint recording", async () => {
+  test("checkpoint-reported foreground input defers system mailbox post-checkpoint recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const events: string[] = [];
@@ -10288,9 +10282,9 @@ describe("hosted workspace runtime entrypoint", () => {
             workspacePort: createWorkspacePort({
               checkpointRequests,
               checkpointResponse(request) {
-                runtimeWakeSignal.notify();
                 return {
                   checkpointed: true,
+                  conversationInputAhead: true,
                   workspace: createWorkspaceState({
                     inboxMediaRetentionWakeAt: request.inboxMediaRetentionWakeAt ?? null,
                     nextWakeAt: request.nextWakeAt ?? null,
