@@ -722,7 +722,7 @@ function renderAssistantSnapshotBodyMeasurementsLine(
     return null
   }
 
-  return `- Body/scale measurement history is present (latest ${latestDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`; if a reading was saved as a canonical measurement event, use \`vault-cli measurement list --from ${latestDate} --limit 100 --format json\` and widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
+  return `- Body/scale measurement history is present (latest ${latestDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`. For canonical measurement events, list candidates with \`vault-cli measurement list --from ${latestDate} --to ${latestDate} --limit 100 --format json\`, then read each candidate with \`vault-cli measurement show <event-id> --format json\`; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
 }
 
 function renderAssistantSnapshotBloodPressureMeasurementsLine(
@@ -732,7 +732,7 @@ function renderAssistantSnapshotBloodPressureMeasurementsLine(
     return null
   }
 
-  return `- Blood-pressure measurement history is present (latest ${latestDate}). Read canonical events with \`vault-cli measurement list --from ${latestDate} --limit 100 --format json\`; inspect \`systolic-blood-pressure\` and \`diastolic-blood-pressure\` entries, treating values as paired only when they come from the same event, and widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
+  return `- Blood-pressure measurement history is present (latest ${latestDate}). List canonical candidates with \`vault-cli measurement list --from ${latestDate} --to ${latestDate} --limit 100 --format json\`, then read each candidate with \`vault-cli measurement show <event-id> --format json\`. Inspect \`systolic-blood-pressure\` and \`diastolic-blood-pressure\` entries, treating values as paired only inside the same shown event; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
 }
 
 async function collectAssistantSnapshotCanonicalEventCoverage(input: {

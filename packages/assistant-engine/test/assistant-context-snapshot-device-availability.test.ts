@@ -12,7 +12,10 @@ import {
   VAULT_LAYOUT,
 } from '@murphai/core'
 import { writeAssistantStateVersionedJson } from '@murphai/runtime-state/node'
-import { listMeasurementRecords } from '@murphai/vault-usecases/measurements'
+import {
+  listMeasurementRecords,
+  showMeasurementRecord,
+} from '@murphai/vault-usecases/measurements'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import { describe, expect, it } from 'vitest'
 
@@ -93,7 +96,10 @@ describe('assistant context snapshot device availability', () => {
       )
       expect(prompt).toContain('Blood-pressure measurement history is present')
       expect(prompt).toContain(
-        'vault-cli measurement list --from 2026-08-08 --limit 100 --format json',
+        'vault-cli measurement list --from 2026-08-08 --to 2026-08-08 --limit 100 --format json',
+      )
+      expect(prompt).toContain(
+        'vault-cli measurement show <event-id> --format json',
       )
       expect(prompt).toContain('systolic-blood-pressure')
       expect(prompt).toContain('diastolic-blood-pressure')
@@ -105,6 +111,29 @@ describe('assistant context snapshot device availability', () => {
       expect(prompt).not.toContain('82.5')
       expect(prompt).not.toContain('121')
       expect(prompt).not.toContain('79')
+
+      const candidates = await listMeasurementRecords({
+        from: '2026-08-08',
+        limit: 100,
+        to: '2026-08-08',
+        vault: vaultRoot,
+      })
+      const candidate = candidates.items.find((item) =>
+        item.kind === 'measurement'
+      )
+      expect(candidate).toMatchObject({
+        data: { dayKey: '2026-08-08', measurementsCount: 3 },
+      })
+      if (!candidate) {
+        throw new Error('Expected a canonical measurement candidate.')
+      }
+      const shown = await showMeasurementRecord(vaultRoot, candidate.id)
+      expect(shown.entity.data).toMatchObject({
+        measurements: expect.arrayContaining([
+          expect.objectContaining({ metric: 'systolic-blood-pressure', value: 121 }),
+          expect.objectContaining({ metric: 'diastolic-blood-pressure', value: 79 }),
+        ]),
+      })
       await expect(
         isAssistantContextSnapshotRefreshPending({ vaultRoot }),
       ).resolves.toBe(false)
@@ -118,6 +147,7 @@ describe('assistant context snapshot device availability', () => {
 
   it.each([
     { metric: 'bmi', unit: 'kg/m2', value: 21.7 },
+    { metric: 'body-fat-pct', unit: '%', value: 18.4 },
     { metric: 'lean-body-mass', unit: 'kg', value: 61.4 },
     { metric: 'waist-circumference', unit: 'cm', value: 81 },
   ] as const)(
@@ -136,6 +166,11 @@ describe('assistant context snapshot device availability', () => {
         await addMeasurement({
           vaultRoot,
           draft: {
+            externalRef: {
+              resourceId: `body-${metric}-1`,
+              resourceType: 'summary',
+              system: 'test-device',
+            },
             occurredAt: '2026-08-09T09:00:00.000Z',
             source: 'device',
             title: 'Connected body measurement',
@@ -156,6 +191,11 @@ describe('assistant context snapshot device availability', () => {
           'Body/scale measurement history is present (latest 2026-08-09)',
         )
         expect(prompt).not.toContain(String(value))
+        await expect(createIntegratedVaultServices().query.listWearableBodyState({
+          limit: 30,
+          requestId: null,
+          vault: vaultRoot,
+        })).resolves.toMatchObject({ count: 1 })
       } finally {
         await rm(parentRoot, {
           force: true,
@@ -164,6 +204,54 @@ describe('assistant context snapshot device availability', () => {
       }
     },
   )
+
+  it('does not advertise a normalized non-body measurement metric', async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), 'assistant-device-context-non-body-'),
+    )
+    const vaultRoot = path.join(parentRoot, 'vault')
+
+    try {
+      await initializeVault({
+        createdAt: '2026-08-09T00:00:00.000Z',
+        vaultRoot,
+      })
+      await addMeasurement({
+        vaultRoot,
+        draft: {
+          externalRef: {
+            resourceId: 'steps-1',
+            resourceType: 'summary',
+            system: 'test-device',
+          },
+          occurredAt: '2026-08-09T09:00:00.000Z',
+          source: 'device',
+          title: 'Connected step measurement',
+          measurements: [{ metric: 'daily-steps', unit: 'count', value: 7000 }],
+        },
+      })
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({ vaultRoot })
+
+      const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+      expect(prompt ?? '').not.toContain(
+        'Body/scale measurement history is present',
+      )
+      await expect(createIntegratedVaultServices().query.listWearableBodyState({
+        limit: 30,
+        requestId: null,
+        vault: vaultRoot,
+      })).resolves.toMatchObject({ count: 0, items: [] })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
 
   it('yields during a sizable canonical ledger scan without starting a query projection', async () => {
     const parentRoot = await mkdtemp(

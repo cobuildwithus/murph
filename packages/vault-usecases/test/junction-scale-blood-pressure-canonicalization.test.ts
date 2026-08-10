@@ -7,7 +7,10 @@ import { importDeviceProviderSnapshot } from '@murphai/importers'
 import { listMetricPointsBatch } from '@murphai/query'
 import { expect, test } from 'vitest'
 
-import { listMeasurementRecords } from '../src/usecases/measurement-read.js'
+import {
+  listMeasurementRecords,
+  showMeasurementRecord,
+} from '../src/usecases/measurement-read.js'
 import { createIntegratedVaultServices } from '../src/vault-services.js'
 
 function isCanonicalMeasurementValue(
@@ -211,6 +214,19 @@ test('Junction offset blood pressure keeps the local day used by measurement rea
         measurementsCount: 2,
       },
       kind: 'measurement',
+    })
+    const candidate = measurementRead.items[0]
+    expect(candidate).toBeDefined()
+    if (!candidate) {
+      throw new Error('Expected the canonical blood-pressure event.')
+    }
+    const shown = await showMeasurementRecord(vaultRoot, candidate.id)
+    expect(shown.entity.data).toMatchObject({
+      dayKey: '2026-08-07',
+      measurements: expect.arrayContaining([
+        expect.objectContaining({ metric: 'systolic-blood-pressure', value: 118 }),
+        expect.objectContaining({ metric: 'diastolic-blood-pressure', value: 76 }),
+      ]),
     })
   } finally {
     await rm(parentRoot, {

@@ -7,6 +7,7 @@ import {
   isStrictIsoDate,
   safeParseContract,
 } from "@murphai/contracts";
+import { resolveWearableCanonicalMetricKey } from "@murphai/health-metrics";
 
 import type {
   BloodTestReferenceRange,
@@ -126,13 +127,12 @@ export interface CanonicalEventAvailabilitySummary {
   latestBodyMeasurementOccurredAt: string | null;
 }
 
-const CANONICAL_BODY_MEASUREMENT_METRICS = new Set([
+const CANONICAL_BODY_MEASUREMENT_METRIC_KEYS = new Set([
   "bmi",
-  "body-fat-percentage",
-  "body-weight",
-  "lean-body-mass",
-  "waist-circumference",
-  "weight",
+  "bodyFatPercentage",
+  "leanBodyMassKg",
+  "waistCircumference",
+  "weightKg",
 ]);
 const CANONICAL_BODY_MEASUREMENT_TYPES = new Set([
   "body_fat_pct",
@@ -1441,7 +1441,7 @@ export async function readCanonicalEventAvailabilityInterruptible(
 
 function canonicalEventContainsBodyMeasurement(record: EventRecord): boolean {
   if (record.kind === "observation") {
-    return CANONICAL_BODY_MEASUREMENT_METRICS.has(record.metric)
+    return isCanonicalBodyMeasurementMetric(record.metric)
       && record.externalRef !== undefined
       && (
         record.observationGrain === undefined
@@ -1450,7 +1450,7 @@ function canonicalEventContainsBodyMeasurement(record: EventRecord): boolean {
   }
   if (record.kind === "measurement") {
     return record.measurements.some((measurement) =>
-      CANONICAL_BODY_MEASUREMENT_METRICS.has(measurement.metric)
+      isCanonicalBodyMeasurementMetric(measurement.metric)
     );
   }
   if (record.kind === "body_measurement") {
@@ -1459,6 +1459,12 @@ function canonicalEventContainsBodyMeasurement(record: EventRecord): boolean {
     );
   }
   return false;
+}
+
+function isCanonicalBodyMeasurementMetric(metric: string): boolean {
+  const canonicalMetricKey = resolveWearableCanonicalMetricKey(metric);
+  return canonicalMetricKey !== null
+    && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(canonicalMetricKey);
 }
 
 function canonicalEventContainsPairedBloodPressure(record: EventRecord): boolean {
