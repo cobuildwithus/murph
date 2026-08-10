@@ -5163,6 +5163,12 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("accepts durable Junction payload webhooks under the connection acceptance lock", async () => {
+    const preparedPayloads = {
+      dirtyRevision: 1n,
+      resources: [],
+      rows: [],
+    };
+    mocks.prepareDirtyPayloads.mockResolvedValueOnce(preparedPayloads);
     const webhookDataJson = JSON.stringify({
       data: [
         {
@@ -5242,6 +5248,22 @@ describe("hosted device-sync wakes", () => {
       accepted: true,
     });
 
+    const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
+
+    expect(mocks.prepareDirtyPayloads).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      provider: "junction",
+      resources: dirtyResources,
+      traceId: "trace_junction_payload_busy",
+      userId: "user-123",
+    });
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      preparedPayloads,
+      resources: dirtyResources,
+    }));
+    expect(mocks.prepareDirtyPayloads.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
