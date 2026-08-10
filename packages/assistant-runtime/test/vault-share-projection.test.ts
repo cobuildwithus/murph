@@ -921,6 +921,74 @@ describe("selectProjectableDailyMetricDays", () => {
     }
   });
 
+  it("projects a manual sleep-stage correction as an explicit source", async () => {
+    const vaultRoot = await createSleepSourceProjectionVault([]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await writeFile(
+        join(vaultRoot, "ledger", "events", "2026", "2026-07.jsonl"),
+        `${JSON.stringify({
+          schemaVersion: "murph.event.v1",
+          id: "evt_manual_deep_sleep",
+          kind: "observation",
+          occurredAt: "2026-07-03T07:00:00.000Z",
+          recordedAt: "2026-07-03T12:00:00.000Z",
+          dayKey: ACTIVITY_DAY.date,
+          source: "manual",
+          title: "Deep sleep",
+          metric: "sleep-deep-minutes",
+          value: 91,
+          unit: "minutes",
+        })}\n`,
+        "utf8",
+      );
+
+      const selected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      );
+      const legacySelected = await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-days.v0"),
+      );
+
+      expect(legacySelected).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            metricKey: "deep-sleep-minutes",
+            unit: "minutes",
+            value: 91,
+          }),
+          recordKey: ACTIVITY_DAY.date,
+        }),
+      ]);
+      expect(selected).toEqual([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            date: ACTIVITY_DAY.date,
+            metricKey: "deep-sleep-minutes",
+            sources: [{
+              label: "Manual",
+              recordedAt: "2026-07-03T12:00:00.000Z",
+              selected: true,
+              source: "manual",
+              unit: "minutes",
+              value: 91,
+            }],
+            sourcesDisagree: false,
+            unit: "minutes",
+            value: 91,
+          }),
+          recordKey: ACTIVITY_DAY.date,
+        }),
+      ]);
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps valid dates when more than four providers appear across the window", async () => {
     const vaultRoot = await createSleepSourceProjectionVault([
       { date: "2026-07-02", providers: ["fitbit", "garmin", "oura", "polar"] },

@@ -138,7 +138,10 @@ label, its value and unit, its nullable canonical source-record time, and
 whether it supplied the canonical selected value. The record also carries `projectedAt`
 and a literal `sourcesDisagree` flag. Source-aware records fail closed instead of
 truncating when the source bound is exceeded or the selected source cannot be
-proved. The legacy provider-neutral `deep-sleep-days.v0` and
+proved. A canonical manually entered sleep-stage event is projected onto its
+member-local day and disclosed as the explicit `manual` / `Manual` source; it is
+never attributed to a connected wearable or aggregator. The legacy
+provider-neutral `deep-sleep-days.v0` and
 `rem-sleep-days.v0` scopes remain read-only compatibility contracts for
 existing policies and grants, disclosing one canonical daily value only. A new
 join view or access offer derives the matching legacy policy request as v1, so
