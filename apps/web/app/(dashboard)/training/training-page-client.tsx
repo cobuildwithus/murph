@@ -41,6 +41,52 @@ export type TrainingHandoffRefreshState =
   | "checking"
   | "not_visible";
 
+const EMPTY_TRAINING_PROJECTION_SIGNATURE = "[]";
+
+function useTrainingNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    let midnightTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleMidnightRefresh = (current: Date) => {
+      const nextMidnight = new Date(current);
+      nextMidnight.setHours(24, 0, 0, 0);
+      midnightTimeout = setTimeout(() => {
+        const refreshedNow = new Date();
+        setNow(refreshedNow);
+        scheduleMidnightRefresh(refreshedNow);
+      }, Math.max(1_000, nextMidnight.getTime() - current.getTime() + 50));
+    };
+    const refreshNow = () => {
+      const refreshedNow = new Date();
+      setNow(refreshedNow);
+      if (midnightTimeout) {
+        clearTimeout(midnightTimeout);
+      }
+      scheduleMidnightRefresh(refreshedNow);
+    };
+    const refreshVisibleNow = () => {
+      if (document.visibilityState !== "hidden") {
+        refreshNow();
+      }
+    };
+
+    scheduleMidnightRefresh(new Date());
+    window.addEventListener("focus", refreshNow);
+    document.addEventListener("visibilitychange", refreshVisibleNow);
+    return () => {
+      window.removeEventListener("focus", refreshNow);
+      document.removeEventListener("visibilitychange", refreshVisibleNow);
+      if (midnightTimeout) {
+        clearTimeout(midnightTimeout);
+      }
+    };
+  }, []);
+
+  return now;
+}
+
 export default function TrainingPageClient({
   authenticated,
   continueContactOptions,
@@ -52,39 +98,46 @@ export default function TrainingPageClient({
 }) {
   const {
     error,
-    ref,
     refresh,
     refreshPending,
     runtimeRefreshPending,
     status,
   } = useBrowserVault();
-  const training = useBrowserVaultSelector(selectBrowserVaultTraining);
+  const trainingNow = useTrainingNow();
+  const selectTraining = useCallback(
+    (client: Parameters<typeof selectBrowserVaultTraining>[0]) =>
+      selectBrowserVaultTraining(client, { now: trainingNow }),
+    [trainingNow],
+  );
+  const training = useBrowserVaultSelector(selectTraining);
   const refreshAfterContactRef = useRef<{
-    sourceBundleHash: string | null;
+    projectionSignature: string;
   } | null>(null);
-  const [handoffRefreshBaselineSourceHash, setHandoffRefreshBaselineSourceHash]
-    = useState<string | null | undefined>(undefined);
+  const [handoffRefreshBaselineSignature, setHandoffRefreshBaselineSignature]
+    = useState<string | undefined>(undefined);
   const [handoffRefreshRequestSettled, setHandoffRefreshRequestSettled] =
     useState(false);
   const requestHandoffRefresh = useCallback(
-    (sourceBundleHash: string | null) => {
-      setHandoffRefreshBaselineSourceHash(sourceBundleHash);
+    (projectionSignature: string) => {
+      setHandoffRefreshBaselineSignature(projectionSignature);
       setHandoffRefreshRequestSettled(false);
       void refresh({
         background: true,
-        requestRuntimeRefreshFromSourceHash: sourceBundleHash,
+        requestRuntimeRefreshUntil: (client) =>
+          selectBrowserVaultTraining(client, { now: trainingNow })
+            .projectionSignature !== projectionSignature,
       }).finally(() => {
         setHandoffRefreshRequestSettled(true);
       });
     },
-    [refresh],
+    [refresh, trainingNow],
   );
-  const currentSourceHash = ref?.sourceBundleHash ?? null;
-  const replacementVisible = handoffRefreshBaselineSourceHash !== undefined
-    && currentSourceHash !== null
-    && currentSourceHash !== handoffRefreshBaselineSourceHash;
+  const currentProjectionSignature = training?.projectionSignature
+    ?? EMPTY_TRAINING_PROJECTION_SIGNATURE;
+  const replacementVisible = handoffRefreshBaselineSignature !== undefined
+    && currentProjectionSignature !== handoffRefreshBaselineSignature;
   const handoffRefreshState: TrainingHandoffRefreshState =
-    handoffRefreshBaselineSourceHash === undefined
+    handoffRefreshBaselineSignature === undefined
       || replacementVisible
       || status === "error"
       ? "idle"
@@ -93,9 +146,9 @@ export default function TrainingPageClient({
         : "checking";
   const markContactHandoff = useCallback(() => {
     refreshAfterContactRef.current = {
-      sourceBundleHash: ref?.sourceBundleHash ?? null,
+      projectionSignature: currentProjectionSignature,
     };
-  }, [ref?.sourceBundleHash]);
+  }, [currentProjectionSignature]);
 
   useEffect(() => {
     const refreshAfterContact = () => {
@@ -104,7 +157,7 @@ export default function TrainingPageClient({
         return;
       }
       refreshAfterContactRef.current = null;
-      requestHandoffRefresh(refreshRequest.sourceBundleHash);
+      requestHandoffRefresh(refreshRequest.projectionSignature);
     };
 
     window.addEventListener("focus", refreshAfterContact);
@@ -122,7 +175,7 @@ export default function TrainingPageClient({
       error={error}
       handoffRefreshState={handoffRefreshState}
       onCheckUpdate={() => {
-        requestHandoffRefresh(ref?.sourceBundleHash ?? null);
+        requestHandoffRefresh(currentProjectionSignature);
       }}
       onContactAction={markContactHandoff}
       onRefresh={() => void refresh()}

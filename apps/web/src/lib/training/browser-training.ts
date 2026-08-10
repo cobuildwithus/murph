@@ -78,6 +78,7 @@ export interface BrowserTrainingView {
   activeSession: TrainingSessionView | null;
   exerciseProgress: TrainingExerciseProgress[];
   generatedAt: string;
+  projectionSignature: string;
   recentSessions: TrainingSessionView[];
   summary: TrainingSummary;
   weeks: TrainingWeek[];
@@ -85,14 +86,17 @@ export interface BrowserTrainingView {
 
 export function selectBrowserVaultTraining(
   client: BrowserVaultQueryClient,
-  options: { timeZone?: string } = {},
+  options: { now?: Date; timeZone?: string } = {},
 ): BrowserTrainingView {
   const generatedAt = client.replica.generatedAt;
   const sessions = client.entities
     .list({ families: ["event"], kinds: ["activity_session"] })
     .flatMap(parseTrainingSession)
     .sort(compareSessionsLatestFirst);
-  const currentDate = resolveTrainingCurrentDate(generatedAt, options.timeZone);
+  const currentDate = resolveTrainingCurrentDate(
+    options.now ?? new Date(),
+    options.timeZone,
+  );
   const activeSession =
     sessions.find((session) => session.state === "in_progress") ?? null;
   const completedSessions = sessions.filter(
@@ -117,6 +121,7 @@ export function selectBrowserVaultTraining(
     activeSession,
     exerciseProgress: buildExerciseProgress(progressSessions),
     generatedAt,
+    projectionSignature: JSON.stringify(sessions),
     recentSessions: completedSessions.slice(0, RECENT_SESSION_LIMIT),
     summary: buildTrainingSummary(summarySessions),
     weeks: buildTrainingWeeks(sessions, currentDate),
@@ -484,6 +489,10 @@ function normalizedLoadKg(set: TrainingSetView): number {
 }
 
 function hasComparableBestMeasurement(set: TrainingSetView): boolean {
+  if (set.durationSeconds !== null || set.distanceMeters !== null) {
+    return false;
+  }
+
   if (
     set.weight !== null
     && !isPoundUnit(set.weightUnit)
@@ -540,14 +549,13 @@ function isIsoDateWithinLookback(
 }
 
 function resolveTrainingCurrentDate(
-  generatedAt: string,
+  now: Date,
   timeZone?: string,
 ): string {
-  const fallbackDate = generatedAt.slice(0, 10);
-  const generatedInstant = new Date(generatedAt);
-  if (Number.isNaN(generatedInstant.getTime())) {
-    return fallbackDate;
+  if (Number.isNaN(now.getTime())) {
+    return "";
   }
+  const fallbackDate = now.toISOString().slice(0, 10);
 
   try {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -555,7 +563,7 @@ function resolveTrainingCurrentDate(
       month: "2-digit",
       timeZone,
       year: "numeric",
-    }).formatToParts(generatedInstant);
+    }).formatToParts(now);
     const year = parts.find((part) => part.type === "year")?.value;
     const month = parts.find((part) => part.type === "month")?.value;
     const day = parts.find((part) => part.type === "day")?.value;

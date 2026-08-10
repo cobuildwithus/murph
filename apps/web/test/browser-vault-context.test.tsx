@@ -1178,20 +1178,21 @@ test("browser-vault provider keeps admitted content visible during focus revalid
   await rendered.cleanup();
 });
 
-test("a runtime refresh request survives an in-flight focus read and waits through a same-source replica", async () => {
+test("a runtime refresh request survives an in-flight focus read and waits through a nonmatching replica", async () => {
   vi.useFakeTimers();
   const currentRef = createReplicaRef();
-  const sameSourceRef = createReplicaRef({
+  const unrelatedRef = createReplicaRef({
     dataVersion: "e".repeat(64),
     keyId: "browser-vault-replica:e",
-    objectKey: "users/browser-vault-replicas/opaque/same-source.json",
+    objectKey: "users/browser-vault-replicas/opaque/unrelated.json",
+    sourceBundleHash: "b".repeat(64),
   });
   const replacementRef = {
     ...currentRef,
     dataVersion: "f".repeat(64),
     keyId: "browser-vault-replica:f",
     objectKey: "users/browser-vault-replicas/opaque/replacement.json",
-    sourceBundleHash: "b".repeat(64),
+    sourceBundleHash: "c".repeat(64),
   };
   let pendingPollCount = 0;
   const focusResponse = createDeferred<Response>();
@@ -1229,11 +1230,11 @@ test("a runtime refresh request survives an in-flight focus read and waits throu
         return Promise.resolve(jsonResponse({
           encryptedReplica: createReplicaEnvelope("e"),
           replicaAad: createReplicaAad("member_123", "e", {
-            objectKey: sameSourceRef.objectKey,
-            sourceBundleHash: sameSourceRef.sourceBundleHash,
+            objectKey: unrelatedRef.objectKey,
+            sourceBundleHash: unrelatedRef.sourceBundleHash,
           }),
           replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "e"),
-          replicaRef: sameSourceRef,
+          replicaRef: unrelatedRef,
           state: "ready",
         }));
       }
@@ -1243,7 +1244,7 @@ test("a runtime refresh request survives an in-flight focus read and waits throu
           memberId: "member_123",
           replicaAad: null,
           replicaKeyEnvelope: null,
-          replicaRef: sameSourceRef,
+          replicaRef: unrelatedRef,
           state: "not_modified",
         }));
       }
@@ -1265,8 +1266,8 @@ test("a runtime refresh request survives an in-flight focus read and waits throu
     .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica())))
     .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
       source: {
-        dataVersion: sameSourceRef.dataVersion,
-        sourceBundleHash: sameSourceRef.sourceBundleHash,
+        dataVersion: unrelatedRef.dataVersion,
+        sourceBundleHash: unrelatedRef.sourceBundleHash,
       },
     }))))
     .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
@@ -1319,7 +1320,7 @@ test("a runtime refresh request survives an in-flight focus read and waits throu
   });
   await waitForText(
     rendered.container,
-    `${sameSourceRef.sourceBundleHash}:${sameSourceRef.dataVersion}:pending`,
+    `${unrelatedRef.sourceBundleHash}:${unrelatedRef.dataVersion}:pending`,
   );
   await act(async () => {
     await vi.advanceTimersByTimeAsync(5_000);
@@ -2259,8 +2260,8 @@ function BrowserVaultRuntimeRefreshProbe() {
     {
       onClick: () => void vault.refresh({
         background: true,
-        requestRuntimeRefreshFromSourceHash:
-          vault.ref?.sourceBundleHash ?? null,
+        requestRuntimeRefreshUntil: (client) =>
+          client.replica.source.dataVersion === "f".repeat(64),
       }),
     },
     `${vault.ref?.sourceBundleHash ?? "none"}:${vault.dataVersion ?? "none"}:${vault.runtimeRefreshPending ? "pending" : "ready"}`,

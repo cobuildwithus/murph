@@ -182,6 +182,7 @@ const TRAINING_STUDY_VIEW: BrowserTrainingView = {
     },
   ],
   generatedAt: "2026-08-09T16:00:00.000Z",
+  projectionSignature: "training-dashboard-study",
   recentSessions: [
     {
       activityType: "strength-training",

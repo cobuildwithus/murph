@@ -57,7 +57,7 @@ export interface BrowserVaultContextValue {
   refreshPending: boolean;
   refresh(options?: {
     background?: boolean;
-    requestRuntimeRefreshFromSourceHash?: string | null;
+    requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
   }): Promise<void>;
   runtimeRefreshPending: boolean;
   status: BrowserVaultStatus;
@@ -139,15 +139,15 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const providerStartedLoadRef = useRef(false);
-  const runtimeRefreshBaselineSourceHashRef = useRef<
-    string | null | undefined
-  >(undefined);
+  const runtimeRefreshCompletionRef = useRef<
+    ((client: BrowserVaultQueryClient) => boolean) | null
+  >(null);
   const runtimeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
 
   const clearRuntimeRefreshWait = useCallback(() => {
-    runtimeRefreshBaselineSourceHashRef.current = undefined;
+    runtimeRefreshCompletionRef.current = null;
     if (runtimeRefreshTimeoutRef.current) {
       clearTimeout(runtimeRefreshTimeoutRef.current);
       runtimeRefreshTimeoutRef.current = null;
@@ -156,14 +156,14 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, []);
 
   const beginRuntimeRefreshWait = useCallback(
-    (sourceBundleHash: string | null) => {
-      runtimeRefreshBaselineSourceHashRef.current = sourceBundleHash;
+    (isComplete: (client: BrowserVaultQueryClient) => boolean) => {
+      runtimeRefreshCompletionRef.current = isComplete;
       if (runtimeRefreshTimeoutRef.current) {
         clearTimeout(runtimeRefreshTimeoutRef.current);
       }
       setRuntimeRefreshPending(true);
       runtimeRefreshTimeoutRef.current = setTimeout(() => {
-        runtimeRefreshBaselineSourceHashRef.current = undefined;
+        runtimeRefreshCompletionRef.current = null;
         runtimeRefreshTimeoutRef.current = null;
         if (mountedRef.current) {
           setRuntimeRefreshPending(false);
@@ -174,10 +174,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
-    const baselineSourceHash = runtimeRefreshBaselineSourceHashRef.current;
-    const awaitingRequestedReplacement = baselineSourceHash !== undefined
-      && snapshot.ref.sourceBundleHash === baselineSourceHash;
-    if (baselineSourceHash !== undefined && !awaitingRequestedReplacement) {
+    const isRuntimeRefreshComplete = runtimeRefreshCompletionRef.current;
+    const awaitingRequestedReplacement = isRuntimeRefreshComplete !== null
+      && !isRuntimeRefreshComplete(snapshot.client);
+    if (isRuntimeRefreshComplete && !awaitingRequestedReplacement) {
       clearRuntimeRefreshWait();
     }
     clientRef.current = snapshot.client;
@@ -282,12 +282,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     async (options: {
       authorityPathname?: string;
       background?: boolean;
-      requestRuntimeRefreshFromSourceHash?: string | null;
+      requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
     } = {}) => {
       const background = options.background ?? false;
       const { authorityPathname } = options;
-      const requestRuntimeRefresh =
-        options.requestRuntimeRefreshFromSourceHash !== undefined;
+      const runtimeRefreshCompletion = options.requestRuntimeRefreshUntil;
+      const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined;
       const authorityGeneration = authorityPathname === undefined
         ? authorityGenerationRef.current
         : authorityGenerationRef.current + 1;
@@ -323,10 +323,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         }
       }
 
-      if (requestRuntimeRefresh) {
-        beginRuntimeRefreshWait(
-          options.requestRuntimeRefreshFromSourceHash ?? null,
-        );
+      if (runtimeRefreshCompletion) {
+        beginRuntimeRefreshWait(runtimeRefreshCompletion);
       }
 
       const outcome = await startBrowserVaultWarmLoad({
@@ -351,19 +349,17 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const refresh = useCallback(
     async (options: {
       background?: boolean;
-      requestRuntimeRefreshFromSourceHash?: string | null;
+      requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
     } = {}) => {
       await runProviderLoad(
         options.background
           ? {
               background: true,
-              requestRuntimeRefreshFromSourceHash:
-                options.requestRuntimeRefreshFromSourceHash,
+              requestRuntimeRefreshUntil: options.requestRuntimeRefreshUntil,
             }
           : {
               authorityPathname: pathname,
-              requestRuntimeRefreshFromSourceHash:
-                options.requestRuntimeRefreshFromSourceHash,
+              requestRuntimeRefreshUntil: options.requestRuntimeRefreshUntil,
             },
       );
     },

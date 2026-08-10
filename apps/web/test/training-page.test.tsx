@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 
-import { createElement, type ReactNode } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
+import {
+  createBrowserVaultQueryClient,
+  createBrowserVaultReplica,
+  createVaultReadModel,
+} from "@murphai/query/browser";
+
 import type { BrowserTrainingView } from "../src/lib/training/browser-training";
+import type { BrowserVaultContextValue } from "../src/lib/browser-vault/context";
 
 const mocks = vi.hoisted(() => ({
   useBrowserVault: vi.fn(),
@@ -123,6 +130,7 @@ const trainingFixture: BrowserTrainingView = {
     },
   ],
   generatedAt: "2026-08-09T18:00:00.000Z",
+  projectionSignature: "[]",
   recentSessions: [
     {
       activityType: "strength-training",
@@ -259,7 +267,61 @@ test("Training renders live progress, history and a continuation action for the 
 });
 
 test("Training requests one runtime-owned refresh after its messaging handoff returns", async () => {
-  const refresh = vi.fn(async () => {});
+  const unchangedClient = createBrowserVaultQueryClient(
+    await createBrowserVaultReplica({
+      generatedAt: "2026-08-09T18:00:00.000Z",
+      metricPoints: [],
+      sourceBundleHash: "unrelated-source-change",
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    }),
+  );
+  const changedClient = createBrowserVaultQueryClient(
+    await createBrowserVaultReplica({
+      generatedAt: "2026-08-09T18:05:00.000Z",
+      metricPoints: [],
+      sourceBundleHash: "training-source-change",
+      vault: createVaultReadModel({
+        entities: [{
+          attributes: {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-09T18:04:00.000Z",
+              exercises: [{
+                name: "Bench press",
+                sets: [{ order: 1, reps: 8, weight: 155, weightUnit: "lb" }],
+              }],
+              startedAt: "2026-08-09T18:00:00.000Z",
+            },
+          },
+          body: null,
+          date: "2026-08-09",
+          entityId: "training_update",
+          experimentSlug: null,
+          family: "event",
+          frontmatter: null,
+          kind: "activity_session",
+          links: [],
+          lookupIds: ["training_update"],
+          occurredAt: "2026-08-09T18:00:00.000Z",
+          path: "history/events/training-update.jsonl",
+          primaryLookupId: "training_update",
+          recordClass: "ledger",
+          relatedIds: [],
+          status: null,
+          stream: null,
+          tags: [],
+          title: null,
+        }],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    }),
+  );
+  const refresh = vi.fn<BrowserVaultContextValue["refresh"]>(async () => {});
   mocks.useBrowserVault.mockReturnValue({
     error: null,
     ref: {
@@ -292,16 +354,67 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
     );
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
     await Promise.resolve();
-    assert.deepEqual(refresh.mock.calls, [[{
-      background: true,
-      requestRuntimeRefreshFromSourceHash: "a".repeat(64),
-    }]]);
+    assert.equal(refresh.mock.calls.length, 1);
+    const refreshOptions = refresh.mock.calls[0]?.[0];
+    assert.equal(refreshOptions?.background, true);
+    assert.equal(typeof refreshOptions?.requestRuntimeRefreshUntil, "function");
+    assert.equal(
+      refreshOptions?.requestRuntimeRefreshUntil?.(unchangedClient),
+      false,
+    );
+    assert.equal(
+      refreshOptions?.requestRuntimeRefreshUntil?.(changedClient),
+      true,
+    );
 
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
     await Promise.resolve();
     assert.equal(refresh.mock.calls.length, 1);
   } finally {
     await rendered.cleanup();
+  }
+});
+
+test("Training rolls its local date forward while the same replica stays mounted", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 7, 9, 23, 59, 59, 900));
+  const emptyClient = createBrowserVaultQueryClient(
+    await createBrowserVaultReplica({
+      generatedAt: "2026-08-09T12:00:00.000Z",
+      metricPoints: [],
+      sourceBundleHash: "mounted-midnight-training",
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    }),
+  );
+  const currentWeekStarts: string[] = [];
+  mocks.useBrowserVaultSelector.mockImplementation((selector) => {
+    const view = selector(emptyClient);
+    currentWeekStarts.push(view.weeks.at(-1)?.startDate ?? "none");
+    return view;
+  });
+
+  const rendered = await renderClientComponent(
+    createElement(TrainingPageClient, {
+      authenticated: true,
+      continueContactOptions,
+      startContactOptions,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.equal(currentWeekStarts.at(-1), "2026-08-03");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_100);
+    });
+    assert.equal(currentWeekStarts.at(-1), "2026-08-10");
+  } finally {
+    await rendered.cleanup();
+    vi.useRealTimers();
   }
 });
 

@@ -590,22 +590,22 @@ test("Training reserves Best for strength-comparable sets across stable and fall
               exercises: [
                 {
                   name: "Bike",
-                  sets: [{ durationSeconds: 300, order: 1 }],
+                  sets: [{ durationSeconds: 300, order: 1, reps: 20 }],
                   sourceExerciseId: "EX_DURATION",
                 },
                 {
                   name: "Sled push",
-                  sets: [{ distanceMeters: 100, order: 1 }],
+                  sets: [{ distanceMeters: 100, order: 1, weight: 90, weightUnit: "kg" }],
                   sourceExerciseId: "EX_DISTANCE",
                 },
                 {
                   name: "Row",
-                  sets: [{ distanceMeters: 1_000, order: 1 }],
+                  sets: [{ distanceMeters: 1_000, order: 1, reps: 24 }],
                   sourceExerciseId: "EX_MIXED",
                 },
                 {
                   name: "  Farmer   carry ",
-                  sets: [{ distanceMeters: 20, order: 1 }],
+                  sets: [{ durationSeconds: 45, order: 1, reps: 12 }],
                 },
                 {
                   name: "Bench press",
@@ -627,22 +627,22 @@ test("Training reserves Best for strength-comparable sets across stable and fall
               exercises: [
                 {
                   name: "Bike",
-                  sets: [{ durationSeconds: 360, order: 1 }],
+                  sets: [{ durationSeconds: 360, order: 1, reps: 20 }],
                   sourceExerciseId: "EX_DURATION",
                 },
                 {
                   name: "Sled push",
-                  sets: [{ distanceMeters: 120, order: 1 }],
+                  sets: [{ distanceMeters: 120, order: 1, weight: 95, weightUnit: "kg" }],
                   sourceExerciseId: "EX_DISTANCE",
                 },
                 {
                   name: "Row",
-                  sets: [{ durationSeconds: 300, order: 1 }],
+                  sets: [{ durationSeconds: 300, order: 1, weight: 25, weightUnit: "kg" }],
                   sourceExerciseId: "EX_MIXED",
                 },
                 {
                   name: "Farmer carry",
-                  sets: [{ durationSeconds: 30, order: 1 }],
+                  sets: [{ distanceMeters: 30, order: 1, weight: 35, weightUnit: "kg" }],
                 },
                 {
                   name: "Bench press",
@@ -679,7 +679,7 @@ test("Training reserves Best for strength-comparable sets across stable and fall
   assert.equal(progress.get("EX_DURATION")?.lastSet?.durationSeconds, 360);
   assert.equal(progress.get("EX_DISTANCE")?.lastSet?.distanceMeters, 120);
   assert.equal(progress.get("EX_MIXED")?.lastSet?.durationSeconds, 300);
-  assert.equal(progress.get("farmer-carry")?.lastSet?.durationSeconds, 30);
+  assert.equal(progress.get("farmer-carry")?.lastSet?.distanceMeters, 30);
   assert.equal(progress.get("EX_STRENGTH")?.bestSet?.weight, 155);
 });
 
@@ -720,13 +720,19 @@ test("Training preserves a completed next-local-day workout before UTC midnight"
   });
   const activeView = selectBrowserVaultTraining(
     createBrowserVaultQueryClient(await createReplica()),
-    { timeZone: "Asia/Tokyo" },
+    {
+      now: new Date("2026-08-09T23:30:00.000Z"),
+      timeZone: "Asia/Tokyo",
+    },
   );
   const completedView = selectBrowserVaultTraining(
     createBrowserVaultQueryClient(
       await createReplica("2026-08-09T23:25:00.000Z"),
     ),
-    { timeZone: "Asia/Tokyo" },
+    {
+      now: new Date("2026-08-09T23:30:00.000Z"),
+      timeZone: "Asia/Tokyo",
+    },
   );
 
   assert.equal(activeView.activeSession?.id, "tokyo_monday_workout");
@@ -756,13 +762,69 @@ test("Training derives the current week from the browser time zone without a wor
 
   const tokyoView = selectBrowserVaultTraining(
     await createEmptyClient("2026-08-09T23:30:00.000Z"),
-    { timeZone: "Asia/Tokyo" },
+    {
+      now: new Date("2026-08-09T23:30:00.000Z"),
+      timeZone: "Asia/Tokyo",
+    },
   );
   const losAngelesView = selectBrowserVaultTraining(
     await createEmptyClient("2026-08-10T04:30:00.000Z"),
-    { timeZone: "America/Los_Angeles" },
+    {
+      now: new Date("2026-08-10T04:30:00.000Z"),
+      timeZone: "America/Los_Angeles",
+    },
   );
 
   assert.equal(tokyoView.weeks.at(-1)?.startDate, "2026-08-10");
   assert.equal(losAngelesView.weeks.at(-1)?.startDate, "2026-08-03");
+});
+
+test("Training uses the browser's current local day while a pre-midnight replica remains fresh", async () => {
+  const trainingEntity = (id: string, date: string, sourceExerciseId: string) =>
+    createWorkoutEntity(
+      id,
+      {
+        activityType: "strength-training",
+        workout: {
+          endedAt: `${date}T18:30:00.000Z`,
+          exercises: [{
+            name: sourceExerciseId,
+            sets: [{ order: 1, reps: 5, weight: 100, weightUnit: "lb" }],
+            sourceExerciseId,
+          }],
+          startedAt: `${date}T18:00:00.000Z`,
+        },
+      },
+      `${date}T18:00:00.000Z`,
+      date,
+    );
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-10T06:58:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-stale-local-date",
+    vault: createVaultReadModel({
+      entities: [
+        trainingEntity("summary_boundary", "2026-07-12", "SUMMARY_IN"),
+        trainingEntity("before_summary_boundary", "2026-07-11", "SUMMARY_OUT"),
+        trainingEntity("progress_boundary", "2026-02-09", "PROGRESS_IN"),
+        trainingEntity("before_progress_boundary", "2026-02-08", "PROGRESS_OUT"),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+    {
+      now: new Date("2026-08-10T19:00:00.000Z"),
+      timeZone: "America/Los_Angeles",
+    },
+  );
+
+  assert.equal(view.weeks.at(-1)?.startDate, "2026-08-10");
+  assert.equal(view.summary.workoutCount, 1);
+  assert.deepEqual(
+    view.exerciseProgress.map((entry) => entry.id).sort(),
+    ["PROGRESS_IN", "SUMMARY_IN", "SUMMARY_OUT"].sort(),
+  );
 });
