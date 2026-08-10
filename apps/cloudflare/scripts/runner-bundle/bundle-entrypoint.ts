@@ -188,8 +188,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // production assembly of the combined graph measured a 9,986,541B total on
 // 2026-08-10. After adding the timezone and deliverable-occurrence projection,
 // exact local production assembly of the fully merged graph measured an
-// 8,015,234B static closure and 10,024,188B total. Ratchet to those reviewed
-// measurements and retain the established cross-platform allowances.
+// 1,674,361B entry, 8,046,334B static closure, and 10,024,188B total. Only the
+// total exceeded its prior allowance, so ratchet that measurement and retain
+// the tighter reviewed startup baselines plus established tolerances.
 const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_024_188 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_015_234;
