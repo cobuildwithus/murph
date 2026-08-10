@@ -38,20 +38,27 @@ describe('response-card static Linq layouts', () => {
     )
   })
 
-  it('distinguishes one-off and canonical workout tables without exposing values', () => {
+  it('preserves complete table semantics without exposing tracking authority', () => {
     expect(buildLinqIMessageAppLayout(ONE_OFF_TABLE)).toEqual({
-      caption: 'Murph',
-      subcaption: 'Table',
-      trailing_caption: 'OPEN',
+      caption: 'Weekly plan',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: 'Monday: Focus: Upper body',
     })
     expect(buildLinqIMessageAppLayout(TRACKED_TABLE)).toEqual({
-      caption: 'Murph',
-      subcaption: 'Workout table',
-      trailing_caption: 'OPEN',
+      caption: 'Live workout',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: 'Exercise A: Set 1: 10',
     })
 
+    expect(JSON.stringify(buildLinqIMessageAppLayout(TRACKED_TABLE))).toMatch(
+      /Exercise A|10/u,
+    )
     expect(JSON.stringify(buildLinqIMessageAppLayout(TRACKED_TABLE))).not.toMatch(
-      /Exercise A|10|evt_|2026/u,
+      /evt_|2026/u,
     )
   })
 })

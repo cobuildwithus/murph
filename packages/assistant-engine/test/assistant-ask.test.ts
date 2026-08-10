@@ -739,19 +739,25 @@ function createCodexUsageEvent(input: {
   outputTokens: number
   turnId: string
 }): unknown {
+  const usage = {
+    cacheWriteInputTokens: 0,
+    cachedInputTokens: 0,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    reasoningOutputTokens: 0,
+    totalTokens: input.inputTokens + input.outputTokens,
+  }
   return {
+    method: 'thread/tokenUsage/updated',
     params: {
-      turn: {
-        id: input.turnId,
-        model: 'gpt-5.5',
+      threadId: 'thread_assistant_ask',
+      tokenUsage: {
+        last: usage,
+        modelContextWindow: null,
+        total: usage,
       },
-      usage: {
-        input_tokens: input.inputTokens,
-        output_tokens: input.outputTokens,
-        total_tokens: input.inputTokens + input.outputTokens,
-      },
+      turnId: input.turnId,
     },
-    type: 'turn.completed',
   }
 }
 

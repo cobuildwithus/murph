@@ -164,25 +164,22 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
 // retain that removal without changing the startup tolerances.
 //
-// Adding the personalized generated contact card puts its request contract,
-// exact-shape parser, direct route resolution, and acknowledgement handling in
-// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
-// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
-// only the total ceiling and keep both startup baselines and all tolerances.
-//
-// Adding the single-message group offer, exact reply ownership, and weekly
-// contextualization instructions grows only that lazy assistant output. Exact
-// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
-// baselines and established total tolerance.
-//
-// Subsequent reviewed biomarker ranges, hosted runtime-control compaction,
-// named-diet guidance, bounded group-tool failure diagnostics, and the strict
-// included-usage read contract grew only the reviewed lazy graph. The higher
-// exact pre-merge cross-platform measurements remain 10,000,845B total and an
-// 8,023,354B static closure. Retain those maxima until the combined production
-// assembly below proves a tighter exact baseline without weakening either
-// ratchet.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_000_845 + 32_768;
+// Adding the workout response-card contract, canonical command reconciliation,
+// and generated CLI option puts their code in the runner output. Exact Ubuntu
+// assembly measured a 9,922,798B total on 2026-08-10. The matching macOS
+// assembly measured a 9,969,877B total and 7,994,746B static boot closure; use
+// the larger cross-host measurements while keeping the entry baseline and all
+// tolerances unchanged.
+// Main's later reviewed biomarker, runtime-control, and named-diet changes
+// measured 9,933,847B total on Ubuntu. The combined merged tree measured a
+// 9,994,210B total and 8,019,079B static boot closure on macOS; retain those
+// cross-host measurements. Other reviewed mainline and current-sender changes
+// measured higher pre-merge maxima of 10,000,845B total and an 8,023,354B
+// static closure. Exact merged macOS production assembly measured 10,029,806B
+// total and an 8,049,480B static closure. Ratchet the total baseline to that
+// combined graph while keeping the entry/static baselines and every tolerance
+// unchanged.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_029_806 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_023_354;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

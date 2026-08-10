@@ -67,16 +67,14 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // June 2026 latency regression was exactly this: one static import dragged
 // the whole command surface onto the hot path with nothing watching).
 // Baselines measured from the real assembled bundle on 2026-06-11:
-// total 7,052,933 B across all chunks, entry bin.js 15,569 B. Budgets are
-// baseline + ~25-30% headroom. If a violation fires, investigate the listed
-// largest inputs first; only raise the budget deliberately for growth that
-// is understood and intended.
-//
-// Bounded Health Commons search plus the reviewed current-sender private
-// completion and response-card paths extend existing CLI/assistant chunks
-// without adding a forbidden input. Exact macOS production assembly measured
-// 9,012,752B on 2026-08-10; retain the established 32KB reviewed-addition
-// allowance above that combined baseline.
+// total 7,052,933 B across all chunks, entry bin.js 15,569 B. The combined
+// 2026-08-10 main plus compact-table image contract measured 9,027,632 B after
+// the listed graph was inspected. The reviewed current-sender private
+// completion and response-card paths also extend existing CLI/assistant chunks
+// without adding a forbidden input. Exact merged macOS production assembly
+// measured 9,011,007 B; retain the higher reviewed cross-host ceiling and keep
+// the entry budget unchanged. If a violation fires, investigate the listed
+// largest inputs first before raising the budget.
 const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_012_752 + 32_768;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 

@@ -1,9 +1,9 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import type {
@@ -125,7 +125,7 @@ describe('assistant Clinical Records connect-link tool', () => {
 })
 
 function readConnectLinkRequest(args: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: args,

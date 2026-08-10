@@ -17,6 +17,7 @@ import {
   assertTargetableLiveWorkout,
   normalizeLiveWorkoutId,
   requireLiveWorkoutSetOrder,
+  resolveExerciseIndex,
 } from '../src/usecases/workout-live-state.js'
 
 describe('live workout model', () => {
@@ -27,19 +28,19 @@ describe('live workout model', () => {
         {
           name: 'Bench press',
           sourceExerciseId: 'EX123',
-          order: 1,
+          order: 3,
           mode: 'weight_reps',
           unitOverride: 'lb',
           plannedSets: [
             {
-              order: 1,
+              order: 2,
               type: 'warmup',
               targetReps: 10,
               targetWeight: 95,
               targetWeightUnit: 'lb',
             },
             {
-              order: 2,
+              order: 4,
               targetReps: 8,
               targetWeight: 135,
               targetWeightUnit: 'lb',
@@ -67,16 +68,32 @@ describe('live workout model', () => {
       {
         name: 'Bench press',
         sourceExerciseId: 'EX123',
-        order: 1,
+        order: 3,
         mode: 'weight_reps',
         unitOverride: 'lb',
         sets: [
-          { order: 1, type: 'warmup' },
-          { order: 2 },
+          { order: 2, type: 'warmup' },
+          { order: 4 },
         ],
       },
     ])
     assert.equal(hasLoggedWorkoutSet(workout.exercises[0]!.sets[0]!), false)
+    assert.equal(
+      resolveExerciseIndex(workout.exercises, {
+        exerciseName: 'Bench press',
+        exerciseOrder: 3,
+      }),
+      0,
+    )
+    assert.throws(
+      () =>
+        resolveExerciseIndex(workout.exercises, {
+          exerciseName: 'Bench press',
+          exerciseOrder: 1,
+        }),
+      (error: unknown) =>
+        error instanceof VaultCliError && error.code === 'not_found',
+    )
     assert.equal(
       hasLoggedWorkoutSet({ order: 1, reps: 8, weight: 135, weightUnit: 'lb' }),
       true,

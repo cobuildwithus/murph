@@ -4559,11 +4559,19 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "start_checkout") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action"]),
+      new Set(["action", "confirmedTrialConversion"]),
       "Hosted runtime family plan tool start_checkout request",
     );
     return {
       action,
+      ...(record.confirmedTrialConversion === undefined
+        ? {}
+        : {
+            confirmedTrialConversion: requireExactTrue(
+              record.confirmedTrialConversion,
+              "Hosted runtime family plan tool start_checkout request confirmedTrialConversion",
+            ),
+          }),
     };
   }
   if (action !== "create_invite") {
@@ -5334,6 +5342,7 @@ function parseHostedRuntimeFamilyPlanStatusResponse(
     new Set([
       "billingActive",
       "billingStatus",
+      "activeTrialConversion",
       "members",
       "owner",
       "pendingInvites",
@@ -5345,6 +5354,9 @@ function parseHostedRuntimeFamilyPlanStatusResponse(
 
   const seats = parseHostedRuntimeFamilyPlanSeatStatus(record.seats);
   return {
+    activeTrialConversion: parseHostedRuntimeFamilyPlanActiveTrialConversion(
+      record.activeTrialConversion,
+    ),
     billingActive: requireBoolean(
       record.billingActive,
       "Hosted runtime family plan status billingActive",
@@ -5367,6 +5379,54 @@ function parseHostedRuntimeFamilyPlanStatusResponse(
     ).map(parseHostedRuntimeFamilyPlanInvite),
     plans: parseHostedRuntimeFamilyPlanPlans(record.plans, seats),
     seats,
+  };
+}
+
+function parseHostedRuntimeFamilyPlanActiveTrialConversion(
+  value: unknown,
+): HostedRuntimeFamilyPlanToolStatusResponse["activeTrialConversion"] {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const record = requireObject(
+    value,
+    "Hosted runtime family plan active trial conversion",
+  );
+  assertAllowedObjectKeys(
+    record,
+    new Set([
+      "includedPulseSeats",
+      "monthlyAmountUsdCents",
+      "perSeatMonthlyAmountUsdCents",
+      "trialEndsImmediately",
+    ]),
+    "Hosted runtime family plan active trial conversion",
+  );
+  const includedPulseSeats = requirePositiveInteger(
+    record.includedPulseSeats,
+    "Hosted runtime family plan active trial conversion includedPulseSeats",
+  );
+  const perSeatMonthlyAmountUsdCents = requirePositiveInteger(
+    record.perSeatMonthlyAmountUsdCents,
+    "Hosted runtime family plan active trial conversion perSeatMonthlyAmountUsdCents",
+  );
+  const monthlyAmountUsdCents = requirePositiveInteger(
+    record.monthlyAmountUsdCents,
+    "Hosted runtime family plan active trial conversion monthlyAmountUsdCents",
+  );
+  if (monthlyAmountUsdCents !== includedPulseSeats * perSeatMonthlyAmountUsdCents) {
+    throw new TypeError(
+      "Hosted runtime family plan active trial conversion monthly amount must match its included seats.",
+    );
+  }
+  return {
+    includedPulseSeats,
+    monthlyAmountUsdCents,
+    perSeatMonthlyAmountUsdCents,
+    trialEndsImmediately: requireExactTrue(
+      record.trialEndsImmediately,
+      "Hosted runtime family plan active trial conversion trialEndsImmediately",
+    ),
   };
 }
 
@@ -7305,6 +7365,13 @@ function requirePositiveInteger(value: unknown, label: string): number {
   }
 
   return parsed;
+}
+
+function requireExactTrue(value: unknown, label: string): true {
+  if (requireBoolean(value, label) !== true) {
+    throw new TypeError(`${label} must be true.`);
+  }
+  return true;
 }
 
 function requireNonNegativeInteger(value: unknown, label: string): number {
