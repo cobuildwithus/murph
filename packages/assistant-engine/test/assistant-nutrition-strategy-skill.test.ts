@@ -318,6 +318,21 @@ describe('assistant nutrition strategy skill', () => {
       'before every `daily_nutrition` attachment, including when five accepted active goals already exist and during a scheduled closeout.',
     )
     expect(compactSafety).toContain(
+      '`vault-cli measurement list --from <45-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'either a direct `bmi` measurement in `kg/m^2`, or height and weight from the same measurement event',
+    )
+    expect(compactSafety).toContain(
+      'Do not combine height and weight from different events or dates',
+    )
+    expect(compactSafety).toContain(
+      'A usable adult BMI below 18.5 suppresses numeric goals and the card.',
+    )
+    expect(compactSafety).toContain(
+      'If the 200-record result is saturated without resolving whether usable BMI evidence is present, suppress the card; otherwise missing measurements are unavailable evidence, not a universal block.',
+    )
+    expect(compactSafety).toContain(
       'A scheduled occurrence uses this file only as a card-time safety check.',
     )
   })
@@ -348,6 +363,9 @@ describe('assistant nutrition strategy skill', () => {
     expect(compactSafety).toContain('under-fueling or RED-S concern')
     expect(compactSafety).toContain(
       'known underweight (including adult BMI below 18.5 when current height and weight are available), frailty, or malnutrition risk',
+    )
+    expect(compactSafety).toContain(
+      'Never ask a scheduled occurrence for these measurements and never mutate measurement records during this check.',
     )
     expect(compactSafety).toContain(
       "Treat a calorie target below 1,200 kcal/day as outside this product's self-directed numeric-card boundary.",
