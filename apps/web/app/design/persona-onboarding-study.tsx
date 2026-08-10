@@ -64,6 +64,45 @@ export function PersonaOnboardingStudy() {
   );
 }
 
+export function PersonaSettingsStudy() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div id="settings-persona-picker" className="scroll-mt-24">
+      <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+        Settings reuses the production personality selector as a focused
+        two-step flow. It changes only the main and optional supporting
+        personality, leaving tone and voice untouched.
+      </p>
+      <div className="mt-5 flex flex-col gap-5 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-serif text-xl font-semibold tracking-normal text-foreground">
+            Classic + Scientist
+          </p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            Main personality · optional supporting personality
+          </p>
+          <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Preview only · choices are not saved
+          </p>
+        </div>
+        <Button onClick={() => setOpen(true)}>Edit personality</Button>
+      </div>
+      {open ? (
+        <MurphPersonaPicker
+          initialPersona="classic-with-scientist"
+          initialTone="formal"
+          initialVoice="upbeat"
+          mode="personality"
+          onOpenChange={setOpen}
+          open
+          savePreference={preservePreviewPreferences}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function preservePreviewPreferences(
   preferences: MurphPersonaPreferences,
 ): Promise<MurphPersonaPreferences> {

@@ -1,8 +1,10 @@
 import "server-only";
 
 import {
-  assistantWebPersonalitySettingIds,
-  type AssistantWebPersonalitySettingId,
+  isAssistantTonePreference,
+  isAssistantVoiceOptionId,
+  normalizeStoredAssistantPersonaId,
+  type AssistantPersonaId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -27,7 +29,6 @@ import {
   readHostedMemberIdentityPhoneNumber,
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
-import { projectHostedMemberAssistantPreferences } from "./member-preferences";
 import {
   extractHostedPrivyEmailAccount,
   extractHostedPrivyTelegramAccount,
@@ -39,7 +40,7 @@ export interface HostedAccountSettingsSnapshot {
     configurationAvailable: boolean;
     dormantSolPreference: boolean;
     model: HostedAssistantProductModel;
-    personality: Record<AssistantWebPersonalitySettingId, number | null>;
+    persona: AssistantPersonaId | null;
     provider?: HostedAssistantProvider;
     solAvailable: boolean;
     tone: AssistantTonePreference | null;
@@ -98,10 +99,7 @@ export interface HostedAccountSettingsRouting {
 const hostedAccountSettingsMemberSelect =
   Prisma.validator<Prisma.HostedMemberSelect>()({
     ...HOSTED_MEMBER_ASSISTANT_MODEL_SELECT,
-    assistantDetail: true,
-    assistantHumor: true,
-    assistantPush: true,
-    assistantUnhinged: true,
+    assistantPersona: true,
     assistantTone: true,
     assistantVoice: true,
     billingRef: {
@@ -161,17 +159,14 @@ export async function readHostedAccountSettingsPageSnapshot(input: {
       id: input.memberId,
     },
   });
-  const projectedAssistantPreferences = projectHostedMemberAssistantPreferences(member);
-  // Only the web-visible dials reach the browser Settings payload. `unhinged`
-  // is conversational-only and must never be projected into client state.
-  const webPersonality = {} as Record<AssistantWebPersonalitySettingId, number | null>;
-  for (const id of assistantWebPersonalitySettingIds) {
-    webPersonality[id] = projectedAssistantPreferences.personality[id];
-  }
   const assistantPreferences = {
-    personality: webPersonality,
-    tone: projectedAssistantPreferences.tone,
-    voice: projectedAssistantPreferences.voice,
+    persona: normalizeStoredAssistantPersonaId(member?.assistantPersona ?? null),
+    tone: isAssistantTonePreference(member?.assistantTone)
+      ? member.assistantTone
+      : null,
+    voice: isAssistantVoiceOptionId(member?.assistantVoice)
+      ? member.assistantVoice
+      : null,
   };
   const assistantModel = resolveHostedMemberAssistantModel(member);
   const privateSettings = member

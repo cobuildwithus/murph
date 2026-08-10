@@ -838,7 +838,7 @@ describe('assistant execution prompt contract', () => {
       '/settings?voice=true',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Saved tone (formal/casual) and voice',
+      'Saved personality, tone (formal/casual), and voice',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'Use `murph.assistant_style` for dials',
@@ -955,7 +955,10 @@ describe('assistant execution prompt contract', () => {
       'use `/settings?voice=true` only for voice or sound changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Use `/settings` for tone, model, provider, or reasoning changes',
+      'Use `/settings` for personality, tone, model, provider, or reasoning changes',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'read or save explicit main personality, optional supporting personality, tone, and voice fields',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'never use a same-turn voice demo as activation proof',
@@ -2925,7 +2928,10 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain(
-      "Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime",
+      "Main Personality, Supporting Personality, Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime",
+    )
+    expect(prompt).toContain(
+      "Read or save this room's explicit main personality, optional supporting personality, tone, and voice fields",
     )
     expect(prompt).toContain(
       "They never read or change any participant's private Murph settings",

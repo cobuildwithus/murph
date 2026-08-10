@@ -49,11 +49,13 @@ export interface MurphPersonaPreferences {
 
 type PersonaPickerStep = "main" | "supporting" | "voices" | "tone";
 type PersonaPickerOperation = "save" | "skip";
+export type MurphPersonaPickerMode = "onboarding" | "personality";
 
 export function MurphPersonaPicker({
   initialPersona = "classic",
   initialTone,
   initialVoice,
+  mode = "onboarding",
   onComplete,
   onOpenChange,
   onSaved,
@@ -65,6 +67,7 @@ export function MurphPersonaPicker({
   initialPersona?: AssistantPersonaId;
   initialTone?: AssistantTonePreference | null;
   initialVoice?: AssistantVoiceOptionId | null;
+  mode?: MurphPersonaPickerMode;
   onComplete?: (preferences: MurphPersonaPreferences | null) => void;
   onOpenChange: (open: boolean) => void;
   onSaved?: (preferences: MurphPersonaPreferences) => void;
@@ -78,7 +81,6 @@ export function MurphPersonaPicker({
   const supportingPersonaGroupId = useId();
   const toneGroupId = useId();
   const voicePreviewGroupId = useId();
-  const stepTitleId = useId();
   const initialPersonaParts = resolveAssistantPersonaParts(initialPersona);
   const initialOption = resolveAssistantBasePersonaOption(initialPersonaParts.mainId);
   const [step, setStep] = useState<PersonaPickerStep>("main");
@@ -142,8 +144,10 @@ export function MurphPersonaPicker({
     const next = resolveAssistantBasePersonaOption(nextPersona);
     setPersona(nextPersona);
     if (supportingPersona === next.id) setSupportingPersona(null);
-    setTone(next.defaultTone);
-    setVoice(next.defaultVoiceId);
+    if (mode === "onboarding") {
+      setTone(next.defaultTone);
+      setVoice(next.defaultVoiceId);
+    }
   };
 
   const handleSave = async () => {
@@ -439,6 +443,10 @@ export function MurphPersonaPicker({
           disabled={saving}
           onClick={() => {
             if (step === "main") {
+              if (mode === "personality") {
+                handleOpenChange(false);
+                return;
+              }
               void handleSkip();
               return;
             }
@@ -458,7 +466,7 @@ export function MurphPersonaPicker({
           {step === "main" && pendingOperation === "skip"
             ? "Skipping…"
             : step === "main"
-              ? "Skip"
+              ? mode === "personality" ? "Cancel" : "Skip"
               : "Back"}
         </Button>
         <Button
@@ -472,6 +480,10 @@ export function MurphPersonaPicker({
               return;
             }
             if (step === "supporting") {
+              if (mode === "personality") {
+                void handleSave();
+                return;
+              }
               setStep("voices");
               return;
             }
@@ -485,7 +497,11 @@ export function MurphPersonaPicker({
           {pendingOperation === "save" ? (
             <Loader2Icon data-icon="inline-start" className="animate-spin" />
           ) : null}
-          {pendingOperation === "save" ? "Saving…" : "Continue"}
+          {pendingOperation === "save"
+            ? "Saving…"
+            : mode === "personality" && step === "supporting"
+              ? "Save personality"
+              : "Continue"}
         </Button>
       </div>
     </div>
@@ -518,16 +534,18 @@ export function MurphPersonaPicker({
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerContent className="h-dvh data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-t-none">
           <DrawerHeader className="items-start gap-2 pb-3 text-left">
-            <StepProgress step={stepNumber} />
+            <StepProgress
+              step={stepNumber}
+              total={mode === "personality" ? 2 : 4}
+            />
             <div
               ref={stepTitleRef}
-              aria-labelledby={stepTitleId}
+              aria-label={title}
               className="outline-none"
               data-persona-picker-step-title
               tabIndex={-1}
             >
               <DrawerTitle
-                id={stepTitleId}
                 className="font-serif text-[2rem] leading-9 font-semibold tracking-[-0.02em]"
               >
                 {title}
@@ -563,16 +581,18 @@ export function MurphPersonaPicker({
         className="flex min-w-0 max-h-[calc(100dvh-2rem)] flex-col gap-5 overflow-hidden p-6"
       >
         <DialogHeader className="min-w-0 gap-2 text-left">
-          <StepProgress step={stepNumber} />
+          <StepProgress
+            step={stepNumber}
+            total={mode === "personality" ? 2 : 4}
+          />
           <div
             ref={stepTitleRef}
-            aria-labelledby={stepTitleId}
+            aria-label={title}
             className="min-w-0 outline-none"
             data-persona-picker-step-title
             tabIndex={-1}
           >
             <DialogTitle
-              id={stepTitleId}
               className="break-words font-serif text-[2.5rem] leading-[2.75rem] font-semibold tracking-[-0.025em] text-balance"
             >
               {title}
@@ -894,14 +914,29 @@ function PersonaVoiceChoice({
   );
 }
 
-function StepProgress({ step }: { step: 1 | 2 | 3 | 4 }) {
+function StepProgress({
+  step,
+  total,
+}: {
+  step: 1 | 2 | 3 | 4;
+  total: 2 | 4;
+}) {
   return (
-    <div className="flex w-full items-center gap-3" aria-label={`Step ${step} of 4`}>
+    <div
+      className="flex w-full items-center gap-3"
+      aria-label={`Step ${step} of ${total}`}
+    >
       <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-        Step {step} of 4
+        Step {step} of {total}
       </span>
-      <span className="grid flex-1 grid-cols-4 gap-1.5" aria-hidden="true">
-        {[1, 2, 3, 4].map((segment) => (
+      <span
+        className={cn(
+          "grid flex-1 gap-1.5",
+          total === 2 ? "grid-cols-2" : "grid-cols-4",
+        )}
+        aria-hidden="true"
+      >
+        {Array.from({ length: total }, (_, index) => index + 1).map((segment) => (
           <span
             key={segment}
             className={cn(

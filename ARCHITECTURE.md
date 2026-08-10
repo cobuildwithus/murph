@@ -657,11 +657,12 @@ receipts; the database migration must precede the web deploy.
 
 ## Hosted Assistant Personalization
 
-`apps/web` remains the canonical projection and mutation owner for hosted tone,
-voice, model, and reasoning preferences; canonical tone, voice, and personality
+`apps/web` remains the canonical projection and mutation owner for hosted persona,
+tone, voice, model, and reasoning preferences; canonical persona, tone, voice, and personality
 truth converges into the current runtime's `bank/preferences.json`. The
 assistant-accessible `murph.personalization` tool
-reads model availability as context but mutates only tone and voice through one
+reads model availability as context but mutates only the main and optional
+supporting persona, tone, and voice through one
 active-runtime-write-fenced, runtime-bound, signed `web-control.worker` callback
 with strict read/update contracts. The
 validated fence identity is the only member identity forwarded and signed for
@@ -683,10 +684,14 @@ input to be a direct conversation wake; explicitly authorized direct email is
 accepted, while non-direct Linq or email fails closed. A synthetic
 thread-container mutation requires that exact input to be a non-direct Linq
 wake whose current route authority is still bound to the same container; group
-email and stale, direct, missing, or cross-room authority fail closed. Tone and voice changes continue to
+email and stale, direct, missing, or cross-room authority fail closed. Persona,
+tone, and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
-runtime handling. Hosted `murph.assistant_style` set/reset operations use a
+runtime handling. Personal Settings projects the canonical combined persona ID
+and reuses the onboarding selector for a persona-only save; browser Settings do
+not expose or accept the numeric personality dials. Hosted
+`murph.assistant_style` set/reset operations use a
 separate strict personality action on that same signed, input-bound callback;
 local mode continues to mutate the canonical vault directly. Web resolves the
 accepted input's causal sequence inside the transaction, applies Humor, Push,
@@ -708,7 +713,8 @@ remains the only durable path into `bank/preferences.json`.
 Authenticated hosted Linq group turns register the same `murph.personalization`
 and `murph.assistant_style` tools against the room runtime. The container's
 `HostedMember` projection fields and canonical room vault therefore own Tone,
-Voice, Humor, Push, Detail, and Unhinged for that group. Saved room tone and personality
+Voice, Main Personality, Supporting Personality, Humor, Push, Detail, and
+Unhinged for that group. Saved room tone and personality
 enter later attended and scheduled hosted group turns, and saved room voice
 enters later generated voice
 output. They never read, inherit, or mutate a speaker's private Murph

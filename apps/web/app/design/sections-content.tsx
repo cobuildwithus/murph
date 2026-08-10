@@ -56,7 +56,10 @@ import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
-import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import {
+  PersonaOnboardingStudy,
+  PersonaSettingsStudy,
+} from "./persona-onboarding-study";
 import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
@@ -479,6 +482,8 @@ export function SectionsContent() {
       <StudySection title="Persona onboarding with stacked tone samples">
         <div data-design-section="persona-onboarding">
           <PersonaOnboardingStudy />
+          <Separator />
+          <PersonaSettingsStudy />
         </div>
       </StudySection>
 

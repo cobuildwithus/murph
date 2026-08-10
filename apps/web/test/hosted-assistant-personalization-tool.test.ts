@@ -83,6 +83,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
     mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
     mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
+      persona: "classic",
       personality: {
         detail: null,
         humor: null,
@@ -102,6 +103,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
     });
     mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
       appliedFields: ["voice"],
+      assistantPersona: "classic",
       assistantPersonality: {
         detail: null,
         humor: null,
@@ -122,8 +124,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).resolves.toEqual({
       action: "read",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         solAvailable: false,
+        supportingPersona: null,
         tone: "formal",
         voice: "warm",
       },
@@ -164,8 +168,10 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).resolves.toEqual({
       action: "read",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         solAvailable: false,
+        supportingPersona: null,
         tone: "formal",
         voice: "upbeat",
       },
@@ -274,6 +280,72 @@ describe("hosted assistant personalization tool owner adapter", () => {
     expect(mocks.scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_personalization_1",
       mailboxItemId: "mailbox_scheduled_personality",
+    });
+  });
+
+  it("resolves and persists main and supporting personalities without changing tone or voice", async () => {
+    mocks.readHostedMemberAssistantPreferences.mockResolvedValue({
+      persona: "classic-with-navy-seal",
+      personality: {
+        detail: null,
+        humor: null,
+        push: null,
+        unhinged: null,
+      },
+      tone: "formal",
+      voice: "warm",
+    });
+    mocks.upsertHostedMemberAssistantPreferencesTx.mockResolvedValue({
+      appliedFields: ["persona"],
+      assistantPersona: "scientist-with-classic",
+      assistantPersonality: {
+        detail: null,
+        humor: null,
+        push: null,
+        unhinged: null,
+      },
+      assistantTone: "formal",
+      assistantVoice: "warm",
+      dispatch: { mailboxItemId: "mailbox_persona_1" },
+      updated: true,
+    });
+
+    await expect(handleHostedRuntimeAssistantPersonalizationTool({
+      authority: { assistantInputId: "ain_12121212121212121212121212121212" },
+      memberId: "member_personalization_1",
+      request: {
+        action: "update",
+        mainPersona: "scientist",
+        supportingPersona: "classic",
+      },
+      scheduleMailboxWake: mocks.scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "update",
+      result: {
+        mainPersona: "scientist",
+        model: "gpt-5.6-terra",
+        modelChangeAppliesNextRun: false,
+        modelUpdated: false,
+        solAvailable: false,
+        status: "saved",
+        supportingPersona: "classic",
+        tone: "formal",
+        voice: "warm",
+      },
+    });
+
+    expect(mocks.upsertHostedMemberAssistantPreferencesTx).toHaveBeenCalledWith({
+      causalOrigin: "turn",
+      memberId: "member_personalization_1",
+      occurredAt: "2026-07-16T00:00:00.000Z",
+      preferenceCausalSeq: "42",
+      preferences: { persona: "scientist-with-classic" },
+      prisma: expect.objectContaining({ tx: true }),
+      updateId: buildAcceptedPreferenceUpdateId({
+        assistantInputId: "ain_12121212121212121212121212121212",
+        operation: "personalization",
+        requestedFields: ["persona"],
+      }),
     });
   });
 
@@ -920,11 +992,13 @@ describe("hosted assistant personalization tool owner adapter", () => {
     })).resolves.toEqual({
       action: "update",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
         status: "saved",
+        supportingPersona: null,
         tone: "casual",
         voice: "warm",
       },
@@ -1015,7 +1089,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
 });
 
 function buildScheduledPreferenceUpdateId(
-  operation: "personality" | "tone-voice",
+  operation: "personalization" | "personality" | "tone-voice",
   requestedFields: string[],
 ): string {
   return createHash("sha256")
@@ -1035,7 +1109,7 @@ function buildScheduledPreferenceUpdateId(
 
 function buildAcceptedPreferenceUpdateId(input: {
   assistantInputId: string;
-  operation: "personality" | "tone-voice";
+  operation: "personalization" | "personality" | "tone-voice";
   requestedFields: string[];
   toolCallId?: string;
 }): string {

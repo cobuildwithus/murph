@@ -20,7 +20,10 @@ import {
 } from "@murphai/hosted-execution";
 import {
   assistantPersonalitySettingIds,
+  resolveAssistantPersonaCombinationId,
+  resolveAssistantPersonaParts,
   resolveAssistantEffectiveStyle,
+  type AssistantBasePersonaId,
   type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantPreferenceFieldId,
@@ -101,63 +104,77 @@ export async function handleHostedRuntimeAssistantPersonalizationTool(input: {
   }
   const prisma = getPrisma();
   const transactionResult = await prisma.$transaction(async (tx) => {
+    const personaRequested = request.mainPersona !== undefined
+      || request.supportingPersona !== undefined;
+    const requestedFields: AssistantPreferenceFieldId[] = [
+      ...(personaRequested ? ["persona" as const] : []),
+      ...(request.tone === undefined ? [] : ["tone" as const]),
+      ...(request.voice === undefined ? [] : ["voice" as const]),
+    ];
     const writeAuthority =
       await resolveHostedRuntimeAssistantPreferenceWriteAuthority({
         authority,
         memberId: input.memberId,
-        operation: "tone-voice",
+        operation: personaRequested ? "personalization" : "tone-voice",
         prisma: tx,
-        requestedFields: [
-          ...(request.tone === undefined ? [] : ["tone" as const]),
-          ...(request.voice === undefined ? [] : ["voice" as const]),
-        ],
+        requestedFields,
       });
-    const styleResult = request.tone !== undefined || request.voice !== undefined
-      ? await upsertHostedMemberAssistantPreferencesTx({
-          causalOrigin: "turn",
+    const currentPreferences = personaRequested
+      ? await readHostedMemberAssistantPreferences({
           memberId: input.memberId,
-          occurredAt: writeAuthority.occurredAt,
-          ...(writeAuthority.preferenceCausalSeq === undefined
-            ? {}
-            : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
-          preferences: {
-            ...(request.tone === undefined ? {} : { tone: request.tone }),
-            ...(request.voice === undefined ? {} : { voice: request.voice }),
-          },
           prisma: tx,
-          updateId: writeAuthority.updateId,
         })
       : null;
+    const requestedPersona = currentPreferences
+      ? resolveRequestedAssistantPersona({
+          currentPersona: resolveHostedAssistantEffectiveStyle(currentPreferences).persona,
+          mainPersona: request.mainPersona,
+          supportingPersona: request.supportingPersona,
+        })
+      : null;
+    const styleResult = await upsertHostedMemberAssistantPreferencesTx({
+      causalOrigin: "turn",
+      memberId: input.memberId,
+      occurredAt: writeAuthority.occurredAt,
+      ...(writeAuthority.preferenceCausalSeq === undefined
+        ? {}
+        : { preferenceCausalSeq: writeAuthority.preferenceCausalSeq }),
+      preferences: {
+        ...(requestedPersona === null ? {} : { persona: requestedPersona }),
+        ...(request.tone === undefined ? {} : { tone: request.tone }),
+        ...(request.voice === undefined ? {} : { voice: request.voice }),
+      },
+      prisma: tx,
+      updateId: writeAuthority.updateId,
+    });
     const model = await readHostedMemberAssistantModelPreference({
-        memberId: input.memberId,
-        prisma: tx,
-      });
-    const preferences = styleResult
-      ? {
-          persona: styleResult.assistantPersona,
-          personality: styleResult.assistantPersonality,
-          tone: styleResult.assistantTone,
-          voice: styleResult.assistantVoice,
-        }
-      : await readHostedMemberAssistantPreferences({
-          memberId: input.memberId,
-          prisma: tx,
-        });
+      memberId: input.memberId,
+      prisma: tx,
+    });
+    const preferences = {
+      persona: styleResult.assistantPersona,
+      personality: styleResult.assistantPersonality,
+      tone: styleResult.assistantTone,
+      voice: styleResult.assistantVoice,
+    };
     const effectiveStyle = resolveHostedAssistantEffectiveStyle(preferences);
+    const personaParts = resolveAssistantPersonaParts(effectiveStyle.persona);
     const effectiveTone = effectiveStyle.tone;
     const effectiveVoice = effectiveStyle.voice;
-    const styleUpdated = styleResult?.updated ?? false;
+    const styleUpdated = styleResult.updated;
 
     return {
-      dispatch: styleResult?.dispatch ?? null,
+      dispatch: styleResult.dispatch,
       response: {
         action: "update" as const,
         result: {
+          mainPersona: personaParts.mainId,
           model: model.model,
           modelChangeAppliesNextRun: false as const,
           modelUpdated: false as const,
           solAvailable: model.solAvailable,
           status: styleUpdated ? "saved" as const : "unchanged" as const,
+          supportingPersona: personaParts.supportingId,
           tone: effectiveTone,
           voice: effectiveVoice,
         },
@@ -318,7 +335,7 @@ function buildHostedAssistantPersonalitySetting(input: {
 async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
   authority: HostedRuntimeAssistantPersonalizationToolAuthority;
   memberId: string;
-  operation: "personality" | "tone-voice";
+  operation: "personalization" | "personality" | "tone-voice";
   prisma: HostedMailboxStoreClient;
   requestedFields: readonly AssistantPreferenceFieldId[];
 }): Promise<HostedRuntimeAssistantPreferenceWriteAuthority> {
@@ -362,7 +379,7 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
 
 function buildHostedAssistantPreferenceUpdateId(input: {
   authority: HostedRuntimeAssistantPersonalizationToolAuthority;
-  operation: "personality" | "tone-voice";
+  operation: "personalization" | "personality" | "tone-voice";
   requestedFields: readonly AssistantPreferenceFieldId[];
 }): string {
   return createHash("sha256")
@@ -455,10 +472,36 @@ async function readHostedAssistantPersonalization(
   ]);
 
   const effective = resolveHostedAssistantEffectiveStyle(preferences);
+  const personaParts = resolveAssistantPersonaParts(effective.persona);
   return {
+    mainPersona: personaParts.mainId,
     model: model.model,
     solAvailable: model.solAvailable,
+    supportingPersona: personaParts.supportingId,
     tone: effective.tone,
     voice: effective.voice,
   };
+}
+
+function resolveRequestedAssistantPersona(input: {
+  currentPersona: AssistantPersonaId;
+  mainPersona?: AssistantBasePersonaId;
+  supportingPersona?: AssistantBasePersonaId | null;
+}): AssistantPersonaId {
+  const current = resolveAssistantPersonaParts(input.currentPersona);
+  const main = input.mainPersona ?? current.mainId;
+  let supporting = input.supportingPersona === undefined
+    ? current.supportingId
+    : input.supportingPersona;
+  if (
+    input.mainPersona !== undefined
+    && input.supportingPersona === undefined
+    && supporting === main
+  ) {
+    supporting = null;
+  }
+  if (supporting === main) {
+    throw new TypeError("Supporting persona must differ from the main persona.");
+  }
+  return resolveAssistantPersonaCombinationId(main, supporting);
 }

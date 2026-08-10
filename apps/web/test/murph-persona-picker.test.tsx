@@ -10,6 +10,8 @@ import {
 } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
+import type { MurphPersonaPreferences } from "@/src/components/murph/murph-persona-picker";
+
 import { renderClientComponent } from "./render-client-component";
 
 const componentMocks = vi.hoisted(() => ({
@@ -176,6 +178,48 @@ test("MurphPersonaPicker saves the selected persona, voice, and tone atomically"
       persona: "navy-seal-with-stoic-philosopher",
       tone: "casual",
       voice: "husky",
+    }]);
+    assert.deepEqual(onOpenChange.mock.calls[0], [false]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphPersonaPicker reuses the main and supporting steps without changing tone or voice", async () => {
+  const savePreference = vi.fn(async (preferences: MurphPersonaPreferences) =>
+    preferences
+  );
+  const onOpenChange = vi.fn();
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      initialPersona: "classic-with-navy-seal",
+      initialTone: "formal",
+      initialVoice: "grandpa",
+      mode: "personality",
+      onOpenChange,
+      open: true,
+      savePreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Step 1 of 2/u);
+    assert.match(rendered.container.textContent ?? "", /Cancel/u);
+    await clickControlContaining(rendered, "Scientist");
+    await clickControlContaining(rendered, "Continue");
+    assert.match(rendered.container.textContent ?? "", /Step 2 of 2/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Choose a voice/u);
+    await clickControlContaining(rendered, "Classic");
+    await clickControlContaining(rendered, "Save personality");
+
+    assert.deepEqual(savePreference.mock.calls[0], [{
+      persona: "scientist-with-classic",
+      tone: "formal",
+      voice: "grandpa",
     }]);
     assert.deepEqual(onOpenChange.mock.calls[0], [false]);
   } finally {

@@ -1,9 +1,11 @@
 "use client";
 
 import {
-  assistantWebPersonalitySettingIds,
   assistantVoiceOptions,
-  type AssistantWebPersonalitySettingId,
+  defaultAssistantPersonaId,
+  resolveAssistantBasePersonaOption,
+  resolveAssistantPersonaParts,
+  type AssistantPersonaId,
   type AssistantTonePreference,
   type AssistantVoiceOptionId,
 } from "@murphai/contracts";
@@ -14,31 +16,19 @@ import {
   MurphAssistantStylePicker,
   type MurphAssistantStylePreferences,
 } from "@/src/components/murph/murph-assistant-style-picker";
+import {
+  MurphPersonaPicker,
+  type MurphPersonaPreferences,
+} from "@/src/components/murph/murph-persona-picker";
 import { MurphContactCardPicker } from "@/src/components/murph/murph-contact-card-picker";
 import { Button } from "@/src/components/ui/button";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
-import {
-  MurphPersonalitySettingsDialog,
-  resolveAssistantPersonalitySnapshotScores,
-  type AssistantPersonalitySnapshot,
-} from "./murph-personality-settings-dialog";
 import { SettingsRow, SettingsRowList } from "./settings-row";
 import { stripSettingsQueryParam } from "./hosted-settings-utils";
 
-// Personality lives in the same Settings snapshot block as tone and voice, but
-// its dials are tracked separately so a personality save never touches them.
 type CustomizeMurphAssistant = MurphAssistantStylePreferences & {
-  personality?: AssistantPersonalitySnapshot | null;
-};
-
-const PERSONALITY_DIAL_SUMMARY_LABELS: Record<
-  AssistantWebPersonalitySettingId,
-  string
-> = {
-  humor: "Humor",
-  push: "Push",
-  detail: "Detail",
+  persona?: AssistantPersonaId | null;
 };
 
 type AssistantStyleStep = "tone" | "voice";
@@ -64,8 +54,8 @@ export function CustomizeMurphSettings({
   const [style, setStyle] = useState<MurphAssistantStylePreferences>(
     assistant ?? DEFAULT_ASSISTANT_STYLE,
   );
-  const [personality, setPersonality] = useState<AssistantPersonalitySnapshot | null>(
-    assistant?.personality ?? null,
+  const [persona, setPersona] = useState<AssistantPersonaId>(
+    assistant?.persona ?? defaultAssistantPersonaId,
   );
   const [pickerStep, setPickerStep] = useState<AssistantStyleStep | null>(
     openVoiceLink ? "voice" : null,
@@ -104,7 +94,7 @@ export function CustomizeMurphSettings({
         <SettingsRow
           icon={<SlidersHorizontal className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Personality"
-          value={formatPersonalitySummary(personality)}
+          value={formatPersonalitySummary(persona)}
           action={
             <Button type="button" size="default" variant="ghost" onClick={() => setPersonalityOpen(true)}>
               Customize
@@ -158,17 +148,19 @@ export function CustomizeMurphSettings({
         />
       ) : null}
       {personalityOpen ? (
-        <MurphPersonalitySettingsDialog
-          personality={personality}
-          // The successful save returns the authoritative web projection; it
-          // updates the row and never triggers the voice chat handoff.
-          onSaved={setPersonality}
+        <MurphPersonaPicker
+          initialPersona={persona}
+          initialTone={style.tone}
+          initialVoice={style.voice}
+          mode="personality"
+          onSaved={(preferences) => setPersona(preferences.persona)}
           onOpenChange={(open) => {
             if (!open) {
               setPersonalityOpen(false);
             }
           }}
           open
+          savePreference={saveAssistantPersonaOnlyPreference}
         />
       ) : null}
       {contactPickerOpen ? (
@@ -191,12 +183,13 @@ export function CustomizeMurphSettings({
 }
 
 function formatPersonalitySummary(
-  personality: AssistantPersonalitySnapshot | null,
+  persona: AssistantPersonaId,
 ): string {
-  const scores = resolveAssistantPersonalitySnapshotScores(personality);
-  return assistantWebPersonalitySettingIds
-    .map((id) => `${PERSONALITY_DIAL_SUMMARY_LABELS[id]} ${scores[id]}`)
-    .join(" · ");
+  const parts = resolveAssistantPersonaParts(persona);
+  const main = resolveAssistantBasePersonaOption(parts.mainId).label;
+  return parts.supportingId
+    ? `${main} + ${resolveAssistantBasePersonaOption(parts.supportingId).label}`
+    : main;
 }
 
 function formatAssistantTone(tone: AssistantTonePreference): string {
@@ -205,4 +198,25 @@ function formatAssistantTone(tone: AssistantTonePreference): string {
 
 function formatAssistantVoice(voice: AssistantVoiceOptionId): string {
   return assistantVoiceOptions.find((option) => option.id === voice)?.label ?? "Classic";
+}
+
+async function saveAssistantPersonaOnlyPreference(
+  preferences: MurphPersonaPreferences,
+): Promise<MurphPersonaPreferences> {
+  const response = await fetch("/api/settings/assistant-style", {
+    body: JSON.stringify({ persona: preferences.persona }),
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    method: "POST",
+  });
+  if (!response.ok) throw new Error("Assistant persona save failed.");
+  const body: unknown = await response.json();
+  if (
+    !body
+    || typeof body !== "object"
+    || Reflect.get(body, "assistantPersona") !== preferences.persona
+  ) {
+    throw new Error("Assistant persona save response was invalid.");
+  }
+  return preferences;
 }
