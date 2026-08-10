@@ -233,6 +233,17 @@ workout count, duration, or type. Use association language such as "alongside,"
 the metric. If the authorized result has no such context, state the number
 plainly instead of guessing.
 
+For group-email preparation, authorized `workouts.v0` days become
+kind-specific count and minute streams in the existing weekly-stat shape. Each
+value is an average across the returned `observedDates`, which include only
+dates inside the seven-completed-day window and no date after the workout
+projection's completion watermark. The reducer aggregates multiple same-kind
+workouts on one date before averaging, omits `startLocalMs`, and never exposes a
+raw workout event list. These values can support truthful phrasing such as
+"alongside running on three observed days"; they do not support multiplying an
+average into a weekly workout or minute total. Current-chat delivery keeps its
+existing compact day-by-day workout representation.
+
 Express durations in human units. Use "about 30 minutes of movement a day"
 instead of raw minute totals when the returned fact's semantic owner identifies
 the value as broad movement. New `activity-days.v0` producers mark that value

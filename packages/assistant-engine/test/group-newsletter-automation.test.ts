@@ -26,6 +26,8 @@ describe('group newsletter execution prompt', () => {
       expect(prompt).toContain('workout count, duration, or type alongside steps or movement')
       expect(prompt).toContain('Never invent a reason')
       expect(prompt).toContain('If no grounded context is available, state the number plainly')
+      expect(prompt).toContain('workout-kind-<type>-count')
+      expect(prompt).toContain('never multiply them into a weekly session or minute total')
     })
   }
 })

@@ -158,6 +158,7 @@ export function buildGroupNewsletterScheduledExecutionPrompt(input: {
     'Follow the saved newsletter name, tone, health scopes, and custom note unless they conflict with this contract.',
     'When highlighting or ranking a number, turn it into a short story by pairing it with directly observed behavior from the same member and period when available—for example, workout count, duration, or type alongside steps or movement.',
     'Use neutral association language such as "alongside", "with", or "during". Never invent a reason, infer an unreturned workout type, or say one metric caused another. If no grounded context is available, state the number plainly.',
+    '`workout-kind-<type>-count` and `workout-kind-<type>-minutes` are averages across their listed observed workout dates. Use the returned observed dates, day count, and averages directly; never multiply them into a weekly session or minute total.',
     ...deliveryRules,
     'Before finishing, verify that you used only the authorized tool result and exactly one delivery path.',
   ].join('\n- ')

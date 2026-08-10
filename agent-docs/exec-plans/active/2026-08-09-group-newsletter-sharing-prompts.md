@@ -107,5 +107,10 @@ Updated: 2026-08-09
   reproduced by the production code paths. The recorded retrospective chooses
   one opaque generation in the existing policy JSON plus field-preserving
   adapter forwarding, without a new table, queue, lifecycle, or reconciler.
+- ReviewGPT round 4 verified those consent corrections but found that the
+  existing group-email weekly reducer silently drops authorized `workouts.v0`
+  day records. The recorded retrospective keeps the correction in that reducer
+  and the existing weekly-stat shape, with a full email-prepare regression and
+  no raw-event payload or new owner.
 - Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
   candidate.
