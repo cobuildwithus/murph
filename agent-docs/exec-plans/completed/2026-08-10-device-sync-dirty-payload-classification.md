@@ -1,6 +1,6 @@
 # Persist device-sync dirty-payload credential authority
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -69,3 +69,4 @@ Updated: 2026-08-10
 - After old writers have drained, nullable rows should naturally converge to
   zero without a backfill worker. A future contract migration may make the
   column non-null only after production evidence proves that condition.
+Completed: 2026-08-10
