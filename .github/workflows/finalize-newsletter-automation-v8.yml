@@ -1,0 +1,313 @@
+name: Finalize newsletter automation refactor v8
+
+on:
+  push:
+    branches:
+      - codex/simplify-newsletter-automation
+    paths:
+      - .github/workflows/finalize-newsletter-automation-v8.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: contains(github.event.head_commit.message, '[finalize-newsletter-v8]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/simplify-newsletter-automation
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Rebase onto current main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git rebase origin/main
+
+      - name: Apply reviewed patch with owner-scoped policy edits
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+          import runpy
+
+          def extract_step_script(path: str, step_name: str) -> str:
+              lines = Path(path).read_text().splitlines()
+              step_index = next(
+                  index for index, line in enumerate(lines)
+                  if line.strip() == f'- name: {step_name}'
+              )
+              run_index = next(
+                  index for index in range(step_index + 1, len(lines))
+                  if lines[index].strip() == 'run: |'
+              )
+              output: list[str] = []
+              for line in lines[run_index + 1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  if line.startswith('          '):
+                      output.append(line[10:])
+                  elif not line.strip():
+                      output.append('')
+                  else:
+                      raise SystemExit(f'unexpected workflow indentation: {line!r}')
+              return '\n'.join(output) + '\n'
+
+          script = extract_step_script(
+              '.github/workflows/finalize-newsletter-automation-v4.yml',
+              'Apply reviewed patch and final edge-case fixes',
+          )
+
+          import_block = 'from pathlib import Path\nimport runpy\n'
+          if script.count(import_block) != 1:
+              raise SystemExit(
+                  f'expected one v4 import block, found {script.count(import_block)}'
+              )
+          script = script.replace(
+              import_block,
+              'from pathlib import Path\nimport re\nimport runpy\n',
+              1,
+          )
+
+          helper_start = script.index(
+              'def replace_once(path: str, old: str, new: str) -> None:\n'
+          )
+          helper_end = script.index('skill_path = ', helper_start)
+          robust_helper = '''def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              if text.count(old) == 1:
+                  target.write_text(text.replace(old, new, 1))
+                  return
+              if text.count(new) == 1:
+                  return
+              pattern = ''.join(
+                  r'\\s+' if part.isspace() else re.escape(part)
+                  for part in re.split(r'(\\s+)', old)
+              )
+              matches = list(re.finditer(pattern, text, flags=re.S))
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f'{path}: exact={text.count(old)}, whitespace={len(matches)}, '
+                      f'replacement={text.count(new)}: {old.splitlines()[0][:120]!r}'
+                  )
+              match = matches[0]
+              target.write_text(text[:match.start()] + new + text[match.end():])
+
+          '''
+          script = script[:helper_start] + robust_helper + script[helper_end:]
+
+          old_block_start = script.index("old_existing_email = '''")
+          old_block_end = script.index(
+              'Path(policy_path).write_text(policy)\n',
+              old_block_start,
+          ) + len('Path(policy_path).write_text(policy)\n')
+          function_scoped_rewrite = '''def _exported_function_bounds(
+              source: str,
+              function_name: str,
+          ) -> tuple[int, int]:
+              start = source.index(f'export function {function_name}(')
+              end = source.find('\\nexport function ', start + 1)
+              if end == -1:
+                  raise SystemExit(
+                      f'could not find the end of exported function {function_name}'
+                  )
+              return start, end
+
+          def _replace_one_whitespace(
+              source: str,
+              old: str,
+              new: str,
+              label: str,
+          ) -> str:
+              if source.count(old) == 1:
+                  return source.replace(old, new, 1)
+              if source.count(new) == 1:
+                  return source
+              pattern = ''.join(
+                  r'\\s+' if part.isspace() else re.escape(part)
+                  for part in re.split(r'(\\s+)', old)
+              )
+              matches = list(re.finditer(pattern, source, flags=re.S))
+              if len(matches) != 1:
+                  raise SystemExit(
+                      f'{label}: exact={source.count(old)}, '
+                      f'whitespace={len(matches)}, replacement={source.count(new)}'
+                  )
+              match = matches[0]
+              return source[:match.start()] + new + source[match.end():]
+
+          save_start, save_end = _exported_function_bounds(
+              policy,
+              'resolveHostedAutomationSavePolicy',
+          )
+          save_block = policy[save_start:save_end]
+          save_block = _replace_one_whitespace(
+              save_block,
+              """  const existingGroupEmail =
+            input.existing !== null
+            && hasAutomationGroupEmailDeliveryTag(input.existing.tags)
+          """,
+              """  const existingGroupEmail =
+            input.existing !== null
+            && resolveAutomationGroupEmailDelivery(input.existing) === 'group_email'
+          """,
+              'save-policy group-email inference',
+          )
+          save_block = _replace_one_whitespace(
+              save_block,
+              """  if (
+            status === 'active'
+            && (input.request.delivery !== undefined || existingGroupEmail)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          """,
+              """  if (
+            status !== 'archived'
+            && (input.request.delivery !== undefined || existingGroupEmail)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          """,
+              'save-policy delivery validation gate',
+          )
+          policy = policy[:save_start] + save_block + policy[save_end:]
+
+          patch_start, patch_end = _exported_function_bounds(
+              policy,
+              'resolveHostedAutomationPatchPolicy',
+          )
+          patch_block = policy[patch_start:patch_end]
+          patch_block = _replace_one_whitespace(
+              patch_block,
+              """  const existingGroupEmail =
+            hasAutomationGroupEmailDeliveryTag(input.existing.tags)
+          """,
+              """  const existingGroupEmail =
+            resolveAutomationGroupEmailDelivery(input.existing) === 'group_email'
+          """,
+              'patch-policy group-email inference',
+          )
+          patch_block = _replace_one_whitespace(
+              patch_block,
+              """  if (
+            status === 'active'
+            && (input.request.delivery !== undefined || existingGroupEmail)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          """,
+              """  const deliveryConfigurationChanged =
+            input.request.delivery !== undefined
+            || input.request.continuityPolicy !== undefined
+            || input.request.schedule !== undefined
+            || input.request.retargetToCurrentConversation === true
+          if (
+            delivery === 'group_email'
+            && (status === 'active' || deliveryConfigurationChanged)
+          ) {
+            assertHostedAutomationDeliveryConfiguration({
+          """,
+              'patch-policy delivery validation gate',
+          )
+          policy = policy[:patch_start] + patch_block + policy[patch_end:]
+          Path(policy_path).write_text(policy)
+          '''
+          script = (
+              script[:old_block_start]
+              + function_scoped_rewrite
+              + script[old_block_end:]
+          )
+
+          first_gate_position = script.index(
+              "status === 'active'\n  && (input.request.delivery !== undefined || existingGroupEmail)",
+              old_block_start,
+          )
+          gate_calls_start = script.rfind(
+              'replace_once(',
+              old_block_start,
+              first_gate_position,
+          )
+          compatibility_position = script.index(
+              'if (input.compatibilitySave)',
+              first_gate_position,
+          )
+          gate_calls_end = script.rfind(
+              'replace_once(',
+              first_gate_position,
+              compatibility_position,
+          )
+          if gate_calls_start == -1 or gate_calls_end <= gate_calls_start:
+              raise SystemExit('could not isolate the two ambiguous validation edits')
+          ambiguous_segment = script[gate_calls_start:gate_calls_end]
+          if ambiguous_segment.count("status === 'active'") != 2:
+              raise SystemExit(
+                  'expected exactly two owner-scoped validation edits, found '
+                  f'{ambiguous_segment.count("status === \'active\'")}'
+              )
+          script = script[:gate_calls_start] + script[gate_calls_end:]
+
+          patch_script = Path('/tmp/finalize-newsletter-automation-v8.py')
+          patch_script.write_text(script)
+          runpy.run_path(str(patch_script), run_name='__main__')
+
+          for path in [
+              '.github/workflows/finalize-newsletter-automation-v5.yml',
+              '.github/workflows/finalize-newsletter-automation-v6.yml',
+              '.github/workflows/finalize-newsletter-automation-v7.yml',
+              '.github/workflows/finalize-newsletter-automation-v8.yml',
+          ]:
+              candidate = Path(path)
+              if candidate.exists():
+                  candidate.unlink()
+
+      - name: Install workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Focused assistant-engine proof
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/automation-delivery.test.ts
+          test/assistant-managed-group-skill-fallbacks.test.ts
+          test/assistant-hosted-domain-tools.test.ts
+          test/assistant-skill-assets.test.ts
+
+      - name: Focused assistant-runtime proof
+        run: >-
+          pnpm --dir packages/assistant-runtime exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/automation-tool-policy.test.ts
+
+      - name: Typecheck touched owners
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-runtime typecheck
+
+      - name: Repository validation
+        run: |
+          pnpm docs:drift
+          pnpm test:diff:local
+          git diff --check
+          for workflow in finalize-newsletter-automation{,-v2,-v3,-v4,-v5,-v6,-v7,-v8}.yml; do
+            test ! -e ".github/workflows/$workflow"
+          done
+          test ! -e agent-docs/exec-plans/active/2026-08-09-newsletter-as-automation.md
+          test -e agent-docs/exec-plans/completed/2026-08-09-newsletter-as-automation.md
+          grep -q 'system:automation-delivery:group-email' packages/assistant-engine/src/assistant/automation-delivery.ts
+          grep -q 'resolveHostedAutomationSavePolicy' packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts
+          grep -q 'resolveAutomationGroupEmailConfigurationIssue' packages/assistant-engine/src/assistant/cron/execution.ts
+          grep -q 'Read the `group-newsletter` skill' packages/assistant-engine/src/assistant/group-newsletter-automation.ts
+
+      - name: Commit and push reviewed fixes
+        run: |
+          git add -A
+          git commit -m "refactor(automation): finalize ordinary group newsletters"
+          git push --force-with-lease origin HEAD:codex/simplify-newsletter-automation
