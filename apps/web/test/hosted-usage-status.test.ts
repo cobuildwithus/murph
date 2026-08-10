@@ -151,6 +151,14 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
     expect(result).toMatchObject({
       accessKind: "starter",
+      availablePlans: [
+        {
+          code: "launch_monthly",
+          displayName: "Pulse",
+          monthlyPriceUsdCents: 800,
+          selectable: true,
+        },
+      ],
       forecast: {
         estimatedDaysRemaining: 2,
         estimatedExhaustionAt: "2026-07-05T12:00:00.000Z",
@@ -161,6 +169,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
       periodStart: PERIOD_START.toISOString(),
       planCode: "launch_monthly",
       planName: "Starter",
+      recommendedPlanCode: "launch_monthly",
       recommendedAction: {
         kind: "change_plan",
         label: "Start Pulse now ($8/month)",
@@ -171,7 +180,6 @@ describe("readHostedPersonalAiUsageStatus", () => {
       status: "active",
       usedPercent: 50,
     });
-    expect(result).not.toHaveProperty("availablePlans");
   });
 
   it("recommends adding usage for an eligible paid Pulse member after the usage threshold", async () => {
@@ -516,7 +524,7 @@ describe("readHostedPersonalAiUsageStatus", () => {
     });
   });
 
-  it("quotes an immediate Group start for exhausted Starter usage", async () => {
+  it("recommends an immediate Core start for eligible exhausted Starter usage", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
       currentBillingPhase: null,
       currentBillingPlanCode: null,
@@ -540,17 +548,111 @@ describe("readHostedPersonalAiUsageStatus", () => {
       now: NOW,
       prisma: buildPrisma(null, true) as never,
       publicBaseUrl: "https://example.test",
-      subscriptionActionTargetPlanCode: "launch_group_monthly",
     })).resolves.toMatchObject({
+      availablePlans: [
+        {
+          code: "launch_group_monthly",
+          displayName: "Group",
+          monthlyPriceUsdCents: 350,
+          selectable: true,
+        },
+        {
+          code: "launch_monthly",
+          displayName: "Pulse",
+          monthlyPriceUsdCents: 800,
+          selectable: true,
+        },
+      ],
       recommendedAction: {
         kind: "change_plan",
+        label: "Start Core now ($3.50/month)",
         targetPlanCode: "launch_group_monthly",
       },
+      recommendedPlanCode: "launch_group_monthly",
       status: "exhausted",
       subscriptionActionQuote: {
         targetPlanCode: "launch_group_monthly",
         timing: "now",
       },
+    });
+  });
+
+  it("falls back to Pulse when Core membership exists but Core is unavailable", async () => {
+    mocks.isHostedBillingPlanSelectionAvailable.mockImplementation(
+      async ({ billingPlanCode }: { billingPlanCode: string }) =>
+        billingPlanCode !== "launch_group_monthly",
+    );
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: false,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowed: false,
+      allowanceSource: "direct_starter",
+      reason: "ai_usage_limit_exceeded",
+      remainingUsdMicros: 0n,
+      spentUsdMicros: 10_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      memberId: "member_exhausted_starter_core_unavailable",
+      now: NOW,
+      prisma: buildPrisma(null, true) as never,
+      publicBaseUrl: "https://example.test",
+    })).resolves.toMatchObject({
+      availablePlans: [
+        {
+          code: "launch_monthly",
+          displayName: "Pulse",
+        },
+      ],
+      recommendedAction: {
+        label: "Start Pulse now ($8/month)",
+        targetPlanCode: "launch_monthly",
+      },
+      recommendedPlanCode: "launch_monthly",
+    });
+  });
+
+  it("does not quote a Starter plan outside the advertised choices", async () => {
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValue({
+      currentBillingPhase: null,
+      currentBillingPlanCode: null,
+      currentCheckoutOffer: null,
+      hasStripeCustomerId: false,
+      hasStripeSubscriptionId: false,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_starter",
+      limitUsdMicros: 4_500_000n,
+      remainingUsdMicros: 2_250_000n,
+      spentUsdMicros: 2_250_000n,
+      usageCreditLedgerVersion: 1n,
+    }));
+
+    const result = await readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_starter_explicit_edge",
+      now: NOW,
+      prisma: buildPrisma(null, true) as never,
+      publicBaseUrl: "https://example.test",
+      subscriptionActionTargetPlanCode: "launch_edge_monthly",
+    });
+
+    expect(result).toMatchObject({
+      availablePlans: [
+        { code: "launch_group_monthly" },
+        { code: "launch_monthly" },
+      ],
+      recommendedPlanCode: "launch_group_monthly",
+      subscriptionActionQuote: null,
     });
   });
 

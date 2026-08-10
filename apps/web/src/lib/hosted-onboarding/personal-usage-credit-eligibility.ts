@@ -6,7 +6,8 @@ import {
 } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
-import { hasHostedMemberOwnActiveAccess } from "./entitlement";
+import { parseHostedBillingPlanCode } from "./billing-plans";
+import { hasHostedMemberOwnPaidBilling } from "./entitlement";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
@@ -36,6 +37,15 @@ const hostedPersonalUsageCreditEligibilitySelect =
         suspendedAt: null,
       },
     },
+    billingRef: {
+      select: {
+        currentBillingPhase: true,
+        currentBillingPlanCode: true,
+        currentCheckoutOffer: true,
+        stripeCustomerLookupKey: true,
+        stripeSubscriptionLookupKey: true,
+      },
+    },
     billingStatus: true,
     suspendedAt: true,
     threadContainer: {
@@ -62,12 +72,23 @@ export async function readHostedPersonalUsageCreditOfferCodes(input: {
     select: hostedPersonalUsageCreditEligibilitySelect,
     where: { id: input.memberId },
   });
+  const billingRef = member?.billingRef;
+  const billingPlanCode = parseHostedBillingPlanCode(
+    billingRef?.currentBillingPlanCode,
+  );
   if (
     !member ||
-    !hasHostedMemberOwnActiveAccess(member) ||
+    !billingRef ||
+    !hasHostedMemberOwnPaidBilling({ ...member, billingRef }) ||
     member.threadContainer !== null ||
     member.accountGroupsOwned.length > 0 ||
-    member.accountGroupMemberships.length > 0
+    member.accountGroupMemberships.length > 0 ||
+    billingRef.currentBillingPhase !== "paid" ||
+    (billingPlanCode !== "launch_monthly" &&
+      billingPlanCode !== "launch_edge_monthly" &&
+      billingPlanCode !== "launch_max_monthly") ||
+    !billingRef.stripeCustomerLookupKey ||
+    !billingRef.stripeSubscriptionLookupKey
   ) {
     return [];
   }

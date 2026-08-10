@@ -607,13 +607,16 @@ function PlanUsageBand(props: {
   const forecast = status.forecast
     ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
     : null;
+  const eligibleUsageTopUpOffers = status.accessKind === "paid"
+    ? props.usageTopUpOffers
+    : [];
   const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
       checkoutUrl={props.usageTopUpCheckoutUrl}
       contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
-      offers={props.usageTopUpOffers}
+      offers={eligibleUsageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
       scope={props.usageTopUpScope}
@@ -635,7 +638,7 @@ function PlanUsageBand(props: {
             {displayPlanName} · {periodLabel}
           </p>
         </div>
-        {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
+        {eligibleUsageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
           ? usageTopUpDialog
           : !props.planChangePending && action?.kind === "start_pulse"
             ? (
@@ -681,19 +684,17 @@ function PlanUsageBand(props: {
       {status.status === "exhausted" ? (
         <p className="mt-3 text-sm text-pretty text-muted-foreground">
           {status.accessKind === "starter"
-            ? props.usageTopUpOffers.length > 0
-              ? "You've used your starter usage. Add usage or choose a monthly plan to continue."
-              : "You've used your starter usage. Choose a monthly plan to continue."
+            ? "You've used your starter usage. Choose a monthly plan to continue."
             : status.planCode === "launch_group_monthly"
               ? "You've used this period's included AI usage. Your wearable keeps syncing and your group activity stays current."
-              : props.usageTopUpOffers.length > 0
+              : eligibleUsageTopUpOffers.length > 0
                 ? "You've used all available usage. Add usage to continue."
                 : "You've used all available usage. Murph pauses new usage until more capacity is available."}
         </p>
       ) : forecast ? (
         <p className="mt-3 text-sm text-pretty text-muted-foreground">{forecast}</p>
       ) : null}
-      {props.usageTopUpOffers.length === 0 &&
+      {eligibleUsageTopUpOffers.length === 0 &&
       !props.usageTopUpActivePurchase &&
       (props.usageTopUpInitialOpen || props.usageTopUpPurchaseReturn)
         ? usageTopUpDialog

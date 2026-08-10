@@ -42,7 +42,10 @@ vi.mock("@/src/components/settings/hosted-plan-upgrade-button", () => ({
 }));
 
 vi.mock("@/src/components/settings/hosted-usage-top-up-dialog", () => ({
-  HostedUsageTopUpDialog: () => null,
+  HostedUsageTopUpDialog: (props: { offers: readonly unknown[] }) =>
+    props.offers.length > 0
+      ? createElement("button", null, "Add usage")
+      : null,
 }));
 
 vi.mock("@/src/components/support/contact-support-action", () => ({
@@ -97,6 +100,9 @@ describe("HostedBillingSettings", () => {
       authenticated: true,
       billingStatus: "active",
       canStartDirectPlan: true,
+      usageTopUpOffers: [
+        { amountLabel: "$5", offerCode: "usage_5_usd" },
+      ],
       usageStatus: buildStarterStatus({
         remainingPercent: 0,
         status: "exhausted",
@@ -107,6 +113,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /used your starter usage/i);
     assert.match(markup, /choose a monthly plan/i);
     assert.match(markup, /Does not expire/);
+    assert.doesNotMatch(markup, /Add usage/i);
     assert.doesNotMatch(markup, /resets? /i);
   });
 

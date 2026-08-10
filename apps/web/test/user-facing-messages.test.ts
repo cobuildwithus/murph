@@ -194,8 +194,9 @@ describe("user-facing message variants", () => {
 
   it("explains how each blocked allowance can resume", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.starter_limit_reached")) {
-      expect(text).toMatch(/starter|free usage|signup/iu);
-      expect(text).toMatch(/add usage|plan/iu);
+      expect(text).toMatch(/starter|free usage|account/iu);
+      expect(text).toMatch(/plan/iu);
+      expect(text).not.toMatch(/add usage|top[ -]?up/iu);
     }
 
     for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {

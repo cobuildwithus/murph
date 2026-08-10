@@ -12,6 +12,7 @@ import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import {
   canScheduleHostedBillingPlanChange,
   canUpgradeHostedBillingPlan,
+  getHostedBillingPlanDefinition,
   isHostedBillingPlanChangePortalConfigured,
   parseHostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
@@ -626,23 +627,86 @@ async function resolveAvailableSubscriptionOffer(input: {
         : null,
     },
   });
+  if (input.accessKind === "starter") {
+    if (
+      hasOwnPaidBilling
+      || member.billingStatus !== "active"
+      || member.suspendedAt !== null
+    ) {
+      return EMPTY_SUBSCRIPTION_OFFER;
+    }
+
+    const hasConfirmedGroupMembership =
+      await hasConfirmedHostedGroupMembership({
+        memberId: input.memberId,
+        prisma: input.prisma,
+      });
+    const groupPlanAvailable = hasConfirmedGroupMembership
+      && await isHostedBillingPlanSelectionAvailable({
+        billingPlanCode: "launch_group_monthly",
+      });
+    const pulsePlanAvailable =
+      await isHostedBillingPlanSelectionAvailable({
+        billingPlanCode: "launch_monthly",
+      });
+    const availablePlanCodes = [
+      ...(groupPlanAvailable
+        ? ["launch_group_monthly" as const]
+        : []),
+      ...(pulsePlanAvailable ? ["launch_monthly" as const] : []),
+    ];
+    const recommendedPlanCode = groupPlanAvailable
+      ? "launch_group_monthly" as const
+      : pulsePlanAvailable
+        ? "launch_monthly" as const
+        : null;
+    if (!recommendedPlanCode) {
+      return EMPTY_SUBSCRIPTION_OFFER;
+    }
+
+    const targetPlanCode = input.requestedTargetPlanCode
+      ?? recommendedPlanCode;
+    const targetPlanAvailable = targetPlanCode === "launch_group_monthly"
+      ? groupPlanAvailable
+      : targetPlanCode === "launch_monthly" && pulsePlanAvailable;
+
+    return {
+      availablePlans: availablePlanCodes.map((planCode) => {
+        const definition = getHostedBillingPlanDefinition(planCode);
+        return {
+          code: planCode,
+          displayName: planCode === "launch_group_monthly"
+            ? "Group" as const
+            : "Pulse" as const,
+          monthlyPriceUsdCents: definition.recurringAmountUsdCents,
+          selectable: true as const,
+        };
+      }),
+      quote: targetPlanAvailable
+        ? createHostedBillingPlanQuote({
+            memberId: input.memberId,
+            now: input.now,
+            state: buildHostedBillingPlanQuoteState({
+              billingState,
+              billingStatus: member.billingStatus,
+            }),
+            targetPlanCode,
+            timing: "now",
+          })
+        : null,
+      recommendedPlanCode,
+    };
+  }
+
   const targetPlanCode = input.requestedTargetPlanCode
     ?? (
-      input.accessKind === "starter"
+      input.planCode === "launch_group_monthly"
         ? "launch_monthly"
-        : input.planCode === "launch_group_monthly"
-          ? "launch_monthly"
-          : input.planCode === "launch_monthly"
-            ? "launch_edge_monthly"
-            : null
+        : input.planCode === "launch_monthly"
+          ? "launch_edge_monthly"
+          : null
     );
-  if (
-    !targetPlanCode
-    || (
-      targetPlanCode === input.planCode
-      && input.accessKind !== "starter"
-    )
-  ) {
+  if (!targetPlanCode || targetPlanCode === input.planCode) {
     return EMPTY_SUBSCRIPTION_OFFER;
   }
   if (
@@ -696,16 +760,11 @@ async function resolveAvailableSubscriptionOffer(input: {
       suspendedAt: member.suspendedAt,
       targetPlanCode,
     });
-  const canStartDirectPlan = !hasOwnPaidBilling
-    && input.accessKind === "starter"
-    && member.billingStatus === "active";
   const timing = canUpgrade
     ? "immediate" as const
     : canSchedule
       ? "period_end" as const
-      : canStartDirectPlan
-        ? "now" as const
-        : null;
+      : null;
 
   return {
     quote: timing
