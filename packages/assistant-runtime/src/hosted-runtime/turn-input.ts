@@ -392,18 +392,34 @@ export async function selectHostedAssistantInputIds(
       // state cannot be read safely. The durable wake can retry that state.
     }
   }
-  const selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
-    events: selectionEvents,
-    fallbackEvents: freshEvents,
-    ...(explicitCompletionInputIds.length > 0
-      ? { hostedImageCompletionInputIds: explicitCompletionInputIds }
-      : {}),
-    limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
-    ...(restoredCompletionRequiredInputIds
-      ? { requiredInputIds: restoredCompletionRequiredInputIds }
-      : {}),
-    vaultRoot: input.vaultRoot,
-  });
+  let selected: Awaited<
+    ReturnType<typeof selectHostedAssistantInputEventBatchWithImageCompletion>
+  >;
+  try {
+    selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
+      events: selectionEvents,
+      fallbackEvents: freshEvents,
+      ...(explicitCompletionInputIds.length > 0
+        ? { hostedImageCompletionInputIds: explicitCompletionInputIds }
+        : {}),
+      limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+      ...(restoredCompletionRequiredInputIds
+        ? { requiredInputIds: restoredCompletionRequiredInputIds }
+        : {}),
+      vaultRoot: input.vaultRoot,
+    });
+  } catch (error) {
+    if (explicitCompletionInputIds.length > 0) {
+      throw error;
+    }
+    selected = {
+      events: selectHostedAssistantInputEventBatch({
+        events: freshEvents,
+        limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+      }),
+      preserveInputOrder: false,
+    };
+  }
 
   return {
     freshInputIds,
