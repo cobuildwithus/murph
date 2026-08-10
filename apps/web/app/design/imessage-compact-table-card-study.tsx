@@ -14,7 +14,7 @@ const SYNTHETIC_WORKOUT_CARD: Extract<
   kind: "compact_table",
   version: 1,
   title: "Push day",
-  subtitle: "3 of 6 sets complete",
+  subtitle: "4 of 6 sets complete",
   footer: "Tap an exercise to log or correct a set.",
   workout: {
     version: 1,
@@ -25,7 +25,7 @@ const SYNTHETIC_WORKOUT_CARD: Extract<
         sets: [
           { status: "completed", target: "185 lb × 8", actual: "185 lb × 8" },
           { status: "completed", target: "185 lb × 8", actual: "185 lb × 7" },
-          { status: "pending", target: "185 lb × 6–8", actual: null },
+          { status: "completed", target: "185 lb × 6–8", actual: "185 lb × 6" },
         ],
       },
       {

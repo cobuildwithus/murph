@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Starter access, patterns, reminders, steady voices, and web search",
+    title: "Starter access, patterns, reminders, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -146,6 +146,35 @@ const RAW_CHANGELOG_EDITIONS = [
           "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
         relevanceTags: ["assistant", "search", "research", "reliability"],
         sourcePullRequests: [1583],
+      },
+      {
+        id: "appointment-reminders-by-default",
+        kind: "improvement",
+        priority: 4,
+        title: "Confirmed appointments come with a reminder",
+        summary:
+          "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
+        details:
+          "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
+        relevanceTags: ["appointments", "reminders", "automations", "care"],
+        sourcePullRequests: [1586],
+        tryIt: {
+          label: "Tell Murph about an appointment",
+          prompt:
+            "I have a confirmed dentist appointment next Thursday at 2 PM.",
+        },
+      },
+      {
+        id: "workout-card-status-rendering",
+        kind: "improvement",
+        priority: 3,
+        title: "Completed workout rows keep their checkmark",
+        summary:
+          "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
+        details:
+          "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
+        relevanceTags: ["workouts", "imessage", "cards", "reliability"],
+        sourcePullRequests: [1599],
       },
     ],
   },

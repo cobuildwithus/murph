@@ -1723,6 +1723,11 @@ function buildAssistantSharedAutomationPreferenceText(
         )} and offer a finite conversational ${code("check_in")}. Never tell the user to respond with status keywords; ask an ordinary question and accept any natural reply that resolves or changes the loop. Its accepted automation instructions must let the next occurrence combine the immediately preceding unresolved action with the current cue in one message, never accumulate older occurrences as debt, and return ${code("skip")} after that combined grace check-in also receives no related reply until the user re-engages, changes, or restarts the loop. Use ${code(
           hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
         )} so the scheduled turn can inspect the recent reply loop.`
+      : null,
+    conversationScope === "direct"
+      ? `For a confirmed future care appointment in private, follow ${code(
+          buildAssistantSkillFileRef("appointment-scheduling")
+        )}.`
       : null
   );
   return `${openingGuidance}
