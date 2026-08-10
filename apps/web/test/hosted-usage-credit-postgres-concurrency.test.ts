@@ -8,7 +8,41 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import pg from "pg";
+import type Stripe from "stripe";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+
+const usageCreditFinancialStripeMocks = vi.hoisted(() => ({
+  stripe: {
+    charges: {
+      retrieve: vi.fn(),
+    },
+    disputes: {
+      list: vi.fn(),
+      retrieve: vi.fn(),
+    },
+    paymentIntents: {
+      retrieve: vi.fn(),
+    },
+    refunds: {
+      list: vi.fn(),
+      retrieve: vi.fn(),
+    },
+  },
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/runtime", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/runtime")
+  >("@/src/lib/hosted-onboarding/runtime");
+
+  return {
+    ...actual,
+    requireHostedStripeApiMode: () => ({
+      stripe: usageCreditFinancialStripeMocks.stripe,
+      stripeLiveMode: false,
+    }),
+  };
+});
 
 import {
   appendHostedUsageCreditGrantTx,
@@ -46,6 +80,9 @@ import {
   createHostedExternalThreadIdentityLookupKey,
   createHostedExternalThreadLookupKey,
   createHostedPhoneLookupKey,
+  createHostedStripeBillingEventLookupKey,
+  createHostedStripeCustomerLookupKey,
+  createHostedStripePriceLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
   getHostedAiUsageMonthlyAllowanceUsdMicros,
@@ -55,6 +92,10 @@ import {
 } from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { assertHostedUsageCreditPurchasesReadyForAccountDeletionTx } from "@/src/lib/hosted-onboarding/usage-credit-purchase-account-deletion";
 import { bindHostedUsageCreditStripeReferencesTx } from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation-context";
+import {
+  isHostedUsageCreditStripeRetryableError,
+  reconcileHostedUsageCreditStripeEvent,
+} from "@/src/lib/hosted-onboarding/usage-credit-stripe-reconciliation";
 import {
   buildHostedThreadDeliveryRoute,
   sealHostedThreadDeliveryRoute,
@@ -177,6 +218,24 @@ type SeededBoundedUsageCreditHistory = {
   initialLedgerVersion: bigint;
   secondActiveEntryId: string;
 };
+
+type SeededFinancialRestorationCapacity = {
+  charge: Stripe.Charge;
+  dispute: Stripe.Dispute;
+  event: Stripe.Event;
+  paymentIntent: Stripe.PaymentIntent;
+  refund: Stripe.Refund;
+  secondActiveEntryId: string;
+  targetGrantEntryId: string;
+};
+
+function defineStripeFixture<T extends { id: string; object: string }>(
+  value: Pick<T, "id" | "object"> & Partial<Omit<T, "id" | "object">>,
+): T {
+  // Stripe response types include fields outside the reconciliation path under
+  // test. Keep the partial-response assertion at this single fixture boundary.
+  return value as T;
+}
 
 const transactionOptions = {
   maxWait: 10_000,
@@ -370,6 +429,306 @@ async function seedActivePurchaseGrantFragments(input: {
   }, transactionOptions);
 
   return { entryIds, purchaseIds, totalUsdMicros };
+}
+
+async function seedFinancialRestorationCapacity(input: {
+  fixture: UsageCreditFixture;
+}): Promise<SeededFinancialRestorationCapacity> {
+  const seededActive = await seedActivePurchaseGrantFragments({
+    count: HOSTED_USAGE_CREDIT_MAX_OCCUPIED_GRANT_SLOTS,
+    fixture: input.fixture,
+  });
+  const fixtureId = randomUUID().replaceAll("-", "");
+  const paidAt = new Date("2026-07-16T12:00:00.000Z");
+  const financialEffectiveAt = new Date("2026-07-16T12:10:00.000Z");
+  const customerId = `cus_financial_${fixtureId}`;
+  const priceId = `price_financial_${fixtureId}`;
+  const paymentIntentId = `pi_financial_${fixtureId}`;
+  const chargeId = `ch_financial_${fixtureId}`;
+  const refundId = `re_financial_${fixtureId}`;
+  const disputeId = `dp_financial_${fixtureId}`;
+  const targetGrantEntryId = `huce_financial_grant_${fixtureId}`;
+  const initialRefundEntryId = `huce_financial_refund_${fixtureId}`;
+  const secondActiveEntryId = seededActive.entryIds[1];
+  if (!secondActiveEntryId) {
+    throw new Error("Financial restoration fixture lacked a second active grant.");
+  }
+  const lookupKey = (
+    value: string | null,
+    label: string,
+  ): string => {
+    if (!value) {
+      throw new Error(`Financial restoration fixture lacked ${label}.`);
+    }
+    return value;
+  };
+
+  await input.fixture.observer.$transaction(async (tx) => {
+    await tx.hostedUsageCreditPurchase.update({
+      data: {
+        checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
+        grantSlotReleasedAt: null,
+        lastReconciledAt: financialEffectiveAt,
+        paidAt,
+        payerMemberId: null,
+        reconciliationVersion: 0n,
+        remainingCreditUsdMicros: 0n,
+        status: HostedUsageCreditPurchaseStatus.fulfilled,
+        stripeChargeIdEncrypted: null,
+        stripeChargeLookupKey: lookupKey(
+          createHostedStripeBillingEventLookupKey(chargeId),
+          "Charge lookup key",
+        ),
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCheckoutSessionLookupKey: null,
+        stripeCheckoutUrlEncrypted: null,
+        stripeCustomerIdEncrypted: null,
+        stripeCustomerLookupKey: lookupKey(
+          createHostedStripeCustomerLookupKey(customerId),
+          "Customer lookup key",
+        ),
+        stripePaymentIntentIdEncrypted: null,
+        stripePaymentIntentLookupKey: lookupKey(
+          createHostedStripeBillingEventLookupKey(paymentIntentId),
+          "PaymentIntent lookup key",
+        ),
+        stripePriceIdEncrypted: null,
+        stripePriceLookupKey: lookupKey(
+          createHostedStripePriceLookupKey(priceId),
+          "Price lookup key",
+        ),
+        terminalAt: paidAt,
+      },
+      where: { id: input.fixture.purchaseId },
+    });
+    await tx.hostedUsageCreditEntry.create({
+      data: {
+        amountUsdMicros: 5_000_000n,
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+        beneficiarySequence: 33n,
+        effectiveAt: paidAt,
+        id: targetGrantEntryId,
+        kind: "purchase_grant",
+        purchaseId: input.fixture.purchaseId,
+        semanticSourceKey:
+          `hosted-usage-credit:purchase:${input.fixture.purchaseId}:grant:v1`,
+      },
+    });
+    await tx.hostedUsageCreditGrant.create({
+      data: {
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+        beneficiarySequence: 33n,
+        entryId: targetGrantEntryId,
+        remainingUsdMicros: 0n,
+      },
+    });
+    await tx.hostedUsageCreditEntry.create({
+      data: {
+        amountUsdMicros: -5_000_000n,
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+        beneficiarySequence: 34n,
+        effectiveAt: financialEffectiveAt,
+        id: initialRefundEntryId,
+        kind: "refund_adjustment",
+        parentGrantEntryId: targetGrantEntryId,
+        purchaseId: input.fixture.purchaseId,
+        semanticSourceKey:
+          `hosted-usage-credit:refund:purchase:${input.fixture.purchaseId}:net:0:to:5000000:ledger:34:v2`,
+        sourceReferenceLookupKey: lookupKey(
+          createHostedStripeBillingEventLookupKey(refundId),
+          "Refund lookup key",
+        ),
+      },
+    });
+    await tx.hostedMember.update({
+      data: {
+        usageCreditBalanceUsdMicros: seededActive.totalUsdMicros,
+        usageCreditLedgerVersion: 34n,
+      },
+      where: { id: input.fixture.beneficiaryMemberId },
+    });
+  }, transactionOptions);
+
+  const paymentIntent = defineStripeFixture<Stripe.PaymentIntent>({
+    amount: 500,
+    amount_received: 500,
+    created: Math.floor(paidAt.getTime() / 1000),
+    currency: "usd",
+    customer: customerId,
+    id: paymentIntentId,
+    latest_charge: chargeId,
+    livemode: false,
+    metadata: {
+      policyVersion: "hosted-usage-credit-checkout-v4",
+      purchaseId: input.fixture.purchaseId,
+      purpose: "hosted_usage_credit_saved_card",
+    },
+    object: "payment_intent",
+    status: "succeeded",
+  });
+  const charge = defineStripeFixture<Stripe.Charge>({
+    amount: 500,
+    amount_refunded: 0,
+    created: Math.floor(paidAt.getTime() / 1000),
+    currency: "usd",
+    customer: customerId,
+    id: chargeId,
+    livemode: false,
+    object: "charge",
+    paid: true,
+    payment_intent: paymentIntentId,
+  });
+  const refund = defineStripeFixture<Stripe.Refund>({
+    amount: 500,
+    charge: chargeId,
+    created: Math.floor(financialEffectiveAt.getTime() / 1000),
+    currency: "usd",
+    id: refundId,
+    object: "refund",
+    payment_intent: paymentIntentId,
+    status: "failed",
+  });
+  const dispute = defineStripeFixture<Stripe.Dispute>({
+    amount: 500,
+    balance_transactions: [
+      defineStripeFixture<Stripe.BalanceTransaction>({
+        amount: -500,
+        currency: "usd",
+        id: `txn_financial_${fixtureId}`,
+        object: "balance_transaction",
+        source: disputeId,
+      }),
+    ],
+    charge: chargeId,
+    created: Math.floor(financialEffectiveAt.getTime() / 1000),
+    currency: "usd",
+    id: disputeId,
+    livemode: false,
+    object: "dispute",
+    payment_intent: paymentIntentId,
+  });
+  const event = defineStripeFixture<Stripe.Event>({
+    api_version: "2025-03-31.basil",
+    created: Math.floor(financialEffectiveAt.getTime() / 1000),
+    data: {
+      object: refund,
+    },
+    id: `evt_financial_${fixtureId}`,
+    livemode: false,
+    object: "event",
+    pending_webhooks: 0,
+    request: {
+      id: null,
+      idempotency_key: null,
+    },
+    type: "refund.failed",
+  });
+
+  return {
+    charge,
+    dispute,
+    event,
+    paymentIntent,
+    refund,
+    secondActiveEntryId,
+    targetGrantEntryId,
+  };
+}
+
+function configureFinancialRestorationStripe(input: {
+  disputes?: Stripe.Dispute[];
+  seeded: SeededFinancialRestorationCapacity;
+}): void {
+  const stripe = usageCreditFinancialStripeMocks.stripe;
+  stripe.charges.retrieve.mockReset();
+  stripe.disputes.list.mockReset();
+  stripe.disputes.retrieve.mockReset();
+  stripe.paymentIntents.retrieve.mockReset();
+  stripe.refunds.list.mockReset();
+  stripe.refunds.retrieve.mockReset();
+
+  stripe.charges.retrieve.mockResolvedValue(input.seeded.charge);
+  stripe.disputes.list.mockResolvedValue({
+    data: input.disputes ?? [],
+    has_more: false,
+    object: "list",
+    url: "/v1/disputes",
+  });
+  stripe.disputes.retrieve.mockResolvedValue(input.seeded.dispute);
+  stripe.paymentIntents.retrieve.mockResolvedValue(input.seeded.paymentIntent);
+  stripe.refunds.list.mockResolvedValue({
+    data: [input.seeded.refund],
+    has_more: false,
+    object: "list",
+    url: "/v1/refunds",
+  });
+  stripe.refunds.retrieve.mockResolvedValue(input.seeded.refund);
+}
+
+async function readFinancialRestorationState(input: {
+  fixture: UsageCreditFixture;
+  seeded: SeededFinancialRestorationCapacity;
+}) {
+  const [
+    member,
+    targetGrant,
+    purchase,
+    activeGrantCount,
+    grantCount,
+    adjustments,
+  ] = await Promise.all([
+    input.fixture.observer.hostedMember.findUniqueOrThrow({
+      select: {
+        usageCreditBalanceUsdMicros: true,
+        usageCreditLedgerVersion: true,
+      },
+      where: { id: input.fixture.beneficiaryMemberId },
+    }),
+    input.fixture.observer.hostedUsageCreditGrant.findUniqueOrThrow({
+      select: { remainingUsdMicros: true },
+      where: { entryId: input.seeded.targetGrantEntryId },
+    }),
+    input.fixture.observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+      select: {
+        lastReconciledAt: true,
+        reconciliationVersion: true,
+        remainingCreditUsdMicros: true,
+      },
+      where: { id: input.fixture.purchaseId },
+    }),
+    input.fixture.observer.hostedUsageCreditGrant.count({
+      where: {
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+        remainingUsdMicros: { gt: 0n },
+      },
+    }),
+    input.fixture.observer.hostedUsageCreditGrant.count({
+      where: {
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+      },
+    }),
+    input.fixture.observer.hostedUsageCreditEntry.findMany({
+      orderBy: { beneficiarySequence: "asc" },
+      select: {
+        amountUsdMicros: true,
+        beneficiarySequence: true,
+        kind: true,
+      },
+      where: {
+        kind: { in: ["dispute_adjustment", "refund_adjustment"] },
+        purchaseId: input.fixture.purchaseId,
+      },
+    }),
+  ]);
+
+  return {
+    activeGrantCount,
+    adjustments,
+    grantCount,
+    member,
+    purchase,
+    targetGrant,
+  };
 }
 
 async function seedBoundedUsageCreditHistory(input: {
@@ -2195,6 +2554,218 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await cleanupUsageCreditFixture(fixture);
       }
     });
+
+    it("retries a slot-33 financial restore, then restores that event once after one slot is consumed", async () => {
+      const fixture = await createUsageCreditFixture();
+      const firstUsageId = `usage_financial_capacity_first_${randomUUID()}`;
+      const secondUsageId = `usage_financial_capacity_second_${randomUUID()}`;
+
+      try {
+        const seeded = await seedFinancialRestorationCapacity({ fixture });
+        configureFinancialRestorationStripe({ seeded });
+        const before = await readFinancialRestorationState({ fixture, seeded });
+        expect(before).toMatchObject({
+          activeGrantCount: 32,
+          adjustments: [
+            {
+              amountUsdMicros: -5_000_000n,
+              beneficiarySequence: 34n,
+              kind: "refund_adjustment",
+            },
+          ],
+          grantCount: 33,
+          member: {
+            usageCreditBalanceUsdMicros: 32_000_000n,
+            usageCreditLedgerVersion: 34n,
+          },
+          purchase: {
+            reconciliationVersion: 0n,
+            remainingCreditUsdMicros: 0n,
+          },
+          targetGrant: { remainingUsdMicros: 0n },
+        });
+
+        let retryableError: unknown;
+        try {
+          await reconcileHostedUsageCreditStripeEvent({
+            event: seeded.event,
+            prisma: fixture.firstClient,
+          });
+        } catch (error) {
+          retryableError = error;
+        }
+        expect(isHostedUsageCreditStripeRetryableError(retryableError))
+          .toBe(true);
+        expect(retryableError).toMatchObject({
+          message:
+            "Usage-credit financial restoration exceeds occupied grant capacity.",
+          name: "HostedUsageCreditStripeRetryableError",
+        });
+        await expect(readFinancialRestorationState({ fixture, seeded }))
+          .resolves.toEqual(before);
+
+        await expect(fixture.secondClient.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 1_000_000n,
+            effectiveAt: new Date("2026-07-16T12:20:00.000Z"),
+            sourceUsageId: firstUsageId,
+            tx,
+          }), transactionOptions
+        )).resolves.toEqual({
+          absorbedUsdMicros: 0n,
+          balanceUsdMicros: 31_000_000n,
+          debitedUsdMicros: 1_000_000n,
+          ledgerVersion: 35n,
+        });
+        expect((await readFinancialRestorationState({ fixture, seeded }))
+          .activeGrantCount).toBe(31);
+
+        configureFinancialRestorationStripe({ seeded });
+        await expect(reconcileHostedUsageCreditStripeEvent({
+          event: seeded.event,
+          prisma: fixture.firstClient,
+        })).resolves.toEqual({
+          beneficiaryMemberId: fixture.beneficiaryMemberId,
+          granted: false,
+          handled: true,
+          purchaseId: fixture.purchaseId,
+          wakeRequired: true,
+        });
+
+        const restored = await readFinancialRestorationState({ fixture, seeded });
+        expect(restored).toMatchObject({
+          activeGrantCount: 32,
+          grantCount: 33,
+          member: {
+            usageCreditBalanceUsdMicros: 36_000_000n,
+            usageCreditLedgerVersion: 36n,
+          },
+          purchase: {
+            reconciliationVersion: 1n,
+            remainingCreditUsdMicros: 5_000_000n,
+          },
+          targetGrant: { remainingUsdMicros: 5_000_000n },
+        });
+        expect(restored.adjustments).toEqual([
+          {
+            amountUsdMicros: -5_000_000n,
+            beneficiarySequence: 34n,
+            kind: "refund_adjustment",
+          },
+          {
+            amountUsdMicros: 5_000_000n,
+            beneficiarySequence: 36n,
+            kind: "refund_adjustment",
+          },
+        ]);
+
+        await expect(fixture.thirdClient.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 500_000n,
+            effectiveAt: new Date("2026-07-16T12:30:00.000Z"),
+            sourceUsageId: secondUsageId,
+            tx,
+          }), transactionOptions
+        )).resolves.toEqual({
+          absorbedUsdMicros: 0n,
+          balanceUsdMicros: 35_500_000n,
+          debitedUsdMicros: 500_000n,
+          ledgerVersion: 37n,
+        });
+        await expect(Promise.all([
+          fixture.observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: { remainingUsdMicros: true },
+            where: { entryId: seeded.targetGrantEntryId },
+          }),
+          fixture.observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: { remainingUsdMicros: true },
+            where: { entryId: seeded.secondActiveEntryId },
+          }),
+        ])).resolves.toEqual([
+          { remainingUsdMicros: 5_000_000n },
+          { remainingUsdMicros: 500_000n },
+        ]);
+      } finally {
+        await cleanupUsageCreditFixture(fixture);
+      }
+    }, 60_000);
+
+    it("allows an intermediate financial restore when the converged snapshot ends at 32 slots", async () => {
+      const fixture = await createUsageCreditFixture();
+      const sourceUsageId = `usage_financial_transient_${randomUUID()}`;
+
+      try {
+        const seeded = await seedFinancialRestorationCapacity({ fixture });
+        configureFinancialRestorationStripe({
+          disputes: [seeded.dispute],
+          seeded,
+        });
+
+        await expect(reconcileHostedUsageCreditStripeEvent({
+          event: seeded.event,
+          prisma: fixture.firstClient,
+        })).resolves.toEqual({
+          beneficiaryMemberId: fixture.beneficiaryMemberId,
+          granted: false,
+          handled: true,
+          purchaseId: fixture.purchaseId,
+          wakeRequired: true,
+        });
+
+        const finalState = await readFinancialRestorationState({
+          fixture,
+          seeded,
+        });
+
+        expect(finalState.member).toEqual({
+          usageCreditBalanceUsdMicros: 32_000_000n,
+          usageCreditLedgerVersion: 36n,
+        });
+        expect(finalState.targetGrant).toEqual({ remainingUsdMicros: 0n });
+        expect(finalState.purchase).toMatchObject({
+          reconciliationVersion: 1n,
+          remainingCreditUsdMicros: 0n,
+        });
+        expect(finalState.activeGrantCount).toBe(32);
+        expect(finalState.grantCount).toBe(33);
+        expect(finalState.adjustments).toEqual([
+          {
+            amountUsdMicros: -5_000_000n,
+            beneficiarySequence: 34n,
+            kind: "refund_adjustment",
+          },
+          {
+            amountUsdMicros: 5_000_000n,
+            beneficiarySequence: 35n,
+            kind: "refund_adjustment",
+          },
+          {
+            amountUsdMicros: -5_000_000n,
+            beneficiarySequence: 36n,
+            kind: "dispute_adjustment",
+          },
+        ]);
+
+        await expect(fixture.secondClient.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 1_000_000n,
+            effectiveAt: new Date("2026-07-16T12:30:00.000Z"),
+            sourceUsageId,
+            tx,
+          }), transactionOptions
+        )).resolves.toEqual({
+          absorbedUsdMicros: 0n,
+          balanceUsdMicros: 31_000_000n,
+          debitedUsdMicros: 1_000_000n,
+          ledgerVersion: 37n,
+        });
+      } finally {
+        await cleanupUsageCreditFixture(fixture);
+      }
+    }, 60_000);
 
     it("replaces an exact purchase reservation at the 32-slot boundary", async () => {
       const fixture = await createUsageCreditFixture();

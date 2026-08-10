@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   decryptStripeField: vi.fn(),
   encryptStripeField: vi.fn(),
   grantUsageCredit: vi.fn(),
+  readGrantCapacity: vi.fn(),
   reconcileDisputeNetReversal: vi.fn(),
   reconcileRefundNetReversal: vi.fn(),
   stripeApiMode: vi.fn(),
@@ -42,6 +43,10 @@ vi.mock("@/src/lib/hosted-execution/usage-credits", () => ({
     mocks.reconcileDisputeNetReversal,
   reconcileHostedUsageCreditRefundNetReversalTx:
     mocks.reconcileRefundNetReversal,
+}));
+
+vi.mock("@/src/lib/hosted-execution/usage-credit-grant-capacity", () => ({
+  readHostedUsageCreditGrantCapacityTx: mocks.readGrantCapacity,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/contact-privacy", () => ({
@@ -167,6 +172,10 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       entryId: "huce_grant_123",
       granted: true,
       ledgerVersion: 1n,
+    });
+    mocks.readGrantCapacity.mockResolvedValue({
+      expectedPurchaseOwnsReservation: false,
+      state: "available",
     });
     mocks.reconcileDisputeNetReversal.mockResolvedValue({
       balanceUsdMicros: 2_500_000n,
@@ -1599,6 +1608,47 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     );
   });
 
+  it("keeps an overflowing final restoration retryable", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      stripeChargeLookupKey: "stripe-billing-event:ch_usage_123",
+      stripePaymentIntentLookupKey: "stripe-billing-event:pi_usage_123",
+    });
+    mocks.stripe.charges.retrieve.mockResolvedValue(
+      makeCharge({ amountRefunded: 0 }),
+    );
+    mocks.stripe.refunds.list.mockResolvedValue(
+      makeRefundList([makeRefund({ status: "failed" })]),
+    );
+    mocks.stripe.refunds.retrieve.mockResolvedValue(
+      makeRefund({ status: "failed" }),
+    );
+    mocks.readGrantCapacity.mockResolvedValue({
+      expectedPurchaseOwnsReservation: false,
+      state: "overflow",
+    });
+    mockExistingUsageCreditGrant(32_000_000n);
+
+    const reconciliation = reconcileHostedUsageCreditStripeEvent({
+      event: makeRefundEvent("refund.failed"),
+      prisma: harness.client,
+    });
+
+    await expect(reconciliation).rejects.toSatisfy(
+      isHostedUsageCreditStripeRetryableError,
+    );
+    expect(mocks.readGrantCapacity).toHaveBeenCalledTimes(1);
+    expect(mocks.readGrantCapacity).toHaveBeenCalledWith({
+      lockedBeneficiary: {
+        balanceUsdMicros: 2_500_000n,
+        beneficiaryMemberId: "member_beneficiary",
+        ledgerVersion: 2n,
+      },
+      tx: harness.client,
+    });
+    expect(harness.purchase.reconciliationVersion).toBe(0n);
+  });
+
   it("converges refunds and multiple disputes in two deterministic passes", async () => {
     const harness = createUsageCreditStripePrismaHarness({
       status: HostedUsageCreditPurchaseStatus.fulfilled,
@@ -1645,6 +1695,13 @@ describe("hosted usage-credit Stripe reconciliation", () => {
         : "dispute-b");
       return makeNetReversalResult({ balanceUsdMicros: 0n });
     });
+    mocks.readGrantCapacity.mockImplementation(async () => {
+      order.push("capacity");
+      return {
+        expectedPurchaseOwnsReservation: false,
+        state: "at_capacity",
+      };
+    });
 
     await expect(reconcileHostedUsageCreditStripeEvent({
       event: makeDisputeEvent("charge.dispute.funds_withdrawn", {
@@ -1663,7 +1720,17 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       "refund",
       "dispute-a",
       "dispute-b",
+      "capacity",
     ]);
+    expect(mocks.readGrantCapacity).toHaveBeenCalledOnce();
+    expect(mocks.readGrantCapacity).toHaveBeenCalledWith({
+      lockedBeneficiary: {
+        balanceUsdMicros: 0n,
+        beneficiaryMemberId: "member_beneficiary",
+        ledgerVersion: 2n,
+      },
+      tx: harness.client,
+    });
     expect(mocks.reconcileRefundNetReversal).toHaveBeenCalledWith(
       expect.objectContaining({ targetNetReversalUsdMicros: 1_000_000n }),
     );
