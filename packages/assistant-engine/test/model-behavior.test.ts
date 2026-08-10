@@ -961,6 +961,12 @@ describe('assistant execution prompt contract', () => {
       'never use a same-turn voice demo as activation proof',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Voice memos use the running-turn voice',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Set `userRequestedVoice` only when this user explicitly names the voice for this memo or test',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
       'explicit user-requested model, core-reply provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
