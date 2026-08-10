@@ -96,3 +96,8 @@ Updated: 2026-08-10
   separate npm install duplicated the workspace dependency acquisition. The
   accepted correction reuses the existing workspace bin and removes that
   installer and its temporary-prefix lifecycle.
+- Final ReviewGPT round 2 attempt 1 was not attested because its marked response
+  completed below the trust floor. Its diagnostic result also identified that
+  the declared full snapshot omitted the runner-base Dockerfile required to
+  verify the documented workspace/image version-alignment contract. The audit
+  context now includes that exact owner path and locks it with packager coverage.
