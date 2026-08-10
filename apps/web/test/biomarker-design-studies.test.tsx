@@ -141,7 +141,9 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("This link isn’t available");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
-  expect(sectionsMarkup).toContain("Boundary result detail");
+  expect(sectionsMarkup).toContain(
+    "Biomarker boundary result · published comparator provenance",
+  );
   expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');

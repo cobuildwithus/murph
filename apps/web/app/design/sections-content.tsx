@@ -535,8 +535,10 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Boundary result detail">
-        <BiomarkerBoundaryResultStudy />
+      <StudySection title="Biomarker boundary result · published comparator provenance">
+        <div id="biomarker-boundary-result">
+          <BiomarkerBoundaryResultStudy />
+        </div>
       </StudySection>
     </div>
   );
