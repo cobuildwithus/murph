@@ -126,6 +126,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
     ),
   sendHostedLinqAttachmentMessage: mocks.sendHostedLinqAttachmentMessage,
   sendHostedLinqChatMessage: mocks.sendHostedLinqChatMessage,
+  sendHostedLinqReactionBoundChatMessage: mocks.sendHostedLinqChatMessage,
   updateHostedLinqChatAvatar: mocks.updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName: mocks.updateHostedLinqChatDisplayName,
 }));
@@ -443,6 +444,7 @@ describe("hosted group access-offer defaults", () => {
     "React to share {{share_scope}} twice: {{share_scope}}. Use {{join_url}}.",
     "React to share {{share_scope}}. Use {{join_url}} or {{join_url}}.",
     "React to share {{share_scope}}. Use {{join_url}} or {{external_url}}.",
+    "React to share {{share_scope}}. Read https://example.test first, then use {{join_url}}.",
   ])("falls back when a consent template is incomplete or invalid", (messageTemplate) => {
     const message = buildHostedGroupJoinOfferMessage({
       joinUrl: "https://www.withmurph.ai/groups/join/example",
@@ -3629,6 +3631,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         }));
       expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
         groupId: GROUP_SUMMARY.id,
+        now: expect.any(Date),
         projectionScopes: offeredScopes,
         tx: fakeTx,
       });
@@ -3676,6 +3679,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       );
     expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });
@@ -3722,6 +3726,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
       projectionScopes: requestedScopes,
       tx: fakeTx,
     });
@@ -3776,6 +3781,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
 
     expect(mocks.prepareHostedGroupJoinOfferPostTx).toHaveBeenCalledWith({
       groupId: GROUP_SUMMARY.id,
+      now: expect.any(Date),
       projectionScopes: COMPLETE_ACCESS_OFFER_SCOPES,
       tx: fakeTx,
     });

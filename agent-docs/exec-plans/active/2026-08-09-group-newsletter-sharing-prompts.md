@@ -51,7 +51,7 @@ Updated: 2026-08-09
    the smallest complete implementation.
 2. [x] Add focused regression coverage and run scoped local verification plus
    direct source-level scenario proof.
-3. [ ] Commit and push the exact candidate, open the PR with the required intent
+3. [x] Commit and push the exact candidate, open the PR with the required intent
    contract, and start specialist/final ReviewGPT concurrently with CI.
 4. [ ] Resolve accepted findings, rerun affected proof, and complete parent
    review and merge-conflict proof.
@@ -69,8 +69,12 @@ Updated: 2026-08-09
   apps/web/test/hosted-group-tool.test.ts
   apps/web/test/hosted-onboarding-linq-http.test.ts`: 208 tests passed on the
   initial full focused run.
-- Final affected reruns: 89 Assistant Engine tests and 150 Web group-tool tests
-  passed.
+- Remediation rerun: 302 focused Web group, join-client, and Linq-provider tests
+  passed; the final join-client-only rerun also passed.
 - `pnpm typecheck` passed in `packages/assistant-engine`,
   `packages/hosted-execution`, and `apps/web`.
-- Exact-head CI and ReviewGPT remain pending until the candidate is published.
+- Desktop and 390px mobile design-catalog proof captured the comprehensive
+  selected-permission checkpoint with its bounded review area and visible join
+  action.
+- Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
+  candidate.

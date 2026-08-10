@@ -1113,9 +1113,9 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     });
   });
 
-  it("finds an active offer whose canonical scope snapshot covers the request", async () => {
+  it("reuses an active offer whose canonical scope snapshot exactly matches the request", async () => {
     const findMany = vi.fn(async () => [{
-      projectionKindsJson: [SLEEP_SCOPE, ACTIVITY_SCOPE],
+      projectionKindsJson: [SLEEP_SCOPE],
     }]);
     const tx = createPrismaStub({
       $queryRaw: vi.fn(async () => []),
@@ -1129,6 +1129,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(prepareHostedGroupJoinOfferPostTx({
       groupId: "group_1",
+      now: new Date("2026-07-01T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       tx,
     })).resolves.toEqual({ kind: "active_offer" });
@@ -1136,6 +1137,39 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       where: { groupId: "group_1", revokedAt: null },
       select: { projectionKindsJson: true },
       take: HOSTED_GROUP_ACTIVE_JOIN_OFFER_SCAN_MAX + 1,
+    });
+  });
+
+  it("revokes a broader active offer before posting a narrower replacement", async () => {
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    const updateMany = vi.fn(async () => ({ count: 1 }));
+    const tx = createPrismaStub({
+      $queryRaw: vi.fn(async () => []),
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          joinCode: "join_generation_1",
+        })),
+      },
+      hostedGroupJoinOffer: {
+        findMany: vi.fn(async () => [{
+          projectionKindsJson: [SLEEP_SCOPE, ACTIVITY_SCOPE],
+        }]),
+        updateMany,
+      },
+    });
+
+    await expect(prepareHostedGroupJoinOfferPostTx({
+      groupId: "group_1",
+      now,
+      projectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toEqual({
+      joinCode: "join_generation_1",
+      kind: "post",
+    });
+    expect(updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: now },
+      where: { groupId: "group_1", revokedAt: null },
     });
   });
 
@@ -1156,6 +1190,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(prepareHostedGroupJoinOfferPostTx({
       groupId: "group_1",
+      now: new Date("2026-07-01T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       tx,
     })).resolves.toEqual({ kind: "unavailable" });
@@ -1176,6 +1211,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(prepareHostedGroupJoinOfferPostTx({
       groupId: "group_1",
+      now: new Date("2026-07-01T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE],
       tx,
     })).resolves.toEqual({ kind: "unavailable" });
@@ -1195,6 +1231,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
 
     await expect(prepareHostedGroupJoinOfferPostTx({
       groupId: "group_1",
+      now: new Date("2026-07-01T00:00:00.000Z"),
       projectionScopes: [SLEEP_SCOPE, SLEEP_SCOPE],
       tx,
     })).resolves.toEqual({ kind: "unavailable" });
@@ -2012,13 +2049,13 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     expect(tx.hostedGroup.update).not.toHaveBeenCalled();
   });
 
-  it("seeds email authorization as the default requested and owner-granted group projection", async () => {
+  it("does not request or grant health projections without an explicit checkpoint scope", async () => {
     const tx = buildGroupLinkTx({
       existingGroup: false,
-      grantedProjectionKinds: ["group-email.v0", "profile-name.v0"],
+      grantedProjectionKinds: ["profile-name.v0"],
       joinCode: null,
       ownerMemberId: "member_owner",
-      requestedProjectionKinds: ["group-email.v0"],
+      requestedProjectionKinds: [],
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
 
@@ -2031,22 +2068,18 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       group: {
         members: [
           {
-            grantedVaultShareProjectionKinds: ["group-email.v0", "profile-name.v0"],
+            grantedVaultShareProjectionKinds: ["profile-name.v0"],
             memberId: "member_owner",
           },
         ],
-        requestedVaultShareProjectionKinds: ["group-email.v0"],
+        requestedVaultShareProjectionKinds: [],
       },
       joinCode: "join_created",
     });
 
     expect(tx.hostedGroup.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
-        joinPolicyJson: {
-          requestedVaultShareProjectionKinds: ["group-email.v0"],
-          requestedVaultShareProjectionScopes: [GROUP_EMAIL_SCOPE],
-          schema: "murph.hosted-group.join-policy.v1",
-        },
+        joinPolicyJson: undefined,
       }),
     }));
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
@@ -2055,12 +2088,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       now,
       projectionScope: PROFILE_SCOPE,
     }));
-    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
-      destinationMemberId: "member_group_runtime",
-      grantorMemberId: "member_owner",
-      now,
-      projectionScope: GROUP_EMAIL_SCOPE,
-    }));
+    expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledTimes(1);
   });
 
   it("stores a legacy deep-sleep request as the single source-aware permission", async () => {
@@ -2080,11 +2108,9 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     })).resolves.toMatchObject({
       group: {
         requestedVaultShareProjectionKinds: [
-          "group-email.v0",
           "deep-sleep-sources-days.v1",
         ],
         requestedVaultShareProjectionScopes: [
-          GROUP_EMAIL_SCOPE,
           DEEP_SLEEP_SOURCES_SCOPE,
         ],
       },
@@ -2094,11 +2120,9 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       data: expect.objectContaining({
         joinPolicyJson: {
           requestedVaultShareProjectionKinds: [
-            "group-email.v0",
             "deep-sleep-sources-days.v1",
           ],
           requestedVaultShareProjectionScopes: [
-            GROUP_EMAIL_SCOPE,
             DEEP_SLEEP_SOURCES_SCOPE,
           ],
           schema: "murph.hosted-group.join-policy.v1",
@@ -2107,7 +2131,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     }));
   });
 
-  it("merges the default email request into existing groups without granting email", async () => {
+  it("replaces an existing requested policy with the explicitly requested scopes", async () => {
     const tx = buildGroupLinkTx({
       existingGroup: true,
       grantedProjectionKinds: ["profile-name.v0"],
@@ -2117,27 +2141,31 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     });
     const now = new Date("2026-07-01T00:00:00.000Z");
 
-    const first = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
+    const result = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
       actorMemberId: "member_owner",
       containerMemberId: "member_group_runtime",
       now,
-      tx,
-    });
-    const second = await createHostedGroupJoinLinkForOwnedThreadContainerTx({
-      actorMemberId: "member_owner",
-      containerMemberId: "member_group_runtime",
-      now,
+      requestedVaultShareProjectionScopes: [ACTIVITY_SCOPE],
       tx,
     });
 
-    expect(first.group.requestedVaultShareProjectionKinds).toEqual([
-      "group-email.v0",
-      "sleep-times.v0",
+    expect(result.group.requestedVaultShareProjectionKinds).toEqual([
+      "activity-days.v0",
     ]);
-    expect(second.group.requestedVaultShareProjectionKinds).toEqual([
-      "group-email.v0",
-      "sleep-times.v0",
-    ]);
+    expect(tx.hostedGroup.update).toHaveBeenCalledWith({
+      data: {
+        joinPolicyJson: {
+          requestedVaultShareProjectionKinds: ["activity-days.v0"],
+          requestedVaultShareProjectionScopes: [ACTIVITY_SCOPE],
+          schema: "murph.hosted-group.join-policy.v1",
+        },
+      },
+      where: { id: "group_1" },
+    });
+    expect(tx.hostedGroupJoinOffer.updateMany).toHaveBeenCalledWith({
+      data: { revokedAt: now },
+      where: { groupId: "group_1", revokedAt: null },
+    });
     expect(mocks.grantHostedVaultShareTx).toHaveBeenCalledWith(expect.objectContaining({
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_owner",
@@ -2149,7 +2177,7 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
     }));
   });
 
-  it("keeps an existing legacy sleep policy rollback-readable during ordinary link creation", async () => {
+  it("replaces an existing legacy sleep policy with an explicitly narrower request", async () => {
     const tx = buildGroupLinkTx({
       existingGroup: true,
       joinCode: "join_existing",
@@ -2161,23 +2189,21 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
       actorMemberId: "member_owner",
       containerMemberId: "member_group_runtime",
       now: new Date("2026-07-01T00:00:00.000Z"),
+      requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
       tx,
     });
 
     expect(result.group.requestedVaultShareProjectionScopes).toEqual([
-      GROUP_EMAIL_SCOPE,
-      LEGACY_DEEP_SLEEP_SCOPE,
+      SLEEP_SCOPE,
     ]);
     expect(tx.hostedGroup.update).toHaveBeenCalledWith({
       data: {
         joinPolicyJson: {
           requestedVaultShareProjectionKinds: [
-            "group-email.v0",
-            "deep-sleep-days.v0",
+            "sleep-times.v0",
           ],
           requestedVaultShareProjectionScopes: [
-            GROUP_EMAIL_SCOPE,
-            LEGACY_DEEP_SLEEP_SCOPE,
+            SLEEP_SCOPE,
           ],
           schema: "murph.hosted-group.join-policy.v1",
         },
@@ -2216,8 +2242,8 @@ describe("createHostedGroupJoinLinkForOwnedThreadContainerTx", () => {
             role: "owner",
           },
         ],
-        requestedVaultShareProjectionKinds: ["group-email.v0", "sleep-times.v0"],
-        requestedVaultShareProjectionScopes: [GROUP_EMAIL_SCOPE, SLEEP_SCOPE],
+        requestedVaultShareProjectionKinds: ["sleep-times.v0"],
+        requestedVaultShareProjectionScopes: [SLEEP_SCOPE],
         status: "active",
       },
       joinCode: "join_created",
@@ -2376,7 +2402,7 @@ function buildGroupLinkTx(input: {
         groupKind = args.data?.kind ?? groupKind;
         requestedProjectionKinds =
           args.data?.joinPolicyJson?.requestedVaultShareProjectionKinds
-          ?? requestedProjectionKinds;
+          ?? [];
         return { id: "group_1" };
       }),
       findUnique: vi.fn(async (args: {
@@ -2446,9 +2472,14 @@ function buildGroupLinkTx(input: {
         ) {
           groupJoinCode = "join_created";
         }
-        requestedProjectionKinds =
-          args.data?.joinPolicyJson?.requestedVaultShareProjectionKinds
-          ?? requestedProjectionKinds;
+        if (
+          args.data
+          && Object.prototype.hasOwnProperty.call(args.data, "joinPolicyJson")
+        ) {
+          requestedProjectionKinds =
+            args.data.joinPolicyJson?.requestedVaultShareProjectionKinds
+            ?? [];
+        }
         return { joinCode: "join_created" };
       }),
     },

@@ -23,6 +23,7 @@ import {
   createHostedLinqChat,
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
+  sendHostedLinqReactionBoundChatMessage,
   shareHostedLinqContactCard,
   startHostedLinqChatTypingIndicator,
 } from "@/src/lib/hosted-onboarding/linq-client";
@@ -908,6 +909,38 @@ describe("sendHostedLinqChatMessage", () => {
         },
       },
     ]);
+  });
+
+  it("keeps a reaction-bound consent prompt and its terminal link in one text message", async () => {
+    const requestBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(readJsonRequestBody(init));
+      return createJsonResponse({
+        chat_id: "chat_123",
+        message: { id: "msg_consent" },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqReactionBoundChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "group-offer:evt_123",
+      message: "React to share the selected data, or customize at https://app.example.test/join/code.",
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_consent",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBodies).toEqual([{
+      message: {
+        idempotency_key: "group-offer:evt_123",
+        parts: [{
+          type: "text",
+          value: "React to share the selected data, or customize at https://app.example.test/join/code.",
+        }],
+      },
+    }]);
   });
 
   it.each([

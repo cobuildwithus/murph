@@ -167,6 +167,39 @@ test("renders optional sharing cards with visible keyboard focus treatment", asy
   expect(markup).toContain('type="checkbox"');
 });
 
+test("keeps a comprehensive default checklist bounded and keyboard-scrollable", async () => {
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const permissions = Array.from({ length: 13 }, (_, index) => ({
+    description: `Shares choice ${index + 1}.`,
+    label: `Choice ${index + 1}`,
+    projectionScope: { projectionKind: "steps-days.v0" as const },
+    projectionScopeKey: `steps-days.v0:${index + 1}`,
+  }));
+
+  const markup = renderToStaticMarkup(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions,
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+  );
+
+  expect(markup).toContain("13 of 13 choices selected");
+  expect(markup).toContain('aria-label="Sharing choices"');
+  expect(markup).toContain('role="region"');
+  expect(markup).toContain("max-h-[26rem]");
+  expect(markup).toContain('tabindex="0"');
+  expect(markup).toContain("shrink-0 overflow-hidden");
+  expect(markup).toContain("Join group");
+});
+
 test("discloses and submits source-aware sleep metadata on the link-only join page", async () => {
   mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
   const { GroupJoinAcceptForm } = await import(

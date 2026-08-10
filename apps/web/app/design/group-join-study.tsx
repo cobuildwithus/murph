@@ -109,7 +109,11 @@ const DESIGN_PERMISSIONS: GroupJoinPermissionDisplay[] = [
   },
 ];
 
-export function GroupJoinStudy() {
+export function GroupJoinStudy({
+  comprehensivePermissions,
+}: {
+  comprehensivePermissions: readonly GroupJoinPermissionDisplay[];
+}) {
   return (
     <div
       className="grid gap-6 rounded-3xl border border-border bg-background px-4 py-12 sm:px-8 lg:grid-cols-2"
@@ -190,17 +194,20 @@ export function GroupJoinStudy() {
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="Signed-in invitee deciding whether to join. Not now matches the consent gate's existing decline link."
-        title="New invitee"
+        caption="A new member sees every available sharing choice selected, can scroll through the complete list, and keeps the join action in view. Nothing is shared until they join."
+        title="New invitee · comprehensive default"
       >
-        <GroupJoinPageMock alreadyActiveMember={false}>
+        <GroupJoinPageMock
+          alreadyActiveMember={false}
+          designState="group-join-comprehensive-default"
+        >
           <GroupJoinAcceptForm
             activeVaultShareProjectionScopes={[]}
             alreadyActiveMember={false}
             expectedMembershipId={null}
             groupName={DESIGN_GROUP_NAME}
             joinCode={DESIGN_JOIN_CODE}
-            permissions={DESIGN_PERMISSIONS}
+            permissions={comprehensivePermissions}
             postJoinContactOption={null}
             postJoinDestination="/home"
           />
@@ -300,12 +307,17 @@ function GroupJoinVariant({
 function GroupJoinPageMock({
   alreadyActiveMember,
   children,
+  designState,
 }: {
   alreadyActiveMember: boolean;
   children: React.ReactNode;
+  designState?: string;
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-md flex-col gap-8">
+    <div
+      className="mx-auto flex w-full max-w-md flex-col gap-8"
+      data-design-state={designState}
+    >
       <header className="flex flex-col items-center gap-4 text-center">
         <div className="flex size-[76px] items-center justify-center rounded-full bg-[#d4c4a8] font-serif text-[2rem] font-semibold text-[#2d3436]">
           S

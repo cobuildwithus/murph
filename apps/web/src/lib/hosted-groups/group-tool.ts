@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import { containsHttpUrlText } from "@murphai/contracts";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
 } from "@murphai/hosted-execution/contracts";
@@ -46,6 +47,7 @@ import {
   getHostedLinqChatSummary,
   type HostedLinqChatHandleSummary,
   sendHostedLinqChatMessage,
+  sendHostedLinqReactionBoundChatMessage,
   updateHostedLinqChatAvatar,
   updateHostedLinqChatDisplayName,
 } from "../hosted-onboarding/linq-client";
@@ -1277,6 +1279,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     });
     const offerPost = await prepareHostedGroupJoinOfferPostTx({
       groupId: result.group.id,
+      now,
       projectionScopes,
       tx,
     });
@@ -1321,7 +1324,7 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
   const providerSendStartedAt = new Date();
   let sent: Awaited<ReturnType<typeof sendHostedLinqChatMessage>>;
   try {
-    sent = await sendHostedLinqChatMessage({
+    sent = await sendHostedLinqReactionBoundChatMessage({
       chatId: authorized.chatId,
       idempotencyKey: buildHostedGroupJoinOfferProviderIdempotencyKey({
         groupId: created.group.id,
@@ -1562,6 +1565,9 @@ function isValidHostedGroupJoinOfferMessageTemplate(
   value: string | null | undefined,
 ): value is string {
   if (!value) {
+    return false;
+  }
+  if (containsHttpUrlText(value)) {
     return false;
   }
   const shareScopeCount = value.split(

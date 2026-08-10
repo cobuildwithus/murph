@@ -40,7 +40,7 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
 | Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. The default scopes are steps, workout details, and sleep duration so same-week activity context is available when shared. |
-| Permission offers | In iMessage/Linq, Murph authors one natural consent message with `{{share_scope}}` and `{{join_url}}` exactly once each. Web rejects unknown, repeated, or missing placeholders to trusted fallback copy, substitutes only the frozen server-owned scope description and first-party URL, and treats a freshly posted native offer as Murph's complete reply. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
+| Permission offers | In iMessage/Linq, Murph authors one natural consent message with `{{share_scope}}` and `{{join_url}}` exactly once each. Web rejects unknown, repeated, or missing placeholders and literal URLs to trusted fallback copy, substitutes only the frozen server-owned scope description and first-party URL, sends the rendered consent target as one reaction-bound provider message, and treats a freshly posted native offer as Murph's complete reply. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
 | Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
 | Projection retention | Each Web-owned encrypted health snapshot can carry **the 8 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. This retains the open local date plus the seven prior completed dates without exposing older history. The signed callback body ceiling is 19 KiB: above the maximum legal eight-record workout payload and below the equivalent nine-record payload. |
@@ -64,7 +64,16 @@ update can explain a movement number with observed same-period training context
 when available. Nothing is silently granted: the reaction or join page remains
 the consent gate, and each member can deselect any requested permission before
 granting it. When Murph supplies an explicit narrower scope list, the server
-preserves that exact narrow request.
+preserves that exact narrow request. A new consent checkpoint replaces the
+group's prior requested policy instead of unioning it, revokes stale unaccepted
+offers, and reuses an active native offer only when its frozen scopes match
+exactly. This replacement changes requested consent only; it does not revoke
+permissions that members already granted.
+
+For native reaction offers, Web also rejects literal URLs in Murph's template,
+then injects the one first-party customization URL. The rendered prompt is sent
+as one reaction-bound provider text message even when the URL is terminal, so
+the stored consent target is the same bubble the member reads and reacts to.
 
 ### Newsletter automation — the schedule + config
 
