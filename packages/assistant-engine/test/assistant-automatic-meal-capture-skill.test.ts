@@ -135,7 +135,16 @@ describe('assistant automatic meal capture skill', () => {
     )
     const compactSkill = compact(skill)
     expect(compactSkill).toContain(
-      'Only when all five scalar targets resolve from active canonical Goals',
+      'Only when all five qualifying scalar targets resolve from active canonical Goals',
+    )
+    expect(compactSkill).toContain(
+      'A card-qualifying target must use the exact canonical metric/unit pair: `dietary-calories` with `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
+    )
+    expect(compactSkill).toContain(
+      'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
+    )
+    expect(compactSkill).toContain(
+      'on a scheduled occurrence, ask no question and use ordinary closeout text.',
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
@@ -150,7 +159,7 @@ describe('assistant automatic meal capture skill', () => {
       'do not ask for profile inputs, call `goal import-json`, create or change a paused proposal, or surface a numeric target proposal.',
     )
     expect(compactSkill).toContain(
-      'If numeric presentation is suppressed, or the active target bundle is incomplete or ambiguous, retain the ordinary compact closeout and do not attach a card.',
+      'If numeric presentation is suppressed, or the active target bundle is incomplete, ambiguous, or unit-incompatible, retain the ordinary compact closeout and do not attach a card.',
     )
     expect(compactSkill).not.toContain(
       'follow it exactly. Resolve all five targets from active canonical Goals.',
@@ -182,6 +191,12 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(compactSafety).toContain('below 1,200 kcal/day')
     expect(compactSafety).toContain('active canonical target at card time')
+    expect(compactSafety).toContain(
+      'Evaluate that boundary only for `dietary-calories` in canonical `kcal`.',
+    )
+    expect(compactSafety).toContain(
+      'A calorie target in any other unit makes the fixed-unit card bundle incompatible',
+    )
     expect(compactSafety).toContain('pregnancy or breastfeeding')
     expect(compactSafety).toContain('glucose-lowering medication')
     expect(compactSafety).toContain('kidney disease')
@@ -232,7 +247,7 @@ describe('assistant automatic meal capture skill', () => {
     )
   })
 
-  it('maps all five canonical target metrics into the closed V2 card', () => {
+  it('maps all five canonical target units and rejects incompatible values', () => {
     const canonicalTotals = {
       mealCount: 4,
       totals: {
@@ -250,8 +265,16 @@ describe('assistant automatic meal capture skill', () => {
       { metricKey: 'fat-grams', unit: 'g', value: 80 },
       { metricKey: 'fiber-grams', unit: 'g', value: 35 },
     ] as const
-    const resolveTarget = (metricKey: string, unit: string): number => {
-      const matches = canonicalTargets.filter(
+    const resolveTarget = (
+      metricKey: string,
+      unit: string,
+      targets: readonly {
+        metricKey: string
+        unit: string
+        value: number
+      }[] = canonicalTargets,
+    ): number => {
+      const matches = targets.filter(
         (target) => target.metricKey === metricKey && target.unit === unit,
       )
       expect(matches).toHaveLength(1)
@@ -302,6 +325,31 @@ describe('assistant automatic meal capture skill', () => {
     expect(expectedArgument.card.totals.fiberGrams).toBe(
       canonicalTotals.totals.fiberGrams,
     )
+
+    const kilojouleCalories = canonicalTargets.map((target) =>
+      target.metricKey === 'dietary-calories'
+        ? { ...target, unit: 'kJ', value: 4_000 }
+        : target
+    )
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      kilojouleCalories,
+    )).toThrow()
+
+    for (const metricKey of [
+      'protein-grams',
+      'carbs-grams',
+      'fat-grams',
+      'fiber-grams',
+    ]) {
+      const ounceTarget = canonicalTargets.map((target) =>
+        target.metricKey === metricKey
+          ? { ...target, unit: 'oz' }
+          : target
+      )
+      expect(() => resolveTarget(metricKey, 'g', ounceTarget)).toThrow()
+    }
   })
 
   it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {

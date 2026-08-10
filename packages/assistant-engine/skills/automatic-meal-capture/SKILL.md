@@ -181,10 +181,16 @@ On a scheduled run:
    target-setting intent: do not ask for profile inputs, call `goal import-json`,
    create or change a paused proposal, or surface a numeric target proposal.
    If numeric presentation is suppressed, or the active target bundle is
-   incomplete or ambiguous, retain the ordinary compact closeout and do not
-   attach a card. Never infer a target from this day's meal total or one
-   wearable day.
-7. Only when all five scalar targets resolve from active canonical Goals, run
+   incomplete, ambiguous, or unit-incompatible, retain the ordinary compact
+   closeout and do not attach a card. A card-qualifying target must use the
+   exact canonical metric/unit pair: `dietary-calories` with `kcal`, and
+   `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.
+   A target in another unit remains authoritative, but never compare, convert,
+   or copy its raw value into this fixed-unit card; on a scheduled occurrence,
+   ask no question and use ordinary closeout text. Never infer a target from
+   this day's meal total or one wearable day.
+7. Only when all five qualifying scalar targets resolve from active canonical
+   Goals, run
    the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date
    range immediately before any response-card attachment; do not reuse an

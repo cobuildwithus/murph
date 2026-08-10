@@ -236,7 +236,7 @@ describe('assistant nutrition strategy skill', () => {
       'If the adjusted or rounded target is below 1,200 kcal/day, stop',
     )
     expect(compactGoals).toContain(
-      'Hold the calorie target and every explicit protein, carbohydrate, and fat target fixed.',
+      'Hold those compatible explicit targets fixed.',
     )
     expect(compactGoals).toContain(
       'With exactly one macro missing, assign that macro the remaining energy.',
@@ -327,6 +327,21 @@ describe('assistant nutrition strategy skill', () => {
       'A member- or clinician-chosen active target always wins for its metric.',
     )
     expect(compactGoals).toContain(
+      'Unit compatibility is part of target authority.',
+    )
+    expect(compactGoals).toContain(
+      'This fixed-unit workflow accepts only `dietary-calories` in `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
+    )
+    expect(compactGoals).toContain(
+      'its raw value must not be compared with the 1,200 kcal boundary, copied into a card, or used by the residual-energy or fiber calculations.',
+    )
+    expect(compactGoals).toContain(
+      'perform no managed Goal mutation, use ordinary text or one narrow interactive question, and let a scheduled closeout use ordinary text without a question or card.',
+    )
+    expect(compactGoals).toContain(
+      'Run this only after the calorie target is proven to be in `kcal` and every explicit protein, carbohydrate, and fat target is proven to be in `g`.',
+    )
+    expect(compactGoals).toContain(
       "send the managed Goal's complete retained array without that overlapping metric; never edit the explicit Goal.",
     )
     expect(compactGoals).toContain(
@@ -352,6 +367,9 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactSafety).toContain(
       'A usable adult BMI below 18.5 suppresses numeric goals and the card.',
+    )
+    expect(compactSafety).toContain(
+      'A calorie target in any other unit makes the fixed-unit card bundle incompatible',
     )
     expect(compactSafety).toContain(
       'If the 200-record result is saturated without resolving whether usable BMI evidence is present, suppress the card; otherwise missing measurements are unavailable evidence, not a universal block.',
@@ -398,7 +416,7 @@ describe('assistant nutrition strategy skill', () => {
       'This applies both to an active canonical target at card time and to an adjusted or rounded derived result before any Goal write.',
     )
     expect(compactSafety).toContain(
-      'Do not raise it to the boundary and continue',
+      'Do not raise a compatible low target to the boundary and continue',
     )
     expect(cardSafety).toContain('anyone under 18')
     expect(compactSafety).toContain('pregnancy or breastfeeding')

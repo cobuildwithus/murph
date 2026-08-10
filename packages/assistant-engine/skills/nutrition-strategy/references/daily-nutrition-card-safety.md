@@ -35,11 +35,15 @@ is still safe in the member's current context.
 - Treat a calorie target below 1,200 kcal/day as outside this product's
   self-directed numeric-card boundary. This applies both to an active canonical
   target at card time and to an adjusted or rounded derived result before any
-  Goal write. Do not raise it to the boundary and continue; stop numeric setup,
-  keep ordinary supportive text, and use the body-composition or qualified-care
-  owner when the member wants help with the underlying direction. This is a
-  conservative product guard, not a claim that 1,200 kcal is appropriate for
-  every adult.
+  Goal write. Evaluate that boundary only for `dietary-calories` in canonical
+  `kcal`. A calorie target in any other unit makes the fixed-unit card bundle
+  incompatible: never compare its raw number with 1,200, copy it as calories,
+  convert it ad hoc, or use it for macro derivation. Suppress the card and make
+  no managed Goal mutation. Do not raise a compatible low target to the
+  boundary and continue; stop numeric setup, keep ordinary supportive text,
+  and use the body-composition or qualified-care owner when the member wants
+  help with the underlying direction. This is a conservative product guard,
+  not a claim that 1,200 kcal is appropriate for every adult.
 - When this gate suppresses a card, keep the owning skill's non-numeric or
   clinical path. Do not expose stored targets or their assessments in card or
   fallback text, and do not mutate a Goal merely because the current context
