@@ -1,0 +1,63 @@
+name: PR 1498 Design Proof Capture
+
+on:
+  push:
+    branches:
+      - fix/referral-invite-session-mismatch
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr-1498-design-proof-capture
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    if: ${{ !contains(github.event.head_commit.message, '[design-proof-capture]') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Register the composed recovery state in the sections catalog
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("apps/web/app/design/sections-content.tsx")
+          source = path.read_text()
+          old = '      <StudySection title="Reusable signup referral link and recipient claim states">'
+          new = '      <StudySection title="Reusable signup referral link, recipient claim, and signed-in recovery states">'
+          if source.count(old) != 1:
+              raise SystemExit("Could not find the unique signup referral catalog title")
+          path.write_text(source.replace(old, new))
+          PY
+
+      - name: Capture exact desktop and mobile design states
+        env:
+          DESIGN_PROOF_OUTPUT_DIR: ${{ github.workspace }}/design-proof/pr-1498
+        run: pnpm --dir apps/web exec playwright test e2e/pr-1498-design-proof.spec.ts --config playwright.config.ts
+
+      - name: Commit proof assets and catalog registration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/web/app/design/sections-content.tsx design-proof/pr-1498/desktop.png design-proof/pr-1498/mobile.png
+          git commit -m "chore: capture PR 1498 design proof [design-proof-capture]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
