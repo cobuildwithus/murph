@@ -90,6 +90,8 @@ Updated: 2026-08-10
   safety-only, and result-limit regressions found during prior review rounds.
 - The earlier ReviewGPT loop reached its configured round cap. Do not start a
   new final round without explicit user approval.
+- Temporary PR application, checkout-export, and validation workflows were
+  removed after their failed runs. They are not part of the product design.
 
 ## Verification
 
