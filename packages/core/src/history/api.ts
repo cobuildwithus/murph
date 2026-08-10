@@ -7,7 +7,10 @@ import {
   isStrictIsoDate,
   safeParseContract,
 } from "@murphai/contracts";
-import { resolveWearableCanonicalMetricKey } from "@murphai/health-metrics";
+import {
+  normalizeWearableMetricValue,
+  resolveWearableCanonicalMetricKey,
+} from "@murphai/health-metrics";
 
 import type {
   BloodTestReferenceRange,
@@ -1491,7 +1494,13 @@ function canonicalEventContainsBodyMeasurement(
   providerBodyObservation = false,
 ): boolean {
   if (record.kind === "observation") {
-    return isCanonicalBodyMeasurementMetric(record.metric)
+    const normalizedMetric = normalizeWearableMetricValue(
+      record.metric,
+      record.value,
+      record.unit,
+    );
+    return normalizedMetric !== null
+      && CANONICAL_BODY_MEASUREMENT_METRIC_KEYS.has(normalizedMetric.key)
       && (providerBodyObservation || record.externalRef !== undefined)
       && (
         record.observationGrain === undefined

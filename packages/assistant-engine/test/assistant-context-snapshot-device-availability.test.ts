@@ -345,6 +345,85 @@ describe('assistant context snapshot device availability', () => {
     }
   })
 
+  it('advertises only body observations that wearable reads can normalize', async () => {
+    const parentRoot = await mkdtemp(
+      path.join(tmpdir(), 'assistant-device-context-body-units-'),
+    )
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const queryProjectionPath = path.join(
+      vaultRoot,
+      '.runtime/projections/query.sqlite',
+    )
+
+    try {
+      await initializeVault({
+        createdAt: '2026-08-07T00:00:00.000Z',
+        vaultRoot,
+      })
+      for (const observation of [
+        {
+          externalRef: {
+            resourceId: 'body-weight-pounds',
+            resourceType: 'summary',
+            system: 'test-device',
+          },
+          occurredAt: '2026-08-08T09:00:00.000Z',
+          unit: 'pounds',
+          value: 180,
+        },
+        {
+          externalRef: {
+            resourceId: 'body-weight-stone',
+            resourceType: 'summary',
+            system: 'test-device',
+          },
+          occurredAt: '2026-08-09T09:00:00.000Z',
+          unit: 'stone',
+          value: 12,
+        },
+      ] as const) {
+        await upsertEvent({
+          vaultRoot,
+          draft: buildObservationEventDraft({
+            ...observation,
+            metric: 'weight',
+            observationGrain: 'summary',
+            source: 'device',
+            title: 'Connected body weight',
+          }),
+        })
+      }
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      await refreshAssistantContextSnapshot({ vaultRoot })
+
+      const prompt = await readAssistantContextSnapshotPrompt({ vaultRoot })
+      expect(prompt).toContain(
+        'Body/scale measurement history is present (latest 2026-08-08)',
+      )
+      expect(prompt).not.toContain('180')
+      expect(prompt).not.toContain('12')
+      await expect(access(queryProjectionPath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      })
+      await expect(createIntegratedVaultServices().query.listWearableBodyState({
+        limit: 30,
+        requestId: null,
+        vault: vaultRoot,
+      })).resolves.toMatchObject({
+        count: 1,
+        items: [{ date: '2026-08-08' }],
+      })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
   it('yields during a sizable canonical ledger scan without starting a query projection', async () => {
     const parentRoot = await mkdtemp(
       path.join(tmpdir(), 'assistant-device-context-preemption-'),
