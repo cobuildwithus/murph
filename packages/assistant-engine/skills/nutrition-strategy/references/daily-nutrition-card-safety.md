@@ -35,8 +35,11 @@ is still safe in the member's current context.
 - Treat a calorie target below 1,200 kcal/day as outside this product's
   self-directed numeric-card boundary. This applies both to an active canonical
   target at card time and to an adjusted or rounded derived result before any
-  Goal write. Evaluate that boundary only for `dietary-calories` in canonical
-  `kcal`. A calorie target in any other unit makes the fixed-unit card bundle
+  Goal write. For an existing target, first require that the containing Goal
+  window and target-level dates include the exact card `localDate`; an
+  out-of-window target must neither trigger nor satisfy this gate. Evaluate the
+  boundary only for `dietary-calories` in canonical `kcal`. A calorie target in
+  any other unit makes the fixed-unit card bundle
   incompatible: never compare its raw number with 1,200, copy it as calories,
   convert it ad hoc, or use it for macro derivation. Suppress the card and make
   no managed Goal mutation. Do not raise a compatible low target to the

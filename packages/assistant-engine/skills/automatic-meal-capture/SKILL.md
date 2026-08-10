@@ -182,8 +182,16 @@ On a scheduled run:
    create or change a paused proposal, or surface a numeric target proposal.
    If numeric presentation is suppressed, or the active target bundle is
    incomplete, ambiguous, or unit-incompatible, retain the ordinary compact
-   closeout and do not attach a card. A card-qualifying target must use the
-   exact canonical metric/unit pair: `dietary-calories` with `kcal`, and
+   closeout and do not attach a card. Resolve target applicability against the
+   selected occurrence local date from step 1, not wall-clock today. A target
+   qualifies only when that date is on or after the containing Goal's
+   `window.startAt`, on or before its optional `window.targetAt`, and inside the
+   target's optional inclusive `startAt`/`targetAt` interval. Ignore an
+   out-of-window target for current authority and conflict resolution; never
+   copy, expose, derive from, or mutate a Goal because of it. If fewer than five
+   applicable targets remain, ask no question and use ordinary closeout text.
+   A card-qualifying target must use the exact canonical metric/unit pair:
+   `dietary-calories` with `kcal`, and
    `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.
    A target in another unit remains authoritative, but never compare, convert,
    or copy its raw value into this fixed-unit card; on a scheduled occurrence,

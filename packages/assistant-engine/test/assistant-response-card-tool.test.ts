@@ -176,13 +176,22 @@ describe('murph.attach_response_card', () => {
       'never calculate or reuse totals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Require exactly one unambiguous active scalar target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
+      'Require exactly one unambiguous applicable scalar target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A target in another unit remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      "For the exact card localDate, require the containing active Goal window and each target's optional startAt/targetAt interval to include that date, with inclusive boundaries",
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use the scheduled occurrence or explicitly requested date, including historical catch-up, never wall-clock today',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'nutrition-strategy/references/daily-nutrition-card-safety.md',
@@ -206,7 +215,7 @@ describe('murph.attach_response_card', () => {
       'explicit numeric-card request authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'hold compatible explicit targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
+      'hold applicable, compatible explicit targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'an infeasible bundle means ordinary text and no mutation',

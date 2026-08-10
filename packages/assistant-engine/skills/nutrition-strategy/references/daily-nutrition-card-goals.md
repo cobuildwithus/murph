@@ -41,6 +41,20 @@ remain required before the proposal can affect a card.
   managed Goal mutation, use ordinary text or one narrow interactive question,
   and let a scheduled closeout use ordinary text without a question or card.
   Apply this rule before any low-energy check or derivation.
+- Effective dates are also part of target authority. Resolve them against the
+  exact card `localDate`: the scheduled occurrence local date or the explicitly
+  requested date, including a historical or catch-up date, never wall-clock
+  today. The containing Goal applies only when
+  `window.startAt <= localDate` and its optional `window.targetAt` is absent or
+  `localDate <= window.targetAt`. A target inside it also applies only when its
+  optional `startAt` is absent or `startAt <= localDate`, and its optional
+  `targetAt` is absent or `localDate <= targetAt`; both boundaries are
+  inclusive. An out-of-window target remains canonical authority for its own
+  period, but it is not a current owner or conflict: do not copy or expose its
+  value, compare it with the 1,200 kcal boundary, derive from it, or let it
+  cause any managed Goal mutation. If one complete applicable bundle does not
+  remain, use ordinary text or one narrow interactive question with no
+  mutation; a scheduled closeout asks nothing and sends no card.
 - After explicit interactive target-setting intent, if one consolidated question
   can collect the genuinely missing inputs, ask it once. Until a responsible
   calorie estimate and all five goals exist, save no active defaults and attach
@@ -84,11 +98,12 @@ Keep population guidance separate from Murph's product judgment.
    reference. Round to the nearest 5 g. This is the preferred derived protein
    value when more than one macro is missing, not authority to override an
    explicit metric or an energy-feasibility check.
-3. **One residual-energy algorithm.** Run this only after the calorie target is
-   proven to be in `kcal` and every explicit protein, carbohydrate, and fat
-   target is proven to be in `g`. Hold those compatible explicit targets fixed.
-   Use 4 kcal/g for protein and carbohydrate and 9 kcal/g for fat. Then derive
-   only missing macros:
+3. **One residual-energy algorithm.** Run this only after the calorie target and
+   every explicit protein, carbohydrate, and fat target are proven applicable
+   to the proposal's card date, then prove the calorie target is in `kcal` and
+   each macro target is in `g`. Hold those applicable, compatible explicit
+   targets fixed. Use 4 kcal/g for protein and carbohydrate and 9 kcal/g for
+   fat. Then derive only missing macros:
 
    - With exactly one macro missing, assign that macro the remaining energy.
    - With protein plus another macro missing, start from the weight-based protein

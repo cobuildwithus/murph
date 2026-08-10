@@ -146,6 +146,18 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSkill).toContain(
       'on a scheduled occurrence, ask no question and use ordinary closeout text.',
     )
+    expect(compactSkill).toContain(
+      'Resolve target applicability against the selected occurrence local date from step 1, not wall-clock today.',
+    )
+    expect(compactSkill).toContain(
+      "A target qualifies only when that date is on or after the containing Goal's `window.startAt`, on or before its optional `window.targetAt`, and inside the target's optional inclusive `startAt`/`targetAt` interval.",
+    )
+    expect(compactSkill).toContain(
+      'Ignore an out-of-window target for current authority and conflict resolution; never copy, expose, derive from, or mutate a Goal because of it.',
+    )
+    expect(compactSkill).toContain(
+      'If fewer than five applicable targets remain, ask no question and use ordinary closeout text.',
+    )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
     )
@@ -192,7 +204,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('below 1,200 kcal/day')
     expect(compactSafety).toContain('active canonical target at card time')
     expect(compactSafety).toContain(
-      'Evaluate that boundary only for `dietary-calories` in canonical `kcal`.',
+      'Evaluate the boundary only for `dietary-calories` in canonical `kcal`.',
     )
     expect(compactSafety).toContain(
       'A calorie target in any other unit makes the fixed-unit card bundle incompatible',
@@ -247,7 +259,7 @@ describe('assistant automatic meal capture skill', () => {
     )
   })
 
-  it('maps all five canonical target units and rejects incompatible values', () => {
+  it('maps applicable canonical targets and rejects incompatible units', () => {
     const canonicalTotals = {
       mealCount: 4,
       totals: {
@@ -350,6 +362,40 @@ describe('assistant automatic meal capture skill', () => {
       )
       expect(() => resolveTarget(metricKey, 'g', ounceTarget)).toThrow()
     }
+
+    const appliesToCardDate = (input: {
+      cardDate: string
+      goalStartAt: string
+      goalTargetAt?: string
+      targetStartAt?: string
+      targetTargetAt?: string
+    }): boolean =>
+      input.goalStartAt <= input.cardDate &&
+      (input.goalTargetAt === undefined || input.cardDate <= input.goalTargetAt) &&
+      (input.targetStartAt === undefined || input.targetStartAt <= input.cardDate) &&
+      (input.targetTargetAt === undefined || input.cardDate <= input.targetTargetAt)
+
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-09-01',
+    })).toBe(false)
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-01-01',
+      targetStartAt: '2026-09-01',
+    })).toBe(false)
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-01-01',
+      goalTargetAt: '2026-08-09',
+    })).toBe(false)
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-08-10',
+      goalTargetAt: '2026-08-10',
+      targetStartAt: '2026-08-10',
+      targetTargetAt: '2026-08-10',
+    })).toBe(true)
   })
 
   it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {

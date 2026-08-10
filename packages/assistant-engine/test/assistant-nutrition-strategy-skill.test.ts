@@ -236,7 +236,7 @@ describe('assistant nutrition strategy skill', () => {
       'If the adjusted or rounded target is below 1,200 kcal/day, stop',
     )
     expect(compactGoals).toContain(
-      'Hold those compatible explicit targets fixed.',
+      'Hold those applicable, compatible explicit targets fixed.',
     )
     expect(compactGoals).toContain(
       'With exactly one macro missing, assign that macro the remaining energy.',
@@ -339,7 +339,20 @@ describe('assistant nutrition strategy skill', () => {
       'perform no managed Goal mutation, use ordinary text or one narrow interactive question, and let a scheduled closeout use ordinary text without a question or card.',
     )
     expect(compactGoals).toContain(
-      'Run this only after the calorie target is proven to be in `kcal` and every explicit protein, carbohydrate, and fat target is proven to be in `g`.',
+      "Run this only after the calorie target and every explicit protein, carbohydrate, and fat target are proven applicable to the proposal's card date, then prove the calorie target is in `kcal` and each macro target is in `g`.",
+    )
+    expect(compactGoals).toContain('Effective dates are also part of target authority.')
+    expect(compactGoals).toContain(
+      'Resolve them against the exact card `localDate`: the scheduled occurrence local date or the explicitly requested date, including a historical or catch-up date, never wall-clock today.',
+    )
+    expect(compactGoals).toContain(
+      '`window.startAt <= localDate` and its optional `window.targetAt` is absent or `localDate <= window.targetAt`.',
+    )
+    expect(compactGoals).toContain(
+      'An out-of-window target remains canonical authority for its own period, but it is not a current owner or conflict',
+    )
+    expect(compactGoals).toContain(
+      'If one complete applicable bundle does not remain, use ordinary text or one narrow interactive question with no mutation; a scheduled closeout asks nothing and sends no card.',
     )
     expect(compactGoals).toContain(
       "send the managed Goal's complete retained array without that overlapping metric; never edit the explicit Goal.",
@@ -370,6 +383,9 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactSafety).toContain(
       'A calorie target in any other unit makes the fixed-unit card bundle incompatible',
+    )
+    expect(compactSafety).toContain(
+      'first require that the containing Goal window and target-level dates include the exact card `localDate`; an out-of-window target must neither trigger nor satisfy this gate.',
     )
     expect(compactSafety).toContain(
       'If the 200-record result is saturated without resolving whether usable BMI evidence is present, suppress the card; otherwise missing measurements are unavailable evidence, not a universal block.',
