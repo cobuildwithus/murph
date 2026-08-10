@@ -125,7 +125,9 @@ export function toBrowserVaultLabResultRows(input: {
 }
 
 function readLabSpecimenKind(value: unknown): BrowserVaultLabSpecimenKind | null {
-  return value === "serum" || value === "plasma" ? value : null;
+  return value === "serum" || value === "plasma" || value === "whole_blood"
+    ? value
+    : null;
 }
 
 export function labResultRowMatchesFilters(
