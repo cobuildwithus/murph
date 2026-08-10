@@ -497,7 +497,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   forward. One live authorization per group is database-enforced. Refill
   admission occurs only inside the existing beneficiary serialization boundary,
   provider work is post-commit, Stripe reconciliation alone grants credit, and
-  group-visible projections reveal only sponsored versus unsponsored.
+  the sponsorship projection reveals only sponsored versus unsponsored. A
+  separate room-public usage projection may reveal only the bounded percentage
+  of current-period included usage already used. That aggregate is independent
+  of purchased, referral, carryover, and refill credit; it never reveals or
+  implies payer identity, sponsorship setup, money, credit remaining, period
+  dates, message counts, or whether effective room capacity is exhausted.
 - Purchased hosted usage credit belongs to its beneficiary, not its payer. A
   payer deletion must first resolve nonterminal payment state and must not
   delete fulfilled credit owned by a surviving beneficiary. Terminal

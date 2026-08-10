@@ -30,6 +30,9 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 }));
 
 import {
+  calculateHostedGroupIncludedUsageUsedPercent,
+} from "@/src/lib/hosted-groups/group-usage-capacity";
+import {
   buildHostedGroupUsageFundingLocatorForRuntimeMember,
   buildHostedGroupUsageFundingUrl,
   normalizeHostedGroupUsageFundingLocator,
@@ -54,6 +57,32 @@ describe("hosted group usage funding", () => {
       "not_sponsored",
     );
     mocks.resolveHostedPublicBaseUrl.mockReturnValue("https://www.withmurph.ai");
+  });
+
+  it.each([
+    [10_000_000n, -1n, 0],
+    [10_000_000n, 0n, 0],
+    [10_000_000n, 1n, 1],
+    [10_000_000n, 2_999_999n, 29],
+    [10_000_000n, 10_000_000n, 100],
+    [10_000_000n, 12_000_000n, 100],
+  ] as const)(
+    "projects %s included limit and %s spend as %s percent",
+    (limitUsdMicros, spentUsdMicros, expected) => {
+      expect(calculateHostedGroupIncludedUsageUsedPercent({
+        limitUsdMicros,
+        spentUsdMicros,
+      })).toBe(expected);
+    },
+  );
+
+  it.each([0n, -1n])("rejects a nonpositive included limit of %s", (
+    limitUsdMicros,
+  ) => {
+    expect(() => calculateHostedGroupIncludedUsageUsedPercent({
+      limitUsdMicros,
+      spentUsdMicros: 0n,
+    })).toThrow(/included usage limit must be positive/u);
   });
 
   it("uses the existing opaque join code for an active group target", async () => {
@@ -134,7 +163,7 @@ describe("hosted group usage funding", () => {
     [1n, true],
     [0n, true],
     [9_000_000n, false],
-  ] as const)("projects urgency independently for %s remaining", async (
+  ] as const)("projects included usage independently for %s effective remaining", async (
     remainingUsdMicros,
     fundingNeeded,
   ) => {
@@ -153,6 +182,7 @@ describe("hosted group usage funding", () => {
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       reason: remainingUsdMicros > 0n ? undefined : "ai_usage_limit_exceeded",
       remainingUsdMicros,
+      spentUsdMicros: 2_250_000n,
     });
 
     await expect(readHostedGroupFundingRecoveryStatus({
@@ -162,6 +192,7 @@ describe("hosted group usage funding", () => {
       fundingNeeded,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      includedUsageUsedPercent: 50,
     });
     expect(mocks.readHostedGroupSponsorshipPublicState).not.toHaveBeenCalled();
   });
@@ -182,6 +213,7 @@ describe("hosted group usage funding", () => {
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
+      spentUsdMicros: 4_500_000n,
     });
     mocks.hasHostedGroupAutomaticRefillAvailable.mockResolvedValue(true);
     await expect(readHostedGroupFundingRecoveryStatus({
@@ -191,6 +223,7 @@ describe("hosted group usage funding", () => {
       fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+      includedUsageUsedPercent: 100,
     });
     expect(mocks.hasHostedGroupAutomaticRefillAvailable).not.toHaveBeenCalled();
     expect(mocks.readHostedGroupSponsorshipPublicState).not.toHaveBeenCalled();
@@ -211,12 +244,14 @@ describe("hosted group usage funding", () => {
       limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       remainingUsdMicros: 3_000_000n,
+      spentUsdMicros: 1_500_000n,
     });
     await expect(readHostedGroupFundingRecoveryStatus({
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     })).resolves.toMatchObject({
       fundingNeeded: false,
+      includedUsageUsedPercent: 33,
     });
     expect(mocks.hasHostedGroupAutomaticRefillAvailable).not.toHaveBeenCalled();
   });
@@ -236,6 +271,7 @@ describe("hosted group usage funding", () => {
       limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       remainingUsdMicros: 900_000n,
+      spentUsdMicros: 3_600_000n,
     });
     mocks.hasHostedGroupAutomaticRefillAvailable.mockResolvedValue(true);
     await expect(readHostedGroupFundingRecoveryStatus({
@@ -243,6 +279,7 @@ describe("hosted group usage funding", () => {
       runtimeMemberId: "member_group_runtime",
     })).resolves.toMatchObject({
       fundingNeeded: false,
+      includedUsageUsedPercent: 80,
     });
     expect(mocks.hasHostedGroupAutomaticRefillAvailable).toHaveBeenCalledWith({
       beneficiaryMemberId: "member_group_runtime",
@@ -265,12 +302,14 @@ describe("hosted group usage funding", () => {
       limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       remainingUsdMicros: 900_000n,
+      spentUsdMicros: 3_600_000n,
     });
     await expect(readHostedGroupFundingRecoveryStatus({
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     })).resolves.toMatchObject({
       fundingNeeded: true,
+      includedUsageUsedPercent: 80,
     });
   });
 
@@ -290,6 +329,7 @@ describe("hosted group usage funding", () => {
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
+      spentUsdMicros: 4_500_000n,
     });
 
     const status = await readHostedGroupFundingRecoveryStatus({
@@ -302,6 +342,7 @@ describe("hosted group usage funding", () => {
     expect(status).toEqual({
       fundingNeeded: true,
       fundingUrl: `https://www.withmurph.ai/groups/fund/${encodeURIComponent(expectedLocator ?? "")}`,
+      includedUsageUsedPercent: 100,
     });
     expect(expectedLocator).toMatch(/^gf1\.member_group_runtime\./u);
   });
@@ -338,6 +379,7 @@ describe("hosted group usage funding", () => {
       limitUsdMicros: 4_500_000n,
       periodEnd: new Date("2026-08-01T00:00:00.000Z"),
       remainingUsdMicros: 900_000n,
+      spentUsdMicros: 3_600_000n,
     });
 
     const status = await readHostedGroupFundingRecoveryStatus({
@@ -347,6 +389,7 @@ describe("hosted group usage funding", () => {
 
     expect(status?.fundingNeeded).toBe(true);
     expect(status?.fundingUrl).toContain("/groups/fund/gf1.member_group_runtime.");
+    expect(status?.includedUsageUsedPercent).toBe(80);
   });
 
   it("never lets the signed locator pass as a join code", () => {

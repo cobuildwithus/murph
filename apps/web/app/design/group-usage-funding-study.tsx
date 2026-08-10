@@ -76,7 +76,7 @@ const DESIGN_TOP_UP_CONTACT_OPTIONS: MurphContactOption[] = [
 
 const DESIGN_USAGE_MISSION_CONTACT_OPTION: MurphContactOption = {
   href: buildMurphSmsHref({
-    body: "Hey Murph, what usage missions can I choose from?",
+    body: "Hey Murph, what referral options can I choose from?",
     murphPhoneNumber: "+15555550100",
   }),
   kind: "text",
@@ -109,7 +109,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "in_progress",
       statusLabel: "In progress",
       timingLabel: "Ends Aug 3 at 12:00 PM UTC",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
     {
       destinationLabel: "the group",
@@ -121,7 +121,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "checking_final_activity",
       statusLabel: "Checking final activity",
       timingLabel: "Closed Jul 27 at 12:00 PM UTC",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
     {
       destinationLabel: "the group",
@@ -133,13 +133,13 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "reward_pending",
       statusLabel: "Reward pending",
       timingLabel: "Qualified Jul 25",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
     {
       destinationLabel: "your Murph",
       id: "design-mission-new-person",
       requirementsLabel:
-        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+        "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
       rewardLabel: "About 10 more days of Murph usage",
       selectedLabel: "Jul 10, 2026",
       status: "completed",
@@ -164,7 +164,7 @@ const DESIGN_AI_USAGE_WAITING_ACTIVITY: HostedAiUsageActivitySnapshot = {
       status: "waiting_for_group",
       statusLabel: "Waiting for a new group",
       timingLabel: "Start by Aug 5 at 12:00 PM UTC",
-      title: "Start an active group",
+      title: "Start a group conversation",
     },
   ],
   missionsEnabled: true,
@@ -190,7 +190,7 @@ const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
       destinationLabel: "your Murph",
       id: "design-mission-disabled-history",
       requirementsLabel:
-        "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+        "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
       rewardLabel: "About 10 more days of Murph usage",
       selectedLabel: "Jul 10, 2026",
       status: "completed",

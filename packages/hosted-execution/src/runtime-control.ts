@@ -1012,6 +1012,8 @@ export interface HostedRuntimeGroupUsageStatus {
   fundingNeeded: boolean;
   /** Current explicit funding capability, independent of urgency. */
   fundingUrl: string | null;
+  /** Required on the current shape; absent only on legacy response branches. */
+  includedUsageUsedPercent?: number;
 }
 
 export const HOSTED_USAGE_REFERRAL_POLICY_CODES = [

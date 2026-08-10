@@ -3043,6 +3043,21 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'In group email, where filesystem reads are forbidden, do not attempt the read; apply the resident group Understand before recommending rules instead.',
     )
+    expect(prompt).toContain(
+      'Group email has no filesystem access. Do not try to read a usage skill.',
+    )
+    expect(prompt).toContain(
+      'call `murph.group action="read_usage"` exactly once',
+    )
+    expect(prompt).toContain(
+      'At least all of this room\'s included usage for the current period has been used.',
+    )
+    expect(prompt).toContain(
+      'authoritative included-usage progress figure for this room is unavailable right now',
+    )
+    expect(prompt).not.toContain(
+      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
+    )
     expect(prompt).not.toContain(
       'Use `murph.automation` with `action: save`',
     )
