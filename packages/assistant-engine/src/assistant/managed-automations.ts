@@ -470,6 +470,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
       '- Search other knowledge pages only when the index suggests a candidate finding may already be covered elsewhere.',
       '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated activity or intervention links with next-day sleep and recovery.',
+      '- If the patterns command is unavailable, fails, or does not return a usable report, continue with the existing bounded manual candidate search. Do not treat command failure as evidence that no pattern exists, and do not send a setup or process note to the member.',
       '- Treat `new_clue`, `seen_again`, and `worth_testing` as stages of repeated association, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
       '- Inspect the underlying canonical dates and other vault context before sending. Check plausible alternatives. The pattern report narrows the search; it does not make the final judgment.',
       '- Inspect only enough recent and historical vault data to test candidate patterns.',

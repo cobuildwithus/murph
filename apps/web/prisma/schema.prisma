@@ -1505,6 +1505,7 @@ model HostedUsageCreditPurchase {
   checkoutExpiresAt                 DateTime                             @map("checkout_expires_at")
   paidAt                            DateTime?                            @map("paid_at")
   terminalAt                        DateTime?                            @map("terminal_at")
+  grantSlotReleasedAt               DateTime?                            @map("grant_slot_released_at")
   lastReconciledAt                  DateTime?                            @map("last_reconciled_at")
   reconciliationVersion             BigInt                               @default(0) @map("reconciliation_version")
   createdAt                         DateTime                             @default(now()) @map("created_at")
@@ -1605,13 +1606,16 @@ model HostedUsageCreditEntry {
 }
 
 /// Mutable remaining-capacity projection for one immutable positive grant
-/// entry. The entry ledger remains the canonical accounting history.
+/// entry. Beneficiary identity and FIFO sequence are immutable canonical-entry
+/// copies; the entry ledger remains the canonical accounting history.
 model HostedUsageCreditGrant {
-  entryId            String                 @id @map("entry_id")
-  remainingUsdMicros BigInt                 @map("remaining_usd_micros")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @updatedAt @map("updated_at")
-  entry              HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  entryId              String                 @id @map("entry_id")
+  beneficiaryMemberId  String                 @map("beneficiary_member_id")
+  beneficiarySequence  BigInt                 @map("beneficiary_sequence")
+  remainingUsdMicros   BigInt                 @map("remaining_usd_micros")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  entry                HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
 
   @@map("hosted_usage_credit_grant")
 }

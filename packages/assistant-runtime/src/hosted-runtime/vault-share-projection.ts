@@ -550,7 +550,7 @@ export async function readProjectableDailyMetricDays(
       ?? vaultTimeZone;
     if (!timeZone) return [];
     const currentDate = formatTimeZoneDateTimeParts(nowMs, timeZone).dayKey;
-    return row.date > currentDate ? [] : [{ ...row, provisional: row.date === currentDate }];
+    return row.date > currentDate ? [] : [row];
   }), spec, nowMs);
 }
 

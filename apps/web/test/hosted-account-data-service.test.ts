@@ -2000,6 +2000,30 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls.map((call) => call.model)).not.toContain("hostedMailboxItemConsume");
   });
 
+  it("deletes referral invite claims owned by the introduced member", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => {},
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_invite"]).toBe(1);
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedInvite",
+        where: {
+          memberId: "member_123",
+        },
+      },
+    ]));
+  });
+
   it("reports vault-share rows before member-row FK cascades delete them", async () => {
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({

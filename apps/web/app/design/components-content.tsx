@@ -161,6 +161,9 @@ import {
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
@@ -626,6 +629,7 @@ export function ComponentsContent() {
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
     useState(false);
+  const [usageCapacityPreviewKey, setUsageCapacityPreviewKey] = useState(0);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -1596,7 +1600,7 @@ export function ComponentsContent() {
                 Add one-time usage with a saved card or continue securely in
                 Stripe when needed.
               </p>
-              <div className="mt-6">
+              <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   inert
@@ -1604,6 +1608,31 @@ export function ComponentsContent() {
                   payerMemberId="design_usage_top_up_payer"
                   scope="personal"
                 />
+                <div
+                  className="contents"
+                  data-design-state="usage-top-up-capacity-conflict"
+                >
+                  <Button
+                    variant="outline"
+                    onClick={() => setUsageCapacityPreviewKey((key) => key + 1)}
+                  >
+                    Preview capacity response
+                  </Button>
+                  {usageCapacityPreviewKey > 0 ? (
+                    <HostedUsageTopUpDialog
+                      key={usageCapacityPreviewKey}
+                      checkoutUrl="/api/design/usage-credit-preview"
+                      inert
+                      initialCheckoutErrorCode={
+                        HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE
+                      }
+                      initialOpen
+                      offers={[]}
+                      payerMemberId="design_usage_top_up_payer"
+                      scope="personal"
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
             <div
