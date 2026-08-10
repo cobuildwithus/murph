@@ -14,6 +14,7 @@ Key decisions:
 - Keep the pending-input index so runner loss or a failed completion turn retries through the existing durable path.
 - Treat the provider continuation session as ordinary batching context, not authenticated group-route identity, for the exact trusted-completion match. The production importer does not attach that session to a newer inbound group message.
 - Reconstruct completion-first ordering from structurally trusted pending completion events after invocation loss; the existing pending index remains the only durable owner and the wake remains a scheduling hint.
+- Run that restored arbitration before both background and fresh foreground selection, and bound the joined cohort to same-route conversation events strictly after the completion's trusted origin input.
 
 State:
 - In progress.
@@ -31,9 +32,13 @@ Done:
 - Accepted the final-audit restart finding: the invocation-local exact-id marker disappeared before provider admission even though both inputs remained durable, so restored background selection could split the completion from a null-session follow-up.
 - Added one shared event-based selection path for foreground, restored background, and empty-source refresh. It derives trusted completion ids from durable events only on background recovery, preserves ordinary batching otherwise, and adds no queue or persisted marker.
 - Converted the production-importer regression into a two-invocation interruption proof covering restored selection, grouping, provider acceptance, current-input authority, ordinary Linq delivery, terminal cleanup, route isolation, and duplicate-pass prevention.
+- Accepted both round-4 findings: a newly imported foreground message on the replacement invocation bypassed background-only recovery, and route-only recovery could fold same-route backlog older than the image request.
+- Moved pending-completion arbitration to the foreground/background selection boundary. Fresh mode inspects pending state only for structurally trusted completions, falls back to fresh-only work on unrelated or malformed state, and never generically merges pending backlog.
+- Added an origin-only trusted completion parser for ready and failed envelopes. Restored selection loads that existing origin event and admits only same-route conversation input with a strictly later canonical cursor; an unprovable origin delivers the completion alone.
+- Extended the production two-invocation proof with a new group message between invocations. The replacement invocation now admits `[completion, prior follow-up, newest message]`, keeps the newest message current, delivers once, records terminal evidence, and empties the admitted pending cohort without a duplicate completion pass.
 
 Now:
-- Run focused verification and package typechecks for the restart correction.
+- Run focused verification and package typechecks for the foreground/origin correction.
 
 Next:
 - Commit and push the corrected candidate, update the PR evidence, then run the next final ReviewGPT round and required CI against that exact head.

@@ -4,6 +4,7 @@ import {
   compareAssistantInputCursors,
   isSameAssistantConversationRef,
   isAssistantHostedImageCompletionEvent,
+  parseAssistantHostedImageCompletionOriginText,
   readAssistantInputEvent,
   readHostedMailboxAssistantInputItemDetails,
   type AssistantInputCandidate,
@@ -27,6 +28,7 @@ import { assistantPreferenceCausalSeqSchema } from "@murphai/contracts";
 import {
   compactHostedPendingAssistantInputIds,
   isHostedPendingAssistantInputStillReplyable,
+  readHostedPendingAssistantInputIds,
   runHostedPendingAssistantInputContentRetention,
 } from "./pending-input-index.ts";
 
@@ -358,10 +360,48 @@ export async function selectHostedAssistantInputIds(
     inputIds: freshInputIds,
     vaultRoot: input.vaultRoot,
   });
+  const explicitCompletionInputIds = uniqueStrings(
+    input.hostedImageCompletionInputIds ?? [],
+  );
+  let selectionEvents = freshEvents;
+  let restoredCompletionRequiredInputIds: string[] | undefined;
+  if (explicitCompletionInputIds.length === 0) {
+    try {
+      const pendingInputIds = await readHostedPendingAssistantInputIds({
+        vaultRoot: input.vaultRoot,
+      });
+      const pendingEvents =
+        await readHostedReplyablePendingAssistantInputEvents({
+          inputIds: pendingInputIds,
+          vaultRoot: input.vaultRoot,
+        });
+      if (pendingEvents.some(isAssistantHostedImageCompletionEvent)) {
+        const eventsByInputId = new Map<string, AssistantInputEventRecord>();
+        for (const event of [...pendingEvents, ...freshEvents]) {
+          eventsByInputId.set(event.inputId, event);
+        }
+        selectionEvents = [...eventsByInputId.values()];
+        restoredCompletionRequiredInputIds =
+          selectHostedAssistantInputEventBatch({
+            events: freshEvents,
+            limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+          }).slice(0, 1).map((event) => event.inputId);
+      }
+    } catch {
+      // Fresh conversation input remains authoritative when unrelated pending
+      // state cannot be read safely. The durable wake can retry that state.
+    }
+  }
   const selected = await selectHostedAssistantInputEventBatchWithImageCompletion({
-    events: freshEvents,
-    hostedImageCompletionInputIds: input.hostedImageCompletionInputIds ?? [],
+    events: selectionEvents,
+    fallbackEvents: freshEvents,
+    ...(explicitCompletionInputIds.length > 0
+      ? { hostedImageCompletionInputIds: explicitCompletionInputIds }
+      : {}),
     limit: DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
+    ...(restoredCompletionRequiredInputIds
+      ? { requiredInputIds: restoredCompletionRequiredInputIds }
+      : {}),
     vaultRoot: input.vaultRoot,
   });
 
@@ -378,8 +418,10 @@ export async function selectHostedAssistantInputIds(
 
 async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {
   events: readonly AssistantInputEventRecord[];
+  fallbackEvents?: readonly AssistantInputEventRecord[];
   hostedImageCompletionInputIds?: readonly string[];
   limit: number;
+  requiredInputIds?: readonly string[];
   vaultRoot: string;
 }): Promise<{
   events: AssistantInputEventRecord[];
@@ -391,35 +433,49 @@ async function selectHostedAssistantInputEventBatchWithImageCompletion(input: {
         .filter(isAssistantHostedImageCompletionEvent)
         .map((event) => event.inputId),
   );
-  const completionInputIdSet = new Set(completionInputIds);
   const cursorOrderedEvents = [...input.events].sort((left, right) =>
     compareAssistantInputCursors(left.cursor, right.cursor)
   );
-  const completionFirstEvents = completionInputIds.length === 0
-    ? cursorOrderedEvents
-    : [
-        ...cursorOrderedEvents.filter((event) =>
-          completionInputIdSet.has(event.inputId)
-        ),
+  const completionInputIdSet = new Set(completionInputIds);
+  const completionEvents = cursorOrderedEvents.filter((event) =>
+    completionInputIdSet.has(event.inputId)
+    && isAssistantHostedImageCompletionEvent(event)
+  );
+  if (completionEvents.length === completionInputIds.length) {
+    const requiredInputIdSet = new Set(input.requiredInputIds ?? []);
+    for (const anchorEvent of completionEvents) {
+      const completionFirstEvents = [
+        anchorEvent,
+        ...completionEvents.filter((event) => event !== anchorEvent),
         ...cursorOrderedEvents.filter((event) =>
           !completionInputIdSet.has(event.inputId)
         ),
       ];
-  const hostedImageCompletionEvents =
-    await selectHostedImageCompletionInputEventBatch({
-      events: completionFirstEvents,
-      hostedImageCompletionInputIds: completionInputIds,
-      vaultRoot: input.vaultRoot,
-    });
-  if (hostedImageCompletionEvents) {
-    return {
-      events: hostedImageCompletionEvents.slice(0, input.limit),
-      preserveInputOrder: true,
-    };
+      const hostedImageCompletionEvents =
+        await selectHostedImageCompletionInputEventBatch({
+          events: completionFirstEvents,
+          hostedImageCompletionInputIds: [anchorEvent.inputId],
+          vaultRoot: input.vaultRoot,
+        });
+      if (
+        hostedImageCompletionEvents
+        && (
+          requiredInputIdSet.size === 0
+          || hostedImageCompletionEvents.some((event) =>
+            requiredInputIdSet.has(event.inputId)
+          )
+        )
+      ) {
+        return {
+          events: hostedImageCompletionEvents.slice(0, input.limit),
+          preserveInputOrder: true,
+        };
+      }
+    }
   }
   return {
     events: selectHostedAssistantInputEventBatch({
-      events: input.events,
+      events: input.fallbackEvents ?? input.events,
       limit: input.limit,
     }),
     preserveInputOrder: false,
@@ -460,6 +516,30 @@ async function selectHostedImageCompletionInputEventBatch(input: {
   if (!anchorCandidate) {
     return null;
   }
+  const completionOrigin = parseAssistantHostedImageCompletionOriginText(
+    anchorEvent.content.text ?? "",
+  );
+  if (!completionOrigin) {
+    return [anchorEvent];
+  }
+  const [originEvent] = await readHostedAssistantInputEventsById({
+    inputIds: [completionOrigin.originAssistantInputId],
+    missingInput: "skip",
+    vaultRoot: input.vaultRoot,
+  });
+  if (!originEvent) {
+    return [anchorEvent];
+  }
+  const [originCandidate] = await createHostedAssistantInputCandidates({
+    events: [originEvent],
+    vaultRoot: input.vaultRoot,
+  });
+  if (
+    !originCandidate
+    || !isSameAuthenticatedAssistantGroupRoute(anchorCandidate, originCandidate)
+  ) {
+    return [anchorEvent];
+  }
   const candidatesByInputId = new Map(
     candidates.map((candidate) => [candidate.event.inputId, candidate] as const),
   );
@@ -468,9 +548,14 @@ async function selectHostedImageCompletionInputEventBatch(input: {
       return true;
     }
     const candidate = candidatesByInputId.get(event.inputId);
-    return candidate
-      ? isSameAuthenticatedAssistantGroupRoute(anchorCandidate, candidate)
-      : false;
+    if (
+      !candidate
+      || !isSameAuthenticatedAssistantGroupRoute(anchorCandidate, candidate)
+    ) {
+      return false;
+    }
+    return isAssistantHostedImageCompletionEvent(event)
+      || compareAssistantInputCursors(event.cursor, originEvent.cursor) > 0;
   }).slice(0, DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT);
 }
 

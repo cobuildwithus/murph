@@ -19489,8 +19489,10 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = path.join(root, "vault");
     const referenceImageRef = "raw/inbox/2026/04/image-edit-source.png";
     const freshInputText = "Did the group image edit finish?";
+    const newestFreshInputText = "Is the finished group image ready now?";
     const codexCommand = await createImageFailureCodexAppServerCommand({
       freshInputText,
+      newestFreshInputText,
       referenceImageRef,
       root,
     });
@@ -19518,6 +19520,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let freshInputId: string | null = null;
     let imageProviderInvocationCount = 0;
     let interruptedPhaseInputIds: readonly string[] = [];
+    let newestFreshInputId: string | null = null;
     let snapshotRestoreCount = 0;
 
     const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
@@ -19711,9 +19714,11 @@ describe("hosted workspace runtime entrypoint", () => {
               };
             },
             async importItem(item, context) {
-              const inputText = item.item.laneSeq === "2"
-                ? freshInputText
-                : "Edit the shared image so the subject faces left.";
+              const inputText = item.item.laneSeq === "1"
+                ? "Edit the shared image so the subject faces left."
+                : item.item.laneSeq === "2"
+                  ? freshInputText
+                  : newestFreshInputText;
               const wake = buildHostedExecutionLinqConversationMessageWake({
                 accountLookupKey: "hbidx:group-account",
                 eventId: item.item.dedupeKey,
@@ -19769,6 +19774,16 @@ describe("hosted workspace runtime entrypoint", () => {
                   vault: vaultRoot,
                 });
                 assert.equal(freshInput?.conversation?.sessionId, null);
+              } else if (item.item.laneSeq === "3") {
+                newestFreshInputId = outcome.status === "imported"
+                  ? outcome.assistantInputId ?? null
+                  : null;
+                assert.ok(newestFreshInputId);
+                const newestFreshInput = await readAssistantInputEvent({
+                  inputId: newestFreshInputId,
+                  vault: vaultRoot,
+                });
+                assert.equal(newestFreshInput?.conversation?.sessionId, null);
               }
               return outcome;
             },
@@ -19825,7 +19840,7 @@ describe("hosted workspace runtime entrypoint", () => {
                         );
                         if (
                           activeInvocation === 2
-                          && acceptedAssistantInputIds.length === 2
+                          && acceptedAssistantInputIds.length === 3
                         ) {
                           combinedPhaseInputIds = acceptedAssistantInputIds;
                           combinedPhaseSessionIds = await Promise.all(
@@ -19905,6 +19920,14 @@ describe("hosted workspace runtime entrypoint", () => {
         );
       }
 
+      const newestFreshAt = new Date(Date.now() + 2_000).toISOString();
+      mailboxItems.push(createMailboxItem({
+        createdAt: newestFreshAt,
+        id: "mailbox_item_image_edit_failure_newest_followup",
+        laneSeq: "3",
+        occurredAt: newestFreshAt,
+        updatedAt: newestFreshAt,
+      }));
       activeInvocation = 2;
       await withRealTimeout(
         runInvocation(createRuntimeJobInput(
@@ -19916,10 +19939,12 @@ describe("hosted workspace runtime entrypoint", () => {
       );
 
       assert.equal(imageProviderInvocationCount, 1);
-      assert.equal(mailboxItems.length, 2);
+      assert.equal(mailboxItems.length, 3);
       assert.ok(freshInputId);
-      assert.equal(combinedPhaseInputIds.length, 2, events.join(","));
+      assert.ok(newestFreshInputId);
+      assert.equal(combinedPhaseInputIds.length, 3, events.join(","));
       assert.equal(combinedPhaseInputIds[1], freshInputId);
+      assert.equal(combinedPhaseInputIds[2], newestFreshInputId);
       const completionInput = await readAssistantInputEvent({
         inputId: combinedPhaseInputIds[0]!,
         vault: vaultRoot,
@@ -19933,9 +19958,10 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.deepEqual(combinedPhaseSessionIds, [
         completionInput?.conversation?.sessionId ?? null,
         null,
+        null,
       ]);
       assert.ok(combinedPhaseSessionIds[0]);
-      assert.equal(currentInputAtProviderAcceptance, freshInputId);
+      assert.equal(currentInputAtProviderAcceptance, newestFreshInputId);
       assert.equal(linqRequests.length, 2, events.join(","));
       assert.equal(linqRequestPaths.length, 2);
       for (const requestPath of linqRequestPaths) {
@@ -31294,6 +31320,7 @@ function createWorkspaceSnapshotV2Ref(snapshotId: string): HostedWorkspaceSnapsh
 
 async function createImageFailureCodexAppServerCommand(input: {
   freshInputText: string;
+  newestFreshInputText: string;
   referenceImageRef: string;
   root: string;
 }): Promise<string> {
@@ -31387,7 +31414,8 @@ for line in sys.stdin:
         completion_index = serialized_input.find("The reference image could not be decoded.")
         if completion_index >= 0:
             fresh_index = serialized_input.find(${JSON.stringify(input.freshInputText)})
-            if fresh_index <= completion_index:
+            newest_fresh_index = serialized_input.find(${JSON.stringify(input.newestFreshInputText)})
+            if fresh_index <= completion_index or newest_fresh_index <= fresh_index:
                 sys.exit(4)
             finish_turn(turn_id, ${JSON.stringify(failureExplanation)})
             continue

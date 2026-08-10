@@ -1969,10 +1969,13 @@ batch places the trusted completion immediately before that input; later input
 still joins through the existing live foreground loop. Invocation-local
 completion readiness is cleared only when the exact input reaches provider
 admission. After shutdown, provider handoff, or an earlier failure, background
-selection reconstructs the same completion-first batch from structurally
-trusted completion events in the ordinary pending input index. That index owns
-durable retry and terminal evidence; the immediate assistant wake is only a
-scheduling hint. Provider completion starts the existing generic
+or fresh-foreground selection reconstructs the same completion-first batch
+from structurally trusted completion events in the ordinary pending input
+index. The trusted envelope's existing origin input id bounds the cohort to
+same-route conversation events strictly after that origin, so older backlog
+and other routes remain pending. The index owns durable retry and terminal
+evidence; the immediate assistant wake is only a scheduling hint. Provider
+completion starts the existing generic
 usage recorder without awaiting it, and image delivery never waits for
 accounting or diagnostic writes. A provider rejection keeps the exact legacy
 failed result envelope and places its bounded structured OpenAI diagnostic on a

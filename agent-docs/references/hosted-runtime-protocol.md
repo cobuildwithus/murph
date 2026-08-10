@@ -1510,8 +1510,12 @@ retains that exact ready marker until provider admission accepts it, so
 shutdown, provider handoff, or an earlier failure still projects the existing
 immediate assistant checkpoint wake. A restored background pass derives the
 same completion-first order directly from structurally trusted completion
-events in the ordinary pending input index, which owns durable completion retry
-and terminal evidence; the wake is not the obligation owner. Provider
+events in the ordinary pending input index. The same arbitration runs before
+fresh foreground input on a replacement invocation. It uses the trusted
+envelope's existing origin input id to include only same-route conversation
+events strictly after that origin; older backlog and other routes stay pending.
+The pending index owns durable completion retry and terminal evidence; the wake
+is not the obligation owner. Provider
 completion starts the existing generic usage recorder without awaiting it, and
 image delivery never waits for accounting or diagnostic writes. When the model
 attaches the private ref, the assistant boundary reloads it and derives
