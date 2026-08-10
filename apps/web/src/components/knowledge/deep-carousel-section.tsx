@@ -121,7 +121,7 @@ const TOPICS: readonly Topic[] = [
     image: "/design-assets/hero-red-light-therapy.jpeg",
     headline: "Murph helps you dial in the dose.",
     proof: "278 studies read · reviewed Jul 2026",
-    skill: "red-light-therapy",
+    skill: "recovery-modalities",
     handles: [
       "How far to sit from your specific lamp",
       "How many seconds, for the goal you have",
