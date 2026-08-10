@@ -36,6 +36,8 @@ import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
+import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client";
+import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout";
 
 type BrowserVaultEntity = Parameters<
   typeof createVaultReadModel
@@ -70,6 +72,11 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     overviewMetadata.description,
     "A quick read on your recent notes, experiments, and tracked trends.",
   );
+  assert.equal(patternsMetadata.title, "Patterns — Murph");
+  assert.equal(
+    patternsMetadata.description,
+    "See which repeated actions and next-day outcomes tend to move together.",
+  );
   assert.equal(historyMetadata.title, "History — Murph");
   assert.equal(
     historyMetadata.description,
@@ -98,6 +105,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
 
   for (const routeMetadata of [
     overviewMetadata,
+    patternsMetadata,
     historyMetadata,
     experimentsMetadata,
   ]) {
@@ -142,9 +150,17 @@ test("OverviewPage renders the dashboard overview", () => {
   );
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Travel recovery note/);
+  assert.doesNotMatch(markup, /What tends to move together/);
+  assert.match(markup, /Weekly changes/);
+});
+
+test("PatternsPage renders personal comparisons on their own route", () => {
+  const markup = renderToStaticMarkup(createElement(PatternsPageClient));
+
+  assert.match(markup, /Personal patterns/);
   assert.match(markup, /What tends to move together/);
   assert.match(markup, /No clear comparison is ready yet/);
-  assert.match(markup, /Weekly changes/);
+  assert.doesNotMatch(markup, /Weekly changes/);
 });
 
 test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {

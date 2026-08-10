@@ -26,7 +26,6 @@ import {
   TableRow,
 } from "@/src/components/ui/table";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
-import { PersonalPatternsSection } from "@/src/components/overview/personal-patterns-section";
 import {
   formatIsoDate,
   formatNumber,
@@ -44,7 +43,6 @@ export default function OverviewPage() {
   const overview = useMemo(() => client ? selectBrowserVaultOverview(client) : null, [client]);
   const metrics = overview?.metrics ?? [];
   const experimentSummary = overview?.experimentSummary;
-  const personalPatterns = overview?.personalPatterns;
   const allExperiments = overview?.trackedExperiments ?? [];
   const experiments = allExperiments.slice(0, 8);
   const recentJournals = overview?.recentJournals ?? [];
@@ -64,8 +62,7 @@ export default function OverviewPage() {
     metrics.every((metric) => metric.value === 0) &&
     weeklyStats.length === 0 &&
     recentJournals.length === 0 &&
-    experiments.length === 0 &&
-    (personalPatterns?.testedCellCount ?? 0) === 0;
+    experiments.length === 0;
 
   return (
     <div className="flex flex-col gap-8">
@@ -143,8 +140,6 @@ export default function OverviewPage() {
 
       {canRenderContent && !isEmpty ? (
         <>
-          {personalPatterns ? <PersonalPatternsSection report={personalPatterns} /> : null}
-
           <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
             <Card>
               <CardHeader>

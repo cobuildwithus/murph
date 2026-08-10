@@ -36,9 +36,9 @@ const STAGE_RANK: Record<PersonalPatternStage, number> = {
 export function PersonalPatternsSection({
   report,
 }: {
-  report: PersonalPatternReport;
+  report: PersonalPatternReport | null;
 }) {
-  const lead = findLeadCell(report);
+  const lead = report ? findLeadCell(report) : null;
 
   return (
     <section
@@ -50,19 +50,19 @@ export function PersonalPatternsSection({
           <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
             Personal patterns
           </p>
-          <h2
+          <h1
             id="personal-patterns-title"
             className="mt-3 max-w-[22ch] font-serif text-3xl font-semibold leading-tight tracking-[-0.025em] text-foreground"
           >
             What tends to move together
-          </h2>
+          </h1>
           <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-muted-foreground">
             Murph compares repeated action days with similar days when the action did not happen.
             Outcomes come from the next day. These are clues, not proof of cause.
           </p>
         </div>
 
-        {lead ? (
+        {lead && report ? (
           <LeadPattern report={report} cell={lead} />
         ) : (
           <div className="flex items-center gap-4 border-l border-border pl-5">
@@ -89,7 +89,7 @@ export function PersonalPatternsSection({
         )}
       </div>
 
-      {report.factors.length > 0 && report.outcomes.length > 0 ? (
+      {report && report.factors.length > 0 && report.outcomes.length > 0 ? (
         <PatternMatrix report={report} />
       ) : (
         <div className="border-t border-border bg-muted/20 px-6 py-8 sm:px-8">

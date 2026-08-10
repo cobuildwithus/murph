@@ -257,7 +257,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Overview personal patterns">
+      <StudySection title="Patterns page">
         <PersonalPatternsStudy />
       </StudySection>
 
