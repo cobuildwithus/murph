@@ -14,6 +14,7 @@ import {
 import { GrowthCharts } from "../(dashboard)/ops/growth/growth-charts";
 import { GrowthSponsorships } from "../(dashboard)/ops/growth/growth-sponsorships";
 import { GrowthWeeklyTable } from "../(dashboard)/ops/growth/growth-weekly-table";
+import { ReferralLinkUsage } from "../(dashboard)/ops/growth/referral-link-usage";
 import { TrialStartAttribution } from "../(dashboard)/ops/growth/trial-start-attribution";
 
 const GROWTH_DATES = Array.from({ length: 30 }, (_, index) => {
@@ -70,6 +71,54 @@ const DAILY_SERIES = GROWTH_DATES.map((date, index) => ({
   newMembers: 2 + ((index * 3) % 8),
   trialStarts: 1 + ((index * 2) % 5),
 }));
+
+const REFERRAL_LINK_DAILY_SERIES = GROWTH_DATES.map((date, index) => {
+  const claims = index === GROWTH_DATES.length - 1
+    ? 2
+    : index % 6 === 0
+    ? 4
+    : index % 4 === 0
+      ? 2
+      : index % 3 === 0
+        ? 1
+        : 0;
+  return {
+    activatedClaims: claims === 0
+      || index % 5 === 0
+      || index === GROWTH_DATES.length - 1
+      ? 0
+      : Math.max(1, claims - 1),
+    claims,
+    date,
+  };
+});
+const REFERRAL_LINK_CLAIMS = REFERRAL_LINK_DAILY_SERIES.reduce(
+  (sum, point) => sum + point.claims,
+  0,
+);
+const REFERRAL_LINK_ACTIVATED_CLAIMS = REFERRAL_LINK_DAILY_SERIES.reduce(
+  (sum, point) => sum + point.activatedClaims,
+  0,
+);
+const REFERRAL_LINK_USAGE = {
+  activatedClaims: REFERRAL_LINK_ACTIVATED_CLAIMS,
+  activationRatePercent:
+    (REFERRAL_LINK_ACTIVATED_CLAIMS / REFERRAL_LINK_CLAIMS) * 100,
+  activeReferrers: 18,
+  claims: REFERRAL_LINK_CLAIMS,
+  dailySeries: REFERRAL_LINK_DAILY_SERIES,
+} satisfies HostedGrowthDashboard["referralLinkUsage"];
+const EMPTY_REFERRAL_LINK_USAGE = {
+  activatedClaims: 0,
+  activationRatePercent: null,
+  activeReferrers: 0,
+  claims: 0,
+  dailySeries: GROWTH_DATES.map((date) => ({
+    activatedClaims: 0,
+    claims: 0,
+    date,
+  })),
+} satisfies HostedGrowthDashboard["referralLinkUsage"];
 
 const SNAPSHOT_SERIES = GROWTH_DATES.map((date, index) => ({
   coveredMembers: 82 + index * 3,
@@ -349,6 +398,24 @@ export function GrowthScorecardStudy() {
           messageSeries={MESSAGE_SERIES}
           monthlyRevenueSeries={MONTHLY_REVENUE_SERIES}
           snapshotSeries={SNAPSHOT_SERIES}
+        />
+      </div>
+      <div id="growth-referral-link-usage">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Signup referral funnel
+        </div>
+        <ReferralLinkUsage
+          titleId="design-growth-referral-link-usage-title"
+          usage={REFERRAL_LINK_USAGE}
+        />
+      </div>
+      <div id="growth-referral-link-usage-empty">
+        <div className="mb-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Signup referral funnel · empty
+        </div>
+        <ReferralLinkUsage
+          titleId="design-growth-referral-link-usage-empty-title"
+          usage={EMPTY_REFERRAL_LINK_USAGE}
         />
       </div>
       <div id="growth-trial-start-attribution">

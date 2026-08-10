@@ -1315,22 +1315,31 @@ Worker replacement is checkpoint-safe at the runtime fence rather than through r
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The non-expiring Starter plan-usage schema is a bidirectional hard cut between
-Web and the runner bundle. Suspend the production Render
-`murph-temporal-worker` background-worker service, confirm both declared
-instances have stopped and no `ensureRuntimeProcessing` activity remains in
-flight, then apply the Starter migrations and deploy Web plus Cloudflare from
-the same commit while that worker stays suspended. Dispatch the protected
-production workflow with `container_rollout=immediate`; do not resume after
-only one plane succeeds. Managed-container smoke must report the exact new
-runner-bundle fingerprint, and signed active and exhausted Starter plan-usage
-reads plus an eligible subscription quote must succeed before the Render worker
-resumes.
+Web and the runner bundle. Before the merge that can apply its migration,
+enable and publish the disabled first-position Vercel project route named
+`Starter hard-cut maintenance`; it matches `^/.*$`, returns `503`, and sets
+`Retry-After: 60`. Verify that production `GET /` and a harmless Linq-webhook
+`POST` stop at that edge, then wait for bounded runtime-log evidence that no
+previously accepted `ensureRuntimeProcessing` attempt remains in flight. A
+Render-worker suspension is not the traffic boundary: old Web can also call
+Cloudflare directly.
+
+Keep the edge route enabled while the Starter migrations commit and Web plus
+Cloudflare deploy from the same commit. Dispatch the protected production
+workflow with `container_rollout=immediate`; do not restore traffic after only
+one plane succeeds. Once the production Web commit and exact managed-container
+runner-bundle fingerprint both match, disable and publish the route. Signed
+active and exhausted Starter plan-usage reads, an eligible subscription quote,
+and one approved canary or provider-retried Linq delivery must then prove one
+durable acceptance, one ensure, one completed result, and one Starter debit;
+replay must not add another debit. Keep the disabled rule available until that
+proof passes, then delete it and publish the removal.
 
 Before the Starter migration commits, the complete prior Web/runner pair
 remains a rollback target. After it commits, the migrated ledger establishes a
-forward-only floor: keep the Render worker suspended and forward-fix or
-redeploy the exact current Web/runner pair. Neither prior plane is a resumable
-target against the migrated database.
+forward-only floor: re-enable and publish the project-edge rule on any failure,
+then forward-fix or redeploy the exact current Web/runner pair. Neither prior
+plane is a resumable target against the migrated database.
 
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence

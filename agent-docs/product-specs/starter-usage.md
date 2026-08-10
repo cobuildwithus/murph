@@ -149,36 +149,89 @@ required to drain already-created provider objects.
 
 Use this rollout order:
 
-1. suspend the production Render `murph-temporal-worker` background-worker
-   service, confirm both declared instances have stopped, and confirm no
-   `ensureRuntimeProcessing` activity remains in flight;
-2. while that worker remains suspended, apply the additive
-   ledger-kind/check-constraint migration and Starter backfill, then deploy Web
-   and the Cloudflare Worker/runner bundle from the same commit with
-   `container_rollout=immediate`;
-3. require the exact runner-bundle fingerprint, signed active and exhausted
-   Starter plan-usage reads, and one eligible subscription quote before
-   resuming the Render worker;
-4. confirm every old Web deployment capable of creating a Stripe trial is
+1. from the linked production Web project, create and publish one disabled,
+   first-position project route named `Starter hard-cut maintenance`:
+
+   ```bash
+   pnpm exec vercel --cwd apps/web routes add "Starter hard-cut maintenance" \
+     --src "^/.*$" --action set-status --status 503 \
+     --set-response-header "Retry-After=60" --position start --disabled --yes
+   pnpm exec vercel --cwd apps/web routes publish --yes
+   ```
+
+   Inspect the production version before continuing. Do not stage another
+   traffic owner, app flag, or Render suspension for this cut;
+2. immediately before the merge that can run the migration, enable and publish
+   that route. Confirm the production rule is enabled and both `GET /` and a
+   harmless `POST /api/hosted-onboarding/linq/webhook` probe return `503` with
+   `Retry-After: 60`. Because the rule is project-level and first-position, the
+   response occurs before any old Web handler can create a legacy trial,
+   accept a provider delivery, signal Temporal, or call Cloudflare directly;
+
+   ```bash
+   pnpm exec vercel --cwd apps/web routes enable "Starter hard-cut maintenance"
+   pnpm exec vercel --cwd apps/web routes publish --yes
+   pnpm exec vercel --cwd apps/web routes list --production \
+     --search "Starter hard-cut maintenance" --expand
+   curl -sS -D - -o /dev/null "${HOSTED_WEB_PRODUCTION_ORIGIN}/"
+   curl -sS -D - -o /dev/null -X POST \
+     -H "Content-Type: application/json" -d '{}' \
+     "${HOSTED_WEB_PRODUCTION_ORIGIN}/api/hosted-onboarding/linq/webhook"
+   ```
+
+3. leave the route enabled while already accepted old Web and runtime work
+   drains. Require bounded runtime-log evidence that no prior
+   `ensureRuntimeProcessing` attempt remains in flight before allowing the
+   migration to commit;
+4. merge the reviewed head. Let the production Web deploy apply the additive
+   ledger-kind/check-constraint migration and Starter backfill, and deploy the
+   Cloudflare Worker/runner bundle from that same commit with
+   `container_rollout=immediate`. Do not restore traffic after only one plane
+   succeeds;
+5. while the edge still returns `503`, require the exact production Web commit
+   and exact runner-bundle fingerprint. Then disable and publish the route so
+   only the converged pair receives traffic. Keep the disabled rule staged for
+   immediate re-enable until post-deploy proof finishes;
+
+   ```bash
+   pnpm exec vercel --cwd apps/web routes disable "Starter hard-cut maintenance"
+   pnpm exec vercel --cwd apps/web routes publish --yes
+   ```
+
+6. require signed active and exhausted Starter plan-usage reads and one
+   eligible subscription quote. Exercise one approved canary Linq delivery—or
+   observe one provider retry held by the `503` window—and prove one durable
+   acceptance, one Cloudflare ensure, one completed processing result, and one
+   Starter debit. A duplicate delivery must not add another debit;
+7. confirm every old Web deployment capable of creating a Stripe trial is
    drained, then let delayed Stripe events and the runtime compatibility owner
    convert exact post-migration legacy objects through the canonical Starter
    grant path;
    keep the configured legacy Pulse Price unchanged through this drain and the
    delayed-event horizon so exact old objects remain verifiable;
-5. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
+8. delete the disabled maintenance route and publish only after all post-deploy
+   proof passes;
+
+   ```bash
+   pnpm exec vercel --cwd apps/web routes delete \
+     "Starter hard-cut maintenance" --yes
+   pnpm exec vercel --cwd apps/web routes publish --yes
+   ```
+
+9. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
    in dry-run mode and review the aggregate candidate and provider-status
    counts;
-6. apply only with the exact observed count using `--apply
+10. apply only with the exact observed count using `--apply
    --expected-candidates=<count>`; any potentially paid provider state aborts
    the entire preflight before mutation;
-7. rerun the dry-run until it reports zero candidates; and
-8. after the delayed-event horizon has passed, remove the legacy offer fields,
+11. rerun the dry-run until it reports zero candidates; and
+12. after the delayed-event horizon has passed, remove the legacy offer fields,
    wire actions, cleanup owner, and operator command together.
 
 The complete prior Web/runner pair remains a rollback target only until the
-Starter migration commits. After commit, keep the Render worker suspended and
-forward-fix or redeploy the exact current Web/runner pair; neither prior plane
-may resume against the migrated ledger. The operator command requires an
+Starter migration commits. After commit, re-enable and publish the edge rule
+on any failure, then forward-fix or redeploy the exact current Web/runner pair;
+neither prior plane may resume against the migrated ledger. The operator command requires an
 explicit Stripe mode and verifies that it matches the configured credential,
 defaults to dry-run, prevalidates every candidate before applying, and is safe
 to rerun.
@@ -208,4 +261,4 @@ historical records are not runtime compatibility and may remain.
 
 Do not revert the Starter migration: its ledger kind and historical entries are
 accounting history. Recovery after migration commit is forward-only under the
-same suspended-worker gate.
+same project-edge traffic gate.

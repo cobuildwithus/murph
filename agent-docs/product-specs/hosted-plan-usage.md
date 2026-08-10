@@ -555,22 +555,32 @@ unimplemented.
 The non-expiring Starter contract is a strict Web/runtime schema hard cut. The
 new Web response uses `accessKind: starter`, `planName: Starter`, and
 `periodKind: lifetime`; the new runner no longer accepts the retired trial
-values. Neither direction is compatible across the cut. Use the existing
-operational pause: suspend the production Render `murph-temporal-worker`
-background-worker service and confirm both declared instances have stopped and
-no `ensureRuntimeProcessing` activity remains in flight. Apply the Starter
-migrations only after that drain, then deploy Web and the Cloudflare
-Worker/runner bundle from the same commit while the worker remains suspended.
-The Cloudflare deploy must use `container_rollout=immediate`. Resume the Render
-worker only after managed-container smoke reports that commit's exact
-runner-bundle fingerprint, a signed `murph.plan_usage` read proves active and
-exhausted Starter responses through the deployed adapter, and one exact
-eligible subscription quote succeeds.
+values. Neither direction is compatible across the cut. Use one project-edge
+traffic owner: publish a first-position Vercel project route matching `^/.*$`
+that returns `503` and `Retry-After: 60`. Enable and publish it before the merge
+that can apply the migration. This blocks every old Web handler—including Linq
+and Stripe ingress, Temporal signaling, and Web-direct Cloudflare ensures—so
+the old Web/runtime work accepted before the boundary can drain without new
+work entering behind it. Prove the rule against production `GET` and Linq
+`POST` paths and require bounded runtime-log evidence that no earlier
+`ensureRuntimeProcessing` attempt remains in flight before migration commit.
+
+Keep the edge rule enabled while Web applies the Starter migrations and while
+the Cloudflare Worker/runner bundle deploys from the same commit with
+`container_rollout=immediate`. Do not restore traffic after only one plane
+succeeds. Once the production Web commit and managed-container runner-bundle
+fingerprint both match, disable and publish the route. Then require signed
+active and exhausted `murph.plan_usage` reads, one exact eligible subscription
+quote, and one approved canary or provider-retried Linq delivery that records
+one durable acceptance, one ensure, one completed result, and one Starter
+debit. Replay must not add another debit. Delete and publish removal of the
+disabled route only after those checks pass.
 
 The complete prior Web/runner pair is a rollback target only before the Starter
-migration commits. Once it commits, keep the Render worker suspended and
-forward-fix or redeploy the exact current Web/runner pair; the prior Web or
-runner is not a resumable target against the migrated ledger.
+migration commits. Once it commits, re-enable and publish the project-edge
+route on any failure and forward-fix or redeploy the exact current Web/runner
+pair; the prior Web or runner is not a resumable target against the migrated
+ledger.
 
 For the capacity-epoch change, deploy the assistant runtime that timestamps
 every provider operation at its own request start, then wait for work accepted
