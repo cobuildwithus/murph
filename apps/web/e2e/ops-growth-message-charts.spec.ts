@@ -79,6 +79,20 @@ for (const viewport of VIEWPORTS) {
       await expect(chartSurfaces.nth(index)).toHaveAccessibleName(name);
     }
 
+    const referralLinkUsage = study.locator("#growth-referral-link-usage");
+    const referralChart = referralLinkUsage.locator(
+      '.recharts-surface[role="application"][tabindex="0"]',
+    );
+    await expect(referralLinkUsage).toContainText(
+      "A use is counted when a recipient selects Join Murph",
+    );
+    await expect(referralLinkUsage).toContainText(
+      "Page views, copied links, and shares are not tracked here",
+    );
+    await expect(referralLinkUsage).toContainText("Claim activation");
+    await expect(referralChart).toHaveAccessibleName("Daily claim cohorts");
+    await expect(referralLinkUsage.locator(".recharts-bar")).toHaveCount(2);
+
     const activityLines = chartCards.nth(0).locator(".recharts-line-curve");
     await expect(chartCards.nth(0)).toContainText(
       "Personal and owned-group rows are removed with account deletion",
@@ -178,6 +192,29 @@ for (const viewport of VIEWPORTS) {
     await expect(monthlyRevenueTooltip).toContainText("No snapshot");
     await expect(monthlyRevenueTooltip).toContainText("$8");
     await expect(monthlyRevenueTooltip).toContainText("Unavailable");
+
+    const referralTooltip = referralLinkUsage.locator(
+      ".recharts-tooltip-wrapper",
+    );
+    await referralChart.focus();
+    for (let index = 0; index < 6; index += 1) {
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect(referralTooltip).toBeVisible();
+    await expect(referralTooltip).toContainText("Jul 7");
+    await expect(referralTooltip).toContainText("Join Murph claims");
+    await expect(referralTooltip).toContainText("Activated claims");
+    const referralFocusStyle = await referralLinkUsage
+      .locator('[data-slot="chart"]')
+      .evaluate((element) => {
+        const style = window.getComputedStyle(element);
+        return {
+          outlineStyle: style.outlineStyle,
+          outlineWidth: Number.parseFloat(style.outlineWidth),
+        };
+      });
+    expect(referralFocusStyle.outlineStyle).not.toBe("none");
+    expect(referralFocusStyle.outlineWidth).toBeGreaterThanOrEqual(2);
 
     await page.emulateMedia({ forcedColors: "active" });
     await expect(activityLines.nth(1)).toHaveAttribute("stroke-dasharray", "6 4");
