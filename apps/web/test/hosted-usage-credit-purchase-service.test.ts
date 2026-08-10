@@ -276,6 +276,8 @@ beforeEach(() => {
   mocks.stripePaymentMethodsList.mockReset();
   mocks.stripePriceRetrieve.mockReset();
   mocks.stripeSubscriptionsList.mockReset();
+  mocks.lockHostedMemberRow.mockReset();
+  mocks.lockHostedMemberRow.mockImplementation(async () => {});
   mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
     currentBillingPhase: "paid",
     currentBillingPlanCode: "launch_monthly",
@@ -535,6 +537,116 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
+  it("admits a new Family checkout with 31 combined occupied slots under beneficiary-first locking", async () => {
+    const usageCreditEvents: string[] = [];
+    const fake = createFakePrisma({
+      occupiedUsageCreditSlotCount: 31,
+      usageCreditEvents,
+    });
+    mocks.lockHostedMemberRow.mockImplementationOnce(async () => {
+      usageCreditEvents.push("payer-lock");
+    });
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    await expect(createHostedFamilyMemberUsageCreditCheckout({
+      beneficiaryMemberId: "hbm_familymember1",
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    })).resolves.toMatchObject({ status: "checkout_open" });
+
+    expect(usageCreditEvents).toEqual([
+      "beneficiary-lock",
+      "payer-lock",
+      "capacity-read",
+      "purchase-create",
+    ]);
+    expect(fake.usageCreditBeneficiaryLockQueryCalls).toHaveLength(1);
+    expect(fake.usageCreditCapacityQueryCalls).toHaveLength(1);
+    expect(fake.usageCreditCapacityQueryCalls[0]?.values).toEqual([
+      "hbm_familymember1",
+      "hbm_familymember1",
+      33,
+      null,
+    ]);
+    expect(onlyPurchase(fake.purchases)).toMatchObject({
+      beneficiaryMemberId: "hbm_familymember1",
+      grantSlotReleasedAt: null,
+      payerMemberId: MEMBER_ID,
+      status: "checkout_open",
+    });
+  });
+
+  it("rejects a new personal checkout at 32 combined slots before creating a purchase", async () => {
+    const usageCreditEvents: string[] = [];
+    const fake = createFakePrisma({
+      occupiedUsageCreditSlotCount: 32,
+      usageCreditEvents,
+    });
+
+    await expect(createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+      httpStatus: 409,
+    });
+
+    expect(usageCreditEvents).toEqual([
+      "beneficiary-lock",
+      "capacity-read",
+    ]);
+    expect(fake.usageCreditBeneficiaryLockQueryCalls).toHaveLength(1);
+    expect(mocks.lockHostedMemberRow).not.toHaveBeenCalled();
+    expect(fake.prisma.hostedUsageCreditPurchase.create).not.toHaveBeenCalled();
+    expect(fake.purchases.size).toBe(0);
+    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+    expect(mocks.encryptHostedWebNullableString).not.toHaveBeenCalled();
+  });
+
+  it("returns a matching active purchase at capacity without reserving another slot", async () => {
+    let occupiedUsageCreditSlotCount = 31;
+    const fake = createFakePrisma({
+      occupiedUsageCreditSlotCount: () => occupiedUsageCreditSlotCount,
+    });
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const initial = await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      memberId: MEMBER_ID,
+      now: NOW,
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    });
+    occupiedUsageCreditSlotCount = 32;
+    const replay = await createHostedUsageCreditCheckout({
+      clientRequestKey: "matching_active_key_1234",
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    });
+
+    expect(replay).toMatchObject({
+      purchaseId: initial.purchaseId,
+      recovered: true,
+      status: "checkout_open",
+    });
+    expect(fake.usageCreditCapacityQueryCalls).toHaveLength(1);
+    expect(fake.prisma.hostedUsageCreditPurchase.create).toHaveBeenCalledOnce();
+    expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
+  });
+
   it("preserves price-read request identity while keeping recovered retries silent", async () => {
     const fake = createFakePrisma();
     const fetchMock = stubStripeAlertEmailDelivery();
@@ -698,7 +810,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.purchases.size).toBe(0);
   });
 
-  it("starts monthly group sponsorship without consulting current capacity", async () => {
+  it("starts monthly group sponsorship through initial capacity admission", async () => {
     const fake = createFakePrisma();
     mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
       buildStripeSession(request)
@@ -725,10 +837,12 @@ describe("createHostedUsageCreditCheckout", () => {
     ]);
     expect(onlyPurchase(fake.purchases)).toMatchObject({
       cashAmountMinor: 500,
+      grantSlotReleasedAt: null,
       groupSponsorshipAuthorizationId: expect.stringMatching(/^hgsa_/u),
       groupSponsorshipChargeOrdinal: 0,
       offerCode: "usage_5_usd",
     });
+    expect(fake.usageCreditCapacityQueryCalls).toHaveLength(1);
   });
 
   it("charges the Family customer and freezes the selected member as beneficiary", async () => {
@@ -6220,8 +6334,18 @@ function createFakePrisma(input: {
   customizationAuthorized?: boolean;
   groupFundingTargetLocked?: boolean;
   memberOverride?: Record<string, unknown>;
+  occupiedUsageCreditSlotCount?: number | (() => number);
+  usageCreditEvents?: string[];
 } = {}) {
   const groupFundingQueryCalls: Array<{
+    queryParts: TemplateStringsArray;
+    values: unknown[];
+  }> = [];
+  const usageCreditBeneficiaryLockQueryCalls: Array<{
+    queryParts: TemplateStringsArray;
+    values: unknown[];
+  }> = [];
+  const usageCreditCapacityQueryCalls: Array<{
     queryParts: TemplateStringsArray;
     values: unknown[];
   }> = [];
@@ -6238,7 +6362,9 @@ function createFakePrisma(input: {
       },
     })),
     create: vi.fn(async (query: { data: Record<string, unknown> }) => {
+      input.usageCreditEvents?.push("purchase-create");
       const record: Record<string, unknown> = {
+        grantSlotReleasedAt: null,
         lastReconciledAt: null,
         paidAt: null,
         reconciliationVersion: 0n,
@@ -6400,6 +6526,31 @@ function createFakePrisma(input: {
       queryParts: TemplateStringsArray,
       ...values: unknown[]
     ) => {
+      const sql = queryParts.join("?");
+      if (
+        sql.includes('FROM "hosted_member"')
+        && sql.includes('COALESCE("usage_credit_balance_usd_micros", 0)')
+        && sql.includes("FOR UPDATE")
+      ) {
+        input.usageCreditEvents?.push("beneficiary-lock");
+        usageCreditBeneficiaryLockQueryCalls.push({ queryParts, values });
+        return [{
+          balanceUsdMicros: 0n,
+          beneficiaryMemberId: String(values[0]),
+          ledgerVersion: 0n,
+        }];
+      }
+      if (sql.includes("bounded_occupied_slots")) {
+        input.usageCreditEvents?.push("capacity-read");
+        usageCreditCapacityQueryCalls.push({ queryParts, values });
+        return [{
+          expectedPurchaseOwnsReservation: false,
+          occupiedSlotCount:
+            typeof input.occupiedUsageCreditSlotCount === "function"
+              ? input.occupiedUsageCreditSlotCount()
+              : input.occupiedUsageCreditSlotCount ?? 0,
+        }];
+      }
       groupFundingQueryCalls.push({ queryParts, values });
       return input.groupFundingTargetLocked === false
         ? []
@@ -6418,6 +6569,8 @@ function createFakePrisma(input: {
     purchases,
     sponsorshipAuthorizations,
     sponsorshipMoments,
+    usageCreditBeneficiaryLockQueryCalls,
+    usageCreditCapacityQueryCalls,
   };
 }
 

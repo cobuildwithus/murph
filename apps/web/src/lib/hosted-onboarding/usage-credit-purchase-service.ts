@@ -84,6 +84,13 @@ import {
 } from "./usage-credit-saved-card-payment";
 import { readHostedAiUsageGate } from "../hosted-execution/usage-allowance";
 import {
+  readHostedUsageCreditGrantCapacityTx,
+} from "../hosted-execution/usage-credit-grant-capacity";
+import {
+  lockHostedUsageCreditBeneficiaryTx,
+  type LockedHostedUsageCreditBeneficiary,
+} from "../hosted-execution/usage-credit-ledger";
+import {
   classifyHostedGroupUsageCapacity,
 } from "../hosted-groups/group-usage-capacity";
 import {
@@ -467,10 +474,28 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const resolution = await prisma.$transaction(async (tx) => {
-    if (input.target.kind === "group") {
-      await lockHostedMemberRow(tx, input.target.beneficiaryMemberId);
+    let lockedBeneficiary: LockedHostedUsageCreditBeneficiary;
+    try {
+      lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+        beneficiaryMemberId: input.target.beneficiaryMemberId,
+        tx,
+      });
+    } catch (error) {
+      if (
+        error instanceof TypeError
+        && error.message
+          === "Hosted usage-credit beneficiary does not exist."
+      ) {
+        throw buildHostedUsageCreditNotEligibleError(input.target.kind);
+      }
+      throw error;
     }
-    await lockHostedMemberRow(tx, input.target.payerMemberId);
+    if (
+      input.target.payerMemberId
+        !== lockedBeneficiary.beneficiaryMemberId
+    ) {
+      await lockHostedMemberRow(tx, input.target.payerMemberId);
+    }
     const payer = await tx.hostedMember.findUnique({
       select: {
         suspendedAt: true,
@@ -779,6 +804,14 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       throw buildHostedUsageCreditNotEligibleError(target.kind);
     }
 
+    const capacity = await readHostedUsageCreditGrantCapacityTx({
+      lockedBeneficiary,
+      tx,
+    });
+    if (capacity.state !== "available") {
+      throw buildHostedUsageCreditNotEligibleError(target.kind, 409);
+    }
+
     const checkoutConfig = requireHostedStripeUsageCreditCheckoutConfig({
       offerCode: input.offerCode,
     });
@@ -850,6 +883,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
         checkoutRequestPolicyVersion: HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
         clientRequestKey: input.clientRequestKey,
         createdAt: now,
+        grantSlotReleasedAt: null,
         grantUsdMicros: offer.grantUsdMicros,
         ...(sponsorshipAuthorization
           ? {
@@ -1611,10 +1645,11 @@ function hostedUsageCreditTargetMatches(input: {
 
 function buildHostedUsageCreditNotEligibleError(
   kind: HostedUsageCreditCheckoutTarget["kind"] = "personal",
+  httpStatus: 403 | 409 = 403,
 ) {
   return hostedOnboardingError({
     code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
-    httpStatus: 403,
+    httpStatus,
     message: kind === "group"
       ? "Usage credit is not available for this group."
       : kind === "family"

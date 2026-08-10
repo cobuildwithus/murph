@@ -89,24 +89,28 @@ export async function appendHostedUsageCreditGrantTx(input: {
     };
   }
 
-  // A verified purchase may already have crossed its external payment effect,
-  // so purchase conversion is the sole temporary admission exception. Every
-  // current or future non-purchase grant consumes unreserved capacity here.
-  if (input.source.kind !== "purchase") {
-    const capacity = await readHostedUsageCreditGrantCapacityTx({
-      lockedBeneficiary: input.lockedBeneficiary,
-      tx: input.tx,
-    });
-    if (capacity === "at_capacity") {
+  const capacity = await readHostedUsageCreditGrantCapacityTx({
+    ...(input.source.kind === "purchase"
+      ? { expectedPurchaseId: input.source.purchaseId }
+      : {}),
+    lockedBeneficiary: input.lockedBeneficiary,
+    tx: input.tx,
+  });
+  if (capacity.state === "overflow") {
+    throw new TypeError(
+      "Hosted usage-credit active grant capacity exceeds its contract.",
+    );
+  }
+  if (input.source.kind === "purchase") {
+    if (!capacity.expectedPurchaseOwnsReservation) {
       throw new TypeError(
-        "Hosted usage-credit active grant capacity is full.",
+        "Hosted usage-credit purchase grant reservation is missing.",
       );
     }
-    if (capacity === "overflow") {
-      throw new TypeError(
-        "Hosted usage-credit active grant capacity exceeds its contract.",
-      );
-    }
+  } else if (capacity.state === "at_capacity") {
+    throw new TypeError(
+      "Hosted usage-credit active grant capacity is full.",
+    );
   }
 
   const projection = await applyHostedUsageCreditProjectionDeltaTx({
