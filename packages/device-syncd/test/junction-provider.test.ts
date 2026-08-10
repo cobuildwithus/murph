@@ -549,9 +549,7 @@ test("Junction omitted timeseries config defaults to compact resources only", as
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]
-      .filter((resource) => resource !== "blood_pressure")
-      .sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
   assert.equal(
     requests.every((url) =>
@@ -648,9 +646,7 @@ test("Junction known dense programmatic timeseries config falls back to compact 
 
   assert.deepEqual(
     [...new Set(requestedTimeseriesResources)].sort(),
-    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES]
-      .filter((resource) => resource !== "blood_pressure")
-      .sort(),
+    [...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].sort(),
   );
   assert.equal(
     requests.every((url) =>

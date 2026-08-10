@@ -311,17 +311,32 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   });
 
   const executor = requireValue(provider.jobExecutor);
-  await executor.executeJob(createJobContext(), toJobRecord(backfill, 1));
+  const boundedResult = await executor.executeJob(
+    createJobContext({
+      account: createAccount({
+        metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|omron" },
+      }),
+    }),
+    toJobRecord(backfill, 1),
+  );
   const boundedRequests = [...requests];
-  assert.equal(boundedRequests.length, 14);
+  assert.equal(boundedRequests.length, 28);
   assert.equal(
-    boundedRequests.every((request) => request.resource === "stress_level"),
-    true,
+    boundedRequests.filter((request) => request.resource === "stress_level").length,
+    14,
   );
   assert.equal(
-    boundedRequests.some((request) => request.resource === "blood_pressure"),
+    boundedRequests.filter((request) => request.resource === "blood_pressure").length,
+    14,
+  );
+  assert.equal(
+    Object.hasOwn(
+      boundedResult.metadataPatch ?? {},
+      BP_HISTORY_COVERAGE_KEY,
+    ),
     false,
   );
+  requests.length = 0;
 
   const result = await executor.executeJob(
     createJobContext(),
@@ -339,6 +354,81 @@ test("the persisted-source scheduler gives sparse blood pressure its own full-hi
   assert.equal(retry.payload?.emptyBackfillAttempts, 1);
   assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
   assert.equal(retry.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+});
+
+test("covered Link reconnects retain bounded blood-pressure catch-up", async () => {
+  for (const timeseriesBackfillDays of [14, 21]) {
+    const requests: TimeseriesRequest[] = [];
+    const importedSnapshots: unknown[] = [];
+    const provider = createProvider({
+      bloodPressureRecords: [{
+        id: `bp-reconnect-${timeseriesBackfillDays}`,
+        timestamp: "2026-06-02T08:30:00.000Z",
+        systolic: 122,
+        diastolic: 80,
+      }],
+      requests,
+      timeseriesBackfillDays,
+    });
+    const callbackAt = "2026-06-12T00:05:00.000Z";
+    const connection = await createSourceConnection(provider, callbackAt, "omron");
+    const backfill = requireValue(
+      connection.initialJobs?.find((job) => job.kind === "backfill"),
+    );
+    const account = createAccount({
+      connectedAt: "2026-03-20T23:55:00.000Z",
+      metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|omron" },
+      now: callbackAt,
+      sources: [createSourceSummary("omron", "2026-03-20T23:55:00.000Z")],
+    });
+
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({ account, importedSnapshots, now: callbackAt }),
+      toJobRecord(backfill, timeseriesBackfillDays),
+    );
+    const bloodPressureRequests = requests.filter(
+      (request) => request.resource === "blood_pressure",
+    );
+
+    assert.equal(bloodPressureRequests.length, timeseriesBackfillDays);
+    assert.equal(
+      bloodPressureRequests[0]?.start,
+      timeseriesBackfillDays === 14
+        ? "2026-05-29"
+        : "2026-05-22",
+    );
+    assert.equal(bloodPressureRequests.at(-1)?.end, "2026-06-11");
+    assert.equal(
+      bloodPressureRequests.some((request) =>
+        request.start !== null && request.start < "2026-06-05"
+      ),
+      true,
+    );
+    assert.equal(
+      JSON.stringify(importedSnapshots).includes(
+        `bp-reconnect-${timeseriesBackfillDays}`,
+      ),
+      true,
+    );
+    assert.equal(
+      Object.hasOwn(result.metadataPatch ?? {}, BP_HISTORY_COVERAGE_KEY),
+      false,
+    );
+    const scheduled = requireValue(provider.jobExecutor).createScheduledJobs?.(
+      createStoredAccount({
+        connectedAt: account.connectedAt,
+        metadata: account.metadata,
+        sources: account.sources,
+      }),
+      callbackAt,
+    );
+    assert.equal(
+      requireValue(scheduled).jobs.some((job) =>
+        job.kind === "resource" && job.payload?.resource === "blood_pressure"
+      ),
+      false,
+    );
+  }
 });
 
 test("empty blood-pressure history retries are bounded and mark source coverage terminal", async () => {

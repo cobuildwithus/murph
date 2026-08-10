@@ -338,9 +338,6 @@ export function createJunctionDeviceSyncProvider(
   const summaryBackfillDays = config.summaryBackfillDays ?? DEFAULT_SUMMARY_BACKFILL_DAYS;
   const timeseriesBackfillDays = config.timeseriesBackfillDays ?? DEFAULT_TIMESERIES_BACKFILL_DAYS;
   const extendedTimeseriesBackfillDays = config.timeseriesBackfillDays ?? summaryBackfillDays;
-  const boundedBackfillTimeseriesResources = timeseriesResources.filter(
-    (resource) => !JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource),
-  );
   const extendedBackfillTimeseriesResources = timeseriesResources.filter(
     (resource) => JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource),
   );
@@ -1037,9 +1034,7 @@ export function createJunctionDeviceSyncProvider(
     const historicalSummaryHasRecords = hasJunctionHistoricalBackfillSummaryRecords(
       summaryNormalizationEvidence,
     );
-    const jobTimeseriesResources = job.kind === "backfill"
-      ? boundedBackfillTimeseriesResources
-      : timeseriesResources;
+    const jobTimeseriesResources = timeseriesResources;
     const baseTimeseriesWindowStart = job.kind === "backfill"
       ? maxIsoTimestamp(window.windowStart, subtractDays(window.windowEnd, timeseriesBackfillDays))
       : window.windowStart;
