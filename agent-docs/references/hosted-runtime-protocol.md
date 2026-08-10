@@ -56,6 +56,15 @@ The live ownership split is:
   signature, and unwraps only its `cloudflare-automation-secret` recipient. The
   signed full envelopes are disclosed to preserve signature verification over
   the web-authored body; Cloudflare still has no GCP KMS decrypt authority.
+  Current and historical root callbacks are signed, user-bound,
+  workspace-scoped resource authority. They do not repeat operation admission:
+  Temporal and UserRunner own mode-aware runtime admission (including
+  `inbox_media_retention` for an inactive member), Settings vault export owns
+  app-session, MFA, and consent admission, and ordinary browser-vault, media
+  staging, and ingress owners keep their existing active-access gates. This
+  separation lets paused-member retention and an explicitly authorized
+  Settings export restore encrypted workspace state without reopening ordinary
+  assistant or model work.
   During active mailbox import, the runner container calls a Worker-owned
   mailbox-payload decode route over the invocation outbound proxy. That route
   requires the runtime write fence, decrypts the mailbox payload with the
