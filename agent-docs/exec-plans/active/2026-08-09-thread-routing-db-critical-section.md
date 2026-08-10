@@ -190,6 +190,24 @@ Updated: 2026-08-09
   all six affected non-PostgreSQL files passed 403 tests, the PostgreSQL
   concurrency lane passed 9 tests, and app-local prepared typecheck, scoped
   lint, and `git diff --check` passed.
+- Final ReviewGPT round 5 found a supported rotation path that still missed the
+  pre-transaction cache: stored delivery-route ciphertext may name a valid
+  decrypt-only control root while replacement sealing uses the newer active
+  root. Opening that stored route after the raw-thread lock could therefore
+  perform the historical-root KMS unwrap inside the transaction.
+- The round-5 finding was accepted. Canonical route observation now carries the
+  exact stored ciphertext into required preparation. Preparation parses that
+  ciphertext and prewarms its referenced control root before `BEGIN` when it
+  differs from the active root. Refresh compares the locked row with the exact
+  observed ciphertext before demotion, mailbox work, or decryption and uses the
+  existing preparation-required retry if it changed. Absent or structurally
+  corrupt ciphertext retains the existing owning-ingress repair path.
+- Local proof on the round-5-remediated worktree: the six affected
+  non-PostgreSQL crypto/Linq/Telegram routing files passed 407 tests, the
+  PostgreSQL concurrency lane passed 9 tests, app-local prepared typecheck and
+  scoped lint passed, and `git diff --check` passed. Production-format Linq and
+  Telegram fixtures prove both active and decrypt-only roots unwrap before the
+  route lock; a stale-ciphertext case exits before demotion or route mutation.
 
 ## Round 4 anomaly retrospective
 
@@ -222,3 +240,36 @@ Updated: 2026-08-09
 - Expected architecture result: no-op group webhooks retain their established
   ignored or typed-retry outcomes without a new KMS failure dependency, while
   genuine route creation keeps the same short atomic prepared transaction.
+
+## Round 5 anomaly retrospective
+
+- Trigger: final round 5 returned `FINDINGS`; the next run is substantive round
+  6. The finding identified a valid decrypt-only route root that the active-root
+  prewarm did not cover.
+- Original requirement: prepare every route/container KMS dependency before
+  `BEGIN`, preserve local validation and owning-ingress repair inside the short
+  transaction, and use the existing bounded retry when observed route material
+  changes.
+- Shape comparison: authored-source churn is 767 lines at the immutable
+  first-reviewed head and 1,112 lines on the remediated worktree, below the
+  2,000-line threshold. The remediation adds no schema, durable state, cache
+  lifecycle, queue, service, lock owner, retry class, or compatibility path.
+- Root cause: route observation reduced the stored ciphertext to a presence
+  flag. Preparation therefore knew only the active control root used to seal a
+  replacement, while in-transaction validation correctly followed the exact
+  root id embedded in the stored ciphertext. Reader-first rotation makes those
+  roots differ by design.
+- Decision: carry the exact ephemeral ciphertext through the existing snapshot
+  and prepared-value boundary. Prewarm its referenced decryptable root before
+  `BEGIN`; after the existing raw-thread lock, compare exact ciphertext before
+  any mutation or decrypt. Reuse the existing preparation-required result and
+  one fresh attempt when the comparison fails. Do not add persisted observation
+  state or weaken ciphertext validation.
+- Required proof: production-format Linq and Telegram routes sealed under C1
+  still validate after C1 becomes decrypt-only and C2 active, with both KMS
+  misses before the route lock; same-active-root preparation performs no second
+  historical-root request; a changed locked ciphertext exits before demotion or
+  route mutation; corrupt-route repair and PostgreSQL concurrency remain green.
+- Expected architecture result: established-route validation remains
+  fail-closed and repairable, but supported control-root rotation cannot place
+  a KMS call inside the route transaction.
