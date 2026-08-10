@@ -156,7 +156,7 @@ export async function executeAskGrokTool(input: {
     timeout.cleanup()
   }
 
-  const answer = readAnswer(payload, input.args.question)
+  const answer = readAnswer(payload)
   if (!answer.text) {
     return failure('X search returned no answer; nothing can be shown')
   }
@@ -178,10 +178,7 @@ function failure(rpcText: string): AskGrokToolResult {
  * Concatenates the response's assistant text and X post citations, sanitized
  * and length-bounded, reporting whether the bound dropped any answer text.
  */
-function readAnswer(
-  payload: unknown,
-  question: string,
-): { text: string; truncated: boolean } {
+function readAnswer(payload: unknown): { text: string; truncated: boolean } {
   const output = asRecord(payload)?.output
   if (!Array.isArray(output)) {
     return { text: '', truncated: false }
@@ -221,7 +218,6 @@ function readAnswer(
   const sourceUrls = uniqueXPostUrls([
     ...annotatedUrls,
     ...readTopLevelCitationUrls(payload),
-    ...readUrls(question),
   ])
   const sourceBlock = sourceUrls.length > 0
     ? `\n\nX posts Grok inspected:\n${sourceUrls.join('\n')}`
@@ -238,10 +234,6 @@ function readTopLevelCitationUrls(payload: unknown): string[] {
   return Array.isArray(citations)
     ? citations.filter((citation): citation is string => typeof citation === 'string')
     : []
-}
-
-function readUrls(value: string): string[] {
-  return value.match(/https:\/\/[^\s<>]+/giu) ?? []
 }
 
 function uniqueXPostUrls(candidates: string[]): string[] {

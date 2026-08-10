@@ -199,9 +199,9 @@ describe('executeAskGrokTool', () => {
     expect(result.rpcText.match(/2000000000000000001/gu)).toHaveLength(1)
   })
 
-  it('retains a supplied X post URL when a clipped answer has no citations', async () => {
+  it('does not promote a requested X post URL into provider evidence', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
-      answerPayload('x'.repeat(20000)),
+      answerPayload('I could not inspect that post.'),
     )
 
     const result = await executeAskGrokTool({
@@ -212,9 +212,9 @@ describe('executeAskGrokTool', () => {
     })
 
     expect(result.rpcSuccess).toBe(true)
-    expect(result.rpcText).toContain('the answer below is partial')
-    expect(result.rpcText).toContain('https://x.com/example/status/2000000000000000003')
-    expect(result.rpcText.length).toBeLessThan(8800)
+    expect(result.rpcText).toContain('I could not inspect that post.')
+    expect(result.rpcText).not.toContain('X posts Grok inspected:')
+    expect(result.rpcText).not.toContain('https://x.com/example/status/2000000000000000003')
   })
 
   it('bounds a long answer so one call cannot flood thread context', async () => {
