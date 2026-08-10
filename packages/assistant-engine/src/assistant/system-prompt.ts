@@ -1285,7 +1285,7 @@ ${replyTargetGuidance}
 
 function buildAssistantHealthCommonsGuidanceText(): string {
   return `Health Commons tools:
-- Health: use \`vault-cli commons knowledge search "<exact title or alias>" "<focus>" --format json\`. Broad: focus exactly "overall evidence"; other focus is strict. Use 1 search; use 2 only for separate evidence+safety. Across both: same catalogHash, 3 sourced + 1 safety. Empty: retry topic only if topicResolved=false; else no matching Commons evidence. No index: continue. Skip trivial/non-health; no experiments.
+- Before health advice, run one \`vault-cli commons knowledge search "<full health question in concise English>" --format json\`. Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events. Use evidence, caveats, safety, and sources. If unavailable or empty, continue honestly. Clarify only when candidates differ materially. Skip jokes, acknowledgements, logs, logistics, and non-health turns. Suggest experiments only when asked to try, test, track, or set one up.
 - For protocol discovery/setup, search first. ${buildHealthCommonsDiscoverySurfaceText()}`;
 }
 
@@ -1371,7 +1371,7 @@ function buildAssistantSkillRouteHintText(): string {
     "- Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.",
     "- Eye health: general-eye-health for screen-linked discomfort, contact-lens safety, refractive questions, prevention, and symptom triage.",
     "- Route any active eye pain, redness, light sensitivity, discharge, vision change, flashes, floaters, injury, or chemical exposure to general-eye-health first, even when contacts, light devices, screens, circadian timing, or a browser or ordering task are also involved. Load secondary skills only after establishing the care level and immediate action.",
-    "- Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.",
+    "- Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities.",
     "- Mind/substances: stress-regulation, cognitive-focus, substance-load. Chronic care: chronic-illness-support, chronic-pain-support.",
     "- Care logistics: appointment-scheduling. Transports and services: connected-apps, computer-use, phone-calls. Account products: murph-family. Artifacts: pdf, music-generation. Groups: group-chat, groupchat-comedy, group-challenge, group-newsletter.",
     "- Overlaps: sleep-improvement owns sleep mechanics; circadian-rhythm clock timing; sleep-recovery-readiness an acute train/modify/rest decision; hrv-resting-heart-rate marker interpretation; energy-fatigue persistent fatigue.",

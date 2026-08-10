@@ -120,13 +120,14 @@ describe("Health Commons knowledge SQLite projection", () => {
       await expect(readFile(firstPath)).resolves.toEqual(await readFile(secondPath));
       const result = searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "cardiovascular",
         limit: 2,
-        query: "dry sauna",
+        query: "Does dry sauna improve cardiovascular health?",
       });
 
-      expect(result.focus).toBe("cardiovascular");
-      expect(result.topicResolved).toBe(true);
+      expect(result.topic).toEqual({
+        key: "experiment_family:dry-sauna",
+        title: "Dry Sauna",
+      });
       expect(result.items).toHaveLength(1);
       expect(result.items).toContainEqual(expect.objectContaining({
         entityKey: "experiment_family:dry-sauna",
@@ -142,13 +143,11 @@ describe("Health Commons knowledge SQLite projection", () => {
       });
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "immunity",
-        query: "dry sauna",
+        query: "Does dry sauna improve immunity?",
       }).items).toEqual([]);
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "spermatogenesis",
-        query: "dry sauna",
+        query: "Is dry sauna safe for spermatogenesis?",
       }).safety).toMatchObject({
         caveat: "Evidence use: safety.",
         kind: "safety",
@@ -156,10 +155,9 @@ describe("Health Commons knowledge SQLite projection", () => {
       });
       const broad = searchHealthCommonsKnowledgeIndex({
         databasePath: firstPath,
-        focus: "overall evidence",
-        query: "dry sauna",
+        query: "What does the evidence say about dry sauna?",
       });
-      expect(broad.topicResolved).toBe(true);
+      expect(broad.topic).not.toBeNull();
       expect(broad.items).toEqual([
         expect.objectContaining({ kind: "claim", entityKey: "experiment_family:dry-sauna" }),
       ]);
@@ -171,26 +169,23 @@ describe("Health Commons knowledge SQLite projection", () => {
   it("rejects empty search terms before opening broad content", () => {
     expect(() => searchHealthCommonsKnowledgeIndex({
       databasePath: "unused.sqlite",
-      focus: "health evidence",
       query: " - ",
     })).toThrow("at least one searchable term");
     expect(() => searchHealthCommonsKnowledgeIndex({
       databasePath: "unused.sqlite",
-      focus: " ",
-      query: "dry sauna",
-    })).toThrow("focus must not be blank");
+      query: "x".repeat(501),
+    })).toThrow("at most 500 characters");
   });
 
-  it("requires every focus term instead of silently dropping terms after eight", async () => {
+  it("uses question terms without admitting a nearby topic", async () => {
     const temporaryRoot = await mkdtemp(path.join(tmpdir(), "health-commons-focus-"));
     const databasePath = path.join(temporaryRoot, "knowledge.sqlite");
     try {
       writeHealthCommonsKnowledgeIndex(databasePath, testCatalog());
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath,
-        focus: "dry sauna heat cardiovascular recovery fertility regular frequent mortality absent",
-        query: "dry sauna",
-      })).toMatchObject({ items: [], safety: null });
+        query: "Does dry sauna improve an absent unrelated outcome?",
+      })).toMatchObject({ items: [], topic: { key: "experiment_family:dry-sauna" } });
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }
@@ -218,10 +213,17 @@ describe("Health Commons knowledge SQLite projection", () => {
       writeHealthCommonsKnowledgeIndex(databasePath, catalog);
       expect(searchHealthCommonsKnowledgeIndex({
         databasePath,
-        focus: "heat",
-        query: "shared heat",
+        query: "What are the benefits of shared heat?",
       }))
-        .toMatchObject({ items: [], safety: null, topicResolved: false });
+        .toMatchObject({
+          candidates: expect.arrayContaining([
+            { key: "experiment_family:ambiguous-heat", title: "Ambiguous Heat" },
+            { key: "experiment_family:dry-sauna", title: "Dry Sauna" },
+          ]),
+          items: [],
+          safety: null,
+          topic: null,
+        });
     } finally {
       await rm(temporaryRoot, { force: true, recursive: true });
     }

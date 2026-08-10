@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 
 import {
   contentRuleIds,
+  sensitiveFilenameRule,
   verifyReleaseArtifacts,
 } from './release-artifact-secret-guard.mjs';
 
@@ -95,6 +96,25 @@ test('accepts ordinary package code and obvious local placeholders', async () =>
   } finally {
     await fixture.cleanup();
   }
+});
+
+test('allows only the generated public Health Commons knowledge index', () => {
+  assert.equal(
+    sensitiveFilenameRule(
+      'package/node_modules/@murphai/health-commons/generated/knowledge.sqlite',
+    ),
+    null,
+  );
+  assert.equal(
+    sensitiveFilenameRule(
+      'package/node_modules/@murphai/health-commons/generated/private.sqlite',
+    ),
+    'sensitive-filename:data-store',
+  );
+  assert.equal(
+    sensitiveFilenameRule('package/generated/knowledge.sqlite'),
+    'sensitive-filename:data-store',
+  );
 });
 
 test('detects quoted and unquoted generic secret assignments', () => {

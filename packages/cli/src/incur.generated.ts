@@ -64,7 +64,7 @@ declare module 'incur' {
       'clinical-note import-json': { args: {}; options: { requestId?: string; input: string } }
       'clinical-note payload-schema': { args: {}; options: {} }
       'clinical-note scaffold': { args: {}; options: { requestId?: string } }
-      'commons knowledge search': { args: { query: string; focus: string }; options: { limit: number } }
+      'commons knowledge search': { args: { query: string }; options: { limit: number } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
       'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }

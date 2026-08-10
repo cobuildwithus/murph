@@ -41,19 +41,18 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli<{
     available: boolean;
-    focus: string;
+    candidates: Array<{ key: string; title: string }>;
     items: Array<{
       entityKey: string;
       sources: Array<{ pmid: string | null; url: string | null }>;
     }>;
     safety: { kind: string } | null;
-    topicResolved: boolean;
+    topic: { key: string; title: string } | null;
   }>(cli, [
     "commons",
     "knowledge",
     "search",
-    "Finnish Dry Sauna",
-    "overall evidence",
+    "What does the evidence say about Finnish dry sauna?",
     "--limit",
     "3",
   ]);
@@ -61,8 +60,8 @@ test("commons knowledge search returns a bounded source-backed sauna packet", as
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
   assert.equal(data.available, true);
-  assert.equal(data.topicResolved, true);
-  assert.equal(data.focus, "overall evidence");
+  assert.equal(data.topic?.title, "Finnish Dry Sauna");
+  assert.deepEqual(data.candidates, []);
   assert.ok(data.items.length > 0 && data.items.length <= 3);
   assert.ok(data.items.some((item) =>
     item.sources.some((source) => source.pmid === "29849692")
@@ -81,8 +80,7 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
     "commons",
     "knowledge",
     "search",
-    "Finnish Dry Sauna",
-    "fentanyl patch",
+    "Is Finnish dry sauna safe while wearing a fentanyl patch?",
   ]);
 
   assert.equal(result.envelope.ok, true);
@@ -95,13 +93,12 @@ test("commons knowledge search returns a safety-only sauna hard stop", async () 
   ));
 });
 
-test("commons knowledge search rejects a packet larger than three items", async () => {
+test("commons knowledge search rejects a result limit larger than three items", async () => {
   const result = await runInProcessJsonCli(createCommonsSliceCli(), [
     "commons",
     "knowledge",
     "search",
-    "Finnish Dry Sauna",
-    "overall evidence",
+    "What does the evidence say about Finnish dry sauna?",
     "--limit",
     "4",
   ]);
@@ -110,12 +107,12 @@ test("commons knowledge search rejects a packet larger than three items", async 
   assert.equal(result.envelope.ok, false);
 });
 
-test("commons knowledge search requires a question focus", async () => {
+test("commons knowledge search requires one complete question", async () => {
   const result = await runInProcessJsonCli(createCommonsSliceCli(), [
     "commons",
     "knowledge",
     "search",
-    "Finnish Dry Sauna",
+    "x",
   ]);
 
   assert.equal(result.exitCode, 1);
@@ -131,22 +128,23 @@ test("commons knowledge search stays non-blocking when its generated index is mi
   try {
     const result = await runInProcessJsonCli<{
       available: boolean;
-      focus: string;
+      candidates: unknown[];
       items: unknown[];
+      topic: unknown;
       warning: string | null;
     }>(createCommonsSliceCli(), [
       "commons",
       "knowledge",
       "search",
-      "Finnish Dry Sauna",
-      "recent fainting",
+      "Is Finnish dry sauna safe after recent fainting?",
     ]);
 
     assert.equal(result.envelope.ok, true);
     const data = requireData(result.envelope);
     assert.equal(data.available, false);
-    assert.equal(data.focus, "recent fainting");
+    assert.deepEqual(data.candidates, []);
     assert.deepEqual(data.items, []);
+    assert.equal(data.topic, null);
     assert.match(data.warning ?? "", /continue without corpus context/u);
   } finally {
     if (previousRoot === undefined) {

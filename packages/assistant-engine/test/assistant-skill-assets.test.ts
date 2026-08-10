@@ -237,10 +237,7 @@ describe('assistant skill assets', () => {
       expect(raw).not.toMatch(/^\+\d+\s*$/mu)
     }
 
-    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(true)
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
+    expect(registeredSkillSlugs.has('red-light-therapy')).toBe(false)
   })
 
   it('keeps private activity interpretation in its owner', async () => {
@@ -287,7 +284,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('routes red light dose ownership to the dedicated red-light skill', async () => {
+  it('routes photobiomodulation knowledge through Health Commons', async () => {
     const recoverySkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'recovery-modalities',
     )
@@ -296,54 +293,12 @@ describe('assistant skill assets', () => {
       return
     }
 
-    expect(recoverySkill.triggerHint).toContain('Use red-light-therapy')
-    expect(recoverySkill.triggerHint).not.toContain('device dosing')
+    expect(recoverySkill.triggerHint).not.toContain('red-light-therapy')
 
     const recoveryText = await readSkillFile(recoverySkill)
-    expect(recoveryText).toContain('Use red-light-therapy for red/NIR photobiomodulation dose')
+    expect(recoveryText).toContain('Use Health Commons for red/NIR photobiomodulation evidence')
     expect(recoveryText).toContain('does not own PBM device-dose math')
     expect(recoveryText).not.toContain('device-seeds.json')
-  })
-
-  it('keeps red light therapy registered with device seed data', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
-    )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
-      return
-    }
-
-    expect(redLightSkill.triggerHint).toContain('red light therapy')
-    expect(redLightSkill.triggerHint).toContain('device irradiance')
-    expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
-    )
-
-    const redLightText = await readSkillFile(redLightSkill)
-    expect(redLightText).toContain('device-seeds.json')
-    expect(redLightText).toContain('activeModeLabel')
-    expect(redLightText).toContain('manufacturer-claim duration estimate')
-
-    const deviceSeedsRaw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'red-light-therapy',
-        'device-seeds.json',
-      ),
-      'utf8',
-    )
-    const deviceSeeds: unknown = JSON.parse(deviceSeedsRaw)
-    expectRecord(deviceSeeds, 'red-light device seeds')
-    expect(deviceSeeds.schemaVersion).toBe(
-      'murph.assistant.skill.red-light-device-seeds.v1',
-    )
-    const devices = deviceSeeds.devices
-    expect(Array.isArray(devices)).toBe(true)
-    if (!Array.isArray(devices)) {
-      return
-    }
-    expect(devices.length).toBeGreaterThan(0)
   })
 
   it('routes general eye health with evidence and contact-lens safety boundaries', async () => {
@@ -1425,134 +1380,6 @@ describe('assistant skill assets', () => {
     )
     expect(raw).not.toContain('/tmp/')
     expect(raw).not.toContain('.codex-hosted')
-  })
-
-  it('keeps red light therapy registered with dose math and device seeds', async () => {
-    const redLightSkill = ASSISTANT_SKILLS.find(
-      (skill) => skill.slug === 'red-light-therapy',
-    )
-    expect(redLightSkill).toBeTruthy()
-    if (!redLightSkill) {
-      return
-    }
-
-    const skillText = await readSkillFile(redLightSkill)
-    expect(redLightSkill.triggerHint).toContain('device irradiance')
-    expect(skillText).toContain('seconds = target dose J/cm2 * 1000 / irradiance mW/cm2')
-    expect(skillText).toContain('manufacturer-claim duration estimate')
-    expect(skillText).toContain('matches the user\'s distance or contact setting')
-    expect(skillText).toContain('activeModeLabel')
-    expect(skillText).toContain('vault-cli commons protocol explore "red light therapy" --format json')
-    expect(skillText).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md')
-
-    const raw = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        redLightSkill.slug,
-        'device-seeds.json',
-      ),
-      'utf8',
-    )
-    const parsed: unknown = JSON.parse(raw)
-    expectRecord(parsed, 'red light device seed root')
-
-    expect(parsed.schemaVersion).toBe(
-      'murph.assistant.skill.red-light-device-seeds.v1',
-    )
-    expect(Array.isArray(parsed.sourcePolicy)).toBe(true)
-    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
-      'manufacturer-claim examples',
-    )
-    expect(JSON.stringify(parsed.sourcePolicy)).toContain(
-      'Do not extrapolate',
-    )
-
-    const devices = parsed.devices
-    expect(Array.isArray(devices)).toBe(true)
-    if (!Array.isArray(devices)) {
-      return
-    }
-    expect(devices.length).toBeGreaterThanOrEqual(8)
-
-    const aliases = new Set<string>()
-    const models = new Set<string>()
-
-    for (const [deviceIndex, deviceValue] of devices.entries()) {
-      expectRecord(deviceValue, `device ${deviceIndex}`)
-      expect(typeof deviceValue.brand).toBe('string')
-      expect(typeof deviceValue.model).toBe('string')
-      expect(typeof deviceValue.deviceClass).toBe('string')
-      models.add(String(deviceValue.model))
-
-      const deviceClass = deviceValue.deviceClass
-      expect(['panel', 'contact_wrap', 'contact_mat']).toContain(deviceClass)
-
-      expect(Array.isArray(deviceValue.aliases)).toBe(true)
-      if (Array.isArray(deviceValue.aliases)) {
-        for (const alias of deviceValue.aliases) {
-          expect(typeof alias).toBe('string')
-          expect(aliases.has(String(alias))).toBe(false)
-          aliases.add(String(alias))
-        }
-      }
-
-      expect(Array.isArray(deviceValue.wavelengthsNm)).toBe(true)
-      if (Array.isArray(deviceValue.wavelengthsNm)) {
-        for (const wavelength of deviceValue.wavelengthsNm) {
-          expect(typeof wavelength).toBe('number')
-          expect(wavelength).toBeGreaterThan(0)
-        }
-      }
-
-      expect(Array.isArray(deviceValue.irradianceReadings)).toBe(true)
-      if (!Array.isArray(deviceValue.irradianceReadings)) {
-        continue
-      }
-
-      for (const [
-        readingIndex,
-        readingValue,
-      ] of deviceValue.irradianceReadings.entries()) {
-        expectRecord(
-          readingValue,
-          `device ${deviceIndex} reading ${readingIndex}`,
-        )
-        expect(readingValue.sourceType).toBe('manufacturer_claim')
-        expect(String(readingValue.sourceUrl)).toMatch(
-          /^https:\/\/www\.bestqool\.com\/products\//u,
-        )
-        expect(typeof readingValue.activeModeLabel).toBe('string')
-        expect(String(readingValue.activeModeLabel).trim().length)
-          .toBeGreaterThan(0)
-        expect(typeof readingValue.distanceCm).toBe('number')
-        expect(typeof readingValue.distanceLabel).toBe('string')
-        expect(typeof readingValue.irradianceMwPerCm2).toBe('number')
-        expect(Number(readingValue.irradianceMwPerCm2)).toBeGreaterThan(0)
-        expect(typeof readingValue.measurementContext).toBe('string')
-
-        if (deviceClass === 'panel') {
-          expect(Number(readingValue.distanceCm)).toBeGreaterThan(0)
-        } else {
-          expect(readingValue.distanceCm).toBe(0)
-          expect(String(readingValue.distanceLabel)).toContain('surface')
-        }
-      }
-    }
-
-    expect(models).toEqual(
-      new Set([
-        'BQ40',
-        'BQ60',
-        'BQ60Pro',
-        'BQ150',
-        'Pro100',
-        'Pro200',
-        'Pro300',
-        'Redot S',
-        'Redot M',
-        'Redot L',
-      ]),
-    )
   })
 
   it('keeps behavior follow-through policy in the skill file with only compact bridges elsewhere', async () => {
