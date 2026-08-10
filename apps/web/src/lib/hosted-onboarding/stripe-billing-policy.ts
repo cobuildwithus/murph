@@ -38,6 +38,7 @@ type HostedUsagePlanTransitionWrite = {
 
 export type HostedStripeBillingFreshnessPolicy =
   | "auto-pulse-trial-entitlement"
+  | "proven-current-refund"
   | "strict"
   | "positive-invoice-entitlement"
   | "trial-checkout-entitlement";
@@ -194,12 +195,23 @@ export async function writeHostedMemberStripeBillingTx(input: {
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
+  const allowStaleProvenCurrentRefundWrite = isStale && shouldAllowStaleProvenCurrentRefundWrite({
+    billingRef: currentMember.billingRef,
+    billingStatus: input.billingStatus,
+    canonicalBillingStatus: input.canonicalBillingStatus,
+    currentBillingStatus: currentMember.core.billingStatus,
+    dispatchContext: input.dispatchContext,
+    freshnessPolicy,
+    stripeCustomerId: input.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+  });
 
   if (
     isStale &&
     !allowStalePositiveInvoiceWrite &&
     !allowStaleTrialCheckoutWrite &&
-    !allowStaleAutoPulseTrialWrite
+    !allowStaleAutoPulseTrialWrite &&
+    !allowStaleProvenCurrentRefundWrite
   ) {
     return null;
   }
@@ -209,7 +221,8 @@ export async function writeHostedMemberStripeBillingTx(input: {
     preserveCurrentWhenNextMissing:
       allowStalePositiveInvoiceWrite ||
       allowStaleTrialCheckoutWrite ||
-      allowStaleAutoPulseTrialWrite,
+      allowStaleAutoPulseTrialWrite ||
+      allowStaleProvenCurrentRefundWrite,
     stripeCustomerId: input.stripeCustomerId,
     stripeSubscriptionId: input.stripeSubscriptionId,
   });
@@ -430,10 +443,18 @@ export async function writeHostedMemberStripeBillingRefIfFreshTx(input: {
 export async function suspendHostedMemberForBillingReversalTx(input: {
   canonicalBillingStatus: HostedBillingStatus | null;
   dispatchContext: Pick<HostedStripeDispatchContext, "eventCreatedAt" | "sourceEventId" | "sourceType">;
+  freshnessPolicy?: HostedStripeBillingFreshnessPolicy;
   member: HostedMemberBillingSnapshot;
   stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
+  const suspendedAt = input.freshnessPolicy === "proven-current-refund"
+    && input.member.billingRef?.lastStripeEventCreatedAt
+    && input.member.billingRef.lastStripeEventCreatedAt.getTime()
+      > input.dispatchContext.eventCreatedAt.getTime()
+    ? input.member.billingRef.lastStripeEventCreatedAt
+    : input.dispatchContext.eventCreatedAt;
   await writeHostedMemberStripeBillingTx({
     billingStatus: HostedBillingStatus.unpaid,
     canonicalBillingStatus: input.canonicalBillingStatus,
@@ -443,11 +464,59 @@ export async function suspendHostedMemberForBillingReversalTx(input: {
       sourceEventId: input.dispatchContext.sourceEventId,
       sourceType: input.dispatchContext.sourceType,
     },
+    freshnessPolicy: input.freshnessPolicy,
     member: input.member,
     stripeCustomerId: input.stripeCustomerId,
-    suspendedAtOverride: input.dispatchContext.eventCreatedAt,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    suspendedAtOverride: suspendedAt,
     tx: input.tx,
   });
+}
+
+export async function terminalizeHostedFamilySponsoredDirectBillingTx(input: {
+  dispatchContext: HostedStripeDispatchContext;
+  memberId: string;
+  stripeSubscriptionId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<boolean> {
+  await lockHostedMemberRow(input.tx, input.memberId);
+  const member = await readHostedMemberBillingSnapshot({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+
+  if (
+    !member
+    || member.billingRef?.stripeSubscriptionId !== input.stripeSubscriptionId
+  ) {
+    return false;
+  }
+
+  const updatedMember = await writeHostedMemberStripeBillingTx({
+    billingStatus: HostedBillingStatus.canceled,
+    canonicalBillingStatus: HostedBillingStatus.canceled,
+    dispatchContext: input.dispatchContext,
+    member,
+    stripeCustomerId: member.billingRef.stripeCustomerId,
+    stripeSubscriptionId: input.stripeSubscriptionId,
+    suspendedAtOverride: isHostedStripeBillingOwnedSuspension(member)
+      ? null
+      : undefined,
+    tx: input.tx,
+  });
+
+  if (
+    !updatedMember
+    || updatedMember.core.billingStatus !== HostedBillingStatus.canceled
+    || updatedMember.billingRef?.stripeSubscriptionId !==
+      input.stripeSubscriptionId
+  ) {
+    throw new Error(
+      "Family-sponsored Stripe cleanup did not terminalize the exact direct billing projection.",
+    );
+  }
+
+  return true;
 }
 
 function isHostedStripeBillingOwnedSuspension(
@@ -604,6 +673,44 @@ function shouldAllowStaleAutoPulseTrialBillingWrite(input: {
 
   return hostedStripeBillingRefValueMatches(input.billingRef?.stripeCustomerId, input.stripeCustomerId) &&
     hostedStripeBillingRefValueMatches(input.billingRef?.stripeSubscriptionId, input.stripeSubscriptionId);
+}
+
+function shouldAllowStaleProvenCurrentRefundWrite(input: {
+  billingRef: HostedMemberStripeBillingRefSnapshot | null;
+  billingStatus: HostedBillingStatus;
+  canonicalBillingStatus: HostedBillingStatus | null;
+  currentBillingStatus: HostedBillingStatus;
+  dispatchContext: Pick<HostedStripeDispatchContext, "sourceType">;
+  freshnessPolicy: HostedStripeBillingFreshnessPolicy;
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+}): boolean {
+  if (
+    input.freshnessPolicy !== "proven-current-refund"
+    || (
+      input.dispatchContext.sourceType !== "stripe.refund.created"
+      && input.dispatchContext.sourceType !== "stripe.refund.updated"
+    )
+    || input.billingStatus !== HostedBillingStatus.unpaid
+    || input.canonicalBillingStatus !== HostedBillingStatus.active
+    || (
+      input.currentBillingStatus !== HostedBillingStatus.active
+      && input.currentBillingStatus !== HostedBillingStatus.unpaid
+    )
+  ) {
+    return false;
+  }
+
+  const currentCustomerId = input.billingRef?.stripeCustomerId ?? null;
+  const currentSubscriptionId = input.billingRef?.stripeSubscriptionId ?? null;
+  return Boolean(
+    currentCustomerId
+    && input.stripeCustomerId
+    && currentCustomerId === input.stripeCustomerId
+    && currentSubscriptionId
+    && input.stripeSubscriptionId
+    && currentSubscriptionId === input.stripeSubscriptionId,
+  );
 }
 
 function shouldRejectPulseTrialEntitlementWriteForCurrentMember(input: {

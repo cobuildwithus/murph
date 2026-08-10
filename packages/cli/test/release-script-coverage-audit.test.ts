@@ -960,6 +960,7 @@ describe('monorepo release flow coverage audit', () => {
       [
         "'@cobuild/repo-tools@0.1.15': patches/@cobuild__repo-tools@0.1.15.patch",
         'incur@0.4.5: patches/incur@0.4.5.patch',
+        'ink@6.8.0: patches/ink@6.8.0.patch',
       ],
     )
     expect(
@@ -1682,6 +1683,70 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
+  it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
+    const localConfigRoot = path.join(harnessRoot, 'config')
+    const reviewGptBin = path.join(
+      repoRoot,
+      'node_modules',
+      '.bin',
+      'cobuild-review-gpt',
+    )
+    const runDry = (extraArgs: string[] = []) =>
+      spawnSync(
+        reviewGptBin,
+        [
+          '--config',
+          'scripts/review-gpt.config.sh',
+          '--wait',
+          '--dry-run',
+          '--no-zip',
+          '--browser-path',
+          process.execPath,
+          '--prompt',
+          'Validate response timeout precedence.',
+          ...extraArgs,
+        ],
+        {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          env: {
+            ...withoutNodeV8Coverage(),
+            HOME: harnessRoot,
+            REVIEW_GPT_BROWSER_LANE_COUNT: '1',
+            XDG_CONFIG_HOME: localConfigRoot,
+          },
+        },
+      )
+
+    try {
+      const defaultResult = runDry()
+      expect(defaultResult.status, defaultResult.stderr).toBe(0)
+      expect(defaultResult.stdout).toContain(
+        'Response capture: enabled (10800000ms timeout)',
+      )
+
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        'response_timeout_ms=7654321\n',
+      )
+      const localResult = runDry()
+      expect(localResult.status, localResult.stderr).toBe(0)
+      expect(localResult.stdout).toContain(
+        'Response capture: enabled (7654321ms timeout)',
+      )
+
+      const perRunResult = runDry(['--wait-timeout', '42m'])
+      expect(perRunResult.status, perRunResult.stderr).toBe(0)
+      expect(perRunResult.stdout).toContain(
+        'Response capture: enabled (2520000ms timeout)',
+      )
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
+  })
+
   it('keeps ReviewGPT browser preferences local and reuses correction threads', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-browser-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
@@ -1710,7 +1775,7 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
         },
       })
       expect(localResult.status, localResult.stderr).toBe(0)
-      expect(localResult.stdout.trim()).toBe('eragon|1')
+      expect(localResult.stdout.trim()).toBe('main|1')
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
       const defaultResult = spawnSync('bash', ['-c', configHarness], {
@@ -1724,7 +1789,7 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
         },
       })
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
-      expect(defaultResult.stdout.trim().split('|')[1]).toBe('4')
+      expect(defaultResult.stdout.trim()).toBe('main|4')
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -2983,6 +3048,7 @@ Updated: 2026-04-24
     expect(fullPackageScript).toContain('REVIEW_GPT_CONTEXT_ANCHOR_HEAD')
     expect(fullPackageScript).toContain('REVIEW_GPT_REVIEW_PHASE')
     expect(fullPackageScript).toContain('REVIEW_GPT_RENDERED_EVIDENCE_PATHS')
+    expect(fullPackageScript).toContain('REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS')
     expect(fullPackageScript).toContain('review-phase.json')
     expect(fullPackageScript).toContain('rendered-evidence.txt')
     expect(fullPackageScript).toContain('review-round.json')
@@ -3199,6 +3265,21 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         'audit-packages/desktop.png',
         'redacted rendered evidence\n',
       )
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/managed-skill/SKILL.md',
+        '# Managed skill evidence\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        '.artifacts/review-gpt/managed-skill.test.ts',
+        'export const managedSkillProof = true\n',
+      )
+      writeHarnessFile(
+        harnessRoot,
+        'audit-packages/too-large.txt',
+        'x'.repeat(2 * 1024 * 1024 + 1),
+      )
 
       const invokePackager = (
         name: string,
@@ -3245,6 +3326,10 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
         REVIEW_GPT_ROUND_NUMBER: '',
         REVIEW_GPT_RENDERED_EVIDENCE_PATHS: 'audit-packages/desktop.png',
+        REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS: [
+          'audit-packages/managed-skill/SKILL.md',
+          '.artifacts/review-gpt/managed-skill.test.ts',
+        ].join('\n'),
       })
       expect(preliminary.result.status, preliminary.result.stderr).toBe(0)
       const preliminaryMetadata = JSON.parse(
@@ -3277,6 +3362,10 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
         ),
       ).toBe('redacted rendered evidence\n')
       const preliminaryEntries = listZipEntries(preliminary.zipPath)
+      const supplementalSkillPath =
+        'review-gpt-pr-context/supplemental-evidence/01-SKILL.md'
+      const supplementalProofPath =
+        'review-gpt-pr-context/supplemental-evidence/02-managed-skill.test.ts'
       expect(preliminaryEntries).toEqual(
         expect.arrayContaining([
           'agent-docs/FRONTEND.md',
@@ -3288,15 +3377,105 @@ done <<< "\${COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS:-}"
           '.crabbox.yaml',
           'agent-docs/prompts/coverage-write.md',
           packagedEvidencePath,
+          supplementalSkillPath,
+          supplementalProofPath,
           'review-gpt-pr-context/review-phase.json',
           'review-gpt-pr-context/rendered-evidence.txt',
+          'review-gpt-pr-context/supplemental-evidence.txt',
         ]),
       )
       expect(preliminaryEntries).not.toContain('audit-packages/desktop.png')
       expect(preliminaryEntries).not.toContain(
+        'audit-packages/managed-skill/SKILL.md',
+      )
+      expect(preliminaryEntries).not.toContain(
+        '.artifacts/review-gpt/managed-skill.test.ts',
+      )
+      expect(
+        execFileSync(
+          'unzip',
+          ['-p', preliminary.zipPath, 'review-gpt-pr-context/supplemental-evidence.txt'],
+          { encoding: 'utf8' },
+        ),
+      ).toBe(
+        `audit-packages/managed-skill/SKILL.md\t${supplementalSkillPath}\n` +
+        `.artifacts/review-gpt/managed-skill.test.ts\t${supplementalProofPath}\n`,
+      )
+      expect(
+        execFileSync('unzip', ['-p', preliminary.zipPath, supplementalSkillPath], {
+          encoding: 'utf8',
+        }),
+      ).toBe('# Managed skill evidence\n')
+      expect(
+        execFileSync('unzip', ['-p', preliminary.zipPath, supplementalProofPath], {
+          encoding: 'utf8',
+        }),
+      ).toBe('export const managedSkillProof = true\n')
+      expect(preliminaryEntries).not.toContain(
         'review-gpt-pr-context/review-round.json',
       )
       expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const finalWithSupplementalEvidence = invokePackager(
+        'final-with-supplemental-evidence',
+        firstHead,
+        {
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_ROUND_NUMBER: '1',
+          REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS:
+            'audit-packages/managed-skill/SKILL.md',
+        },
+      )
+      expect(finalWithSupplementalEvidence.result.status).not.toBe(0)
+      expect(finalWithSupplementalEvidence.result.stderr).toContain(
+        'supplemental evidence is allowed only for the preliminary specialist review',
+      )
+      expect(existsSync(path.join(harnessRoot, 'review-gpt-pr-context'))).toBe(false)
+
+      const supplementalEvidenceRejections = [
+        {
+          expectedError:
+            'supplemental evidence paths must be repo-relative and boundary-safe',
+          name: 'supplemental-traversal',
+          paths: '../managed-skill/SKILL.md',
+        },
+        {
+          expectedError: 'supplemental evidence must be a supported text or code file',
+          name: 'supplemental-unsupported-extension',
+          paths: 'audit-packages/desktop.png',
+        },
+        {
+          expectedError: 'supplemental evidence is limited to 12 explicit files',
+          name: 'supplemental-too-many-files',
+          paths: Array.from(
+            { length: 13 },
+            () => 'audit-packages/managed-skill/SKILL.md',
+          ).join('\n'),
+        },
+        {
+          expectedError: 'supplemental evidence is limited to 2 MiB in total',
+          name: 'supplemental-too-large',
+          paths: 'audit-packages/too-large.txt',
+        },
+      ]
+      for (const rejection of supplementalEvidenceRejections) {
+        const rejected = invokePackager(rejection.name, firstHead, {
+          REVIEW_GPT_FIRST_REVIEWED_HEAD: '',
+          REVIEW_GPT_PREVIOUS_REVIEWED_HEAD: '',
+          REVIEW_GPT_REVIEW_PHASE: 'preliminary',
+          REVIEW_GPT_ROUND_NUMBER: '',
+          REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS: rejection.paths,
+        })
+        expect(rejected.result.status, rejection.name).not.toBe(0)
+        expect(rejected.result.stderr, rejection.name).toContain(
+          rejection.expectedError,
+        )
+        expect(
+          existsSync(path.join(harnessRoot, 'review-gpt-pr-context')),
+          rejection.name,
+        ).toBe(false)
+      }
 
       const preliminaryWithFinalRound = invokePackager(
         'preliminary-with-final-round',
@@ -4258,7 +4437,7 @@ exit 1
       name: '@murphai/hosted-execution',
     }))
     expect(summary.packages).toContainEqual(expect.objectContaining({
-      bundledExternalDependencies: ['incur'],
+      bundledExternalDependencies: ['incur', 'ink'],
       bundledWorkspaceDependencies: expect.arrayContaining([
         '@murphai/assistant-cli',
         '@murphai/assistant-engine',
@@ -4399,12 +4578,15 @@ exit 1
     expect(cliPackageJson.dependencies?.tokenx).toBe('^1.3.0')
     expect(cliPackageJson.dependencies?.yaml).toBe('^2.8.2')
     expect(cliPackageJson.bundleDependencies).toContain('incur')
+    expect(cliPackageJson.bundleDependencies).toContain('ink')
     expect(packPublishables).toContain('resolveBundledExternalDependencies')
     expect(packPublishables).toContain('copyExternalBundledDependency')
     expect(packPublishables).toContain('stripBundledDependencyMetadata')
     expect(packPublishables).toContain("path.join(targetDir, 'package.json')")
     expect(packPublishables).toContain('shouldSkipExternalPayloadArtifact')
     expect(packPublishables).toContain("path.basename(sourcePath) === 'node_modules'")
+    expect(packPublishables).toContain('isNonRuntimeIncurPayloadPath')
+    expect(packPublishables).toContain('/(?:^|\\/)[^/]+\\.test\\.[cm]?[jt]sx?$/u')
     expect(cliPackageJson.scripts?.['release:check']).toBeUndefined()
     expect(existsSync(path.join(packageDir, 'scripts', 'release.sh'))).toBe(false)
     expect(existsSync(path.join(packageDir, 'scripts', 'release-check.sh'))).toBe(false)
@@ -4492,6 +4674,42 @@ exit 1
           'cli-surface-contract.generated.json',
         )
         expect(existsSync(installedArtifactPath)).toBe(true)
+
+        const installedIncurDirectory = path.join(
+          installRoot,
+          'package',
+          'node_modules',
+          'incur',
+        )
+        expect(existsSync(path.join(installedIncurDirectory, 'dist', 'index.js'))).toBe(true)
+        expect(existsSync(path.join(installedIncurDirectory, 'src', 'index.ts'))).toBe(true)
+        for (const testSource of [
+          'Cli.test.ts',
+          'Fetch.test.ts',
+          'Mcp.test.ts',
+          'Skill.test.ts',
+          'e2e.test.ts',
+        ]) {
+          expect(existsSync(path.join(installedIncurDirectory, 'src', testSource))).toBe(false)
+        }
+
+        const installedInkRuntime = readFileSync(
+          path.join(
+            installRoot,
+            'package',
+            'node_modules',
+            'ink',
+            'build',
+            'ink.js',
+          ),
+          'utf8',
+        )
+        expect(installedInkRuntime).toContain(
+          "import throttle from 'es-toolkit/compat/throttle';",
+        )
+        expect(installedInkRuntime).not.toContain(
+          "import { throttle } from 'es-toolkit/compat';",
+        )
 
         const installedArtifact = JSON.parse(
           readFileSync(installedArtifactPath, 'utf8'),

@@ -2771,50 +2771,56 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("settles a failed creative notification without regenerating its media", async () => {
-    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "evt_notification_creative_failure",
-      memberId: "member_group_runtime",
-      notification: {
-        instructions: "Create one brief sponsorship thank-you.",
-        notificationPromptProfile: "creative-response",
-        responsePolicy: {
-          kind: "require_send",
-        },
-        route: {
-          actorId: null,
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "thread_group_sponsorship",
+  it.each([
+    "creative-response",
+    "creative-response-text",
+  ] as const)(
+    "settles a failed %s notification without replaying optional creative work",
+    async (notificationPromptProfile) => {
+      const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+        eventId: `evt_notification_${notificationPromptProfile}_failure`,
+        memberId: "member_group_runtime",
+        notification: {
+          instructions: "Create one brief sponsorship thank-you.",
+          notificationPromptProfile,
+          responsePolicy: {
+            kind: "require_send",
           },
-          identityId: "hbidx:phone:v1:test",
-          threadId: "thread_group_sponsorship",
-          threadIsDirect: false,
+          route: {
+            actorId: null,
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "thread_group_sponsorship",
+            },
+            identityId: "hbidx:phone:v1:test",
+            threadId: "thread_group_sponsorship",
+            threadIsDirect: false,
+          },
         },
-      },
-      occurredAt: "2026-04-08T00:00:00.000Z",
-    });
-    mocks.sendAssistantNotification.mockRejectedValueOnce(
-      new Error("creative notification delivery failed"),
-    );
+        occurredAt: "2026-04-08T00:00:00.000Z",
+      });
+      mocks.sendAssistantNotification.mockRejectedValueOnce(
+        new Error("creative notification delivery failed"),
+      );
 
-    await expect(executeHostedMailboxEvent({
-      wake,
-      executionContext,
-      runtime: createRuntime(),
-      runtimeEnv: {},
-      vaultRoot: "/tmp/assistant-runtime-events",
-    })).resolves.toMatchObject({
-      conversationMetrics: null,
-      mailboxLane: "assistant-notification",
-    });
-    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notificationPromptProfile: "creative-response",
-      }),
-    );
-  });
+      await expect(executeHostedMailboxEvent({
+        wake,
+        executionContext,
+        runtime: createRuntime(),
+        runtimeEnv: {},
+        vaultRoot: "/tmp/assistant-runtime-events",
+      })).resolves.toMatchObject({
+        conversationMetrics: null,
+        mailboxLane: "assistant-notification",
+      });
+      expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          notificationPromptProfile,
+        }),
+      );
+    },
+  );
 
   it("still fails closed for non-first-contact required notifications", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({

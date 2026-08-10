@@ -26,6 +26,7 @@ import {
 } from "@murphai/device-syncd/types";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
 
+import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-context";
@@ -490,7 +491,16 @@ export class HostedDeviceSyncPublicIngressService {
 
   async handleWebhook(provider: string, rawBody?: Buffer): Promise<HandleWebhookResult> {
     const resolvedRawBody = rawBody ?? (await this.readWebhookRawBody());
-    return this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody);
+    // One webhook request opens and seals several secure-box fields under the
+    // member's device domain roots. Scope the unwrap memo to the request so
+    // each distinct root key costs at most one KMS round trip per request
+    // instead of one per field: the concrete root is unwrapped by the account
+    // lookup before the admission transaction, while the @active root used for
+    // sealing payloads is a separate cache key whose first unwrap still runs
+    // inside the transaction. Hosted-onboarding webhooks use the same seam.
+    return runWithHostedDomainRootUnwrapCache(() =>
+      this.ingress.handleWebhook(provider, this.context.request.headers, resolvedRawBody),
+    );
   }
 
   async resolveWebhookPreflight(

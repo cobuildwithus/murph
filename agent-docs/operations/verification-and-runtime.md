@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-05
+Last verified: 2026-08-06
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -66,6 +66,82 @@ account-projection backfill, and the production migration guard. Keep the
 5,000 assignment target assertions separate from the existing 7,000 provider
 traffic guideline; this verification slice must not add a runtime traffic-cap
 expectation.
+
+## Hosted Stripe Billing Verification
+
+Billing changes retain two distinct lanes. Run the focused hermetic owner proof
+first; it must not need Stripe credentials:
+
+```bash
+pnpm --dir packages/hosted-local-harness exec vitest run \
+  --config vitest.config.ts --no-coverage \
+  test/stripe-billing-live-config.test.ts \
+  test/dev-hosted-local/stack.test.ts
+pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage \
+  apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts \
+  apps/web/test/hosted-billing-live-support.test.ts
+pnpm hosted-billing:ci-guard
+```
+
+The live lane is an explicit external-provider proof, not a replacement for
+those tests. With a local PostgreSQL database and the dedicated test-sandbox
+environment contract loaded, run:
+
+```bash
+pnpm stripe:cli:setup
+pnpm hosted-billing:live:preflight
+pnpm hosted-local e2e stripe-billing-browser-matrix
+pnpm hosted-billing:live:cleanup
+```
+
+Never run PR-controlled code with writable Stripe authority and never use
+`pull_request_target` to work around GitHub's secret boundary. The live lane
+runs only on pushes to `main` (`github.event_name == 'push'`), so no pull
+request event of any origin can start the secret-bearing job; absent or
+malformed sandbox configuration fails closed on those `main` runs. All pull
+requests run only the credential-free hermetic lane. The always-present
+`Required hosted Stripe billing boundary` job checks the event-applicable
+result so branch protection has one stable required context. The live job exposes the
+existing pinned `@openai/codex` workspace binary for
+hosted-local model-catalog preparation without adding another CLI dependency.
+Keep the key on preflight/matrix/cleanup steps only; within the scenario it
+reaches the web Stripe client and harness-owned
+`stripe listen` child, not the browser, Cloudflare, Temporal, setup, or runner
+children. Do not pass it as a CLI argument or write it to a repository file.
+
+Use stable pre-provisioned test prices and an active default Portal configuration
+with plan updates enabled that ends Trial upgrades and immediately invoices the
+resulting paid plan. The browser journey, rather than a cached configuration
+projection, proves that Stripe exposes the dedicated Pulse and Edge products.
+Test Clocks are reserved for the paused-Trial case.
+Synchronize on bounded Stripe object/event
+state and Murph's PostgreSQL projection; do not replace those assertions with a
+fixed sleep. Diagnostics may state only opaque run correlation, object
+type/status, and browser step/surface/status. Do not capture or upload
+screenshots, traces, raw webhook payloads, URLs, identities, or full Playwright
+reports. Cleanup must verify exact run ownership, remain idempotent, avoid shared
+catalog objects, and run even after a scenario failure. Use the standalone
+cleanup command with the same run id after an interrupted process.
+
+The paused-Trial regression deliberately makes a real unsupported Resume control
+call before the UI journey, then requires the corrected production sequence:
+Subscription Update carries the inherited Customer payment method while paused,
+Subscription Resume carries only supported resume fields, the browser observes
+the resulting open, positive-balance hosted invoice even before Stripe records
+an attempted charge, that exact test invoice is paid, and webhook
+reconciliation opens Murph paid entitlement. The Family Checkout scenario starts from an
+authenticated lapsed individual without an active subscription, while a separate
+browser case proves that an already-paid individual converts to Family through an
+in-place update of the same subscription. Edge to Pulse is verified as a renewal
+schedule, never an immediate downgrade. Stripe's
+official Subscription Update and Resume references are the authority for that
+request-shape boundary; the trial, Test Clock, Portal deep-link, webhook, and
+test-mode references linked from `packages/hosted-local-harness/README.md` own
+the remaining external-provider assumptions. Stripe's immutable paid
+invoices/events and terminal records remain as bounded audit history in the
+dedicated sandbox; cleanup removes only mutable resources whose exact run
+ownership was proved. Repository files contain only the protected Environment
+contract names; the sandbox values remain external to the checkout.
 
 ## Verification Execution Location
 
@@ -658,8 +734,8 @@ the advisory budget.
 - `pnpm verify:acceptance`: the canonical repo acceptance gate. It runs through the root workspace verifier so one lock covers the whole acceptance pass: first the full `typecheck` surface, then the coverage-heavy acceptance lane with already-proven repo guards skipped, `apps/cloudflare` app-local typecheck skipped, and the contracts artifact verification reusing the `packages/contracts` build from typecheck. On non-CI default-profile hosts with at least 12 logical CPUs, including a locally forced Codex/shared-host execution and the Blacksmith Testbox, its startup log reports the composed resource profile. Independent doc gardening and prepared-runtime setup overlap before coverage begins. Web tests/lint/dev smoke then start immediately while the protected CLI phase uses four CLI workers plus one two-worker package peer. CLI terminal success or failure publishes one invocation-scoped readiness marker: that releases Cloudflare's serial app tests and the hosted-web Next build without hiding the CLI result, lets package fanout refill to at most five two-worker processes, and is removed by the root owner at completion. The sanitized bootstrap does not set an app-step policy for that default profile; the root verifier alone assigns Web-parallel and Cloudflare-serial behavior. Static SSH is resource-qualified by construction: its entrypoint selects `profile=static-ssh`, and the verifier admits composition only with at least 10 logical CPUs and 24 GiB of detected physical memory. The `resources` line reports those measurements and the effective worker/overlap plan. Smaller or memory-unobservable static workers retain the serial fallback. Standalone `pnpm test:coverage`, smaller default-profile hosts, and CI retain their self-contained or conservative defaults unless explicitly overridden.
 - `pnpm zip:src` and `scripts/package-audit-context.sh`: shell through `pnpm no-js`, which first prunes untracked generated JS/declaration sidecars that sit next to tracked TypeScript source files and then runs the tracked-artifact hygiene guard, before building the source/review bundle from git-visible files while scanning `config/**` alongside app/package code and filtering blocked local residue such as `.env` / `.env.*`, `dist/`, `.next/`, `.next-dev/`, `.next-smoke/`, `.test-dist/`, `*.tsbuildinfo`, and `packages/health-commons/generated/**` paths out of the manifest. This keeps ignored local artifacts out of the upload bundle without requiring a clean development worktree, while raw clone archives remain unsafe.
 - `pnpm test:scenario-integrity`: the root command for fixture/scenario-manifest integrity verification. It is not executable end-to-end smoke.
-- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`. PR-bound work runs focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement proof locally while exact-head CI owns broad acceptance. A direct shared-default push must use `pnpm verify:acceptance`. Neither automated path replaces a physical-device opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
-- `pnpm release:check`: assumes dependencies are already installed, syntax-checks the release helpers, validates the fixed-version monorepo release manifest plus publish metadata, then runs `pnpm build:workspace:clean` and `pnpm verify:acceptance`. The tag-driven release workflow performs the one required install up front, opts the verify lanes into CI parallel execution through `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1`, and leaves the actual tarball packing to the later dedicated pack step instead of repacking inside `release:check`. Treat it as the release-specific extension of `pnpm verify:acceptance`, with the extra clean-build proof layered on top.
+- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`. Enrollment-contract changes additionally prove both arrival orders for schema-v2 enable/disable, missing-row tombstones, exact disabled replay, stale and duplicate conflict behavior, higher-revision prepare, lost-response inactivity, exact bodyless activation and retry, activation/deletion in both serialization orders, activation against direct access, consent, sponsored-member, and sponsoring-group loss under real PostgreSQL locks, schema-v1 revision-zero immediate activation, signed-32-bit parsing, complete prepared/active credentials, and exact expand/contract SQL against opt-in local PostgreSQL. PR-bound work runs focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement proof locally while exact-head CI owns broad acceptance. A direct shared-default push must use `pnpm verify:acceptance`. Neither automated path replaces a signed physical-iPhone opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
+- `pnpm release:check`: assumes dependencies are already installed, syntax-checks the release helpers and final-tarball secret guard, runs the guard's focused Node tests, validates the fixed-version monorepo release manifest plus publish metadata, then runs `pnpm build:workspace:clean` and `pnpm verify:acceptance`. The tag-driven release workflow performs the one required install up front, opts the verify lanes into CI parallel execution through `MURPH_TEST_LANES_PARALLEL=1`, `MURPH_APP_VERIFY_PARALLEL=1`, and `MURPH_VERIFY_STEP_PARALLEL=1`, and leaves the actual tarball packing to the later dedicated pack step instead of repacking inside `release:check`. Packing scans the final tarballs before writing their manifest, npm publication scans them again before its first provider request, and GitHub Release creation scans the downloaded one-day handoff artifact before permanent upload. The manifest may live outside the checkout and point to the established external pack output, but it still records repository-relative `.tgz` paths and one exact shared-directory inventory. Treat `release:check` as the release-specific extension of `pnpm verify:acceptance`, with the extra clean-build proof layered on top.
 
 ## Incur-Backed CLI Guardrails
 

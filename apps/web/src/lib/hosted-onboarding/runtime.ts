@@ -5,10 +5,11 @@ import {
   getHostedDefaultBillingPlanCode,
   getHostedFamilyBillingOfferDefinition,
   type HostedBillingPlanCode,
-  type HostedPlanCode,
+  type HostedFamilyPlanCode,
 } from "./billing-plans";
 import { hostedOnboardingError } from "./errors";
 import { readHostedOnboardingEnvironment, type HostedOnboardingEnvironment } from "./env";
+import { buildHostedStripeAlertCorrelationCause } from "./stripe-error-fields";
 import {
   getHostedUsageCreditOfferDefinition,
   type HostedUsageCreditOfferCode,
@@ -110,6 +111,7 @@ export function requireHostedStripeCheckoutConfig(input?: {
   billingPlanCode: HostedBillingPlanCode;
   priceId: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
 } {
   return requireHostedStripeBillingPlanConfig(input);
 }
@@ -120,6 +122,7 @@ export function requireHostedStripeBillingPlanConfig(input?: {
   billingPlanCode: HostedBillingPlanCode;
   priceId: string;
   stripe: Stripe;
+  stripeLiveMode: boolean;
 } {
   const environment = getHostedOnboardingEnvironment();
   const billingPlanCode = input?.billingPlanCode ?? getHostedDefaultBillingPlanCode();
@@ -146,6 +149,9 @@ export function requireHostedStripeBillingPlanConfig(input?: {
     billingPlanCode,
     priceId,
     stripe: requireHostedStripeApi(),
+    stripeLiveMode: readHostedStripeSecretKeyLiveMode(
+      environment.stripeSecretKey,
+    ),
   };
 }
 
@@ -173,7 +179,7 @@ async function requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(
   let price: Stripe.Price;
 
   try {
-    const retrieveParams = {
+    const retrieveParams: Stripe.PriceRetrieveParams = {
       expand: ["currency_options"],
     };
     price = input?.requestOptions
@@ -185,7 +191,7 @@ async function requireValidatedHostedStripeBillingPlanConfigWithRequestOptions(
       : await config.stripe.prices.retrieve(config.priceId, retrieveParams);
   } catch (error) {
     throw hostedOnboardingError({
-      cause: error,
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_BILLING_PRICE_UNAVAILABLE",
       httpStatus: 502,
       message:
@@ -302,9 +308,9 @@ function buildHostedBillingPriceConfigurationError(
 }
 
 export function requireHostedStripeFamilyPlanConfig(input: {
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
 }): {
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   priceId: string;
   stripe: Stripe;
 } {

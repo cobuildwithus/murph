@@ -64,7 +64,13 @@ describe('proactive onboarding support', () => {
 
   it('requires schedule resolution, modality matching, and a text-only onboarding close', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
-    const [behaviorRaw, onboardingRaw, musicRaw] = await Promise.all([
+    const [
+      behaviorRaw,
+      onboardingRoot,
+      onboardingAspiration,
+      onboardingReturn,
+      musicRaw,
+    ] = await Promise.all([
       readFile(
         path.join(skillsRoot, 'behavior-followthrough', 'SKILL.md'),
         'utf8',
@@ -74,12 +80,34 @@ describe('proactive onboarding support', () => {
         'utf8',
       ),
       readFile(
+        path.join(
+          skillsRoot,
+          'murph-onboarding',
+          'references',
+          'aspiration-foundation-delegation.md',
+        ),
+        'utf8',
+      ),
+      readFile(
+        path.join(
+          skillsRoot,
+          'murph-onboarding',
+          'references',
+          'return-launch-completion.md',
+        ),
+        'utf8',
+      ),
+      readFile(
         path.join(skillsRoot, 'music-generation', 'SKILL.md'),
         'utf8',
       ),
     ])
     const behavior = behaviorRaw.replace(/\s+/gu, ' ')
-    const onboarding = onboardingRaw.replace(/\s+/gu, ' ')
+    const onboarding = [
+      onboardingRoot,
+      onboardingAspiration,
+      onboardingReturn,
+    ].join('\n').replace(/\s+/gu, ' ')
     const music = musicRaw.replace(/\s+/gu, ' ')
 
     expect(behavior).toContain('"Any day you have time" is unresolved.')

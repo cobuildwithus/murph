@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_PHYSICAL_NOTES_PATH = "/api/internal/physical-notes" as const;
 export const HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS = 45_000;

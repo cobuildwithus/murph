@@ -122,13 +122,28 @@ export function isAssistantOutboxRetryableError(error: unknown): boolean {
  * These terminal outcomes must never be retried by creating a new intent.
  * Revoked automation authority means the send is no longer authorized;
  * ambiguous or confirmation-pending delivery may already have reached the
- * provider; retry exhaustion is the durable automatic-retry ceiling.
+ * provider; retry exhaustion is the durable automatic-retry ceiling. A
+ * confirmed Linq attachment reservation also cannot be replaced after its
+ * bounded replay-safe PUT sequence becomes terminal.
  */
 export function assistantDeliveryErrorPreventsFreshIntentRetry(
   error: unknown,
 ): boolean {
-  const code = normalizeAssistantDeliveryError(error).code?.toUpperCase() ?? ''
-  return FRESH_INTENT_RETRY_FORBIDDEN_ERROR_CODES.has(code)
+  const deliveryError = normalizeAssistantDeliveryError(error)
+  const code = deliveryError.code?.toUpperCase() ?? ''
+  const diagnosticContext = deliveryError.diagnosticContext
+  const isTerminalConfirmedLinqAttachmentUpload =
+    code === 'LINQ_API_REQUEST_FAILED' &&
+    diagnosticContext?.operation === 'create_attachment_upload' &&
+    diagnosticContext.method === 'PUT' &&
+    diagnosticContext.retryable === false &&
+    (
+      diagnosticContext.failureStage === 'http' ||
+      diagnosticContext.failureStage === 'transport'
+    )
+
+  return FRESH_INTENT_RETRY_FORBIDDEN_ERROR_CODES.has(code) ||
+    isTerminalConfirmedLinqAttachmentUpload
 }
 
 export function normalizeAssistantDeliveryError(

@@ -462,6 +462,123 @@ test("SettingsPage suppresses plan actions while a completed update awaits webho
   );
 });
 
+test("SettingsPage completes a return only from an active paid exact projection", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: HostedBillingStatus.active,
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: { privyUserId: "did:privy:user_123" },
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ planUpdate: "launch_edge_monthly" }),
+  }));
+
+  assert.match(markup, /Edge is active/);
+  assert.doesNotMatch(markup, /Activating Edge/);
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ planChangePending: false }),
+    undefined,
+  );
+});
+
+test("SettingsPage keeps an inactive same-plan return in recoverable pending state", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: HostedBillingStatus.past_due,
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: { privyUserId: "did:privy:user_123" },
+  });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_123",
+      stripeSubscriptionId: "sub_123",
+    },
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ planUpdate: "launch_edge_monthly" }),
+  }));
+
+  assert.match(markup, /Activating Edge/);
+  assert.doesNotMatch(markup, /Edge is active/);
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ planChangePending: true }),
+    undefined,
+  );
+});
+
+test("SettingsPage suppresses a personal plan return for a sponsored member", async () => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: HostedBillingStatus.active,
+      id: "member_123",
+      suspendedAt: null,
+    },
+    session: { privyUserId: "did:privy:user_123" },
+  });
+  mocks.readHostedFamilyAccessForMember.mockResolvedValue({ groupId: "family_123" });
+  mockSettingsPageSnapshot({
+    billingRef: {
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      memberId: "member_123",
+      stripeCustomerId: "cus_personal",
+      stripeSubscriptionId: "sub_personal",
+    },
+  });
+
+  const { default: SettingsPage } = await import(
+    "../app/(dashboard)/settings/page"
+  );
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({ planUpdate: "launch_edge_monthly" }),
+  }));
+
+  assert.doesNotMatch(markup, /Activating Edge|Edge is active/);
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      familyState: "sponsored",
+      planChangePending: false,
+    }),
+    undefined,
+  );
+});
+
 test("SettingsDataPrivacyPage redirects signed-in users to the settings privacy section", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
@@ -877,7 +994,7 @@ test("SettingsPage reads the app session and persisted account settings into the
         destinationLabel: "the group",
         id: "mission_1",
         requirementsLabel: "Start a fresh group and get people talking.",
-        rewardLabel: "$3.50",
+        rewardLabel: "About 14 more days of Murph usage",
         selectedLabel: "Jul 27, 2026",
         status: "in_progress",
         statusLabel: "In progress",
@@ -2209,7 +2326,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
       destinationLabel: "your Murph",
       id: "mission_email_history",
       requirementsLabel: "Complete the selected mission.",
-      rewardLabel: "$2.00",
+      rewardLabel: "About 10 more days of Murph usage",
       selectedLabel: "Jul 20, 2026",
       status: "completed",
       statusLabel: "Completed",

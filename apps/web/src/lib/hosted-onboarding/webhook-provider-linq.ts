@@ -62,6 +62,7 @@ import {
 import {
   type HostedLinqMessageEditedEvent,
   type HostedLinqMessageReceivedEvent,
+  type HostedLinqTypingIndicatorStartedEvent,
   type HostedLinqWebhookEvent,
   shouldIgnoreHostedLinqForLocalInboundGuard,
 } from "./linq";
@@ -92,9 +93,9 @@ import {
   buildSignupLinkResponse,
   buildInactiveMemberAccessNoticeResponse,
   HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON,
-  hostedLinqFirstContactContainsBlockedContent,
   isHostedLinqDeliverableFirstContact,
   isHostedLinqIMessageService,
+  resolveHostedLinqFirstContactContentDisposition,
   resolveHostedOnboardingLinqMessageContext,
 } from "./webhook-provider-linq-shared";
 import {
@@ -206,6 +207,26 @@ type HostedLinqDailyState = Awaited<ReturnType<typeof incrementHostedLinqInbound
 interface VerifiedHostedLinqInboundParticipant {
   contact: HostedLinqParticipantContact;
   memberId: string;
+}
+
+/**
+ * Resolves a typing hint only through an established direct home-chat binding.
+ * This result is speculative latency data, never authorization to process work.
+ */
+export async function resolveHostedLinqTypingPrewarmMemberId(input: {
+  event: HostedLinqTypingIndicatorStartedEvent;
+  prisma: HostedOnboardingReadClient;
+}): Promise<string | null> {
+  const memberId = await lookupHostedLinqPrewarmHomeChatMemberId({
+    chatId: input.event.data.chat_id,
+    prisma: input.prisma,
+  });
+  return memberId && await isHostedLinqMailboxRootPrewarmEligible({
+    memberId,
+    prisma: input.prisma,
+  })
+    ? memberId
+    : null;
 }
 
 /**
@@ -1346,10 +1367,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
     // overrides recipient control. Keep that decision inside this one ordered
     // branch so opt-out wins before the group link, which wins before generic
     // billing and home-route handling below.
-    if (hostedLinqFirstContactContainsBlockedContent({
-      event: messageEvent,
-      participantContact,
-    })) {
+    if (
+      resolveHostedLinqFirstContactContentDisposition({
+        event: messageEvent,
+        participantContact,
+      }) === "blocked"
+    ) {
       return logHostedLinqWebhookPlannerDecisionAndReturn(
         buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
         buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -1653,10 +1676,24 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   }
 
-  if (hostedLinqFirstContactContainsBlockedContent({
-    event: messageEvent,
-    participantContact,
-  })) {
+  const firstContactContentDisposition =
+    resolveHostedLinqFirstContactContentDisposition({
+      event: messageEvent,
+      participantContact,
+    });
+  if (firstContactContentDisposition === "contentless") {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan("contentless-first-contact"),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: "contentless-first-contact",
+        routeStage: "ignored-contentless-first-contact",
+      }),
+    );
+  }
+
+  if (firstContactContentDisposition === "blocked") {
     return logHostedLinqWebhookPlannerDecisionAndReturn(
       buildIgnoredLinqWebhookPlan("blocked-first-contact-content"),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
@@ -2647,6 +2684,7 @@ const HOSTED_LINQ_GROUP_PROVISION_UNAVAILABLE_ERROR_CODES = new Set([
 
 type HostedLinqNewGroupAdmissionIgnoreReason =
   | "blocked-first-contact-content"
+  | "contentless-first-contact"
   | "empty-message-parts"
   | "local-inbound-not-allowlisted"
   | "own-message"
@@ -2774,6 +2812,12 @@ async function planHostedLinqGroupChatWebhook(input: {
   const senderAccessAllowed = senderAccess?.allowed ?? false;
   const activeSenderMemberId = senderAccessAllowed ? sender?.id ?? null : null;
   const inactiveSender = sender !== null && !senderAccessAllowed;
+  const firstContactContentDisposition = !activeSenderMemberId
+    ? resolveHostedLinqFirstContactContentDisposition({
+        event: messageEvent,
+        participantContact,
+      })
+    : null;
 
   if (senderSuspended) {
     return ignored("suspended-member", senderIdentityMatch);
@@ -2787,6 +2831,12 @@ async function planHostedLinqGroupChatWebhook(input: {
     && senderAccess.reason === "health_data_consent_withdrawn"
   ) {
     return ignored("sender-inactive", senderIdentityMatch);
+  }
+  if (
+    sender === null
+    && firstContactContentDisposition === "contentless"
+  ) {
+    return ignored("contentless-first-contact", senderIdentityMatch);
   }
   const lineState = await readHostedLinqIncomingLineState({
     phoneNumberLookupKeys: input.threadRouteAccountLookupKeys,
@@ -2830,10 +2880,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   }
   if (
     !activeSenderMemberId
-    && hostedLinqFirstContactContainsBlockedContent({
-      event: messageEvent,
-      participantContact,
-    })
+    && firstContactContentDisposition === "blocked"
   ) {
     return ignored("blocked-first-contact-content", senderIdentityMatch);
   }
@@ -3216,8 +3263,14 @@ function buildHostedLinqFirstContactAdmissionText(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
 ): string | null {
   const text = parts
-    .filter((part) => part.type === "text" || part.type === "link")
-    .map((part) => normalizeHostedLinqPartText(part.value) ?? "")
+    .filter((part) =>
+      part.type === "text"
+      || part.type === "link"
+      || part.type === "imessage_app"
+    )
+    .map((part) => part.type === "imessage_app"
+      ? normalizeHostedLinqPartText(part.fallback_text) ?? ""
+      : normalizeHostedLinqPartText(part.value) ?? "")
     .filter(Boolean)
     .join("\n")
     .slice(0, 2_000)
@@ -3506,11 +3559,17 @@ function buildHostedLinqMailboxTextPart(
   let truncatedContent = false;
 
   for (const part of parts) {
-    if (part.type !== "text" && part.type !== "link") {
+    if (
+      part.type !== "text"
+      && part.type !== "link"
+      && part.type !== "imessage_app"
+    ) {
       continue;
     }
 
-    const value = normalizeHostedLinqPartText(part.value);
+    const value = part.type === "imessage_app"
+      ? normalizeHostedLinqPartText(part.fallback_text) ?? "[iMessage app]"
+      : normalizeHostedLinqPartText(part.value);
     if (!value) {
       continue;
     }
@@ -3597,8 +3656,14 @@ function buildMinimalHostedLinqMailboxParts(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
 ): HostedExecutionLinqConversationMessagePart[] {
   const text = parts
-    .filter((part) => part.type === "text" || part.type === "link")
-    .map((part) => normalizeHostedLinqPartText(part.value) ?? "")
+    .filter((part) =>
+      part.type === "text"
+      || part.type === "link"
+      || part.type === "imessage_app"
+    )
+    .map((part) => part.type === "imessage_app"
+      ? normalizeHostedLinqPartText(part.fallback_text) ?? "[iMessage app]"
+      : normalizeHostedLinqPartText(part.value) ?? "")
     .filter(Boolean)
     .join("\n")
     .slice(0, HOSTED_LINQ_COMPACT_TEXT_BUDGET_CHARS);

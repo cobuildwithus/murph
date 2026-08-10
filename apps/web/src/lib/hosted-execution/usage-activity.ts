@@ -7,10 +7,19 @@ import type {
 } from "@prisma/client";
 
 import {
+  HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY,
+  isHostedSignupReferralPolicyVersion,
+} from "../hosted-growth/signup-referral-policy";
+import {
+  formatHostedReferralRewardUsageDays,
+} from "../hosted-growth/referral-reward-days";
+import {
   buildHostedUsageReferralOutstandingWhere,
   getHostedUsageReferralPolicyDisplay,
-  isHostedUsageReferralEnabled,
 } from "../hosted-growth/usage-referral";
+import {
+  isHostedUsageReferralEnabled,
+} from "../hosted-growth/usage-referral-policy";
 import { getPrisma } from "../prisma";
 import type {
   HostedAiUsageActivitySnapshot,
@@ -49,6 +58,7 @@ interface HostedUsageReferralActivityRecord {
   expiresAt: Date;
   id: string;
   policyCode: HostedUsageReferralPolicyCode;
+  policyVersion: string;
   qualifiedAt: Date | null;
   rewardedAt: Date | null;
   rewardUsdMicros: bigint;
@@ -99,6 +109,7 @@ export async function readHostedAiUsageActivity(input: {
       expiresAt: true,
       id: true,
       policyCode: true,
+      policyVersion: true,
       qualifiedAt: true,
       rewardedAt: true,
       rewardUsdMicros: true,
@@ -124,6 +135,7 @@ export async function readHostedAiUsageActivity(input: {
           expiresAt: true,
           id: true,
           policyCode: true,
+          policyVersion: true,
           qualifiedAt: true,
           rewardedAt: true,
           rewardUsdMicros: true,
@@ -157,6 +169,7 @@ export async function readHostedAiUsageActivity(input: {
     missions,
     missionsEnabled:
       input.missionsEnabled ?? isHostedUsageReferralEnabled(),
+    referralIdentityKey: input.memberId,
   };
 }
 
@@ -165,16 +178,22 @@ function projectHostedUsageMissionActivity(input: {
   now: Date;
   row: HostedUsageReferralActivityRecord;
 }): HostedAiUsageMissionActivityRow {
-  const policy = getHostedUsageReferralPolicyDisplay(input.row.policyCode);
+  const policy = isHostedSignupReferralPolicyVersion(input.row.policyVersion)
+    ? HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY
+    : getHostedUsageReferralPolicyDisplay(input.row.policyCode);
   const status = projectHostedUsageMissionStatus(input.row, input.now);
-
   return {
     destinationLabel: input.row.beneficiaryMemberId === input.memberId
       ? "your Murph"
       : "the group",
     id: input.row.id,
     requirementsLabel: policy.requirementsLabel,
-    rewardLabel: formatUsdMicros(input.row.rewardUsdMicros),
+    rewardLabel: formatHostedReferralRewardUsageDays({
+      policyCode: input.row.policyCode,
+      policyVersion: input.row.policyVersion,
+      rewardUsdMicros: input.row.rewardUsdMicros,
+      sentenceCase: true,
+    }),
     selectedLabel: formatDate(input.row.armedAt),
     status,
     statusLabel: projectHostedUsageMissionStatusLabel(status),

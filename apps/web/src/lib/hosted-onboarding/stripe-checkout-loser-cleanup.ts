@@ -40,13 +40,18 @@ export class HostedStripeCheckoutLoserCleanupPendingError
  */
 export async function cleanupHostedStandardCheckoutLoser(input: {
   stripe?: Stripe;
+  subscription?: Stripe.Subscription;
   stripeSubscriptionId: string;
 }): Promise<void> {
   const stripe = input.stripe ?? requireHostedStripeApi();
-  const subscription = await withHostedStripeFailureLog(
-    "subscription.retrieve.checkout-loser",
-    () => stripe.subscriptions.retrieve(input.stripeSubscriptionId),
-  );
+  const subscription = input.subscription ??
+    await withHostedStripeFailureLog(
+      "subscription.retrieve.checkout-loser",
+      () => stripe.subscriptions.retrieve(input.stripeSubscriptionId),
+    );
+  if (subscription.id !== input.stripeSubscriptionId) {
+    throw buildCheckoutLoserCleanupSupportError();
+  }
 
   if (
     subscription.status !== "canceled"
@@ -101,14 +106,15 @@ export async function cleanupHostedStandardCheckoutLoser(input: {
     throw buildCheckoutLoserCleanupSupportError();
   }
 
+  const refundListParams: Stripe.RefundListParams = { limit: 100 };
+  if (refundTarget.paymentIntent) {
+    refundListParams.payment_intent = refundTarget.paymentIntent;
+  } else {
+    refundListParams.charge = refundTarget.charge;
+  }
   const existingRefunds = await withHostedStripeFailureLog(
     "refunds.list.checkout-loser",
-    () => stripe.refunds.list({
-      ...(refundTarget.paymentIntent
-        ? { payment_intent: refundTarget.paymentIntent }
-        : { charge: refundTarget.charge }),
-      limit: 100,
-    }),
+    () => stripe.refunds.list(refundListParams),
   );
   const succeededRefundAmount = existingRefunds.data.reduce(
     (total, refund) =>
@@ -132,15 +138,18 @@ export async function cleanupHostedStandardCheckoutLoser(input: {
     throw buildCheckoutLoserCleanupSupportError();
   }
 
+  const refundCreateParams: Stripe.RefundCreateParams = {
+    amount: paidAmount,
+    reason: "duplicate",
+  };
+  if (refundTarget.paymentIntent) {
+    refundCreateParams.payment_intent = refundTarget.paymentIntent;
+  } else {
+    refundCreateParams.charge = refundTarget.charge;
+  }
   const refund = await withHostedStripeFailureLog(
     "refunds.create.checkout-loser",
-    () => stripe.refunds.create({
-      amount: paidAmount,
-      ...(refundTarget.paymentIntent
-        ? { payment_intent: refundTarget.paymentIntent }
-        : { charge: refundTarget.charge }),
-      reason: "duplicate",
-    }, {
+    () => stripe.refunds.create(refundCreateParams, {
       idempotencyKey: [
         "hosted-checkout-loser-refund",
         subscription.id,

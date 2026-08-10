@@ -82,18 +82,6 @@ export function resolveHostedRuntimeLogMigrationDatabaseUrl(
   ].filter((value): value is string => value !== null);
   const production = environment.VERCEL_ENV === "production"
     || environment.MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS === "1";
-  const storageMode = nonEmpty(environment.HOSTED_RUNTIME_LOG_STORAGE);
-
-  if (
-    production
-    && storageMode !== "primary"
-    && storageMode !== "dedicated"
-  ) {
-    throw new Error(
-      "HOSTED_RUNTIME_LOG_STORAGE must be explicitly set to primary or dedicated for production runtime-log migrations.",
-    );
-  }
-
   if (production && !runtime) {
     throw new Error(
       "HOSTED_RUNTIME_LOG_DATABASE_URL is required for production runtime-log migrations.",

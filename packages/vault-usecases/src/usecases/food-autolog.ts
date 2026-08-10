@@ -1,5 +1,5 @@
 import type { AssistantCronSchedule } from '@murphai/operator-config/assistant-cli-contracts'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 
 export const dailyFoodTimeSchema = z
   .string()

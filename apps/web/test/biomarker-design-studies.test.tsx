@@ -123,14 +123,27 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
   expect(sectionsMarkup).toContain(
-    "Group sponsorship and mobile one-time contribution",
+    "Group sponsorship with optional creative response",
   );
   expect(sectionsMarkup).toContain(
-    "Overall AI usage, purchase reset, Family owner action, credits, and referrals",
+    "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
   );
+  expect(sectionsMarkup).toContain(
+    "Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states",
+  );
+  expect(sectionsMarkup).toMatch(
+    /<[^>]*(?=[^>]*\bdata-design-contract="origin-only-referral-claim")(?=[^>]*\bdata-design-section="signup-referral-flow")[^>]*>/,
+  );
+  expect(sectionsMarkup).toContain("Settings · Messaging");
+  expect(sectionsMarkup).toContain("Recipient landing states");
+  expect(sectionsMarkup).toContain("Meet Murph");
+  expect(sectionsMarkup).toContain("Try again soon");
+  expect(sectionsMarkup).toContain("This link isn’t available");
   expect(sectionsMarkup).toContain("Biomarker result detail");
   expect(sectionsMarkup).toContain("Biomarker reference context");
-  expect(sectionsMarkup).toContain("Boundary result detail");
+  expect(sectionsMarkup).toContain(
+    "Biomarker boundary result · published comparator provenance",
+  );
   expect(sectionsMarkup).toContain('data-design-study="biomarker-preparing"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-index"');
   expect(sectionsMarkup).toContain('data-design-study="biomarker-detail"');
@@ -185,6 +198,10 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-detail"');
   expect(componentsMarkup).not.toContain('data-design-study="biomarker-boundary-result"');
   expect(componentsMarkup).toContain('data-design-component="group-usage-funding"');
+  expect(componentsMarkup).toContain(
+    'data-design-component="signup-referral-link-states"',
+  );
+  expect(componentsMarkup).toContain("Clipboard write failed");
   expect(componentsMarkup).toContain(
     'data-design-component="group-sponsorship-management"',
   );
@@ -449,7 +466,7 @@ test("boundary result study keeps comparator data out of the numeric chart", () 
   expect(markup).toContain("&lt;10");
   expect(markup).not.toContain("Why there is no line chart");
   expect(markup).not.toContain("invented midpoint");
-  expect(markup).toContain("Source range not listed");
+  expect(markup).toContain("Published comparator — not the reporting lab&#x27;s range");
   expect(markup).not.toContain('role="img"');
 });
 

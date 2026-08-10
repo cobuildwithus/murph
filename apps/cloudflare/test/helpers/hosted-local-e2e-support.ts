@@ -235,6 +235,7 @@ export function expectAdvertisedMurphDynamicTools(
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     newsletterAvailable?: boolean;
+    pendingVaultFilesAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
@@ -310,6 +311,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.responseCardAvailable !== true
         && name === "murph.attach_response_card"
+      ) {
+        return false;
+      }
+
+      if (
+        options.pendingVaultFilesAvailable !== true
+        && name === "murph.pending_vault_files"
       ) {
         return false;
       }
@@ -447,6 +455,7 @@ export interface HostedLocalAssistantProviderStubState {
 export interface HostedLocalAssistantProviderStubRequest {
   body: string;
   method: string;
+  observedAtEpochMs?: number;
   url: string;
 }
 
@@ -946,6 +955,7 @@ export async function startAssistantProviderStubServer(input: {
   let responsesApiRequestBodyCount = 0;
 
   const server = createServer(async (request, response) => {
+    const observedAtEpochMs = Date.now();
     const requestMethod = request.method ?? "GET";
     const requestUrl = request.url ?? "/";
     if (
@@ -966,6 +976,7 @@ export async function startAssistantProviderStubServer(input: {
     const requestRecord = {
       body,
       method: requestMethod,
+      observedAtEpochMs,
       url: requestUrl,
     } satisfies HostedLocalAssistantProviderStubRequest;
     input.onRequest?.(requestRecord);

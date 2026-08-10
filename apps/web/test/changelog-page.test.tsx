@@ -40,6 +40,8 @@ import {
   resolveChangelogPage,
 } from "../src/lib/changelog";
 
+const RETIRED_USAGE_TERM = ["cost", "weighted"].join("-");
+
 describe("ChangelogPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -176,6 +178,8 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("One-time follow-up");
     expect(markup).toContain("Sponsor this group");
     expect(markup).toContain("Private attachment");
+    expect(markup.match(/>Usage credit</gu)).toHaveLength(7);
+    expect(markup.toLowerCase()).not.toContain(RETIRED_USAGE_TERM);
   });
 
   it("renders the real archive section against synthetic design data", () => {

@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events'
 
 import { afterEach, expect, test, vi } from 'vitest'
 
+import { buildLinqIMessageAppCardUrl } from '../src/assistant-response-cards.ts'
 import {
   fetchJsonResponse,
   readJsonErrorResponse,
@@ -163,6 +164,26 @@ test('http json helpers cover swallowed body read failures, caller abort passthr
         url: 'https://example.test',
       }),
     (error) => error === passthrough,
+  )
+
+  const bodyAbort = new AbortController()
+  const bodyAbortReason = new Error('caller aborted during body consumption')
+  await assert.rejects(
+    () =>
+      fetchJsonResponse({
+        consumeResponse: async () => {
+          bodyAbort.abort(bodyAbortReason)
+          throw new Error('body read interrupted')
+        },
+        createTransportError: () => new Error('should not wrap'),
+        fetchImplementation: async () => createJsonResponse({ available: true }),
+        headers: {},
+        method: 'POST',
+        signal: bodyAbort.signal,
+        timeoutMs: 50,
+        url: 'https://example.test',
+      }),
+    (error) => error === bodyAbortReason,
   )
 
   const terminalHttpError = new Error('stop retrying')
@@ -344,6 +365,10 @@ test('linq runtime normalizes happy-path payloads and retries retryable GET fail
     {
       chatId: 'chat-created',
       messageId: 'message-created',
+      providerMessageEffects: [{
+        message: 'hi',
+        providerMessageId: 'message-created',
+      }],
     },
   )
 
@@ -433,7 +458,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             team_id: 'G9DJH2XUMK',
           },
           fallback_text: 'Ask Murph for this card in text',
-          interactive: false,
+          interactive: true,
           layout: {
             caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
             subcaption: '1,490.25 cal',
@@ -441,7 +466,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             trailing_subcaption: '34.75g fat · 26.5g fiber',
           },
           type: 'imessage_app',
-          url: 'https://murph.ai',
+          url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),
         }],
         preferred_service: 'iMessage',
       },
@@ -465,6 +490,145 @@ test('linq iMessage capability requires a literal available true response', asyn
       env,
       fetchImplementation: async () => createJsonResponse(payload),
     })).resolves.toBe(false)
+  }
+})
+
+test('linq iMessage capability does not wait or retry after rate limiting', async () => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  const fetchImplementation = vi.fn(async () =>
+    createJsonResponse({ code: 'RATE_LIMITED' }, {
+      headers: { 'Retry-After': '30' },
+      status: 429,
+    }))
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        status: 429,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+    await rejection
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('linq iMessage capability uses its short read deadline without retrying', async () => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  let abortedAt: number | null = null
+  const startedAt = Date.now()
+  const fetchImplementation = vi.fn<LinqFetch>(async (_url, init) =>
+    await new Promise<Response>((_resolve, reject) => {
+      const rejectOnAbort = () => {
+        abortedAt = Date.now()
+        reject(new DOMException('aborted', 'AbortError'))
+      }
+      if (init.signal?.aborted) {
+        rejectOnAbort()
+        return
+      }
+      init.signal?.addEventListener('abort', rejectOnAbort, { once: true })
+    }))
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        timedOut: true,
+        timeoutMs: 2_500,
+      }),
+      message:
+        'Linq request POST /capability/check_imessage timed out after 2500ms.',
+    })
+    await vi.advanceTimersByTimeAsync(2_499)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(abortedAt).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+
+    expect(abortedAt).toBe(startedAt + 2_500)
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test.each([
+  { label: 'success', status: 200 },
+  { label: 'rate-limit error', status: 429 },
+])('linq iMessage capability keeps its deadline through a stalled $label body', async ({
+  status,
+}) => {
+  vi.useFakeTimers()
+  const env = { LINQ_API_TOKEN: 'linq-token' } satisfies NodeJS.ProcessEnv
+  let bodyAbortedAt: number | null = null
+  const startedAt = Date.now()
+  const fetchImplementation = vi.fn<LinqFetch>(async (_url, init) => {
+    const responseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(
+          status === 200 ? '{"available":' : '{"code":',
+        ))
+        const abortBody = () => {
+          bodyAbortedAt = Date.now()
+          controller.error(new DOMException('aborted', 'AbortError'))
+        }
+        if (init.signal?.aborted) {
+          abortBody()
+          return
+        }
+        init.signal?.addEventListener('abort', abortBody, { once: true })
+      },
+    })
+    return new Response(responseBody, {
+      headers: {
+        'content-type': 'application/json',
+        ...(status === 429 ? { 'retry-after': '30' } : {}),
+      },
+      status,
+    })
+  })
+  try {
+    const rejection = expect(checkLinqIMessageCapability({
+      address: '+15550001',
+    }, { env, fetchImplementation })).rejects.toMatchObject({
+      code: 'LINQ_API_REQUEST_FAILED',
+      context: expect.objectContaining({
+        operation: 'check_imessage_capability',
+        retryable: false,
+        timedOut: true,
+        timeoutMs: 2_500,
+      }),
+    })
+    await vi.advanceTimersByTimeAsync(2_499)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(bodyAbortedAt).toBeNull()
+
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+
+    expect(bodyAbortedAt).toBe(startedAt + 2_500)
+    expect(fetchImplementation).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    vi.useRealTimers()
   }
 })
 
@@ -503,11 +667,14 @@ test('linq app-card rejection classification permits only definitive pre-accepta
   const createError = (
     status: number,
     retryable: boolean,
+    linqFailureKind?: 'chat_not_found',
+    failureStage: 'http' | 'transport' = 'http',
   ): VaultCliError => new VaultCliError(
     'LINQ_API_REQUEST_FAILED',
     'Linq rejected the iMessage app card.',
     {
-      failureStage: 'http',
+      failureStage,
+      ...(linqFailureKind ? { linqFailureKind } : {}),
       method: 'POST',
       operation: 'send_imessage_app_card',
       path: '/chats/[chat]/messages',
@@ -522,11 +689,17 @@ test('linq app-card rejection classification permits only definitive pre-accepta
       createError(status, false),
     )).toBe(true)
   }
+  expect(isDefinitiveLinqIMessageAppCardRejection(
+    createError(404, false, 'chat_not_found'),
+  )).toBe(true)
   for (const status of [404, 408, 429, 500]) {
     expect(isDefinitiveLinqIMessageAppCardRejection(
       createError(status, status !== 404),
     )).toBe(false)
   }
+  expect(isDefinitiveLinqIMessageAppCardRejection(
+    createError(0, true, undefined, 'transport'),
+  )).toBe(false)
 })
 
 test('linq runtime serializes reply targets only for marked native replies', async () => {
@@ -546,7 +719,7 @@ test('linq runtime serializes reply targets only for marked native replies', asy
     })
   })
 
-  await sendLinqChatMessage(
+  const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
       message: 'ordinary automatic reply',
@@ -652,6 +825,16 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
 
   assert.equal(result.message.id, 'message-link')
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
+  assert.deepEqual(result.providerMessageEffects, [
+    {
+      message: 'Complete payment here:',
+      providerMessageId: 'message-text',
+    },
+    {
+      message: null,
+      providerMessageId: 'message-link',
+    },
+  ])
   assert.deepEqual(bodies, [
     {
       message: {
@@ -875,6 +1058,10 @@ test('linq runtime keeps a selected link-only payment URL on the text reply anch
       },
     },
   })
+  assert.deepEqual(result.providerMessageEffects, [{
+    message: 'https://pay.example.test/checkout/session_123',
+    providerMessageId: 'message-link',
+  }])
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })
 
@@ -892,7 +1079,7 @@ test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL'
     })
   })
 
-  await sendLinqChatMessage(
+  const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
       message: 'HTTPS://PAY.EXAMPLE.TEST/checkout/session_123',
@@ -908,6 +1095,10 @@ test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL'
       }],
     },
   })
+  assert.deepEqual(result.providerMessageEffects, [{
+    message: null,
+    providerMessageId: 'message-link',
+  }])
 })
 
 test('linq runtime creates a chat with caller text before the rich-link follow-up', async () => {
@@ -947,6 +1138,16 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
 
   assert.equal(result.messageId, 'message-link')
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
+  assert.deepEqual(result.providerMessageEffects, [
+    {
+      message: 'Your secure payment link:',
+      providerMessageId: 'message-text',
+    },
+    {
+      message: null,
+      providerMessageId: 'message-link',
+    },
+  ])
   assert.deepEqual(requests, [
     {
       body: {
@@ -1135,6 +1336,16 @@ test('linq runtime falls back to URL text after a definitive rich-link rejection
     'message-text',
     'message-fallback',
   ])
+  assert.deepEqual(result.providerMessageEffects, [
+    {
+      message: 'Complete payment here:',
+      providerMessageId: 'message-text',
+    },
+    {
+      message: 'https://pay.example.test/checkout/session_123',
+      providerMessageId: 'message-fallback',
+    },
+  ])
   assert.deepEqual(bodies[2], {
     message: {
       idempotency_key: 'payment-message-123:link:fallback',
@@ -1287,7 +1498,7 @@ test('linq runtime converts supported text styles to iMessage text decorations',
     })
   })
 
-  await sendLinqChatMessage(
+  const result = await sendLinqChatMessage(
     {
       chatId: 'chat-123',
       message: '  This is **bold**, *italic*, _short aside_, ~~gone~~, and ++underlined++. Keep durable/home/*/rollout-*.jsonl intact.  ',
@@ -1296,6 +1507,10 @@ test('linq runtime converts supported text styles to iMessage text decorations',
   )
 
   assert.equal(seenRequests.length, 1)
+  assert.deepEqual(result.providerMessageEffects, [{
+    message: 'This is bold, italic, short aside, gone, and underlined. Keep durable/home/*/rollout-*.jsonl intact.',
+    providerMessageId: 'message-1',
+  }])
   assert.deepEqual(parseJsonRequestBody(seenRequests[0]?.body), {
     message: {
       parts: [
@@ -1622,7 +1837,503 @@ test('linq runtime uploads attachment bytes with public fetch for the presigned 
   expect(publicFetch).toHaveBeenCalledTimes(1)
 })
 
+test('linq runtime retries only the presigned attachment PUT with stable reservation bytes', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const bytes = new Uint8Array([7, 8, 9, 10])
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_retry',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+        'x-upload-token': 'stable-upload-token',
+      },
+      upload_url: 'https://uploads.example.test/upload/retry-report',
+    }))
+  const uploadBodies: Blob[] = []
+  const uploadHeaders: Array<Record<string, string> | undefined> = []
+  const uploadUrls: string[] = []
+  let uploadAttempts = 0
+  const publicFetch = vi.fn(async (url: string, init) => {
+    assert.ok(init.body instanceof Blob)
+    uploadBodies.push(init.body)
+    uploadHeaders.push(init.headers)
+    uploadUrls.push(url)
+    uploadAttempts += 1
+    if (uploadAttempts === 1) {
+      throw new TypeError('socket closed')
+    }
+    if (uploadAttempts === 2) {
+      return createJsonResponse({ error: 'temporarily unavailable' }, {
+        headers: { 'Retry-After': '0' },
+        status: 503,
+      })
+    }
+    return new Response(null, { status: 204 })
+  })
+
+  const upload = uploadLinqAttachment(
+    {
+      bytes,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+    },
+    {
+      env,
+      fetchImplementation: providerFetch,
+      publicFetchImplementation: publicFetch,
+    },
+  )
+  await vi.runAllTimersAsync()
+
+  await expect(upload).resolves.toEqual({ attachmentId: 'attachment_pdf_retry' })
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(3)
+  expect(uploadBodies).toHaveLength(3)
+  expect(uploadBodies[1]).toBe(uploadBodies[0])
+  expect(uploadBodies[2]).toBe(uploadBodies[0])
+  expect(uploadHeaders[1]).toBe(uploadHeaders[0])
+  expect(uploadHeaders[2]).toBe(uploadHeaders[0])
+  expect(uploadUrls).toEqual([
+    'https://uploads.example.test/upload/retry-report',
+    'https://uploads.example.test/upload/retry-report',
+    'https://uploads.example.test/upload/retry-report',
+  ])
+  for (const body of uploadBodies) {
+    assert.deepEqual(new Uint8Array(await body.arrayBuffer()), bytes)
+  }
+})
+
+test('linq runtime bounds retryable presigned attachment PUT failures', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_bounded',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/bounded-report',
+    }))
+  const publicFetch = vi.fn(async () =>
+    createJsonResponse({ error: 'temporarily unavailable' }, {
+      headers: { 'Retry-After': '0' },
+      status: 503,
+    }))
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'PUT' &&
+      error.context?.path === '[presigned-upload]' &&
+      error.context?.retryable === false &&
+      error.context?.status === 503,
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(3)
+})
+
+test('linq runtime keeps presigned attachment retries inside one timeout budget', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_deadline',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/deadline-report',
+    }))
+  const publicFetch = vi.fn(async () =>
+    createJsonResponse({ error: 'temporarily unavailable' }, {
+      headers: { 'Retry-After': '30' },
+      status: 503,
+    }))
+  const startedAt = Date.now()
+
+  const rejection = assert.rejects(
+    uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'PUT' &&
+      error.context?.retryable === false &&
+      error.context?.status === 503,
+  )
+  await vi.advanceTimersByTimeAsync(30_000)
+  await rejection
+
+  expect(Date.now() - startedAt).toBe(30_000)
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime keeps the upload budget active through retryable response bodies', async () => {
+  vi.useFakeTimers()
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_body_deadline',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/body-deadline-report',
+    }))
+  const publicFetch = vi.fn<LinqFetch>(async (_url, init) => ({
+    arrayBuffer: async () => new ArrayBuffer(0),
+    headers: { 'Retry-After': '0' },
+    json: async () => ({ error: 'temporarily unavailable' }),
+    ok: false,
+    status: 503,
+    text: () => new Promise<string>((_resolve, reject) => {
+      const rejectOnAbort = () => reject(new DOMException('aborted', 'AbortError'))
+      if (init.signal?.aborted) {
+        rejectOnAbort()
+        return
+      }
+      init.signal?.addEventListener('abort', rejectOnAbort, { once: true })
+    }),
+  }))
+  const startedAt = Date.now()
+
+  const rejection = assert.rejects(
+    uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'PUT' &&
+      error.context?.retryable === false &&
+      error.context?.status === 503,
+  )
+  await vi.advanceTimersByTimeAsync(30_000)
+  await rejection
+
+  expect(Date.now() - startedAt).toBe(30_000)
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime aborts a presigned attachment PUT retry without another attempt', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const signalController = new AbortController()
+  const providerFetch = vi.fn(async () =>
+    createJsonResponse({
+      attachment_id: 'attachment_pdf_abort',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      upload_url: 'https://uploads.example.test/upload/abort-report',
+    }))
+  const publicFetch = vi.fn(async () => {
+    queueMicrotask(() => signalController.abort())
+    return createJsonResponse({ error: 'temporarily unavailable' }, {
+      status: 503,
+    })
+  })
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+        signal: signalController.signal,
+      },
+    ),
+    (error) => error instanceof Error && error.name === 'AbortError',
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(1)
+})
+
+test('linq runtime does not retry an ambiguous attachment reservation failure', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () => {
+    throw new TypeError('connection ended before a response')
+  })
+  const publicFetch = vi.fn(async () => new Response(null, { status: 204 }))
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.method === 'POST' &&
+      error.context?.path === '/attachments' &&
+      error.context?.retryable === false,
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).not.toHaveBeenCalled()
+})
+
+test('linq runtime preserves pre-provider yield provenance without retrying the reservation locally', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerSkippedError = Object.assign(
+    new Error('foreground work owns provider entry'),
+    {
+      assistantDeliveryFailureClass: 'transient' as const,
+      assistantDeliveryResumeTrigger: 'fresh_foreground_input' as const,
+      deliveryMayHaveSucceeded: false as const,
+      retryable: true as const,
+    },
+  )
+  const providerFetch = vi.fn(async () => {
+    throw providerSkippedError
+  })
+  const publicFetch = vi.fn(async () => new Response(null, { status: 204 }))
+
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) => error === providerSkippedError,
+  )
+
+  expect(providerSkippedError).toMatchObject({
+    assistantDeliveryFailureClass: 'transient',
+    assistantDeliveryResumeTrigger: 'fresh_foreground_input',
+    deliveryMayHaveSucceeded: false,
+    retryable: true,
+  })
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).not.toHaveBeenCalled()
+})
+
+test('linq runtime preserves post-reservation provenance without retrying the message locally', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () => {
+    throw Object.assign(new Error('foreground work owns provider entry'), {
+      linqAttachmentReservationMayHaveSucceeded: true as const,
+    })
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-post-reservation-yield',
+        idempotencyKey: 'post-reservation-yield',
+        message: 'Private media',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+      },
+    ),
+    (error) =>
+      error instanceof VaultCliError &&
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.context?.failureStage === 'transport' &&
+      error.context?.method === 'POST' &&
+      error.context?.operation === 'send_message' &&
+      error.context?.retryable === false &&
+      (error as VaultCliError & {
+        linqAttachmentReservationMayHaveSucceeded?: unknown
+      }).linqAttachmentReservationMayHaveSucceeded === true,
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+})
+
+test.each([
+  {
+    label: 'missing required fields',
+    payload: {
+      attachment_id: 'attachment_missing_upload_url',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      detail: 'reservation-secret-value',
+    },
+  },
+  {
+    label: 'an unsupported upload method',
+    payload: {
+      attachment_id: 'attachment_unsupported_method',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'POST',
+      required_headers: {
+        'content-type': 'application/pdf',
+      },
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
+  {
+    label: 'empty required headers',
+    payload: {
+      attachment_id: 'attachment_empty_headers',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {},
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
+  {
+    label: 'all-blank required headers',
+    payload: {
+      attachment_id: 'attachment_blank_headers',
+      expires_at: '2026-04-08T00:05:00.000Z',
+      http_method: 'PUT',
+      required_headers: {
+        '   ': '   ',
+        'content-type': '   ',
+      },
+      detail: 'reservation-secret-value',
+      upload_url: 'https://uploads.example.test/upload/report',
+    },
+  },
+])('linq runtime marks a successful reservation with $label as post-reservation ambiguity', async ({ payload }) => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  const providerFetch = vi.fn(async () => createJsonResponse(payload))
+  const publicFetch = vi.fn(async () => new Response(null, { status: 204 }))
+  await assert.rejects(
+    () => uploadLinqAttachment(
+      {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: 'application/pdf',
+        filename: 'report.pdf',
+      },
+      {
+        env,
+        fetchImplementation: providerFetch,
+        publicFetchImplementation: publicFetch,
+      },
+    ),
+    (error) => {
+      if (!(error instanceof VaultCliError)) {
+        return false
+      }
+      expect(JSON.stringify({
+        context: error.context,
+        message: error.message,
+      })).not.toContain('reservation-secret-value')
+      return error.code === 'LINQ_API_REQUEST_FAILED' &&
+        error.context?.failureStage === 'http' &&
+        error.context?.method === 'POST' &&
+        error.context?.operation === 'create_attachment_upload' &&
+        error.context?.path === '/attachments' &&
+        error.context?.retryable === false &&
+        error.context?.status === 200 &&
+        (error as VaultCliError & {
+          deliveryMayHaveSucceeded?: unknown
+          retryable?: unknown
+        }).deliveryMayHaveSucceeded === true &&
+        (error as VaultCliError & { retryable?: unknown }).retryable === false
+    },
+  )
+
+  expect(providerFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).not.toHaveBeenCalled()
+})
+
 test('linq runtime fails closed when a presigned attachment PUT redirects', async () => {
+  vi.useFakeTimers()
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test/custom/',
     LINQ_API_TOKEN: 'linq-token',
@@ -1650,20 +2361,20 @@ test('linq runtime fails closed when a presigned attachment PUT redirects', asyn
     throw new TypeError('fetch failed: redirected')
   })
 
-  await assert.rejects(
-    () =>
-      uploadLinqAttachment(
-        {
-          bytes,
-          contentType: 'application/pdf',
-          filename: 'report.pdf',
-        },
-        {
-          env,
-          fetchImplementation: providerFetch,
-          publicFetchImplementation: publicFetch,
-        },
-      ),
+  const upload = uploadLinqAttachment(
+    {
+      bytes,
+      contentType: 'application/pdf',
+      filename: 'report.pdf',
+    },
+    {
+      env,
+      fetchImplementation: providerFetch,
+      publicFetchImplementation: publicFetch,
+    },
+  )
+  const rejection = assert.rejects(
+    upload,
     (error) =>
       error instanceof VaultCliError &&
       error.code === 'LINQ_API_REQUEST_FAILED' &&
@@ -1676,9 +2387,11 @@ test('linq runtime fails closed when a presigned attachment PUT redirects', asyn
       error.context?.retryable === false &&
       error.context?.timedOut === false,
   )
+  await vi.runAllTimersAsync()
+  await rejection
 
   expect(providerFetch).toHaveBeenCalledTimes(1)
-  expect(publicFetch).toHaveBeenCalledTimes(1)
+  expect(publicFetch).toHaveBeenCalledTimes(3)
 })
 
 test('linq runtime falls back to provider fetch for attachment PUT when public fetch is absent', async () => {
@@ -1730,7 +2443,7 @@ test('linq runtime falls back to provider fetch for attachment PUT when public f
   ])
 })
 
-test('linq runtime rejects unsafe attachment upload URLs before uploading bytes', async () => {
+test('linq runtime marks unsafe 2xx attachment upload URLs ambiguous before uploading bytes', async () => {
   const env = {
     LINQ_API_BASE_URL: ' https://linq.example.test/custom/ ',
     LINQ_API_TOKEN: ' linq-token ',
@@ -1764,8 +2477,15 @@ test('linq runtime rejects unsafe attachment upload URLs before uploading bytes'
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_INVALID_INPUT' &&
-      error.message.includes('must use HTTPS'),
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.message.includes('must use HTTPS') &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'POST' &&
+      error.context?.operation === 'create_attachment_upload' &&
+      error.context?.status === 200 &&
+      (error as VaultCliError & {
+        deliveryMayHaveSucceeded?: unknown
+      }).deliveryMayHaveSucceeded === true,
   )
   expect(createFetch).toHaveBeenCalledTimes(1)
 
@@ -1802,8 +2522,15 @@ test('linq runtime rejects unsafe attachment upload URLs before uploading bytes'
       ),
     (error) =>
       error instanceof VaultCliError &&
-      error.code === 'LINQ_INVALID_INPUT' &&
-      error.message.includes('must use a public host'),
+      error.code === 'LINQ_API_REQUEST_FAILED' &&
+      error.message.includes('must use a public host') &&
+      error.context?.failureStage === 'http' &&
+      error.context?.method === 'POST' &&
+      error.context?.operation === 'create_attachment_upload' &&
+      error.context?.status === 200 &&
+      (error as VaultCliError & {
+        deliveryMayHaveSucceeded?: unknown
+      }).deliveryMayHaveSucceeded === true,
   )
   expect(uploadFetch).not.toHaveBeenCalled()
 })
@@ -2045,6 +2772,30 @@ test('linq runtime surfaces non-retryable transport, http, and configuration fai
       error.message ===
         'Linq request POST /webhook-subscriptions failed with HTTP 429.',
   )
+})
+
+test('linq runtime preserves an explicit pre-provider delivery failure', async () => {
+  const preProviderError = Object.assign(
+    new VaultCliError(
+      'HOSTED_BACKGROUND_DELIVERY_YIELDED',
+      'Hosted background delivery yielded before provider entry.',
+      { retryable: true },
+    ),
+    { deliveryMayHaveSucceeded: false as const },
+  )
+  const fetchImplementation: LinqFetch = vi.fn(async () => {
+    throw preProviderError
+  })
+
+  await expect(sendLinqChatMessage({
+    chatId: 'chat-pre-provider-failure',
+    idempotencyKey: 'message-pre-provider-failure',
+    message: 'hello',
+  }, {
+    env: { LINQ_API_TOKEN: 'linq-token' },
+    fetchImplementation,
+  })).rejects.toBe(preProviderError)
+  expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
 test('deleteLinqMessage treats missing provider messages as an idempotent success', async () => {
@@ -2519,6 +3270,10 @@ test('linq runtime covers optional payload omissions, fallback http messages, an
     message: {
       id: 'msg-retry-succeeded',
     },
+    providerMessageEffects: [{
+      message: 'hello',
+      providerMessageId: 'msg-retry-succeeded',
+    }],
   })
   assert.equal(idempotentSendRequests.length, 2)
   assert.deepEqual(

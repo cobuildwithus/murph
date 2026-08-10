@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-08-01
+Last verified: 2026-08-08
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ Last verified: 2026-08-01
 | `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members, with an internal Group billing identity, Pulse runtime capability, $2.80 included personal AI usage, trial continuation, signed billing actions, and public-checkout exclusion. | Active |
 | `agent-docs/product-specs/labs-discovery.md` | Live read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked `/labs` page, with provider-neutral member-facing language. | Implemented |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
-| `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 personal, exact Family-member, and hosted-group funding with current-policy saved-card reuse, Checkout fallback, authenticated payer-and-target-scoped lost-response recovery, canonical purchase/referral credit entries, and purchase-only refund/dispute reversal; fulfilled top-ups immediately refresh the overall usage bar. | Active |
+| `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 personal, exact Family-member, and hosted-group funding with current-policy saved-card reuse, Checkout fallback, authenticated payer-and-target-scoped lost-response recovery, canonical purchase/referral credit entries, optional participant-authorized group creative responses, and purchase-only refund/dispute reversal; fulfilled top-ups immediately refresh the overall usage bar. | Active |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Conversational personal/group usage missions, portable qualification, canonical credit-entry accounting, final rewards, and source-room celebration. | Active |
 | `agent-docs/product-specs/physical-notes.md` | GPT Image plus Lob physical notes composed through the existing hosted image-completion wake, one Web-owned provider effect, one complimentary claim per member or group, and ordinary Murph usage thereafter. | Active |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Direct support address plus explicit, member-linked, de-identified product-team escalation with a three-email-per-UTC-day server limit and stable provider idempotency. | Implemented |
@@ -22,7 +22,7 @@ Last verified: 2026-08-01
 | `agent-docs/product-specs/health-commons.md` | Health Commons page graph, catalog, versioning, future aggregate outcome summaries, and artifact-storage product boundary. | Active |
 | `agent-docs/product-specs/murph-safe-public-product-search.md` | Public supplement and branded-food evidence search, normalized API contract, exact product-test semantics, privacy, and abuse bounds. | Active |
 | `agent-docs/product-specs/protocol-summary-copy.md` | Source-of-truth copy rules for Health Commons protocol `summary:` fields shown on `/experiments` cards. | Active |
-| `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding for a private broad-assistant relationship: brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, and finite completion. | Active |
+| `agent-docs/product-specs/murph-onboarding.md` | Aspiration-anchored onboarding through a compact progressive-disclosure skill: private relationship, observable bounded-history resume rules, brief aspiration-thread capture, explicit park, progressive health foundation, contextual return, collaborative first step, finite completion, and one code-owned first personal read. | Active |
 | `agent-docs/product-specs/experiment-onboarding.md` | Experiment-only start, protocol onboarding contracts, assistant setup behavior, and private run handoff. | Active |
 | `agent-docs/product-specs/experiment-adherence-confidence.md` | Read-time assumed adherence, sensed/confirmed/assumed confidence ladder, correction semantics, and category-scoped activity evidence. | Active |
 | `agent-docs/product-specs/experiment-outcome-selection.md` | Experiment-only choice rules for member-valued outcomes, credible evidence, timeframe integrity, and setup handoff. | Active |

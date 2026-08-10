@@ -11,6 +11,122 @@ import type {
 } from "../src/runner-job-transport.js";
 
 describe("RunnerContainer internal runtime dispatch", () => {
+  it("reports completion only after the exact container operation is inactive", async () => {
+    let container!: RunnerContainer;
+    let activeFenceAtReceipt: Awaited<
+      ReturnType<RunnerContainer["readActiveRuntimeUserFence"]>
+    > | null = null;
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => {
+      activeFenceAtReceipt = await container.readActiveRuntimeUserFence();
+      return { completed: true };
+    });
+    const environment = {
+      USER_RUNNER: {
+        getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
+      },
+    };
+    ({ container } = createActivityExpiryContainerDouble({ environment }));
+
+    const result = await container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    });
+
+    expect(result).toMatchObject({ status: "idle" });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledWith({
+      attemptId: "attempt_member_123",
+      generation: "11",
+      result: expect.objectContaining({ status: "idle" }),
+      userId: "member_123",
+    });
+    expect(activeFenceAtReceipt).toEqual({
+      active: false,
+      reason: "no_active_runtime",
+    });
+  });
+
+  it("preserves a completed result when the completion receipt fails", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => {
+      throw new Error("completion receipt unavailable");
+    });
+    const { container } = createActivityExpiryContainerDouble({
+      environment: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
+        },
+      },
+    });
+
+    await expect(container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    })).resolves.toMatchObject({ status: "idle" });
+    expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
+  });
+
+  it("bounds a non-settling completion receipt and consumes its late rejection", async () => {
+    vi.useFakeTimers();
+    let rejectReceipt!: (error: unknown) => void;
+    const receipt = new Promise<{ completed: boolean }>((_resolve, reject) => {
+      rejectReceipt = reject;
+    });
+    const recordRuntimeCompletionFromContainer = vi.fn(() => receipt);
+    const { container } = createActivityExpiryContainerDouble({
+      environment: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
+        },
+      },
+    });
+
+    try {
+      const invocation = container.invoke({
+        job: createWorkspaceRunnerJob("member_123"),
+        timeoutMs: 5_000,
+        userId: "member_123",
+      });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(recordRuntimeCompletionFromContainer).toHaveBeenCalledOnce();
+      await expect(container.readActiveRuntimeUserFence()).resolves.toEqual({
+        active: false,
+        reason: "no_active_runtime",
+      });
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(invocation).resolves.toMatchObject({ status: "idle" });
+
+      rejectReceipt(new Error("late completion receipt failure"));
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not report an invocation that fails in the container", async () => {
+    const recordRuntimeCompletionFromContainer = vi.fn(async () => ({
+      completed: true,
+    }));
+    const { container } = createActivityExpiryContainerDouble({
+      environment: {
+        USER_RUNNER: {
+          getByName: vi.fn(() => ({ recordRuntimeCompletionFromContainer })),
+        },
+      },
+      invocationStatus: 500,
+    });
+
+    await expect(container.invoke({
+      job: createWorkspaceRunnerJob("member_123"),
+      timeoutMs: 5_000,
+      userId: "member_123",
+    })).rejects.toThrow();
+    expect(recordRuntimeCompletionFromContainer).not.toHaveBeenCalled();
+  });
+
   it("posts workspace jobs without active-operation storage", async () => {
     const storage = createContainerStorageDouble();
     const startAndWaitForPorts = vi.fn(async () => {});
@@ -125,6 +241,8 @@ function createWorkspaceRunnerJob(userId: string): HostedExecutionWorkspaceInvoc
 }
 
 function createActivityExpiryContainerDouble(input: {
+  environment?: ConstructorParameters<typeof RunnerContainer>[1];
+  invocationStatus?: number;
   renewActivityTimeout?: ReturnType<typeof vi.fn>;
   resultOverrides?: Record<string, unknown>;
 } = {}) {
@@ -142,13 +260,13 @@ function createActivityExpiryContainerDouble(input: {
       headers: {
         "content-type": "application/json; charset=utf-8",
       },
-      status: 200,
+      status: input.invocationStatus ?? 200,
     });
   });
   let status: "running" | "stopped" = "stopped";
   const container = new RunnerContainer({
     storage,
-  } as never, {} as never);
+  } as never, input.environment ?? {});
   Object.assign(container, {
     containerFetch,
     destroy: vi.fn(async () => {

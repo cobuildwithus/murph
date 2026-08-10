@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 import {
   HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX,

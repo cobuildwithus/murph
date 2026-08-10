@@ -1058,7 +1058,9 @@ describe('assistant codex runtime', () => {
     })
   })
 
-  it('executes Codex app-server turns, sanitizes env, and streams assistant output through JSON-RPC', async () => {
+  it.each([0, 3])(
+    'executes Codex app-server turns, sanitizes env, and streams assistant output through JSON-RPC at provider ordinal %i',
+    async (providerRequestOrdinal) => {
     const workingDirectory = await createTempDir('assistant-codex-workdir-')
     const codexHome = await createTempDir('assistant-codex-home-')
     const threadId = '00000000-0000-4000-8000-000000000001'
@@ -1367,7 +1369,16 @@ describe('assistant codex runtime', () => {
         model: 'gpt-5',
         modelProvider: 'vercel-ai-gateway',
         reasoningEffort: 'high',
-        providerRequestOrdinal: 3,
+        providerRequestOrdinal,
+        providerStartCriticalPath: {
+          assistantPhaseStartedAtMonotonicMs: 0,
+          assistantServiceStartedAtMonotonicMs: 0,
+          assistantTurnLockAcquiredAtMonotonicMs: 0,
+          assistantTurnLockWaitStartedAtMonotonicMs: 0,
+          automationLaneStartedAtMonotonicMs: 0,
+          mailboxImportDoneAtMonotonicMs: 0,
+          preProviderSetupDoneAtMonotonicMs: 0,
+        },
         prompt: 'Explain this',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -1441,7 +1452,7 @@ describe('assistant codex runtime', () => {
         event.codexTimingStage === 'turn-completed'
       )
     expect(turnCompletedTiming).toEqual(expect.objectContaining({
-      codexTimingProviderRequestOrdinal: 3,
+      codexTimingProviderRequestOrdinal: providerRequestOrdinal,
       codexTimingTurnCompleteElapsedMs: expect.any(Number),
       codexTimingTurnCompletedNotificationElapsedMs: expect.any(Number),
       codexTimingTurnStartAckElapsedMs: expect.any(Number),
@@ -1452,7 +1463,9 @@ describe('assistant codex runtime', () => {
     expect(onTraceEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         rawEvent: expect.objectContaining({
-          codexTimingColdStartReason: 'node-process-first-use',
+          ...(providerRequestOrdinal === 0
+            ? { codexTimingColdStartReason: 'node-process-first-use' }
+            : {}),
           codexTimingStage: 'initialized',
         }),
         updates: [],
@@ -1467,7 +1480,26 @@ describe('assistant codex runtime', () => {
         startedAt: expect.any(String),
       }),
     )
-  })
+    const providerStartEvent = onProviderRequestStarted.mock.calls[0]?.[0]
+    if (providerRequestOrdinal === 0) {
+      expect(providerStartEvent).toMatchObject({
+        providerStartCriticalPath: {
+          assistantServicePreLockMs: expect.any(Number),
+          automationLaneToAssistantServiceMs: expect.any(Number),
+          codexAppServerPreProviderMs: expect.any(Number),
+          codexProcessPreparationMs: expect.any(Number),
+          mailboxImportDoneToAssistantPhaseMs: expect.any(Number),
+          preProviderSetupMs: expect.any(Number),
+          providerPlanAndGateMs: expect.any(Number),
+          turnLockWaitMs: expect.any(Number),
+          workspaceAssistantPreAutomationMs: expect.any(Number),
+        },
+      })
+    } else {
+      expect(providerStartEvent).not.toHaveProperty('providerStartCriticalPath')
+    }
+    },
+  )
 
   it('starts cold and warm App Server turns before any lazy shared-data read', async () => {
     const workingDirectory = await createTempDir('assistant-codex-group-shared-work-')
@@ -6337,7 +6369,7 @@ describe('assistant codex runtime', () => {
     },
   )
 
-  it('uses the lower group threshold and preserves pre-compaction usage attribution', async () => {
+  it('uses-the-lower-group-threshold and preserves pre-compaction usage attribution', async () => {
     const workingDirectory = await createTempDir('assistant-codex-compact-provider-usage-work-')
     const codexHome = await createTempDir('assistant-codex-compact-provider-usage-home-')
     const threadId = 'thread-compact-provider-usage'
@@ -6365,15 +6397,15 @@ describe('assistant codex runtime', () => {
               tokenUsage: {
                 last: {
                   cachedInputTokens: 25_000,
-                  inputTokens: 75_000,
+                  inputTokens: 50_000,
                   outputTokens: 12,
-                  totalTokens: 75_012,
+                  totalTokens: 50_012,
                 },
                 total: {
                   cachedInputTokens: 25_000,
-                  inputTokens: 75_000,
+                  inputTokens: 50_000,
                   outputTokens: 12,
-                  totalTokens: 75_012,
+                  totalTokens: 50_012,
                 },
                 modelContextWindow: 128_000,
               },
@@ -6488,20 +6520,20 @@ describe('assistant codex runtime', () => {
 
     await expect(
       compactWarmCodexThread({
-        groupMinThreadTokens: 60_000,
+        groupMinThreadTokens: 50_000,
         minThreadTokens: 100_000,
         timeoutMs: 5_000,
       }),
     ).resolves.toMatchObject({
       kind: 'compacted',
-      threadContextTokensBefore: 75_000,
+      threadContextTokensBefore: 50_000,
       threadId,
       usage: {
         cachedInputTokens: null,
-        inputTokens: 75_000,
+        inputTokens: 50_000,
         outputTokens: null,
         source: 'estimated',
-        totalTokens: 75_000,
+        totalTokens: 50_000,
       },
     })
   })
@@ -15274,6 +15306,25 @@ describe('assistant codex runtime', () => {
           })
 
           child.stdout.write(jsonLine({
+            id: 1000,
+            method: 'item/tool/call',
+            params: {
+              arguments: { action: 'list' },
+              namespace: 'murph',
+              threadId: 'thread-root-tool-scope',
+              tool: 'pending_vault_files',
+              turnId: 'turn-stale-root-tool-scope',
+            },
+          }))
+          await expect(waitForRpcResponse(child, 1000)).resolves.toEqual({
+            error: {
+              code: -32000,
+              message: 'Codex message turn id does not match the active turn.',
+            },
+            id: 1000,
+          })
+
+          child.stdout.write(jsonLine({
             id: 100,
             method: 'item/tool/call',
             params: {
@@ -15517,6 +15568,7 @@ describe('assistant codex runtime', () => {
       dynamicTools: resolveMurphDynamicTools({
         deviceAvailable: true,
         messageTargetingAvailable: true,
+        pendingVaultFilesAvailable: true,
       }),
       prompt: 'inspect connected devices',
       workingDirectory,
@@ -15651,6 +15703,99 @@ describe('assistant codex runtime', () => {
       }),
     ])
     expect(JSON.stringify(result.runtimeIssueInputs)).not.toContain('arguments')
+  })
+
+  it('records pending-file schema rejection through the standard safe diagnostic', async () => {
+    const workingDirectory = await createTempDir(
+      'assistant-codex-pending-file-invalid-',
+    )
+
+    codexMocks.spawn.mockImplementation(() => {
+      const child = new MockChildProcess()
+
+      queueMicrotask(() => {
+        void (async () => {
+          await waitForRpcMethod(child, 'initialize')
+          child.stdout.write(jsonLine({ id: 1, result: {} }))
+          await waitForRpcMethod(child, 'thread/start')
+          child.stdout.write(jsonLine({
+            id: 2,
+            result: {
+              thread: { id: 'thread-pending-file-invalid' },
+            },
+          }))
+          await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: 3,
+            result: {
+              turn: { id: 'turn-pending-file-invalid' },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            id: 99,
+            method: 'item/tool/call',
+            params: {
+              arguments: {
+                action: 'cancel',
+                intentIds: ['private invalid intent'],
+              },
+              namespace: 'murph',
+              tool: 'pending_vault_files',
+              turnId: 'turn-pending-file-invalid',
+            },
+          }))
+
+          await expect(waitForRpcResponse(child, 99)).resolves.toEqual({
+            id: 99,
+            result: {
+              success: false,
+              contentItems: [{
+                type: 'inputText',
+                text: 'invalid pending vault-file arguments',
+              }],
+            },
+          })
+
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-pending-file-invalid',
+                status: 'completed',
+              },
+            },
+          }))
+        })()
+      })
+
+      return child
+    })
+
+    const result = await executeCodexAppServerTurn({
+      dynamicTools: resolveMurphDynamicTools({
+        pendingVaultFilesAvailable: true,
+      }),
+      prompt: 'try invalid pending file tool',
+      workingDirectory,
+    })
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        operation: 'murph.pending_vault_files',
+        phase: 'tool_call',
+        issueKind: 'schema_rejection',
+        severity: 'warning',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        details: expect.objectContaining({
+          detailsSchema: 'murph.tool-call-validation-digest.v1',
+          invalidPaths: ['intentIds.[]'],
+          schemaName: 'murph.pending_vault_files.input',
+          toolName: 'murph.pending_vault_files',
+        }),
+      }),
+    ])
+    expect(JSON.stringify(result.runtimeIssueInputs))
+      .not.toContain('private invalid intent')
   })
 
   it('uses native cold resume when the turn requires the private style tool', async () => {

@@ -3099,7 +3099,6 @@ describe("parseHostedRuntimeGroupTool", () => {
         usage: {
           fundingNeeded: true,
           fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored" as const,
         },
       },
     };
@@ -3124,7 +3123,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: true,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3147,7 +3145,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: false,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3170,7 +3167,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: false,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3366,6 +3362,13 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "share_contact_card",
       result: { status: "already_shared" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
+    })).toEqual({
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
     });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "share_contact_card",
@@ -3746,32 +3749,17 @@ describe("parseHostedRuntimeNewsletterTool", () => {
 });
 
 describe("parseHostedRuntimeFamilyPlanTool", () => {
-  it("parses checkout and create-invite requests and rejects missing invite routes", () => {
+  it("keeps checkout invitation-free and validates create-invite routes", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "start_checkout",
     })).toEqual({
       action: "start_checkout",
-    });
-    expect(parseHostedRuntimeFamilyPlanToolRequest({
-      action: "start_checkout",
-      invite: {
-        targetLabel: "dad",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "dad_username",
-      },
-    })).toEqual({
-      action: "start_checkout",
-      invite: {
-        targetLabel: "dad",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "dad_username",
-      },
     });
 
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -3780,7 +3768,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     })).toEqual({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -3795,7 +3783,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
           targetLabel: "dad",
         },
       })
-    ).toThrow(/phone number, Telegram username, or email/u);
+    ).toThrow(/start_checkout request\.invite is not allowed/u);
 
     expect(() =>
       parseHostedRuntimeFamilyPlanToolRequest({
@@ -3818,6 +3806,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
   });
 
   it("parses exact member and invite tiers with per-tier capacity", () => {
+    const maxMember = {
+      isOwner: false,
+      label: "Mom",
+      planCode: "max",
+      role: "member",
+      status: "active",
+    } as const;
+
+    expect(() => parsePreMaxHostedRuntimeFamilyPlanCode(maxMember.planCode)).toThrow(
+      /plan code is not supported/u,
+    );
+
     expect(parseHostedRuntimeFamilyPlanToolResponse({
       action: "read_status",
       result: {
@@ -3826,6 +3826,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         members: [
           { isOwner: true, label: null, planCode: "pulse", role: "owner", status: "active" },
           { isOwner: false, label: "Dad", planCode: "edge", role: "member", status: "active" },
+          maxMember,
         ],
         owner: true,
         pendingInvites: [
@@ -3841,16 +3842,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         ],
         plans: {
           edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+          max: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
           pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
         },
-        seats: { active: 2, billed: 3, invited: 1, max: 6, min: 2, remaining: 0, used: 3 },
+        seats: { active: 3, billed: 4, invited: 1, max: 6, min: 2, remaining: 0, used: 4 },
       },
     })).toMatchObject({
       result: {
-        members: [{ planCode: "pulse" }, { planCode: "edge" }],
+        members: [{ planCode: "pulse" }, { planCode: "edge" }, { planCode: "max" }],
         pendingInvites: [{ planCode: "edge" }],
         plans: {
           edge: { billed: 2, used: 2 },
+          max: { billed: 1, used: 1 },
           pulse: { billed: 1, used: 1 },
         },
       },
@@ -3915,15 +3918,6 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         billingStatus: "not_started",
         checkoutUrl: "https://checkout.stripe.test/family",
         owner: true,
-        preparedInvite: {
-          acceptUrl: null,
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
         seats: {
           active: 1,
           billed: 2,
@@ -3951,6 +3945,13 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
             remaining: 0,
             used: 0,
           },
+          max: {
+            active: 0,
+            billed: 0,
+            invited: 0,
+            remaining: 0,
+            used: 0,
+          },
           pulse: {
             active: 1,
             billed: 2,
@@ -3959,16 +3960,6 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
             used: 1,
           },
         },
-        preparedInvite: {
-          acceptUrl: null,
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          planCode: "pulse",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
         seats: {
           active: 1,
           billed: 2,
@@ -4009,6 +4000,19 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         unavailableReason: "already_sponsored",
       },
     });
+
+    expect(() => parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        preparedInvite: {},
+      },
+    })).toThrow(/preparedInvite must be null/u);
+    expect(() => parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        preparedInviteReplyText: "prepared",
+      },
+    })).toThrow(/preparedInviteReplyText must be null/u);
   });
 });
 
@@ -4167,3 +4171,11 @@ describe("parseHostedExecutionWake", () => {
     });
   });
 });
+
+function parsePreMaxHostedRuntimeFamilyPlanCode(value: unknown): "edge" | "pulse" {
+  if (value === "edge" || value === "pulse") {
+    return value;
+  }
+
+  throw new TypeError("Pre-Max hosted runtime Family plan code is not supported.");
+}

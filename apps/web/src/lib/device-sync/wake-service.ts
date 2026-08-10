@@ -2169,6 +2169,15 @@ async function startHostedDeviceSyncWakeWorkflow(
   }
 }
 
+/**
+ * Webhook fan-out bursts queue many admissions on one member row. Without a
+ * lock bound, each queued transaction burns its whole 15s budget waiting and
+ * then expires mid-callback; with one, waiters fail fast with a retryable 503
+ * the provider absorbs by redelivering. Only webhook acceptance passes this
+ * bound: other admission callers have no redelivery loop.
+ */
+const WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS = 5_000;
+
 async function persistHostedDeviceSyncWebhookAccepted(input: {
   acceptedAt: string;
   acceptanceMode: DeviceSyncWebhookAcceptanceMode;
@@ -2316,6 +2325,9 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       return {
         wakeMailboxItemId,
       };
+      },
+      {
+        memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
       },
     ));
 

@@ -73,7 +73,7 @@ describe("reserveLocalTemporalTcpPort", () => {
 
 describe("startAssistantProviderStubServer", () => {
   it("streams Responses API fixtures for real Codex app-server recorder mode", async () => {
-    const requests: Array<{ body: string; method: string; url: string }> = [];
+    const requests: HostedLocalAssistantProviderStubRequest[] = [];
     const server = await startAssistantProviderStubServer({
       onRequest: (request) => {
         requests.push(request);
@@ -105,6 +105,7 @@ describe("startAssistantProviderStubServer", () => {
       expect(body).toContain("response.completed");
       expect(body).toContain("streamed recorder reply");
       expect(requests).toHaveLength(1);
+      expect(Number.isSafeInteger(requests[0]?.observedAtEpochMs)).toBe(true);
       expect(JSON.parse(requests[0]!.body)).toMatchObject({
         stream: true,
       });
@@ -514,6 +515,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
       && name !== "murph.newsletter"
+      && name !== "murph.pending_vault_files"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
@@ -546,6 +548,18 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       buildResponsesRequest(baseToolNames, "code-mode"),
     ]);
     expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.pending_vault_files"])],
+      {
+        pendingVaultFilesAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.send_vault_file"])],
+      {
+        vaultFileSendAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
         progressUpdatesAvailable: false,
@@ -561,6 +575,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
         newsletterAvailable: true,
+        pendingVaultFilesAvailable: true,
         physicalNotesAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
@@ -675,6 +690,7 @@ describe("resolveHostedAssistantLocalDevEnv", () => {
 describe("hosted local e2e scenario registration", () => {
   it("keeps heavy hosted-local scenarios manual-only while preserving the direct-R2 invariant in all", () => {
     const allScenarios = resolveHostedLocalE2eScenarios("all");
+    const coldStartBenchmark = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "cold-start-benchmark");
     const containerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "container-continuity");
     const codexContainerContinuity = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "codex-container-continuity");
     const directR2PresignedPut = listHostedLocalE2eScenarios().find((scenario) => scenario.name === "direct-r2-presigned-put");
@@ -686,6 +702,11 @@ describe("hosted local e2e scenario registration", () => {
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
       manualOnly: true,
       name: "container-continuity",
+    });
+    expect(coldStartBenchmark).toMatchObject({
+      file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+      manualOnly: true,
+      name: "cold-start-benchmark",
     });
     expect(codexContainerContinuity).toMatchObject({
       file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",
@@ -712,6 +733,7 @@ describe("hosted local e2e scenario registration", () => {
       name: "vault-persistence",
     });
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("container-continuity");
+    expect(allScenarios.map((scenario) => scenario.name)).not.toContain("cold-start-benchmark");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("codex-container-continuity");
     expect(allScenarios.map((scenario) => scenario.name)).toContain("direct-r2-presigned-put");
     expect(allScenarios.map((scenario) => scenario.name)).not.toContain("linq-lost-active-operation");
@@ -721,6 +743,11 @@ describe("hosted local e2e scenario registration", () => {
       file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
       manualOnly: true,
       name: "container-continuity",
+    })]);
+    expect(resolveHostedLocalE2eScenarios("cold-start-benchmark")).toEqual([expect.objectContaining({
+      file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+      manualOnly: true,
+      name: "cold-start-benchmark",
     })]);
     expect(resolveHostedLocalE2eScenarios("codex-container-continuity")).toEqual([expect.objectContaining({
       file: "apps/cloudflare/test/hosted-local-codex-container-continuity-e2e.test.ts",

@@ -13,7 +13,10 @@ import {
 
 const CORE_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   accessKind: "paid",
-  forecast: null,
+  forecast: {
+    estimatedDaysRemaining: 7,
+    estimatedExhaustionAt: "2026-08-16T04:00:00.000Z",
+  },
   generatedAt: "2026-07-27T04:00:00.000Z",
   periodEnd: "2026-08-27T04:00:00.000Z",
   periodKind: "monthly",
@@ -24,6 +27,21 @@ const CORE_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
   remainingPercent: 72,
   status: "active",
   usedPercent: 28,
+};
+
+const MAX_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
+  accessKind: "paid",
+  forecast: null,
+  generatedAt: "2026-08-07T20:00:00.000Z",
+  periodEnd: "2026-09-07T20:00:00.000Z",
+  periodKind: "monthly",
+  periodStart: "2026-08-07T20:00:00.000Z",
+  planCode: "launch_max_monthly",
+  planName: "Max",
+  recommendedAction: null,
+  remainingPercent: 84,
+  status: "active",
+  usedPercent: 16,
 };
 
 export function GroupMemberPlanStudy() {
@@ -53,7 +71,7 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
-        label="Payment method saved before starting Core"
+        label="Paused Pulse trial ready to resume after payment recovery"
         state="payment-recovery"
       >
         <div inert>
@@ -61,6 +79,7 @@ export function GroupMemberPlanStudy() {
             authenticated
             billingStatus="paused"
             canStartPaidPulse
+            currentBillingPhase="trial"
             currentBillingPlanCode="launch_monthly"
             currentCheckoutOffer="pulse_trial_7d"
             groupPaymentMethodSaved
@@ -89,14 +108,83 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
-        label="Completed Edge upgrade awaiting billing sync"
+        label="Edge member can upgrade to the $50 Max plan"
+        state="edge-upgrade-max"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canUpgradeToMax
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_edge_monthly"
+            currentPeriodEnd={new Date("2026-09-07T20:00:00.000Z")}
+            showMaxPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Max stays active until the scheduled Edge downgrade"
+        state="active-max-scheduled-edge"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canSwitchToEdge
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_max_monthly"
+            currentPeriodEnd={new Date("2026-09-07T20:00:00.000Z")}
+            scheduledBillingEffectiveAt={new Date("2026-09-07T20:00:00.000Z")}
+            scheduledBillingPlanCode="launch_edge_monthly"
+            showMaxPlan
+            usageStatus={MAX_USAGE_STATUS}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Paid plan lapsed while Stripe recovery is available"
+        state="lapsed-pulse"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="past_due"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_monthly"
+            currentCheckoutOffer="standard"
+            showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family-sponsored member with billing owned by the sponsor"
+        state="family-sponsored"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            currentBillingPhase="paid"
+            currentBillingPlanCode="launch_edge_monthly"
+            familyState="sponsored"
+            showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Completed Max upgrade awaiting billing sync"
         state="plan-update-pending"
       >
         <div className="flex flex-col gap-4" inert>
           <HostedPlanUpdateReturn
             active={false}
             pollingEnabled={false}
-            targetPlanCode="launch_edge_monthly"
+            targetPlanCode="launch_max_monthly"
           />
           <HostedBillingSettings
             authenticated
@@ -104,20 +192,14 @@ export function GroupMemberPlanStudy() {
             canStartFamily
             canSwitchToGroup
             canUpgradeToEdge
+            canUpgradeToMax
             canUpgradeToPulse
             currentBillingPhase="paid"
-            currentBillingPlanCode="launch_group_monthly"
-            currentPeriodEnd={new Date("2026-08-27T04:00:00.000Z")}
+            currentBillingPlanCode="launch_edge_monthly"
+            currentPeriodEnd={new Date("2026-09-07T20:00:00.000Z")}
             planChangePending
             showGroupPlan
-            usageStatus={{
-              ...CORE_USAGE_STATUS,
-              recommendedAction: {
-                kind: "upgrade_edge",
-                label: "Upgrade to Edge",
-                url: "/settings#subscription",
-              },
-            }}
+            showMaxPlan
           />
         </div>
       </StudyState>
@@ -153,6 +235,55 @@ export function GroupMemberPlanStudy() {
               label: "Choose Pulse",
               targetPlanCode: "launch_monthly",
               url: "/settings#subscription",
+            }}
+            resetAt={new Date("2026-08-27T04:00:00.000Z")}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family allowance exhausted with the fallback Add usage action"
+        state="family-usage-exhausted-fallback"
+      >
+        <div inert>
+          <UsageLimitBanner
+            noticeCode="family_usage_limit_reached"
+            now={new Date("2026-08-21T12:00:00.000Z")}
+            resetAt={new Date("2026-08-27T04:00:00.000Z")}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Pulse usage exhausted with an add-usage action"
+        state="pulse-usage-exhausted-add-usage"
+      >
+        <div inert>
+          <UsageLimitBanner
+            noticeCode="pulse_upgrade_edge"
+            now={new Date("2026-08-21T12:00:00.000Z")}
+            recommendedAction={{
+              kind: "add_usage",
+              label: "Add usage",
+              url: "/settings?addUsage=true#subscription",
+            }}
+            resetAt={new Date("2026-08-27T04:00:00.000Z")}
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Max usage exhausted with an add-usage action"
+        state="max-usage-exhausted-add-usage"
+      >
+        <div inert>
+          <UsageLimitBanner
+            noticeCode="max_usage_limit_reached"
+            now={new Date("2026-08-21T12:00:00.000Z")}
+            recommendedAction={{
+              kind: "add_usage",
+              label: "Add usage",
+              url: "/settings?addUsage=true#subscription",
             }}
             resetAt={new Date("2026-08-27T04:00:00.000Z")}
           />

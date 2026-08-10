@@ -122,14 +122,14 @@
     "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "@murphai/vault-usecases": "workspace:*",
-    "zod": "^4.4.3"
+    "@murphai/vault-usecases": "workspace:*"
   },
   "engines": {
     "node": ">=24.14.1"
   },
   "devDependencies": {
     "@openai/codex": "0.145.0",
-    "openai": "6.45.0"
+    "openai": "6.45.0",
+    "zod": "^4.4.3"
   }
 }

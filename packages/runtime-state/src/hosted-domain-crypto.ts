@@ -669,6 +669,12 @@ export async function verifyHostedDomainRootEnvelopeSignatureWithPublicKey(input
   );
 }
 
+export async function assertHostedAuthorityVerifyPublicKeyPem(
+  publicKeyPem: string,
+): Promise<void> {
+  await importP256PublicKeyFromPem(publicKeyPem);
+}
+
 async function deriveHostedSecureBoxKey(input: {
   domain: HostedCryptoDomain;
   lane: HostedCryptoLane;

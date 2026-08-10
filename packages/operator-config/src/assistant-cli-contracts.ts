@@ -1,5 +1,5 @@
 import { isIP } from 'node:net'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
   automationRouteSchema,
@@ -13,6 +13,7 @@ import {
   type AutomationTimeScheduleKind,
 } from '@murphai/contracts'
 import {
+  isAssistantGeneratedDeliveryRef,
   isNormalizedAssistantVaultFileRef,
 } from '@murphai/runtime-state/assistant-generated-deliveries'
 import { normalizeAssistantOpaqueId } from '@murphai/runtime-state/assistant-ids'
@@ -448,6 +449,13 @@ const assistantVoiceMemoResponseMediaSchema = z
   })
   .strict()
 
+const assistantExportPackRetirementReceiptSchema = z
+  .object({
+    manifestSha256: z.string().regex(/^[0-9a-f]{64}$/u),
+    packId: z.string().regex(/^[A-Za-z0-9_-]+$/u),
+  })
+  .strict()
+
 const assistantVaultFileResponseMediaSchema = z
   .object({
     approvalGeneration: z.string().regex(/^[0-9a-f]{64}$/u).nullable().default(null),
@@ -478,13 +486,42 @@ const assistantVaultFileResponseMediaSchema = z
       .min(3)
       .max(200)
       .regex(/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u),
+    retireExportPacks: z
+      .array(assistantExportPackRetirementReceiptSchema)
+      .min(1)
+      .max(20)
+      .optional(),
     sizeBytes: z.number().int().positive().max(assistantVaultFileMaxBytes),
   })
   .strict()
-  .refine(
-    (value) => (value.approvalGeneration === null) === (value.approvalId === null),
-    'Assistant vault file approval id and generation must be present together.',
-  )
+  .superRefine((value, context) => {
+    if ((value.approvalGeneration === null) !== (value.approvalId === null)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Assistant vault file approval id and generation must be present together.',
+      })
+    }
+    if (value.retireExportPacks) {
+      if (
+        value.contentType !== 'application/zip'
+        || !isAssistantGeneratedDeliveryRef(value.ref)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Export-pack retirement requires an assistant-generated ZIP.',
+          path: ['retireExportPacks'],
+        })
+      }
+      const packIds = value.retireExportPacks.map((receipt) => receipt.packId)
+      if (new Set(packIds).size !== packIds.length) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Export-pack retirement receipts must have unique pack ids.',
+          path: ['retireExportPacks'],
+        })
+      }
+    }
+  })
 
 export const assistantResponseMediaSchema = z.union([
   assistantImageResponseMediaSchema,
@@ -747,6 +784,13 @@ const assistantChannelCleanupMessageSchema = z
   })
   .strict()
 
+export const assistantProviderMessageEffectSchema = z
+  .object({
+    providerMessageId: z.string().min(1),
+    message: z.string().min(1).nullable(),
+  })
+  .strict()
+
 const assistantMessageChannelDeliverySchema = z.object({
   kind: z.literal('message').optional(),
   channel: z.string().min(1),
@@ -757,6 +801,10 @@ const assistantMessageChannelDeliverySchema = z.object({
   messageLength: z.number().int().nonnegative(),
   providerMessageId: z.string().min(1).nullable().default(null),
   providerMessageIds: z.array(z.string().min(1)).min(1).optional(),
+  providerMessageEffects: z
+    .array(assistantProviderMessageEffectSchema)
+    .min(1)
+    .optional(),
   cleanupMessages: z.array(assistantChannelCleanupMessageSchema).min(1).optional(),
   cleanupTargetAliases: z.array(z.string().min(1)).min(1).optional(),
   providerThreadId: z.string().min(1).nullable().default(null),
@@ -1777,6 +1825,9 @@ export type AssistantTranscriptEntry = z.infer<
 >
 export type AssistantChannelDelivery = z.infer<
   typeof assistantChannelDeliverySchema
+>
+export type AssistantProviderMessageEffect = z.infer<
+  typeof assistantProviderMessageEffectSchema
 >
 export type AssistantDeliveryError = z.infer<
   typeof assistantDeliveryErrorSchema

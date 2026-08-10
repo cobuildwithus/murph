@@ -13,8 +13,16 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Connect a supported patient portal to copy available lab results and report summaries into Murph.",
 });
 
-export default async function RecordsConnectPage() {
+export default async function RecordsConnectPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ launch?: string | string[] }>;
+}) {
   const auth = await getHostedDashboardPageAuthSnapshot();
+  const resolvedSearchParams = await searchParams;
+  const launch = Array.isArray(resolvedSearchParams.launch)
+    ? resolvedSearchParams.launch[0]
+    : resolvedSearchParams.launch;
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-8">
@@ -32,7 +40,10 @@ export default async function RecordsConnectPage() {
           description="Find a hospital or clinic Murph supports. You will sign in to its patient portal, then Murph will copy available lab results and report summaries once."
         />
       </div>
-      <RecordsConnectClient authenticated={Boolean(auth.authenticatedMember)} />
+      <RecordsConnectClient
+        authenticated={Boolean(auth.authenticatedMember)}
+        launchConnectIntent={launch === "clinical-records"}
+      />
     </div>
   );
 }

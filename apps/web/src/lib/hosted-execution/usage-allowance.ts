@@ -33,13 +33,13 @@ import {
   HOSTED_PULSE_TRIAL_OFFER,
   HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS,
   getHostedAiUsageMonthlyAllowanceUsdMicros,
-  getHostedBillingPlanCodeForPlan,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
+  getHostedFamilyBillingPlanCode,
   isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
-  parseHostedPlanCode,
+  parseHostedFamilyPlanCode,
   parseHostedBillingCheckoutOffer,
   requireHostedPulseTrialPolicy,
   type HostedBillingPlanCode,
@@ -90,6 +90,7 @@ export type HostedAiUsageGateNoticeCode =
   | "edge_usage_limit_reached"
   | "family_usage_limit_reached"
   | "group_upgrade_pulse"
+  | "max_usage_limit_reached"
   | "pulse_upgrade_edge"
   | "thread_usage_limit_reached"
   | "trial_usage_limit_reached"
@@ -369,7 +370,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   if (!familyAccess) {
     return null;
   }
-  const planCode = parseHostedPlanCode(familyAccess.planCode);
+  const planCode = parseHostedFamilyPlanCode(familyAccess.planCode);
   if (!planCode) {
     return null;
   }
@@ -399,7 +400,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   return {
     allowanceSource: "family_sponsored_plan",
     currentBillingPhase: "paid",
-    currentBillingPlanCode: getHostedBillingPlanCodeForPlan(planCode),
+    currentBillingPlanCode: getHostedFamilyBillingPlanCode(planCode),
     currentCheckoutOffer: null,
     currentPeriodEnd,
     currentPeriodStart,
@@ -3676,6 +3677,18 @@ function buildHostedAiUsageGateLimitNotice(input: {
     };
   }
 
+  if (input.billingPlanCode === "launch_max_monthly") {
+    return {
+      code: "max_usage_limit_reached",
+      message: renderHostedAiUsageGateLimitNoticeMessage({
+        key: "linq.ai_usage.max_limit_reached",
+        memberId: input.memberId,
+        noticeCode: "max_usage_limit_reached",
+        periodStart: input.periodStart,
+      }),
+    };
+  }
+
   return {
     code: "pulse_upgrade_edge",
     message: renderHostedAiUsageGateLimitNoticeMessage({
@@ -3692,6 +3705,7 @@ function renderHostedAiUsageGateLimitNoticeMessage(input: {
     | "linq.ai_usage.edge_limit_reached"
     | "linq.ai_usage.family_limit_reached"
     | "linq.ai_usage.group_upgrade_pulse"
+    | "linq.ai_usage.max_limit_reached"
     | "linq.ai_usage.pulse_upgrade_edge"
     | "linq.ai_usage.trial_limit_reached";
   memberId: string;

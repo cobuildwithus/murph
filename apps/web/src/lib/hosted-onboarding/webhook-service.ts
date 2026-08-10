@@ -7,8 +7,11 @@ import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageEditedEvent,
   requireHostedLinqParticipantChangedEvent,
+  requireHostedLinqTypingIndicatorStartedEvent,
   requireHostedLinqMessageReceivedEvent,
+  inspectHostedLinqMessageReceivedParts,
   sendHostedLinqReadReceipt,
+  type HostedLinqMessageReceivedPartsInspection,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import {
@@ -25,11 +28,13 @@ import {
 import {
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
 } from "./linq-group-line-recovery";
+import { HOSTED_LINQ_GROUP_SETUP_TEMPLATE } from "./linq-group-setup";
 import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+  resolveHostedLinqTypingPrewarmMemberId,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -52,6 +57,7 @@ import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
+  logHostedOnboardingWarning,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -94,7 +100,7 @@ import {
   maybeHandoffHostedExecutionWebhookWake,
 } from "./webhook-service-wake";
 import {
-  startHostedDirectRuntimeWakeBestEffort,
+  startHostedRuntimeShellPrewarmBestEffort,
 } from "../hosted-execution/direct-runtime-wake";
 import {
   assertHostedThreadRouteEgressAuthority,
@@ -179,6 +185,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   });
   let eventId: string | null = null;
   let eventType: string | null = null;
+  let eventWebhookVersion: string | null = null;
+  let messagePartsInspection: HostedLinqMessageReceivedPartsInspection | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
   let pendingInstantStartActivationWake: {
@@ -209,6 +217,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     eventId = event.event_id;
     eventType = event.event_type;
+    eventWebhookVersion = event.webhook_version ?? null;
+    messagePartsInspection = inspectHostedLinqMessageReceivedParts(event);
     let affirmativeReaction = false;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -217,6 +227,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (event.event_type === "chat.typing_indicator.started") {
+      scheduleHostedLinqTypingShellPrewarmBestEffort({
+        event: requireHostedLinqTypingIndicatorStartedEvent(event),
+        prisma: input.prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
       const response: HostedOnboardingLinqWebhookResponse = {
         ignored: true,
         ok: true,
@@ -236,6 +251,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       event,
       rawBody: input.rawBody,
     });
+    if (messagePartsInspection?.compatibilityFallback) {
+      logHostedLinqMessageReceivedPartsWarning({
+        eventId,
+        inspection: messagePartsInspection,
+        outcome: "compatibility-accepted",
+        webhookVersion: event.webhook_version,
+      });
+    }
     if (
       providerEvent
       && (event.event_type === "reaction.added" || event.event_type === "reaction.removed")
@@ -369,6 +392,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         duplicate: providerResult.duplicate,
         eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
         eventType,
+        ...(providerEvent.eventType === "chat.group_icon_updated"
+          || providerEvent.eventType === "chat.group_icon_update_failed"
+            ? {
+                chatIdSuffix: toHostedOnboardingLogIdSuffix(providerEvent.linqChatId),
+                failureCode: providerEvent.failureCode,
+                providerStatus: providerEvent.providerStatus,
+              }
+            : {}),
         responseReason,
       });
       return response;
@@ -605,6 +636,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         instantStartTypingHint = startHostedLinqInstantStartTypingHintBestEffort({
           event: planningEvent,
         });
+        // The member row is committed, so issue only the deterministic
+        // container start command while enrollment runs. This does not resolve
+        // a runtime owner, inspect workspace state, create a fence, or process
+        // mailbox work; the ordinary post-Temporal ensure owns those steps.
+        void startHostedRuntimeShellPrewarmBestEffort({
+          source: "linq-instant-start",
+          userId: instantStartEnrollment.memberId,
+        });
         let enrollmentFailed = false;
         try {
           const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
@@ -637,15 +676,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               eventIdSuffix: toHostedOnboardingLogIdSuffix(event.event_id),
             },
           );
-        }
-        if (!enrollmentFailed) {
-          // Enrollment has now activated access. Start the container before
-          // the active-member replan so this best-effort hint warms the same
-          // foreground mode that will consume the appended conversation item.
-          void startHostedDirectRuntimeWakeBestEffort({
-            source: "linq-instant-start",
-            userId: instantStartEnrollment.memberId,
-          });
         }
         plan = await runPlan(!enrollmentFailed);
         if (plan.instantStartEnrollment) {
@@ -713,6 +743,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           (
             skip.template === "invite_signup"
             || skip.template === "invite_signup_fallback"
+            || skip.template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE
             || skip.template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
           )
           && skip.reason === "notice_in_flight",
@@ -721,14 +752,20 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         const groupLineRecoveryInFlight =
           pendingRequiredDelivery.template
             === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE;
+        const groupSetupInFlight = pendingRequiredDelivery.template
+          === HOSTED_LINQ_GROUP_SETUP_TEMPLATE;
         throw hostedOnboardingError({
-          code: groupLineRecoveryInFlight
-            ? "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT"
-            : "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
+          code: groupSetupInFlight
+            ? "HOSTED_LINQ_GROUP_SETUP_DELIVERY_IN_FLIGHT"
+            : groupLineRecoveryInFlight
+              ? "HOSTED_LINQ_GROUP_LINE_RECOVERY_IN_FLIGHT"
+              : "HOSTED_LINQ_SIGNUP_DELIVERY_IN_FLIGHT",
           httpStatus: 503,
-          message: groupLineRecoveryInFlight
-            ? "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt expires."
-            : "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
+          message: groupSetupInFlight
+            ? "The group setup message is still recovering. Retry this webhook after the current delivery attempt expires."
+            : groupLineRecoveryInFlight
+              ? "The group line recovery message is still recovering. Retry this webhook after the current delivery attempt expires."
+              : "The signup link is still recovering. Retry this webhook after the current delivery attempt expires.",
           retryable: true,
         });
       }
@@ -841,6 +878,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     return plan.response;
   } catch (error) {
+    if (
+      messagePartsInspection
+      && isHostedOnboardingError(error)
+      && error.code === "LINQ_PAYLOAD_INVALID"
+    ) {
+      logHostedLinqMessageReceivedPartsWarning({
+        errorCode: error.code,
+        eventId,
+        inspection: messagePartsInspection,
+        outcome: "rejected",
+        webhookVersion: eventWebhookVersion,
+      });
+    }
     // Activation is already durable even if replanning, delivery, or the
     // conversation wake failed. Fall back to its original best-effort signal
     // before propagating the error and asking the provider to retry.
@@ -861,6 +911,100 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+function logHostedLinqMessageReceivedPartsWarning(input: {
+  errorCode?: string;
+  eventId: string | null;
+  inspection: HostedLinqMessageReceivedPartsInspection;
+  outcome: "compatibility-accepted" | "rejected";
+  webhookVersion?: string | null;
+}): void {
+  logHostedOnboardingWarning(
+    "hosted-onboarding.webhook.linq.message-parts",
+    {
+      compatibilityFallback: input.inspection.compatibilityFallback,
+      dataKind: input.inspection.dataKind,
+      errorCode: input.errorCode,
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      messageKind: input.inspection.messageKind,
+      nestedActionPresent: input.inspection.nestedActionPresent,
+      outcome: input.outcome,
+      partCount: input.inspection.partCount,
+      partKinds: input.inspection.partKinds,
+      partsKind: input.inspection.partsKind,
+      partsLocation: input.inspection.partsLocation,
+      payloadShape: input.inspection.payloadShape,
+      topLevelActionPresent: input.inspection.topLevelActionPresent,
+      unsupportedPartCount: input.inspection.unsupportedPartCount,
+      webhookVersion: classifyHostedLinqWebhookVersion(input.webhookVersion),
+    },
+  );
+}
+
+function classifyHostedLinqWebhookVersion(
+  value: string | null | undefined,
+): "2025-01-01" | "2026-02-03" | "missing" | "other" {
+  if (value === "2025-01-01" || value === "2026-02-03") {
+    return value;
+  }
+  return value ? "other" : "missing";
+}
+
+function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
+  event: ReturnType<typeof requireHostedLinqTypingIndicatorStartedEvent>;
+  prisma?: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  const task = async (): Promise<void> => {
+    try {
+      const memberId = await resolveHostedLinqTypingPrewarmMemberId({
+        event: input.event,
+        prisma: input.prisma ?? getPrisma(),
+      });
+      if (!memberId) {
+        logHostedOnboardingDiagnostic(
+          "linq-typing-shell-prewarm",
+          { outcome: "target-not-found" },
+        );
+        return;
+      }
+
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        { outcome: "target-resolved" },
+      );
+      await startHostedRuntimeShellPrewarmBestEffort({
+        source: "linq-typing-started",
+        userId: memberId,
+      });
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "failed",
+        },
+      );
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    try {
+      input.scheduleAfterResponse(task);
+      return;
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "schedule-failed",
+        },
+      );
+    }
+  }
+
+  void task();
 }
 
 interface HostedLinqPlanningEventResolution {

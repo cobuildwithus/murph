@@ -313,7 +313,7 @@ describe("hosted private media", () => {
     })).resolves.toBeNull();
     await expect(readHostedPrivateMedia({
       bucket: bucket.api,
-      capability: `${capability.slice(0, -1)}x`,
+      capability: `${capability.slice(0, -1)}${capability.endsWith("x") ? "y" : "x"}`,
       capabilitySecret: CAPABILITY_SECRET,
       expiresAtUnixSeconds,
       nowMs,

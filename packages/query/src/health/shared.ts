@@ -7,7 +7,7 @@ import {
   type FrontmatterValue,
   type ParsedFrontmatterDocument,
 } from "@murphai/contracts";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export type { FrontmatterObject, FrontmatterScalar, FrontmatterValue };
 

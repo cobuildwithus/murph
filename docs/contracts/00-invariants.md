@@ -473,6 +473,14 @@ it has been explicitly elevated to a cross-cutting invariant.
 - Safety, reliability, privacy, authentication, and review fixes preserve the
   authorized success path for existing critical flows. Disabling, silently
   dropping, or degrading the flow is a product decision, not a technical fix.
+- A direct Stripe subscription classified as a Family-sponsored loser may be
+  canceled or refunded only while holding the Family owner lock before the
+  sponsored-member lock and re-proving the exact active membership, paid local
+  Family binding, provider-current active Family subscription identity, and
+  direct-subscription ownership. If Family authority changes first or Stripe no
+  longer confirms that exact Family authority, the receipt remains retryable
+  and a pending Checkout attempt remains available for replay as the member's
+  direct subscription.
 - A live monthly group sponsorship is a payer authorization, not a Stripe
   subscription and not a message bundle. It stores only payer, beneficiary,
   status, $5/$10/$20 cap, and anchored period. Current-period committed spend is

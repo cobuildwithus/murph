@@ -10,6 +10,10 @@ import {
   runForegroundCommand,
 } from "./process.ts";
 import { hostedLocalHarnessRepoRoot } from "./repo.ts";
+import {
+  HOSTED_STRIPE_BILLING_LIVE_SCENARIO,
+  partitionHostedStripeBillingLiveEnvironment,
+} from "./stripe-billing-live-config.ts";
 
 const HOSTED_RUNNER_LOCAL_BUILD_ID_ENV = "MURPH_HOSTED_RUNNER_LOCAL_BUILD_ID";
 const HOSTED_LOCAL_E2E_RUNNER_SMOKE_ONCE_ENV =
@@ -56,6 +60,7 @@ export type HostedLocalE2eScenarioName =
   | "active-turn-latency"
   | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
+  | "cold-start-benchmark"
   | "codex-container-continuity"
   | "codex-gateway-prefix"
   | "codex-image-media-delivery"
@@ -95,6 +100,7 @@ export type HostedLocalE2eScenarioName =
   | "runner-warm-reuse"
   | "snapshot-publication-fallback"
   | "snapshot-stress"
+  | "stripe-billing-browser-matrix"
   | "stuck-invocation-recovery"
   | "timezone-injection"
   | "usage-limit-ambiguous-send"
@@ -138,6 +144,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-runtime-checkpoint-baseline-e2e.test.ts",
     name: "checkpoint-baseline",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-cold-start-benchmark-e2e.test.ts",
+    manualOnly: true,
+    name: "cold-start-benchmark",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-container-continuity-e2e.test.ts",
@@ -316,6 +328,13 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     testControls: true,
   },
   {
+    dedicatedVitestProcess: true,
+    file:
+      "apps/cloudflare/test/hosted-local-stripe-billing-browser-e2e.test.ts",
+    manualOnly: true,
+    name: HOSTED_STRIPE_BILLING_LIVE_SCENARIO,
+  },
+  {
     file: "apps/cloudflare/test/hosted-local-stuck-invocation-recovery-e2e.test.ts",
     manualOnly: true,
     name: "stuck-invocation-recovery",
@@ -345,6 +364,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-retell-call-result-roundtrip-e2e.test.ts",
     name: "retell-call-result-roundtrip",
+    testControls: true,
   },
   {
     file: "apps/cloudflare/test/hosted-local-usage-limit-ambiguous-send-e2e.test.ts",
@@ -480,10 +500,14 @@ export async function runHostedLocalE2eSuite(
   removeHostedLocalWebAuthorityFromProcessEnvironment();
   const scenarios = resolveHostedLocalE2eScenarios(input.scenario ?? "all");
   const liveWearableEnvironment = partitionLiveWearableEnvironment({ env, scenarios });
+  const liveStripeEnvironment = partitionHostedStripeBillingLiveEnvironment({
+    environment: liveWearableEnvironment.genericEnv,
+    selectedScenarioNames: scenarios.map((scenario) => scenario.name),
+  });
   const prepareRunnerBundle = input.prepareRunnerBundle !== false;
   const injectSkipRunnerBundleEnv = input.injectSkipRunnerBundleEnv !== false;
   const suiteEnv = buildHostedLocalE2eSuiteEnv({
-    env: liveWearableEnvironment.genericEnv,
+    env: liveStripeEnvironment.genericEnvironment,
     injectSkipRunnerBundleEnv,
   });
   let terminationSignal: NodeJS.Signals | null = null;
@@ -539,7 +563,10 @@ export async function runHostedLocalE2eSuite(
           assertWorkAdmission,
           env: suiteEnv,
           scenarios,
-          vitestEnvOverlay: liveWearableEnvironment.vitestEnvOverlay,
+          vitestEnvOverlay: {
+            ...liveWearableEnvironment.vitestEnvOverlay,
+            ...liveStripeEnvironment.scenarioEnvironment,
+          },
         });
       });
     } catch (error) {

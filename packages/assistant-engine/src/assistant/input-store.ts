@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import { assistantPreferenceCausalSeqSchema } from '@murphai/contracts'
 import { createHostedMailboxAssistantInputIdFromBlindedIdentity } from '@murphai/hosted-execution/assistant-identifiers'
 import {

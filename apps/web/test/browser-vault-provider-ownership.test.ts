@@ -24,11 +24,11 @@ test("the persistent dashboard layout fences fresh vault authority to its server
   assert.match(layoutSource, /!consentStatus\.launchGranted/u);
   assert.match(
     layoutSource,
-    /initialMemberId=\{auth\.pageAuth\.authenticatedMember\?\.id \?\? null\}/u,
+    /initialMemberId=\{authenticatedMember\?\.id \?\? null\}/u,
   );
   assert.match(
     layoutSource,
-    /browserVaultLoadEnabled = consentStatus\?\.launchGranted \?\? true/u,
+    /browserVaultLoadEnabled = authenticatedMember\s*\?\s*consentStatus\?\.launchGranted \?\? true\s*:\s*false/u,
   );
   assert.match(layoutSource, /loadEnabled=\{browserVaultLoadEnabled\}/u);
   assert.match(contextSource, /expectedMemberId: initialMemberId/u);

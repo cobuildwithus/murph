@@ -97,6 +97,7 @@ export {
   reconcileAssistantCronDeliveryIntent,
   repairPendingAssistantCronDeliveries,
 }
+export { listAssistantCronPendingDeliveryIntentIds } from './cron/delivery-reconciliation.ts'
 export { addAssistantCronJob, installAssistantCronPreset, upsertAssistantCronAutomation }
 export type {
   AddAssistantCronJobInput,

@@ -256,6 +256,21 @@ The `/settings` Data & privacy export uses that same in-browser browser-vault re
 - storing raw provider webhook bodies or provider tokens in hosted API responses
 - turning Cloudflare execution mirrors into a second durable source of product truth
 
+Signed Linq `message.received` payloads accept both supported webhook shapes.
+An absent or null `parts` field uses the existing empty-message disposition: Web
+records the provider event, acknowledges it without an assistant wake, and emits
+a redacted warning containing only bounded shape categories, part counts and
+kinds, webhook-version category, outcome, and an event-id suffix. Non-array
+`parts` values and unsupported part types still fail closed with the same
+redacted warning. Inbound `imessage_app` parts contribute only their documented
+fallback text (or a fixed placeholder); app identity, layout, and URL metadata
+do not enter the durable mailbox payload or logs. First-contact admission and
+blocked-content screening use one shared disposition for that same fallback
+text before any signup or group routing, independent of admission mode. An app
+card without fallback text remains contentless there rather than receiving the
+active-member placeholder. This rule is app-card-specific; legacy media-only
+first contacts retain their existing behavior.
+
 ## Legal and health-permission publication surfaces
 
 Hosted deployments should expose HTML legal pages in addition to downloadable
@@ -319,7 +334,7 @@ The hosted Prisma schema keeps ownership sharp and nested:
   action; the claim leaves with the row under existing mailbox retention.
 - `HostedWorkspace` owns the latest encrypted checkpoint pointer and redacted
   status projection
-- `HostedRuntimeLog` owns bounded redacted observability events
+- The dedicated runtime-log Postgres database owns bounded redacted observability events
 - Temporal orchestrates per-user execution wakeups; Cloudflare only executes or
   wakes a bound runtime and does not own a queue, mailbox cursor, or web-visible
   run recovery ledger
@@ -645,15 +660,19 @@ Before a production build, configure these Production-scoped server values:
 - `MURPH_PUBLIC_ROUTES_WAF_REQUIRED=1`
 - `MURPH_SAFE_SEARCH_WAF_RULE_ID`
 - `MURPH_SAFE_DETAIL_WAF_RULE_ID`
+- `MURPH_SIGNUP_REFERRAL_CLAIM_WAF_RULE_ID`
 - `HOSTED_WEB_VERCEL_PROJECT_ID`
 - optional `HOSTED_WEB_VERCEL_TEAM_ID`
 - `HOSTED_WEB_VERCEL_TOKEN`, limited to reading the project's firewall config
 
-The exact-id custom rules must be the first active rules after the optional
+The exact-id Murph Safe rules must be the first active rules after the optional
 companion diagnostics rule. Search is an exact POST path with a fixed-window
 per-IP 429 at 30 requests per 60 seconds. Detail covers the public API prefix
 while excluding search, plus the public web-detail prefix, at 120 requests per
-60 seconds. `pnpm public-routes:waf-check` reads the active Vercel firewall
+60 seconds. The signup-referral claim rule matches only POST paths that start
+with `/r/` and end with `/claim`, with a fixed-window per-IP 429 at 10 requests
+per 60 seconds. It may follow other scoped active rules but never an active
+bypass rule. `pnpm public-routes:waf-check` reads the active Vercel firewall
 configuration and fails on disabled firewall, order, condition, algorithm,
 key, limit, window, action, or id drift. It never downloads environment values
 or prints the provider token or response body.
@@ -676,6 +695,13 @@ Hosted onboarding extras:
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
 - `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients when Stripe reconciliation accepts a hosted signup or trial activation. Leave it unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
+- `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
+  `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
+  uses it for metadata-only alerts when a provider rejection aborts a complete
+  billing action, for new verified payment-failure events, and for the first
+  failed reconciliation attempt. Both website and iMessage Assistant billing
+  use the same Web-owned Stripe services, so there is no separate
+  channel-specific configuration.
 - `NEXT_PUBLIC_PRIVY_APP_ID`
 - `NEXT_PUBLIC_PRIVY_CLIENT_ID`
 - `PRIVY_CUSTOM_AUTH_DOMAIN`
@@ -703,6 +729,8 @@ Hosted onboarding extras:
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY`
+- `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD`
 - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD`
@@ -763,8 +791,35 @@ Hosted managed crypto:
 - `HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME`
 - `HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION`
 - `HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM`
+- `HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON` for additional `verify_only` or
+  `disabled` authority public keys
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID`
+- `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_KEYRING_JSON` for additional
+  `disabled` Cloudflare automation public keys during standby preload
+- The production build runs `hosted-crypto:env-check` before Next.js. It parses
+  every configured standby ring through the shared runtime-state acceptance
+  contract, rejects active entries, private material in the public ring, and
+  any private keyring configured in Web runtime, and reports field-only errors
+  without echoing key material. Public-ring entries and JWKs use closed schemas,
+  so a sibling `privateJwk` or another ignored field cannot ride into Vercel;
+  a duplicate-aware scan runs before `JSON.parse`, and every ring also rejects
+  duplicate raw members or identifiers that collide after trimming. Before
+  changing a provider, load the three proposed payloads from their approved secret
+  stores into the process environment together with the current active IDs and
+  the operator-only `HOSTED_CRYPTO_STANDBY_AUTHORITY_KEY_VERSION` and
+  `HOSTED_CRYPTO_STANDBY_CLOUDFLARE_AUTOMATION_KEY_ID`, then run
+  `pnpm --dir apps/web hosted-crypto:env-check -- --require-complete-preload`;
+  complete mode rejects active-ID collisions, requires the intended
+  `verify_only` / `disabled` / `decrypt_only` entries, imports the exact
+  authority PEM as a P-256 ECDSA verification key, and wraps then unwraps an
+  ephemeral challenge through the exact Cloudflare public/private pair. Do not
+  add the two operator-only identifiers to Vercel runtime.
+- Record the current ready Vercel production deployment before preload. Deploy
+  Web first and prove that its active hosted crypto context still reads the
+  current ingress/runtime envelopes before changing the Worker. A failed Web
+  proof rolls back to that recorded deployment; a successful build alone is
+  not runtime proof.
 - production Vercel OIDC / GCP Workload Identity Federation:
   `HOSTED_CRYPTO_GCP_PROJECT_NUMBER`,
   `HOSTED_CRYPTO_GCP_SERVICE_ACCOUNT_EMAIL`,
@@ -803,7 +858,7 @@ Hosted AI usage metering:
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
 - Settings keeps the aggregate usage meter as the only current-capacity view. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
-- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment and no room notification; public group usage exposes only sponsored versus unsponsored.
+- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
 - Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
@@ -812,9 +867,10 @@ Hosted AI usage metering:
   referrer's next new group, and freeze pre-expiry qualification in the
   provider-ingress transaction. Bound commitments remain reserved for a
   25-hour late-evidence grace before referrer-serialized expiry becomes final.
-  The assistant-facing reward label is an exact server-owned cost-weighted
-  usage-credit label; it is never translated into an approximate number of
-  messages or days. Exact qualification counters remain server-only.
+  The assistant-facing reward label is a server-owned estimate of additional
+  Murph usage days derived from the persisted grant and policy basis. It is
+  never translated into a message count or calendar/trial duration. Exact
+  qualification counters remain server-only.
   Immediate post-commit reconciliation and the bounded minute recovery cron
   converge on one final referral grant and one atomic source-mailbox
   celebration fence. Recovery also re-signals bounded oldest unconsumed
@@ -888,6 +944,8 @@ To complete either flow without moving real money:
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY=price_...`
+   - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_5_USD=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_10_USD=price_...`
    - `HOSTED_ONBOARDING_STRIPE_PRICE_ID_USAGE_CREDIT_20_USD=price_...`
@@ -1055,6 +1113,31 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
   with it, incomplete Resend email config or an invalid time zone fails the
   cron visibly. The latency path has no Linq/iMessage fallback.
+- The same `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`, and
+  `HOSTED_LINQ_ALERT_EMAILS` configuration enables Stripe failure alerts. No
+  time-zone setting is required for Stripe alerts. Confirm that the Stripe
+  webhook endpoint subscribes to `checkout.session.async_payment_failed`,
+  `payment_intent.payment_failed`, `invoice.payment_failed`, and
+  `invoice.finalization_failed`. Checkout action owners cover mandatory
+  price reads, customer provisioning, saved-card preparation, and Checkout
+  Session create/resume. Paid-plan upgrades, paid-trial transitions, and
+  scheduled plan switches use the same complete-action ownership. An owner
+  emails only when the provider rejection aborts the action; recovered reads,
+  replays, and cleanup races remain diagnostic logs.
+  Family retries bind alerts to the current replacement attempt, and explicit
+  group-sponsorship recovery reports only when its own provider-backed checkout
+  terminates; a no-charge reactivation stays silent. The final Family redirect
+  Session read reports a provider rejection only for a still-current blind
+  Session binding, keeping unknown or stale public IDs silent. Paid Family
+  capacity changes reuse their exact Stripe update identity for alert replay;
+  member-tier swaps reuse the persisted transition identity. Successful,
+  already-applied, and domain-only outcomes schedule no email. Provider
+  adapters retain only a validated opaque Stripe request id in a frozen
+  non-serialized correlation record so distinct failed requests remain distinct
+  emails; client-visible error details still expose presence only. The parser
+  is dependency-free so production migration line sync and standalone Stripe
+  tooling can continue importing the general onboarding runtime under ordinary
+  Node conditions.
 - Configure the hosted public-origin envs and `HOSTED_WEB_CALLBACK_SIGNING_*`
   values exactly as described above.
 - Set `HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS`. Keep
@@ -1120,8 +1203,10 @@ second time. The handoff is accepted only for a main-branch Vercel production
 deploy; ordinary and preview builds still generate Prisma themselves. The
 generic `pnpm --dir apps/web build` script is intentionally non-mutating and
 only generates artifacts plus validation output. The predeploy migration
-wrapper uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel
-production, rejects known pooled Postgres ports such as `6432` and `6543`, and
+wrapper first proves the app-session signing key and configured HTTPS public
+origin can construct and parse a signed group-funding recovery URL. It then
+uses `DIRECT_DATABASE_URL` when it is set, requires it in Vercel production,
+rejects known pooled Postgres ports such as `6432` and `6543`, and
 blocks destructive or incompatible Prisma migration SQL outside the frozen
 historical migration set ending at
 `20260707170000_drop_stale_linq_recency_columns`; keep

@@ -43,9 +43,11 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "id String @id",
     'memberId String @map("member_id")',
     'installationIdHash String @map("installation_id_hash")',
-    'uploadTokenHash String @unique @map("upload_token_hash")',
-    'idempotencySecretEncrypted String @map("idempotency_secret_encrypted")',
-    'expiresAt DateTime @map("expires_at")',
+    'authorityRevision Int @default(0) @map("authority_revision")',
+    'uploadTokenHash String? @unique @map("upload_token_hash")',
+    'idempotencySecretEncrypted String? @map("idempotency_secret_encrypted")',
+    'expiresAt DateTime? @map("expires_at")',
+    'activatedAt DateTime? @map("activated_at")',
     'revokedAt DateTime? @map("revoked_at")',
     'revokeReason String? @map("revoke_reason")',
     'createdAt DateTime @default(now()) @map("created_at")',
@@ -248,7 +250,6 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMailboxPayload",
   "HostedComputerHandoff",
   "HostedComputerRun",
-  "HostedRuntimeLog",
   "HostedWorkspace",
   "HostedUserCryptoAudit",
   "HostedUserCryptoEnvelope",
@@ -722,6 +723,13 @@ describe("hosted Prisma baseline migration", () => {
       ),
       "utf8",
     );
+    const hostedGrowthSnapshotActiveUsersMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260806120000_hosted_growth_snapshot_active_users/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
     const hostedAssistantPersonalityProjectionWatermarkContractMigrationSql = readFileSync(
       new URL(
         "../prisma/contract-migrations/20260715193000_seed_hosted_assistant_personality_projection_watermarks/migration.sql",
@@ -1070,7 +1078,13 @@ describe("hosted Prisma baseline migration", () => {
       "20260804223000_hosted_signup_referral_attribution",
       "20260805010000_rearm_generated_image_capture_retention",
       "20260805160000_hosted_usage_plan_reset_epoch",
+      "20260805230000_meal_photo_authority_revision",
+      "20260806120000_hosted_growth_snapshot_active_users",
       "20260806170000_hosted_pulse_trial_start_source",
+      "20260806180000_fix_hosted_usage_plan_transition_bridge",
+      "20260807140000_hosted_growth_snapshot_mrr_breakdown",
+      "20260807210000_add_group_sponsorship_creative_request",
+      "20260809160000_add_hosted_family_max_plan_code",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(
@@ -1293,6 +1307,16 @@ describe("hosted Prisma baseline migration", () => {
       'ADD COLUMN "outbound_messages_prior_day" INTEGER',
     );
     expect(hostedGrowthSnapshotMessageCountsMigrationSql).not.toContain("UPDATE");
+    expect(hostedGrowthSnapshotActiveUsersMigrationSql).toContain(
+      'ALTER TABLE "hosted_growth_daily_snapshot"',
+    );
+    expect(hostedGrowthSnapshotActiveUsersMigrationSql).toContain(
+      'ADD COLUMN "active_users_prior_day" INTEGER',
+    );
+    expect(hostedGrowthSnapshotActiveUsersMigrationSql).toContain(
+      'ADD COLUMN "active_users_trailing_7_days" INTEGER',
+    );
+    expect(hostedGrowthSnapshotActiveUsersMigrationSql).not.toContain("UPDATE");
     expect(hostedFamilyMixedTierCapacityMigrationSql).toContain(
       'ADD COLUMN "plan_code" TEXT DEFAULT \'pulse\'',
     );

@@ -4,7 +4,7 @@ import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
-import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
+import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import {
@@ -129,6 +129,19 @@ import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards"
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
+import {
+  CHECKOUT_CORE_FEATURES,
+  CHECKOUT_PULSE_FEATURES,
+  EDGE_ONLY_FEATURES,
+  JOIN_EDGE_FEATURES,
+  JOIN_FAMILY_FEATURES,
+  JOIN_PULSE_FEATURES,
+  PULSE_TRIAL_FEATURES,
+  SETTINGS_CORE_FEATURES,
+  SETTINGS_EDGE_FEATURES,
+  SETTINGS_FAMILY_FEATURES,
+  SETTINGS_PULSE_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
@@ -150,7 +163,7 @@ import {
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
-import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
   EnvironmentEmptyState,
@@ -160,6 +173,10 @@ import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environm
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
+import { SignupReferralComponentStudy } from "./signup-referral-study";
+
+const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
+  "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
@@ -200,6 +217,32 @@ function Section({
     <div id={id} className="flex flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
+    </div>
+  );
+}
+
+function PlanBulletListStudy({
+  features,
+  title,
+}: {
+  features: readonly string[];
+  title: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card/80 p-4">
+      <p className="mb-2 text-sm font-medium text-foreground">{title}</p>
+      <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
+        {features.map((feature) => (
+          <li key={feature} className="flex items-start gap-2">
+            <CheckIcon
+              className="mt-0.5 size-3.5 shrink-0 text-primary"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            />
+            {feature}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -555,7 +598,9 @@ export function ComponentsContent() {
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
-  const [garminHistoricalDataDialogOpen, setGarminHistoricalDataDialogOpen] = useState(false);
+  const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
+    Pick<ConnectSource, "id" | "logo" | "name" | "requiresReconnect"> | null
+  >(null);
   const [assistantStylePickerStep, setAssistantStylePickerStep] =
     useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
@@ -1532,7 +1577,7 @@ export function ComponentsContent() {
                   <GroupUsageFundingActions
                     monthlyAction={(
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="monthly"
@@ -1544,7 +1589,7 @@ export function ComponentsContent() {
                     )}
                     oneTimeAction={(
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="one_time"
@@ -1565,7 +1610,7 @@ export function ComponentsContent() {
               inert
             >
               <GroupSponsorshipManagementCard
-                endpoint="/api/design/group-sponsorship-management"
+                endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
                 inert
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1624,21 +1669,91 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Garmin Historical Data Preflight">
+        <Section title="Vital-backed health source handoff">
           <div className="flex flex-col items-start gap-3">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Provider-specific reminder shown before Murph opens Garmin&apos;s
-              authorization screen. It names the default-off permission without
-              claiming Murph can verify the external setting.
+              Reusable handoff shown before every Vital-backed authorization.
+              It leads with the connection, credits Vital underneath with a
+              link, and keeps Garmin&apos;s Historical Data reminder inside
+              the same dialog.
             </p>
-            <Button onClick={() => setGarminHistoricalDataDialogOpen(true)}>
-              Preview Garmin preflight
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {[
+                {
+                  label: "Preview standard handoff",
+                  source: {
+                    id: "fitbit",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/fitbit.svg",
+                      width: 44,
+                    },
+                    name: "Fitbit",
+                  },
+                  variant: "default" as const,
+                },
+                {
+                  label: "Preview Garmin handoff",
+                  source: {
+                    id: "garmin",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/garmin.png",
+                      width: 44,
+                    },
+                    name: "Garmin",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview wide logo",
+                  source: {
+                    id: "runkeeper",
+                    logo: {
+                      className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+                      height: 20,
+                      src: "/brand-logos/connect/runkeeper.svg",
+                      width: 132,
+                    },
+                    name: "Runkeeper",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview long label",
+                  source: {
+                    id: "dexcom-g6-and-older",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/dexcom-g6-and-older.png",
+                      width: 44,
+                    },
+                    name: "Dexcom (G6 and older)",
+                  },
+                  variant: "outline" as const,
+                },
+              ].map((preview) => (
+                <Button
+                  key={preview.source.id}
+                  variant={preview.variant}
+                  onClick={() => setVitalConnectionDialogSource(preview.source)}
+                >
+                  {preview.label}
+                </Button>
+              ))}
+            </div>
           </div>
-          <GarminHistoricalDataDialog
-            open={garminHistoricalDataDialogOpen}
-            onContinue={() => setGarminHistoricalDataDialogOpen(false)}
-            onOpenChange={setGarminHistoricalDataDialogOpen}
+          <VitalConnectionDialog
+            source={vitalConnectionDialogSource}
+            onContinue={() => setVitalConnectionDialogSource(null)}
+            onOpenChange={(open) => {
+              if (!open) {
+                setVitalConnectionDialogSource(null);
+              }
+            }}
           />
         </Section>
 
@@ -1950,10 +2065,21 @@ export function ComponentsContent() {
                 <HostedAiUsageActivity
                   activity={preview.activity}
                   missionContactOption={preview.contactOption}
+                  signupReferralUrl="https://example.com/r/design-referral"
                 />
               </div>
             ))}
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Signup referral link actions">
+          <p className="text-sm text-muted-foreground">
+            The real copy action keeps loading, clipboard, and recovery states
+            distinct without moving keyboard focus away from the control.
+          </p>
+          <SignupReferralComponentStudy />
         </Section>
 
         <Separator />
@@ -1994,7 +2120,7 @@ export function ComponentsContent() {
                   label: null,
                   memberId: "design-owner",
                   pendingPlanCode: null,
-                  planCode: "pulse",
+                  planCode: "max",
                 },
                 {
                   isOwner: false,
@@ -2004,23 +2130,48 @@ export function ComponentsContent() {
                   pendingPlanCode: null,
                   planCode: "edge",
                 },
+                {
+                  isOwner: false,
+                  joinedAtIso: "2026-07-12T00:00:00.000Z",
+                  label: "Sibling",
+                  memberId: "design-pending-member",
+                  pendingPlanCode: "max",
+                  planCode: "pulse",
+                },
               ]}
               plans={{
                 edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+                max: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
                 pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
               }}
               seats={{
-                active: 2,
-                billed: 3,
+                active: 3,
+                billed: 4,
                 invited: 1,
                 max: 6,
                 min: 2,
                 remaining: 0,
-                used: 3,
+                used: 4,
               }}
               tiers={[
-                { name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" },
-                { name: "Edge", planCode: "edge", priceLabel: "$19/mo" },
+                {
+                  name: "Pulse",
+                  planCode: "pulse",
+                  priceLabel: "$7/mo",
+                  recurringAmountUsdCents: 700,
+                },
+                {
+                  name: "Edge",
+                  planCode: "edge",
+                  priceLabel: "$19/mo",
+                  recurringAmountUsdCents: 1_900,
+                },
+                {
+                  name: "Max",
+                  planCode: "max",
+                  priceLabel: "$49/mo",
+                  recurringAmountUsdCents: 4_900,
+                },
               ]}
             />
           </div>
@@ -2349,6 +2500,39 @@ export function ComponentsContent() {
               <PlanVisual tier="edge" />
               <span className="text-xs text-muted-foreground">Edge</span>
             </div>
+          </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Plan selling points">
+          <p className="-mt-3 text-xs text-muted-foreground">
+            Canonical bullet lists from lib/hosted-onboarding/plan-features.ts. The join page,
+            billing settings, and the plan dialogs all render from these lists, so a wording
+            change here is the wording change everywhere. Only Edge may claim the most capable
+            AI models; the top model requires an active paid Edge plan.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <PlanBulletListStudy title="Pulse trial · join page" features={PULSE_TRIAL_FEATURES} />
+            <PlanBulletListStudy title="Pulse · join page" features={JOIN_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · join page" features={JOIN_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · join page" features={JOIN_FAMILY_FEATURES} />
+            <PlanBulletListStudy title="Core · settings" features={SETTINGS_CORE_FEATURES} />
+            <PlanBulletListStudy title="Pulse · settings" features={SETTINGS_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · settings" features={SETTINGS_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · settings" features={SETTINGS_FAMILY_FEATURES} />
+            <PlanBulletListStudy
+              title="Pulse · start-paid dialog"
+              features={CHECKOUT_PULSE_FEATURES}
+            />
+            <PlanBulletListStudy
+              title="Core · start-paid dialog"
+              features={CHECKOUT_CORE_FEATURES}
+            />
+            <PlanBulletListStudy
+              title="Edge loses · downgrade dialog"
+              features={EDGE_ONLY_FEATURES}
+            />
           </div>
         </Section>
 

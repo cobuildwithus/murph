@@ -21,6 +21,9 @@ import type {
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
 import type {
+  AssistantProviderStartCriticalPathContext,
+} from './provider-start-critical-path.js'
+import type {
   AutomationAssistantTargetOverride,
 } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from './content-types.js'
@@ -127,6 +130,7 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   activeTurnCheckpoint?: AssistantActiveTurnInputCheckpointHook
   activeTurnInput?: AssistantActiveTurnInputAdmissionHook
   beforeProviderAcceptedInputs?: AssistantBeforeProviderAcceptedInputsHook | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   // Automation-owned per-turn provider route override. It is execution input,
   // not durable session target state.
   assistantTargetOverride?: AutomationAssistantTargetOverride | null

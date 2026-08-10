@@ -1,4 +1,4 @@
-import * as z from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import type {
   AssistantResponseMedia,
   AssistantSession,
@@ -150,6 +150,14 @@ const ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'provider-turn',
 }
+const ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'creative-notification',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
+}
 const ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
@@ -174,7 +182,9 @@ export type AssistantNotificationTurnPolicy =
       privateSummary: string
     }
 
-export type AssistantNotificationPromptProfile = 'creative-response'
+export type AssistantNotificationPromptProfile =
+  | 'creative-response'
+  | 'creative-response-text'
 
 export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
@@ -650,6 +660,18 @@ export async function sendAssistantNotificationLocal(
           })
         }
 
+        let responseMedia: readonly AssistantResponseMedia[]
+        try {
+          responseMedia = resolveAssistantNotificationResponseMedia({
+            notificationPromptProfile: input.notificationPromptProfile ?? null,
+            responseMedia: providerResult.responseMedia,
+          })
+        } catch (error) {
+          throw annotateAssistantNotificationError(
+            error,
+            providerValidationErrorDetails,
+          )
+        }
         const responseText = providerResult.responseCard
           ? renderAssistantResponseCardText(providerResult.responseCard)
           : normalizeRequiredText(decision.text, 'notification response')
@@ -696,7 +718,7 @@ export async function sendAssistantNotificationLocal(
             decisionSubject: decision.subject ?? null,
             input: messageInput,
             card: providerResult.responseCard ?? null,
-            media: providerResult.responseMedia ?? [],
+            media: responseMedia,
             message: responseText,
             session: savedSession,
             sharedPlan,
@@ -761,7 +783,7 @@ export async function sendAssistantNotificationLocal(
           decisionSubject: decision.subject ?? null,
           input: messageInput,
           card: providerResult.responseCard ?? null,
-          media: providerResult.responseMedia ?? [],
+          media: responseMedia,
           message: responseText,
           session: providerResult.session,
           sharedPlan,
@@ -1580,6 +1602,9 @@ function resolveAssistantNotificationTurnProfile(
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
   }
+  if (input.notificationPromptProfile === 'creative-response-text') {
+    return ASSISTANT_CREATIVE_TEXT_NOTIFICATION_TURN_PROFILE
+  }
   if (isAssistantOnboardingGoalCheckinNotification(input)) {
     return ASSISTANT_ONBOARDING_GOAL_CHECKIN_TURN_PROFILE
   }
@@ -1799,6 +1824,23 @@ export function parseAssistantNotificationDecision(
       )
     }
   }
+}
+
+function resolveAssistantNotificationResponseMedia(input: {
+  notificationPromptProfile: AssistantNotificationPromptProfile | null
+  responseMedia: readonly AssistantResponseMedia[] | null | undefined
+}): readonly AssistantResponseMedia[] {
+  if (input.notificationPromptProfile !== 'creative-response') {
+    return input.responseMedia ?? []
+  }
+  const media = normalizeAssistantResponseMediaList(input.responseMedia)
+  if (media.length !== 1 || media[0]?.kind !== 'voice_memo') {
+    throw new VaultCliError(
+      'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+      'A song notification requires exactly one generated song attachment.',
+    )
+  }
+  return media
 }
 
 function normalizeAssistantNotificationDecisionJson(value: string): string {

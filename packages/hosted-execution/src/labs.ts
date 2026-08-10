@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_RUNTIME_LABS_OFFERING_KINDS = [
   "panel",

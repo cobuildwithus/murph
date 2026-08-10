@@ -1,4 +1,4 @@
-import * as z from "zod";
+import * as z from "./zod-runtime.ts";
 
 import {
   ALLERGY_CRITICALITIES,

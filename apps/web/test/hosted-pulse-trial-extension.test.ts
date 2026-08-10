@@ -60,6 +60,8 @@ import {
   HostedPulseTrialExtensionPreviewStaleError,
   HostedPulseTrialExtensionProviderError,
   previewHostedPulseTrialExtension,
+  type HostedPulseTrialExtensionStripeResumeParams,
+  type HostedPulseTrialExtensionStripeUpdateParams,
   type HostedPulseTrialExtensionSubscription,
 } from "../src/lib/hosted-ops/pulse-trial-extension";
 
@@ -1586,21 +1588,14 @@ function makeStripeClient(subscription: HostedPulseTrialExtensionSubscription) {
     resumeSubscription: vi.fn<
       (
         id: string,
-        params: {
-          billing_cycle_anchor: "unchanged";
-          proration_behavior: "none";
-        },
+        params: HostedPulseTrialExtensionStripeResumeParams,
         options: Stripe.RequestOptions,
       ) => Promise<HostedPulseTrialExtensionSubscription>
     >(async () => subscription),
     updateSubscription: vi.fn<
       (
         id: string,
-        params: {
-          metadata: Record<string, string>;
-          proration_behavior?: "none";
-          trial_end?: number;
-        },
+        params: HostedPulseTrialExtensionStripeUpdateParams,
         options: Stripe.RequestOptions,
       ) => Promise<HostedPulseTrialExtensionSubscription>
     >(async () => subscription),

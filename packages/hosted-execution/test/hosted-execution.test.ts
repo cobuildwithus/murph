@@ -287,7 +287,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(3);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(4);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -557,11 +557,15 @@ describe("hosted execution coverage gaps", () => {
       "package.json",
     );
     const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
       exports?: Record<string, unknown>;
     };
 
     const exportKeys = Object.keys(packageJson.exports ?? {}).sort();
 
+    expect(packageJson.dependencies?.zod).toBe("^4.4.3");
+    expect(packageJson.devDependencies?.zod).toBeUndefined();
     expect(exportKeys).toEqual([
       ".",
       "./action-approval",

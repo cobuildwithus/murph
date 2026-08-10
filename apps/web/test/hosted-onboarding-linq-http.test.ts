@@ -1446,6 +1446,7 @@ describe("shareHostedLinqContactCard", () => {
 
 describe("updateHostedLinqChatAvatar", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     if (originalFetch) {
       vi.stubGlobal("fetch", originalFetch);
@@ -1481,6 +1482,47 @@ describe("updateHostedLinqChatAvatar", () => {
       group_chat_icon:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
+  });
+
+  it("can time out after Linq returns a successful response with a stalled body", async () => {
+    vi.useFakeTimers();
+    let bodyAborted = false;
+    let putStarted = false;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      putStarted = true;
+      const signal = readRequestSignal(init);
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => {
+            bodyAborted = true;
+            controller.error(signal.reason ?? new Error("aborted"));
+          }, { once: true });
+        },
+      });
+      return new Response(body, {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    });
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq chat avatar update timed out.",
+      retryable: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expectation;
+    expect(putStarted).toBe(true);
+    expect(bodyAborted).toBe(true);
   });
 
   it("preserves an allowlisted Linq error code without provider prose", async () => {

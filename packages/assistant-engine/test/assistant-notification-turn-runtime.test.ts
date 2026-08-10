@@ -3264,7 +3264,63 @@ test('sendAssistantNotificationLocal preserves a card decision and delivers dete
   )
 })
 
-test('sendAssistantNotificationLocal accepts a sponsor-song response', async () => {
+test.each([
+  {
+    expectedToolProfile: 'provider-turn',
+    profile: 'creative-response' as const,
+  },
+  {
+    expectedToolProfile: 'output-only-turn',
+    profile: 'creative-response-text' as const,
+  },
+])(
+  'sendAssistantNotificationLocal maps $profile to $expectedToolProfile',
+  async ({ expectedToolProfile, profile }) => {
+    const providerResult = createProviderResult({
+      response: JSON.stringify({
+        kind: 'send_message',
+        privateSummary: 'Celebrate the group contribution.',
+        text: 'Fiscal leadership has arrived.',
+      }),
+      responseMedia: profile === 'creative-response'
+        ? [{
+            filename: 'profile-mapping-song.mp3',
+            kind: 'voice_memo',
+            transcript: 'Fiscal leadership has arrived.',
+            transport: {
+              attachmentId: 'attachment-profile-mapping-song',
+              kind: 'linq_attachment',
+            },
+          }]
+        : [],
+    })
+    const { mocks, sendAssistantNotificationLocal } =
+      await loadNotificationTurnHarness({
+        providerResult,
+        turnId: `turn-${profile}`,
+      })
+
+    await sendAssistantNotificationLocal({
+      executionContext: { hosted: null },
+      instructions: 'Create one validated creative response.',
+      notificationPromptProfile: profile,
+      responsePolicy: { kind: 'require_send' },
+      vault: `/vaults/${profile}`,
+    })
+
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile: expect.objectContaining({
+          promptProfile: 'creative-notification',
+          threadScope: 'isolated-thread',
+          toolProfile: expectedToolProfile,
+        }),
+      }),
+    )
+  },
+)
+
+test('sendAssistantNotificationLocal rejects a selected song without generated media', async () => {
   const providerResult = createProviderResult({
     response: JSON.stringify({
       kind: 'send_message',
@@ -3273,7 +3329,7 @@ test('sendAssistantNotificationLocal accepts a sponsor-song response', async () 
     }),
   })
   const observedProviderInputs: NotificationTurnProviderInput[] = []
-  const { deliverMessage, sendAssistantNotificationLocal } =
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
     await loadNotificationTurnHarness({
       onExecuteCodexTurnWithRecovery: async (providerInput) => {
         observedProviderInputs.push(providerInput)
@@ -3291,11 +3347,11 @@ test('sendAssistantNotificationLocal accepts a sponsor-song response', async () 
     notificationPromptProfile: 'creative-response',
     responsePolicy: { kind: 'require_send' },
     vault: '/vaults/group-sponsorship-text',
-  })).resolves.toMatchObject({
-    deliveryOutcome: {
-      kind: 'sent',
-      media: [],
-    },
+  })).rejects.toMatchObject({
+    code: 'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
+    details: expect.objectContaining({
+      assistantNotificationProviderNonReplayableWork: false,
+    }),
   })
 
   expect(observedProviderInputs[0]).toMatchObject({
@@ -3308,37 +3364,8 @@ test('sendAssistantNotificationLocal accepts a sponsor-song response', async () 
       toolProfile: 'provider-turn',
     },
   })
-  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
-    media: [],
-  }))
-})
-
-test('sendAssistantNotificationLocal accepts a text fallback when song generation fails', async () => {
-  const providerResult = createProviderResult({
-    response: JSON.stringify({
-      kind: 'send_message',
-      privateSummary: 'Audio was unavailable; use text.',
-      text: 'The group fuel gauge lives to fight another day.',
-    }),
-  })
-  const { deliverMessage, sendAssistantNotificationLocal } =
-    await loadNotificationTurnHarness({
-      providerResult,
-      turnId: 'turn-group-sponsorship-media-failed',
-    })
-
-  await expect(sendAssistantNotificationLocal({
-    instructions: 'Create a brief group sponsorship thank-you.',
-    notificationPromptProfile: 'creative-response',
-    responsePolicy: { kind: 'require_send' },
-    vault: '/vaults/group-sponsorship-media-failed',
-  })).resolves.toMatchObject({
-    deliveryOutcome: {
-      kind: 'sent',
-      media: [],
-    },
-  })
-  expect(deliverMessage).toHaveBeenCalledOnce()
+  expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
+  expect(deliverMessage).not.toHaveBeenCalled()
 })
 
 test('sendAssistantNotificationLocal delivers one successful sponsor song', async () => {
@@ -3387,6 +3414,7 @@ test('sendAssistantNotificationLocal delivers one successful sponsor song', asyn
   })).resolves.toMatchObject({
     deliveryOutcome: { kind: 'sent' },
   })
+  expect(deliverMessage).toHaveBeenCalledOnce()
   expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
     media: [song],
   }))

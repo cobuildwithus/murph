@@ -59,6 +59,9 @@ patchedDependencies:
   incur@0.4.5:
     hash: d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e
     path: patches/incur@0.4.5.patch
+  ink@6.8.0:
+    hash: 9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5
+    path: patches/ink@6.8.0.patch
 
 importers:
 
@@ -304,8 +307,11 @@ importers:
         version: 4.2.4(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.19(@nestjs/common@11.1.19(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2))(@opentelemetry/api@1.9.0)(@swc/cli@0.8.1(@swc/core@1.15.3(@swc/helpers@0.5.21))(chokidar@5.0.0))(@swc/core@1.15.3(@swc/helpers@0.5.21))(@swc/helpers@0.5.21)(magicast@0.5.2)(next@16.3.0(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.59.1)(@types/node@25.6.2)(react-dom@19.2.6(react@19.2.6))(react@19.2.6))(typescript@5.9.3)
     devDependencies:
       '@linqapp/sdk':
-        specifier: 0.28.0
-        version: 0.28.0
+        specifier: 0.34.0
+        version: 0.34.0
+      '@murphai/hosted-local-harness':
+        specifier: workspace:*
+        version: link:../../packages/hosted-local-harness
       '@playwright/test':
         specifier: ^1.59.1
         version: 1.59.1
@@ -371,7 +377,7 @@ importers:
         version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
+        version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
       react:
         specifier: ^19.2.6
         version: 19.2.6
@@ -421,9 +427,6 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@openai/codex':
         specifier: 0.145.0
@@ -431,6 +434,9 @@ importers:
       openai:
         specifier: 6.45.0
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/assistant-runtime:
     dependencies:
@@ -494,12 +500,12 @@ importers:
 
   packages/cli:
     dependencies:
+      '@alcalzone/ansi-tokenize':
+        specifier: ^0.2.4
+        version: 0.2.5
       '@cfworker/json-schema':
         specifier: ^4.1.1
         version: 4.1.1
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@modelcontextprotocol/server':
         specifier: ^2.0.0-alpha.2
         version: 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
@@ -572,27 +578,99 @@ importers:
       '@toon-format/toon':
         specifier: ^2.1.0
         version: 2.2.0
+      ansi-escapes:
+        specifier: ^7.3.0
+        version: 7.3.0
+      ansi-styles:
+        specifier: ^6.2.1
+        version: 6.2.3
+      auto-bind:
+        specifier: ^5.0.1
+        version: 5.0.1
+      chalk:
+        specifier: ^5.6.0
+        version: 5.6.2
+      cli-boxes:
+        specifier: ^3.0.0
+        version: 3.0.0
+      cli-cursor:
+        specifier: ^4.0.0
+        version: 4.0.0
+      cli-truncate:
+        specifier: ^5.1.1
+        version: 5.2.0
+      code-excerpt:
+        specifier: ^4.0.0
+        version: 4.0.0
+      es-toolkit:
+        specifier: ^1.39.10
+        version: 1.46.1
       grammy:
         specifier: 1.42.0
         version: 1.42.0
       incur:
         specifier: 0.4.5
         version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+      indent-string:
+        specifier: ^5.0.0
+        version: 5.0.0
       ink:
         specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
+        version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
+      is-in-ci:
+        specifier: ^2.0.0
+        version: 2.0.0
+      patch-console:
+        specifier: ^2.0.0
+        version: 2.0.0
       react:
         specifier: ^19.2.6
         version: 19.2.6
+      react-reconciler:
+        specifier: ^0.33.0
+        version: 0.33.0(react@19.2.6)
+      scheduler:
+        specifier: ^0.27.0
+        version: 0.27.0
       sharp:
         specifier: 0.34.5
         version: 0.34.5
+      signal-exit:
+        specifier: ^3.0.7
+        version: 3.0.7
+      slice-ansi:
+        specifier: ^8.0.0
+        version: 8.0.0
+      stack-utils:
+        specifier: ^2.0.6
+        version: 2.0.6
+      string-width:
+        specifier: ^8.1.1
+        version: 8.2.0
+      terminal-size:
+        specifier: ^4.0.1
+        version: 4.0.1
       tokenx:
         specifier: ^1.3.0
         version: 1.3.0
+      type-fest:
+        specifier: ^5.4.1
+        version: 5.6.0
+      widest-line:
+        specifier: ^6.0.0
+        version: 6.0.0
+      wrap-ansi:
+        specifier: ^9.0.0
+        version: 9.0.2
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       yaml:
         specifier: ^2.8.2
         version: 2.9.0
+      yoga-layout:
+        specifier: ~3.2.1
+        version: 3.2.1
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -612,6 +690,7 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -642,9 +721,6 @@ importers:
 
   packages/device-syncd:
     dependencies:
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -654,6 +730,10 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
+      '@junction-api/sdk':
+        specifier: 1.2.0
+        version: 1.2.0
 
   packages/exercise-library:
     devDependencies:
@@ -709,9 +789,6 @@ importers:
 
   packages/hosted-execution:
     dependencies:
-      '@junction-api/sdk':
-        specifier: 1.2.0
-        version: 1.2.0
       '@murphai/clinical-records':
         specifier: workspace:*
         version: link:../clinical-records
@@ -766,13 +843,13 @@ importers:
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:../health-metrics
-      zod:
-        specifier: ^4.4.3
-        version: 4.4.3
     devDependencies:
       '@medplum/fhirtypes':
         specifier: ^5.1.24
         version: 5.1.24
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/inbox-services:
     dependencies:
@@ -800,6 +877,7 @@ importers:
       '@murphai/vault-usecases':
         specifier: workspace:*
         version: link:../vault-usecases
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -852,13 +930,13 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
+      '@linqapp/sdk':
+        specifier: 0.34.0
+        version: 0.34.0
       zod:
         specifier: ^4.4.3
         version: 4.4.3
-    devDependencies:
-      '@linqapp/sdk':
-        specifier: 0.28.0
-        version: 0.28.0
 
   packages/parsers:
     dependencies:
@@ -883,6 +961,7 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -908,7 +987,7 @@ importers:
         version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
       ink:
         specifier: ^6.8.0
-        version: 6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
+        version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
       react:
         specifier: ^19.2.6
         version: 19.2.6
@@ -949,6 +1028,7 @@ importers:
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
+    devDependencies:
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -2092,8 +2172,8 @@ packages:
   '@kurkle/color@0.3.4':
     resolution: {integrity: sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==}
 
-  '@linqapp/sdk@0.28.0':
-    resolution: {integrity: sha512-Hd6FligxpH3G9Dq0HV6dSjE5hBwI/NanyXVlsZlETKdAtdcRLhXDYI9gJPkqDLfFdWjaAYvCndnaF4lD7DU8eA==}
+  '@linqapp/sdk@0.34.0':
+    resolution: {integrity: sha512-ABuFPWZkwBaQY5C0tU2RYWp1KXKGeENBFQKsmDu73SjpYgObRxwFzALtDDWkhhVIjMYCiR9TI4/Y3K+1jh9dCQ==}
 
   '@lit-labs/ssr-dom-shim@1.5.1':
     resolution: {integrity: sha512-Aou5UdlSpr5whQe8AA/bZG0jMj96CoJIWbGfZ91qieWu5AWUMKw8VR/pAkQkJYvBNhmCcWnZlyyk5oze8JIqYA==}
@@ -11120,7 +11200,7 @@ snapshots:
 
   '@kurkle/color@0.3.4': {}
 
-  '@linqapp/sdk@0.28.0':
+  '@linqapp/sdk@0.34.0':
     dependencies:
       standardwebhooks: 1.0.0
 
@@ -17640,7 +17720,7 @@ snapshots:
   ini@1.3.8:
     optional: true
 
-  ink@6.8.0(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6):
+  ink@6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6):
     dependencies:
       '@alcalzone/ansi-tokenize': 0.2.5
       ansi-escapes: 7.3.0

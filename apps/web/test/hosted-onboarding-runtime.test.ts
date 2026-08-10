@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type Stripe from "stripe";
 
 import type { HostedOnboardingEnvironment } from "@/src/lib/hosted-onboarding/env";
 import {
@@ -15,6 +16,10 @@ const globalForHostedOnboarding = globalThis as typeof globalThis & {
   __murphHostedOnboardingStripe?: unknown;
 };
 const originalVercelEnvironment = process.env.VERCEL_ENV;
+
+type StripePriceRetrieveMock = (
+  ...args: Parameters<Stripe["prices"]["retrieve"]>
+) => Promise<Record<string, unknown>>;
 
 function createHostedOnboardingEnvironment(
   overrides: Partial<HostedOnboardingEnvironment> = {},
@@ -45,11 +50,13 @@ function createHostedOnboardingEnvironment(
     publicBaseUrl: "https://join.example.test",
     stripeFamilyPriceIdsByPlan: {
       edge: "price_family_edge_123",
+      max: "price_family_max_123",
       pulse: "price_family_pulse_123",
     },
     stripePriceIdsByPlan: {
       launch_edge_monthly: "price_edge_monthly_123",
       launch_group_monthly: "price_group_monthly_123",
+      launch_max_monthly: "price_max_monthly_123",
       launch_monthly: "price_monthly_123",
     },
     stripeUsageCreditPriceIdsByOffer: {
@@ -93,7 +100,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
   });
 
   it("accepts a distinct active monthly Group Price with the catalog amount", async () => {
-    const retrieve = vi.fn().mockResolvedValue(
+    const retrieve = vi.fn<StripePriceRetrieveMock>().mockResolvedValue(
       buildRecurringStripePrice(),
     );
     globalForHostedOnboarding.__murphHostedOnboardingEnv =
@@ -113,18 +120,59 @@ describe("requireHostedStripeCheckoutConfig", () => {
     });
   });
 
+  it("keeps only frozen request correlation when a Price read fails", async () => {
+    const providerError = Object.assign(
+      new Error("Stripe echoed private request content"),
+      {
+        requestId: "req_price_failure",
+        statusCode: 503,
+        type: "StripeAPIError",
+      },
+    );
+    globalForHostedOnboarding.__murphHostedOnboardingEnv =
+      createHostedOnboardingEnvironment();
+    globalForHostedOnboarding.__murphHostedOnboardingStripe = {
+      prices: { retrieve: vi.fn().mockRejectedValue(providerError) },
+    };
+
+    let checkoutError: unknown;
+    try {
+      await requireValidatedHostedStripeBillingPlanConfig({
+        billingPlanCode: "launch_group_monthly",
+      });
+    } catch (error) {
+      checkoutError = error;
+    }
+
+    expect(checkoutError).toMatchObject({
+      code: "HOSTED_BILLING_PRICE_UNAVAILABLE",
+      httpStatus: 502,
+    });
+    expect(checkoutError).toBeInstanceOf(Error);
+    if (!(checkoutError instanceof Error)) {
+      throw new TypeError("Expected a hosted billing error.");
+    }
+    expect(checkoutError.cause).toEqual({
+      kind: "hosted_stripe_alert_correlation",
+      requestId: "req_price_failure",
+    });
+    expect(Object.isFrozen(checkoutError.cause)).toBe(true);
+    expect(JSON.stringify(checkoutError)).not.toContain("req_price_failure");
+    expect(JSON.stringify(checkoutError)).not.toContain("private request content");
+  });
+
   it("bounds display-only Group Price validation and fails closed", async () => {
     vi.useFakeTimers();
-    const retrieve = vi.fn(
+    const retrieve = vi.fn<StripePriceRetrieveMock>(
       (
         _priceId: string,
-        _params: unknown,
-        requestOptions: { timeout?: number },
+        _params?: Stripe.PriceRetrieveParams,
+        requestOptions?: Stripe.RequestOptions,
       ) =>
         new Promise((_, reject) => {
           setTimeout(
             () => reject(new Error("Stripe display read timed out.")),
-            requestOptions.timeout,
+            requestOptions?.timeout ?? 0,
           );
         }),
     );
@@ -158,6 +206,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: "price_monthly_123",
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });
@@ -178,6 +227,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: "price_monthly_123",
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });
@@ -227,7 +277,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
       createHostedOnboardingEnvironment();
     globalForHostedOnboarding.__murphHostedOnboardingStripe = {
       prices: {
-        retrieve: vi.fn().mockResolvedValue(
+        retrieve: vi.fn<StripePriceRetrieveMock>().mockResolvedValue(
           buildRecurringStripePrice(override),
         ),
       },
@@ -247,6 +297,7 @@ describe("requireHostedStripeCheckoutConfig", () => {
         stripePriceIdsByPlan: {
           launch_edge_monthly: "price_edge_monthly_123",
           launch_group_monthly: null,
+          launch_max_monthly: "price_max_monthly_123",
           launch_monthly: "price_monthly_123",
         },
       });

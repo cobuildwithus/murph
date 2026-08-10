@@ -1,5 +1,7 @@
 interface GrowthScorecardProps {
   activeUsers: {
+    today: number;
+    todayComplete: boolean;
     trailing30Days: number;
     trailing30DaysComplete: boolean;
     trailing7Days: number;
@@ -67,6 +69,7 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
             </div>
             <div className="mt-6 grid gap-4 border-t border-border/60 pt-4 sm:grid-cols-2">
               <SupportingRevenueMetric
+                helper="Recurring subscriptions only; sponsorship stays separate"
                 label="Current MRR"
                 value={formatCurrency(input.mrrUsdCents)}
               />
@@ -78,20 +81,25 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
             </div>
           </div>
 
-          <div className="grid border-t border-border/70 sm:grid-cols-2 lg:grid-cols-1 lg:border-l lg:border-t-0">
+          <div className="grid border-t border-border/70 sm:grid-cols-3 lg:grid-cols-1 lg:border-l lg:border-t-0">
             <GrowthSignal
-              detail={`${formatInteger(input.payingCustomers)} paying now`}
-              label="Paying customer growth"
-              value={formatGrowthRate(input.payingCustomersWowPercent)}
+              detail="Unique senders whose messages Murph received since 00:00 UTC"
+              helper={formatTodayActiveUserDefinition(input.activeUsers)}
+              label="Messaged Murph today"
+              value={formatTodayActiveUsers(input.activeUsers)}
             />
             <GrowthSignal
               className="border-t border-border/60 sm:border-l sm:border-t-0 lg:border-l-0 lg:border-t"
               detail={formatMonthlyActiveUsers(input.activeUsers)}
-              helper={formatActiveUserChange(
-                input.activeUsers,
-              )}
-              label="Weekly active users"
+              helper={formatActiveUserChange(input.activeUsers)}
+              label="Messaged Murph · last 7 days"
               value={formatWeeklyActiveUsers(input.activeUsers)}
+            />
+            <GrowthSignal
+              className="border-t border-border/60 sm:border-l sm:border-t-0 lg:border-l-0 lg:border-t"
+              detail={`${formatInteger(input.payingCustomers)} paying now`}
+              label="Paying customer growth"
+              value={formatGrowthRate(input.payingCustomersWowPercent)}
             />
           </div>
         </div>
@@ -277,14 +285,31 @@ function formatWeeklyActiveUsers(
   activeUsers: GrowthScorecardProps["activeUsers"],
 ): string {
   const prefix = activeUsers.trailing7DaysComplete ? "" : "At least ";
-  return `${prefix}${formatInteger(activeUsers.trailing7Days)} WAU`;
+  return `${prefix}${formatInteger(activeUsers.trailing7Days)}`;
+}
+
+function formatTodayActiveUsers(
+  activeUsers: GrowthScorecardProps["activeUsers"],
+): string {
+  const prefix = activeUsers.todayComplete ? "" : "At least ";
+  return `${prefix}${formatInteger(activeUsers.today)}`;
+}
+
+function formatTodayActiveUserDefinition(
+  activeUsers: GrowthScorecardProps["activeUsers"],
+): string {
+  const definition =
+    "Each retained distinct sender counts once when Murph receives a message in the UTC window, across personal + group chats";
+  return activeUsers.todayComplete
+    ? definition
+    : `Today is a lower bound because group sender evidence was intentionally retired · ${definition}`;
 }
 
 function formatActiveUserChange(
   activeUsers: GrowthScorecardProps["activeUsers"],
 ): string {
   const activityDefinition =
-    "Each retained distinct sender counts once across personal + group chats";
+    "Each retained distinct sender counts once when Murph receives a message in the UTC window, across personal + group chats";
 
   if (!activeUsers.wowComparisonComplete) {
     return `Prior-week comparison unavailable because older group sender evidence was intentionally retired · ${activityDefinition}`;

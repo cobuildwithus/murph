@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type Server, type ServerResponse } from 'node:http'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -18,6 +18,10 @@ import {
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
 import {
+  MURPH_ASSISTANT_SKILLS_ROOT_ENV,
+  resolveAssistantSkillsRoot,
+} from '../src/assistant-skill-assets.ts'
+import {
   compactWarmCodexThread,
   executeCodexAppServerTurn as executeCodexAppServerTurnUnchecked,
   resolveMurphDynamicTools,
@@ -31,6 +35,9 @@ import {
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
+import {
+  MURPH_ATTACH_RESPONSE_CARD_TOOL,
+} from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -40,6 +47,12 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
+import type {
+  AssistantHostedAutomationToolRequest,
+} from '../src/assistant/execution-context.ts'
+import {
+  isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
+} from '../src/assistant/onboarding-first-personal-read-automation.ts'
 import { sendAssistantAskContinuationLocal } from '../src/assistant/ask-continuation.ts'
 import { conversationRefFromBinding } from '../src/assistant/conversation-ref.ts'
 import { listAssistantOutboxIntents } from '../src/assistant/outbox.ts'
@@ -47,6 +60,16 @@ import { resolveAssistantSession } from '../src/assistant/store.ts'
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
+import {
+  ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+} from '../src/assistant/first-contact-welcome.ts'
+import {
+  buildAssistantResearchScoutCapabilityText,
+} from '../src/assistant/model-behavior.ts'
+import {
+  MURPH_MANAGED_AUTOMATIONS,
+  MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+} from '../src/assistant/managed-automations.ts'
 
 // Runs the REAL `codex app-server` binary (pinned @openai/codex devDependency,
 // matching CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base)
@@ -113,6 +136,8 @@ interface ScriptedProviderRequestSummary {
     includesAutomation: boolean
     includesGroup: boolean
     includesReadShared: boolean
+    includesResponseCardCompactTableShape: boolean
+    includesResponseCardNutritionV2Shape: boolean
     includesSaveNewsletter: boolean
     includesToolSearch: boolean
   }
@@ -185,6 +210,365 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('keeps a fresh onboarding greeting on the compact root and bounded resume read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.join(
+      scenario.turnInput.workingDirectory,
+      'skills',
+    )
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'murph-onboarding'),
+      path.join(skillsRoot, 'murph-onboarding'),
+      { recursive: true },
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "assistant onboarding resume-context --format json" ]; then
+  printf '%s\\n' '{"status":"open","hasPriorSetupContext":false,"savedFacts":[]}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 1
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+
+    const laterStageMarker =
+      'Hosted onboarding must have capacity for at least three concurrent children.'
+    const completionMarker =
+      'Onboarding is complete with `user_answered` only when all of these are true:'
+    const recoveryMarker =
+      'A managed owner may invoke this skill at most once on each of the next three local days after the welcome.'
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/murph-onboarding/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli assistant onboarding resume-context --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE,
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      prompt: 'Hey',
+      // This proof intentionally executes the staged skill and fake vault CLI.
+      // Match the existing scripted exec lane so GitHub's restricted Linux
+      // runner does not fail while bubblewrap configures loopback.
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toBe(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('## Progressive disclosure')
+    expect(toolOutputs).toContain(
+      'Never re-ask solely for optional demographics.',
+    )
+    expect(toolOutputs).toContain('"hasPriorSetupContext":false')
+    expect(toolOutputs).not.toContain(laterStageMarker)
+    expect(toolOutputs).not.toContain(completionMarker)
+    expect(toolOutputs).not.toContain(recoveryMarker)
+  })
+
+  it('completes onboarding without arming or promising a revoked first read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'murph-onboarding'),
+      path.join(skillsRoot, 'murph-onboarding'),
+      { recursive: true },
+    )
+    const commandLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'onboarding-completion-commands.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "assistant onboarding complete --reason user_answered" ]; then
+  printf '%s\\n' "$*" >> "${commandLog}"
+  printf '%s\\n' '{"status":"completed","completedReason":"user_answered"}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 1
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/murph-onboarding/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,360p' skills/murph-onboarding/references/return-launch-completion.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli assistant onboarding complete --reason user_answered",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "Understood — you're all set, and I won't send proactive follow-ups.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            throw new Error('The revoked first read must not be armed.')
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onboardingFirstReadCompletionTransitionAvailable: true,
+      prompt: [
+        'Every user_answered onboarding criterion is now satisfied.',
+        'Complete onboarding, but do not follow up or message me proactively.',
+      ].join(' '),
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toBe(
+      "Understood — you're all set, and I won't send proactive follow-ups.",
+    )
+    expect(automationRequests).toEqual([])
+    expect((await readFile(commandLog, 'utf8')).trim().split('\n')).toEqual([
+      'assistant onboarding complete --reason user_answered',
+    ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain(
+      'Never arm it when the current message says the member asked not to',
+    )
+    expect(result.finalMessage).not.toContain(
+      'If I find something genuinely useful',
+    )
+  })
+
+  it('completes onboarding before arming and promising one first read', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const skillsRoot = path.join(scenario.turnInput.workingDirectory, 'skills')
+    await mkdir(skillsRoot, { recursive: true })
+    await cp(
+      path.join(resolveAssistantSkillsRoot(), 'murph-onboarding'),
+      path.join(skillsRoot, 'murph-onboarding'),
+      { recursive: true },
+    )
+    const commandLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'onboarding-positive-completion-commands.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "assistant onboarding complete --reason user_answered" ]; then
+  printf '%s\\n' "$*" >> "${commandLog}"
+  printf '%s\\n' '{"status":"completed","completedReason":"user_answered"}'
+  exit 0
+fi
+printf '%s\\n' '{"error":"unexpected scripted command"}' >&2
+exit 1
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,260p' skills/murph-onboarding/SKILL.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "sed -n '1,360p' skills/murph-onboarding/references/return-launch-completion.md",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli assistant onboarding complete --reason user_answered",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save_onboarding_first_personal_read",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "You're all set. I'm going to take a proper look across what you shared and any data you connected. If I find something genuinely useful—whether that's a pattern, a clearer interpretation, or something worth watching next—I'll send it over. You can keep texting me normally in the meantime.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      env: {
+        ...scenario.turnInput.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+      },
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            expect((await readFile(commandLog, 'utf8')).trim()).toBe(
+              'assistant onboarding complete --reason user_answered',
+            )
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-first-personal-read',
+              created: true,
+              lookupId: 'onboarding-first-personal-read',
+              routeBinding: 'current_conversation',
+              status: 'active',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onboardingFirstReadCompletionTransitionAvailable: true,
+      prompt: [
+        'Every user_answered onboarding criterion is now satisfied.',
+        'Complete onboarding and follow the completion owner.',
+      ].join(' '),
+      sandbox: 'danger-full-access',
+    })
+
+    expect(result.finalMessage).toContain(
+      'If I find something genuinely useful',
+    )
+    expect(automationRequests).toHaveLength(1)
+    const request = automationRequests[0]
+    expect(request?.action).toBe('save')
+    if (request?.action !== 'save') {
+      throw new Error('Expected the code-owned first-read save request.')
+    }
+    expect(
+      isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest(request),
+    ).toBe(true)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(5)
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs.replace(/\s+/gu, ' ')).toContain(
+      'post-completion first-personal-read one-shot',
+    )
+    expect(toolOutputs).toContain('routeBinding')
+    expect(toolOutputs).toContain('current_conversation')
   })
 
   it('carries a compact mixed-meal lookup through a grounded save and final reply', {
@@ -432,6 +816,374 @@ text(result.output);
     expect(invocations[1]).toContain('USDA fdc:oats-1 scaled from 100 g')
     expect(invocations[1]).toContain('label fdc:kefir-1 scaled to its 240 g serving')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
+  })
+
+  it('carries generalized Exa evidence through progress, source mapping, and empty recovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const requestLog = path.join(
+      scenario.turnInput.workingDirectory,
+      'research-request.log',
+    )
+    const fakeVaultCli = path.join(
+      scenario.turnInput.workingDirectory,
+      'vault-cli',
+    )
+    const sourcedResponsePayload = {
+      ok: true,
+      privacy: {
+        persistedByTool: false,
+        rawVaultValuesSent: false,
+        sentProfileKind: 'focused_profile',
+        tokenSource: 'env',
+      },
+      provider: {
+        endpoint: 'search',
+        mode: 'deep-reasoning',
+        name: 'exa',
+      },
+      response: {
+        output: {
+          content: JSON.stringify({
+            candidates: [{
+              actionOrQuestion: 'Treat this as a population-level result.',
+              doNotOverinterpret: 'The included trials were small and heterogeneous.',
+              evidenceStrength: 'moderate',
+              hypeRisk: 'medium',
+              keyFinding: 'The review found a small possible memory benefit.',
+              matchedProfileTags: [],
+              resultIndex: 0,
+              studyType: 'systematic_review',
+              whyItMayMatter: 'It directly addresses the generalized question.',
+            }],
+          }),
+        },
+        results: [{
+          publishedDate: '2025-02-03',
+          title: 'Creatine and cognitive performance: a systematic review',
+          url: 'https://example.test/research/creatine-cognition-review',
+        }],
+      },
+    }
+    const sourcedResponse = JSON.stringify(sourcedResponsePayload)
+    const emptyResponse = JSON.stringify({
+      ok: true,
+      privacy: {
+        persistedByTool: false,
+        rawVaultValuesSent: false,
+        sentProfileKind: 'focused_profile',
+        tokenSource: 'env',
+      },
+      provider: {
+        endpoint: 'search',
+        mode: 'deep-reasoning',
+        name: 'exa',
+      },
+      response: {
+        output: { content: '{"candidates":[]}' },
+        results: [],
+      },
+    })
+    const batchResponse = JSON.stringify({
+      ok: true,
+      privacy: {
+        ...sourcedResponsePayload.privacy,
+        sentProfileKind: 'tag_profile',
+      },
+      provider: sourcedResponsePayload.provider,
+      lanes: [{
+        label: 'creatine and cognition',
+        response: sourcedResponsePayload.response,
+      }],
+    })
+    await writeFile(fakeVaultCli, `#!/bin/sh
+if [ "$*" = "research payload-schema --format json" ]; then
+  printf '%s\\n' '{"schemaVersion":"murph.payload-schema.v1","schema":{"properties":{"topics":{"items":{"description":"Allowed provider values: cognition."}},"supplements":{"items":{"description":"Allowed provider values: creatine."}},"conditionsOrConcerns":{"items":{"description":"Allowed provider values: adults, healthy adults."}},"goals":{"items":{"description":"Allowed provider values: cognitive performance."}}}}}'
+  exit 0
+fi
+if [ "$*" = "research scout-batch-payload-schema --format json" ]; then
+  printf '%s\\n' '{"command":"research scout-batch-payload-schema","schemaVersion":"murph.payload-schema.v1","schema":{"properties":{"lanes":{"items":{"properties":{"profile":{"properties":{"topics":{"items":{"description":"Allowed provider values: cognition."}},"supplements":{"items":{"description":"Allowed provider values: creatine."}},"conditionsOrConcerns":{"items":{"description":"Allowed provider values: healthy adults."}},"goals":{"items":{"description":"Allowed provider values: cognitive performance."}}}}}}}}}}'
+  exit 0
+fi
+request="$(cat)"
+printf '%s\\n' "$request" >> "research-request.log"
+case "$*" in
+  *"research scout-batch"*) printf '%s\\n' '${batchResponse}'; exit 0 ;;
+esac
+case "$request" in
+  *creatine*) printf '%s\\n' '${sourcedResponse}' ;;
+  *) printf '%s\\n' '${emptyResponse}' ;;
+esac
+`, {
+      encoding: 'utf8',
+      mode: 0o755,
+    })
+    const progressUpdates: string[] = []
+    const progressDelivery = {
+      send: async (text: string) => {
+        progressUpdates.push(text)
+        return { kind: 'sent' as const, source: 'model' as const }
+      },
+    }
+    const directGuidance = buildAssistantResearchScoutCapabilityText({
+      progressUpdateMode: 'direct',
+    })
+
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: { text: 'I’m checking the current human evidence and its limits.' },
+          name: 'send_progress_update',
+          namespace: 'murph',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli research payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const input = JSON.stringify({mode: "focused", topics: ["cognition"], supplements: ["creatine"], conditionsOrConcerns: ["adults"], goals: ["cognitive performance"]});
+const result = await tools.exec_command({
+  cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2020-01-01 --until 2026-08-06",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'A 2025 systematic review, “Creatine and cognitive performance,” found a small possible memory benefit, but the evidence is only moderate because the included trials were small and heterogeneous. Source: https://example.test/research/creatine-cognition-review. That is population-level evidence, not a personalized recommendation.',
+      },
+    )
+
+    const sourced = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: directGuidance,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      progressDelivery,
+      prompt: 'Check current creatine-and-memory evidence relevant to Caseperson, then explain the useful result and its main limitation.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(progressUpdates).toEqual([
+      'I’m checking the current human evidence and its limits.',
+    ])
+    expect(sourced.finalMessage).toContain('2025 systematic review')
+    expect(sourced.finalMessage).toContain('evidence is only moderate')
+    expect(sourced.finalMessage).toContain('small and heterogeneous')
+    expect(sourced.finalMessage).toContain(
+      'https://example.test/research/creatine-cognition-review',
+    )
+    expect(
+      scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.customToolCallOutputs ?? [])
+        .join('\n'),
+    ).toContain('Allowed provider values: creatine')
+    const providerQuestion = (await readFile(requestLog, 'utf8')).trim()
+    expect(providerQuestion).toContain('"mode":"focused"')
+    expect(providerQuestion).toContain('"topics":["cognition"]')
+    expect(providerQuestion).toContain('"supplements":["creatine"]')
+    expect(providerQuestion.toLowerCase()).not.toContain('caseperson')
+
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const input = JSON.stringify({mode: "focused", behaviors: ["meal timing", "sleep timing"], conditionsOrConcerns: ["adults"]});
+const result = await tools.exec_command({
+  cmd: "printf '%s' '" + input + "' | ./vault-cli research scout --input - --since 2025-01-01 --until 2026-08-06",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'That research pass found no usable current source, so I would not raise confidence or invent a current-evidence answer from it.',
+      },
+    )
+
+    const empty = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: directGuidance,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      progressDelivery,
+      prompt: 'Check current trial evidence on meal timing and sleep timing.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(empty.finalMessage).toBe(
+      'That research pass found no usable current source, so I would not raise confidence or invent a current-evidence answer from it.',
+    )
+    expect(progressUpdates).toHaveLength(1)
+    expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(2)
+
+    scenario.stub.markRequestBaseline()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli research payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'I could not safely form that current-source lookup, so no current sources were checked. I can offer clearly labeled general background from existing knowledge, but not a current-research answer.',
+      },
+    )
+
+    const unrepresentable = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: directGuidance,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      progressDelivery,
+      prompt: 'What do the latest human studies say about semaglutide and gallbladder risk?',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(unrepresentable.finalMessage).toContain(
+      'could not safely form that current-source lookup',
+    )
+    expect(unrepresentable.finalMessage).toContain(
+      'no current sources were checked',
+    )
+    expect(unrepresentable.finalMessage).toContain('general background')
+    expect(unrepresentable.finalMessage).not.toContain('I found')
+    expect(unrepresentable.finalMessage).not.toContain('I checked')
+    expect(unrepresentable.finalMessage).not.toContain('I reviewed')
+    expect(unrepresentable.finalMessage).not.toContain('I verified')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(2)
+
+    const managedResearchScout = MURPH_MANAGED_AUTOMATIONS.find(
+      (seed) =>
+        seed.automationId ===
+          MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
+    )
+    expect(managedResearchScout).toBeDefined()
+
+    scenario.stub.markRequestBaseline()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli research scout-batch-payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const input = JSON.stringify({lanes: [{label: "creatine and cognition", profile: {topics: ["cognition"], supplements: ["creatine"], conditionsOrConcerns: ["healthy adults"], goals: ["cognitive performance"]}}]});
+const result = await tools.exec_command({
+  cmd: "printf '%s' '" + input + "' | ./vault-cli research scout-batch --input - --since 2024-08-07 --until 2026-08-07 --maxCandidatesPerLane 8",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: 'A current review suggests creatine may have a small memory benefit, although the trials were small and heterogeneous.',
+      },
+    )
+
+    const scheduled = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      baseInstructions: managedResearchScout!.instructions,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      prompt: 'Scheduled occurrence context: the current vault context contains an active creatine experiment and a current cognition question.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(scheduled.finalMessage).toContain('small memory benefit')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    const scheduledToolOutputs =
+      scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.customToolCallOutputs ?? [])
+        .join('\n')
+    expect(scheduledToolOutputs).toContain(
+      'research scout-batch-payload-schema',
+    )
+    expect(scheduledToolOutputs).toContain(
+      'https://example.test/research/creatine-cognition-review',
+    )
+    const scheduledRequests = (await readFile(requestLog, 'utf8'))
+      .trim()
+      .split('\n')
+    expect(scheduledRequests).toHaveLength(3)
+    expect(scheduledRequests[2]).toContain('"topics":["cognition"]')
+    expect(scheduledRequests[2]).toContain('"supplements":["creatine"]')
+    expect(scheduledRequests[2]).not.toContain('mode')
+
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli research scout-batch-payload-schema --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {},
+          name: 'finish_without_reply',
+          namespace: 'murph',
+        },
+      },
+      { text: '' },
+    )
+
+    const suppressed = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      allowFinishWithoutReply: true,
+      baseInstructions: managedResearchScout!.instructions,
+      env: {
+        ...scenario.turnInput.env,
+        EXA_API_KEY: 'configured-sentinel',
+      },
+      prompt: 'Scheduled occurrence context: a current private context exists, but none of it maps exactly to an allowed provider concept.',
+      sandbox: 'danger-full-access',
+    })
+
+    expect(suppressed.finalAction).toEqual({ kind: 'none' })
+    expect(suppressed.finalMessage).toBe('')
+    expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
   it.each(['direct', 'group'] as const)(
@@ -747,6 +1499,79 @@ if (!tool) {
       (directSummary?.providerRequestDiagnostics?.bytes ?? 0)
         - deferredRequestBytes,
     ).toBeGreaterThan(4_000)
+  })
+
+  it('preserves both response-card shapes through the real App Server boundary', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const cards = [
+      {
+        kind: 'compact_table',
+        version: 1,
+        title: 'Training sets',
+        subtitle: null,
+        rowHeader: 'Order',
+        columns: ['Set', 'Reps'],
+        rows: [
+          { label: 'First', values: ['1', '8'] },
+          { label: 'Second', values: ['2', '6'] },
+        ],
+        footer: null,
+        tracking: null,
+      },
+      {
+        kind: 'daily_nutrition',
+        version: 2,
+        localDate: '2026-08-08',
+        mealCount: 2,
+        totals: {
+          calories: { total: 900, mealCount: 2 },
+          proteinGrams: { total: 70, mealCount: 2 },
+          carbsGrams: { total: 80, mealCount: 2 },
+          fatGrams: { total: 30, mealCount: 2 },
+          fiberGrams: { total: 15, mealCount: 2 },
+        },
+        goals: {
+          calories: null,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
+    ] as const
+
+    for (const card of cards) {
+      const scenario = await prepareScriptedTurnScenario()
+      scenario.stub.captureProviderRequestDiagnostics()
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: { card },
+            name: 'attach_response_card',
+            namespace: 'murph',
+          },
+        },
+        { text: 'CARD_ATTACHED' },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+        groupConversation: false,
+        prompt: 'Attach the requested synthetic response card.',
+      })
+
+      expect(
+        scenario.stub.requestSummariesSinceBaseline()[0]
+          ?.providerRequestDiagnostics,
+      ).toMatchObject({
+        includesResponseCardCompactTableShape: true,
+        includesResponseCardNutritionV2Shape: true,
+      })
+      expect(result.runtimeIssueInputs).toEqual([])
+      expect(result.responseCard).toEqual(card)
+    }
   })
 
   it('discovers deferred Murph schemas through native Codex tool_search', {
@@ -1644,7 +2469,6 @@ text(JSON.stringify(result));
     const authorizations: unknown[] = []
     const groupRequests: unknown[] = []
     const phoneCallStarts: unknown[] = []
-    const previewAuthorityChecks: unknown[] = []
     const userActionScope = {
       acceptedInputIds: [messageRef],
       conversationId: 'conversation_group_effect',
@@ -1655,12 +2479,6 @@ text(JSON.stringify(result));
     }
     const hostedToolContext: AssistantHostedToolContext = {
       computerToolsAvailable: false,
-      currentGroupPhoneCallPreviewAuthority: async (input) => {
-        previewAuthorityChecks.push(input)
-        return input?.confirmationInputId === messageRef
-          ? { assistantInputId: messageRef }
-          : null
-      },
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       currentUserActionScope: () => userActionScope,
@@ -1774,22 +2592,6 @@ text(JSON.stringify(result));
     expect(groupRequests).toEqual([{
       action: 'revoke_own_email_share',
       participant,
-    }])
-    expect(previewAuthorityChecks).toEqual([{
-      brief: {
-        allowTransferToUser: false,
-        callerName: 'Murph',
-        goal: 'Confirm the office opening time.',
-        instructions: ['Ask only for the opening time.'],
-        shareableFacts: {},
-        successCriteria: 'The office states its opening time.',
-        timeZone: 'America/New_York',
-        to: {
-          label: 'The office',
-          phoneNumber: '+12125550123',
-        },
-      },
-      confirmationInputId: messageRef,
     }])
     expect(phoneCallStarts).toEqual([
       expect.objectContaining({
@@ -2076,6 +2878,7 @@ function createScriptedSongRuntime(
 
 function buildScriptedHostedSystemPrompt(
   conversationScope: 'direct' | 'group',
+  onboardingGuidance = false,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
@@ -2093,7 +2896,7 @@ function buildScriptedHostedSystemPrompt(
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
-    onboardingGuidance: false,
+    onboardingGuidance,
     ordinaryInboundTurn: true,
     turnTrigger: 'automation-auto-reply',
   })
@@ -2433,6 +3236,23 @@ function readScriptedProviderRequestSummary(
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
             includesReadShared: requestBody.includes('read_shared'),
+            includesResponseCardCompactTableShape: [
+              'compact_table',
+              'columns',
+              'rowHeader',
+              'rows',
+              'values',
+              'tracking',
+              'snapshotAt',
+            ].every((field) => requestBody.includes(field)),
+            includesResponseCardNutritionV2Shape: [
+              'daily_nutrition',
+              'fiberGrams',
+              'goals',
+              'status',
+              'target',
+              'totals',
+            ].every((field) => requestBody.includes(field)),
             includesSaveNewsletter: requestBody.includes('save_newsletter'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },

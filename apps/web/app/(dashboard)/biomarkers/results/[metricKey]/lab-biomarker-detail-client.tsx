@@ -6,7 +6,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import type { HealthCommonsWebBiomarkerFallbackRange } from "@murphai/health-commons/runtime";
+import type { BiomarkerFallbackRangeForDisplay } from "@murphai/health-commons/biomarker-fallback-ranges";
 import {
   selectBrowserVaultLabBiomarkerDetail,
   type BrowserVaultLabBiomarkerDetail,
@@ -18,6 +18,7 @@ import {
   LabBiomarkerHistoryChart,
   type LabBiomarkerChartPoint,
   type LabBiomarkerChartRange,
+  type LabBiomarkerReferenceRangeTone,
 } from "@/src/components/biomarkers/lab-biomarker-history-chart";
 import { LabResultValue } from "@/src/components/biomarkers/lab-result-value";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -51,7 +52,7 @@ import { cn } from "@/src/lib/utils";
 interface LabBiomarkerDetailClientProps {
   authenticated: boolean;
   chatAction?: ReactNode;
-  fallbackRanges?: readonly HealthCommonsWebBiomarkerFallbackRange[];
+  fallbackRanges?: readonly BiomarkerFallbackRangeForDisplay[];
   metricKey: string;
   summary?: string | null;
   uploadLabsAction?: ReactNode;
@@ -195,7 +196,7 @@ function BiomarkerDetailContent({
   stale,
 }: {
   detail: BrowserVaultLabBiomarkerDetail;
-  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[];
+  fallbackRanges: readonly BiomarkerFallbackRangeForDisplay[];
   onRefresh: () => void;
   refreshPending: boolean;
   stale: boolean;
@@ -271,6 +272,11 @@ function BiomarkerDetailContent({
             >
               {formatLabDate(detail.latest.date)}
             </time>
+            {statusSourceLabel(detail.latest.statusSource, true) ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                {statusSourceLabel(detail.latest.statusSource, true)}
+              </p>
+            ) : null}
           </div>
 
           {chartPoints.length > 0 ? (
@@ -283,6 +289,7 @@ function BiomarkerDetailContent({
                   referenceRangeLabel={chartReference?.label}
                   referenceRangeSourceLabel={chartReference?.sourceLabel}
                   referenceRangeTitle={chartReference?.title}
+                  referenceRangeTone={chartReference?.tone}
                   unit={detail.comparableUnit}
                 />
               </div>
@@ -394,6 +401,8 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
                         <span aria-hidden="true" className="xl:hidden">Range </span>
                         {referenceRange}
                       </>
+                    ) : row.statusSource === "published_comparator" ? (
+                      "Published comparator — not the reporting lab's range"
                     ) : (
                       "No reference range"
                     )}
@@ -411,6 +420,22 @@ function LabResultYearSection({ group }: { group: LabResultYearGroup }) {
       </div>
     </section>
   );
+}
+
+function statusSourceLabel(
+  source: BrowserVaultPresentedLabResultRow["statusSource"],
+  latest: boolean,
+): string | null {
+  switch (source) {
+    case "published_comparator":
+      return "Published comparator — not the reporting lab's range";
+    case "reporting_lab_flag":
+      return "Reporting-lab flag";
+    case "reporting_lab_range":
+      return latest ? "Latest lab range" : "Reporting-lab range";
+    case "reported":
+      return null;
+  }
 }
 
 function EmptyBiomarkerDetailCard({
@@ -577,13 +602,14 @@ function formatDetailSummary(detail: BrowserVaultLabBiomarkerDetail): string {
  */
 function resolveChartedReferenceContext(
   detail: BrowserVaultLabBiomarkerDetail,
-  fallbackRanges: readonly HealthCommonsWebBiomarkerFallbackRange[],
+  fallbackRanges: readonly BiomarkerFallbackRangeForDisplay[],
   latestReferenceRange: string | null,
 ): {
   label: string;
   range: LabBiomarkerChartRange;
   sourceLabel: string | null;
   title: string;
+  tone: LabBiomarkerReferenceRangeTone;
 } | null {
   const latestPoint = detail.chartSeries.find((point) => point.rowId === detail.latest.id);
   if (
@@ -604,6 +630,7 @@ function resolveChartedReferenceContext(
       range: { high, low },
       sourceLabel: detail.latest.labName ?? detail.latest.sourceLabel,
       title: "Latest lab range",
+      tone: "lab",
     };
   }
 
@@ -636,11 +663,12 @@ function resolveChartedReferenceContext(
     },
     sourceLabel: `${fallback.label} · not the reporting lab's range`,
     title: "Published adult comparator",
+    tone: "context",
   };
 }
 
 function formatFallbackReferenceRange(
-  range: HealthCommonsWebBiomarkerFallbackRange,
+  range: BiomarkerFallbackRangeForDisplay,
 ): string | null {
   const lower = range.lowerBound;
   const upper = range.upperBound;

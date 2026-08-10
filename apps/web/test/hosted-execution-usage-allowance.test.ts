@@ -44,8 +44,10 @@ import { buildHostedRetellPhoneCallUsageRecord } from "@/src/lib/hosted-executio
 
 const DIRECT_PULSE_ALLOWANCE_USD_MICROS = 6_400_000n;
 const DIRECT_EDGE_ALLOWANCE_USD_MICROS = 16_000_000n;
+const DIRECT_MAX_ALLOWANCE_USD_MICROS = 40_000_000n;
 const FAMILY_PULSE_ALLOWANCE_USD_MICROS = 5_600_000n;
 const FAMILY_EDGE_ALLOWANCE_USD_MICROS = 15_200_000n;
+const FAMILY_MAX_ALLOWANCE_USD_MICROS = 39_200_000n;
 
 beforeEach(() => {
   usageCreditMocks.admitHostedGroupSponsorshipRefillTx.mockReset();
@@ -2478,6 +2480,35 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
+  it("identifies Max when an active Max member exhausts the combined allowance", async () => {
+    const prisma = createGatePrisma({
+      billingPlanCode: "launch_max_monthly",
+      limitUsdMicros: DIRECT_MAX_ALLOWANCE_USD_MICROS,
+      spentUsdMicros: DIRECT_MAX_ALLOWANCE_USD_MICROS,
+    });
+
+    const decision = await resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-03-29T12:00:00.000Z",
+      prisma: prisma as never,
+    });
+
+    expect(decision).toMatchObject({
+      allowed: false,
+      billingPlanCode: "launch_max_monthly",
+      reason: "ai_usage_limit_exceeded",
+      userNotice: {
+        code: "max_usage_limit_reached",
+        message: expect.any(String),
+      },
+    });
+    if (decision.allowed || !decision.userNotice) {
+      throw new Error("Expected exhausted Max usage to return a user notice");
+    }
+    expect(decision.userNotice.message).toMatch(/Max/iu);
+    expect(decision.userNotice.message).not.toMatch(/Pulse|Edge/iu);
+  });
+
   it("gives an exhausted group gate the deterministic refill admission seam before denial", async () => {
     const now = new Date("2026-03-29T12:00:00.000Z");
     const prisma = createGatePrisma({
@@ -2879,6 +2910,29 @@ describe("resolveHostedAiUsageGate", () => {
       billingPlanCode: "launch_edge_monthly",
       limitUsdMicros: FAMILY_EDGE_ALLOWANCE_USD_MICROS,
       remainingUsdMicros: FAMILY_EDGE_ALLOWANCE_USD_MICROS,
+    });
+  });
+
+  it("uses the sponsored member's exact Max allowance", async () => {
+    const prisma = createGatePrisma({
+      billingStatus: HostedBillingStatus.not_started,
+      familyAccessActive: true,
+      familyPlanCode: "max",
+      findUniquePeriod: null,
+      periodEnd: new Date("2026-05-01T00:00:00.000Z"),
+      periodStart: new Date("2026-04-01T00:00:00.000Z"),
+      spentUsdMicros: 0n,
+    });
+
+    await expect(resolveHostedAiUsageGate({
+      memberId: "member_123",
+      now: "2026-04-09T12:00:00.000Z",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({
+      allowed: true,
+      billingPlanCode: "launch_max_monthly",
+      limitUsdMicros: FAMILY_MAX_ALLOWANCE_USD_MICROS,
+      remainingUsdMicros: FAMILY_MAX_ALLOWANCE_USD_MICROS,
     });
   });
 
@@ -4642,7 +4696,7 @@ function createAllowanceTx(input: {
   executeRaw: AllowanceExecuteRawMock;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
-  familyPlanCode?: "edge" | "pulse";
+  familyPlanCode?: "edge" | "max" | "pulse";
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
   familyUpdatedAt?: Date;
@@ -4843,7 +4897,7 @@ function createGatePrisma(input: {
   executeRaw?: ReturnType<typeof vi.fn>;
   familyAccessActive?: boolean;
   familyBillingPlanCode?: string | null;
-  familyPlanCode?: "edge" | "pulse";
+  familyPlanCode?: "edge" | "max" | "pulse";
   familyPeriodEnd?: Date | null;
   familyPeriodStart?: Date | null;
   familyUpdatedAt?: Date;

@@ -15,7 +15,7 @@ import {
   type MealNutrition,
   type WorkoutSession,
 } from "@murphai/contracts";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 import { stripUndefined } from "../shared.ts";
 import {

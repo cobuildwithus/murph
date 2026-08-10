@@ -39,6 +39,19 @@ describe("hosted group sponsorship contracts", () => {
     });
 
     expect(parseHostedExecutionWake(wake)).toEqual(wake);
+    expect(parseHostedExecutionWake({
+      ...wake,
+      notification: {
+        ...wake.notification,
+        notificationPromptProfile: "creative-response-text",
+      },
+    })).toEqual({
+      ...wake,
+      notification: {
+        ...wake.notification,
+        notificationPromptProfile: "creative-response-text",
+      },
+    });
     expect(() => parseHostedExecutionWake({
       ...wake,
       notification: {

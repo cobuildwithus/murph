@@ -349,6 +349,58 @@ test("AuthProvider does not resume Clinical Records connect without a valid stag
   await rendered.cleanup();
 });
 
+test("AuthProvider resumes the exact generic Clinical Records launcher after sign-in", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records/connect?launch=clinical-records",
+        origin: "https://join.example.test",
+        pathname: "/records/connect",
+        search: "?launch=clinical-records",
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", {
+      bubbles: true,
+    }));
+  });
+  const completeButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((button) => button.textContent === "Complete auth");
+  expect(completeButton).toBeTruthy();
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", {
+      bubbles: true,
+    }));
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
 test("AuthProvider returns an unauthenticated medical-records viewer to that page", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"

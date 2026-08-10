@@ -70,19 +70,20 @@ import {
 import {
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
-  HOSTED_PLAN_CODES,
-  getHostedBillingPlanCodeForPlan,
+  HOSTED_FAMILY_PLAN_CODES,
+  getHostedFamilyBillingPlanCode,
   getHostedFamilyBillingOfferDefinition,
   isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
   parseHostedBillingPhase,
-  parseHostedPlanCode,
+  parseHostedFamilyPlanCode,
   type HostedBillingPlanCode,
-  type HostedPlanCode,
+  type HostedFamilyPlanCode,
 } from "./billing-plans";
 import {
   requireHostedOnboardingPublicBaseUrl,
   requireHostedStripeApi,
+  requireHostedStripeApiMode,
   requireHostedStripeBillingPlanConfig,
   requireHostedStripeFamilyPlanConfig,
 } from "./runtime";
@@ -133,9 +134,12 @@ import {
   type HostedFamilyPlanCapacities,
 } from "./family-plan-capacity";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeErrorDetails,
+  isHostedStripeProviderError,
   logHostedStripeFailure,
-  withHostedStripeFailureLog,
+  reportHostedStripeOperationFailure,
+  withHostedStripeActionFailureAlert,
 } from "./stripe-error-log";
 import { closeUnboundHostedSubscriptionCheckout } from "./subscription-checkout-lifecycle";
 
@@ -335,6 +339,7 @@ export type HostedFamilyStripeSubscriptionResult = {
   activations: HostedMemberActivationResult[];
   billingModeChangedMemberIds?: string[];
   groupId: string | null;
+  runtimeRecheckMemberIds?: string[];
 };
 
 export type PreparedHostedFamilyCryptoDomainRoots = ReadonlyMap<
@@ -349,7 +354,7 @@ export interface HostedAccountGroupInvitePrivateSnapshot
     | "targetPhoneNumberEncrypted"
     | "targetTelegramUsernameEncrypted"
   > {
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   targetEmail: string | null;
   targetPhoneHint: string | null;
   targetPhoneNumber: string | null;
@@ -378,8 +383,8 @@ export interface HostedFamilyOwnerMemberRow {
   joinedAt: Date | null;
   label: string | null;
   memberId: string;
-  pendingPlanCode: HostedPlanCode | null;
-  planCode: HostedPlanCode;
+  pendingPlanCode: HostedFamilyPlanCode | null;
+  planCode: HostedFamilyPlanCode;
   role: string;
   status: string;
 }
@@ -389,7 +394,7 @@ export interface HostedFamilyOwnerInviteRow {
   channel: string;
   expiresAt: Date;
   id: string;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   status: string;
   targetEmail: string | null;
   targetLabel: string | null;
@@ -406,7 +411,7 @@ export interface HostedFamilyOwnerSnapshot {
   invites: HostedFamilyOwnerInviteRow[];
   members: HostedFamilyOwnerMemberRow[];
   ownerMemberId: string;
-  plans: Record<HostedPlanCode, HostedFamilyOwnerPlanStatus>;
+  plans: Record<HostedFamilyPlanCode, HostedFamilyOwnerPlanStatus>;
   seats: HostedFamilyOwnerSeatStatus;
   suspendedAt: Date | null;
 }
@@ -444,7 +449,7 @@ export interface HostedFamilyInviteAcceptanceView {
    * line. Null for brand-new invitees (the page falls back to a configured line).
    */
   messagesRecipientPhone: string | null;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   seatAvailable: boolean;
   status: HostedAccountGroupInviteStatus;
   targetLabel: string | null;
@@ -828,7 +833,7 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
   );
 
   const capacities = paidCapacities ?? createEmptyHostedFamilyPlanCapacities();
-  const plans = Object.fromEntries(HOSTED_PLAN_CODES.map((planCode) => {
+  const plans = Object.fromEntries(HOSTED_FAMILY_PLAN_CODES.map((planCode) => {
     const active = members.filter((member) => member.planCode === planCode).length;
     const invited = inviteRows.filter((invite) => invite.planCode === planCode).length;
     const used = active + invited;
@@ -840,12 +845,12 @@ export async function readHostedFamilyOwnerSnapshotForMember(input: {
       remaining: Math.max(0, billed - used),
       used,
     } satisfies HostedFamilyOwnerPlanStatus] as const;
-  })) as Record<HostedPlanCode, HostedFamilyOwnerPlanStatus>;
-  const active = HOSTED_PLAN_CODES.reduce(
+  })) as Record<HostedFamilyPlanCode, HostedFamilyOwnerPlanStatus>;
+  const active = HOSTED_FAMILY_PLAN_CODES.reduce(
     (sum, planCode) => sum + plans[planCode].active,
     0,
   );
-  const invited = HOSTED_PLAN_CODES.reduce(
+  const invited = HOSTED_FAMILY_PLAN_CODES.reduce(
     (sum, planCode) => sum + plans[planCode].invited,
     0,
   );
@@ -1133,15 +1138,6 @@ export async function readHostedMemberFamilyBillingClaim(input: {
       status: "active",
     },
   });
-  if (
-    memberships.length > 0
-    && await hasHostedFamilyMemberDirectPaid({
-      memberId: input.memberId,
-      prisma: input.prisma,
-    })
-  ) {
-    return null;
-  }
   const claims: HostedMemberFamilyBillingClaim[] = [];
   for (const { group } of memberships) {
     if (
@@ -1451,7 +1447,11 @@ export async function writeHostedAccountGroupStripeBillingTx(input: {
     return null;
   }
 
-  await lockHostedMemberRow(input.tx, group.ownerMemberId);
+  await lockHostedFamilyAccessMemberRowsTx({
+    groupId: group.id,
+    ownerMemberId: group.ownerMemberId,
+    tx: input.tx,
+  });
   const currentGroup = await input.tx.hostedAccountGroup.findUnique({
     select: {
       owner: {
@@ -1668,18 +1668,9 @@ export async function prepareHostedFamilyStripeActivationCryptoDomainRoots(input
     PreparedHostedCryptoDomainRootCandidates
   >();
   for (const membership of memberships) {
-    // A reused direct subscription still resolves to the owner until the
-    // authoritative Family transaction clears that same billing reference.
-    // Prepare the owner unconditionally so that handoff cannot retry forever.
-    if (
-      membership.memberId !== group.ownerMemberId
-      && await hasHostedFamilyMemberDirectPaid({
-        memberId: membership.memberId,
-        prisma: input.prisma,
-      })
-    ) {
-      continue;
-    }
+    // Prepare every active membership. The authoritative transaction decides
+    // whether an owner handoff or sponsored-member direct-subscription cleanup
+    // applies under lock, and either path may need activation crypto material.
     preparedByMember.set(
       membership.memberId,
       await prepareHostedCryptoDomainRootCandidates({
@@ -1794,23 +1785,58 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
 
-  const match = await findHostedAccountGroupForStripeObject({
+  const stripeMatchInput = {
     accountGroupId: normalizeNullableString(input.subscription.metadata?.accountGroupId),
     checkoutAttemptId: normalizeNullableString(input.subscription.metadata?.checkoutAttemptId),
     customerId: coerceStripeObjectId(input.subscription.customer),
     customerLookupAllowed: false,
-    prisma: input.tx,
     subscriptionId: input.subscription.id,
+  };
+  const match = await findHostedAccountGroupForStripeObject({
+    ...stripeMatchInput,
+    prisma: input.tx,
   });
   if (!match) {
     return buildEmptyHostedFamilyStripeSubscriptionResult();
   }
-  const { billingRef: matchedBillingRef, group } = match;
   await assertHostedFamilyOwnerIsPersonalMember({
-    ownerMemberId: group.ownerMemberId,
+    ownerMemberId: match.group.ownerMemberId,
     prisma: input.tx,
   });
   const eventCreatedAt = input.dispatchContext.eventCreatedAt ?? null;
+  await lockHostedFamilyAccessMemberRowsTx({
+    groupId: match.group.id,
+    ownerMemberId: match.group.ownerMemberId,
+    tx: input.tx,
+  });
+  const lockedMatch = await findHostedAccountGroupForStripeObject({
+    ...stripeMatchInput,
+    prisma: input.tx,
+  });
+  if (
+    !lockedMatch
+    || lockedMatch.group.ownerMemberId !== match.group.ownerMemberId
+  ) {
+    return {
+      activations: [],
+      groupId: match.group.id,
+      runtimeRecheckMemberIds: [],
+    };
+  }
+  const { billingRef: matchedBillingRef, group } = lockedMatch;
+  const currentActiveFamilySubscription = Boolean(
+    eventCreatedAt
+    && input.subscription.status === "active"
+    && group.billingStatus === HostedBillingStatus.active
+    && matchedBillingRef?.currentBillingPhase === "paid"
+    && matchedBillingRef.currentBillingPlanCode === HOSTED_FAMILY_BILLING_PLAN_CODE
+    && matchedBillingRef.stripeSubscriptionId === input.subscription.id
+  );
+  const recheckOwnerOnExactActiveEventReplay = Boolean(
+    currentActiveFamilySubscription
+    && matchedBillingRef?.lastStripeEventCreatedAt?.getTime()
+      === eventCreatedAt?.getTime()
+  );
   if (isHostedFamilyStripeEventStale({
     billingRef: matchedBillingRef,
     eventCreatedAt,
@@ -1818,18 +1844,17 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     return {
       activations: [],
       groupId: group.id,
-    };
-  }
-
-  const eventFreshUnderOwnerLock = await lockHostedFamilyBillingReconciliationTx({
-    eventCreatedAt,
-    group,
-    tx: input.tx,
-  });
-  if (!eventFreshUnderOwnerLock) {
-    return {
-      activations: [],
-      groupId: group.id,
+      runtimeRecheckMemberIds:
+        group.billingStatus === HostedBillingStatus.active
+          ? await readHostedFamilyRuntimeRecheckMemberIdsForEventTx({
+              eventCreatedAt,
+              groupId: group.id,
+              ownerMemberId: currentActiveFamilySubscription
+                ? group.ownerMemberId
+                : null,
+              tx: input.tx,
+            })
+          : [],
     };
   }
 
@@ -1865,6 +1890,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         ? [group.ownerMemberId]
         : [],
       groupId: group.id,
+      runtimeRecheckMemberIds: billingModeChanged
+        ? [group.ownerMemberId]
+        : [],
     };
   }
 
@@ -1905,7 +1933,16 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 
   const [activeMemberships, currentCapacities] = await Promise.all([
     input.tx.hostedAccountGroupMembership.findMany({
-      select: { id: true, pendingPlanCode: true, planCode: true },
+      select: {
+        id: true,
+        memberId: true,
+        pendingPlanCode: true,
+        planCode: true,
+        usagePlanTransitionAt: true,
+        usagePlanTransitionFromCode: true,
+        usagePlanTransitionKind: true,
+        usagePlanTransitionToCode: true,
+      },
       where: {
         groupId: group.id,
         status: "active",
@@ -1919,11 +1956,24 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   const pendingMemberships = activeMemberships.filter(
     (membership) => typeof membership.pendingPlanCode === "string",
   );
+  const runtimeRecheckMemberIds = new Set(
+    eventCreatedAt
+      ? activeMemberships
+          .filter((membership) =>
+            membership.usagePlanTransitionKind === "plan_upgrade"
+            && membership.usagePlanTransitionAt?.getTime()
+              === eventCreatedAt.getTime()
+          )
+          .map((membership) => membership.memberId)
+      : [],
+  );
   let membershipsForCapacity = activeMemberships;
   if (currentCapacities && pendingMemberships.length === 1) {
     const pendingMembership = pendingMemberships[0];
-    const sourcePlanCode = parseHostedPlanCode(pendingMembership?.planCode);
-    const targetPlanCode = parseHostedPlanCode(pendingMembership?.pendingPlanCode);
+    const sourcePlanCode = parseHostedFamilyPlanCode(pendingMembership?.planCode);
+    const targetPlanCode = parseHostedFamilyPlanCode(
+      pendingMembership?.pendingPlanCode,
+    );
     const expectedCapacities = sourcePlanCode && targetPlanCode && sourcePlanCode !== targetPlanCode
       ? parseHostedFamilyPlanCapacities({
           ...currentCapacities,
@@ -1943,16 +1993,16 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
           pendingPlanCode: null,
           planCode: targetPlanCode,
           ...(isHostedBillingPlanImmediateUpgrade({
-            currentPlanCode: getHostedBillingPlanCodeForPlan(sourcePlanCode),
-            targetPlanCode: getHostedBillingPlanCodeForPlan(targetPlanCode),
+            currentPlanCode: getHostedFamilyBillingPlanCode(sourcePlanCode),
+            targetPlanCode: getHostedFamilyBillingPlanCode(targetPlanCode),
           })
             ? {
                 usagePlanTransitionAt: eventCreatedAt,
                 usagePlanTransitionFromCode:
-                  getHostedBillingPlanCodeForPlan(sourcePlanCode),
+                  getHostedFamilyBillingPlanCode(sourcePlanCode),
                 usagePlanTransitionKind: "plan_upgrade",
                 usagePlanTransitionToCode:
-                  getHostedBillingPlanCodeForPlan(targetPlanCode),
+                  getHostedFamilyBillingPlanCode(targetPlanCode),
               }
             : {}),
         },
@@ -1964,6 +2014,12 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         },
       });
       if (completed.count === 1) {
+        if (isHostedBillingPlanImmediateUpgrade({
+          currentPlanCode: getHostedFamilyBillingPlanCode(sourcePlanCode),
+          targetPlanCode: getHostedFamilyBillingPlanCode(targetPlanCode),
+        })) {
+          runtimeRecheckMemberIds.add(pendingMembership.memberId);
+        }
         membershipsForCapacity = activeMemberships.map((membership) =>
           membership.id === pendingMembership.id
             ? { ...membership, pendingPlanCode: null, planCode: targetPlanCode }
@@ -1973,7 +2029,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
     }
   }
   const activeCounts = countHostedFamilyAssignmentsByPlan(membershipsForCapacity);
-  const activeMembersFitPaidSeats = HOSTED_PLAN_CODES.every(
+  const activeMembersFitPaidSeats = HOSTED_FAMILY_PLAN_CODES.every(
     (planCode) => activeCounts[planCode] <= familyPlanState.capacities[planCode],
   );
   const billedSeatCount = sumHostedFamilyPlanCapacities(familyPlanState.capacities);
@@ -2024,6 +2080,9 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       stripeSubscriptionId: input.subscription.id,
       tx: input.tx,
     });
+    if (billingModeChanged || recheckOwnerOnExactActiveEventReplay) {
+      runtimeRecheckMemberIds.add(group.ownerMemberId);
+    }
     await revokeNewestHostedFamilyPendingInvitesToFitPlanCapacitiesTx({
       capacities: familyPlanState.capacities,
       groupId: group.id,
@@ -2045,6 +2104,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
         ? [group.ownerMemberId]
         : [],
       groupId: group.id,
+      runtimeRecheckMemberIds: [...runtimeRecheckMemberIds],
     };
   }
 
@@ -2054,6 +2114,33 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   };
 }
 
+async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
+  eventCreatedAt: Date | null;
+  groupId: string;
+  ownerMemberId: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<string[]> {
+  if (!input.eventCreatedAt) {
+    return [];
+  }
+  const memberships = await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
+    where: {
+      groupId: input.groupId,
+      status: "active",
+      usagePlanTransitionAt: input.eventCreatedAt,
+      usagePlanTransitionKind: "plan_upgrade",
+    },
+  });
+  return [
+    ...new Set([
+      ...memberships.map((membership) => membership.memberId),
+      ...(input.ownerMemberId ? [input.ownerMemberId] : []),
+    ]),
+  ];
+}
+
 export async function createHostedFamilyBillingCheckout(input: {
   groupId: string;
   now?: Date;
@@ -2061,7 +2148,22 @@ export async function createHostedFamilyBillingCheckout(input: {
   prisma?: PrismaClient;
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
-  return createOrResumeHostedFamilyBillingCheckout(input, true);
+  let restartAllowed = true;
+  while (true) {
+    const outcome = await createOrResumeHostedFamilyBillingCheckout(input);
+    if (outcome !== "restart") {
+      return outcome;
+    }
+    if (!restartAllowed) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+        httpStatus: 409,
+        message: "Family checkout changed while restarting. Try again.",
+        retryable: true,
+      });
+    }
+    restartAllowed = false;
+  }
 }
 
 async function createOrResumeHostedFamilyBillingCheckout(
@@ -2072,8 +2174,10 @@ async function createOrResumeHostedFamilyBillingCheckout(
     prisma?: PrismaClient;
     seatCount?: unknown;
   },
-  restartAllowed: boolean,
-): Promise<{ alreadyActive: boolean; url: string | null }> {
+): Promise<
+  | { alreadyActive: boolean; url: string | null }
+  | "restart"
+> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
@@ -2194,43 +2298,28 @@ async function createOrResumeHostedFamilyBillingCheckout(
       url: null,
     };
   }
-  if (isHostedFamilyDirectPaidUpgradeInput(checkoutInput)) {
-    return upgradeHostedFamilyDirectPaidSubscription(checkoutInput);
-  }
-
-  const stripe = requireHostedStripeApi();
-  if (checkoutInput.mode === "existingCheckout") {
-    const existingCheckout = await resumeHostedFamilyBillingCheckout({
-      checkoutInput,
-      prisma,
-      stripe,
-    });
-    if (existingCheckout === "restart") {
-      if (!restartAllowed) {
-        throw hostedOnboardingError({
-          code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
-          httpStatus: 409,
-          message: "Family checkout changed while restarting. Try again.",
-          retryable: true,
-        });
-      }
-      return createOrResumeHostedFamilyBillingCheckout(input, false);
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+  const directPaidUpgrade = isHostedFamilyDirectPaidUpgradeInput(checkoutInput);
+  const operationIdentity = directPaidUpgrade
+    ? buildHostedFamilyDirectPaidUpgradeIdempotencyKey(checkoutInput)
+    : checkoutInput.checkoutAttemptId;
+  const executeCheckout = async () => {
+    if (directPaidUpgrade) {
+      return upgradeHostedFamilyDirectPaidSubscription(checkoutInput);
     }
-    return existingCheckout;
-  }
+    if (checkoutInput.mode === "existingCheckout") {
+      return resumeHostedFamilyBillingCheckout({
+        checkoutInput,
+        prisma,
+        stripe,
+      });
+    }
 
-  const metadata = {
-    ...buildHostedFamilyStripeMetadata(checkoutInput.group),
-    checkoutAttemptId: checkoutInput.checkoutAttemptId,
-  };
-  const checkoutSession = await withHostedStripeFailureLog(
-    "checkout.sessions.create.family",
-    () => stripe.checkout.sessions.create({
+    const metadata = buildHostedFamilyStripeMetadata(checkoutInput.group);
+    metadata.checkoutAttemptId = checkoutInput.checkoutAttemptId;
+    const checkoutParams: Stripe.Checkout.SessionCreateParams = {
       cancel_url: `${checkoutInput.publicBaseUrl}/settings`,
       client_reference_id: checkoutInput.group.id,
-      ...(checkoutInput.stripeCustomerId
-        ? { customer: checkoutInput.stripeCustomerId }
-        : {}),
       line_items: [{
         price: checkoutInput.priceId,
         quantity: checkoutInput.seatCount,
@@ -2242,7 +2331,11 @@ async function createOrResumeHostedFamilyBillingCheckout(
         metadata,
       },
       success_url: `${checkoutInput.publicBaseUrl}/join?family_checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-    }, {
+    };
+    if (checkoutInput.stripeCustomerId) {
+      checkoutParams.customer = checkoutInput.stripeCustomerId;
+    }
+    const checkoutSession = await stripe.checkout.sessions.create(checkoutParams, {
       idempotencyKey: buildHostedFamilyCheckoutIdempotencyKey({
         attemptId: checkoutInput.checkoutAttemptId,
         groupId: checkoutInput.group.id,
@@ -2250,43 +2343,57 @@ async function createOrResumeHostedFamilyBillingCheckout(
         seatCount: checkoutInput.seatCount,
         stripeCustomerId: checkoutInput.stripeCustomerId,
       }),
-    }),
-  );
+    });
 
-  const checkoutOwned = await prisma.$transaction(
-    (tx) => bindHostedFamilyCheckoutSessionTx({
-      attemptId: checkoutInput.checkoutAttemptId,
-      group: checkoutInput.group,
-      sessionId: checkoutSession.id,
-      tx,
-    }),
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
-  if (!checkoutOwned) {
-    await closeUnboundHostedSubscriptionCheckout({
-      deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
-      sessionId: checkoutSession.id,
-      stripe,
-    });
-    throw hostedOnboardingError({
-      code: "HOSTED_MEMBER_SUSPENDED",
-      httpStatus: 403,
-      message: "This hosted account is suspended. Contact support to restore access.",
-    });
-  }
-  if (!checkoutSession.url) {
-    throw hostedOnboardingError({
-      code: "CHECKOUT_URL_MISSING",
-      httpStatus: 502,
-      message: "Stripe Checkout did not return a redirect URL.",
-    });
-  }
+    const checkoutOwned = await prisma.$transaction(
+      (tx) => bindHostedFamilyCheckoutSessionTx({
+        attemptId: checkoutInput.checkoutAttemptId,
+        group: checkoutInput.group,
+        sessionId: checkoutSession.id,
+        tx,
+      }),
+      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    );
+    if (!checkoutOwned) {
+      await closeUnboundHostedSubscriptionCheckout({
+        deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+        sessionId: checkoutSession.id,
+        stripe,
+      });
+      throw hostedOnboardingError({
+        code: "HOSTED_MEMBER_SUSPENDED",
+        httpStatus: 403,
+        message: "This hosted account is suspended. Contact support to restore access.",
+      });
+    }
+    if (!checkoutSession.url) {
+      throw hostedOnboardingError({
+        code: "CHECKOUT_URL_MISSING",
+        httpStatus: 502,
+        message: "Stripe Checkout did not return a redirect URL.",
+      });
+    }
 
-  return {
-    alreadyActive: false,
-    url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: checkoutSession.url }) ??
-      checkoutSession.url,
+    return {
+      alreadyActive: false,
+      url: buildHostedFamilyCheckoutRedirectUrl({ checkoutUrl: checkoutSession.url }) ??
+        checkoutSession.url,
+    };
   };
+  return withHostedStripeActionFailureAlert(
+    {
+      isTerminalStripeFailure: (error) =>
+        isHostedStripeProviderError(error) ||
+        (
+          isHostedOnboardingError(error) &&
+          error.code === "HOSTED_FAMILY_DIRECT_PAID_STRIPE_UNAVAILABLE"
+        ),
+      operationIdentity,
+      operationName: "family.billing.checkout",
+      stripeLiveMode,
+    },
+    executeCheckout,
+  );
 }
 
 async function resumeHostedFamilyBillingCheckout(input: {
@@ -2297,11 +2404,8 @@ async function resumeHostedFamilyBillingCheckout(input: {
   | { alreadyActive: false; url: string | null }
   | "restart"
 > {
-  const session = await withHostedStripeFailureLog(
-    "checkout.sessions.retrieve.family",
-    () => input.stripe.checkout.sessions.retrieve(
-      input.checkoutInput.sessionId,
-    ),
+  const session = await input.stripe.checkout.sessions.retrieve(
+    input.checkoutInput.sessionId,
   );
   if (
     !isHostedFamilyCheckoutSession(session)
@@ -2648,20 +2752,17 @@ async function normalizeHostedFamilyDirectPaidSubscriptionMetadata(input: {
 function buildHostedFamilyDirectPaidSubscriptionMetadata(
   group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">,
 ): Stripe.MetadataParam {
-  return {
-    ...buildHostedFamilyStripeMetadata(group),
-    ...buildHostedFamilyStripeMetadataUnsetFields([
-      "checkoutOffer",
-      "memberId",
-      "trialDurationDays",
-      "trialPolicyVersion",
-      "trialUsageLimitUsdMicros",
-    ]),
-  };
-}
-
-function buildHostedFamilyStripeMetadataUnsetFields(keys: readonly string[]): Stripe.MetadataParam {
-  return Object.fromEntries(keys.map((key) => [key, ""]));
+  const metadata: Stripe.MetadataParam = buildHostedFamilyStripeMetadata(group);
+  for (const key of [
+    "checkoutOffer",
+    "memberId",
+    "trialDurationDays",
+    "trialPolicyVersion",
+    "trialUsageLimitUsdMicros",
+  ]) {
+    metadata[key] = "";
+  }
+  return metadata;
 }
 
 function isHostedFamilyDirectPaidSubscriptionMetadataNormalized(input: {
@@ -2848,6 +2949,7 @@ async function callHostedFamilyDirectPaidStripeOperation<T>(
     }
     logHostedStripeFailure({ error, operationName });
     throw hostedOnboardingError({
+      cause: buildHostedStripeAlertCorrelationCause(error),
       code: "HOSTED_FAMILY_DIRECT_PAID_STRIPE_UNAVAILABLE",
       details: describeHostedStripeErrorDetails({ error, operationName }),
       httpStatus: 502,
@@ -2871,7 +2973,7 @@ export async function updateHostedFamilyPlanCapacities(input: {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CAPACITY_INVALID",
       httpStatus: 400,
-      message: "Family capacity must contain 2 to 6 total Pulse and Edge seats.",
+      message: "Family capacity must contain 2 to 6 total seats.",
     });
   }
 
@@ -2898,6 +3000,7 @@ export async function updateHostedFamilyPlanCapacities(input: {
         });
       }
       await assertHostedFamilyOwnerCanStartBillingTx({
+        allowDirectPaidOwner: true,
         groupId: group.id,
         ownerMemberId: group.ownerMemberId,
         tx,
@@ -2947,7 +3050,11 @@ export async function updateHostedFamilyPlanCapacities(input: {
         ...memberships,
         ...invites,
       ]);
-      if (HOSTED_PLAN_CODES.some((planCode) => usage[planCode] > target[planCode])) {
+      if (
+        HOSTED_FAMILY_PLAN_CODES.some(
+          (planCode) => usage[planCode] > target[planCode],
+        )
+      ) {
         throw hostedOnboardingError({
           code: "HOSTED_FAMILY_CAPACITY_BELOW_USAGE",
           httpStatus: 409,
@@ -2988,6 +3095,38 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
   };
   target: HostedFamilyPlanCapacities;
 }): Promise<void> {
+  const operationIdentity = input.memberTransition?.idempotencyKey ??
+    buildHostedFamilyCapacityUpdateIdempotencyKey(input);
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+  await withHostedStripeActionFailureAlert(
+    {
+      operationIdentity,
+      operationName: input.memberTransition
+        ? "family.billing.member-plan"
+        : "family.billing.capacity",
+      stripeLiveMode,
+    },
+    () =>
+      performHostedFamilyStripeCapacitiesUpdateUnderOwnerLock({
+        ...input,
+        operationIdentity,
+        stripe,
+      }),
+  );
+}
+
+async function performHostedFamilyStripeCapacitiesUpdateUnderOwnerLock(input: {
+  billingRef: HostedAccountGroupBillingRefSnapshot;
+  current: HostedFamilyPlanCapacities;
+  groupId: string;
+  memberTransition?: {
+    idempotencyKey: string;
+    prorationDate: number;
+  };
+  operationIdentity: string;
+  stripe: Stripe;
+  target: HostedFamilyPlanCapacities;
+}): Promise<void> {
   const stripeSubscriptionId = input.billingRef.stripeSubscriptionId;
   if (!stripeSubscriptionId) {
     throw hostedOnboardingError({
@@ -3000,18 +3139,14 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
   const priceIdsByPlan = {
     ...readHostedOnboardingEnvironment().stripeFamilyPriceIdsByPlan,
   };
-  for (const planCode of HOSTED_PLAN_CODES) {
+  for (const planCode of HOSTED_FAMILY_PLAN_CODES) {
     if (input.target[planCode] > 0) {
       priceIdsByPlan[planCode] = requireHostedStripeFamilyPlanConfig({ planCode }).priceId;
     }
   }
-  const stripe = requireHostedStripeApi();
-  const subscription = await withHostedStripeFailureLog(
-    "subscription.retrieve.family-capacity",
-    () => stripe.subscriptions.retrieve(
-      stripeSubscriptionId,
-      { expand: ["items.data.price"] },
-    ),
+  const subscription = await input.stripe.subscriptions.retrieve(
+    stripeSubscriptionId,
+    { expand: ["items.data.price"] },
   );
   const stripeState = readHostedFamilyStripePlanState({
     priceIdsByPlan,
@@ -3041,32 +3176,27 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
 
   const increase = calculateHostedFamilyMonthlyAmountUsdCents(input.target) >
     calculateHostedFamilyMonthlyAmountUsdCents(stripeState.capacities);
-  const updated = await withHostedStripeFailureLog(
-    "subscription.update.family-capacity",
-    () => stripe.subscriptions.update(
-      stripeSubscriptionId,
-      {
-        expand: ["items.data.price"],
-        items: buildHostedFamilyStripeCapacityUpdateItems({
-          current: stripeState,
-          priceIdsByPlan,
-          target: input.target,
-        }),
-        ...(input.memberTransition
-          ? {
-              proration_behavior: "create_prorations" as const,
-              proration_date: input.memberTransition.prorationDate,
-            }
-          : {
-              ...(increase ? { payment_behavior: "error_if_incomplete" as const } : {}),
-              proration_behavior: "always_invoice" as const,
-            }),
-      },
-      {
-        idempotencyKey: input.memberTransition?.idempotencyKey ??
-          `family-capacity:${input.groupId}:${input.billingRef.updatedAt.getTime()}:${input.target.pulse}:${input.target.edge}`,
-      },
-    ),
+  const updateParams: Stripe.SubscriptionUpdateParams = {
+    expand: ["items.data.price"],
+    items: buildHostedFamilyStripeCapacityUpdateItems({
+      current: stripeState,
+      priceIdsByPlan,
+      target: input.target,
+    }),
+  };
+  if (input.memberTransition) {
+    updateParams.proration_behavior = "create_prorations";
+    updateParams.proration_date = input.memberTransition.prorationDate;
+  } else {
+    updateParams.proration_behavior = "always_invoice";
+    if (increase) {
+      updateParams.payment_behavior = "error_if_incomplete";
+    }
+  }
+  const updated = await input.stripe.subscriptions.update(
+    stripeSubscriptionId,
+    updateParams,
+    { idempotencyKey: input.operationIdentity },
   );
   const applied = readHostedFamilyStripePlanState({
     priceIdsByPlan,
@@ -3079,6 +3209,14 @@ async function updateHostedFamilyStripeCapacitiesUnderOwnerLock(input: {
       message: "Stripe did not confirm the requested Family capacity.",
     });
   }
+}
+
+function buildHostedFamilyCapacityUpdateIdempotencyKey(input: {
+  billingRef: HostedAccountGroupBillingRefSnapshot;
+  groupId: string;
+  target: HostedFamilyPlanCapacities;
+}): string {
+  return `family-capacity:${input.groupId}:${input.billingRef.updatedAt.getTime()}:${input.target.pulse}:${input.target.edge}:${input.target.max}`;
 }
 
 export async function waitForHostedFamilyPlanCapacities(input: {
@@ -3232,14 +3370,36 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     });
   }
 
-  const stripe = requireHostedStripeApi();
+  const prisma = input.prisma ?? getPrisma();
+  const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
   let session: Stripe.Checkout.Session;
   try {
-    session = await withHostedStripeFailureLog(
-      "checkout.sessions.retrieve.family-redirect",
-      () => stripe.checkout.sessions.retrieve(sessionId),
-    );
-  } catch {
+    session = await stripe.checkout.sessions.retrieve(sessionId);
+  } catch (error) {
+    let checkoutAttemptId: string | null = null;
+    if (isHostedStripeProviderError(error)) {
+      try {
+        checkoutAttemptId = await readHostedFamilyCheckoutRedirectAttemptId({
+          prisma,
+          sessionId,
+        });
+      } catch {
+        console.error("Hosted Family checkout alert binding read failed.");
+      }
+    }
+    if (checkoutAttemptId) {
+      reportHostedStripeOperationFailure({
+        error,
+        operationIdentity: checkoutAttemptId,
+        operationName: "family.billing.checkout-redirect",
+        stripeLiveMode,
+      });
+    } else {
+      logHostedStripeFailure({
+        error,
+        operationName: "checkout.sessions.retrieve.family-redirect",
+      });
+    }
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
       httpStatus: 409,
@@ -3255,7 +3415,6 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     });
   }
 
-  const prisma = input.prisma ?? getPrisma();
   const group = await findHostedAccountGroupForStripeCheckoutSession({
     prisma,
     session,
@@ -3313,6 +3472,22 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     message: "Family checkout is still syncing. Try again shortly.",
     retryable: true,
   });
+}
+
+async function readHostedFamilyCheckoutRedirectAttemptId(input: {
+  prisma: PrismaClient;
+  sessionId: string;
+}): Promise<string | null> {
+  const stripeCheckoutSessionLookupKey =
+    createHostedStripeCheckoutSessionLookupKey(input.sessionId);
+  if (!stripeCheckoutSessionLookupKey) {
+    return null;
+  }
+  const billingRef = await input.prisma.hostedAccountGroupBillingRef.findUnique({
+    select: { checkoutAttemptId: true },
+    where: { stripeCheckoutSessionLookupKey },
+  });
+  return normalizeNullableString(billingRef?.checkoutAttemptId);
 }
 
 export async function createHostedAccountGroupForOwner(input: {
@@ -3544,7 +3719,11 @@ export async function issueHostedFamilyInviteTx(input: {
     const projectedUsage = countHostedFamilyAssignmentsByPlan(assignments);
     projectedUsage[existingPlanCode] -= 1;
     projectedUsage[planCode] += 1;
-    if (!HOSTED_PLAN_CODES.every((code) => projectedUsage[code] <= capacities[code])) {
+    if (
+      !HOSTED_FAMILY_PLAN_CODES.every(
+        (code) => projectedUsage[code] <= capacities[code],
+      )
+    ) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
         httpStatus: 409,
@@ -4979,7 +5158,7 @@ async function replaceHostedFamilyPlanCapacitiesTx(input: {
   await input.tx.hostedAccountGroupPlanCapacity.deleteMany({
     where: { groupId: input.groupId },
   });
-  const rows = HOSTED_PLAN_CODES.flatMap((planCode) => {
+  const rows = HOSTED_FAMILY_PLAN_CODES.flatMap((planCode) => {
     const billedQuantity = input.capacities[planCode];
     return billedQuantity > 0
       ? [{ billedQuantity, groupId: input.groupId, planCode }]
@@ -5050,7 +5229,7 @@ async function revokeNewestHostedFamilyPendingInvitesToFitPlanCapacitiesTx(input
     }),
   ]);
   const activeCounts = countHostedFamilyAssignmentsByPlan(activeMemberships);
-  const revokedInviteIds = HOSTED_PLAN_CODES.flatMap((planCode) => {
+  const revokedInviteIds = HOSTED_FAMILY_PLAN_CODES.flatMap((planCode) => {
     const tierInvites = pendingInvites.filter(
       (invite) => requireHostedFamilyPlanCode(invite.planCode) === planCode,
     );
@@ -5132,7 +5311,7 @@ function hostedFamilyAssignmentsFitCapacities(
   capacities: HostedFamilyPlanCapacities,
 ): boolean {
   const usage = countHostedFamilyAssignmentsByPlan(assignments);
-  return HOSTED_PLAN_CODES.every(
+  return HOSTED_FAMILY_PLAN_CODES.every(
     (planCode) => usage[planCode] <= capacities[planCode],
   );
 }
@@ -5140,7 +5319,7 @@ function hostedFamilyAssignmentsFitCapacities(
 function calculateHostedFamilyMonthlyAmountUsdCents(
   capacities: HostedFamilyPlanCapacities,
 ): number {
-  return HOSTED_PLAN_CODES.reduce(
+  return HOSTED_FAMILY_PLAN_CODES.reduce(
     (sum, planCode) => sum + capacities[planCode] *
       getHostedFamilyBillingOfferDefinition(planCode).recurringAmountUsdCents,
     0,
@@ -5151,7 +5330,7 @@ async function assertHostedFamilySeatAvailableTx(input: {
   capacities?: HostedFamilyPlanCapacities;
   group: Pick<HostedAccountGroupAccessSnapshot, "id">;
   now: Date;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const capacitiesPromise = input.capacities === undefined
@@ -5198,7 +5377,7 @@ async function assertHostedFamilySeatAvailableForInviteAcceptanceTx(input: {
   group: Pick<HostedAccountGroupAccessSnapshot, "id">;
   inviteId: string;
   now: Date;
-  planCode: HostedPlanCode;
+  planCode: HostedFamilyPlanCode;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const [activeMemberships, existingAcceptedMembership, pendingInvites, capacities] =
@@ -5255,8 +5434,8 @@ async function assertHostedFamilySeatAvailableForInviteAcceptanceTx(input: {
   }
 }
 
-function requireHostedFamilyPlanCode(value: unknown): HostedPlanCode {
-  const planCode = parseHostedPlanCode(value);
+function requireHostedFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
+  const planCode = parseHostedFamilyPlanCode(value);
   if (planCode) {
     return planCode;
   }
@@ -5267,15 +5446,15 @@ function requireHostedFamilyPlanCode(value: unknown): HostedPlanCode {
   });
 }
 
-function normalizeHostedFamilyPlanCode(value: unknown): HostedPlanCode {
-  const planCode = parseHostedPlanCode(value);
+function normalizeHostedFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
+  const planCode = parseHostedFamilyPlanCode(value);
   if (planCode) {
     return planCode;
   }
   throw hostedOnboardingError({
     code: "HOSTED_FAMILY_PLAN_CODE_INVALID",
     httpStatus: 400,
-    message: "Choose Pulse or Edge for this Family member.",
+    message: "Choose Pulse, Edge, or Max for this Family member.",
   });
 }
 
@@ -5355,19 +5534,19 @@ async function assertHostedFamilyMemberNotDirectPaidTx(input: {
   if (input.allowDirectPaidOwner) {
     return;
   }
-  if (await hasHostedFamilyMemberDirectPaid({
+  if (await hasHostedFamilyMemberLiveDirectSubscription({
     memberId: input.memberId,
     prisma: input.tx,
   })) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
       httpStatus: 409,
-      message: "You're currently paying for Murph yourself. Switching paid accounts into Family billing is not supported in this release.",
+      message: "Your personal Murph subscription must be canceled before you can join a Family plan.",
     });
   }
 }
 
-async function hasHostedFamilyMemberDirectPaid(input: {
+async function hasHostedFamilyMemberLiveDirectSubscription(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
 }): Promise<boolean> {
@@ -5375,7 +5554,7 @@ async function hasHostedFamilyMemberDirectPaid(input: {
     select: {
       billingRef: {
         select: {
-          currentBillingPhase: true,
+          stripeSubscriptionIdEncrypted: true,
         },
       },
       billingStatus: true,
@@ -5386,8 +5565,8 @@ async function hasHostedFamilyMemberDirectPaid(input: {
   });
 
   return (
-    member?.billingStatus === HostedBillingStatus.active &&
-    parseHostedBillingPhase(member.billingRef?.currentBillingPhase) === "paid"
+    Boolean(member?.billingRef?.stripeSubscriptionIdEncrypted)
+    && member?.billingStatus !== HostedBillingStatus.canceled
   );
 }
 
@@ -5404,6 +5583,7 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
     },
     select: {
       memberId: true,
+      role: true,
     },
     where: {
       groupId: input.groupId,
@@ -5418,10 +5598,13 @@ async function activateHostedFamilyGroupMembersForActiveBillingTx(input: {
       memberId: membership.memberId,
       tx: input.tx,
     });
-    if (await hasHostedFamilyMemberDirectPaid({
+    if (
+      membership.role === "owner"
+      && await hasHostedFamilyMemberLiveDirectSubscription({
       memberId: membership.memberId,
       prisma: input.tx,
-    })) {
+      })
+    ) {
       continue;
     }
     eligibleMemberships.push(membership);
@@ -5789,25 +5972,26 @@ function readHostedLegacySyntheticFamilyStripeBinding(event: Stripe.Event): {
   return null;
 }
 
-async function lockHostedFamilyBillingReconciliationTx(input: {
-  eventCreatedAt: Date | null;
-  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
+async function lockHostedFamilyAccessMemberRowsTx(input: {
+  groupId: string;
+  ownerMemberId: string;
   tx: Prisma.TransactionClient;
-}): Promise<boolean> {
-  await lockHostedMemberRow(input.tx, input.group.ownerMemberId);
-  const billingRef = await input.tx.hostedAccountGroupBillingRef.findUnique({
-    select: {
-      lastStripeEventCreatedAt: true,
-    },
+}): Promise<void> {
+  await lockHostedMemberRow(input.tx, input.ownerMemberId);
+  const memberships = await input.tx.hostedAccountGroupMembership.findMany({
+    orderBy: { memberId: "asc" },
+    select: { memberId: true },
     where: {
-      groupId: input.group.id,
+      groupId: input.groupId,
+      status: "active",
     },
   });
-
-  return !isHostedFamilyStripeEventStale({
-    billingRef,
-    eventCreatedAt: input.eventCreatedAt,
-  });
+  const memberIds = [...new Set(memberships.map(({ memberId }) => memberId))]
+    .filter((memberId) => memberId !== input.ownerMemberId)
+    .sort();
+  for (const memberId of memberIds) {
+    await lockHostedMemberRow(input.tx, memberId);
+  }
 }
 
 function isHostedFamilyStripeEventStale(input: {

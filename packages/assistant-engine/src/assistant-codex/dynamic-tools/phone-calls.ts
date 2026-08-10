@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX,
   hostedPhoneCallBriefSchema,
@@ -42,15 +42,14 @@ export const MURPH_CREATE_PHONE_CALL_TOOL = {
   namespace: 'murph',
   name: 'create_phone_call',
   description: [
-    'Before preparing a preview for a real call or placing one, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
-    'For a hosted group call, start one outbound phone call only when the current requester explicitly confirms an exact GROUP CALL PREVIEW that Murph successfully delivered before that confirmation message was received; set message_ref to that later confirming message\'s visible ain_... reference.',
-    'Never deliver a group preview and start the call in the same provider turn; after a new group request or any changed term, deliver the complete preview with the skill\'s exact heading and values, then stop.',
-    'The group confirming message must explicitly approve any requester name or contact fact used in the call; one participant cannot approve another participant\'s private facts.',
+    'Before placing a real call, read $MURPH_ASSISTANT_SKILLS_ROOT/phone-calls/SKILL.md.',
+    'Use the same explicit-consent or ready-to-act flow in private and hosted group conversations. A group request does not require a special structured preview or a later confirmation solely because it is a group; ask one narrow question only when material terms are still unclear.',
     'Resolve relative dates and times before creating the brief.',
     'Before a real health care appointment booking, rescheduling, cancellation, or waitlist call, read $MURPH_ASSISTANT_SKILLS_ROOT/appointment-scheduling/SKILL.md and satisfy its ready-to-act gate with a completed, user-approved readiness brief; an information-only or connectivity-test call must stay non-mutating, remain separate, and never count as appointment readiness.',
     'Put only requester-approved, call-relevant, disclosable facts in shareableFacts.',
+    'The current group requester must explicitly supply or approve any requester name or contact fact used in the call; one participant cannot approve another participant\'s private facts.',
     'Group-chat calls never transfer to one participant; Murph forces allowTransferToUser=false for group calls.',
-    'In a group chat, message_ref is required and must be the exact opaque Message ref beside the accepted message whose sender confirmed the preview. The host reloads that message and derives the provider sender; never supply a canonical member id.',
+    'In a group chat, message_ref is required and must be the exact opaque Message ref beside the current accepted request. The host reloads that message and derives the provider sender; never supply a canonical member id.',
     'Do not put a participant transfer phone number in shareableFacts; Murph resolves eligible verified transfer numbers server-side for private calls.',
   ].join(' '),
   inputSchema: z.toJSONSchema(phoneCallArgumentsSchema, { io: 'input' }),

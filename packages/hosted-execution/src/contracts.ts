@@ -207,6 +207,7 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
 
 export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
   "creative-response",
+  "creative-response-text",
 ] as const;
 
 export type HostedExecutionAssistantNotificationPromptProfile =

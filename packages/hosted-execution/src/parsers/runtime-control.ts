@@ -43,7 +43,7 @@ import {
 } from "../assistant-ask-payload.ts";
 import {
   HOSTED_RUNTIME_DEVICE_SYNC_BRIDGE_KINDS,
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_INGRESS_LATENCY_SOURCES,
   HOSTED_RUNTIME_ASSISTANT_MILESTONES,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
@@ -51,6 +51,8 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
+  inspectHostedRuntimeAutomationLaneTimingSubdivision,
+  isHostedRuntimeDirectEnsureOrchestrationAttemptId,
   HOSTED_RUNTIME_LATENCY_TRACE_MILESTONES,
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
@@ -127,9 +129,9 @@ import {
   type HostedRuntimeFamilyPlanToolResponse,
   type HostedRuntimeFamilyPlanToolStartCheckoutResponse,
   type HostedRuntimeFamilyPlanToolStatusResponse,
+  type HostedFamilyPlanCode,
   type HostedRuntimeIMessageContactToolRequest,
   type HostedRuntimeIMessageContactToolResponse,
-  type HostedPlanCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationControlRequest,
   type HostedRuntimeAssistantConfigurationToolRequest,
@@ -143,6 +145,7 @@ import {
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_KINDS,
   HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX,
+  HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_OWNER_ADVISORY_NAME_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX,
@@ -1489,11 +1492,11 @@ export function parseHostedRuntimeGroupToolRequest(
       ),
     };
   }
-  if (action === "read_chat_participants" || action === "share_contact_card") {
+  if (action === "read_chat_participants") {
     assertAllowedObjectKeys(
       record,
       new Set(["action", "linqThread"]),
-      `Hosted runtime group tool ${action} request`,
+      "Hosted runtime group tool read_chat_participants request",
     );
     if (record.linqThread === undefined || record.linqThread === null) {
       return { action };
@@ -1502,8 +1505,71 @@ export function parseHostedRuntimeGroupToolRequest(
       action,
       linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
         record.linqThread,
-        `Hosted runtime group tool ${action} request linqThread`,
+        "Hosted runtime group tool read_chat_participants request linqThread",
       ),
+    };
+  }
+  if (action === "share_contact_card") {
+    const label = "Hosted runtime group tool share_contact_card request";
+    assertAllowedObjectKeys(
+      record,
+      new Set([
+        "action",
+        "contactCardImageUrl",
+        "contactCardShareKey",
+        "directLinqChatId",
+        "linqThread",
+      ]),
+      label,
+    );
+    const hasOwn = (key: string): boolean =>
+      Object.prototype.hasOwnProperty.call(record, key);
+    const hasContactCardImageUrl = hasOwn("contactCardImageUrl");
+    const hasContactCardShareKey = hasOwn("contactCardShareKey");
+    const hasDirectLinqChatId = hasOwn("directLinqChatId");
+    const hasLinqThread = hasOwn("linqThread");
+    const personalizedFieldCount = Number(hasContactCardImageUrl)
+      + Number(hasContactCardShareKey)
+      + Number(hasDirectLinqChatId);
+
+    if (personalizedFieldCount === 0) {
+      if (!hasLinqThread || record.linqThread === null) {
+        return { action };
+      }
+      return {
+        action,
+        linqThread: parseHostedRuntimeGroupToolLinqThreadContext(
+          record.linqThread,
+          `${label} linqThread`,
+        ),
+      };
+    }
+
+    if (personalizedFieldCount !== 3 || hasLinqThread) {
+      throw new TypeError(
+        `${label} must be either canonical with optional linqThread, or personalized with contactCardImageUrl, contactCardShareKey, and directLinqChatId only.`,
+      );
+    }
+
+    return {
+      action,
+      contactCardImageUrl: parseHostedRuntimeGroupChatIconUrl(
+        record.contactCardImageUrl,
+        options.privateMediaDeliveryOrigin,
+        `${label} contactCardImageUrl`,
+      ),
+      contactCardShareKey: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} contactCardShareKey`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+        value: record.contactCardShareKey,
+      }),
+      directLinqChatId: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} directLinqChatId`,
+        maxCodePoints:
+          HOSTED_RUNTIME_GROUP_CONTACT_CARD_SHARE_KEY_MAX_CODE_POINTS,
+        value: record.directLinqChatId,
+      }),
     };
   }
   if (action === "revoke_own_email_share") {
@@ -1573,31 +1639,29 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
 function parseHostedRuntimeGroupChatIconUrl(
   value: unknown,
   privateMediaDeliveryOrigin?: string | null,
+  label = "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
 ): string {
-  const iconUrl = requireString(
-    value,
-    "Hosted runtime group tool set_chat_avatar groupChatIconUrl",
-  ).trim();
+  const iconUrl = requireString(value, label).trim();
   if (
     iconUrl.length === 0 ||
     iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
   ) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   let parsed: URL;
   try {
     parsed = new URL(iconUrl);
   } catch {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl must be HTTPS.");
+    throw new TypeError(`${label} must be HTTPS.`);
   }
   if (!isHostedRuntimePrivateImageDeliveryUrl(
     parsed,
     privateMediaDeliveryOrigin ?? undefined,
   )) {
-    throw new TypeError("Hosted runtime group tool set_chat_avatar groupChatIconUrl is invalid.");
+    throw new TypeError(`${label} is invalid.`);
   }
   return parsed.toString();
 }
@@ -2883,7 +2947,6 @@ export function parseHostedRuntimeGroupToolResponse(
             usage: {
               fundingNeeded: capacityState !== "healthy",
               fundingUrl,
-              sponsorshipStatus: "not_sponsored",
             },
           },
         };
@@ -2897,17 +2960,19 @@ export function parseHostedRuntimeGroupToolResponse(
         ]),
         "Hosted runtime group tool read_usage usage",
       );
-      const sponsorshipStatus = requireString(
-        usage.sponsorshipStatus,
-        "Hosted runtime group tool read_usage sponsorshipStatus",
-      );
-      if (
-        sponsorshipStatus !== "not_sponsored"
-        && sponsorshipStatus !== "sponsored"
-      ) {
-        throw new TypeError(
-          "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
+      if (usage.sponsorshipStatus !== undefined) {
+        const legacySponsorshipStatus = requireString(
+          usage.sponsorshipStatus,
+          "Hosted runtime group tool read_usage sponsorshipStatus",
         );
+        if (
+          legacySponsorshipStatus !== "not_sponsored"
+          && legacySponsorshipStatus !== "sponsored"
+        ) {
+          throw new TypeError(
+            "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
+          );
+        }
       }
       if (typeof usage.fundingNeeded !== "boolean") {
         throw new TypeError(
@@ -2924,7 +2989,6 @@ export function parseHostedRuntimeGroupToolResponse(
               usage.fundingUrl,
               "Hosted runtime group tool read_usage fundingUrl",
             ),
-            sponsorshipStatus,
           },
         },
       };
@@ -3406,7 +3470,7 @@ export function parseHostedRuntimeGroupToolResponse(
   if (action === "share_contact_card") {
     const result = requireObject(record.result, "Hosted runtime group tool share_contact_card response result");
     const status = requireString(result.status, "Hosted runtime group tool share_contact_card response status");
-    if (status === "sent" || status === "already_shared") {
+    if (status === "sent" || status === "already_shared" || status === "unconfirmed") {
       assertAllowedObjectKeys(result, new Set(["status"]), "Hosted runtime group tool share_contact_card response result");
       return { action, result: { status } };
     }
@@ -4437,23 +4501,12 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "start_checkout") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "invite"]),
+      new Set(["action"]),
       "Hosted runtime family plan tool start_checkout request",
     );
-    const invite = record.invite === undefined || record.invite === null
-      ? null
-      : parseHostedRuntimeFamilyPlanInviteRequest(
-          record.invite,
-          "Hosted runtime family plan tool start_checkout request invite",
-        );
-    return invite
-      ? {
-          action,
-          invite,
-        }
-      : {
-          action,
-        };
+    return {
+      action,
+    };
   }
   if (action !== "create_invite") {
     throw new TypeError("Hosted runtime family plan tool action is not supported.");
@@ -4966,7 +5019,7 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
   return {
     ...(invite.planCode === undefined
       ? {}
-      : { planCode: parseHostedRuntimePlanCode(invite.planCode) }),
+      : { planCode: parseHostedRuntimeFamilyPlanCode(invite.planCode) }),
     ...(targetEmail === undefined ? {} : { targetEmail }),
     targetLabel,
     targetPhoneNumber,
@@ -5282,6 +5335,22 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     ]),
     "Hosted runtime family plan tool start_checkout response result",
   );
+  // The Max-aware runner deploys before Web. The old Web build emits these
+  // inert null keys when checkout carries no invite; accept only that legacy
+  // shape until the old build has drained.
+  if (record.preparedInvite !== undefined && record.preparedInvite !== null) {
+    throw new TypeError(
+      "Hosted runtime family plan start_checkout preparedInvite must be null.",
+    );
+  }
+  if (
+    record.preparedInviteReplyText !== undefined
+    && record.preparedInviteReplyText !== null
+  ) {
+    throw new TypeError(
+      "Hosted runtime family plan start_checkout preparedInviteReplyText must be null.",
+    );
+  }
   const unavailableReason = readOptionalNullableString(
     record.unavailableReason,
     "Hosted runtime family plan start_checkout unavailableReason",
@@ -5313,13 +5382,6 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     owner: requireBoolean(
       record.owner,
       "Hosted runtime family plan start_checkout owner",
-    ),
-    preparedInvite: record.preparedInvite === null || record.preparedInvite === undefined
-      ? null
-      : parseHostedRuntimeFamilyPlanInvite(record.preparedInvite),
-    preparedInviteReplyText: readNullableString(
-      record.preparedInviteReplyText,
-      "Hosted runtime family plan start_checkout preparedInviteReplyText",
     ),
     plans: parseHostedRuntimeFamilyPlanPlans(record.plans, seats),
     seats,
@@ -5356,6 +5418,7 @@ function parseHostedRuntimeFamilyPlanPlans(
   if (value === undefined) {
     return {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: {
         active: legacySeats.active,
         billed: legacySeats.billed,
@@ -5366,7 +5429,16 @@ function parseHostedRuntimeFamilyPlanPlans(
     };
   }
   const record = requireObject(value, "Hosted runtime family plan plans");
-  return Object.fromEntries(HOSTED_PLAN_CODES.map((planCode) => {
+  return Object.fromEntries(HOSTED_FAMILY_PLAN_CODES.map((planCode) => {
+    if (planCode === "max" && record[planCode] === undefined) {
+      return [planCode, {
+        active: 0,
+        billed: 0,
+        invited: 0,
+        remaining: 0,
+        used: 0,
+      }];
+    }
     const status = requireObject(
       record[planCode],
       `Hosted runtime family plan ${planCode} status`,
@@ -5386,7 +5458,7 @@ function parseHostedRuntimeFamilyPlanPlans(
       ),
       used: requireNumber(status.used, `Hosted runtime family plan ${planCode} used`),
     }];
-  })) as Record<HostedPlanCode, {
+  })) as Record<HostedFamilyPlanCode, {
     active: number;
     billed: number;
     invited: number;
@@ -5395,11 +5467,12 @@ function parseHostedRuntimeFamilyPlanPlans(
   }>;
 }
 
-function parseHostedRuntimePlanCode(value: unknown): HostedPlanCode {
+function parseHostedRuntimeFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
   const planCode = requireString(value, "Hosted runtime Family plan code");
-  if (HOSTED_PLAN_CODES.includes(planCode as HostedPlanCode)) {
-    return planCode as HostedPlanCode;
+  if (HOSTED_FAMILY_PLAN_CODES.includes(planCode as HostedFamilyPlanCode)) {
+    return planCode as HostedFamilyPlanCode;
   }
+
   throw new TypeError("Hosted runtime Family plan code is not supported.");
 }
 
@@ -5422,7 +5495,7 @@ function parseHostedRuntimeFamilyPlanMember(value: unknown) {
     ),
     planCode: record.planCode === undefined
       ? "pulse" as const
-      : parseHostedRuntimePlanCode(record.planCode),
+      : parseHostedRuntimeFamilyPlanCode(record.planCode),
     role: requireString(record.role, "Hosted runtime family plan member role"),
     status: requireString(record.status, "Hosted runtime family plan member status"),
   };
@@ -5455,7 +5528,7 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
     ),
     planCode: record.planCode === undefined
       ? "pulse" as const
-      : parseHostedRuntimePlanCode(record.planCode),
+      : parseHostedRuntimeFamilyPlanCode(record.planCode),
     status: requireString(record.status, "Hosted runtime family plan invite status"),
     targetLabel: readNullableString(
       record.targetLabel,
@@ -5639,6 +5712,54 @@ function requireOptionalBoolean(
   return { [key]: requireBoolean(record[key], `${label}.${key}`) };
 }
 
+function requireOptionalShellPrewarmOutcome(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  shellPrewarmOutcome?:
+    | "cold_start_observed"
+    | "failed"
+    | "start_issued_warm"
+    | "superseded";
+} {
+  const value = record.shellPrewarmOutcome;
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    value !== "cold_start_observed"
+    && value !== "failed"
+    && value !== "start_issued_warm"
+    && value !== "superseded"
+  ) {
+    throw new TypeError(`${label}.shellPrewarmOutcome is invalid.`);
+  }
+  return { shellPrewarmOutcome: value };
+}
+
+function requireOptionalShellPrewarmSource(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  shellPrewarmSource?:
+    | "linq-instant-start"
+    | "linq-typing-started"
+    | "unknown";
+} {
+  const value = record.shellPrewarmSource;
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    value !== "linq-instant-start"
+    && value !== "linq-typing-started"
+    && value !== "unknown"
+  ) {
+    throw new TypeError(`${label}.shellPrewarmSource is invalid.`);
+  }
+  return { shellPrewarmSource: value };
+}
+
 // phaseBreakdown is best-effort diagnostic telemetry, not a core milestone. Parse
 // it leniently: if it is malformed (unknown key, non-number/boolean leaf, or an
 // older/newer shape during web/runtime deploy skew) drop only the breakdown rather
@@ -5661,9 +5782,10 @@ function readOptionalHostedRuntimeLatencyPhaseBreakdown(
 }
 
 // Secret-safety trust boundary: this parser is the only path through which a
-// phaseBreakdown reaches storage. It rejects any non-number/non-boolean leaf and
-// any unknown top-level or sub key so secrets (ids/tokens/paths/urls) cannot ride
-// this channel into the trace JSON.
+// phaseBreakdown reaches storage. It rejects unknown keys and all strings except
+// the two exact UUID-shaped direct-wake correlation leaves plus the bounded
+// runtime lease generation, so secrets/tokens/paths/URLs cannot ride this
+// channel into the trace JSON.
 function parseHostedRuntimeLatencyPhaseBreakdown(
   value: unknown,
 ): HostedRuntimeLatencyPhaseBreakdown {
@@ -5697,11 +5819,21 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "tokenAcquiredAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureRequestStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "directEnsureResponseReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "directEnsureOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthStartedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeControlAuthFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "cloudflareRouteReceivedAtEpochMs", orchestrationLabel),
+      ...requireOptionalDirectEnsureOrchestrationAttemptId(orchestration, "runtimeInvocationOrchestrationAttemptId", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "triggeredByWebDirect", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "userRunnerRpcStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runtimeConsentLockAcquiredAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "healthDataAdmissionReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "userRunnerEnsureStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateBindStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateBindFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateReadStartedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "runnerStateReadFinishedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeFenceObservedAtEpochMs", orchestrationLabel),
       ...requireOptionalBoolean(orchestration, "activeFenceTargetWasPriorVersion", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "activeWakeStartedAtEpochMs", orchestrationLabel),
@@ -5718,6 +5850,12 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerReadyAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationPreparedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationAcceptedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmFirstHintAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmOperationElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmHintCount", orchestrationLabel),
+      ...requireOptionalShellPrewarmOutcome(orchestration, orchestrationLabel),
+      ...requireOptionalShellPrewarmSource(orchestration, orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "workspaceReadElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeStoreEnsureElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeInvocationPreparationElapsedMs", orchestrationLabel),
@@ -5761,6 +5899,11 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(restore, "extractMs", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "encryptedBytes", restoreLabel),
       ...requireOptionalNonNegativeInteger(restore, "plainBytes", restoreLabel),
+      ...requireOptionalNonNegativeInteger(
+        restore,
+        "replaySafeReadMaxAttempt",
+        restoreLabel,
+      ),
     };
   }
 
@@ -5822,13 +5965,27 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS.preProvider,
       preProviderLabel,
     );
-    breakdown.preProvider = {
+    const parsedPreProvider = {
+      ...requireOptionalNonNegativeInteger(preProvider, "mailboxImportDoneToAssistantPhaseMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "workspaceAssistantPreAutomationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationLaneToAssistantServiceMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationReadinessMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationInputSelectionMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationPassSetupMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationCandidateScanMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationGroupAndOperationScopeMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationTerminalEvidenceMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationSessionPreflightMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationCrossSessionContextMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationPromptPreparationMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "automationServiceHandoffMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "executionTargetHydrateMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "systemMailboxMaintenanceMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "memberPreferencesPrePlanningMs", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "automationBootstrapMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanBytesRead", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "outboxScanElapsedMs", preProviderLabel),
+      ...requireOptionalNonNegativeInteger(preProvider, "outboxScanFilesRead", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "outboxScanPerformed", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanBytesRead", preProviderLabel),
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanElapsedMs", preProviderLabel),
@@ -5836,6 +5993,15 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(preProvider, "receiptScanLockWaitMs", preProviderLabel),
       ...requireOptionalBoolean(preProvider, "receiptScanPerformed", preProviderLabel),
     };
+    if (
+      inspectHostedRuntimeAutomationLaneTimingSubdivision(parsedPreProvider).kind
+        === "invalid"
+    ) {
+      throw new TypeError(
+        `${preProviderLabel} automation lane timing subdivision must be absent or contain all ten leaves summing to automationLaneToAssistantServiceMs`,
+      );
+    }
+    breakdown.preProvider = parsedPreProvider;
   }
 
   if (record.assistant !== undefined) {
@@ -5873,22 +6039,42 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       providerLabel,
     );
     breakdown.provider = {
+      ...requireOptionalNonNegativeInteger(provider, "assistantServicePreLockMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerInitializeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerPreProviderMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerSpawnReadyMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadResumeMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerThreadStartMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "codexAppServerWarmReuseMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "codexProcessPreparationMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "turnLockWaitMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "sessionResolveMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "promptBuildMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "admissionMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "preProviderSetupMs", providerLabel),
+      ...requireOptionalNonNegativeInteger(provider, "providerPlanAndGateMs", providerLabel),
       ...requireOptionalNonNegativeInteger(provider, "linqEgressGuardMs", providerLabel),
     };
   }
 
   return breakdown;
+}
+
+function requireOptionalDirectEnsureOrchestrationAttemptId<
+  Key extends "directEnsureOrchestrationAttemptId" | "runtimeInvocationOrchestrationAttemptId",
+>(
+  record: Record<string, unknown>,
+  key: Key,
+  label: string,
+): Partial<Record<Key, string>> {
+  const value = record[key];
+  if (value === undefined) {
+    return {};
+  }
+  if (!isHostedRuntimeDirectEnsureOrchestrationAttemptId(value)) {
+    throw new TypeError(`${label}.${key} must be a direct-wake orchestration attempt id.`);
+  }
+  return { [key]: value } as Record<Key, string>;
 }
 
 function parseHostedRuntimeLatencyTraceProviderStartedEvent(
@@ -6599,64 +6785,9 @@ export function parseHostedRunnerStatusResponse(value: unknown): HostedRunnerSta
           recentLogs: requireArray(record.recentLogs, "Hosted runner status response recentLogs")
             .map((entry) => parseHostedRuntimeLogEntry(entry)),
         }),
-    ...(record.r2Cutover === undefined
-      ? {}
-      : { r2Cutover: parseHostedRunnerR2CutoverStatus(record.r2Cutover) }),
     userId: requireString(record.userId, "Hosted runner status response userId"),
     workspace: record.workspace === null ? null : parseHostedWorkspaceState(record.workspace),
   };
-}
-
-function parseHostedRunnerR2CutoverStatus(
-  value: unknown,
-): NonNullable<HostedRunnerStatusResponse["r2Cutover"]> {
-  const record = requireObject(value, "Hosted runner status response r2Cutover");
-  const phase = requireString(
-    record.phase,
-    "Hosted runner status response r2Cutover.phase",
-  );
-  if (phase !== "source_active" && phase !== "destination_active") {
-    throw new TypeError(
-      "Hosted runner status response r2Cutover.phase must be source_active or destination_active.",
-    );
-  }
-  return {
-    coexisting: requireBoolean(
-      record.coexisting,
-      "Hosted runner status response r2Cutover.coexisting",
-    ),
-    ...(record.pausedCanaryConfigured === undefined
-      ? {}
-      : {
-          pausedCanaryConfigured: requireBoolean(
-            record.pausedCanaryConfigured,
-            "Hosted runner status response r2Cutover.pausedCanaryConfigured",
-          ),
-        }),
-    phase,
-    protocolVersion: requireString(
-      record.protocolVersion,
-      "Hosted runner status response r2Cutover.protocolVersion",
-    ),
-    ...(record.writeAdmission === undefined
-      ? {}
-      : {
-          writeAdmission: parseHostedR2WriteAdmission(record.writeAdmission),
-        }),
-  };
-}
-
-function parseHostedR2WriteAdmission(value: unknown): "open" | "paused" {
-  const writeAdmission = requireString(
-    value,
-    "Hosted runner status response r2Cutover.writeAdmission",
-  );
-  if (writeAdmission !== "open" && writeAdmission !== "paused") {
-    throw new TypeError(
-      "Hosted runner status response r2Cutover.writeAdmission must be open or paused.",
-    );
-  }
-  return writeAdmission;
 }
 
 export function parseHostedRuntimeWebStatusResponse(value: unknown): HostedRuntimeWebStatusResponse {
@@ -6706,9 +6837,9 @@ export function parseHostedRuntimeHealthDataAdmissionResponse(
     record.processingAllowed,
     "Hosted runtime health-data admission response processingAllowed",
   );
-  if (processingAllowed !== (consentState !== "revoked")) {
+  if (processingAllowed && consentState === "revoked") {
     throw new TypeError(
-      "Hosted runtime health-data admission response processingAllowed did not match consentState.",
+      "Hosted runtime health-data admission response cannot allow processing after consent revocation.",
     );
   }
 

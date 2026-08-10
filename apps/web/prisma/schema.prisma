@@ -570,7 +570,6 @@ model HostedMember {
   hostedMailboxPayloads          HostedMailboxPayload[]
   hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
   hostedWorkspace                HostedWorkspace?
-  hostedRuntimeLogs              HostedRuntimeLog[]
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
@@ -692,9 +691,11 @@ model HostedMealPhotoCaptureEnrollment {
   id                         String       @id
   memberId                   String       @map("member_id")
   installationIdHash         String       @map("installation_id_hash")
-  uploadTokenHash            String       @unique @map("upload_token_hash")
-  idempotencySecretEncrypted String       @map("idempotency_secret_encrypted")
-  expiresAt                  DateTime     @map("expires_at")
+  authorityRevision          Int          @default(0) @map("authority_revision")
+  uploadTokenHash            String?      @unique @map("upload_token_hash")
+  idempotencySecretEncrypted String?      @map("idempotency_secret_encrypted")
+  expiresAt                  DateTime?    @map("expires_at")
+  activatedAt                DateTime?    @map("activated_at")
   revokedAt                  DateTime?    @map("revoked_at")
   revokeReason               String?      @map("revoke_reason")
   createdAt                  DateTime     @default(now()) @map("created_at")
@@ -1177,36 +1178,6 @@ model HostedWorkspace {
   @@map("hosted_workspace")
 }
 
-model HostedRuntimeLog {
-  id                String       @id
-  userId            String       @map("user_id")
-  at                DateTime
-  level             String
-  component         String
-  phase             String
-  eventCode         String       @map("event_code")
-  attemptId         String?      @map("attempt_id")
-  leaseGeneration   BigInt?      @map("lease_generation")
-  workspaceVersion  BigInt?      @map("workspace_version")
-  checkpointVersion BigInt?      @map("checkpoint_version")
-  mailboxLane       String?      @map("mailbox_lane")
-  mailboxSeqStart   BigInt?      @map("mailbox_seq_start")
-  mailboxSeqEnd     BigInt?      @map("mailbox_seq_end")
-  outboxIntentRef   String?      @map("outbox_intent_ref")
-  errorCode         String?      @map("error_code")
-  redactedJson      Json?        @map("redacted_json")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, at])
-  @@index([userId, eventCode, createdAt])
-  @@index([attemptId, eventCode, at])
-  @@index([level, at])
-  @@index([component, at])
-  @@index([at, id])
-  @@map("hosted_runtime_log")
-}
-
 model HostedInvite {
   id                           String        @id
   memberId                     String        @map("member_id")
@@ -1358,6 +1329,15 @@ model HostedGrowthDailySnapshot {
   // because the live source rows are short-lived (mailbox TTL, delivery churn).
   inboundMessagesPriorDay  Int? @map("inbound_messages_prior_day")
   outboundMessagesPriorDay Int? @map("outbound_messages_prior_day")
+  // Unique attributable senders for the completed UTC day before
+  // snapshot_date and the seven completed UTC days ending at snapshot_date.
+  // Null means the window is unknown or incomplete, never zero.
+  activeUsersPriorDay      Int? @map("active_users_prior_day")
+  activeUsersTrailing7Days Int? @map("active_users_trailing_7_days")
+  // MRR split behind mrr_usd_cents: individual plans versus family seats.
+  // Null means the row predates split capture, never zero.
+  individualMrrUsdCents Int? @map("individual_mrr_usd_cents")
+  familyMrrUsdCents     Int? @map("family_mrr_usd_cents")
 
   @@map("hosted_growth_daily_snapshot")
 }
@@ -1552,6 +1532,7 @@ model HostedGroupSponsorshipMoment {
   beneficiaryMemberId        String   @map("beneficiary_member_id")
   creatorMemberId            String   @map("creator_member_id")
   configurationDigest        String   @map("configuration_digest")
+  creativeRequestEncrypted   String?  @map("creative_request_encrypted")
   publicAliasEncrypted       String?  @map("public_alias_encrypted")
   sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
   runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")

@@ -4,6 +4,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const ORDINARY_POLICY_VERSION = "hosted-usage-referral-2026-07-v1";
+const SIGNUP_POLICY_VERSION =
+  "hosted-signup-referral-activation-2026-08-v1";
+
 const mocks = vi.hoisted(() => ({
   buildOutstandingWhere: vi.fn(),
   creditFindMany: vi.fn(),
@@ -19,9 +23,24 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
+vi.mock("@/src/lib/hosted-growth/signup-referral-policy", () => ({
+  HOSTED_SIGNUP_REFERRAL_POLICY_VERSION: SIGNUP_POLICY_VERSION,
+  HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY: {
+    requirementsLabel:
+      "A new member completed Murph setup through your referral link.",
+    title: "Invite someone to Murph",
+  },
+  isHostedSignupReferralPolicyVersion: (policyVersion: string) =>
+    policyVersion === SIGNUP_POLICY_VERSION,
+}));
+
 vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
   buildHostedUsageReferralOutstandingWhere: mocks.buildOutstandingWhere,
   getHostedUsageReferralPolicyDisplay: mocks.policyDisplay,
+}));
+
+vi.mock("@/src/lib/hosted-growth/usage-referral-policy", () => ({
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION: ORDINARY_POLICY_VERSION,
   isHostedUsageReferralEnabled: mocks.isReferralEnabled,
 }));
 
@@ -58,7 +77,7 @@ beforeEach(() => {
 });
 
 describe("readHostedAiUsageActivity", () => {
-  it("projects purchase grants and active or completed missions", async () => {
+  it("projects purchase grants and every ordinary mission state", async () => {
     const now = new Date("2026-07-29T12:00:00.000Z");
     const outstandingWhere = [
       {
@@ -88,6 +107,7 @@ describe("readHostedAiUsageActivity", () => {
         expiresAt: new Date("2026-08-02T12:00:00.000Z"),
         id: "hur_waiting",
         policyCode: "new_person_activation_v1",
+        policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
         rewardUsdMicros: 2_000_000n,
@@ -99,6 +119,7 @@ describe("readHostedAiUsageActivity", () => {
         expiresAt: new Date("2026-08-03T12:00:00.000Z"),
         id: "hur_in_progress",
         policyCode: "active_group_v1",
+        policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
         rewardUsdMicros: 3_500_000n,
@@ -110,6 +131,7 @@ describe("readHostedAiUsageActivity", () => {
         expiresAt: new Date("2026-07-29T11:00:00.000Z"),
         id: "hur_checking_final",
         policyCode: "active_group_v1",
+        policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
         rewardUsdMicros: 3_500_000n,
@@ -121,6 +143,7 @@ describe("readHostedAiUsageActivity", () => {
         expiresAt: new Date("2026-08-04T12:00:00.000Z"),
         id: "hur_pending",
         policyCode: "active_group_v1",
+        policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: new Date("2026-07-29T11:00:00.000Z"),
         rewardedAt: null,
         rewardUsdMicros: 3_500_000n,
@@ -133,6 +156,7 @@ describe("readHostedAiUsageActivity", () => {
         expiresAt: new Date("2026-07-17T12:00:00.000Z"),
         id: "hur_completed",
         policyCode: "new_person_activation_v1",
+        policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: new Date("2026-07-16T11:00:00.000Z"),
         rewardedAt: new Date("2026-07-16T12:00:00.000Z"),
         rewardUsdMicros: 2_000_000n,
@@ -169,20 +193,34 @@ describe("readHostedAiUsageActivity", () => {
         kind: "purchase_grant",
       },
     });
-    expect(mocks.missionFindMany).toHaveBeenNthCalledWith(1, expect.objectContaining({
-      take: 50,
-      where: {
-        OR: outstandingWhere,
-        referrerMemberId: "member_123",
-      },
-    }));
-    expect(mocks.missionFindMany).toHaveBeenNthCalledWith(2, expect.objectContaining({
-      take: 46,
-      where: {
-        referrerMemberId: "member_123",
-        status: "rewarded",
-      },
-    }));
+    expect(mocks.missionFindMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        select: expect.objectContaining({
+          policyVersion: true,
+          rewardUsdMicros: true,
+        }),
+        take: 50,
+        where: {
+          OR: outstandingWhere,
+          referrerMemberId: "member_123",
+        },
+      }),
+    );
+    expect(mocks.missionFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        select: expect.objectContaining({
+          policyVersion: true,
+          rewardUsdMicros: true,
+        }),
+        take: 46,
+        where: {
+          referrerMemberId: "member_123",
+          status: "rewarded",
+        },
+      }),
+    );
     expect(activity.credits).toEqual([
       {
         addedLabel: "$10.00",
@@ -209,7 +247,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_pending",
-        rewardLabel: "$3.50",
+        rewardLabel: "About 14 more days of Murph usage",
         selectedLabel: "Jul 28, 2026",
         status: "reward_pending",
         statusLabel: "Reward pending",
@@ -218,7 +256,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_checking_final",
-        rewardLabel: "$3.50",
+        rewardLabel: "About 14 more days of Murph usage",
         selectedLabel: "Jul 28, 2026",
         status: "checking_final_activity",
         statusLabel: "Checking final activity",
@@ -227,7 +265,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "the group",
         id: "hur_in_progress",
-        rewardLabel: "$3.50",
+        rewardLabel: "About 14 more days of Murph usage",
         selectedLabel: "Jul 27, 2026",
         status: "in_progress",
         statusLabel: "In progress",
@@ -236,7 +274,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_waiting",
-        rewardLabel: "$2.00",
+        rewardLabel: "About 10 more days of Murph usage",
         selectedLabel: "Jul 26, 2026",
         status: "waiting_for_group",
         statusLabel: "Waiting for a new group",
@@ -245,7 +283,7 @@ describe("readHostedAiUsageActivity", () => {
       {
         destinationLabel: "your Murph",
         id: "hur_completed",
-        rewardLabel: "$2.00",
+        rewardLabel: "About 10 more days of Murph usage",
         selectedLabel: "Jul 10, 2026",
         status: "completed",
         statusLabel: "Completed",
@@ -253,6 +291,69 @@ describe("readHostedAiUsageActivity", () => {
       },
     ]);
     expect(activity.missionsEnabled).toBe(true);
+  });
+
+  it("uses persisted policy semantics for completed signup-link rewards", async () => {
+    const now = new Date("2026-08-06T12:00:00.000Z");
+    mocks.creditFindMany.mockResolvedValue([]);
+    mocks.missionFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        armedAt: new Date("2026-08-05T12:00:00.000Z"),
+        beneficiaryMemberId: "member_123",
+        expiresAt: new Date("2026-08-12T12:00:00.000Z"),
+        id: "hur_signup_link",
+        policyCode: "new_person_activation_v1",
+        policyVersion: SIGNUP_POLICY_VERSION,
+        qualifiedAt: new Date("2026-08-06T10:00:00.000Z"),
+        rewardedAt: new Date("2026-08-06T10:01:00.000Z"),
+        rewardUsdMicros: 2_750_000n,
+        status: "rewarded",
+      },
+    ]);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activity = await readHostedAiUsageActivity({
+      memberId: "member_123",
+      now,
+    });
+
+    expect(activity.missions).toEqual([
+      expect.objectContaining({
+        id: "hur_signup_link",
+        requirementsLabel:
+          "A new member completed Murph setup through your referral link.",
+        rewardLabel: "About 12 more days of Murph usage",
+        title: "Invite someone to Murph",
+      }),
+    ]);
+    expect(mocks.policyDisplay).not.toHaveBeenCalled();
+  });
+
+  it("omits cap-disqualified signup activations from Settings history", async () => {
+    const now = new Date("2026-08-06T12:00:00.000Z");
+    mocks.creditFindMany.mockResolvedValue([]);
+    mocks.missionFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    const { readHostedAiUsageActivity } = await import(
+      "@/src/lib/hosted-execution/usage-activity"
+    );
+    const activity = await readHostedAiUsageActivity({
+      memberId: "member_123",
+      now,
+    });
+
+    expect(mocks.missionFindMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: {
+          referrerMemberId: "member_123",
+          status: "rewarded",
+        },
+      }),
+    );
+    expect(activity.missions).toEqual([]);
   });
 
   it("switches an unqualified bound mission to final checking at its exact cutoff", async () => {
@@ -263,6 +364,7 @@ describe("readHostedAiUsageActivity", () => {
       expiresAt: input.expiresAt,
       id: input.id,
       policyCode: "active_group_v1",
+      policyVersion: ORDINARY_POLICY_VERSION,
       qualifiedAt: null,
       rewardedAt: null,
       rewardUsdMicros: 3_500_000n,
@@ -319,6 +421,7 @@ describe("readHostedAiUsageActivity", () => {
         expiresAt: new Date("2027-01-01T00:30:00.000Z"),
         id: "hur_cross_year",
         policyCode: "active_group_v1",
+        policyVersion: ORDINARY_POLICY_VERSION,
         qualifiedAt: null,
         rewardedAt: null,
         rewardUsdMicros: 3_500_000n,
@@ -381,52 +484,13 @@ describe("readHostedAiUsageActivity", () => {
       credits: [],
       missions: [],
       missionsEnabled: true,
+      referralIdentityKey: "member_123",
     });
   });
 });
 
 describe("HostedAiUsageActivity", () => {
-  it("keeps earned mission credit visible while purchase history stays explicitly scoped", async () => {
-    const now = new Date("2026-07-29T12:00:00.000Z");
-    mocks.creditFindMany.mockResolvedValue([]);
-    mocks.missionFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
-      {
-        armedAt: new Date("2026-07-10T12:00:00.000Z"),
-        beneficiaryMemberId: "member_123",
-        expiresAt: new Date("2026-07-17T12:00:00.000Z"),
-        id: "hur_completed_without_purchase",
-        policyCode: "new_person_activation_v1",
-        qualifiedAt: new Date("2026-07-16T11:00:00.000Z"),
-        rewardedAt: new Date("2026-07-16T12:00:00.000Z"),
-        rewardUsdMicros: 2_000_000n,
-        status: "rewarded",
-      },
-    ]);
-
-    const { readHostedAiUsageActivity } = await import(
-      "@/src/lib/hosted-execution/usage-activity"
-    );
-    const activity = await readHostedAiUsageActivity({
-      memberId: "member_123",
-      now,
-    });
-    const { HostedAiUsageActivity } = await import(
-      "@/src/components/settings/hosted-ai-usage-activity"
-    );
-    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
-      activity,
-      missionContactOption: null,
-    }));
-
-    assert.match(markup, /Bring someone new to Murph/);
-    assert.match(markup, /Completed/);
-    assert.match(markup, /\$2\.00/);
-    assert.match(markup, /History/);
-    assert.doesNotMatch(markup, /Purchased credits/);
-    assert.doesNotMatch(markup, /No (?:purchased|usage) credits yet/);
-  });
-
-  it("renders a single ledger surface and prefilled Murph handoff", async () => {
+  it("renders referral actions, current missions, and one collapsed history", async () => {
     const { HostedAiUsageActivity } = await import(
       "@/src/components/settings/hosted-ai-usage-activity"
     );
@@ -445,7 +509,7 @@ describe("HostedAiUsageActivity", () => {
             destinationLabel: "the group",
             id: "mission_1",
             requirementsLabel: "Start a fresh group and get people talking.",
-            rewardLabel: "$3.50",
+            rewardLabel: "About 14 more days of Murph usage",
             selectedLabel: "Jul 27, 2026",
             status: "in_progress",
             statusLabel: "In progress",
@@ -453,15 +517,15 @@ describe("HostedAiUsageActivity", () => {
             title: "Start an active group",
           },
           {
-            destinationLabel: "the group",
-            id: "mission_2",
-            requirementsLabel: "Wait while Murph checks final activity.",
-            rewardLabel: "$3.50",
-            selectedLabel: "Jul 28, 2026",
-            status: "checking_final_activity",
-            statusLabel: "Checking final activity",
-            timingLabel: "Closed Jul 29, 2026",
-            title: "Start an active group",
+            destinationLabel: "your Murph",
+            id: "mission_completed",
+            requirementsLabel: "Invite someone.",
+            rewardLabel: "About 10 more days of Murph usage",
+            selectedLabel: "Jul 10, 2026",
+            status: "completed",
+            statusLabel: "Completed",
+            timingLabel: "Earned Jul 16, 2026",
+            title: "Invite someone to Murph",
           },
         ],
         missionsEnabled: true,
@@ -471,47 +535,30 @@ describe("HostedAiUsageActivity", () => {
         kind: "text",
         label: "Messages",
       },
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
-    assert.match(markup, /aria-label="Current usage referrals"/);
-    assert.match(markup, />History</);
-    assert.match(markup, /aria-label="Usage activity history"/);
-    assert.match(markup, /Usage purchase/);
-    assert.match(markup, /Purchased by you/);
-    assert.doesNotMatch(markup, /bar above/);
-    assert.doesNotMatch(markup, /Remaining|\$6\.42/);
-    assert.match(markup, /Start an active group/);
-    assert.match(markup, /to the group/);
-    const detailOpeningTags = markup.match(/<details\b[^>]*>/gu) ?? [];
-    assert.equal(detailOpeningTags.length, 3);
-    detailOpeningTags.forEach((openingTag) => {
-      assert.doesNotMatch(openingTag, /\sopen(?:=|\s|>)/u);
-    });
-    assert.match(markup, /Start a fresh group and get people talking\./);
-    assert.match(markup, /Selected Jul 27, 2026/);
-    assert.match(markup, /Wait while Murph checks final activity\./);
-    assert.match(markup, /Selected Jul 28, 2026/);
-    assert.equal(markup.match(/>Details</gu)?.length, 2);
-    assert.match(
-      markup,
-      /aria-label="Details for Start an active group: In progress, Ends Aug 3, 2026"[^>]*role="button"/,
-    );
-    assert.match(
-      markup,
-      /aria-label="Details for Start an active group: Checking final activity, Closed Jul 29, 2026"/,
-    );
-    assert.ok(
-      markup.indexOf("Checking final activity") < markup.indexOf(">History"),
-    );
-    assert.doesNotMatch(markup, /Amounts added, not current balance/);
+    assert.match(markup, />Copy link</);
     assert.match(markup, /Ask Murph/);
     assert.match(
       markup,
       /aria-label="Ask Murph about referrals in Messages"/,
     );
-    assert.match(markup, /href="sms:\+15550100001\?body=mission"/);
-    assert.doesNotMatch(markup, /<table/);
+    assert.match(markup, /aria-label="Current usage referrals"/);
+    assert.match(markup, /Start an active group/);
+    assert.match(markup, /About 14 more days of Murph usage/);
+    assert.match(markup, />History</);
+    assert.match(markup, /aria-label="Usage activity history"/);
+    assert.match(markup, /Invite someone to Murph/);
+    assert.match(markup, /Usage purchase/);
+    assert.match(markup, /Purchased by you/);
+    assert.doesNotMatch(markup, /Remaining|\$3\.50|\$6\.42|<table/);
+    const detailOpeningTags = markup.match(/<details\b[^>]*>/gu) ?? [];
+    assert.equal(detailOpeningTags.length, 2);
+    detailOpeningTags.forEach((openingTag) => {
+      assert.doesNotMatch(openingTag, /\sopen(?:=|\s|>)/u);
+    });
   });
 
   it("keeps every nonterminal referral current and only completed referrals in History", async () => {
@@ -531,7 +578,7 @@ describe("HostedAiUsageActivity", () => {
       destinationLabel: "the group",
       id,
       requirementsLabel: `Requirements for ${statusLabel}`,
-      rewardLabel: "$3.50",
+      rewardLabel: "About 14 more days of Murph usage",
       selectedLabel: "Jul 27, 2026",
       status,
       statusLabel,
@@ -551,6 +598,7 @@ describe("HostedAiUsageActivity", () => {
         missionsEnabled: true,
       },
       missionContactOption: null,
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
     const historyIndex = markup.indexOf(">History");
 
@@ -560,79 +608,29 @@ describe("HostedAiUsageActivity", () => {
     }
     assert.ok(markup.indexOf("Referral Completed") > historyIndex);
     assert.match(markup, /aria-label="Current usage referrals"/);
-    for (const label of ["Waiting", "Active", "Checking", "Reward pending"]) {
-      assert.match(
-        markup,
-        new RegExp(
-          `aria-label="Details for Referral ${label}: ${label}, Timing for ${label}"`,
-          "u",
-        ),
-      );
-    }
+    assert.match(markup, />Copy link</);
+    assert.doesNotMatch(markup, /Ask Murph/);
     assert.equal(markup.match(/>Details</gu)?.length, 4);
   });
 
-  it("keeps compact referral guidance visible alongside existing History", async () => {
-    const { HostedAiUsageActivity } = await import(
-      "@/src/components/settings/hosted-ai-usage-activity"
-    );
-    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
-      activity: {
-        credits: [{
-          addedLabel: "$5.00",
-          dateLabel: "Jul 29, 2026",
-          id: "credit_with_empty_referrals",
-          sourceLabel: "Purchased by you",
-        }],
-        missions: [{
-          destinationLabel: "your Murph",
-          id: "completed_with_empty_referrals",
-          requirementsLabel: "Invite a friend.",
-          rewardLabel: "$2.00",
-          selectedLabel: "Jul 10, 2026",
-          status: "completed",
-          statusLabel: "Completed",
-          timingLabel: "Earned Jul 16, 2026",
-          title: "Completed referral",
-        }],
-        missionsEnabled: true,
-      },
-      missionContactOption: {
-        href: "sms:+15550100001?body=mission",
-        kind: "text",
-        label: "Messages",
-      },
-    }));
-
-    assert.match(
-      markup,
-      /Earn usage by inviting friends or adding Murph to a groupchat/,
-    );
-    assert.match(markup, />History</);
-    assert.match(markup, /Completed referral/);
-    assert.match(markup, /Usage purchase/);
-  });
-
-  it("keeps completed history while hiding the mission handoff when new missions are disabled", async () => {
+  it("keeps the stable link when mission offers are disabled", async () => {
     const { HostedAiUsageActivity } = await import(
       "@/src/components/settings/hosted-ai-usage-activity"
     );
     const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
       activity: {
         credits: [],
-        missions: [
-          {
-            destinationLabel: "your Murph",
-            id: "mission_completed",
-            requirementsLabel: "Complete the selected mission.",
-            rewardLabel: "$2.00",
-            selectedLabel: "Jul 10, 2026",
-            status: "completed",
-            statusLabel: "Completed",
-            timingLabel: "Earned Jul 16, 2026",
-            title: "Completed mission",
-          },
-        ],
+        missions: [{
+          destinationLabel: "your Murph",
+          id: "mission_completed",
+          requirementsLabel: "Complete the selected mission.",
+          rewardLabel: "About 10 more days of Murph usage",
+          selectedLabel: "Jul 10, 2026",
+          status: "completed",
+          statusLabel: "Completed",
+          timingLabel: "Earned Jul 16, 2026",
+          title: "Completed mission",
+        }],
         missionsEnabled: false,
       },
       missionContactOption: {
@@ -640,21 +638,18 @@ describe("HostedAiUsageActivity", () => {
         kind: "text",
         label: "Messages",
       },
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
-    assert.match(markup, /Completed mission/);
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
+    assert.match(markup, />Copy link</);
+    assert.match(markup, /Completed mission/);
     assert.match(markup, />History</);
-    assert.doesNotMatch(markup, /Purchased credits/);
-    assert.doesNotMatch(markup, /No active referrals/);
-    assert.doesNotMatch(
-      markup,
-      /aria-label="Ask Murph about referrals/,
-    );
+    assert.doesNotMatch(markup, /aria-label="Ask Murph about referrals/);
     assert.doesNotMatch(markup, /href="sms:/);
   });
 
-  it("renders email-only purchased credits without a mission invitation", async () => {
+  it("shows the stable link and purchase history for an email-only member", async () => {
     const { HostedAiUsageActivity } = await import(
       "@/src/components/settings/hosted-ai-usage-activity"
     );
@@ -670,13 +665,15 @@ describe("HostedAiUsageActivity", () => {
         missionsEnabled: true,
       },
       missionContactOption: null,
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
-    assert.match(markup, /Purchased credits/);
+    assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
+    assert.match(markup, />Copy link</);
+    assert.match(markup, /Invite friends to Murph or ask about referral missions\./);
     assert.match(markup, /aria-label="Usage activity history"/);
     assert.match(markup, /Usage purchase/);
     assert.match(markup, /Added for you/);
-    assert.doesNotMatch(markup, /<h3[^>]*>Referrals<\/h3>/);
     assert.doesNotMatch(markup, /Ask Murph/);
   });
 
@@ -695,44 +692,13 @@ describe("HostedAiUsageActivity", () => {
         kind: "text",
         label: "Messages",
       },
+      signupReferralUrl: "https://example.com/r/test-referral",
     }));
 
     assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
+    assert.match(markup, />Copy link</);
     assert.match(markup, /Ask Murph/);
-    assert.match(
-      markup,
-      /Earn usage by inviting friends or adding Murph to a groupchat/,
-    );
-    assert.doesNotMatch(markup, /No purchased credits yet/);
-    assert.doesNotMatch(markup, /<details/);
-  });
-
-  it("renders email-only mission history without action-oriented copy", async () => {
-    const { HostedAiUsageActivity } = await import(
-      "@/src/components/settings/hosted-ai-usage-activity"
-    );
-    const markup = renderToStaticMarkup(createElement(HostedAiUsageActivity, {
-      activity: {
-        credits: [],
-        missions: [{
-          destinationLabel: "your Murph",
-          id: "mission_email_history",
-          requirementsLabel: "Complete the selected mission.",
-          rewardLabel: "$2.00",
-          selectedLabel: "Jul 20, 2026",
-          status: "completed",
-          statusLabel: "Completed",
-          timingLabel: "Earned Jul 27, 2026",
-          title: "Completed mission",
-        }],
-        missionsEnabled: true,
-      },
-      missionContactOption: null,
-    }));
-
-    assert.match(markup, /<h3[^>]*>Referrals<\/h3>/);
-    assert.match(markup, /Completed mission/);
-    assert.doesNotMatch(markup, /Purchased credits/);
-    assert.doesNotMatch(markup, /aria-label="Ask Murph about referrals/);
+    assert.match(markup, /Invite friends to Murph or ask about referral missions\./);
+    assert.doesNotMatch(markup, /No purchased credits yet|<details/);
   });
 });

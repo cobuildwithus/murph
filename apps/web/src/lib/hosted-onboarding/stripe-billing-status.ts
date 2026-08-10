@@ -81,7 +81,9 @@ export function resolveHostedStripeBillingStatusForWrite(input: {
 }
 
 function isHostedStripeBillingReversalSourceType(sourceType: string): boolean {
-  return sourceType === "stripe.refund.created" || sourceType.startsWith("stripe.charge.dispute.");
+  return sourceType === "stripe.refund.created" ||
+    sourceType === "stripe.refund.updated" ||
+    sourceType.startsWith("stripe.charge.dispute.");
 }
 
 function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {

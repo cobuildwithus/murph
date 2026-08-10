@@ -1,13 +1,17 @@
 import {
   type LinqMessageEditedEvent,
+  type LinqMessageReceivedPartsInspection,
   type LinqMessageReceivedEvent,
   type LinqParticipantChangedEvent,
+  type LinqTypingIndicatorStartedEvent,
   type LinqWebhookEvent,
+  inspectLinqMessageReceivedParts,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   parseLinqMessageEditedEvent,
   parseLinqMessageReceivedEvent,
   parseLinqParticipantChangedEvent,
+  parseLinqTypingIndicatorStartedEvent,
   parseLinqWebhookEvent,
   resolveLinqWebhookOccurredAt,
   summarizeLinqMessageReceivedEvent,
@@ -26,7 +30,9 @@ import { getHostedOnboardingEnvironment } from "./runtime";
 export type HostedLinqWebhookEvent = LinqWebhookEvent;
 export type HostedLinqMessageEditedEvent = LinqMessageEditedEvent;
 export type HostedLinqMessageReceivedEvent = LinqMessageReceivedEvent;
+export type HostedLinqMessageReceivedPartsInspection = LinqMessageReceivedPartsInspection;
 export type HostedLinqParticipantChangedEvent = LinqParticipantChangedEvent;
+export type HostedLinqTypingIndicatorStartedEvent = LinqTypingIndicatorStartedEvent;
 
 export function parseHostedLinqWebhookEvent(rawBody: string): HostedLinqWebhookEvent {
   try {
@@ -66,6 +72,12 @@ export function requireHostedLinqMessageReceivedEvent(
   }
 }
 
+export function inspectHostedLinqMessageReceivedParts(
+  event: HostedLinqWebhookEvent,
+): HostedLinqMessageReceivedPartsInspection | null {
+  return inspectLinqMessageReceivedParts(event);
+}
+
 export function requireHostedLinqMessageEditedEvent(
   event: HostedLinqWebhookEvent,
 ): HostedLinqMessageEditedEvent {
@@ -88,6 +100,23 @@ export function requireHostedLinqParticipantChangedEvent(
 ): HostedLinqParticipantChangedEvent {
   try {
     return parseLinqParticipantChangedEvent(event);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw hostedOnboardingError({
+        code: "LINQ_PAYLOAD_INVALID",
+        message: error.message,
+        httpStatus: 400,
+      });
+    }
+    throw error;
+  }
+}
+
+export function requireHostedLinqTypingIndicatorStartedEvent(
+  event: HostedLinqWebhookEvent,
+): HostedLinqTypingIndicatorStartedEvent {
+  try {
+    return parseLinqTypingIndicatorStartedEvent(event);
   } catch (error) {
     if (error instanceof TypeError) {
       throw hostedOnboardingError({

@@ -27,6 +27,10 @@
       "types": "./dist/assistant-vault-paths.d.ts",
       "default": "./dist/assistant-vault-paths.js"
     },
+    "./export-packs": {
+      "types": "./dist/export-packs.d.ts",
+      "default": "./dist/export-packs.js"
+    },
     "./preferences": {
       "types": "./dist/preferences.d.ts",
       "default": "./dist/preferences.js"
@@ -78,7 +82,9 @@
     "@murphai/importers": "workspace:*",
     "@murphai/operator-config": "workspace:*",
     "@murphai/query": "workspace:*",
-    "@murphai/runtime-state": "workspace:*",
+    "@murphai/runtime-state": "workspace:*"
+  },
+  "devDependencies": {
     "zod": "^4.4.3"
   },
   "engines": {

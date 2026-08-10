@@ -1,24 +1,18 @@
-import { z } from 'zod'
-import {
-  assistantPersonaIdValues,
-  assistantTonePreferenceValues,
-  assistantVoiceOptionIdValues,
-  assistantVoiceOptions,
-} from '@murphai/contracts'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
+  type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/contracts'
 import {
-  HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -64,13 +58,6 @@ import {
   type HostedRuntimeSubscriptionToolRequest,
 } from '@murphai/hosted-execution/subscription'
 import {
-  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS,
-  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS,
-  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND,
-  HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS,
-  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS,
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
   parseHostedVaultShareProjectionScope,
@@ -78,8 +65,6 @@ import {
 } from '@murphai/hosted-execution/vault-share'
 import {
   buildHostedComputerRunOperationPath,
-  HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
-  HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
   HOSTED_COMPUTER_FINISH_OUTCOMES,
   HOSTED_COMPUTER_RUNS_PATH,
   hostedComputerActRequestSchema,
@@ -92,13 +77,11 @@ import {
   type HostedComputerPauseForUserRequest,
 } from '@murphai/hosted-execution/computer-use'
 import {
-  assistantVaultImageMaxBytes,
   assistantMessageReactionSchema,
   type AssistantMessageReaction,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -108,12 +91,10 @@ import {
   buildSharedGroupWeeklyMembers,
   type SharedGroupWeeklyMember,
 } from '@murphai/query'
-
 import {
   type AssistantHostedGroupSharedProjection,
   type AssistantHostedGroupSharedReadResponse,
   type AssistantHostedGroupSharedReader,
-  type AssistantHostedGroupSharedRecord,
   type AssistantWorkspaceArtifactMaterializer,
 } from '../assistant/execution-context.js'
 import type {
@@ -125,8 +106,10 @@ import {
 } from '../assistant/group-shared-read-limits.js'
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
-import type {
-  AssistantHostedToolContext,
+import {
+  createAssistantHostedScheduledRequestKey,
+  type AssistantHostedInvocationScope,
+  type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
@@ -140,9 +123,6 @@ import type {
   AssistantProgressDelivery,
   AssistantTurnProductFeedbackRecorder,
 } from '../assistant/turn-progress.js'
-import {
-  ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
-} from '../assistant/generated-delivery-files.js'
 import {
   readAssistantHostedImageCompletion,
 } from '../assistant/hosted-image-completion.js'
@@ -170,59 +150,41 @@ import {
 } from './generate-voice-memo-tool.js'
 import {
   executeAssistantStyleDynamicTool,
-  MURPH_ASSISTANT_STYLE_TOOL,
   readAssistantStyleDynamicToolRequest,
   type AssistantStyleDynamicToolRequest,
   type AssistantStyleTurnSettingsOverlay,
 } from './dynamic-tools/assistant-style.js'
-export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
-export type {
-  AssistantStyleTurnSettingsOverlay,
-} from './dynamic-tools/assistant-style.js'
 import {
   executeAutomationDynamicTool,
-  MURPH_AUTOMATION_TOOL,
   readAutomationDynamicToolRequest,
   type AutomationDynamicToolRequest,
 } from './dynamic-tools/automation.js'
-export { MURPH_AUTOMATION_TOOL } from './dynamic-tools/automation.js'
 import {
   executeDeviceDynamicTool,
-  MURPH_DEVICE_TOOL,
   readDeviceDynamicToolRequest,
   type DeviceDynamicToolRequest,
 } from './dynamic-tools/device.js'
-export { MURPH_DEVICE_TOOL } from './dynamic-tools/device.js'
 import {
   executeLabsDynamicTool,
-  MURPH_LABS_TOOL,
   readLabsDynamicToolRequest,
   type LabsDynamicToolRequest,
 } from './dynamic-tools/labs.js'
-export { MURPH_LABS_TOOL } from './dynamic-tools/labs.js'
+import {
+  executePendingVaultFilesDynamicTool,
+  readPendingVaultFilesDynamicToolRequest,
+  type PendingVaultFilesDynamicToolRequest,
+} from './dynamic-tools/pending-vault-files.js'
 import {
   executeGroupRoomModelDynamicTool,
-  MURPH_GROUP_ROOM_MODEL_TOOL,
   readGroupRoomModelDynamicToolRequest,
   type GroupRoomModelDynamicToolRequest,
 } from './dynamic-tools/group-room-model.js'
-export {
-  MURPH_GROUP_ROOM_MODEL_TOOL,
-} from './dynamic-tools/group-room-model.js'
 import {
-  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
   readClinicalRecordsConnectLinkDynamicToolRequest,
   type ClinicalRecordsConnectLinkDynamicToolRequest,
 } from './dynamic-tools/clinical-records.js'
-export {
-  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
-} from './dynamic-tools/clinical-records.js'
 import {
   executeConnectedAppsDynamicTool,
-  MURPH_CONNECTED_APPS_EXECUTE_TOOL,
-  MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
-  MURPH_CONNECTED_APPS_MANAGE_TOOL,
-  MURPH_CONNECTED_APPS_SEARCH_TOOL,
   readConnectedAppsDynamicToolRequest,
   type ConnectedAppsDynamicToolRequest,
 } from './dynamic-tools/connected-apps.js'
@@ -234,23 +196,21 @@ import {
 import {
   createPhoneCallRequestKey,
   createScheduledPhoneCallRequestKey,
-  MURPH_CREATE_PHONE_CALL_TOOL,
   normalizePhoneCallBriefForConversationScope,
   readPhoneCallDynamicToolRequest,
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
   createPhysicalNoteRequestKey,
-  MURPH_SEND_PHYSICAL_NOTE_TOOL,
   readPhysicalNoteDynamicToolRequest,
   resolvePhysicalNoteExplicitOriginInputId,
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
-export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
 import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
+  type GenerateSongTurnState,
 } from './dynamic-tools/generate-song.js'
 import {
   executeAskGrokDynamicTool,
@@ -262,1320 +222,35 @@ import type {
   AskGrokToolRuntime,
   AskGrokTurnState,
 } from './ask-grok-tool.js'
-export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
-const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
-  'skill-assets/murph-character-sheet-v1.png'
-const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
-  `Optional ordered JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated image. Describe in the prompt how image 1, image 2, etc. should be used.`
-const GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION =
-  `Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated avatar.`
-
-const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
-  'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
-
-export const MURPH_SEND_PROGRESS_UPDATE_TOOL = {
-  namespace: 'murph',
-  name: 'send_progress_update',
-  description:
-    'Send a brief user-visible update to the current conversation before reply-critical work likely to keep the member waiting, then continue immediately. A successful call means this update was sent. This is not a final answer.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      text: {
-        type: 'string',
-        minLength: 1,
-        description:
-          'One short natural sentence orienting the member to the work and immediate next step; no final conclusions or unverified result claims.',
-      },
-    },
-    required: ['text'],
-  },
-} as const
-
-const MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL = {
-  ...MURPH_SEND_PROGRESS_UPDATE_TOOL,
-  description:
-    'Send at most one brief user-visible progress update to the current group. Call only before a real reply-critical wait, then continue work immediately. Success means the update was sent; do not repeat or use it as a final answer.',
-} as const
-
-export const MURPH_ATTACH_RESPONSE_MEDIA_TOOL = {
-  namespace: 'murph',
-  name: 'attach_response_media',
-  description:
-    'Attach image media to the current final assistant response. Accept intentionally public catalog image URLs or an exact vault_image descriptor returned by a trusted Murph command. Never invent or modify a private descriptor. Replaces the current response media batch for this turn only. It does not send directly.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      media: {
-        type: 'array',
-        maxItems: 40,
-        description:
-          'The complete image batch for the final assistant reply. Passing an empty array clears the current reply media batch.',
-        items: {
-          oneOf: [
-            {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                kind: {
-                  type: 'string',
-                  enum: ['image'],
-                },
-                url: {
-                  type: 'string',
-                  description:
-                    'Deliberately public HTTPS image-file URL for static catalog assets only. Never use this for user-sent, vault-backed, generated, health, or otherwise private media.',
-                },
-                alt: {
-                  anyOf: [
-                    { type: 'string', minLength: 1, maxLength: 500 },
-                    { type: 'null' },
-                  ],
-                },
-                source: {
-                  anyOf: [
-                    { type: 'string', minLength: 1, maxLength: 200 },
-                    { type: 'null' },
-                  ],
-                },
-              },
-              required: ['url'],
-            },
-            {
-              type: 'object',
-              additionalProperties: false,
-              properties: {
-                kind: {
-                  type: 'string',
-                  enum: ['vault_image'],
-                },
-                ref: { type: 'string', minLength: 1, maxLength: 1024 },
-                sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
-                filename: { type: 'string', minLength: 1, maxLength: 255 },
-                contentType: {
-                  type: 'string',
-                  enum: ['image/jpeg', 'image/png', 'image/webp'],
-                },
-                sizeBytes: {
-                  type: 'integer',
-                  minimum: 1,
-                  maximum: assistantVaultImageMaxBytes,
-                },
-                alt: {
-                  anyOf: [
-                    { type: 'string', minLength: 1, maxLength: 500 },
-                    { type: 'null' },
-                  ],
-                },
-                source: {
-                  anyOf: [
-                    { type: 'string', minLength: 1, maxLength: 200 },
-                    { type: 'null' },
-                  ],
-                },
-              },
-              required: [
-                'kind',
-                'ref',
-                'sha256',
-                'filename',
-                'contentType',
-                'sizeBytes',
-              ],
-            },
-          ],
-        },
-      },
-    },
-    required: ['media'],
-  },
-} as const
-
-export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
-  namespace: 'murph',
-  name: 'attach_response_card',
-  description:
-    'Attach one private-direct response card only when the current accepted member message explicitly requests it, during managed meal closeout, or for an unambiguous update to the single active tracked workout whose table was explicitly established earlier. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. V2 adds fiber and nullable goal snapshots. Keep a goal null unless current active canonical goals prove exactly one daily target for that metric and unit; otherwise freeze the exact target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, or for that unambiguous active tracked-workout update; with no active table or multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      card: assistantResponseCardJsonSchema,
-    },
-    required: ['card'],
-  },
-} as const
-
-export const MURPH_GENERATE_IMAGE_TOOL = {
-  namespace: 'murph',
-  name: 'generate_image',
-  description:
-    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted runs start generation in the background and return immediately; when generation finishes, private media is provided in a later trusted system input. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      prompt: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 4000,
-      },
-      size: {
-        type: 'string',
-        enum: ['1024x1024', '1024x1536', '1536x1024'],
-        default: '1024x1024',
-      },
-      quality: {
-        type: 'string',
-        enum: ['low', 'medium', 'high'],
-        default: 'medium',
-      },
-      outputFormat: {
-        type: 'string',
-        enum: ['webp', 'png', 'jpeg'],
-        default: 'webp',
-      },
-      alt: {
-        anyOf: [
-          { type: 'string', minLength: 1, maxLength: 500 },
-          { type: 'null' },
-        ],
-        default: null,
-      },
-      referenceImageRefs: {
-        type: 'array',
-        maxItems: 16,
-        default: [],
-        description: GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
-        items: {
-          type: 'string',
-          minLength: 1,
-          maxLength: 1024,
-        },
-      },
-      message_ref: {
-        type: 'string',
-        pattern: '^ain_[0-9a-f]{32}$',
-        description:
-          'Exact current Message ref authorizing an irreversible continuation that will consume this image, such as mailing a physical note. Omit for ordinary image generation.',
-      },
-    },
-    required: ['prompt'],
-  },
-} as const
-
-export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
-  namespace: 'murph',
-  name: 'submit_product_feedback',
-  description:
-    'Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, a concise product-only summary, and optional related changelog item ids. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      kind: {
-        type: 'string',
-        enum: [...HOSTED_PRODUCT_FEEDBACK_KINDS],
-        description:
-          'Use feature_request for a missing or unsupported Murph path, frustration for a negative product experience without a clear requested capability, and feature_interest for interest in an available or shipped capability. Reserved support escalation always uses frustration.',
-      },
-      summary: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
-        description:
-          'Concise de-identified, product-only summary of the feedback. Make it actionable without the conversation: name the generic actor, exact Murph surface or workflow, requested or attempted action, expected versus observed result, and any concrete product constraint the source established. Preserve those distinctions instead of replacing them with vague labels. If a detail is not established, omit it or mark it unclear rather than infer or invent it. Abstract every private fact to the least-specific product concept that still explains the issue, such as "a health metric", "a connected source", or "a scheduled item"; do not preserve a private fact merely because it was relevant in the conversation. When a path is missing, name the desired outcome and missing Murph capability rather than summarizing the conversation. Start with "Speculative:" only for clear inferred user workflow friction, or "Murph-observed:" only for repeated assistant-observed product/tool friction. Never include names, handles, account or member identifiers, raw user wording, quoted conversation or voice-memo content, diagnoses, symptoms, medications, treatments, lab results, biometrics, exact health/fitness/nutrition values, reproductive details, locations, relationships, contact details, secrets, provider payloads, tags, or topics. For explicit verified-private human support, begin exactly "Support escalation:" and follow it with Murph\'s concise de-identified explanation in its own words; never copy or quote the member\'s message.',
-      },
-      relatedChangelogItemIds: {
-        type: 'array',
-        minItems: 0,
-        maxItems: 7,
-        default: [],
-        description:
-          'Optional metadata for known shipped changelog item ids. Leave empty for general product interest, feature requests, frustrations, inferred workflow friction, or assistant-observed product/tool friction.',
-        items: {
-          type: 'string',
-          maxLength: 120,
-          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
-        },
-      },
-    },
-    required: ['kind', 'summary'],
-  },
-} as const
-
-export const MURPH_FAMILY_PLAN_TOOL = {
-  namespace: 'murph',
-  name: 'family_plan',
-  description:
-    'Read Family status, start checkout, or invite. Allow `read_status` for an explicit Family request or trusted private low-usage Family context. Checkout and invite actions require the current member\'s explicit request. Treat results as exact; never claim activation, invitation, payment, or usage completion.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['read_status', 'start_checkout', 'create_invite'],
-      },
-      invite: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          targetEmail: {
-            anyOf: [
-              { type: 'string', minLength: 3, maxLength: 320 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Email address for an email-bound web invite when the user provided one.',
-          },
-          planCode: {
-            type: 'string',
-            enum: [...HOSTED_PLAN_CODES],
-            description: 'Pulse or Edge tier requested for this Family member. Omit for Pulse.',
-          },
-          targetLabel: {
-            anyOf: [
-              { type: 'string', minLength: 1, maxLength: 80 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Optional natural label such as mom, dad, brother, or a first name.',
-          },
-          targetPhoneNumber: {
-            anyOf: [
-              { type: 'string', minLength: 1, maxLength: 40 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Phone number for a phone-bound invite when the user provided one.',
-          },
-          targetTelegramUsername: {
-            anyOf: [
-              { type: 'string', minLength: 5, maxLength: 32 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Telegram username without @ when the user provided one.',
-          },
-        },
-        description:
-          'Invite target for create_invite. Optional context for start_checkout when the user mentions the person they want to invite; no invite token is created until Family billing is active.',
-      },
-    },
-    required: ['action'],
-  },
-} as const
-
-export const MURPH_PLAN_USAGE_TOOL = {
-  namespace: 'murph',
-  name: 'plan_usage',
-  description:
-    'Read current private hosted plan, AI-usage, recommendation, signed quote for explicit plan, usage, billing or trusted low-usage context. Omit target for recommendation. For exact user-named plan, pass target; use only matching quote. availablePlans is only the trial list. Read-only; percentages and forecasts cover all available usage without credit-source splits.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      targetPlanCode: {
-        type: 'string',
-        enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
-        description:
-          'Optional exact user-named plan to quote instead of the server recommendation.',
-      },
-    },
-  },
-} as const
-
-export const MURPH_IMESSAGE_CONTACT_TOOL = {
-  namespace: 'murph',
-  name: 'imessage_contact',
-  description:
-    'Get or atomically assign the current member\'s Murph iMessage number. Call only for their explicit current request; repeated requests return the same number.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {},
-  },
-} as const
-
-export const MURPH_SUBSCRIPTION_TOOL = {
-  namespace: 'murph',
-  name: 'subscription',
-  description:
-    'Apply one signed private plan change explicitly confirmed by the current user in this turn. Use only action=change_plan with exact targetPlanCode and quoteId from a current matching plan_usage quote. Exact replay of the same input and action is idempotent; a different target requires new eligible user input. A scheduled result includes authoritative effectiveAt; keep current and future plans distinct. Only payment_required includes paymentUrl; other results do not prove a payment method.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['change_plan'],
-      },
-      targetPlanCode: {
-        type: 'string',
-        enum: [...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES],
-      },
-      quoteId: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 1024,
-      },
-    },
-    required: ['action', 'targetPlanCode', 'quoteId'],
-  },
-} as const
-
-export const MURPH_PERSONALIZATION_TOOL = {
-  namespace: 'murph',
-  name: 'personalization',
-  description:
-    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
-  inputSchema: {
-    oneOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['read'],
-          },
-        },
-        required: ['action'],
-      },
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['update'],
-          },
-          tone: {
-            type: 'string',
-            enum: assistantTonePreferenceValues,
-          },
-          voice: {
-            type: 'string',
-            enum: assistantVoiceOptionIdValues,
-            description: assistantVoiceOptions
-              .map((option) => `${option.label}=${option.id}`)
-              .join(', '),
-          },
-        },
-        required: ['action'],
-        anyOf: [
-          { required: ['tone'] },
-          { required: ['voice'] },
-        ],
-      },
-    ],
-  },
-} as const
-
-export const MURPH_ASSISTANT_CONFIGURATION_TOOL = {
-  namespace: 'murph',
-  name: 'assistant_configuration',
-  description:
-    'Read the current hosted turn model, provider, and reasoning effort plus the choices available for the next turn, or directly save an explicit user-requested change. OpenAI and Venice are the supported core-reply providers when listed as available; specialized tools may still use their own managed providers. Internally, Luna is the most usage-efficient model, Terra is the default, and Sol requires an active paid Edge plan. Do not assume the member knows model names or introduce them unless the member asks; otherwise describe the usage-saving option as “a less capable model that uses less AI usage.” The lowest supported reasoning effort is low; these hosted models do not support none. Use action="read" whenever configuration facts are needed. Use action="update" only when the current user-sourced turn explicitly asks for the exact change. Never switch models, providers, or reasoning automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['read', 'update'],
-      },
-      model: {
-        type: 'string',
-        enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-        description: 'Optional next-turn model for action="update".',
-      },
-      provider: {
-        type: 'string',
-        enum: [...HOSTED_ASSISTANT_PROVIDERS],
-        description: 'Optional next-turn core-reply provider for action="update".',
-      },
-      reasoningEffort: {
-        type: 'string',
-        enum: [...HOSTED_ASSISTANT_REASONING_EFFORTS],
-        description: 'Optional next-turn reasoning effort for action="update".',
-      },
-    },
-    required: ['action'],
-  },
-} as const
-
-export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
-  namespace: 'murph',
-  name: 'assistant_configuration',
-  description:
-    'Read the current group room model and the choices available for the next turn, or save an explicit current-room request to change it. This changes only the synthetic Murph instance for this room; it never reads or changes any participant\'s private model, provider, reasoning, account, or billing settings. Group rooms default to Sol, and Luna, Terra, or Sol may be selected for the room. Use action="read" whenever model facts are needed. Use action="update" only when the current user-sourced group turn explicitly asks for the exact model. Never switch models automatically because usage is low. Do not claim a change is saved unless the result says updated or unchanged. A saved update does not change the running turn and takes effect on the next turn.',
-  inputSchema: {
-    oneOf: [
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['read'],
-          },
-        },
-        required: ['action'],
-      },
-      {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['update'],
-          },
-          model: {
-            type: 'string',
-            enum: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
-            description: 'Required next-turn group room model.',
-          },
-        },
-        required: ['action', 'model'],
-      },
-    ],
-  },
-} as const
-
-const GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['projectionKind'],
-  properties: {
-    projectionKind: {
-      type: 'string',
-      enum: [...HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_KINDS],
-    },
-  },
-} as const
-
-const GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['projectionKind', 'selector'],
-  properties: {
-    projectionKind: {
-      type: 'string',
-      enum: [HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_KIND],
-    },
-    selector: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['activityKind'],
-      properties: {
-        activityKind: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_MINUTES_SELECTOR_ACTIVITY_KINDS],
-        },
-      },
-      description:
-        'Required for activity-minutes-days.v1.',
-    },
-  },
-} as const
-
-const GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['projectionKind', 'selector'],
-  properties: {
-    projectionKind: {
-      type: 'string',
-      enum: [HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_KIND],
-    },
-    selector: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['activityKind'],
-      properties: {
-        activityKind: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_DISTANCE_SELECTOR_ACTIVITY_KINDS],
-        },
-      },
-      description:
-        'Required for activity-distance-days.v1.',
-    },
-  },
-} as const
-
-const GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['projectionKind', 'selector'],
-  properties: {
-    projectionKind: {
-      type: 'string',
-      enum: [HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_KIND],
-    },
-    selector: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['activityKind'],
-      properties: {
-        activityKind: {
-          type: 'string',
-          enum: [...HOSTED_VAULT_SHARE_ACTIVITY_SESSION_COUNT_SELECTOR_ACTIVITY_KINDS],
-        },
-      },
-      description:
-        'Required for activity-session-count-days.v1.',
-    },
-  },
-} as const
-
-const GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA = {
-  oneOf: [
-    GROUP_VAULT_SHARE_FIXED_PROJECTION_SCOPE_SCHEMA,
-    GROUP_VAULT_SHARE_ACTIVITY_MINUTES_PROJECTION_SCOPE_SCHEMA,
-    GROUP_VAULT_SHARE_ACTIVITY_DISTANCE_PROJECTION_SCOPE_SCHEMA,
-    GROUP_VAULT_SHARE_ACTIVITY_SESSION_COUNT_PROJECTION_SCOPE_SCHEMA,
-  ],
-} as const
-
-/**
- * Detached group consultation gets only the lazy shared-data read surface. It
- * intentionally reuses murph.group so the normal parser/executor stays the
- * single implementation while the model never sees mutation or routing actions.
- */
-export const MURPH_GROUP_SHARED_READ_TOOL = {
-  namespace: 'murph',
-  name: 'group',
-  description:
-    'Read one to three exact consent-aware projections for the current authorized group. The trusted host binds member, group, and route; supply no identifiers. status="partial" means omittedParticipantIds are still current members with omitted rows, so the result is incomplete and cannot prove departure, score, diagnosis, or permission state.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['read_shared'],
-      },
-      projectionScopes: {
-        type: 'array',
-        minItems: 1,
-        maxItems: ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
-        uniqueItems: true,
-        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
-      },
-    },
-    required: ['action', 'projectionScopes'],
-  },
-} as const
-
-/**
- * Scheduled group turns can read shared facts and offer group access without
- * exposing the provider-specific native-message versus link decision.
- */
-export const MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL = {
-  namespace: 'murph',
-  name: 'group',
-  description:
-    'Read consent-aware shared projections or offer access in the current authorized scheduled group turn. The trusted host binds group and route and uses only the first-party link path; unavailable proves no consent surface. Supply exact projectionScopes. Existing membership and other grants stay unchanged. A partial read is incomplete.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['read_shared', 'offer_access'],
-      },
-      projectionScopes: {
-        type: 'array',
-        minItems: 1,
-        maxItems: ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
-        uniqueItems: true,
-        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
-      },
-    },
-    required: ['action', 'projectionScopes'],
-  },
-} as const
-
-const ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN = '^ain_[0-9a-f]{32}$'
-const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
-  type: 'string',
-  pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
-  description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. This is not a provider message id.',
-} as const
-
-export const MURPH_GROUP_TOOL = {
-  namespace: 'murph',
-  name: 'group',
-  deferLoading: true,
-  description:
-    'Use in authorized direct, group, or scheduled context. The trusted host binds member, group, route, input, and occurrence. Next-group setup needs fresh private input. offer_access returns native or one group-access link; standaloneLink needs an explicit link request. Self actions and referral reads need exact message_ref; use exact server-issued membershipId or grantId. read_shared status="partial" is incomplete; ask is asynchronous. Scheduled ask_member must replay exactly; changed questions conflict. update_display_name or set_chat_avatar ok means provider acceptance. group=null proves neither absence nor label storage. Participant displayName and untrusted read_chat_name text prove no identity, consent, routing, persistence, or authority. Results authorize no other action.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: [
-          'ask',
-          'ask_current_sender',
-          'ask_member',
-          'post_disclosure_request',
-          'revoke_disclosure_grant',
-          'read_shared',
-          'read_current',
-          'prepare_next_group',
-          'read_next_group',
-          'cancel_next_group',
-          'read_chat_name',
-          'read_usage',
-          'read_usage_referral',
-          'arm_usage_referral',
-          'cancel_usage_referral',
-          'create_signup_referral_link',
-          'list_memberships',
-          'leave_membership',
-          'update_display_name',
-          'offer_access',
-          'read_chat_participants',
-          'set_chat_avatar',
-          'share_contact_card',
-          'revoke_own_email_share',
-        ],
-      },
-      setup: {
-        type: 'object',
-        additionalProperties: false,
-        description:
-          'Optional only for action="prepare_next_group". Include only style or room context the member explicitly requested for the next group in this private turn. Omit it for ownership-only preparation. Never copy private memory, health facts, contact handles, or personal settings implicitly.',
-        properties: {
-          roomContextMarkdown: {
-            type: 'string',
-            minLength: 1,
-            maxLength:
-              HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
-            description:
-              'Optional compact Markdown containing only social context the member explicitly asked Murph to use in the next group. Keep it within the 2 KiB UTF-8 envelope. It becomes advisory group-visible behavior, not identity or authority, and must not contain raw phone, email, Sender, Telegram, or participant handles.',
-          },
-          style: {
-            type: 'object',
-            additionalProperties: false,
-            minProperties: 1,
-            description:
-              'Optional sparse explicit style for the next group. Omitted fields retain product defaults; this never copies the member’s private settings.',
-            properties: {
-              persona: {
-                type: 'string',
-                enum: assistantPersonaIdValues,
-              },
-              personality: {
-                type: 'object',
-                additionalProperties: false,
-                minProperties: 1,
-                properties: {
-                  detail: {
-                    anyOf: [
-                      { type: 'integer', minimum: 0, maximum: 10 },
-                      { type: 'null' },
-                    ],
-                  },
-                  humor: {
-                    anyOf: [
-                      { type: 'integer', minimum: 0, maximum: 10 },
-                      { type: 'null' },
-                    ],
-                  },
-                  push: {
-                    anyOf: [
-                      { type: 'integer', minimum: 0, maximum: 10 },
-                      { type: 'null' },
-                    ],
-                  },
-                  unhinged: {
-                    anyOf: [
-                      { type: 'integer', minimum: 0, maximum: 10 },
-                      { type: 'null' },
-                    ],
-                  },
-                },
-              },
-              tone: {
-                type: 'string',
-                enum: assistantTonePreferenceValues,
-              },
-              voice: {
-                type: 'string',
-                enum: assistantVoiceOptionIdValues,
-              },
-            },
-          },
-        },
-      },
-      question: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
-        description:
-          'Required only for action="ask" or action="ask_member". Ask one self-contained natural-language question. ask may use a joined group\'s read-only context; ask_member produces a proposed answer whose outgoing information is checked against the selected disclosure grant before sharing.',
-      },
-      permissionText: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
-        description:
-          'Required only for action="post_disclosure_request". The exact concise natural-language description of the type of information a member may allow their private Murph to read and disclose to this group. The server shows this text in the consent request and reviews only each proposed outgoing answer against it before sharing.',
-      },
-      grantId: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
-        description:
-          'Required for action="ask_member" or action="revoke_disclosure_grant". For ask_member, use the exact server-issued grantId from read_current. For revoke_disclosure_grant, use the exact grantId from the immediately preceding list_memberships result. Never guess it or take it from the user.',
-      },
-      policyCode: {
-        type: 'string',
-        enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
-        description:
-          'Required only for action="cancel_usage_referral". Cancel only one exact mission with state="armed" from activeMissions.',
-      },
-      policyCodes: {
-        type: 'array',
-        items: {
-          type: 'string',
-          enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
-        },
-        minItems: 1,
-        maxItems: HOSTED_USAGE_REFERRAL_POLICY_CODES.length,
-        uniqueItems: true,
-        description:
-          'Required only for action="arm_usage_referral". Send one exact set containing only available policies the current sender explicitly selected.',
-      },
-      groupLabel: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-        description:
-          'Optional only for action="ask". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
-      },
-      displayName: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-        description:
-          'Group display name. Required for action="update_display_name"; optional for action="offer_access" only when it is the name the group chose or the exact name from the immediately preceding read_chat_name result.',
-      },
-      membershipId: {
-        type: 'string',
-        minLength: 1,
-        description:
-          'Required only for action="leave_membership". Use the exact opaque membershipId from the immediately preceding list_memberships result; never guess it or take it from the user.',
-      },
-      avatarSource: {
-        type: 'string',
-        enum: ['generate', 'image_ref'],
-        description:
-          'Required for action="set_chat_avatar". Generate a new square avatar or reuse a user-sent private image ref.',
-      },
-      prompt: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 4000,
-        description:
-          'Required for action="set_chat_avatar" with avatarSource="generate". Prompt for one square group chat avatar.',
-      },
-      imageRef: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 1024,
-        description:
-          'Required for action="set_chat_avatar" with avatarSource="image_ref". A user-sent JPG, PNG, or WebP ref under raw/inbox/** or raw/captures/**.',
-      },
-      size: {
-        type: 'string',
-        enum: ['1024x1024'],
-        default: '1024x1024',
-      },
-      quality: {
-        type: 'string',
-        enum: ['low', 'medium', 'high'],
-        default: 'medium',
-      },
-      outputFormat: {
-        type: 'string',
-        enum: ['webp', 'png', 'jpeg'],
-        default: 'webp',
-      },
-      alt: {
-        anyOf: [
-          { type: 'string', minLength: 1, maxLength: 500 },
-          { type: 'null' },
-        ],
-        default: null,
-      },
-      referenceImageRefs: {
-        type: 'array',
-        maxItems: 16,
-        default: [],
-        description: GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION,
-        items: {
-          type: 'string',
-          minLength: 1,
-          maxLength: 1024,
-        },
-      },
-
-      projectionScopes: {
-        type: 'array',
-        maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
-        items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
-        description:
-          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
-      },
-      standaloneLink: {
-        type: 'boolean',
-        description:
-          'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
-      },
-      message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-    },
-    required: ['action'],
-  },
-} as const
-
-export const MURPH_NEWSLETTER_TOOL = {
-  namespace: 'murph',
-  name: 'newsletter',
-  description:
-    'Prepare or send the scheduled group health newsletter. `prepare` returns recipient eligibility, the occurrence reference, and shared facts from the seven completed local days before the run, filtered to exact live email and health-share grants; compose only from its members. Each turn allows one prepare attempt and at most one send attempt. `send` durably queues recipient-scoped delivery and may return `accepted` while that outbox work is pending; stop after that result and do not claim provider completion. Start the subject with the exact name in the current scheduled automation instructions, never a generic label. Send the first edition only after the setup notice and opt-out window. This tool sends one shared email thread, never exposes addresses or grant metadata, and does not manage the automation.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['prepare', 'send'],
-      },
-      subject: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-      },
-      html: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-      },
-      text: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
-          },
-          { type: 'null' },
-        ],
-        default: null,
-      },
-    },
-    required: ['action'],
-  },
-} as const
-
-export const MURPH_SEND_VAULT_FILE_TOOL = {
-  namespace: 'murph',
-  name: 'send_vault_file',
-  description:
-    `Securely prepare one file for the current iMessage conversation. Use a normalized vault-relative file path. Only after this turn establishes an obligation to send a newly generated file now, write its final bytes directly to ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> and use that ref. Do not stage files for possible later delivery, and never move or copy existing, user-owned, canonical, or durable files there. When approval is pending, explain that approval is required; the runtime adds the exact link outside model context. When approval is approved, the runtime owns delivery of the existing attachment intent; call finish_without_reply and do not attach the file or send a companion acknowledgment. Do not claim final iMessage delivery unless later delivery evidence confirms it. It does not reveal file bytes to the model and does not support arbitrary recipients.`,
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      ref: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 1024,
-        description:
-          `Normalized vault-relative path, for example documents/report.pdf. The exact flat ${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/<flat-filename> runtime ref is also accepted; all other hidden paths, traversal, absolute paths, and unsupported file types are rejected.`,
-      },
-    },
-    required: ['ref'],
-  },
-} as const
-
-export const MURPH_FINISH_WITHOUT_REPLY_TOOL = {
-  namespace: 'murph',
-  name: 'finish_without_reply',
-  description:
-    'Finish the current response without adding a new text reply. This does not withdraw a reply you already completed earlier in the turn.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {},
-  },
-} as const
-
-export const MURPH_SELECT_REPLY_TARGET_TOOL = {
-  namespace: 'murph',
-  name: 'select_reply_target',
-  description:
-    'Select one accepted inbound message as the native reply target for the current normal response. Use this only when anchoring the response to a specific message improves clarity; ordinary responses stay flat. This does not send text and does not finish the turn.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-    },
-    required: ['message_ref'],
-  },
-} as const
-
-export const MURPH_REACT_TO_MESSAGE_TOOL = {
-  namespace: 'murph',
-  name: 'react_to_message',
-  description:
-    'React to one accepted inbound message identified by its Message ref when the active channel supports reactions. This does not send text and does not finish the turn.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-      reaction: {
-        type: 'string',
-        enum: ['heart', 'thumbs_up', 'laugh'],
-      },
-    },
-    required: ['message_ref', 'reaction'],
-  },
-} as const
-
-export const MURPH_COMPUTER_OPEN_TOOL = {
-  namespace: 'murph',
-  name: 'computer_open',
-  description:
-    'Open/reuse authorized browser; reopen after handoff/uncertainty. Returns runId, URL, title, text; prior outcome stays unknown. Before multi-step browsing each turn, call send_progress_update if available; prior-turn progress does not count.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      startUrl: {
-        anyOf: [{ type: 'string' }, { type: 'null' }],
-        default: null,
-      },
-    },
-  },
-} as const
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
-type JsonSchemaObject = Record<string, unknown>
-
-const MURPH_COMPUTER_ACT_INPUT_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    runId: { type: 'string', minLength: 1 },
-    code: {
-      type: 'string',
-      minLength: 1,
-      maxLength: HOSTED_COMPUTER_ACT_CODE_MAX_LENGTH,
-      description:
-        'One complete Playwright macro-step using the in-scope page, context, and browser objects. Return only compact JSON-serializable state needed for the next decision.',
-    },
-    timeoutMs: {
-      type: 'integer',
-      minimum: 1000,
-      maximum: HOSTED_COMPUTER_ACT_TIMEOUT_MAX_MS,
-      default: 15000,
-    },
-  },
-  required: ['runId', 'code'],
-} as const
-
-const MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA = buildComputerOsControlInputSchema()
-
-function buildComputerOsControlInputSchema(): JsonSchemaObject {
-  const generated = z.toJSONSchema(hostedComputerOsControlRequestSchema, { io: 'input' }) as JsonSchemaObject
-  const actionSchemas = Array.isArray(generated.oneOf) ? generated.oneOf : []
-
-  return {
-    oneOf: actionSchemas.map(addRunIdToActionSchema),
-    type: 'object',
-  }
-}
-
-function addRunIdToActionSchema(schema: unknown): JsonSchemaObject {
-  const record = asRecord(schema) ?? {}
-  const properties = asRecord(record.properties) ?? {}
-  const required = Array.isArray(record.required)
-    ? record.required.filter((item): item is string => typeof item === 'string')
-    : []
-
-  return {
-    ...record,
-    properties: {
-      runId: { type: 'string', minLength: 1 },
-      ...properties,
-    },
-    required: ['runId', ...required],
-  }
-}
-
-export const MURPH_COMPUTER_ACT_TOOL = {
-  namespace: 'murph',
-  name: 'computer_act',
-  description:
-    'One bounded Playwright macro-step in current authorized run; returns state. No missing or sensitive input or final confirmation. Before browser call two this turn, call send_progress_update if available and not yet sent. Failure leaves outcome uncertain; call computer_open before retry/next action.',
-  inputSchema: MURPH_COMPUTER_ACT_INPUT_SCHEMA,
-} as const
-
-export const MURPH_COMPUTER_OS_CONTROL_TOOL = {
-  namespace: 'murph',
-  name: 'computer_os_control',
-  description:
-    'Fallback: perform one bounded mouse or keyboard action in the current authorized run only when Playwright cannot operate the verified control. Never enter sensitive data. After a possible effect or failure, the outcome may be unknown; call computer_open before any retry or next action.',
-  inputSchema: MURPH_COMPUTER_OS_CONTROL_INPUT_SCHEMA,
-} as const
-
-export const MURPH_COMPUTER_PAUSE_FOR_USER_TOOL = {
-  namespace: 'murph',
-  name: 'computer_pause_for_user',
-  description:
-    'Pause the current authorized run, persist a checkpoint, and optionally return a secure handoffUrl. Call only when missing user input, takeover, inspection, or final confirmation is required. This does not message the user, and a returned URL does not prove handoff completion.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      handoffPurpose: {
-        anyOf: [
-          {
-            type: 'string',
-            enum: [
-              'managed_login',
-              'login',
-              'payment',
-              'card',
-              'captcha',
-              'manual_browser_help',
-            ],
-          },
-          { type: 'null' },
-        ],
-        default: null,
-      },
-      reason: {
-        type: 'string',
-        enum: ['login_needed', 'payment_needed', 'final_confirmation', 'stuck', 'other'],
-      },
-      runId: { type: 'string', minLength: 1 },
-      suggestedReply: {
-        anyOf: [{ type: 'string', minLength: 1, maxLength: 200 }, { type: 'null' }],
-        default: null,
-      },
-    },
-    required: ['runId', 'reason'],
-  },
-} as const
-
-export const MURPH_COMPUTER_FINISH_RUN_TOOL = {
-  namespace: 'murph',
-  name: 'computer_finish_run',
-  description:
-    'Finish the current authorized computer run with the stated outcome and close its browser. On success, do not reuse the runId.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      outcome: { type: 'string', enum: ['completed', 'failed', 'canceled'] },
-      runId: { type: 'string', minLength: 1 },
-    },
-    required: ['runId', 'outcome'],
-  },
-} as const
-
-const MURPH_BASE_DYNAMIC_TOOLS = [
-  MURPH_SEND_PROGRESS_UPDATE_TOOL,
-  MURPH_AUTOMATION_TOOL,
-  MURPH_DEVICE_TOOL,
-  MURPH_ASSISTANT_STYLE_TOOL,
-  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
-  MURPH_ATTACH_RESPONSE_CARD_TOOL,
-  MURPH_GENERATE_IMAGE_TOOL,
-  MURPH_GENERATE_VOICE_MEMO_TOOL,
+export * from './dynamic-tool-catalog.js'
+import {
+  asRecord,
+  ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
+  GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
+  HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
-  MURPH_PERSONALIZATION_TOOL,
-  MURPH_FAMILY_PLAN_TOOL,
-  MURPH_PLAN_USAGE_TOOL,
-  MURPH_IMESSAGE_CONTACT_TOOL,
-  MURPH_SUBSCRIPTION_TOOL,
-  MURPH_GROUP_TOOL,
-  MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_NEWSLETTER_TOOL,
-  MURPH_GENERATE_SONG_TOOL,
-  MURPH_ASK_GROK_TOOL,
-  MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
-  MURPH_SEND_VAULT_FILE_TOOL,
-  MURPH_FINISH_WITHOUT_REPLY_TOOL,
-  MURPH_SELECT_REPLY_TARGET_TOOL,
-  MURPH_REACT_TO_MESSAGE_TOOL,
-  MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
-  MURPH_CREATE_PHONE_CALL_TOOL,
-  MURPH_SEND_PHYSICAL_NOTE_TOOL,
-  MURPH_LABS_TOOL,
-] as const
-
-const MURPH_COMPUTER_DYNAMIC_TOOLS = [
-  MURPH_COMPUTER_OPEN_TOOL,
+  MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_ACT_TOOL,
+  MURPH_COMPUTER_FINISH_RUN_TOOL,
+  MURPH_COMPUTER_OPEN_TOOL,
   MURPH_COMPUTER_OS_CONTROL_TOOL,
   MURPH_COMPUTER_PAUSE_FOR_USER_TOOL,
-  MURPH_COMPUTER_FINISH_RUN_TOOL,
-] as const
-
-export const MURPH_DYNAMIC_TOOLS = [
-  ...MURPH_BASE_DYNAMIC_TOOLS,
-  ...MURPH_COMPUTER_DYNAMIC_TOOLS,
-  ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
-] as const
-
-export type MurphDynamicTool =
-  | (typeof MURPH_DYNAMIC_TOOLS)[number]
-  | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
-  | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
-  | typeof MURPH_GROUP_SHARED_READ_TOOL
-  | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
-
-export interface MurphDynamicToolAvailability {
-  assistantStyleSettingsAvailable?: boolean | null
-  assistantConfigurationAvailable?: boolean | null
-  allowFinishWithoutReply?: boolean | null
-  automationAvailable?: boolean | null
-  computerToolsAvailable?: boolean | null
-  progressUpdatesAvailable?: boolean | null
-  connectedAppsAvailable?: boolean | null
-  connectedAppsManageAvailable?: boolean | null
-  deviceAvailable?: boolean | null
-  clinicalRecordsConnectLinkAvailable?: boolean | null
-  familyPlanAvailable?: boolean | null
-  labsAvailable?: boolean | null
-  planUsageAvailable?: boolean | null
-  imessageContactAvailable?: boolean | null
-  subscriptionAvailable?: boolean | null
-  groupAvailable?: boolean | null
-  groupAssistantConfigurationAvailable?: boolean | null
-  groupRoomModelAvailable?: boolean | null
-  groupPermissionOfferAvailable?: boolean | null
-  groupSharedReadAvailable?: boolean | null
-  newsletterAvailable?: boolean | null
-  messageTargetingAvailable?: boolean | null
-  personalizationAvailable?: boolean | null
-  productFeedbackAvailable?: boolean | null
-  responseCardsAvailable?: boolean | null
-  progressUpdateMode?: 'direct' | 'group'
-  physicalNotesAvailable?: boolean | null
-  phoneCallsAvailable?: boolean | null
-  voiceMemoGenerationAvailable?: boolean | null
-  vaultFileSendAvailable?: boolean | null
-  askGrokAvailable?: boolean | null
-}
-
-type AvailabilityPredicate = (
-  availability: MurphDynamicToolAvailability,
-) => boolean
-
-const ALWAYS_AVAILABLE: AvailabilityPredicate = () => true
-
-// Two default semantics, kept explicit so each tool's gate is obvious:
-//   defaultOn  → the tool is available unless the caller passes `false`.
-//   defaultOff → the tool is available only if the caller passes `true`.
-const defaultOn = (
-  read: (a: MurphDynamicToolAvailability) => boolean | null | undefined,
-): AvailabilityPredicate => (a) => read(a) !== false
-const defaultOff = (
-  read: (a: MurphDynamicToolAvailability) => boolean | null | undefined,
-): AvailabilityPredicate => (a) => read(a) === true
-
-const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
-  new Map<MurphDynamicTool, AvailabilityPredicate>([
-    [MURPH_SEND_PROGRESS_UPDATE_TOOL, defaultOn((a) => a.progressUpdatesAvailable)],
-    [MURPH_AUTOMATION_TOOL, defaultOff((a) => a.automationAvailable)],
-    [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
-    [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
-    [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
-    [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
-    [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
-    [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
-    [MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL, defaultOff((a) => a.productFeedbackAvailable)],
-    [MURPH_ASSISTANT_CONFIGURATION_TOOL, defaultOff((a) => a.assistantConfigurationAvailable)],
-    [MURPH_FAMILY_PLAN_TOOL, defaultOff((a) => a.familyPlanAvailable)],
-    [MURPH_LABS_TOOL, defaultOff((a) => a.labsAvailable)],
-    [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
-    [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
-    [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
-    [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
-    [MURPH_GROUP_ROOM_MODEL_TOOL, defaultOff((a) => a.groupRoomModelAvailable)],
-    [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
-    [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
-    [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
-    [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
-    [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
-    [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
-    [MURPH_CREATE_PHONE_CALL_TOOL, defaultOff((a) => a.phoneCallsAvailable)],
-    [MURPH_SEND_PHYSICAL_NOTE_TOOL, defaultOff((a) => a.physicalNotesAvailable)],
-    ...MURPH_COMPUTER_DYNAMIC_TOOLS.map(
-      (tool) =>
-        [tool, defaultOff((a) => a.computerToolsAvailable)] as const,
-    ),
-    [MURPH_CONNECTED_APPS_MANAGE_TOOL, defaultOff((a) =>
-      a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
-    [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
-    [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
-    [MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL, defaultOff((a) =>
-      a.clinicalRecordsConnectLinkAvailable)],
-  ])
-
-export function resolveMurphDynamicTools(
-  availability: MurphDynamicToolAvailability,
-): readonly MurphDynamicTool[] {
-  const tools: MurphDynamicTool[] = MURPH_DYNAMIC_TOOLS.filter((tool) =>
-    (TOOL_AVAILABILITY.get(tool) ?? ALWAYS_AVAILABLE)(availability),
-  )
-  if (availability.progressUpdateMode === 'group') {
-    const progressToolIndex = tools.indexOf(MURPH_SEND_PROGRESS_UPDATE_TOOL)
-    if (progressToolIndex >= 0) {
-      tools[progressToolIndex] = MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL
-    }
-  }
-  if (
-    availability.assistantConfigurationAvailable !== true &&
-    availability.groupAssistantConfigurationAvailable === true
-  ) {
-    tools.push(MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL)
-  }
-  if (
-    availability.groupAvailable !== true &&
-    availability.groupSharedReadAvailable === true
-  ) {
-    tools.push(
-      availability.groupPermissionOfferAvailable === true
-        ? MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
-        : MURPH_GROUP_SHARED_READ_TOOL,
-    )
-  }
-  return tools
-}
-
-export function listMurphDynamicToolNames(): string[] {
-  return MURPH_DYNAMIC_TOOLS.map((tool) => `${tool.namespace}.${tool.name}`)
-}
-
+  MURPH_FAMILY_PLAN_TOOL,
+  MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GROUP_TOOL,
+  MURPH_IMESSAGE_CONTACT_TOOL,
+  MURPH_NEWSLETTER_TOOL,
+  MURPH_PERSONALIZATION_TOOL,
+  MURPH_PLAN_USAGE_TOOL,
+  MURPH_REACT_TO_MESSAGE_TOOL,
+  MURPH_SELECT_REPLY_TARGET_TOOL,
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
+  MURPH_SEND_VAULT_FILE_TOOL,
+  MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
+  MURPH_SUBSCRIPTION_TOOL,
+} from './dynamic-tool-catalog.js'
 const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
 const attachResponseCardArgumentsSchema = z
@@ -1856,6 +531,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('share_contact_card'),
+      avatarPrompt: z.string().trim().min(1).max(4000).optional(),
     })
     .strict(),
   z
@@ -1915,8 +591,22 @@ const newsletterArgumentsSchema = z.discriminatedUnion('action', [
 const sendVaultFileArgumentsSchema = z
   .object({
     ref: z.string().trim().min(1).max(1024),
+    retire_export_pack_ids: z
+      .array(z.string().trim().regex(/^[A-Za-z0-9_-]+$/u))
+      .min(1)
+      .max(20)
+      .optional(),
   })
   .strict()
+  .refine(
+    (value) => !value.retire_export_pack_ids
+      || new Set(value.retire_export_pack_ids).size
+        === value.retire_export_pack_ids.length,
+    {
+      message: 'retire_export_pack_ids must contain unique pack ids',
+      path: ['retire_export_pack_ids'],
+    },
+  )
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 const planUsageArgumentsSchema = z
@@ -1969,18 +659,11 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
-      invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
-        targetEmail: z.string().trim().email().max(320).nullable().default(null),
-        targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
-        targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
-        targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
-      }).strict().nullable().default(null),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
+        planCode: z.enum(HOSTED_FAMILY_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -1989,11 +672,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
   ])
   .superRefine((value, context) => {
-    const invite = value.action === 'create_invite'
-      ? value.invite
-      : value.action === 'start_checkout'
-        ? value.invite
-        : null
+    const invite = value.action === 'create_invite' ? value.invite : null
     if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername && !invite.targetEmail) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -2303,12 +982,20 @@ type MurphGroupToolRequest =
             imageRef: string
           }
     }
+  | {
+      action: 'share_contact_card'
+      avatar: {
+        source: 'generate'
+        args: GenerateImageToolArgs
+      }
+    }
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
+  | PendingVaultFilesDynamicToolRequest
   | GroupRoomModelDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
@@ -2363,6 +1050,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'send-vault-file'
       ref: string
+      retireExportPackIds?: string[]
       toolCallId?: string
     }
   | {
@@ -2456,6 +1144,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'personalization'
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
+      toolCallId?: string
     }
   | {
       kind: 'plan-usage'
@@ -2551,6 +1240,14 @@ export function readMurphDynamicToolRequest(
     return labsRequest
   }
 
+  const pendingVaultFilesRequest = readPendingVaultFilesDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (pendingVaultFilesRequest) {
+    return pendingVaultFilesRequest
+  }
+
   const groupRoomModelRequest = readGroupRoomModelDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
@@ -2570,6 +1267,7 @@ export function readMurphDynamicToolRequest(
   const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
+    toolCallId: request.toolCallId,
   })
   if (assistantStyleRequest) {
     return assistantStyleRequest
@@ -2712,6 +1410,9 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'send-vault-file',
         ref: parsed.ref,
+        ...(parsed.retireExportPackIds
+          ? { retireExportPackIds: parsed.retireExportPackIds }
+          : {}),
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
@@ -2790,6 +1491,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'personalization',
         request: parsed.request,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -2998,13 +1700,13 @@ function currentHostedMailboxItemId(
 
 function buildGeneratedImageCaptureIdempotencyKey(
   input: {
-    scope: 'generate-image' | 'group-avatar'
-    toolCallId: string | null
+    requestId: string | null
+    scope: 'contact-card-avatar' | 'generate-image' | 'group-avatar'
   },
 ): string | null {
-  const toolCallId = normalizeNullableString(input.toolCallId)
-  return toolCallId
-    ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
+  const requestId = normalizeNullableString(input.requestId)
+  return requestId
+    ? `murph.dynamic-tool.${input.scope}:${requestId}`
     : null
 }
 
@@ -3032,6 +1734,7 @@ export async function executeMurphDynamicToolRequest(input: {
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   deliveryContextOrdinal?: number | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   progressDelivery: AssistantProgressDelivery | null
@@ -3042,6 +1745,7 @@ export async function executeMurphDynamicToolRequest(input: {
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
+  generateSongTurnState?: GenerateSongTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -3060,6 +1764,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
       return toolTextResult(false, 'invalid labs arguments')
+    case 'invalid-pending-vault-files-arguments':
+      return toolTextResult(false, 'invalid pending vault-file arguments')
     case 'invalid-group-room-model-arguments':
       return toolTextResult(false, 'invalid group room-model arguments')
     case 'invalid-connected-apps-arguments':
@@ -3194,6 +1900,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executeAutomationDynamicTool({
         abortSignal: input.abortSignal ?? null,
         automationTool,
+        onboardingFirstReadCompletionTransitionAvailable:
+          input.onboardingFirstReadCompletionTransitionAvailable ?? false,
         request: input.request,
       })
     }
@@ -3235,11 +1943,20 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'pending-vault-files-list':
+    case 'pending-vault-files-cancel':
+      return await executePendingVaultFilesDynamicTool({
+        request: input.request,
+        userActionScope:
+          input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot?.trim() || null,
+      })
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
-        assistantInputId:
-          hostedToolContext?.currentAssistantInputId?.() ?? null,
+        authority: resolveHostedAssistantPersonalizationToolAuthority(
+          hostedToolContext,
+        ),
         available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
@@ -3281,12 +1998,18 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       try {
-        const result = input.request.toolCallId === undefined
-          ? await sendVaultFile(input.request.ref)
-          : await sendVaultFile(
+        const result = input.request.retireExportPackIds
+          ? await sendVaultFile(
               input.request.ref,
               input.request.toolCallId,
+              input.request.retireExportPackIds,
             )
+          : input.request.toolCallId === undefined
+            ? await sendVaultFile(input.request.ref)
+            : await sendVaultFile(
+                input.request.ref,
+                input.request.toolCallId,
+              )
         switch (result.status) {
           case 'pending':
             return {
@@ -3592,34 +2315,33 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope,
         })
-        const groupRequester = conversationScope === 'group'
+        const groupMessageRef = conversationScope === 'group'
+          ? input.request.messageRef
+          : null
+        if (
+          conversationScope === 'group'
+          && (
+            !groupMessageRef
+            || groupMessageRef !== userActionScope?.acceptedInputIds.at(-1)
+          )
+        ) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
+        }
+        const groupRequester = conversationScope === 'group' && groupMessageRef
           ? await authorizeDynamicToolParticipant({
               authorizer: input.authorizeAcceptedMessageTarget ?? null,
               deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
-              messageRef: input.request.messageRef ?? '',
+              messageRef: groupMessageRef,
             })
           : null
-        if (conversationScope === 'group') {
-          const confirmationInputId = input.request.messageRef
-          if (!groupRequester) {
-            return toolTextResult(
-              false,
-              'group phone calling requires the exact accepted Message ref from the participant who confirmed the call preview',
-            )
-          }
-          const previewAuthority = confirmationInputId
-            ? await hostedToolContext
-              .currentGroupPhoneCallPreviewAuthority?.({
-                brief,
-                confirmationInputId,
-              })
-            : null
-          if (!previewAuthority) {
-            return toolTextResult(
-              false,
-              'group phone calling requires an exact preview that was successfully delivered before the referenced current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
-            )
-          }
+        if (conversationScope === 'group' && !groupRequester) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
         }
         const result = await phoneCalls.start({
           brief,
@@ -3675,20 +2397,32 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
 
+      const invocationScope = hostedToolContext.currentInvocationScope?.() ?? null
       const userActionScope = hostedToolContext.currentUserActionScope?.() ?? null
-      if (
-        !userActionScope
-        || userActionScope.conversationScope !== 'direct'
-        || userActionScope.acceptedInputIds.length === 0
-      ) {
+      const conversationScope =
+        invocationScope?.conversationScope ??
+        userActionScope?.conversationScope ??
+        null
+      const hasAuthority =
+        invocationScope !== null ||
+        (userActionScope?.acceptedInputIds.length ?? 0) > 0
+      if (conversationScope !== 'direct' || !hasAuthority) {
         return toolTextResult(
           false,
-          'Clinical Records connection links require current user input in a private conversation',
+          'Clinical Records connection links require current user input in a private conversation or exact private scheduled automation authority',
         )
       }
 
       try {
         const result = await connectLinkTool.createConnectLink({
+          ...(invocationScope?.origin.kind === 'automation_occurrence'
+            ? {
+                requestKey: createAssistantHostedScheduledRequestKey({
+                  operation: 'clinical-records-connect-link',
+                  origin: invocationScope.origin,
+                }),
+              }
+            : {}),
           signal: input.abortSignal ?? null,
         })
         return toolTextResult(true, safeToolPayloadText({
@@ -3728,6 +2462,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+        toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -3809,13 +2544,15 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
-        toolCallId: readGeneratedImageToolCallId(input.request),
+        requestId: readGeneratedImageToolCallId(input.request),
         scope: 'generate-image',
       })
       const imageGenerationLauncher =
         input.hostedToolContext?.imageGenerationLauncher ?? null
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
+      const invocationScope =
+        input.hostedToolContext?.currentInvocationScope?.() ?? null
       const explicitOriginAssistantInputId = input.request.messageRef
         && userActionScope?.acceptedInputIds.includes(input.request.messageRef)
         ? await authorizeDynamicToolEffectOrigin({
@@ -3832,10 +2569,21 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       const originAssistantInputId = explicitOriginAssistantInputId
-        ?? input.hostedToolContext?.currentAssistantInputId?.()
+        ?? (invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.origin.assistantInputId
+          : invocationScope === null
+            ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+            : null)
         ?? null
       const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
-      const imageGenerationScopeId = userActionScope?.originSessionId ?? null
+      const acceptedInvocationSessionId =
+        invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.originSessionId ?? null
+          : null
+      const imageGenerationScopeId =
+        acceptedInvocationSessionId ??
+        userActionScope?.originSessionId ??
+        null
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
@@ -3957,6 +2705,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
@@ -3978,9 +2727,14 @@ export async function executeMurphDynamicToolRequest(input: {
           'connected apps are unavailable without hosted connected-app transport',
         )
       }
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
         connectedApps,
+        emailSendAuthorized:
+          userActionScope?.conversationScope === 'direct'
+          && userActionScope.acceptedInputIds.length > 0,
         request: input.request,
       })
     }
@@ -4167,7 +2921,16 @@ async function executeFamilyPlanTool(input: {
     const result = await familyPlanTool.request(input.request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
-    return toolTextResult(false, 'family plan tool request failed')
+    if (input.request.action === 'read_status') {
+      return toolTextResult(
+        false,
+        'Family status could not be read; no change was attempted; retry the status read',
+      )
+    }
+    return toolTextResult(
+      false,
+      'family plan request was not confirmed; check Family Settings before retrying to avoid a duplicate request',
+    )
   }
 }
 
@@ -4352,26 +3115,52 @@ function isHostedBillingPlanQuoteStaleError(error: unknown): boolean {
     && Reflect.get(error, 'code') === 'HOSTED_BILLING_PLAN_QUOTE_STALE'
 }
 
+function resolveHostedAssistantPersonalizationToolAuthority(
+  hostedToolContext: AssistantHostedToolContext | null,
+): HostedRuntimeAssistantPersonalizationToolAuthority | null {
+  const invocationScope: AssistantHostedInvocationScope | null =
+    hostedToolContext?.currentInvocationScope?.() ?? null
+  if (invocationScope?.origin.kind === 'accepted_input') {
+    return { assistantInputId: invocationScope.origin.assistantInputId }
+  }
+  if (invocationScope?.origin.kind === 'automation_occurrence') {
+    return {
+      automationId: invocationScope.origin.automationId,
+      occurrenceAt: invocationScope.origin.occurrenceAt,
+    }
+  }
+  const assistantInputId =
+    hostedToolContext?.currentAssistantInputId?.() ?? null
+  return assistantInputId ? { assistantInputId } : null
+}
+
 async function executePersonalizationTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
+  toolCallId: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
   if (!personalizationTool) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
-  const assistantInputId = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+  const authority = input.request.action === 'update'
+    ? resolveHostedAssistantPersonalizationToolAuthority(
+        input.hostedToolContext,
+      )
     : null
-  if (input.request.action === 'update' && assistantInputId === null) {
+  if (input.request.action === 'update' && authority === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
   try {
     const result = await personalizationTool.request(
       input.request,
-      assistantInputId === null ? undefined : { assistantInputId },
+      authority === null
+        ? undefined
+        : input.toolCallId
+          ? { ...authority, toolCallId: input.toolCallId }
+          : authority,
     )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
@@ -4918,6 +3707,77 @@ async function executeGroupTool(input: {
     | null = null
   if (input.request.action === 'offer_access') {
     request = buildGroupAccessOfferHostRequest(input.request)
+  } else if (isPreparedContactCardRequest(input.request)) {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'direct'
+      || userActionScope.acceptedInputIds.length === 0
+    ) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require a fresh user request in a personal direct conversation',
+      )
+    }
+    // Refuse a route that can never carry the attachment before paying for
+    // generation, capture, and publication. The post-generation binding below
+    // still owns the authoritative thread.
+    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null
+    if (routeStatus && routeStatus.status !== 'ok') {
+      return toolTextResult(true, safeToolPayloadText({
+        action: 'share_contact_card',
+        result: routeStatus,
+      }))
+    }
+    const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null
+    if (!contactCardShareKey) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require fresh user-sourced input for this turn',
+      )
+    }
+    const prepared = await prepareGroupAvatarRuntimeRequest({
+      abortSignal: input.abortSignal,
+      // The accepted request, not the tool call: a replay must reuse this
+      // capture rather than pay for a second stochastic generation.
+      captureRequestId: contactCardShareKey,
+      captureScope: 'contact-card-avatar',
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedToolContext: input.hostedToolContext,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      nextUsageOrdinal: input.nextUsageOrdinal,
+      request: {
+        action: 'set_chat_avatar',
+        avatar: input.request.avatar,
+      },
+      vaultRoot: input.vaultRoot,
+    })
+    if (!prepared.rpcSuccess) {
+      return {
+        rpcResult: {
+          contentItems: [{ text: prepared.rpcText, type: 'inputText' }],
+          success: false,
+        },
+        usageDraft: prepared.usageDraft ?? null,
+      }
+    }
+    request = {
+      action: 'share_contact_card',
+      contactCardImageUrl: prepared.request.groupChatIconUrl,
+      // Trusted-host request identity, so a retried or replayed turn collapses
+      // to one card while a genuinely new accepted request has its own send
+      // identity. Deliberately not the tool call id: a retry re-emits the
+      // call with a new id but keeps the same accepted input.
+      contactCardShareKey,
+    }
+    usageDraft = prepared.usageDraft ?? null
+    generatedAvatarCapture = prepared.savedImageRef
+      ? {
+          savedCaptureId: prepared.savedCaptureId ?? null,
+          savedImageRef: prepared.savedImageRef,
+        }
+      : null
   } else if (isPreparedGroupAvatarRequest(input.request)) {
     let preflight: Extract<
       HostedRuntimeGroupToolResponse,
@@ -4948,13 +3808,14 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
+      captureRequestId: input.toolCallId,
+      captureScope: 'group-avatar',
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedToolContext: input.hostedToolContext,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       nextUsageOrdinal: input.nextUsageOrdinal,
       request: input.request,
-      toolCallId: input.toolCallId,
       vaultRoot: input.vaultRoot,
     })
     if (!prepared.rpcSuccess) {
@@ -5348,6 +4209,17 @@ async function executeGroupPermissionOffer(input: {
   }
 }
 
+const MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION = 40
+
+function isPreparedContactCardRequest(
+  request: MurphGroupToolRequest,
+): request is Extract<
+  MurphGroupToolRequest,
+  { action: 'share_contact_card'; avatar: unknown }
+> {
+  return request.action === 'share_contact_card' && 'avatar' in request
+}
+
 function isPreparedGroupAvatarRequest(
   request: MurphGroupToolRequest,
 ): request is Extract<
@@ -5359,6 +4231,13 @@ function isPreparedGroupAvatarRequest(
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
+  /**
+   * Identity that owns the generated capture. A replayed turn re-emits the
+   * tool call with a new id, so a caller whose effect must survive a replay
+   * passes its accepted-request id here instead.
+   */
+  captureRequestId: string | null
+  captureScope: 'contact-card-avatar' | 'group-avatar'
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
@@ -5368,7 +4247,6 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     MurphGroupToolRequest,
     { action: 'set_chat_avatar'; avatar: unknown }
   >
-  toolCallId: string | null
   vaultRoot: string | null
 }): Promise<
   | {
@@ -5391,10 +4269,15 @@ async function prepareGroupAvatarRuntimeRequest(input: {
   if (avatar.source === 'generate') {
     const generated = await executeGenerateImageTool({
       abortSignal: input.abortSignal,
-      args: avatar.args,
+      args: input.captureScope === 'contact-card-avatar'
+        ? {
+            ...avatar.args,
+            outputCompression: MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION,
+          }
+        : avatar.args,
       captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-        scope: 'group-avatar',
-        toolCallId: input.toolCallId,
+        requestId: input.captureRequestId,
+        scope: input.captureScope,
       }),
       env: input.env,
       fetchImpl: input.fetchImpl,
@@ -6367,7 +5250,7 @@ function parseDynamicToolCallRequest(
 function parseSendVaultFileArguments(
   value: unknown,
 ):
-  | { ok: true; ref: string }
+  | { ok: true; ref: string; retireExportPackIds?: string[] }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = sendVaultFileArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -6377,7 +5260,7 @@ function parseSendVaultFileArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.send_vault_file.input',
-        schemaRootKeys: ['ref'],
+        schemaRootKeys: ['ref', 'retire_export_pack_ids'],
         toolName: 'murph.send_vault_file',
       }),
     }
@@ -6385,6 +5268,9 @@ function parseSendVaultFileArguments(
   return {
     ok: true,
     ref: parsed.data.ref,
+    ...(parsed.data.retire_export_pack_ids
+      ? { retireExportPackIds: parsed.data.retire_export_pack_ids }
+      : {}),
   }
 }
 
@@ -6499,24 +5385,9 @@ function parseFamilyPlanArguments(
   if (parsed.data.action === 'start_checkout') {
     return {
       ok: true,
-      request: parsed.data.invite
-        ? {
-            action: 'start_checkout',
-            invite: {
-              ...(parsed.data.invite.planCode
-                ? { planCode: parsed.data.invite.planCode }
-                : {}),
-              ...(parsed.data.invite.targetEmail
-                ? { targetEmail: parsed.data.invite.targetEmail }
-                : {}),
-              targetLabel: parsed.data.invite.targetLabel,
-              targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
-              targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
-            },
-          }
-        : {
-            action: 'start_checkout',
-          },
+      request: {
+        action: 'start_checkout',
+      },
     }
   }
 
@@ -6748,6 +5619,31 @@ function parseGroupArguments(
       },
     }
   }
+  if (parsed.data.action === 'share_contact_card') {
+    if (!parsed.data.avatarPrompt) {
+      return { ok: true, request: { action: 'share_contact_card' } }
+    }
+    return {
+      ok: true,
+      request: {
+        action: 'share_contact_card',
+        avatar: {
+          source: 'generate',
+          // One fixed configuration. The card has no recipient-visible alt
+          // channel, and photo quality is not a member-visible choice, so the
+          // schema asks the model only for the picture description.
+          args: {
+            alt: null,
+            outputFormat: 'jpeg',
+            prompt: parsed.data.avatarPrompt,
+            quality: 'medium',
+            referenceImageRefs: [],
+            size: '1024x1024',
+          },
+        },
+      },
+    }
+  }
   if (parsed.data.action === 'set_chat_avatar') {
     if (parsed.data.avatarSource === 'generate') {
       if (!parsed.data.prompt) {
@@ -6834,7 +5730,6 @@ function parseGroupArguments(
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
-    || parsed.data.action === 'share_contact_card'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
   }

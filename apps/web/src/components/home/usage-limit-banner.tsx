@@ -1,6 +1,9 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import type { HostedPlanUsageRecommendedAction } from "@murphai/hosted-execution/plan-usage";
+import {
+  HOSTED_ADD_USAGE_SETTINGS_URL,
+  type HostedPlanUsageRecommendedAction,
+} from "@murphai/hosted-execution/plan-usage";
 
 import type { HostedAiUsageGateNoticeCode } from "@/src/lib/hosted-execution/usage-allowance";
 
@@ -15,8 +18,15 @@ const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
   "family_usage_limit_reached",
   "group_upgrade_pulse",
+  "max_usage_limit_reached",
   "pulse_upgrade_edge",
 ]);
+
+const familyUsageRecoveryAction = {
+  kind: "add_usage",
+  label: "Add usage",
+  url: HOSTED_ADD_USAGE_SETTINGS_URL,
+} satisfies HostedPlanUsageRecommendedAction;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -28,27 +38,31 @@ const usageLimitBannerCopy: Record<
   }
 > = {
   edge_usage_limit_reached: {
-    body: "New replies and other AI work are blocked until your included usage resets.",
+    body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Edge usage",
   },
   family_usage_limit_reached: {
-    body: "New replies and other AI work are blocked until your included usage resets. Other Family members have separate allowances.",
+    body: "Murph is paused until more usage is added or your allowance resets.",
     title: "You've used 100% of your included usage this month",
   },
   group_upgrade_pulse: {
-    body: "New replies and other AI work are blocked until your included usage resets. Your wearable keeps syncing and your group activity stays current.",
+    body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Core usage",
   },
+  max_usage_limit_reached: {
+    body: "Murph is paused until your included usage resets.",
+    title: "You've used 100% of this month's included Max usage",
+  },
   pulse_upgrade_edge: {
-    body: "New replies and other AI work are blocked until your included usage resets.",
+    body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Pulse usage",
   },
   trial_conversion_pending: {
-    body: "New replies and other AI work are blocked because your included trial access is no longer active.",
+    body: "Murph is paused because your included trial access is no longer active.",
     title: "Your trial just ended",
   },
   trial_usage_limit_reached: {
-    body: "New replies and other AI work are blocked because your included trial usage is exhausted.",
+    body: "Murph is paused because your included trial usage is exhausted.",
     title: "You've used 100% of your included trial usage",
   },
 };
@@ -65,21 +79,23 @@ export function UsageLimitBanner({
 
   const copy = usageLimitBannerCopy[noticeCode] ?? usageLimitBannerCopy.pulse_upgrade_edge;
   const resetLabel = formatUsageResetCountdown({ noticeCode, now, resetAt });
-  const body = recommendedAction?.kind === "add_usage"
-    ? "New replies and other AI work are blocked until you add usage or your included usage resets."
+  const action = recommendedAction
+    ?? (noticeCode === "family_usage_limit_reached"
+      ? familyUsageRecoveryAction
+      : null);
+  const body = action?.kind === "add_usage" && noticeCode !== "family_usage_limit_reached"
+    ? "Murph is paused until you add usage or your allowance resets."
     : copy.body;
-  const actionBody = recommendedAction?.kind === "start_pulse"
+  const actionBody = action?.kind === "start_pulse"
     ? " Start Pulse to continue."
-    : recommendedAction?.kind === "upgrade_edge"
+    : action?.kind === "upgrade_edge"
       ? " Edge offers more included usage."
-      : recommendedAction?.kind === "add_usage"
-        ? " You can add more usage now."
-        : recommendedAction?.kind === "change_plan"
-          ? recommendedAction.targetPlanCode === "launch_group_monthly"
-            ? " Core keeps you connected with lighter private Murph usage."
-            : recommendedAction.targetPlanCode === "launch_monthly"
-              ? " Pulse includes more private Murph usage."
-              : " Edge offers more included usage."
+      : action?.kind === "change_plan"
+        ? action.targetPlanCode === "launch_group_monthly"
+          ? " Core keeps you connected with lighter private Murph usage."
+          : action.targetPlanCode === "launch_monthly"
+            ? " Pulse includes more private Murph usage."
+            : " Edge offers more included usage."
         : "";
 
   return (
@@ -101,12 +117,12 @@ export function UsageLimitBanner({
         </p>
       </div>
 
-      {recommendedAction ? (
+      {action ? (
         <Link
-          href={recommendedAction.url}
+          href={action.url}
           className="inline-flex shrink-0 items-center gap-2 self-start rounded-2xl bg-[#5a6e32] px-6 py-3 text-sm font-medium text-white transition-colors duration-200 hover:bg-[#7a8c6e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-2 sm:self-center"
         >
-          {recommendedAction.label}
+          {action.label}
           <ArrowRight className="size-4" aria-hidden="true" />
         </Link>
       ) : null}

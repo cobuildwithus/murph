@@ -1,10 +1,13 @@
+import { Buffer } from 'node:buffer'
+
 import { describe, expect, it } from 'vitest'
 
 import {
   LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
-  LINQ_IMESSAGE_APP_CARD_URL,
+  LINQ_IMESSAGE_APP_CARD_ORIGIN,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
+  buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
@@ -44,96 +47,73 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
   },
 }
 
+function decodeAppCardUrl(url: string): unknown {
+  const encoded = new URL(url).hash.replace(/^#murph-card=/u, '')
+  return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+}
+
 describe('assistant response cards', () => {
-  it('derives the model-facing JSON schema from the runtime contract', () => {
+  it('authors only current cards while the runtime still accepts nutrition V1', () => {
     expect(assistantResponseCardJsonSchema).not.toHaveProperty('$schema')
     expect(assistantResponseCardJsonSchema).toMatchObject({
-      description: expect.stringContaining('compact_table'),
+      description: expect.stringContaining('daily_nutrition V2'),
       anyOf: [
         {
-          anyOf: [
-            {
-              additionalProperties: false,
+          additionalProperties: false,
+          properties: {
+            goals: {
               properties: {
-                goals: {
-                  properties: {
-                    calories: {
-                      anyOf: [
-                        {
-                          properties: {
-                            status: {
-                              enum: [
-                                'far_under_target',
-                                'under_target',
-                                'on_target',
-                                'over_target',
-                                'far_over_target',
-                                'unavailable',
-                              ],
-                            },
-                            target: { type: 'number' },
-                          },
+                calories: {
+                  anyOf: [
+                    {
+                      properties: {
+                        status: {
+                          enum: [
+                            'far_under_target',
+                            'under_target',
+                            'on_target',
+                            'over_target',
+                            'far_over_target',
+                            'unavailable',
+                          ],
                         },
-                        { type: 'null' },
-                      ],
+                        target: { type: 'number' },
+                      },
                     },
-                  },
+                    { type: 'null' },
+                  ],
                 },
-                kind: { const: 'daily_nutrition' },
-                totals: {
-                  properties: {
-                    fiberGrams: {
-                      anyOf: [
-                        {
-                          properties: {
-                            total: { type: 'number' },
-                          },
-                        },
-                        {
-                          properties: {
-                            mealCount: { const: 0 },
-                            total: { type: 'null' },
-                          },
-                        },
-                      ],
-                    },
-                  },
-                },
-                version: { const: 2 },
               },
             },
-            {
-              additionalProperties: false,
+            kind: { const: 'daily_nutrition' },
+            totals: {
               properties: {
-                kind: { const: 'daily_nutrition' },
-                totals: {
-                  properties: {
-                    calories: {
+                fiberGrams: {
+                  anyOf: [
+                    {
                       properties: {
                         total: { type: 'number' },
                       },
                     },
-                    proteinGrams: {
-                      anyOf: [
-                        {
-                          additionalProperties: false,
-                          properties: {
-                            total: { type: 'number' },
-                          },
-                        },
-                        {
-                          additionalProperties: false,
-                          properties: {
-                            mealCount: { const: 0 },
-                            total: { type: 'null' },
-                          },
-                        },
-                      ],
+                    {
+                      properties: {
+                        mealCount: { const: 0 },
+                        total: { type: 'null' },
+                      },
                     },
-                  },
+                  ],
                 },
               },
             },
+            version: { const: 2 },
+          },
+          required: [
+            'kind',
+            'version',
+            'localDate',
+            'mealCount',
+            'totals',
+            'goals',
           ],
         },
         {
@@ -163,9 +143,22 @@ describe('assistant response cards', () => {
             },
             version: { const: 1 },
           },
+          required: [
+            'kind',
+            'version',
+            'title',
+            'subtitle',
+            'rowHeader',
+            'columns',
+            'rows',
+            'footer',
+            'tracking',
+          ],
         },
       ],
     })
+    expect(assistantResponseCardJsonSchema).not.toHaveProperty('$defs')
+    expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {
@@ -414,7 +407,7 @@ describe('assistant response cards', () => {
     })
   })
 
-  it('renders complete, goal-aware, and partial Linq static layouts', () => {
+  it('builds interactive snapshots and truthful Linq fallback layouts', () => {
     const completeLayout = buildLinqIMessageAppLayout(COMPLETE_CARD)
     const goalLayout = buildLinqIMessageAppLayout(COMPLETE_CARD_V2)
     const proteinGoalLayout = buildLinqIMessageAppLayout({
@@ -441,9 +434,23 @@ describe('assistant response cards', () => {
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
       'Ask Murph for this card in text',
     )
-    expect(LINQ_IMESSAGE_APP_CARD_URL).toBe('https://murph.ai')
-    expect(LINQ_IMESSAGE_APP_CARD_URL.length).toBeLessThanOrEqual(2_048)
-    expect(new URL(LINQ_IMESSAGE_APP_CARD_URL).protocol).toBe('https:')
+    const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
+    const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)
+    expect(LINQ_IMESSAGE_APP_CARD_ORIGIN).toBe('https://www.withmurph.ai')
+    expect(completeCardUrl.startsWith(
+      `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`,
+    )).toBe(true)
+    expect(completeCardUrl.length).toBeLessThan(2_048)
+    expect(goalCardUrl.length).toBeLessThan(2_048)
+    expect(new URL(goalCardUrl).protocol).toBe('https:')
+    expect(decodeAppCardUrl(completeCardUrl)).toEqual({
+      schemaVersion: 1,
+      card: COMPLETE_CARD,
+    })
+    expect(decodeAppCardUrl(goalCardUrl)).toEqual({
+      schemaVersion: 2,
+      card: COMPLETE_CARD_V2,
+    })
     expect(completeLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       subcaption: '1,490.25 cal',

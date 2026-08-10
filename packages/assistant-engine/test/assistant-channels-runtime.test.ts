@@ -1594,6 +1594,10 @@ describe('assistant channels runtime seam', () => {
       env: { LINQ_API_TOKEN: 'linq-token' },
     })).resolves.toEqual({
       providerMessageId: 'native-card-message-1',
+      providerMessageEffects: [{
+        message: null,
+        providerMessageId: 'native-card-message-1',
+      }],
       providerThreadId: null,
       target: 'private-thread-1',
     })

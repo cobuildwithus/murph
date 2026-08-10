@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_PLAN_USAGE_ACCESS_KINDS = [
   "family_sponsored",
@@ -10,6 +10,7 @@ export const HOSTED_PLAN_USAGE_PLAN_NAMES = [
   "Edge",
   "Group",
   "Family",
+  "Max",
   "Pulse",
   "Pulse Trial",
 ] as const;
@@ -22,6 +23,7 @@ export const HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES = [
   "launch_group_monthly",
   "launch_monthly",
   "launch_edge_monthly",
+  "launch_max_monthly",
 ] as const;
 
 export const HOSTED_PLAN_USAGE_UNAVAILABLE_REASONS = [
@@ -83,7 +85,7 @@ const hostedPlanUsageAvailablePlanSchema = z
     code: z.enum([
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
     ]),
-    displayName: z.enum(["Group", "Pulse", "Edge"]),
+    displayName: z.enum(["Group", "Pulse", "Edge", "Max"]),
     monthlyPriceUsdCents: z.number().int().positive(),
     selectable: z.literal(true),
   })
@@ -94,7 +96,7 @@ const hostedPlanUsageScheduledPlanSchema = z
     code: z.enum([
       ...HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
     ]),
-    displayName: z.enum(["Group", "Pulse", "Edge"]),
+    displayName: z.enum(["Group", "Pulse", "Edge", "Max"]),
     effectiveAt: z.string().datetime({ offset: true }).nullable(),
   })
   .strict();

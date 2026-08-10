@@ -17,6 +17,7 @@ review_gpt_first_reviewed_head="${REVIEW_GPT_FIRST_REVIEWED_HEAD:-}"
 review_gpt_previous_reviewed_head="${REVIEW_GPT_PREVIOUS_REVIEWED_HEAD:-}"
 review_gpt_context_anchor_head="${REVIEW_GPT_CONTEXT_ANCHOR_HEAD:-}"
 review_gpt_rendered_evidence_paths="${REVIEW_GPT_RENDERED_EVIDENCE_PATHS:-}"
+review_gpt_supplemental_evidence_paths="${REVIEW_GPT_SUPPLEMENTAL_EVIDENCE_PATHS:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
 review_gpt_context_mode="full_snapshot"
 
@@ -114,6 +115,79 @@ review_gpt_add_rendered_evidence() {
   done <<< "$review_gpt_rendered_evidence_paths"
 }
 
+review_gpt_add_supplemental_evidence() {
+  local evidence_absolute_path
+  local evidence_count=0
+  local evidence_manifest="$review_gpt_pr_context_dir/supplemental-evidence.txt"
+  local evidence_package_dir="$review_gpt_pr_context_dir/supplemental-evidence"
+  local evidence_package_name
+  local evidence_package_path
+  local evidence_path
+  local evidence_size
+  local evidence_total_bytes=0
+
+  rm -rf "$evidence_package_dir"
+  mkdir -p "$evidence_package_dir"
+  : > "$evidence_manifest"
+  while IFS= read -r evidence_path; do
+    [[ -z "$evidence_path" ]] && continue
+    case "$evidence_path" in
+      /* | .. | ../* | */../* | */..)
+        echo "Error: ReviewGPT supplemental evidence paths must be repo-relative and boundary-safe." >&2
+        exit 1
+        ;;
+    esac
+    case "$evidence_path" in
+      .artifacts/review-gpt/* | audit-packages/*) ;;
+      *)
+        echo "Error: ReviewGPT supplemental evidence must stay under .artifacts/review-gpt/ or audit-packages/." >&2
+        exit 1
+        ;;
+    esac
+    case "$evidence_path" in
+      *.md | *.txt | *.json | *.ts | *.tsx | *.js | *.mjs | *.cjs | *.sh) ;;
+      *)
+        echo "Error: ReviewGPT supplemental evidence must be a supported text or code file." >&2
+        exit 1
+        ;;
+    esac
+    if [[ ! -f "$evidence_path" ]] || [[ -L "$evidence_path" ]]; then
+      echo "Error: ReviewGPT supplemental evidence must be a regular non-symlink file: $evidence_path" >&2
+      exit 1
+    fi
+    if ! evidence_absolute_path="$(realpath -q "$evidence_path")"; then
+      echo "Error: ReviewGPT supplemental evidence path could not be resolved: $evidence_path" >&2
+      exit 1
+    fi
+    case "$evidence_absolute_path" in
+      "$review_gpt_repo_root_absolute"/.artifacts/review-gpt/* \
+        | "$review_gpt_repo_root_absolute"/audit-packages/*) ;;
+      *)
+        echo "Error: ReviewGPT supplemental evidence must resolve inside an allowed artifact directory." >&2
+        exit 1
+        ;;
+    esac
+    evidence_count=$((evidence_count + 1))
+    if (( evidence_count > 12 )); then
+      echo "Error: ReviewGPT supplemental evidence is limited to 12 explicit files." >&2
+      exit 1
+    fi
+    evidence_size="$(wc -c < "$evidence_path" | tr -d '[:space:]')"
+    evidence_total_bytes=$((evidence_total_bytes + evidence_size))
+    if (( evidence_total_bytes > 2097152 )); then
+      echo "Error: ReviewGPT supplemental evidence is limited to 2 MiB in total." >&2
+      exit 1
+    fi
+    printf -v evidence_package_name '%02d-%s' \
+      "$evidence_count" \
+      "$(basename "$evidence_path")"
+    evidence_package_path="$evidence_package_dir/$evidence_package_name"
+    cp -- "$evidence_path" "$evidence_package_path"
+    printf '%s\t%s\n' "$evidence_path" "$evidence_package_path" >> "$evidence_manifest"
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$evidence_package_path"
+  done <<< "$review_gpt_supplemental_evidence_paths"
+}
+
 cleanup_review_gpt_pr_context() {
   if [[ "$review_gpt_cleanup_pr_context" == "1" ]]; then
     rm -rf "$review_gpt_pr_context_dir"
@@ -128,6 +202,12 @@ case "$review_gpt_review_phase" in
     exit 1
     ;;
 esac
+
+if [[ "$review_gpt_review_phase" != "preliminary" ]] \
+  && [[ -n "$review_gpt_supplemental_evidence_paths" ]]; then
+  echo "Error: ReviewGPT supplemental evidence is allowed only for the preliminary specialist review." >&2
+  exit 1
+fi
 
 if [[ "$review_gpt_review_phase" == "preliminary" ]] \
   && [[ -z "$review_gpt_pr_ref" ]]; then
@@ -377,6 +457,10 @@ if [[ -n "$review_gpt_pr_ref" ]]; then
     || [[ -n "$review_gpt_rendered_evidence_paths" ]]; then
     COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/rendered-evidence.txt"
     review_gpt_add_rendered_evidence
+  fi
+  if [[ -n "$review_gpt_supplemental_evidence_paths" ]]; then
+    COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS="$COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS"$'\n'"$review_gpt_pr_context_dir/supplemental-evidence.txt"
+    review_gpt_add_supplemental_evidence
   fi
 
   if [[ "$review_gpt_context_mode" == "same_thread_delta" ]]; then

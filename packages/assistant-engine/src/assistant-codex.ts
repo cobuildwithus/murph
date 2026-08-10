@@ -61,18 +61,17 @@ import {
   buildRuntimeIssueInputForFailedCodexAction,
   createCodexActionDiagnosticsReducer,
 } from './assistant-codex/action-diagnostics.js'
+import type {
+  MurphDynamicToolFinalActionPatch,
+  MurphDynamicToolReactionPatch,
+  MurphDynamicToolReplyTargetPatch,
+  MurphDynamicToolRequest,
+} from './assistant-codex/dynamic-tools.js'
 import {
-  executeMurphDynamicToolRequest,
-  isComputerDynamicToolRequest,
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   type AssistantStyleTurnSettingsOverlay,
-  type MurphDynamicToolFinalActionPatch,
-  type MurphDynamicToolReactionPatch,
-  type MurphDynamicToolReplyTargetPatch,
-  type MurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
-} from './assistant-codex/dynamic-tools.js'
+} from './assistant-codex/dynamic-tool-catalog.js'
 import type {
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
@@ -140,6 +139,7 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './assistant/message-target-selection.js'
 import type {
+  AssistantGenerateSongTurnPolicy,
   AssistantNoReplyDisposition,
   AssistantProviderDynamicTool,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -158,6 +158,12 @@ import type {
   AssistantProviderTraceEvent,
   AssistantProviderTraceUpdate,
 } from './assistant/provider-traces.js'
+import {
+  completeAssistantProviderStartCriticalPath,
+  readAssistantProviderStartMonotonicTickMs,
+  stampAssistantProviderStartCriticalPath,
+  type AssistantProviderStartCriticalPathContext,
+} from './assistant/provider-start-critical-path.js'
 import type {
   AssistantProgressDelivery,
   AssistantProgressDeliveryResult,
@@ -168,7 +174,7 @@ export { extractCodexTraceUpdates } from './assistant-codex-events.js'
 export {
   listMurphDynamicToolNames,
   resolveMurphDynamicTools,
-} from './assistant-codex/dynamic-tools.js'
+} from './assistant-codex/dynamic-tool-catalog.js'
 export { resolveCodexDisplayOptions } from './assistant-codex/config.js'
 export type { CodexProgressEvent } from './assistant-codex-events.js'
 export type { CodexDisplayOptions } from './assistant-codex/config.js'
@@ -188,6 +194,15 @@ const CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS = 5_000
 const CODEX_BACKGROUND_WORK_WAIT_TIMEOUT_MS = 120_000
 const CODEX_BACKGROUND_WORK_POLL_INTERVAL_MS = 50
 const CODEX_RPC_STEER_TIMEOUT_MS = 15_000
+type MurphDynamicToolRuntime =
+  typeof import('./assistant-codex/dynamic-tools.js')
+let murphDynamicToolRuntimePromise: Promise<MurphDynamicToolRuntime> | null = null
+
+function loadMurphDynamicToolRuntime(): Promise<MurphDynamicToolRuntime> {
+  murphDynamicToolRuntimePromise ??=
+    import('./assistant-codex/dynamic-tools.js')
+  return murphDynamicToolRuntimePromise
+}
 const CODEX_APP_SERVER_INTERRUPT_CLEANUP_TIMEOUT_MS = 15_000
 const CODEX_MANAGED_ACCOUNT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const CODEX_MANAGED_ACCOUNT_CONFIG_OVERRIDES = [
@@ -461,9 +476,11 @@ export interface CodexAppServerTurnInput {
   baseInstructions?: string | null
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
+  generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   excludeResumeTurns?: boolean
   model?: string | null
   modelProvider?: string | null
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   outputSchema?: Readonly<Record<string, unknown>> | null
   onFirstAssistantResponseCompleted?: (() => void) | null
   onLiveTurn?: ((turn: CodexAppServerLiveTurn) => void | (() => void)) | null
@@ -499,6 +516,7 @@ export interface CodexAppServerTurnInput {
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   publicInternetFetch?: typeof fetch | null
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
@@ -668,6 +686,10 @@ function appendRequiredVaultFileApprovalUrls(
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    'codexAppServerTurnStartedAtMonotonicMs',
+  )
   assertCodexAppServerPermissionRequest(input)
   const approvalPolicy = resolveSupportedCodexAppServerApprovalPolicy(input.approvalPolicy)
   if (
@@ -686,6 +708,7 @@ export async function executeCodexAppServerTurn(
     ...input,
     approvalPolicy,
     configOverrides: processInput.configOverrides,
+    ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
     runtimeWorkspaceRoots: input.runtimeWorkspaceRoots?.map((root) =>
       path.resolve(root),
     ),
@@ -3126,6 +3149,10 @@ async function runCodexAppServerTurnOnProcess(
   codexProcess: CodexAppServerProcess,
   input: CodexAppServerPreparedTurnInput,
 ): Promise<CodexAppServerTurnResult> {
+  const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+    input.providerStartCriticalPath,
+    'codexAppServerProcessTurnStartedAtMonotonicMs',
+  )
   const hostedCanonicalWritePort = readHostedCanonicalWritePort()
   let stdout = ''
   let stderr = ''
@@ -3179,6 +3206,12 @@ async function runCodexAppServerTurnOnProcess(
   // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
   // assistant turn, owned here and threaded into the dynamic-tool executor.
   const askGrokTurnState = createAskGrokTurnState()
+  const generateSongTurnState = input.generateSongPolicy
+    ? {
+        attemptCount: 0,
+        policy: input.generateSongPolicy,
+      }
+    : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
   const trackedSubagentUsageThreadIds = new Set<string>()
@@ -3220,6 +3253,7 @@ async function runCodexAppServerTurnOnProcess(
   let contextCompactionProgressNotified = false
   let contextCompactionProgressPending = false
   let releaseLiveTurn = () => {}
+  const pendingDynamicToolRequests = new Set<Promise<void>>()
   const pendingProgressDeliveries = new Set<Promise<void>>()
   let dynamicToolExecutionChain: Promise<void> = Promise.resolve()
   const dynamicToolAbortController = new AbortController()
@@ -3702,13 +3736,24 @@ async function runCodexAppServerTurnOnProcess(
     trailingSteerCandidate = null
   }
 
-  const notifyProviderRequestStarted = () => {
+  const notifyProviderRequestStarted = (
+    providedStartedAtMonotonicMs?: number,
+  ) => {
     if (providerRequestStartedNotified) {
       return
     }
     providerRequestStartedNotified = true
+    const providerStartedAtMonotonicMs = providedStartedAtMonotonicMs
+      ?? readAssistantProviderStartMonotonicTickMs()
     const startedAtMs = Date.now()
     codexProviderRequestStartedAtMs = startedAtMs
+    const completedProviderStartCriticalPath =
+      input.providerRequestOrdinal === 0
+        ? completeAssistantProviderStartCriticalPath(
+            providerStartCriticalPath,
+            providerStartedAtMonotonicMs,
+          )
+        : null
     notifyCodexAppServerProviderRequestStartedBestEffort({
       hook: input.onProviderRequestStarted ?? null,
       startedAt: new Date(startedAtMs).toISOString(),
@@ -3718,6 +3763,9 @@ async function runCodexAppServerTurnOnProcess(
           0,
           startedAtMs - codexAppServerTurnStartedAt,
         ),
+        ...(completedProviderStartCriticalPath
+          ? { providerStartCriticalPath: completedProviderStartCriticalPath }
+          : {}),
       },
     })
   }
@@ -3793,6 +3841,23 @@ async function runCodexAppServerTurnOnProcess(
         pendingProgressDeliveries.delete(tracked)
       })
     pendingProgressDeliveries.add(tracked)
+  }
+
+  const trackDynamicToolRequest = (promise: Promise<void>): void => {
+    const tracked = promise
+      .catch((error: unknown) => {
+        rejectOnce(error)
+      })
+      .finally(() => {
+        pendingDynamicToolRequests.delete(tracked)
+      })
+    pendingDynamicToolRequests.add(tracked)
+  }
+
+  const drainPendingDynamicToolRequests = async (): Promise<void> => {
+    while (pendingDynamicToolRequests.size > 0) {
+      await Promise.all([...pendingDynamicToolRequests])
+    }
   }
 
   const drainPendingProgressDeliveries = async (): Promise<void> => {
@@ -4036,10 +4101,10 @@ async function runCodexAppServerTurnOnProcess(
     jsonEvents.push(message)
   }
 
-  const handleAcceptedServerRequest = (
+  const handleAcceptedServerRequest = async (
     message: CodexRpcMessage,
     requestId: CodexRpcId,
-  ): void => {
+  ): Promise<void> => {
     acceptJsonEvent(message)
 
     if (turnTerminal) {
@@ -4057,6 +4122,38 @@ async function runCodexAppServerTurnOnProcess(
       })
       return
     }
+
+    if (message.method !== 'item/tool/call') {
+      denyUnsupportedCodexServerRequest({
+        message,
+        requestId,
+        writeRpcMessage: (payload) => {
+          void tryWriteRpcMessage(payload)
+        },
+      })
+      return
+    }
+
+    const dynamicToolRequestDeliveryContextOrdinal =
+      currentDeliveryContextOrdinal()
+    let dynamicToolRuntime: MurphDynamicToolRuntime
+    try {
+      dynamicToolRuntime = await loadMurphDynamicToolRuntime()
+    } catch {
+      void tryWriteRpcMessage({
+        id: requestId,
+        error: {
+          code: -32000,
+          message: 'Dynamic tool runtime is unavailable.',
+        },
+      })
+      return
+    }
+    const {
+      executeMurphDynamicToolRequest,
+      isComputerDynamicToolRequest,
+      readMurphDynamicToolRequest,
+    } = dynamicToolRuntime
 
     const dynamicToolRequest = readMurphDynamicToolRequest(message)
     if (!dynamicToolRequest) {
@@ -4205,8 +4302,6 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const dynamicToolRequestDeliveryContextOrdinal =
-      currentDeliveryContextOrdinal()
     const dynamicToolDeliveryContextOrdinal =
       dynamicToolRequest.kind === 'finish-without-reply' ||
       dynamicToolRequest.kind === 'react-to-message' ||
@@ -4355,6 +4450,8 @@ async function runCodexAppServerTurnOnProcess(
           privateDirectResponseCardAllowed: input.groupConversation === false,
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+          onboardingFirstReadCompletionTransitionAvailable:
+            input.onboardingFirstReadCompletionTransitionAvailable ?? false,
           productFeedbackRecorder: input.productFeedbackRecorder ?? null,
           progressDelivery:
             dynamicToolRequest.kind === 'send-progress-update'
@@ -4375,6 +4472,7 @@ async function runCodexAppServerTurnOnProcess(
               ? input.askGrokRuntime ?? null
               : null,
           askGrokTurnState,
+          generateSongTurnState,
         })
         return result
       },
@@ -4973,7 +5071,9 @@ async function runCodexAppServerTurnOnProcess(
         rejectPreStartParentTurnRequest(requestId)
         return
       }
-      handleAcceptedServerRequest(message, requestId)
+      trackDynamicToolRequest(
+        handleAcceptedServerRequest(message, requestId),
+      )
       return
     }
 
@@ -5220,11 +5320,13 @@ async function runCodexAppServerTurnOnProcess(
         codexThreadId,
       }),
     )
+    const providerStartedAtMonotonicMs =
+      readAssistantProviderStartMonotonicTickMs()
     // The child can begin executing (including side-effecting commands) as
     // soon as the turn/start request is written, so the provider-start
     // barrier arms here rather than at the acknowledgement. A death between
     // write and response must never be classified as pre-provider work.
-    notifyProviderRequestStarted()
+    notifyProviderRequestStarted(providerStartedAtMonotonicMs)
     const turnResult = await withCodexRpcTimeout(
       turnStartRequest,
       CODEX_RPC_DEFAULT_TIMEOUT_MS,
@@ -5238,6 +5340,7 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_running'
     await turnCompleted
     clearInterruptCleanupTimer()
+    await drainPendingDynamicToolRequests()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
     emitActionDiagnosticsTrace()
@@ -5294,6 +5397,7 @@ async function runCodexAppServerTurnOnProcess(
       ? (buildRecordedTerminationError(lastEventError) ?? error)
       : error
     emitActionDiagnosticsTrace()
+    await drainPendingDynamicToolRequests()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
@@ -5580,6 +5684,7 @@ function isInvalidDynamicToolRequest(
       | 'invalid-computer-arguments'
       | 'invalid-device-arguments'
       | 'invalid-generate-voice-memo-arguments'
+      | 'invalid-pending-vault-files-arguments'
       | 'invalid-finish-without-reply-arguments'
       | 'invalid-progress-arguments'
       | 'invalid-reaction-arguments'
@@ -5596,6 +5701,7 @@ function isInvalidDynamicToolRequest(
     request.kind === 'invalid-computer-arguments' ||
     request.kind === 'invalid-device-arguments' ||
     request.kind === 'invalid-generate-voice-memo-arguments' ||
+    request.kind === 'invalid-pending-vault-files-arguments' ||
     request.kind === 'invalid-finish-without-reply-arguments' ||
     request.kind === 'invalid-progress-arguments' ||
     request.kind === 'invalid-reaction-arguments' ||
@@ -5617,13 +5723,20 @@ function isSerializedDynamicToolRequest(
     request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
+    request.kind === 'pending-vault-files-list' ||
+    request.kind === 'pending-vault-files-cancel' ||
     request.kind === 'assistant-configuration' ||
     request.kind === 'assistant-style' ||
     request.kind === 'personalization' ||
     request.kind === 'subscription' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
-    isComputerDynamicToolRequest(request)
+    request.kind === 'computer-open' ||
+    request.kind === 'computer-act' ||
+    request.kind === 'computer-os-control' ||
+    request.kind === 'computer-pause-for-user' ||
+    request.kind === 'computer-finish-run' ||
+    request.kind === 'invalid-computer-arguments'
 }
 
 function isResponseAttachmentDynamicToolRequest(
@@ -5644,6 +5757,9 @@ function isInvocationScopedRootToolRequest(
     request.kind === 'invalid-automation-arguments' ||
     request.kind === 'device' ||
     request.kind === 'invalid-device-arguments' ||
+    request.kind === 'pending-vault-files-list' ||
+    request.kind === 'pending-vault-files-cancel' ||
+    request.kind === 'invalid-pending-vault-files-arguments' ||
     request.kind === 'react-to-message' ||
     request.kind === 'select-reply-target' ||
     request.kind === 'invalid-reaction-arguments' ||

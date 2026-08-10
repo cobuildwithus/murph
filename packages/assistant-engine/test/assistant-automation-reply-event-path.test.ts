@@ -21,9 +21,11 @@ import {
 } from '../src/assistant/automation/reply.ts'
 import {
   createAssistantOutboxIntent,
+  dispatchAssistantOutboxIntent,
   readAssistantOutboxIntent,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
+import { sendLinqMessage } from '../src/assistant/channels/runtime.ts'
 
 const replyEventPathMocks = vi.hoisted(() => ({
   listAssistantOutboxIntents: vi.fn(),
@@ -111,6 +113,799 @@ afterEach(async () => {
 })
 
 describe('assistant auto-reply event-first path', () => {
+  it('preserves unresolved authenticated iMessage group reply context without exposing provider ids', async () => {
+    const vault = await createTempVault()
+    const candidate = createLinqGroupCandidate({
+      inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      messageId: 'linq-msg-human-reply',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-unavailable-target',
+      text: 'Drink a pint.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain('Native reply context:')
+    expect(prompt).toContain(
+      'cannot be attested as Murph-authored or linked to an earlier accepted input',
+    )
+    expect(prompt).toContain(
+      'The native reply edge alone does not establish that Murph is addressed.',
+    )
+    expect(prompt).not.toContain('linq-msg-unavailable-target')
+  })
+
+  it('links a native group reply only to an earlier accepted non-Murph input', async () => {
+    const vault = await createTempVault()
+    const target = createLinqGroupCandidate({
+      inputId: 'ain_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      messageId: 'linq-msg-earlier-target',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Currently drinking my first chilled red.',
+    })
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_cccccccccccccccccccccccccccccccc',
+      messageId: 'linq-msg-human-reply',
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-earlier-target',
+      text: 'Drink a pint.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([target, reply]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      `native reply to Message ref ${target.event.inputId}, an earlier accepted non-Murph group message`,
+    )
+    expect(prompt).toContain('Currently drinking my first chilled red.')
+    expect(prompt).not.toContain('linq-msg-earlier-target')
+    expect(prompt).not.toContain(
+      'cannot be attested as Murph-authored or linked',
+    )
+  })
+
+  it('does not correlate a native reply to a later input in the same batch', async () => {
+    const vault = await createTempVault()
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_11111111111111111111111111111111',
+      messageId: 'linq-msg-early-reply',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-later-target',
+      text: 'This reply arrived first.',
+    })
+    const laterTarget = createLinqGroupCandidate({
+      inputId: 'ain_22222222222222222222222222222222',
+      messageId: 'linq-msg-later-target',
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      text: 'This target arrived later.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([reply, laterTarget]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'cannot be attested as Murph-authored or linked to an earlier accepted input',
+    )
+    expect(prompt).not.toContain(
+      `native reply to Message ref ${laterTarget.event.inputId}`,
+    )
+    expect(prompt).not.toContain('linq-msg-later-target')
+  })
+
+  it('falls back safely when different accepted inputs share a provider message id', async () => {
+    const vault = await createTempVault()
+    const firstTarget = createLinqGroupCandidate({
+      inputId: 'ain_33333333333333333333333333333333',
+      messageId: 'linq-msg-duplicate-target',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'First provider-id claimant.',
+    })
+    const secondTarget = createLinqGroupCandidate({
+      inputId: 'ain_44444444444444444444444444444444',
+      messageId: 'linq-msg-duplicate-target',
+      occurredAt: '2026-08-07T21:10:00.500Z',
+      text: 'Second provider-id claimant.',
+    })
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_55555555555555555555555555555555',
+      messageId: 'linq-msg-duplicate-reply',
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-duplicate-target',
+      text: 'Reply to the ambiguous target.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([
+        firstTarget,
+        secondTarget,
+        reply,
+      ]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'cannot be attested as Murph-authored or linked to an earlier accepted input',
+    )
+    expect(prompt).not.toContain(
+      `native reply to Message ref ${firstTarget.event.inputId}`,
+    )
+    expect(prompt).not.toContain(
+      `native reply to Message ref ${secondTarget.event.inputId}`,
+    )
+    expect(prompt).not.toContain('linq-msg-duplicate-target')
+  })
+
+  it('resolves a native reply to an edited group message via the original accepted input', async () => {
+    const vault = await createTempVault()
+    const original = createLinqGroupCandidate({
+      inputId: 'ain_aaaa1111aaaa1111aaaa1111aaaa1111',
+      messageId: 'linq-msg-edited-target',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Original wording.',
+    })
+    const correction = createLinqGroupCandidate({
+      editedSourceInputId: original.event.inputId,
+      editedTextPartIndex: 0,
+      inputId: 'ain_bbbb2222bbbb2222bbbb2222bbbb2222',
+      messageId: 'linq-msg-edited-target',
+      occurredAt: '2026-08-07T21:10:00.500Z',
+      text: 'Corrected wording.',
+    })
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_cccc3333cccc3333cccc3333cccc3333',
+      messageId: 'linq-msg-edited-reply',
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-edited-target',
+      text: 'Replying to the edited message.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([
+        original,
+        correction,
+        reply,
+      ]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      `native reply to Message ref ${original.event.inputId}, an earlier accepted non-Murph group message`,
+    )
+    expect(prompt).toContain('Original wording.')
+    expect(prompt).toContain('Corrected wording.')
+    expect(prompt).not.toContain('linq-msg-edited-target')
+    expect(prompt).not.toContain(
+      'cannot be attested as Murph-authored or linked',
+    )
+  })
+
+  it('keeps a native reply conservative when only the correction of its target was accepted this turn', async () => {
+    const vault = await createTempVault()
+    const correction = createLinqGroupCandidate({
+      editedSourceInputId: 'ain_dddd4444dddd4444dddd4444dddd4444',
+      editedTextPartIndex: 0,
+      inputId: 'ain_eeee5555eeee5555eeee5555eeee5555',
+      messageId: 'linq-msg-prior-turn-target',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Corrected wording for a prior-turn message.',
+    })
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_ffff6666ffff6666ffff6666ffff6666',
+      messageId: 'linq-msg-prior-turn-reply',
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-prior-turn-target',
+      text: 'Replying to the prior-turn edited message.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([correction, reply]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'cannot be attested as Murph-authored or linked to an earlier accepted input',
+    )
+    expect(prompt).not.toContain(
+      `native reply to Message ref ${correction.event.inputId}`,
+    )
+    expect(prompt).not.toContain('linq-msg-prior-turn-target')
+  })
+
+  it('keeps an attested Murph native reply target authoritative', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-attested-murph-target',
+        message: 'Prior Murph message.',
+        providerMessageId: 'linq-msg-murph-target',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_66666666666666666666666666666666',
+      messageId: 'linq-msg-reply-to-murph',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-murph-target',
+      text: 'Yes.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'The sender explicitly replied to this exact prior assistant message:',
+    )
+    expect(prompt).toContain('Prior Murph message.')
+    expect(prompt).not.toContain('Native reply context:')
+    expect(prompt).not.toContain('linq-msg-murph-target')
+  })
+
+  it('fails closed when multiple Murph deliveries claim the same provider message id', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-duplicate-provider-target-first',
+        message: 'First conflicting Murph message.',
+        providerMessageId: 'linq-msg-duplicate-murph-target',
+        sentAt: '2026-08-07T21:08:00.000Z',
+        sessionId: 'session-automation-first',
+        target: 'thread-1',
+      }),
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-duplicate-provider-target-second',
+        message: 'Second conflicting Murph message.',
+        providerMessageId: 'linq-msg-duplicate-murph-target',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation-second',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_67676767676767676767676767676767',
+      messageId: 'linq-msg-reply-to-duplicate-murph-target',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-duplicate-murph-target',
+      text: 'Replying to the ambiguous Murph target.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'cannot be attested as Murph-authored or linked to an earlier accepted input',
+    )
+    expect(prompt).not.toContain('First conflicting Murph message.')
+    expect(prompt).not.toContain('Second conflicting Murph message.')
+    expect(prompt).not.toContain('linq-msg-duplicate-murph-target')
+  })
+
+  it.each([
+    {
+      authorized: false,
+      expectedSends: 1,
+      name: 'a direct iMessage reply',
+      service: 'iMessage' as const,
+      threadIsDirect: true,
+    },
+    {
+      authorized: true,
+      expectedSends: 1,
+      name: 'an SMS group reply',
+      service: 'SMS' as const,
+      threadIsDirect: false,
+    },
+    {
+      authorized: false,
+      expectedSends: 0,
+      name: 'an unauthenticated iMessage group reply',
+      service: 'iMessage' as const,
+      threadIsDirect: false,
+    },
+  ])('does not add participant context for $name', async ({
+    authorized,
+    expectedSends,
+    service,
+    threadIsDirect,
+  }) => {
+    const vault = await createTempVault()
+    const candidate = createLinqGroupCandidate({
+      authorized,
+      inputId: 'ain_77777777777777777777777777777777',
+      messageId: 'linq-msg-scoped-current',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-scoped-target',
+      service,
+      text: 'Not a participant-context route.',
+      threadIsDirect,
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(candidate),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(
+      expectedSends,
+    )
+    if (expectedSends === 1) {
+      expect(readSentPrompt()).not.toContain('Native reply context:')
+    }
+  })
+
+  it('keeps an attested media-only Murph native reply target authoritative', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-attested-media-target',
+        media: [{ filename: 'memo-1.m4a', kind: 'voice_memo' }],
+        message: '',
+        providerMessageEffects: [
+          {
+            message: null,
+            providerMessageId: 'linq-msg-murph-media-target',
+          },
+        ],
+        providerMessageId: 'linq-msg-murph-media-target',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_12121212121212121212121212121212',
+      messageId: 'linq-msg-reply-to-media',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-murph-media-target',
+      text: 'Do another one.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'The sender explicitly replied to an exact prior assistant media delivery',
+    )
+    expect(prompt).not.toContain('cannot be attested as Murph-authored')
+    expect(prompt).not.toContain('Native reply context:')
+    expect(prompt).not.toContain('linq-msg-murph-media-target')
+    expect(prompt).not.toContain('memo-1.m4a')
+  })
+
+  it('quotes the visible transcript when a media-only voice delivery fell back to text', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-attested-voice-fallback-target',
+        media: [{ filename: 'memo-fallback.m4a', kind: 'voice_memo' }],
+        message: '',
+        providerMessageEffects: [
+          {
+            message: 'Visible fallback transcript.',
+            providerMessageId: 'linq-msg-murph-fallback-target',
+          },
+        ],
+        providerMessageId: 'linq-msg-murph-fallback-target',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_13131313131313131313131313131313',
+      messageId: 'linq-msg-reply-to-fallback',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-murph-fallback-target',
+      text: 'That makes sense.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(
+      'The sender explicitly replied to this exact prior assistant message:',
+    )
+    expect(prompt).toContain('Visible fallback transcript.')
+    expect(prompt).not.toContain('prior assistant media delivery')
+    expect(prompt).not.toContain('linq-msg-murph-fallback-target')
+    expect(prompt).not.toContain('memo-fallback.m4a')
+  })
+
+  it.each([
+    {
+      expectedContext: 'The sender explicitly replied to this exact prior assistant message:',
+      expectedMessage: 'Visible fallback transcript.',
+      inputId: 'ain_14141414141414141414141414141414',
+      label: 'primary text bubble',
+      replyToMessageId: 'linq-msg-murph-split-text',
+      unexpectedContext: 'prior assistant media delivery',
+    },
+    {
+      expectedContext: 'The sender explicitly replied to an exact prior assistant media delivery',
+      expectedMessage: null,
+      inputId: 'ain_15151515151515151515151515151515',
+      label: 'native rich-link bubble',
+      replyToMessageId: 'linq-msg-murph-split-link',
+      unexpectedContext: 'this exact prior assistant message:',
+    },
+  ])('uses only the attested effect for a split voice fallback $label', async ({
+    expectedContext,
+    expectedMessage,
+    inputId,
+    replyToMessageId,
+    unexpectedContext,
+  }) => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-attested-split-voice-fallback',
+        media: [{ filename: 'memo-split-fallback.m4a', kind: 'voice_memo' }],
+        message: '',
+        providerMessageEffects: [
+          {
+            message: 'Visible fallback transcript.',
+            providerMessageId: 'linq-msg-murph-split-text',
+          },
+          {
+            message: null,
+            providerMessageId: 'linq-msg-murph-split-link',
+          },
+        ],
+        providerMessageId: 'linq-msg-murph-split-link',
+        providerMessageIds: [
+          'linq-msg-murph-split-text',
+          'linq-msg-murph-split-link',
+        ],
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation',
+        target: 'thread-1',
+      }),
+    ])
+    const reply = createLinqGroupCandidate({
+      inputId,
+      messageId: `reply-${replyToMessageId}`,
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId,
+      text: 'Got it.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).toContain(expectedContext)
+    if (expectedMessage) {
+      expect(prompt).toContain(expectedMessage)
+    } else {
+      expect(prompt).not.toContain('Visible fallback transcript.')
+    }
+    expect(prompt).not.toContain(unexpectedContext)
+    expect(prompt).not.toContain('linq-msg-murph-split-text')
+    expect(prompt).not.toContain('linq-msg-murph-split-link')
+    expect(prompt).not.toContain('memo-split-fallback.m4a')
+  })
+
+  it('persists ordinary physical Linq effects before resolving native replies', async () => {
+    const vault = await createTempVault()
+    const requestedMessage = 'Read this\nhttps://example.test/report'
+    const intent = await createAssistantOutboxIntent({
+      actorId: null,
+      channel: 'linq',
+      dedupeToken: 'ordinary-physical-effects',
+      explicitTarget: 'thread-1',
+      identityId: 'identity-1',
+      message: requestedMessage,
+      sessionId: 'session-ordinary-physical-effects',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+      turnId: 'turn-ordinary-physical-effects',
+      vault,
+    })
+    let requestCount = 0
+    const sendLinq = vi.fn(async (request) => await sendLinqMessage(request, {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation: vi.fn(async () => {
+        requestCount += 1
+        return new Response(JSON.stringify({
+          chat_id: 'thread-1',
+          message: {
+            id: requestCount === 1
+              ? 'linq-msg-ordinary-text'
+              : 'linq-msg-ordinary-link',
+          },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    }))
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-07T21:09:00.000Z'),
+      vault,
+    })
+    expect(requestCount).toBe(2)
+    expect(dispatched.intent.status).toBe('sent')
+    const persisted = await readAssistantOutboxIntent(vault, intent.intentId)
+    if (!persisted) {
+      throw new Error('expected persisted ordinary Linq delivery')
+    }
+    expect(persisted.delivery).toMatchObject({
+      providerMessageEffects: [
+        {
+          message: 'Read this',
+          providerMessageId: 'linq-msg-ordinary-text',
+        },
+        {
+          message: null,
+          providerMessageId: 'linq-msg-ordinary-link',
+        },
+      ],
+      providerMessageIds: [
+        'linq-msg-ordinary-text',
+        'linq-msg-ordinary-link',
+      ],
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([persisted])
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(createLinqGroupCandidate({
+        inputId: 'ain_16161616161616161616161616161616',
+        messageId: 'linq-msg-reply-to-ordinary-link',
+        occurredAt: '2026-08-07T21:10:00.000Z',
+        replyToMessageId: 'linq-msg-ordinary-link',
+        text: 'What about this link?',
+      })),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const linkPrompt = readSentPrompt()
+    expect(linkPrompt).toContain(
+      'The sender explicitly replied to an exact prior assistant media delivery',
+    )
+    expect(linkPrompt).not.toContain('Read this')
+    expect(linkPrompt).not.toContain('https://example.test/report')
+    expect(linkPrompt).not.toContain('linq-msg-ordinary-text')
+    expect(linkPrompt).not.toContain('linq-msg-ordinary-link')
+  })
+
+  it('preserves the explicit-reply boundary for private provider placeholders', async () => {
+    const vault = await createTempVault()
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      createOutboxMessage({
+        channel: 'linq',
+        intentId: 'intent-unrelated-cross-session',
+        message: 'unrelated cross-session context',
+        providerMessageId: 'linq-msg-unrelated',
+        sentAt: '2026-08-07T21:09:00.000Z',
+        sessionId: 'session-automation',
+        target: 'thread-1',
+      }),
+    ])
+    const placeholder = 'linq:hbidx:linq.message:v1:opaque'
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_88888888888888888888888888888888',
+      messageId: 'linq-msg-placeholder-reply',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: placeholder,
+      text: 'A reply with a private target placeholder.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const sendInput = readSentInput()
+    expect(sendInput.turnContext ?? null).toBeNull()
+    expect(sendInput.prompt).not.toContain(placeholder)
+    expect(sendInput.prompt).toContain('Native reply context:')
+    expect(sendInput.prompt).toContain(
+      'cannot be attested as Murph-authored or linked to an earlier accepted input',
+    )
+    expect(replyEventPathMocks.listAssistantOutboxIntents).not.toHaveBeenCalled()
+  })
+
+  it('does not invent participant context for a malformed self-target reply edge', async () => {
+    const vault = await createTempVault()
+    const reply = createLinqGroupCandidate({
+      inputId: 'ain_99999999999999999999999999999999',
+      messageId: 'linq-msg-self-target',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      replyToMessageId: 'linq-msg-self-target',
+      text: 'Malformed provider edge.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(reply),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const prompt = readSentPrompt()
+    expect(prompt).not.toContain('Native reply context:')
+    expect(prompt).not.toContain('linq-msg-self-target')
+  })
+
+  it('links a late live-turn native reply to an input accepted earlier in the turn', async () => {
+    const vault = await createTempVault()
+    const initial = createLinqGroupCandidate({
+      inputId: 'ain_00000000000000000000000000000001',
+      messageId: 'linq-msg-live-initial',
+      occurredAt: '2026-08-07T21:10:00.000Z',
+      text: 'Initial participant message.',
+    })
+    const lateReply = createLinqGroupCandidate({
+      inputId: 'ain_00000000000000000000000000000002',
+      messageId: 'linq-msg-live-reply',
+      occurredAt: '2026-08-07T21:10:01.000Z',
+      replyToMessageId: 'linq-msg-live-initial',
+      text: 'Late reply to the initial participant.',
+    })
+    const inputSource = {
+      checkpointAcceptedInput: vi.fn(async () => undefined),
+      listInputCandidatesByIds: vi.fn(async () => ({
+        inputs: [lateReply],
+        nextCursor: lateReply.event.cursor,
+      })),
+      listNewConversationInputs: vi.fn(async () => ({
+        inputs: [],
+        nextCursor: null,
+      })),
+      refresh: vi.fn(async () => ({
+        progressed: false,
+        reason: 'no_new_input' as const,
+      })),
+    }
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContext(initial),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      inputSource,
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault,
+    })
+
+    const admit = readSentInput().activeTurnInput
+    expect(admit).toBeTypeOf('function')
+    if (!admit) {
+      throw new Error('expected an active-turn input admission hook')
+    }
+    const admitted = await admit({
+      availableInputIds: [lateReply.event.inputId],
+      sessionId: 'session-live-turn',
+      turnId: 'turn-live',
+      vault,
+    })
+    expect(admitted.kind).toBe('accepted')
+    if (admitted.kind !== 'accepted') {
+      throw new Error('expected the late group input to be accepted')
+    }
+    expect(admitted.prompt).toContain(
+      `native reply to Message ref ${initial.event.inputId}, an earlier accepted non-Murph group message`,
+    )
+    expect(admitted.prompt).not.toContain(
+      'cannot be attested as Murph-authored or linked',
+    )
+    expect(admitted.prompt).not.toContain('linq-msg-live-initial')
+  })
+
   it('admits trusted Linq corrections into a live turn while deferring ordinary native replies', async () => {
     const vault = await createTempVault()
     const initial = createAssistantInputCandidate({
@@ -2402,7 +3197,16 @@ describe('assistant auto-reply event-first path', () => {
       intentId: 'intent-history-reader',
       updatedAt: '2026-04-08T00:06:00.000Z',
     })]
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue(outboxIntents)
+    replyEventPathMocks.listAssistantOutboxIntents.mockImplementationOnce(async (
+      _vault: string,
+      onScan?: (metrics: { bytesRead: number; filesRead: number }) => void,
+    ) => {
+      onScan?.({
+        bytesRead: 8_192,
+        filesRead: 10,
+      })
+      return outboxIntents
+    })
     replyEventPathMocks.listAssistantTurnReceipts.mockImplementationOnce(async (
       _vault: string,
       _limit: number,
@@ -2435,7 +3239,9 @@ describe('assistant auto-reply event-first path', () => {
     expect(replyEventPathMocks.listAssistantOutboxIntents).toHaveBeenCalledOnce()
     expect(replyEventPathMocks.listAssistantTurnReceipts).toHaveBeenCalledOnce()
     expect(reader.readMetrics()).toEqual({
+      outboxScanBytesRead: 8_192,
       outboxScanElapsedMs: expect.any(Number),
+      outboxScanFilesRead: 10,
       outboxScanPerformed: true,
       receiptScanBytesRead: 4_096,
       receiptScanElapsedMs: 19,
@@ -2623,17 +3429,82 @@ async function createTempVault(): Promise<string> {
 }
 
 function createReplyContext(candidate: AssistantInputCandidate) {
-  const context = createAssistantAutoReplyGroupContext([
-    {
+  return createReplyContextFromCandidates([candidate])
+}
+
+function createReplyContextFromCandidates(
+  candidates: readonly AssistantInputCandidate[],
+) {
+  const context = createAssistantAutoReplyGroupContext(
+    candidates.map((candidate) => ({
       inputCandidate: candidate,
       summary: assistantAutomationInputSummaryFromCandidate(candidate),
       telegramMetadata: null,
-    },
-  ])
+    })),
+  )
   if (!context) {
     throw new Error('expected auto-reply group context')
   }
   return context
+}
+
+function createLinqGroupCandidate(input: {
+  authorized?: boolean
+  editedSourceInputId?: string
+  editedTextPartIndex?: number
+  inputId: string
+  messageId: string
+  occurredAt: string
+  replyToMessageId?: string | null
+  service?: 'iMessage' | 'SMS'
+  text: string
+  threadIsDirect?: boolean
+}): AssistantInputCandidate {
+  return createAssistantInputCandidate({
+    inputId: input.inputId,
+    occurredAt: input.occurredAt,
+    optionalInboxCaptureId: null,
+    replyTarget: {
+      channel: 'linq',
+      messageId: input.messageId,
+      threadId: 'thread-1',
+    },
+    source: 'linq',
+    sourceMetadata: {
+      ...(input.editedSourceInputId === undefined
+        ? {}
+        : { editedSourceInputId: input.editedSourceInputId }),
+      ...(input.editedTextPartIndex === undefined
+        ? {}
+        : { editedTextPartIndex: input.editedTextPartIndex }),
+      externalThreadRouteAuthorityPresent: input.authorized ?? true,
+      kind: 'linq',
+      partCount: 1,
+      reactionEligible: true,
+      replyToMessageId: input.replyToMessageId ?? null,
+      service: input.service ?? 'iMessage',
+    },
+    text: input.text,
+    threadIsDirect: input.threadIsDirect ?? false,
+  })
+}
+
+function readSentInput() {
+  expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
+  const sendInput =
+    replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+  if (!sendInput) {
+    throw new Error('expected one assistant send input')
+  }
+  return sendInput
+}
+
+function readSentPrompt(): string {
+  const prompt = readSentInput().prompt
+  if (typeof prompt !== 'string') {
+    throw new Error('expected assistant send prompt text')
+  }
+  return prompt
 }
 
 function createAssistantInputCandidate(input: {
@@ -2739,7 +3610,12 @@ function createOutboxMessage(input: {
   channel?: string
   identityId?: string | null
   intentId: string
+  media?: readonly { filename: string; kind: string }[]
   message: string
+  providerMessageEffects?: readonly {
+    message: string | null
+    providerMessageId: string
+  }[]
   providerMessageId?: string | null
   providerMessageIds?: string[]
   providerThreadId?: string | null
@@ -2767,6 +3643,9 @@ function createOutboxMessage(input: {
             idempotencyKey: null,
             messageLength: input.message.length,
             providerMessageId: input.providerMessageId ?? null,
+            ...(input.providerMessageEffects
+              ? { providerMessageEffects: input.providerMessageEffects }
+              : {}),
             ...(input.providerMessageIds
               ? { providerMessageIds: input.providerMessageIds }
               : {}),
@@ -2778,6 +3657,7 @@ function createOutboxMessage(input: {
         : null,
     identityId: input.identityId === undefined ? 'identity-1' : input.identityId,
     intentId: input.intentId,
+    ...(input.media === undefined ? {} : { media: input.media }),
     message: input.message,
     operation: null,
     sentAt: status === 'sent' ? input.sentAt : null,

@@ -36,6 +36,10 @@ import {
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
 import { logHostedStripeFailure } from "./stripe-error-log";
+import {
+  cancelHostedUsageCreditDirectPayment,
+  canCancelHostedUsageCreditDirectPayment,
+} from "./usage-credit-saved-card-payment";
 import { getPrisma } from "../prisma";
 
 export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
@@ -69,7 +73,39 @@ export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
       continue;
     }
     if (purchase.status === HostedUsageCreditPurchaseStatus.payment_pending) {
-      throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      if (!canCancelHostedUsageCreditDirectPayment(purchase)) {
+        throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      }
+      const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+      if (stripeLiveMode !== purchase.stripeLiveMode) {
+        throw hostedOnboardingError({
+          code: "HOSTED_USAGE_CREDIT_STRIPE_MODE_MISMATCH",
+          httpStatus: 500,
+          message: "Usage-credit checkout is temporarily unavailable.",
+        });
+      }
+      const reconciledDirectPayment =
+        await cancelHostedUsageCreditDirectPayment({
+          ...(purchase.beneficiaryMemberId !== purchase.payerMemberId
+            ? { groupBeneficiaryMemberId: purchase.beneficiaryMemberId }
+            : {}),
+          now,
+          prisma,
+          purchase,
+          stripe,
+        });
+      if (isHostedUsageCreditPurchaseSafeForAccountDeletion(
+        reconciledDirectPayment,
+      )) {
+        continue;
+      }
+      if (
+        reconciledDirectPayment.status ===
+        HostedUsageCreditPurchaseStatus.payment_pending
+      ) {
+        throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      }
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
     }
 
     const resolution = await resolveHostedUsageCreditStripeSessionForAccountDeletion({
@@ -295,7 +331,7 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
   while (true) {
     let page: Stripe.ApiList<Stripe.Checkout.Session>;
     try {
-      page = await input.stripe.checkout.sessions.list({
+      const listParams: Stripe.Checkout.SessionListParams = {
         created: {
           gte: Math.max(
             0,
@@ -305,8 +341,11 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
         },
         customer: customerId,
         limit: 100,
-        ...(startingAfter ? { starting_after: startingAfter } : {}),
-      });
+      };
+      if (startingAfter) {
+        listParams.starting_after = startingAfter;
+      }
+      page = await input.stripe.checkout.sessions.list(listParams);
     } catch (error) {
       throw buildHostedUsageCreditStripeUnavailableError(
         error,

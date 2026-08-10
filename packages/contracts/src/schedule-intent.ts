@@ -1,4 +1,4 @@
-import * as z from "zod";
+import * as z from "./zod-runtime.ts";
 
 import { isValidIanaTimeZone } from "./time.ts";
 

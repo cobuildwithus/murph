@@ -408,6 +408,7 @@ import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
 } from "@/src/lib/device-sync/connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
+import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { getPrisma } from "@/src/lib/prisma";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
@@ -692,6 +693,39 @@ describe("hosted device-sync wakes", () => {
       scope: "read:sleep",
       state: "xyz",
     }));
+  });
+
+  it("opens a domain-root unwrap scope around webhook delivery and closes it on failure", async () => {
+    const observedCacheDuringDelegation: unknown[] = [];
+    const delegationFailure = new Error("webhook delegation sentinel");
+    const handleWebhook = vi.fn(async () => {
+      // The webhook owner must establish the scope before delegating: without
+      // it every secure-box field repeats its envelope read and KMS unwrap.
+      observedCacheDuringDelegation.push(getHostedDomainRootUnwrapCache());
+      throw delegationFailure;
+    });
+    mocks.createDeviceSyncPublicIngress.mockReturnValueOnce({
+      describeProviders: vi.fn(() => []),
+      handleWebhook,
+    });
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/junction", {
+        body: JSON.stringify({ event_type: "daily.data.steps.created" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      }),
+    );
+
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
+
+    await expect(ingress.handleWebhook("junction")).rejects.toBe(delegationFailure);
+
+    expect(handleWebhook).toHaveBeenCalledOnce();
+    expect(observedCacheDuringDelegation).toHaveLength(1);
+    expect(observedCacheDuringDelegation[0]).toBeInstanceOf(Map);
+    // The scope is request-bounded: a rejection must not leak cached root keys
+    // past the request that unwrapped them.
+    expect(getHostedDomainRootUnwrapCache()).toBeUndefined();
   });
 
   it("uses explicit companion connect intent as the only lifecycle-changing SDK path", async () => {
@@ -1108,6 +1142,13 @@ describe("hosted device-sync wakes", () => {
       expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
         mailboxItemId: "mailbox_123",
       });
+      // Generic wake persistence has no provider redelivery loop, so it must
+      // not opt into the webhook-only member-row lock bound.
+      expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+        "user-123",
+        "dsc_123",
+        expect.any(Function),
+      );
       expect(warn).toHaveBeenCalledWith(
         "Hosted device-sync wake Temporal signal failed after mailbox append.",
         expect.objectContaining({
@@ -1406,6 +1447,8 @@ describe("hosted device-sync wakes", () => {
       connection.id,
       mocks.prismaTx,
     );
+    // Companion ingestion has no provider redelivery loop, so it must not opt
+    // into the webhook-only member-row lock bound (exact three-argument call).
     expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
       "user-123",
       connection.id,
@@ -3282,6 +3325,9 @@ describe("hosted device-sync wakes", () => {
 
     await controlPlane.handleOAuthCallback("oura", { expectedOwnerId: "user-123" });
 
+    // Connection establishment must keep the full transaction budget: a
+    // bounded member-row wait here would destroy a successful OAuth journey
+    // (exact three-argument call proves no lock-timeout option is passed).
     expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
       "user-123",
       "dsc_123",
@@ -3858,10 +3904,13 @@ describe("hosted device-sync wakes", () => {
       accepted: true,
     });
 
+    // Webhook acceptance is the only admission caller that bounds the
+    // member-row lock wait; its failures are absorbed by provider redelivery.
     expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
       "user-123",
       "dsc_123",
       expect.any(Function),
+      { memberRowLockTimeoutMs: 5_000 },
     );
     expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
       "user-123",
@@ -5192,6 +5241,7 @@ describe("hosted device-sync wakes", () => {
       "user-123",
       "dsc_123",
       expect.any(Function),
+      { memberRowLockTimeoutMs: 5_000 },
     );
   });
 

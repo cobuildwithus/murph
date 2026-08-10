@@ -24,6 +24,7 @@ import {
 import {
   addUtcDays,
   buildHostedGrowthMessageSeries,
+  buildHostedGrowthMonthlyRevenueSeries,
   buildHostedGrowthTrialStartAttribution,
   buildTrialCohortRows,
   calculateHostedGrowthCurrentMetrics,
@@ -78,6 +79,9 @@ const mocks = vi.hoisted(() => ({
   },
   hostedMemberBillingRef: {
     count: vi.fn(),
+    findMany: vi.fn(),
+  },
+  hostedUsageCreditPurchase: {
     findMany: vi.fn(),
   },
   requireActiveHostedAppSession: vi.fn(),
@@ -135,6 +139,7 @@ const prisma = {
   hostedMemberRouting: mocks.hostedMemberRouting,
   hostedMember: mocks.hostedMember,
   hostedMemberBillingRef: mocks.hostedMemberBillingRef,
+  hostedUsageCreditPurchase: mocks.hostedUsageCreditPurchase,
 };
 
 const zeroStatusCounts = {
@@ -175,6 +180,8 @@ describe("hosted ops growth metrics", () => {
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValue({
       trackedFulfilledUsageTopUps: 0,
     });
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValue([]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValue([]);
     mocks.hostedGrowthDailySnapshot.aggregate.mockResolvedValue({
       _count: {
         inboundMessagesPriorDay: 0,
@@ -211,7 +218,7 @@ describe("hosted ops growth metrics", () => {
       payingFamilyGroups: [
         {
           billingRef: {
-            billedSeatCount: 3,
+            billedSeatCount: 4,
             currentBillingPhase: "paid",
           },
           id: "group_family",
@@ -222,6 +229,7 @@ describe("hosted ops growth metrics", () => {
           planCapacities: [
             { billedQuantity: 2, planCode: "pulse" },
             { billedQuantity: 1, planCode: "edge" },
+            { billedQuantity: 1, planCode: "max" },
           ],
         },
       ],
@@ -243,25 +251,35 @@ describe("hosted ops growth metrics", () => {
         {
           billingRef: {
             currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_max_monthly",
+          },
+          id: "member_max",
+        },
+        {
+          billingRef: {
+            currentBillingPhase: "paid",
             currentBillingPlanCode: "retired_plan",
           },
           id: "member_unknown",
         },
       ],
       statusCounts: zeroStatusCounts,
-      totalMembers: 4,
+      totalMembers: 5,
       trialCandidates: [],
       windowEnd: new Date("2026-07-06T12:00:00.000Z"),
     });
 
     expect(metrics.pulsePaidIndividuals).toBe(1);
     expect(metrics.edgePaidIndividuals).toBe(1);
-    expect(metrics.payingIndividuals).toBe(3);
+    expect(metrics.maxPaidIndividuals).toBe(1);
+    expect(metrics.maxMrrUsdCents).toBe(5_000);
+    expect(metrics.payingIndividuals).toBe(4);
     expect(metrics.payingFamilyGroups).toBe(1);
-    expect(metrics.payingFamilySeats).toBe(3);
-    expect(metrics.coveredMembers).toBe(4);
-    expect(metrics.familyMrrUsdCents).toBe(2 * 700 + 1_900);
-    expect(metrics.mrrUsdCents).toBe(800 + 2_000 + 2 * 700 + 1_900);
+    expect(metrics.payingFamilySeats).toBe(4);
+    expect(metrics.coveredMembers).toBe(5);
+    expect(metrics.familyMrrUsdCents).toBe(2 * 700 + 1_900 + 4_900);
+    expect(metrics.mrrUsdCents)
+      .toBe(800 + 2_000 + 5_000 + 2 * 700 + 1_900 + 4_900);
     expect(metrics.unpricedPaidMembers).toBe(1);
   });
 
@@ -624,9 +642,12 @@ describe("hosted ops growth metrics", () => {
     queueCurrentMetricMocks();
     queueCurrentMetricMocks();
     mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce(activeUserRows(6))
       .mockResolvedValueOnce(activeUserRows(3))
-      .mockResolvedValueOnce(activeUserRows(9));
+      .mockResolvedValueOnce(activeUserRows(9))
+      .mockResolvedValueOnce(activeUserRows(4));
     mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
       trackedFulfilledUsageTopUps: 12,
     });
@@ -646,7 +667,10 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toContain("Total messages sent");
     expect(markup).toContain("Messages sent per day");
     expect(markup).toMatch(
-      /Weekly active users<\/div><div[^>]*>6 WAU<\/div><div[^>]*>9 MAU across personal \+ group chats<\/div>/u,
+      /Messaged Murph today<\/div><div[^>]*>4<\/div>/u,
+    );
+    expect(markup).toMatch(
+      /Messaged Murph · last 7 days<\/div><div[^>]*>6<\/div><div[^>]*>9 MAU across personal \+ group chats<\/div>/u,
     );
     expect(markup).toMatch(
       /Tracked fulfilled top-ups<\/span><span[^>]*>12<\/span>/u,
@@ -771,7 +795,7 @@ describe("hosted ops growth metrics", () => {
     expect(calculatePercentChange(6, 3)).toBe(100);
   });
 
-  it("preserves the 30-day message spine, known zeroes, and unavailable gaps", () => {
+  it("preserves one 30-day snapshot spine with activity zeroes and unavailable gaps", () => {
     const points = buildHostedGrowthMessageSeries({
       messagesBeforeSeries: 5_000,
       snapshots: [
@@ -782,11 +806,15 @@ describe("hosted ops growth metrics", () => {
         },
         {
           ...snapshotRow("2026-07-10", 2_900),
+          activeUsersPriorDay: 4,
+          activeUsersTrailing7Days: 18,
           inboundMessagesPriorDay: 42,
           outboundMessagesPriorDay: 57,
         },
         {
           ...snapshotRow("2026-07-11", 2_900),
+          activeUsersPriorDay: 0,
+          activeUsersTrailing7Days: 15,
           inboundMessagesPriorDay: 0,
           outboundMessagesPriorDay: 0,
         },
@@ -807,31 +835,43 @@ describe("hosted ops growth metrics", () => {
       ),
     );
     expect(points[0]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-01",
       messagesPerDay: null,
       totalMessages: null,
     });
     expect(points[6]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-07",
       messagesPerDay: null,
       totalMessages: null,
     });
     expect(points[8]).toEqual({
+      activeUsersPerDay: 4,
+      activeUsersTrailing7Days: 18,
       date: "2026-07-09",
       messagesPerDay: 99,
       totalMessages: 5_099,
     });
     expect(points[9]).toEqual({
+      activeUsersPerDay: 0,
+      activeUsersTrailing7Days: 15,
       date: "2026-07-10",
       messagesPerDay: 0,
       totalMessages: 5_099,
     });
     expect(points[10]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-11",
       messagesPerDay: null,
       totalMessages: null,
     });
     expect(points[11]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-12",
       messagesPerDay: 114,
       totalMessages: null,
@@ -880,11 +920,15 @@ describe("hosted ops growth metrics", () => {
 
     expect(dashboard.messageSeries).toHaveLength(30);
     expect(dashboard.messageSeries[0]).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-06-06",
       messagesPerDay: 0,
       totalMessages: HOSTED_MESSAGE_VOLUME_BASE + 500,
     });
     expect(dashboard.messageSeries.at(-1)).toEqual({
+      activeUsersPerDay: null,
+      activeUsersTrailing7Days: null,
       date: "2026-07-05",
       messagesPerDay: 99,
       totalMessages: HOSTED_MESSAGE_VOLUME_BASE + 599,
@@ -925,8 +969,17 @@ describe("hosted ops growth metrics", () => {
         { userId: "member_direct_only" },
         { userId: "member_previous" },
         { userId: "member_monthly" },
+      ])
+      .mockResolvedValueOnce([
+        { userId: "member_direct" },
+        { userId: "member_today" },
       ]);
     mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-06T08:00:00.000Z"),
+      }),
       buildLinqGroupMailboxRow({
         contact: registeredPhone,
         containerMemberId: "thread_container_one",
@@ -993,6 +1046,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 2,
+      todayComplete: true,
       trailing30Days: 6,
       trailing30DaysComplete: true,
       trailing7Days: 4,
@@ -1019,7 +1074,7 @@ describe("hosted ops growth metrics", () => {
           hostedGroupRuntime: null,
           threadContainer: null,
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-29T12:00:00.000Z"),
           lt: new Date("2026-07-06T12:00:00.000Z"),
         },
@@ -1033,7 +1088,7 @@ describe("hosted ops growth metrics", () => {
           hostedGroupRuntime: null,
           threadContainer: null,
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-22T12:00:00.000Z"),
           lt: new Date("2026-06-29T12:00:00.000Z"),
         },
@@ -1047,7 +1102,7 @@ describe("hosted ops growth metrics", () => {
           hostedGroupRuntime: null,
           threadContainer: null,
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-06T12:00:00.000Z"),
           lt: new Date("2026-07-06T12:00:00.000Z"),
         },
@@ -1061,13 +1116,96 @@ describe("hosted ops growth metrics", () => {
             isNot: null,
           },
         },
-        occurredAt: {
+        createdAt: {
           gte: new Date("2026-06-06T12:00:00.000Z"),
           lt: new Date("2026-07-06T12:00:00.000Z"),
         },
       },
     });
-    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(6);
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[3]?.[0]).toMatchObject({
+      where: {
+        createdAt: {
+          gte: new Date("2026-07-06T00:00:00.000Z"),
+          lt: now,
+        },
+      },
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledTimes(7);
+  });
+
+  it("assigns late provider events to the durable receipt window", async () => {
+    const now = new Date("2026-07-06T00:20:00.000Z");
+    const providerOccurredAt = new Date("2026-07-05T23:59:00.000Z");
+    const mailboxCreatedAt = new Date("2026-07-06T00:15:00.000Z");
+    const groupPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_direct_late" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ userId: "member_direct_late" }])
+      .mockResolvedValueOnce([{ userId: "member_direct_late" }]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: groupPhone,
+        containerMemberId: "thread_container_late",
+        createdAt: mailboxCreatedAt,
+        occurredAt: providerOccurredAt,
+      }),
+    ]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce([{
+      memberId: "member_group_late",
+      phoneLookupKey: groupPhone.lookupKey,
+    }]);
+    mocks.hostedGrowthAggregate.findUniqueOrThrow.mockResolvedValueOnce({
+      trackedFulfilledUsageTopUps: 0,
+    });
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.activeUsers).toEqual({
+      today: 2,
+      todayComplete: true,
+      trailing30Days: 2,
+      trailing30DaysComplete: true,
+      trailing7Days: 2,
+      trailing7DaysComplete: true,
+      wowComparisonComplete: true,
+      wowPercent: null,
+    });
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[3]?.[0]).toMatchObject({
+      where: {
+        createdAt: {
+          gte: new Date("2026-07-06T00:00:00.000Z"),
+          lt: now,
+        },
+      },
+    });
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
+      orderBy: {
+        createdAt: "asc",
+      },
+      select: {
+        createdAt: true,
+        occurredAt: true,
+      },
+      where: {
+        createdAt: {
+          gte: new Date("2026-06-06T00:20:00.000Z"),
+          lt: now,
+        },
+      },
+    });
+    expect(mocks.decodeHostedMailboxStoredPayload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurredAt: providerOccurredAt.toISOString(),
+      }),
+    );
   });
 
   it("marks MAU incomplete without discarding an exact weekly comparison", async () => {
@@ -1108,6 +1246,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 4,
       trailing30DaysComplete: false,
       trailing7Days: 2,
@@ -1154,6 +1294,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 2,
       trailing30DaysComplete: false,
       trailing7Days: 1,
@@ -1195,6 +1337,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 2,
       trailing30DaysComplete: false,
       trailing7Days: 1,
@@ -1234,7 +1378,7 @@ describe("hosted ops growth metrics", () => {
     );
   });
 
-  it("keeps admission-time group members stable when provider identity is missing or reassigned", async () => {
+  it("keeps a shared-group sender countable from retained admission-time identity", async () => {
     const now = new Date("2026-07-06T12:00:00.000Z");
     const registeredPhone = requireLinqContact("phone", "+15550000001");
     queueCurrentMetricMocks();
@@ -1280,6 +1424,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 3,
       trailing30DaysComplete: true,
       trailing7Days: 3,
@@ -1327,6 +1473,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 1,
       trailing30DaysComplete: true,
       trailing7Days: 1,
@@ -1382,6 +1530,8 @@ describe("hosted ops growth metrics", () => {
     const dashboard = await readHostedGrowthDashboard(now);
 
     expect(dashboard.activeUsers).toEqual({
+      today: 0,
+      todayComplete: true,
       trailing30Days: 1,
       trailing30DaysComplete: true,
       trailing7Days: 1,
@@ -1540,6 +1690,8 @@ describe("hosted ops growth metrics", () => {
       const dashboard = await readHostedGrowthDashboard(now);
 
       expect(dashboard.activeUsers).toEqual({
+        today: 0,
+        todayComplete: true,
         trailing30Days: 21,
         trailing30DaysComplete: true,
         trailing7Days: 7,
@@ -1549,7 +1701,7 @@ describe("hosted ops growth metrics", () => {
       });
       expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toMatchObject({
         where: {
-          occurredAt: {
+          createdAt: {
             gte: addUtcDays(now, -7),
             lt: now,
           },
@@ -1557,7 +1709,7 @@ describe("hosted ops growth metrics", () => {
       });
       expect(mocks.hostedMailboxItem.groupBy.mock.calls[1]?.[0]).toMatchObject({
         where: {
-          occurredAt: {
+          createdAt: {
             gte: addUtcDays(now, -14),
             lt: addUtcDays(now, -7),
           },
@@ -1565,7 +1717,7 @@ describe("hosted ops growth metrics", () => {
       });
       expect(mocks.hostedMailboxItem.groupBy.mock.calls[2]?.[0]).toMatchObject({
         where: {
-          occurredAt: {
+          createdAt: {
             gte: addUtcDays(now, -30),
             lt: now,
           },
@@ -1577,6 +1729,8 @@ describe("hosted ops growth metrics", () => {
   it("leads the scorecard with weekly revenue growth and keeps usage context honest", () => {
     const scorecardProps = {
       activeUsers: {
+        today: 9,
+        todayComplete: true,
         trailing30Days: 61,
         trailing30DaysComplete: true,
         trailing7Days: 24,
@@ -1605,11 +1759,16 @@ describe("hosted ops growth metrics", () => {
     expect(markup).toContain("+9.9%");
     expect(markup).toMatch(/text-red-700[^>]*>\+9\.9%/u);
     expect(markup).toContain("Below 10% target");
-    expect(markup).toContain("24 WAU");
+    expect(markup).toContain("Messaged Murph today");
+    expect(markup).toContain(
+      "Unique senders whose messages Murph received since 00:00 UTC",
+    );
+    expect(markup).toContain("Messaged Murph · last 7 days");
+    expect(markup).toContain(">24<");
     expect(markup).toContain("61 MAU across personal + group chats");
     expect(markup).toContain("+9.1% WAU versus the prior seven days");
     expect(markup).toContain(
-      "Each retained distinct sender counts once across personal + group chats",
+      "Each retained distinct sender counts once when Murph receives a message in the UTC window, across personal + group chats",
     );
     expect(markup).toContain("8 of 20 mature trials");
 
@@ -1659,6 +1818,8 @@ describe("hosted ops growth metrics", () => {
       createElement(GrowthScorecard, {
         ...scorecardProps,
         activeUsers: {
+          today: 9,
+          todayComplete: true,
           trailing30Days: 48,
           trailing30DaysComplete: false,
           trailing7Days: 24,
@@ -1678,7 +1839,7 @@ describe("hosted ops growth metrics", () => {
     expect(partialMonthlyHistoryMarkup).toContain(
       "MAU is a lower bound because older group sender evidence was intentionally retired",
     );
-    expect(partialMonthlyHistoryMarkup).toContain(">24 WAU<");
+    expect(partialMonthlyHistoryMarkup).toContain(">24<");
     expect(partialMonthlyHistoryMarkup).not.toContain(
       "Prior-week comparison unavailable",
     );
@@ -1687,6 +1848,8 @@ describe("hosted ops growth metrics", () => {
       createElement(GrowthScorecard, {
         ...scorecardProps,
         activeUsers: {
+          today: 7,
+          todayComplete: false,
           trailing30Days: 48,
           trailing30DaysComplete: false,
           trailing7Days: 21,
@@ -1698,7 +1861,11 @@ describe("hosted ops growth metrics", () => {
       }),
     );
     expect(partialWeeklyHistoryMarkup).toContain(
-      "At least 21 WAU",
+      "At least 21",
+    );
+    expect(partialWeeklyHistoryMarkup).toContain("At least 7");
+    expect(partialWeeklyHistoryMarkup).toContain(
+      "Today is a lower bound because group sender evidence was intentionally retired",
     );
     expect(partialWeeklyHistoryMarkup).toContain(
       "Prior-week comparison unavailable because older group sender evidence was intentionally retired",
@@ -1717,6 +1884,379 @@ describe("hosted ops growth metrics", () => {
     );
 
     expect(selected?.mrrUsdCents).toBe(1_000);
+  });
+
+  it("splits monthly subscriptions from the month's latest snapshot and buckets purchases by paid month", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 6,
+      purchases: [
+        {
+          cashAmountMinor: 1_500,
+          isGroupSponsorship: true,
+          paidAt: new Date("2026-07-31T23:59:59.999Z"),
+        },
+        {
+          cashAmountMinor: 7_500,
+          isGroupSponsorship: false,
+          paidAt: new Date("2026-07-04T10:00:00.000Z"),
+        },
+        {
+          cashAmountMinor: 2_000,
+          isGroupSponsorship: true,
+          paidAt: new Date("2026-08-01T00:00:00.000Z"),
+        },
+        {
+          cashAmountMinor: 3_000,
+          isGroupSponsorship: false,
+          paidAt: new Date("2026-08-05T15:00:00.000Z"),
+        },
+      ],
+      snapshots: [
+        {
+          familyMrrUsdCents: null,
+          individualMrrUsdCents: null,
+          mrrUsdCents: 17_100,
+          snapshotDate: new Date("2026-07-31T00:00:00.000Z"),
+        },
+        {
+          familyMrrUsdCents: 6_100,
+          individualMrrUsdCents: 14_400,
+          mrrUsdCents: 20_500,
+          snapshotDate: new Date("2026-08-07T00:00:00.000Z"),
+        },
+        {
+          familyMrrUsdCents: 5_000,
+          individualMrrUsdCents: 13_000,
+          mrrUsdCents: 18_000,
+          snapshotDate: new Date("2026-08-03T00:00:00.000Z"),
+        },
+      ],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 1_500,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-07",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: 17_100,
+        totalUsdCents: 26_100,
+        usageTopUpsUsdCents: 7_500,
+      },
+      {
+        familySubscriptionsUsdCents: 6_100,
+        groupSponsorshipUsdCents: 2_000,
+        individualSubscriptionsUsdCents: 14_400,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: 25_500,
+        usageTopUpsUsdCents: 3_000,
+      },
+    ]);
+  });
+
+  it("falls back to the unsplit subscription value when a recorded split does not sum to the MRR total", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 1,
+      purchases: [],
+      snapshots: [
+        {
+          familyMrrUsdCents: 6_100,
+          individualMrrUsdCents: 14_400,
+          mrrUsdCents: 21_700,
+          snapshotDate: new Date("2026-08-07T00:00:00.000Z"),
+        },
+      ],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: 21_700,
+        totalUsdCents: 21_700,
+        usageTopUpsUsdCents: 0,
+      },
+    ]);
+  });
+
+  it("withholds the total for months without a subscription snapshot", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 3,
+      purchases: [
+        {
+          cashAmountMinor: 1_000,
+          isGroupSponsorship: false,
+          paidAt: new Date("2026-06-10T00:00:00.000Z"),
+        },
+      ],
+      snapshots: [],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-06",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 1_000,
+      },
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-07",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 0,
+      },
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 0,
+      },
+    ]);
+  });
+
+  it("renders only the window-end month when no revenue evidence exists", () => {
+    const series = buildHostedGrowthMonthlyRevenueSeries({
+      monthCount: 6,
+      purchases: [],
+      snapshots: [],
+      windowEnd: new Date("2026-08-07T12:00:00.000Z"),
+    });
+
+    expect(series).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 0,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: null,
+        usageTopUpsUsdCents: 0,
+      },
+    ]);
+  });
+
+  it("builds the dashboard monthly revenue series from fulfilled live purchases", async () => {
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-07-31", 17_100),
+      {
+        ...snapshotRow("2026-08-07", 20_500),
+        familyMrrUsdCents: 6_100,
+        individualMrrUsdCents: 14_400,
+      },
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        cashAmountMinor: 1_500,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+        paidAt: new Date("2026-07-27T09:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 7_500,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: null,
+        paidAt: new Date("2026-07-04T10:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 2_000,
+        groupSponsorshipAuthorizationId: "auth_recurring",
+        groupSponsorshipMoment: null,
+        paidAt: new Date("2026-08-01T00:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 3_000,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: null,
+        paidAt: new Date("2026-08-05T15:00:00.000Z"),
+      },
+      {
+        cashAmountMinor: 9_900,
+        groupSponsorshipAuthorizationId: null,
+        groupSponsorshipMoment: null,
+        paidAt: null,
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const dashboard = await readHostedGrowthDashboard(now);
+
+    expect(dashboard.monthlyRevenueSeries).toEqual([
+      {
+        familySubscriptionsUsdCents: null,
+        groupSponsorshipUsdCents: 1_500,
+        individualSubscriptionsUsdCents: null,
+        month: "2026-07",
+        monthToDate: false,
+        subscriptionsUnsplitUsdCents: 17_100,
+        totalUsdCents: 26_100,
+        usageTopUpsUsdCents: 7_500,
+      },
+      {
+        familySubscriptionsUsdCents: 6_100,
+        groupSponsorshipUsdCents: 2_000,
+        individualSubscriptionsUsdCents: 14_400,
+        month: "2026-08",
+        monthToDate: true,
+        subscriptionsUnsplitUsdCents: null,
+        totalUsdCents: 25_500,
+        usageTopUpsUsdCents: 3_000,
+      },
+    ]);
+    expect(mocks.hostedUsageCreditPurchase.findMany.mock.calls[0]?.[0]).toEqual({
+      select: {
+        cashAmountMinor: true,
+        groupSponsorshipAuthorizationId: true,
+        groupSponsorshipMoment: {
+          select: {
+            purchaseId: true,
+          },
+        },
+        paidAt: true,
+      },
+      where: {
+        paidAt: {
+          gte: new Date("2026-03-01T00:00:00.000Z"),
+          lte: now,
+        },
+        status: "fulfilled",
+        stripeLiveMode: true,
+      },
+    });
+    expect(mocks.hostedGrowthDailySnapshot.findMany).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.hostedGrowthDailySnapshot.findMany.mock.calls[0]?.[0],
+    ).toMatchObject({
+      where: {
+        snapshotDate: {
+          gte: new Date("2026-03-01T00:00:00.000Z"),
+          lte: new Date("2026-08-07T00:00:00.000Z"),
+        },
+      },
+    });
+  });
+
+  it("moves a one-time group gift to usage top-ups when payer deletion removes its sponsorship moment", async () => {
+    // Payer-only account deletion retains the fulfilled cross-owner purchase
+    // but cascades away its HostedGroupSponsorshipMoment, so the same cash is
+    // classified as a plain top-up on the next read. The card copy discloses
+    // this; the total must not change.
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    const giftRow = {
+      cashAmountMinor: 2_000,
+      groupSponsorshipAuthorizationId: null,
+      paidAt: new Date("2026-08-03T09:00:00.000Z"),
+    };
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-08-07", 2_900),
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        ...giftRow,
+        groupSponsorshipMoment: { purchaseId: "purchase_group_gift" },
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const beforeDeletion = await readHostedGrowthDashboard(now);
+
+    queueCurrentMetricMocks();
+    mocks.hostedMember.findMany.mockResolvedValueOnce([]);
+    mocks.hostedMemberBillingRef.findMany.mockResolvedValueOnce([]);
+    mocks.hostedGrowthDailySnapshot.findMany.mockResolvedValueOnce([
+      snapshotRow("2026-08-07", 2_900),
+    ]);
+    mocks.hostedUsageCreditPurchase.findMany.mockResolvedValueOnce([
+      {
+        ...giftRow,
+        groupSponsorshipMoment: null,
+      },
+    ]);
+    mocks.hostedMemberBillingRef.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+
+    const afterDeletion = await readHostedGrowthDashboard(now);
+
+    const beforePoint = beforeDeletion.monthlyRevenueSeries.at(-1);
+    const afterPoint = afterDeletion.monthlyRevenueSeries.at(-1);
+    expect(beforePoint).toMatchObject({
+      groupSponsorshipUsdCents: 2_000,
+      usageTopUpsUsdCents: 0,
+    });
+    expect(afterPoint).toMatchObject({
+      groupSponsorshipUsdCents: 0,
+      usageTopUpsUsdCents: 2_000,
+    });
+    expect(afterPoint?.totalUsdCents).toEqual(beforePoint?.totalUsdCents);
+  });
+
+  it("records the subscription split in the daily snapshot", async () => {
+    const now = new Date("2026-08-07T12:00:00.000Z");
+    mocks.hostedAccountGroup.findMany.mockResolvedValueOnce([
+      {
+        billingRef: {
+          billedSeatCount: 2,
+          currentBillingPhase: "paid",
+        },
+        id: "group_family",
+        memberships: [
+          { memberId: "member_family_owner" },
+          { memberId: "member_family_seat" },
+        ],
+        planCapacities: [{ billedQuantity: 2, planCode: "pulse" }],
+      },
+    ]);
+    queueCurrentMetricMocks();
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-08-07", 4_200),
+    );
+
+    await captureHostedGrowthDailySnapshot(now);
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      familyMrrUsdCents: 1_400,
+      individualMrrUsdCents: 2_800,
+      mrrUsdCents: 4_200,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      familyMrrUsdCents: 1_400,
+      individualMrrUsdCents: 2_800,
+      mrrUsdCents: 4_200,
+    });
   });
 
   it("upserts one daily snapshot per UTC date", async () => {
@@ -1779,6 +2319,158 @@ describe("hosted ops growth metrics", () => {
       inboundMessagesPriorDay: 42,
       outboundMessagesPriorDay: 57,
     });
+  });
+
+  it("records exact prior-day and trailing-seven-day unique senders", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const unregisteredPhone = requireLinqContact("phone", "+15550000002");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_direct" }])
+      .mockResolvedValueOnce([
+        { userId: "member_direct" },
+        { userId: "member_weekly" },
+      ]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+      buildLinqGroupMailboxRow({
+        contact: unregisteredPhone,
+        containerMemberId: "thread_container_two",
+        occurredAt: new Date("2026-07-05T09:00:00.000Z"),
+      }),
+    ]);
+    mocks.hostedMemberIdentity.findMany.mockResolvedValueOnce([{
+      memberId: "member_direct",
+      phoneLookupKey: registeredPhone.lookupKey,
+    }]);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    const capture = await captureHostedGrowthDailySnapshot(now);
+
+    expect(capture.activityAvailable).toBe(true);
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: 2,
+      activeUsersTrailing7Days: 3,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      activeUsersPriorDay: 2,
+      activeUsersTrailing7Days: 3,
+    });
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[0]?.[0]).toMatchObject({
+      where: {
+        createdAt: {
+          gte: new Date("2026-07-05T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
+    });
+    expect(mocks.hostedMailboxItem.groupBy.mock.calls[1]?.[0]).toMatchObject({
+      where: {
+        createdAt: {
+          gte: new Date("2026-06-29T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
+    });
+    expect(mocks.hostedMailboxItem.findMany.mock.calls[0]?.[0]).toMatchObject({
+      orderBy: {
+        createdAt: "asc",
+      },
+      where: {
+        createdAt: {
+          gte: new Date("2026-06-29T00:00:00.000Z"),
+          lt: new Date("2026-07-06T00:00:00.000Z"),
+        },
+      },
+    });
+  });
+
+  it("stores unknown activity when retired group evidence affects a window", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const retiredPhone = requireLinqContact("phone", "+15550000001");
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.groupBy
+      .mockResolvedValueOnce([{ userId: "member_direct" }])
+      .mockResolvedValueOnce([{ userId: "member_direct" }]);
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      retireGroupMailboxRow(buildLinqGroupMailboxRow({
+        contact: retiredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      })),
+    ]);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    const capture = await captureHostedGrowthDailySnapshot(now);
+
+    expect(capture.activityAvailable).toBe(true);
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+    });
+  });
+
+  it("creates unknown activity without overwriting exact activity after attribution failure", async () => {
+    const now = new Date("2026-07-06T12:00:00.000Z");
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+      new Error("unavailable sidecar"),
+    );
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      const capture = await captureHostedGrowthDailySnapshot(now);
+      expect(capture.activityAvailable).toBe(false);
+      expect(errorSpy).toHaveBeenCalledWith(
+        "Hosted growth activity snapshot attribution failed; preserving existing activity aggregates when present.",
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+      inboundMessagesPriorDay: 42,
+      mrrUsdCents: 2_800,
+      outboundMessagesPriorDay: 57,
+    });
+    expect(upsertArg?.update).toMatchObject({
+      inboundMessagesPriorDay: 42,
+      mrrUsdCents: 2_800,
+      outboundMessagesPriorDay: 57,
+    });
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersPriorDay");
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersTrailing7Days");
   });
 
   it("anchors the prior-day message window to the UTC day at exactly midnight", async () => {
@@ -1892,6 +2584,52 @@ describe("hosted ops growth metrics", () => {
         snapshotDate: "2026-07-06T00:00:00.000Z",
       },
     });
+  });
+
+  it("reports activity failure after preserving the legacy cron snapshot", async () => {
+    const registeredPhone = requireLinqContact("phone", "+15550000001");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    queueCurrentMetricMocks();
+    mocks.hostedMailboxItem.findMany.mockResolvedValueOnce([
+      buildLinqGroupMailboxRow({
+        contact: registeredPhone,
+        containerMemberId: "thread_container_one",
+        occurredAt: new Date("2026-07-05T08:00:00.000Z"),
+      }),
+    ]);
+    mocks.decodeHostedMailboxStoredPayload.mockRejectedValueOnce(
+      new Error("unavailable sidecar"),
+    );
+    mocks.hostedMailboxItem.count.mockResolvedValueOnce(42);
+    mocks.hostedLinqDelivery.count.mockResolvedValueOnce(57);
+    mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
+      snapshotRow("2026-07-06", 2_900),
+    );
+
+    try {
+      const response = await growthCronRoute.GET(new Request(
+        "https://join.example.test/api/internal/hosted-growth/snapshot/cron",
+      ));
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toMatchObject({
+        error: {
+          code: "HOSTED_GROWTH_ACTIVITY_UNAVAILABLE",
+        },
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
+    expect(upsertArg?.create).toMatchObject({
+      activeUsersPriorDay: null,
+      activeUsersTrailing7Days: null,
+      inboundMessagesPriorDay: 42,
+      outboundMessagesPriorDay: 57,
+    });
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersPriorDay");
+    expect(upsertArg?.update).not.toHaveProperty("activeUsersTrailing7Days");
   });
 });
 
@@ -2011,6 +2749,7 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 function buildLinqGroupMailboxRow(input: {
   contact: NonNullable<ReturnType<typeof createHostedLinqParticipantContact>>;
   containerMemberId: string;
+  createdAt?: Date;
   from?: string;
   occurredAt: Date;
   senderMemberId?: string;
@@ -2050,6 +2789,7 @@ function buildLinqGroupMailboxRow(input: {
 
   return buildGroupMailboxRow({
     containerMemberId: input.containerMemberId,
+    createdAt: input.createdAt,
     eventId,
     occurredAt: input.occurredAt,
     wake,
@@ -2225,11 +2965,13 @@ function buildEmailGroupMailboxRow(input: {
 
 function buildGroupMailboxRow(input: {
   containerMemberId: string;
+  createdAt?: Date;
   eventId: string;
   occurredAt: Date;
   wake: HostedExecutionConversationMessageWake;
 }): {
   contentRetiredAt: Date | null;
+  createdAt: Date;
   dedupeKey: string;
   id: string;
   kind: string;
@@ -2244,6 +2986,7 @@ function buildGroupMailboxRow(input: {
 } {
   return {
     contentRetiredAt: null,
+    createdAt: input.createdAt ?? input.occurredAt,
     dedupeKey: input.eventId,
     id: `mailbox_${input.eventId}`,
     kind: "conversation.message",
@@ -2272,9 +3015,13 @@ function retireGroupMailboxRow(
 
 function snapshotRow(date: string, mrrUsdCents: number) {
   return {
+    activeUsersPriorDay: null,
+    activeUsersTrailing7Days: null,
     capturedAt: new Date(`${date}T00:05:00.000Z`),
     coveredMembers: 3,
+    familyMrrUsdCents: null,
     inboundMessagesPriorDay: 0,
+    individualMrrUsdCents: null,
     mrrUsdCents,
     outboundMessagesPriorDay: 0,
     payingCustomers: 3,

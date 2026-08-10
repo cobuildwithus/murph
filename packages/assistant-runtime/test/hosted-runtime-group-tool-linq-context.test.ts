@@ -536,6 +536,120 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
+  it("binds personalized contact cards to the exact direct iMessage chat", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    const request = vi.fn().mockResolvedValue({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({ routeAuthority: ROUTE_AUTHORITY }),
+        // A direct home conversation carries no thread-route authority.
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: null,
+          target: "chat_direct_1",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await groupTool.request({
+      action: "share_contact_card",
+      contactCardImageUrl,
+      contactCardShareKey: "input_direct_1",
+    });
+
+    // The chat id, never a fabricated group thread authority.
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      action: "share_contact_card",
+      contactCardImageUrl,
+      contactCardShareKey: "input_direct_1",
+      directLinqChatId: "chat_direct_1",
+    });
+  });
+
+  it("rejects personalized contact cards on direct SMS before Web delivery", async () => {
+    const directAuthority = {
+      ...ROUTE_AUTHORITY,
+      threadId: "chat_direct_sms",
+    };
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: directAuthority,
+          service: "sms",
+          target: "chat_direct_sms",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await expect(groupTool.request({
+      action: "share_contact_card",
+      contactCardImageUrl,
+      contactCardShareKey: "input_direct_sms",
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "sms_attachments_unsupported",
+      },
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("does not choose between two direct iMessage routes for a personalized card", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    const request = vi.fn();
+    const groupTool = createHostedGroupToolWithCurrentTurnContext({
+      groupToolPort: { request },
+      linqDeliveryContexts: [
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000001",
+          routeAuthority: {
+            ...ROUTE_AUTHORITY,
+            threadId: "chat_direct_1",
+          },
+          target: "chat_direct_1",
+          threadIsDirect: true,
+        }),
+        buildLinqDeliveryContext({
+          directRecipientPhoneNumber: "+15550000002",
+          routeAuthority: {
+            ...ROUTE_AUTHORITY,
+            threadId: "chat_direct_2",
+          },
+          target: "chat_direct_2",
+          threadIsDirect: true,
+        }),
+      ],
+    });
+
+    await expect(groupTool.request({
+      action: "share_contact_card",
+      contactCardImageUrl,
+      contactCardShareKey: "input_direct_ambiguous",
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+    });
+
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("fails closed when the turn carries two distinct route-authorized threads", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "share_contact_card",
@@ -1265,4 +1379,89 @@ describe("createHostedGroupToolWithCurrentTurnContext", () => {
     });
   });
 
+  it.each([
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "imessage",
+          threadIsDirect: true,
+        }),
+      ],
+      expected: { status: "ok" },
+      label: "exactly one direct iMessage route",
+    },
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "sms",
+          threadIsDirect: true,
+        }),
+      ],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "sms_attachments_unsupported",
+      },
+      label: "a direct SMS route",
+    },
+    {
+      contexts: [],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+      label: "no direct route",
+    },
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "imessage",
+          target: "chat_direct_1",
+          threadIsDirect: true,
+        }),
+        buildLinqDeliveryContext({
+          routeAuthority: {
+            ...ROUTE_AUTHORITY,
+            threadId: "chat_direct_2",
+          },
+          service: "imessage",
+          target: "chat_direct_2",
+          threadIsDirect: true,
+        }),
+      ],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+      label: "an ambiguous direct route",
+    },
+    {
+      contexts: [
+        buildLinqDeliveryContext({
+          routeAuthority: ROUTE_AUTHORITY,
+          service: "imessage",
+          threadIsDirect: false,
+        }),
+      ],
+      expected: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+      label: "only a group route",
+    },
+  ])(
+    "reports direct-attachment eligibility for $label without a host round trip",
+    ({ contexts, expected }) => {
+      const request = vi.fn();
+      const groupTool = createHostedGroupToolWithCurrentTurnContext({
+        groupToolPort: { request },
+        linqDeliveryContexts: contexts,
+      });
+
+      expect(groupTool.directAttachmentRouteStatus?.()).toEqual(expected);
+      expect(request).not.toHaveBeenCalled();
+    },
+  );
 });

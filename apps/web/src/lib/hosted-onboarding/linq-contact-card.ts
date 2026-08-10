@@ -584,9 +584,9 @@ function foldMurphContactCardVcfLine(line: string): string {
 
 /**
  * Best-effort fetch of a Murph contact-card photo for embedding; any failure
- * returns null so the card ships without a photo instead of failing the
- * share. Defaults to the canonical headshot; pass `imageUrl` to embed a
- * different member-chosen avatar asset.
+ * returns null. Canonical callers may continue without a photo; personalized
+ * callers can require it and fail before send. Defaults to the canonical
+ * headshot; pass `imageUrl` to embed a different member-chosen avatar asset.
  */
 export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
   fetchImpl?: typeof fetch;
@@ -603,7 +603,12 @@ export async function fetchMurphHostedLinqContactCardVcfPhoto(input: {
     const response = await fetchImpl(imageUrl, {
       // Own-asset fetch only; a redirect means the asset boundary was crossed.
       redirect: "error",
-      signal: input.signal ?? AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
+      signal: input.signal
+        ? AbortSignal.any([
+            input.signal,
+            AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
+          ])
+        : AbortSignal.timeout(MURPH_CONTACT_CARD_VCF_PHOTO_FETCH_TIMEOUT_MS),
     });
     if (!response.ok) {
       return null;

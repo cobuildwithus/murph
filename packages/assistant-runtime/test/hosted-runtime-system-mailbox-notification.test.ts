@@ -2393,7 +2393,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("preserves turn-owned preference time instead of later transport order", async () => {
+  it("orders a Web-approved preference wake by its own mailbox sequence", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionMemberPreferencesUpdatedWake({
       causalOrigin: "turn",
@@ -2420,11 +2420,11 @@ describe("hosted system mailbox notification execution context", () => {
       });
       await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves.toMatchObject({
         pending: [{
-          preferenceCausalSeq: "10",
+          preferenceCausalSeq: "12",
         }],
       });
       mocks.executeHostedMailboxEvent.mockImplementationOnce(async (input) => {
-        expect(input.preferenceCausalSeq).toBe("10");
+        expect(input.preferenceCausalSeq).toBe("12");
         return {
           bootstrapResult: null,
           conversationMetrics: null,
@@ -2449,6 +2449,97 @@ describe("hosted system mailbox notification execution context", () => {
         (await readHostedSystemMailboxState(workspace.vaultRoot)).pending,
         [],
       );
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("converges the canonical bank to Web-approved order when source sequences run backward", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const scheduledWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      causalOrigin: "turn",
+      eventId: "member.preferences.updated:scheduled-approved",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:00:00.000Z",
+      preferenceCausalSeq: "21",
+      preferences: { tone: "casual" },
+    });
+    const acceptedWake = buildHostedExecutionMemberPreferencesUpdatedWake({
+      causalOrigin: "turn",
+      eventId: "member.preferences.updated:accepted-approved",
+      memberId: "member_123",
+      occurredAt: "2026-04-27T00:05:00.000Z",
+      preferenceCausalSeq: "20",
+      preferences: { tone: "formal" },
+    });
+
+    try {
+      await mkdir(workspace.vaultRoot, { recursive: true });
+      await writeFile(
+        path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata),
+        "{}",
+        "utf8",
+      );
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          causalSeq: "41",
+          id: "mailbox_item_scheduled_approved",
+          laneSeq: "41",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: scheduledWake,
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedMemberPreferencesItem({
+          causalSeq: "42",
+          id: "mailbox_item_accepted_approved",
+          laneSeq: "42",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake: acceptedWake,
+      });
+      mocks.executeHostedMailboxEvent.mockImplementation(async (input) => {
+        if (input.wake.kind !== "member.preferences.updated") {
+          throw new TypeError("Expected a member preferences wake.");
+        }
+        const { applyHostedMemberPreferences } = await import(
+          "../src/hosted-runtime/context.ts"
+        );
+        await applyHostedMemberPreferences(
+          input.vaultRoot,
+          input.wake,
+          input.preferenceCausalSeq ?? "0",
+          input.preferenceAppliedAt,
+        );
+        return {
+          bootstrapResult: null,
+          conversationMetrics: null,
+          mailboxLane: "member-preferences-updated",
+          nextWakeAt: null,
+          postCheckpointRecord: null,
+          redactedLogEntries: [],
+        };
+      });
+
+      for (let index = 0; index < 2; index += 1) {
+        const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+          allowedRouteActions: ["apply-member-preferences"],
+          executionContext: null,
+          now: () => "2026-04-27T00:06:00.000Z",
+          runtime: createRuntime({}),
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        assert.equal(prepared?.status, "processed");
+      }
+
+      assert.equal(
+        (await readPreferencesDocument(workspace.vaultRoot)).assistant?.tone,
+        "formal",
+      );
+      expect(mocks.executeHostedMailboxEvent.mock.calls.map(
+        (call) => call[0]?.preferenceCausalSeq,
+      )).toEqual(["41", "42"]);
     } finally {
       await workspace.cleanup();
     }

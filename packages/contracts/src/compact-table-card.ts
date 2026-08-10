@@ -1,6 +1,6 @@
-import { z } from "zod";
+import * as z from "./zod-runtime.ts";
 
-import { ID_PREFIXES } from "./constants.ts";
+import { ID_PREFIXES, MURPH_PRODUCT_ORIGIN } from "./constants.ts";
 import { contractIdMaxLength, idPattern } from "./ids.ts";
 import { isStrictIsoDateTime } from "./time.ts";
 
@@ -16,9 +16,9 @@ export const compactTableCardV1Bounds = {
   rows: 8,
 } as const;
 
-const COMPACT_TABLE_APP_CARD_URL_PREFIX =
-  "https://murph.ai/#murph-card=";
-const COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH = 2_048;
+export const IMESSAGE_APP_CARD_URL_PREFIX =
+  `${MURPH_PRODUCT_ORIGIN}/#murph-card=`;
+export const IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048;
 const EVENT_ID_PATTERN = new RegExp(idPattern(ID_PREFIXES.event), "u");
 
 function singleLineText(maxLength: number) {
@@ -120,8 +120,8 @@ export const compactTableResponseCardV1Schema = z
     const encodedLength =
       4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
     if (
-      COMPACT_TABLE_APP_CARD_URL_PREFIX.length + encodedLength >=
-      COMPACT_TABLE_APP_CARD_URL_MAX_LENGTH
+      IMESSAGE_APP_CARD_URL_PREFIX.length + encodedLength >=
+      IMESSAGE_APP_CARD_URL_MAX_LENGTH
     ) {
       context.addIssue({
         code: "custom",

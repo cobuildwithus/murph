@@ -133,9 +133,48 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // tool path without adding a forbidden boot input. After merging the native-
 // memory relay restoration, macOS measured 10,276,559B total on 2026-08-06;
 // retain the established allowance above that combined measurement.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_276_559 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_699_250;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_540_082;
+//
+// Dynamic-tool request parsing and execution are unnecessary before the first
+// Codex tool call. Splitting that runtime from the provider-visible catalog
+// reduced the static closure to 8,423,496B while keeping the full output at
+// 10,298,233B. Ratchet the static baseline to that measured closure; the
+// existing total ceiling already covers the small lazy-chunk boundary cost.
+// The bounded @murphai/contracts/zod-runtime surface keeps Zod's required
+// English error map while removing the 53-module locale catalog and unrelated
+// namespace exports from production workspace imports. A clean macOS assembly
+// measured a 1,729,632B entry, 8,182,922B static closure, and 9,862,735B total
+// on 2026-08-06. Ratchet the static and total baselines to that implementation
+// while retaining the established cross-platform tolerances.
+//
+// Lazy-loading the rare hosted wake handlers then removes their uncommon
+// activation, notification, ask-completion, Environment voice, and Codex-auth
+// paths from the static boot closure. After merging the Zod runtime change and
+// current main, exact macOS assembly measured a 1,640,840B entry, 8,053,604B
+// static closure, and 9,885,077B total on 2026-08-07. Ratchet both startup-path
+// baselines while retaining the reviewed Zod total ceiling.
+//
+// Combining those startup reductions with the dynamic-tool runtime boundary
+// measured a 1,641,254B entry, 7,885,509B static closure, and 9,902,746B total
+// on 2026-08-07. Against the exact merged-main baseline, the boundary removes
+// 168,095B from startup while adding 17,669B of lazy output. Ratchet all three
+// measurements while retaining the established cross-platform tolerances.
+//
+// Replacing the deferred Junction provider's one generated SDK serializer with
+// its five-field local predicate leaves entry and static startup bytes unchanged
+// while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
+// retain that removal without changing the startup tolerances.
+//
+// Adding the personalized generated contact card puts its request contract,
+// exact-shape parser, direct route resolution, and acknowledgement handling in
+// the runner's lazy output. The subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// remain within their existing ceilings and no forbidden subsystem enters the
+// boot graph, so ratchet only the total ceiling and keep both startup baselines
+// and all tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_933_847 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
@@ -158,10 +197,17 @@ const RUNNER_ENTRYPOINT_FORBIDDEN_BOOT_INPUT_MARKERS = [
   "/contracts/dist/examples.js",
   "/query/dist/murph-age.js",
   "/query/dist/browser-replica/murph-age.js",
+  "/assistant-engine/dist/assistant-codex/dynamic-tools.js",
+  "/assistant-runtime/dist/hosted-runtime/events/assistant-notification.js",
+  "/assistant-runtime/dist/hosted-runtime/events/assistant-ask-completion.js",
+  "/assistant-runtime/dist/hosted-runtime/events/environment-voice.js",
+  "/assistant-runtime/dist/hosted-runtime/events/codex-auth.js",
+  "node_modules/zod/v4/locales/",
 ] as const;
 
 const RUNNER_ENTRYPOINT_ALLOWED_BOOT_INPUT_MARKERS = [
   "/clinical-records/dist/retrieval-limits.js",
+  "node_modules/zod/v4/locales/en.js",
 ] as const;
 
 export async function bundleRunnerContainerEntrypoint(

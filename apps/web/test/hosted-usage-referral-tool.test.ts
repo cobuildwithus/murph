@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const ORDINARY_POLICY_VERSION = "hosted-usage-referral-2026-07-v1";
+
 const mocks = vi.hoisted(() => ({
+  hasHostedRuntimeActiveAccess: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
+  readHostedGroupFundingRecoveryStatus: vi.fn(),
   readHostedGroupUsageStatus: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
   resolveHostedMemberRoutingByTelegramUserId: vi.fn(),
@@ -17,7 +21,13 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
   readHostedAiUsageGate: mocks.readHostedAiUsageGate,
 }));
 
+vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
+  hasHostedRuntimeActiveAccess: mocks.hasHostedRuntimeActiveAccess,
+}));
+
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
+  readHostedGroupFundingRecoveryStatus:
+    mocks.readHostedGroupFundingRecoveryStatus,
   readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
 }));
 
@@ -42,8 +52,10 @@ vi.mock("@/src/lib/hosted-execution/usage-status", async (importOriginal) => {
 
 import {
   handleHostedUsageReferralGroupTool,
-  isHostedUsageReferralEnabled,
 } from "@/src/lib/hosted-growth/usage-referral";
+import {
+  isHostedUsageReferralEnabled,
+} from "@/src/lib/hosted-growth/usage-referral-policy";
 
 type ReferralState = {
   armedAt: Date;
@@ -51,6 +63,7 @@ type ReferralState = {
   expiresAt: Date;
   id: string;
   policyCode: "active_group_v1" | "new_person_activation_v1";
+  policyVersion: string;
   referrerMemberId: string;
   rewardUsdMicros: bigint;
   sourceConversationJson?: {
@@ -100,6 +113,7 @@ describe("hosted usage referral tool", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.useRealUsageStatus = false;
+    mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(true);
     mocks.readHostedAiUsageGate.mockResolvedValue({
       allowed: true,
@@ -114,7 +128,6 @@ describe("hosted usage referral tool", () => {
       usageCreditBalanceUsdMicros: 0n,
       usageCreditLedgerVersion: 0n,
     });
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({ status: "active" });
     mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
       lookup: {
         core: { id: "member_referrer" },
@@ -177,14 +190,14 @@ describe("hosted usage referral tool", () => {
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
-                "$2.00 of cost-weighted usage credit for your Murph",
+                "about 10 more days of Murph usage for your Murph",
             },
             {
               code: "active_group_v1",
               requirementsLabel:
                 "Start a fresh group and make it genuinely active, with multiple people actually talking.",
               rewardLabel:
-                "$3.50 of cost-weighted usage credit for your Murph",
+                "about 14 more days of Murph usage for your Murph",
             },
           ],
         },
@@ -193,7 +206,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("keeps personal referral rewards in cost-weighted credit", async () => {
+  it("frames personal referral rewards as days of Murph usage", async () => {
     const { prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -213,12 +226,12 @@ describe("hosted usage referral tool", () => {
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
-                "$2.00 of cost-weighted usage credit for your Murph",
+                "about 10 more days of Murph usage for your Murph",
             },
             {
               code: "active_group_v1",
               rewardLabel:
-                "$3.50 of cost-weighted usage credit for your Murph",
+                "about 14 more days of Murph usage for your Murph",
             },
           ],
         },
@@ -226,7 +239,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("keeps group referral rewards in cost-weighted credit", async () => {
+  it("frames group referral rewards as days of Murph usage", async () => {
     const { prisma } = buildPrisma({
       containerMemberId: "member_group",
     });
@@ -246,7 +259,56 @@ describe("hosted usage referral tool", () => {
           availablePolicies: [{
             code: "active_group_v1",
             rewardLabel:
-              "$3.50 of cost-weighted usage credit for this room",
+              "about 14 more days of Murph usage for this room",
+          }],
+        },
+        status: "ok",
+      },
+    });
+    expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledWith(
+      "member_group",
+      { prisma },
+    );
+    expect(mocks.readHostedGroupFundingRecoveryStatus).not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupUsageStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps an active mission bound to its persisted reward", async () => {
+    const { prisma, referrals } = buildPrisma();
+    referrals.push({
+      armedAt: new Date("2026-07-29T12:00:00.000Z"),
+      beneficiaryMemberId: "member_personal",
+      expiresAt: new Date("2030-08-05T12:00:00.000Z"),
+      id: "hur_frozen_reward",
+      policyCode: "active_group_v1",
+      policyVersion: ORDINARY_POLICY_VERSION,
+      referrerMemberId: "member_personal",
+      rewardUsdMicros: 2_750_000n,
+      sourceConversationJson: PERSONAL_SOURCE,
+      status: "armed",
+    });
+
+    await expect(handleHostedUsageReferralGroupTool({
+      enabled: true,
+      memberId: "member_personal",
+      prisma: prisma as never,
+      request: {
+        action: "read_usage_referral",
+        sourceConversation: PERSONAL_SOURCE,
+      },
+    })).resolves.toMatchObject({
+      result: {
+        outcome: "read",
+        referral: {
+          activeMissions: [{
+            policyCode: "active_group_v1",
+            rewardLabel:
+              "about 12 more days of Murph usage for your Murph",
+          }],
+          availablePolicies: [{
+            code: "new_person_activation_v1",
+            rewardLabel:
+              "about 10 more days of Murph usage for your Murph",
           }],
         },
         status: "ok",
@@ -549,6 +611,7 @@ describe("hosted usage referral tool", () => {
       expiresAt: new Date("2030-08-05T12:00:00.000Z"),
       id: "hur_other_destination",
       policyCode: "active_group_v1",
+      policyVersion: ORDINARY_POLICY_VERSION,
       referrerMemberId: "member_personal",
       rewardUsdMicros: 3_500_000n,
       sourceConversationJson: null,
@@ -1013,11 +1076,38 @@ function buildPrisma(input: {
         ?? null
     )),
     findMany: vi.fn(async (
-      input?: { where?: Parameters<typeof matchesReferral>[1] },
+      input?: {
+        select?: {
+          expiresAt?: boolean;
+          policyCode?: boolean;
+          policyVersion?: boolean;
+          rewardUsdMicros?: boolean;
+          status?: boolean;
+        };
+        where?: Parameters<typeof matchesReferral>[1];
+      },
     ) => runQuery(() =>
-      referrals.filter((referral) =>
-        matchesReferral(referral, input?.where)
-      )
+      referrals
+        .filter((referral) => matchesReferral(referral, input?.where))
+        .map((referral) =>
+          input?.select
+            ? {
+                ...(input.select.expiresAt
+                  ? { expiresAt: referral.expiresAt }
+                  : {}),
+                ...(input.select.policyCode
+                  ? { policyCode: referral.policyCode }
+                  : {}),
+                ...(input.select.policyVersion
+                  ? { policyVersion: referral.policyVersion }
+                  : {}),
+                ...(input.select.rewardUsdMicros
+                  ? { rewardUsdMicros: referral.rewardUsdMicros }
+                  : {}),
+                ...(input.select.status ? { status: referral.status } : {}),
+              }
+            : referral
+        )
     )),
     update: vi.fn(async (input: {
       data: Partial<ReferralState> & { sourceConversationJson?: unknown };

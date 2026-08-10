@@ -71,10 +71,7 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(unrelatedKey, "other-user-photo");
 
     const result = await deleteHostedRunnerUserData({
-      buckets: {
-        destination: bucket,
-        source: bucket,
-      },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -109,7 +106,7 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(unrelatedKey, "other-user-private-media");
 
     const result = await deleteHostedRunnerUserData({
-      buckets: { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -163,7 +160,7 @@ describe("hosted runner user data cleanup", () => {
       },
     };
     const request = {
-      buckets: { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace,
       runnerRuntimeEnvSource: {
         CF_VERSION_METADATA: { id: "current" },
@@ -206,7 +203,7 @@ describe("hosted runner user data cleanup", () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
 
     await expect(deleteHostedRunnerUserData({
-      buckets: { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -222,7 +219,7 @@ describe("hosted runner user data cleanup", () => {
     const stateStore = createDeletionStateStore();
     const bucket = new ListableMemoryEncryptedR2Bucket();
     const request = {
-      buckets: { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -256,10 +253,7 @@ describe("hosted runner user data cleanup", () => {
     await bucket.put(failedKey, "second");
 
     await expect(deleteHostedRunnerUserData({
-      buckets: {
-        destination: bucket,
-        source: bucket,
-      },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -286,10 +280,7 @@ describe("hosted runner user data cleanup", () => {
     const leakedPrefix = await hostedBundleUserPrefix({ userId: USER_ID });
 
     await expect(deleteHostedRunnerUserData({
-      buckets: {
-        destination: bucket,
-        source: bucket,
-      },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -307,60 +298,13 @@ describe("hosted runner user data cleanup", () => {
     expect(serializedLogs).not.toContain("R2 list failed for");
   });
 
-  it("clears both fixed-role buckets before deleting Durable Object state", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
-    const source = new ListableMemoryEncryptedR2Bucket();
-    const destination = new ListableMemoryEncryptedR2Bucket();
-    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
-    await source.put(`${prefix}source.bundle.json`, "source");
-    await destination.put(`${prefix}destination.bundle.json`, "destination");
-
-    const result = await deleteHostedRunnerUserData({
-      buckets: { destination, source },
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    });
-
-    expect(result.ok).toBe(true);
-    expect(source.objects.size).toBe(0);
-    expect(destination.objects.size).toBe(0);
-    expect(stateStore.deleteStateCallCount).toBe(1);
-  });
-
-  it("does not delete Durable Object state when ENAM cleanup fails after OC succeeds", async () => {
-    const durable = createDurableObjectHarness();
-    const stateStore = createDeletionStateStore();
-    const source = new ListableMemoryEncryptedR2Bucket();
-    const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
-    const destinationKey = `${prefix}destination.bundle.json`;
-    const destination = new FailingDeleteListableR2Bucket(destinationKey);
-    await destination.put(destinationKey, "destination");
-
-    await expect(deleteHostedRunnerUserData({
-      buckets: { destination, source },
-      runnerContainerNamespace: null,
-      runnerRuntimeEnvSource: {},
-      state: durable.state,
-      stateStore,
-      userId: USER_ID,
-    })).rejects.toThrow("Hosted runner R2 cleanup failed");
-
-    expect(stateStore.deleteStateCallCount).toBe(0);
-    expect(durable.deleteAllCount).toBe(0);
-    expect(destination.objects.has(destinationKey)).toBe(true);
-  });
-
   it("rejects a bucket without list support instead of reporting success", async () => {
     const durable = createDurableObjectHarness();
     const stateStore = createDeletionStateStore();
     const unsupported = new MemoryEncryptedR2Bucket();
 
     await expect(deleteHostedRunnerUserData({
-      buckets: { destination: unsupported, source: unsupported },
+      bucket: unsupported,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -382,11 +326,10 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
     const stateStore = createDeletionStateStore();
-    const source = new ListableMemoryEncryptedR2Bucket();
-    const destination = new ListableMemoryEncryptedR2Bucket();
+    const bucket = new ListableMemoryEncryptedR2Bucket();
 
     await expect(deleteHostedRunnerUserData({
-      buckets: { destination, source },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -399,8 +342,7 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
 
-    expect(source.deleteBatches).toEqual([]);
-    expect(destination.deleteBatches).toEqual([]);
+    expect(bucket.deleteBatches).toEqual([]);
     expect(stateStore.deleteStateCallCount).toBe(0);
   });
 
@@ -409,9 +351,8 @@ describe("hosted runner user data cleanup", () => {
     vi.spyOn(Date, "now").mockReturnValue(now);
     const durable = createDurableObjectHarness();
     const ownerStateStore = createOwningSnapshotStateStore();
-    const source = new ListableMemoryEncryptedR2Bucket();
-    const destination = new ListableMemoryEncryptedR2Bucket();
-    const snapshotId = "snapshot_destination_ticket";
+    const bucket = new ListableMemoryEncryptedR2Bucket();
+    const snapshotId = "snapshot_ticket";
     const objectKey =
       `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
     const session: HostedWorkspaceSnapshotUploadSession = {
@@ -432,14 +373,13 @@ describe("hosted runner user data cleanup", () => {
       expiresAt: "2026-07-28T13:00:00.000Z",
       leaseGeneration: "3",
       objectKey,
-      r2BucketRole: "destination",
       schema: HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA,
       snapshotId,
       userId: USER_ID,
       workspaceVersion: "7",
     };
     const service = createWorkspaceSnapshotSessionService({
-      bucket: destination,
+      bucket,
       runnerStoreCache: createUnusedRunnerStoreCache(),
       state: durable.state,
       stateStore: ownerStateStore,
@@ -451,7 +391,10 @@ describe("hosted runner user data cleanup", () => {
     });
 
     const created = await service.create(session);
-    expect(created).toEqual(session);
+    expect(created).toEqual({
+      ...session,
+      checkpointHandoffHeartbeatAt: expect.any(String),
+    });
     const first = await service.rememberPresignedPut({
       drainUntil: "2026-07-28T12:20:00.000Z",
       expectedSession: session,
@@ -472,7 +415,7 @@ describe("hosted runner user data cleanup", () => {
     });
 
     await expect(deleteHostedRunnerUserData({
-      buckets: { destination, source },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -485,10 +428,8 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     });
 
-    expect(source.listCalls).toEqual([]);
-    expect(destination.listCalls).toEqual([]);
-    expect(source.deleteBatches).toEqual([]);
-    expect(destination.deleteBatches).toEqual([]);
+    expect(bucket.listCalls).toEqual([]);
+    expect(bucket.deleteBatches).toEqual([]);
   });
 
   it("withholds completion when a late object appears between empty observations", async () => {
@@ -496,11 +437,10 @@ describe("hosted runner user data cleanup", () => {
     const stateStore = createDeletionStateStore();
     const prefix = await hostedBundleUserPrefix({ userId: USER_ID });
     const lateKey = `${prefix}late.bundle.json`;
-    const source = new LateWriteListableR2Bucket(prefix, lateKey);
-    const destination = new ListableMemoryEncryptedR2Bucket();
+    const bucket = new LateWriteListableR2Bucket(prefix, lateKey);
 
     await expect(deleteHostedRunnerUserData({
-      buckets: { destination, source },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,
@@ -508,7 +448,7 @@ describe("hosted runner user data cleanup", () => {
       userId: USER_ID,
     })).rejects.toThrow("Hosted runner R2 cleanup failed");
 
-    expect(source.objects.has(lateKey)).toBe(true);
+    expect(bucket.objects.has(lateKey)).toBe(true);
     expect(stateStore.deleteStateCallCount).toBe(0);
     expect(durable.deleteAllCount).toBe(0);
   });
@@ -519,7 +459,7 @@ describe("hosted runner user data cleanup", () => {
     const bucket = new ListableMemoryEncryptedR2Bucket();
 
     await expect(deleteHostedRunnerUserData({
-      buckets: { destination: bucket, source: bucket },
+      bucket,
       runnerContainerNamespace: null,
       runnerRuntimeEnvSource: {},
       state: durable.state,

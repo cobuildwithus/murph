@@ -6,7 +6,7 @@ import {
   type HealthEntityDefinition,
   type HealthEntityKind,
 } from "@murphai/contracts";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 import type {
   HealthCoreRuntimeMethodName,
   HealthCoreScaffoldServiceMethodName,

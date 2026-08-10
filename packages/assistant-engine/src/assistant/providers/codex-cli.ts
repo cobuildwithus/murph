@@ -243,6 +243,9 @@ export async function executeCodexAssistantTurnAttempt(
     environments: input.environments ?? undefined,
     ephemeral: input.providerThreadEphemeral ?? undefined,
     fetchImpl: input.providerFetch ?? undefined,
+    ...(input.generateSongPolicy
+      ? { generateSongPolicy: input.generateSongPolicy }
+      : {}),
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
@@ -252,6 +255,8 @@ export async function executeCodexAssistantTurnAttempt(
     modelProvider: providerConfig.target.modelProvider ?? undefined,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
+    onboardingFirstReadCompletionTransitionAvailable:
+      input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
     threadConfig: input.codexThreadConfig ?? null,
     onFirstAssistantResponseCompleted:
@@ -286,6 +291,9 @@ export async function executeCodexAssistantTurnAttempt(
         : undefined,
     onProgress: input.onEvent ?? undefined,
     onProviderRequestStarted: input.onProviderRequestStarted ?? undefined,
+    ...(input.providerStartCriticalPath
+      ? { providerStartCriticalPath: input.providerStartCriticalPath }
+      : {}),
     onTraceEvent: input.onTraceEvent,
     productFeedbackRecorder: input.productFeedbackRecorder ?? null,
     progressDelivery: input.progressDelivery ?? undefined,

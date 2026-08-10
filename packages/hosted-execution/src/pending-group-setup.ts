@@ -4,7 +4,7 @@ import {
   assistantTonePreferenceSchema,
   assistantVoiceOptionIdSchema,
 } from "@murphai/contracts";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION = 1;
 export const HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_BYTES =

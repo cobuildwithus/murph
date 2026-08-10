@@ -36,6 +36,7 @@ describe("createCloudflareHostedControlClient", () => {
       "deleteUserData",
       "ensureRuntimeProcessing",
       "getRunnerStatus",
+      "prewarmRuntimeShell",
       "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",
       "stageEnvironmentVoice",
@@ -296,6 +297,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(onTiming).toHaveBeenCalledWith({
       directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
+      orchestrationAttemptId: "web-ingress-attempt-test",
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });
@@ -357,6 +359,54 @@ describe("createCloudflareHostedControlClient", () => {
     ).rejects.toThrow("processingAllowed did not match consentState");
   });
 
+  it("posts a source-bound runtime shell-prewarm hint to the bound user route", async () => {
+    const fetchImpl = vi.fn(async () =>
+      createJsonResponse({ accepted: true }, { status: 202 })
+    ) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.prewarmRuntimeShell({
+      source: "linq-typing-started",
+      userId: "user_123",
+    })).resolves.toEqual({
+      accepted: true,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      "https://runner.example.test/internal/users/user_123/runtime/shell-prewarm",
+    );
+    expect(init).toMatchObject({
+      body: '{"source":"linq-typing-started"}',
+      method: "POST",
+    });
+    const headers = new Headers(init.headers);
+    expect(headers.get("authorization")).toBe("Bearer token-123");
+    expect(headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(headers.get("x-hosted-execution-user-id")).toBe("user_123");
+  });
+
+  it("rejects a malformed runtime shell-prewarm acknowledgement", async () => {
+    const fetchImpl = vi.fn(async () => createJsonResponse({ accepted: false })) as typeof fetch;
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "token-123",
+    });
+
+    await expect(client.prewarmRuntimeShell({
+      source: "linq-typing-started",
+      userId: "user_123",
+    })).rejects.toThrow(
+      "Cloudflare runtime shell prewarm response accepted must be true.",
+    );
+  });
+
   it("accepts an early runtime ensure-processing ack and still reports timing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T12:00:00.000Z"));
@@ -390,6 +440,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(onTiming).toHaveBeenCalledWith({
       directEnsureRequestStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       directEnsureResponseReceivedAtEpochMs: Date.parse("2026-07-06T12:00:00.025Z"),
+      orchestrationAttemptId: "web-ingress-attempt-test",
       tokenAcquiredAtEpochMs: Date.parse("2026-07-06T12:00:00.010Z"),
       tokenAcquireStartedAtEpochMs: Date.parse("2026-07-06T12:00:00.000Z"),
     });

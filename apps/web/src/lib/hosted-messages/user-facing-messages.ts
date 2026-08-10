@@ -5,9 +5,6 @@ const HOME_REDIRECT_EXPLICIT_RESEND_PATTERN =
 const HOME_REDIRECT_RESEND_FALLBACK =
   "That message can't move between threads. Resend it to the number above."
 
-export const HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE =
-  "Murph is paused in this chat right now."
-
 /**
  * A percentage stands in for the hidden credit balance on the personal notices.
  * The group thread notice is excluded: its copy already says the chat is out,
@@ -17,6 +14,7 @@ const USAGE_LIMIT_PERCENTAGE_TEMPLATE_KEYS = new Set<string>([
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.group_upgrade_pulse",
+  "linq.ai_usage.max_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.trial_limit_reached",
 ])
@@ -33,9 +31,9 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.group_upgrade_pulse",
+  "linq.ai_usage.max_limit_reached",
   "linq.ai_usage.pulse_upgrade_edge",
   "linq.ai_usage.thread_limit_reached",
-  "linq.ai_usage.thread_limit_funding",
 ] as const
 
 export type UserFacingMessageTemplateKey =
@@ -71,13 +69,13 @@ export interface UserFacingMessageContextByKey {
   "linq.ai_usage.group_upgrade_pulse": {
     homeUrl: string
   }
+  "linq.ai_usage.max_limit_reached": {
+    homeUrl: string
+  }
   "linq.ai_usage.pulse_upgrade_edge": {
     homeUrl: string
   }
   "linq.ai_usage.thread_limit_reached": Record<string, never>
-  "linq.ai_usage.thread_limit_funding": {
-    fundingUrl: string
-  }
 }
 
 export interface RenderUserFacingMessageInput<K extends UserFacingMessageTemplateKey> {
@@ -694,6 +692,28 @@ Sound good?`,
     `This month's Core AI allowance is complete. New replies pause, while background health syncing and group activity continue. Pulse has more included replies: {homeUrl}`,
     `Your included Core AI usage has run out for this period. New Murph replies pause, while wearables and group data stay current. Pulse is available here: {homeUrl}`,
   ],
+  "linq.ai_usage.max_limit_reached": [
+    `You've used this month's included Max allowance. Murph is paused for this usage period. The allowance resets next period.`,
+    `Your included Max usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
+    `This month's Max allowance is used. Murph is paused for the current period. A new allowance begins next period.`,
+    `You've reached the included Max allowance. Murph is paused for this usage period. The monthly allowance will reset.`,
+    `Max usage is at the included monthly limit. Murph is paused right now. The allowance resets next period.`,
+    `The included Max allowance is spent for this period. Murph is paused for the current usage period.`,
+    `You've used the monthly Max allowance. Murph is paused right now. The included allowance resets next period.`,
+    `Your Max allowance has reached its included amount. Murph is paused for this usage period.`,
+    `This month's included Max usage is used. Murph is paused right now. A new allowance begins next period.`,
+    `You've reached the Max usage amount for this month. Murph is paused for the current period.`,
+    `This month's Max allowance is fully used. Murph is paused right now. The allowance resets next period.`,
+    `Max's included usage is at its monthly limit. Murph is paused for this usage period.`,
+    `You've used this period's Max allowance. Murph is paused right now. The monthly allowance will reset.`,
+    `The included Max usage has been reached. Murph is paused for the current usage period.`,
+    `Your monthly Max allowance is spent. Murph is paused right now. The next allowance begins next period.`,
+    `This period's Max usage is at the included amount. Murph is paused for this usage period.`,
+    `You've reached the included monthly Max usage. Murph is paused right now. The allowance resets next period.`,
+    `Max usage is at its monthly allowance. Murph is paused for the current period.`,
+    `The monthly Max allowance is used. Murph is paused right now. The included allowance will reset.`,
+    `You've used Max's included allowance for this month. Murph is paused for this usage period.`,
+  ],
   "linq.ai_usage.pulse_upgrade_edge": [
     `You've used this month's included Pulse allowance. Murph is paused for this usage period. The allowance resets next period.`,
     `Your included Pulse usage is at its monthly amount. Murph is paused right now. The allowance resets next period.`,
@@ -737,48 +757,6 @@ Sound good?`,
     `I just spent my last bit of the month on that. Worth it. Out for all of you until it resets.`,
     `That's my month. Going quiet on everyone in here until my time resets.`,
     `I've run out. All of you get peace and quiet until my time resets.`,
-  ],
-  "linq.ai_usage.thread_limit_funding": [
-    `Any of you can turn me back on. Or enjoy the peace:
-{fundingUrl}`,
-    `I'm fine either way. One of you won't be:
-{fundingUrl}`,
-    `Someone in here will crack first. No judgment:
-{fundingUrl}`,
-    `Anyone can undo this. Nobody has to:
-{fundingUrl}`,
-    `Door's open if any of you want me back:
-{fundingUrl}`,
-    `Whichever of you misses me first knows what to do:
-{fundingUrl}`,
-    `Any one of you can fix it. I'll wait. Not like I'm busy:
-{fundingUrl}`,
-    `One tap from anyone here and I'm back. Your call:
-{fundingUrl}`,
-    `Someone tap this. You know who you are:
-{fundingUrl}`,
-    `Any of you can add usage. Or don't, I'm at peace:
-{fundingUrl}`,
-    `Room needs one of you to volunteer:
-{fundingUrl}`,
-    `Anybody here can bring me back. Sort it out amongst yourselves:
-{fundingUrl}`,
-    `Whoever's least stubborn, this one's on you:
-{fundingUrl}`,
-    `Any of you can end my little vacation:
-{fundingUrl}`,
-    `One of you is going to cave eventually. Might as well be now:
-{fundingUrl}`,
-    `Someone here has a phone and a decision to make:
-{fundingUrl}`,
-    `Anyone can bring me back for the room. Take your time:
-{fundingUrl}`,
-    `Whoever wants the chat useful again, it's right here:
-{fundingUrl}`,
-    `Any one of you can sort this. I'm not going to ask twice:
-{fundingUrl}`,
-    `Somebody's going to do it. Curious who:
-{fundingUrl}`,
   ],
 } satisfies Record<UserFacingMessageTemplateKey, readonly string[]>
 

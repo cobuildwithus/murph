@@ -1,16 +1,24 @@
 import {
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PLAN_CODES,
+  type HostedFamilyPlanCode,
   type HostedPlanCode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
 } from "@murphai/hosted-execution/plan-usage";
 
-export { HOSTED_PLAN_CODES, type HostedPlanCode };
+export {
+  HOSTED_FAMILY_PLAN_CODES,
+  HOSTED_PLAN_CODES,
+  type HostedFamilyPlanCode,
+  type HostedPlanCode,
+};
 
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
   "launch_edge_monthly",
+  "launch_max_monthly",
   "launch_group_monthly",
 ] as const;
 
@@ -92,6 +100,7 @@ export interface HostedBillingPlanDefinition {
   readonly code: HostedBillingPlanCode;
   readonly displayName: string;
   readonly interval: HostedBillingPlanInterval;
+  readonly planChangePortalConfigurationIdEnvKey: string | null;
   readonly planCode: HostedPlanCode;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
@@ -113,6 +122,7 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_group_monthly",
     displayName: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
     interval: "month",
+    planChangePortalConfigurationIdEnvKey: null,
     planCode: "pulse",
     priceIdEnvKey:
       "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_GROUP_MONTHLY",
@@ -123,6 +133,8 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_monthly",
     displayName: "Pulse",
     interval: "month",
+    planChangePortalConfigurationIdEnvKey:
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MONTHLY",
     planCode: "pulse",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY",
     recurringAmountUsdCents: 800,
@@ -132,9 +144,22 @@ const HOSTED_BILLING_PLAN_DEFINITIONS = {
     code: "launch_edge_monthly",
     displayName: "Edge",
     interval: "month",
+    planChangePortalConfigurationIdEnvKey:
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY",
     planCode: "edge",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY",
     recurringAmountUsdCents: 2_000,
+  },
+  launch_max_monthly: {
+    badge: "New",
+    code: "launch_max_monthly",
+    displayName: "Max",
+    interval: "month",
+    planChangePortalConfigurationIdEnvKey:
+      "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY",
+    planCode: "edge",
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MAX_MONTHLY",
+    recurringAmountUsdCents: 5_000,
   },
 } as const satisfies Record<HostedBillingPlanCode, HostedBillingPlanDefinition>;
 
@@ -147,6 +172,7 @@ const HOSTED_DIRECT_BILLING_PLAN_RANK = {
   launch_group_monthly: 0,
   launch_monthly: 1,
   launch_edge_monthly: 2,
+  launch_max_monthly: 3,
 } as const satisfies Record<HostedBillingPlanCode, number>;
 
 export interface HostedPlanDefinition {
@@ -167,22 +193,38 @@ const HOSTED_PLAN_DEFINITIONS = {
 >;
 
 export interface HostedFamilyBillingOfferDefinition {
-  readonly planCode: HostedPlanCode;
+  readonly billingPlanCode: HostedBillingPlanCode;
+  readonly displayName: string;
+  readonly planCode: HostedFamilyPlanCode;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
+  readonly runtimePlanCode: HostedPlanCode;
 }
 
 const HOSTED_FAMILY_BILLING_OFFERS = {
   pulse: {
+    billingPlanCode: "launch_monthly",
+    displayName: "Pulse",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
     recurringAmountUsdCents: 700,
+    runtimePlanCode: "pulse",
   },
   edge: {
+    billingPlanCode: "launch_edge_monthly",
+    displayName: "Edge",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
     recurringAmountUsdCents: 1_900,
+    runtimePlanCode: "edge",
+  },
+  max: {
+    billingPlanCode: "launch_max_monthly",
+    displayName: "Max",
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
+    recurringAmountUsdCents: 4_900,
+    runtimePlanCode: "edge",
   },
 } as const satisfies Record<
-  HostedPlanCode,
+  HostedFamilyPlanCode,
   Omit<HostedFamilyBillingOfferDefinition, "planCode">
 >;
 
@@ -195,9 +237,9 @@ export const HOSTED_FAMILY_PLAN_DISPLAY = {
   minSeats: HOSTED_FAMILY_MIN_SEATS,
   recurringAmountUsdCentsPerSeat:
     HOSTED_FAMILY_BILLING_OFFERS.pulse.recurringAmountUsdCents,
-  plans: HOSTED_PLAN_CODES.map((code) => ({
+  plans: HOSTED_FAMILY_PLAN_CODES.map((code) => ({
     code,
-    displayName: HOSTED_PLAN_DEFINITIONS[code].displayName,
+    displayName: HOSTED_FAMILY_BILLING_OFFERS[code].displayName,
     recurringAmountUsdCents:
       HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
   })),
@@ -211,12 +253,24 @@ export function getHostedPlanDefinition(code: HostedPlanCode): HostedPlanDefinit
 }
 
 export function getHostedFamilyBillingOfferDefinition(
-  code: HostedPlanCode,
+  code: HostedFamilyPlanCode,
 ): HostedFamilyBillingOfferDefinition {
   return {
     ...HOSTED_FAMILY_BILLING_OFFERS[code],
     planCode: code,
   };
+}
+
+export function getHostedFamilyBillingPlanCode(
+  code: HostedFamilyPlanCode,
+): HostedBillingPlanCode {
+  return HOSTED_FAMILY_BILLING_OFFERS[code].billingPlanCode;
+}
+
+export function getHostedFamilyRuntimePlanCode(
+  code: HostedFamilyPlanCode,
+): HostedPlanCode {
+  return HOSTED_FAMILY_BILLING_OFFERS[code].runtimePlanCode;
 }
 
 export function getHostedPlanCodeForBillingPlan(
@@ -244,8 +298,17 @@ export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {
     : null;
 }
 
+export function parseHostedFamilyPlanCode(
+  value: unknown,
+): HostedFamilyPlanCode | null {
+  return typeof value === "string" &&
+    HOSTED_FAMILY_PLAN_CODES.includes(value as HostedFamilyPlanCode)
+    ? value as HostedFamilyPlanCode
+    : null;
+}
+
 export function getHostedFamilyAiUsageMonthlyAllowanceForPlan(
-  code: HostedPlanCode,
+  code: HostedFamilyPlanCode,
 ): bigint {
   return calculateHostedPaidAiUsageAllowanceUsdMicros(
     HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
@@ -256,6 +319,27 @@ export function getHostedBillingPlanDefinition(
   code: HostedBillingPlanCode
 ): HostedBillingPlanDefinition {
   return HOSTED_BILLING_PLAN_DEFINITIONS[code];
+}
+
+export function readHostedBillingPlanChangePortalConfigurationId(
+  code: HostedBillingPlanCode,
+  source: Readonly<Record<string, string | undefined>> = process.env,
+): string | null {
+  const environmentKey = getHostedBillingPlanDefinition(code)
+    .planChangePortalConfigurationIdEnvKey;
+  if (!environmentKey) {
+    return null;
+  }
+
+  const value = source[environmentKey]?.trim();
+  return value ? value : null;
+}
+
+export function isHostedBillingPlanChangePortalConfigured(
+  code: HostedBillingPlanCode,
+  source?: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return readHostedBillingPlanChangePortalConfigurationId(code, source) !== null;
 }
 
 export function getHostedDefaultBillingPlanCode(): HostedBillingPlanCode {
@@ -551,20 +635,6 @@ export function formatHostedLandingPricingLongSummary(): string {
   return `${formatUsdLong(
     getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents
   )}/month`;
-}
-
-// Trial length as a human phrase ("2-week", "10-day") driven by the live
-// trial-days constant so landing copy never drifts from the granted trial.
-export function formatHostedLandingTrialDurationPhrase(): string {
-  return HOSTED_PULSE_TRIAL_DAYS % 7 === 0
-    ? `${HOSTED_PULSE_TRIAL_DAYS / 7}-week`
-    : `${HOSTED_PULSE_TRIAL_DAYS}-day`;
-}
-
-// One line for the homepage signup CTA: leads with the free trial so the
-// monthly price reads as what happens after, not an upfront charge.
-export function formatHostedLandingTrialPricingNote(): string {
-  return `Start with a ${formatHostedLandingTrialDurationPhrase()} free trial, then ${formatHostedLandingPricingShortSummary()}. Cancel anytime.`;
 }
 
 function buildHostedBillingPlanPresentation(

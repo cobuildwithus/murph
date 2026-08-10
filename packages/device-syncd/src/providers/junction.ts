@@ -1,7 +1,6 @@
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 
 import type { Junction } from "@junction-api/sdk";
-import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import type * as JunctionSerialization from "@junction-api/sdk/serialization";
 import {
   COMPANION_HRV_RMSSD_RESOURCE,
@@ -87,6 +86,7 @@ import {
   type JunctionBulkTriggerHistoricalPullResult,
   type JunctionHistoricalPullSnapshot,
   type JunctionProviderConnection,
+  type JunctionWindowInput,
 } from "./junction-client.ts";
 import { resolveJunctionDeviceConnectRouteByProviderSlug } from "../config/connect-routes.ts";
 import {
@@ -189,7 +189,6 @@ interface JunctionDirectResourceJobInput {
   windowStart: string;
 }
 
-type JunctionSdkHistoricalPullCompleted = Junction.HistoricalPullCompleted;
 type JunctionSdkHistoricalSleepCompletionWebhook = Junction.ClientFacingSleepHistoricalPullCompleted;
 type JunctionSdkHistoricalSleepCompletionWebhookWire =
   JunctionSerialization.ClientFacingSleepHistoricalPullCompleted.Raw;
@@ -206,6 +205,11 @@ const JUNCTION_WEBHOOK_ROOT_FIELDS = Object.freeze({
   >,
   keyof JunctionSdkHistoricalSleepCompletionWebhookWire
 >);
+
+// Mirrors the pinned Junction SDK's `serialization.date()` wire validation.
+// Keeping this predicate local avoids loading the SDK's generated runtime tree
+// merely to identify one five-field completion envelope.
+const JUNCTION_SDK_ISO_8601_DATE_PATTERN = /^([+-]?\d{4}(?!\d{2}\b))((-?)((0[1-9]|1[0-2])(\3([12]\d|0[1-9]|3[01]))?|W([0-4]\d|5[0-2])(-?[1-7])?|(00[1-9]|0[1-9]\d|[12]\d{2}|3([0-5]\d|6[1-6])))([T\s]((([01]\d|2[0-3])((:?)[0-5]\d)?|24:?00)([.,]\d+(?!:))?)?(\17[0-5]\d([.,]\d+)?)?([zZ]|([+-])([01]\d|2[0-3]):?([0-5]\d)?)?)?)?$/;
 
 interface JunctionWindowFetchOptions {
   dateQueryFormat?: JunctionDateQueryFormat;
@@ -2094,19 +2098,22 @@ export function createJunctionDeviceSyncProvider(
         continue;
       }
 
+      const request: JunctionWindowInput = {
+        resource,
+        signal: context.signal ?? null,
+        userId: context.account.externalAccountId,
+        windowStart,
+        windowEnd,
+      };
+      if (options.dateQueryFormat) {
+        request.dateQueryFormat = options.dateQueryFormat;
+      }
       snapshots[resource] = await fetchOptionalJunctionResourceRecords(
         context,
         "summary",
         resource,
         skippedOptionalResources,
-        () => client.listSummary({
-          resource,
-          signal: context.signal ?? null,
-          userId: context.account.externalAccountId,
-          windowStart,
-          windowEnd,
-          ...(options.dateQueryFormat ? { dateQueryFormat: options.dateQueryFormat } : {}),
-        }),
+        () => client.listSummary(request),
       );
     }
 
@@ -2183,15 +2190,18 @@ export function createJunctionDeviceSyncProvider(
       const chunkWindowStart = new Date(chunkStart).toISOString();
       const chunkWindowEnd = new Date(chunkEnd).toISOString();
       try {
-        const chunkRecords = await client.listTimeseries({
+        const request: JunctionWindowInput = {
           resource,
           signal: context.signal ?? null,
           sourceProviderSlug,
           userId: context.account.externalAccountId,
           windowStart: chunkWindowStart,
           windowEnd: chunkWindowEnd,
-          ...(options.dateQueryFormat ? { dateQueryFormat: options.dateQueryFormat } : {}),
-        });
+        };
+        if (options.dateQueryFormat) {
+          request.dateQueryFormat = options.dateQueryFormat;
+        }
+        const chunkRecords = await client.listTimeseries(request);
         records.push(
           ...filterJunctionTimeseriesRecordsToWindow(
             chunkRecords,
@@ -5317,8 +5327,7 @@ function isJunctionHistoricalPullCompletedWebhookData(
   data: Record<string, unknown>,
   externalAccountId: string,
 ): boolean {
-  const completed = parseJunctionHistoricalPullCompletedWebhookData(data, externalAccountId);
-  if (completed && normalizeJunctionWebhookSourceProviderCandidate(completed.provider)) {
+  if (isJunctionSdkHistoricalPullCompletedWebhookData(data, externalAccountId)) {
     return true;
   }
 
@@ -5329,22 +5338,23 @@ function isJunctionHistoricalPullCompletedWebhookData(
   return isDocumentedJunctionHistoricalPullCompletedWebhookData(data, externalAccountId);
 }
 
-function parseJunctionHistoricalPullCompletedWebhookData(
+function isJunctionSdkHistoricalPullCompletedWebhookData(
   data: Record<string, unknown>,
   externalAccountId: string,
-): JunctionSdkHistoricalPullCompleted | null {
-  const parsed = JunctionHistoricalPullCompletedSchema.parse(
-    {
-      ...data,
-      [JUNCTION_WEBHOOK_ROOT_FIELDS.userId]:
-        normalizeString(data[JUNCTION_WEBHOOK_ROOT_FIELDS.userId]) ?? externalAccountId,
-    },
-    {
-      unrecognizedObjectKeys: "passthrough",
-    },
-  );
+): boolean {
+  const userId = normalizeString(data[JUNCTION_WEBHOOK_ROOT_FIELDS.userId])
+    ?? externalAccountId;
+  const startDate = data.start_date;
+  const endDate = data.end_date;
 
-  return parsed.ok ? parsed.value : null;
+  return typeof userId === "string"
+    && typeof startDate === "string"
+    && JUNCTION_SDK_ISO_8601_DATE_PATTERN.test(startDate)
+    && typeof endDate === "string"
+    && JUNCTION_SDK_ISO_8601_DATE_PATTERN.test(endDate)
+    && data.is_final === true
+    && typeof data.provider === "string"
+    && normalizeJunctionWebhookSourceProviderCandidate(data.provider) !== null;
 }
 
 const JUNCTION_HISTORICAL_INLINE_RECORD_CARRIER_FIELDS = new Set([

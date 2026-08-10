@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   readHostedAiUsageGate: vi.fn(),
@@ -51,8 +51,20 @@ import type {
 const NOW = new Date("2026-07-03T12:00:00.000Z");
 const PERIOD_START = new Date("2026-07-01T00:00:00.000Z");
 const PERIOD_END = new Date("2026-07-11T00:00:00.000Z");
+const MAX_PORTAL_CONFIGURATION_ENV =
+  "HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_MAX_MONTHLY";
+const originalMaxPortalConfiguration =
+  process.env[MAX_PORTAL_CONFIGURATION_ENV];
 
 describe("readHostedPersonalAiUsageStatus", () => {
+  afterEach(() => {
+    if (originalMaxPortalConfiguration === undefined) {
+      delete process.env[MAX_PORTAL_CONFIGURATION_ENV];
+    } else {
+      process.env[MAX_PORTAL_CONFIGURATION_ENV] =
+        originalMaxPortalConfiguration;
+    }
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
@@ -308,6 +320,103 @@ describe("readHostedPersonalAiUsageStatus", () => {
       expect(result).not.toHaveProperty("availablePlans");
     },
   );
+
+  it("quotes Max only from an explicit Edge request with the exact portal configured", async () => {
+    process.env[MAX_PORTAL_CONFIGURATION_ENV] = "bpc_max";
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: PERIOD_END,
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_edge_monthly",
+      remainingUsdMicros: 9_000_000n,
+      spentUsdMicros: 1_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_usage_explicit_max",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+      subscriptionActionTargetPlanCode: "launch_max_monthly",
+    })).resolves.toMatchObject({
+      recommendedAction: null,
+      subscriptionActionQuote: {
+        action: "change_plan",
+        label: "Upgrade to Max ($50/month)",
+        monthlyPriceUsdCents: 5_000,
+        targetPlanCode: "launch_max_monthly",
+        timing: "immediate",
+      },
+    });
+  });
+
+  it("fails closed when an explicit Max request lacks its exact portal configuration", async () => {
+    delete process.env[MAX_PORTAL_CONFIGURATION_ENV];
+    mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce({
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      currentCheckoutOffer: "standard",
+      currentPeriodEnd: PERIOD_END,
+      hasStripeCustomerId: true,
+      hasStripeSubscriptionId: true,
+      scheduledBillingEffectiveAt: null,
+      scheduledBillingPlanCode: null,
+    });
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_edge_monthly",
+      remainingUsdMicros: 9_000_000n,
+      spentUsdMicros: 1_000_000n,
+    }));
+
+    await expect(readHostedPersonalAiUsageStatus({
+      includeSubscriptionActionQuote: true,
+      memberId: "member_usage_unconfigured_max",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: null,
+      subscriptionActionTargetPlanCode: "launch_max_monthly",
+    })).resolves.toMatchObject({
+      recommendedAction: null,
+      subscriptionActionQuote: null,
+    });
+    expect(mocks.isHostedBillingPlanSelectionAvailable).not.toHaveBeenCalled();
+  });
+
+  it("keeps high-usage Edge recovery on add usage instead of auto-recommending Max", async () => {
+    mocks.readHostedAiUsageGate.mockResolvedValue(buildDecision({
+      allowanceSource: "direct_paid_member_plan",
+      billingPlanCode: "launch_edge_monthly",
+      limitUsdMicros: 10_000_000n,
+      remainingUsdMicros: 1_500_000n,
+      spentUsdMicros: 8_500_000n,
+    }));
+
+    const result = await readHostedPersonalAiUsageStatus({
+      memberId: "member_usage_edge_add_usage",
+      now: NOW,
+      prisma: buildPrisma(null) as never,
+      publicBaseUrl: "https://example.test",
+    });
+
+    expect(result).toMatchObject({
+      recommendedAction: {
+        kind: "add_usage",
+      },
+    });
+    expect(result).not.toHaveProperty("subscriptionActionQuote");
+    expect(mocks.readHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.readHostedMemberBillingEligibilityState).not.toHaveBeenCalled();
+  });
 
   it("keeps Pulse as the default paid recommendation from Group", async () => {
     mocks.readHostedMemberBillingEligibilityState.mockResolvedValueOnce({

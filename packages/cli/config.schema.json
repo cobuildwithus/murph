@@ -4736,7 +4736,7 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Compact tag-profile JSON in @file.json form or - for stdin. Use bucket fields: topics, biomarkers, behaviors, supplements, conditionsOrConcerns, goals, activeExperiments. Do not include raw labs, names, dates of birth, full notes, or medical records."
+                          "description": "Focused structured JSON using required {\"mode\":\"focused\"} plus exact server-owned public concepts. Pass @file.json or - for stdin. Focused concept values: topics=[cardiometabolic risk, cognition, memory, metabolic health, mitochondrial complex i, phase i trials, recovery, sleep, sleep duration, sleep regularity, systematic reviews, type i interferon signaling, us guidelines]; biomarkers=[apob, glucose, hba1c, hdl cholesterol, hs-crp, ldl cholesterol]; behaviors=[exercise, meal timing, morning light, resistance training, screen curfew, sleep timing, yoga, zone 2 training]; supplements=[caffeine, creatine, magnesium, omega-3, vitamin d]; conditionsOrConcerns=[adults, anxiety, healthy adults, insomnia, menopause, migraine, older adults, parkinsons disease, sleep deprivation, type 2 diabetes]; goals=[better recovery, cardiometabolic health, cognitive performance, longevity, memory, sleep quality]; activeExperiments=[creatine supplementation, meal timing, morning light, resistance training, screen curfew]. Never include arbitrary values, names, organizations, private notes, contacts, identifiers, credentials, exact personal measurements, or medical records."
                         },
                         "since": {
                           "type": "string",
@@ -4767,7 +4767,7 @@
                       "properties": {
                         "input": {
                           "type": "string",
-                          "description": "Compact lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles use the same bucket fields as research scout and must not include raw labs, names, dates of birth, full notes, or medical records."
+                          "description": "Finite public-concept lane JSON in @file.json form or - for stdin. Use {\"lanes\":[{\"label\":\"sleep\",\"profile\":{\"topics\":[\"sleep\"]}}]}. Lane profiles accept tag-only bucket fields with the same server-owned provider concepts and must not include focused mode, arbitrary values, raw labs, names, dates of birth, full notes, or medical records."
                         },
                         "since": {
                           "type": "string",
@@ -5733,6 +5733,332 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
+                "start": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "routine": {
+                          "description": "Optional saved workout-format id, slug, or exact title.",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "type": {
+                          "description": "Optional activity type override. Defaults to strength-training.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "note": {
+                          "description": "Optional session note.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "startedAt": {
+                          "description": "Optional live-session start timestamp. Defaults to now.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      }
+                    }
+                  }
+                },
+                "active": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "workoutId": {
+                          "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
+                          "type": "string",
+                          "pattern": "^evt_[0-9A-Za-z]+$"
+                        }
+                      }
+                    }
+                  }
+                },
+                "finish": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "workoutId": {
+                          "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
+                          "type": "string",
+                          "pattern": "^evt_[0-9A-Za-z]+$"
+                        },
+                        "endedAt": {
+                          "description": "Optional finish timestamp. Defaults to now.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      }
+                    }
+                  }
+                },
+                "exercise": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "add": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "workoutId": {
+                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                },
+                                "sourceExerciseId": {
+                                  "description": "Optional stable source exercise id, such as an exercise catalog id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "order": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "description": "One-based exercise order within the live workout."
+                                },
+                                "groupId": {
+                                  "description": "Optional superset or circuit group id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 80
+                                },
+                                "mode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "weight_reps",
+                                    "bodyweight",
+                                    "assisted_bodyweight",
+                                    "weighted_bodyweight",
+                                    "duration",
+                                    "cardio"
+                                  ]
+                                },
+                                "unitOverride": {
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "note": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 4000
+                                },
+                                "sets": {
+                                  "default": 1,
+                                  "description": "Number of unlogged set placeholders to create. Defaults to 1.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 150
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "set": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "commands": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "log": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "workoutId": {
+                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                },
+                                "exerciseId": {
+                                  "description": "Optional stable source exercise id, such as an exercise catalog id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "exerciseOrder": {
+                                  "description": "Optional one-based exercise order within the live workout.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "setOrder": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "description": "One-based set order. Read the active workout and pass it explicitly."
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "enum": [
+                                    "normal",
+                                    "warmup",
+                                    "dropset",
+                                    "failure"
+                                  ]
+                                },
+                                "note": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 400
+                                },
+                                "reps": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "weight": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "weightUnit": {
+                                  "type": "string",
+                                  "enum": [
+                                    "lb",
+                                    "kg"
+                                  ]
+                                },
+                                "durationSeconds": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "distanceMeters": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "rpe": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 10
+                                },
+                                "bodyweightKg": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "assistanceKg": {
+                                  "type": "number",
+                                  "minimum": 0
+                                },
+                                "addedWeightKg": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "clear": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "workoutId": {
+                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                },
+                                "exerciseId": {
+                                  "description": "Optional stable source exercise id, such as an exercise catalog id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "exerciseOrder": {
+                                  "description": "Optional one-based exercise order within the live workout.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "setOrder": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "description": "One-based set order to clear."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "add": {
                   "type": "object",
                   "additionalProperties": false,

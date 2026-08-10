@@ -177,3 +177,117 @@ identifiers, payload-like env values, and sensitive command args are redacted.
    fallback; Cloudflare, Temporal, database, and preparatory children never do.
 
 Use `pnpm hosted-local` as the single hosted-local entrypoint.
+
+## Live hosted Stripe billing browser matrix
+
+`stripe-billing-browser-matrix` is the explicit hosted-local lane for
+production-shaped billing proof. It runs locally on demand and on every trusted
+same-repository pull request. It reuses the canonical full-stack
+scenario lifecycle, a real local PostgreSQL database, the harness-owned
+`stripe listen` child, Murph's website and Settings UI, Stripe-hosted Checkout,
+Invoice, and Customer Portal pages, real Stripe test-mode APIs and webhooks, and
+the existing test-only app-session issuer. It does not add a production route,
+auth bypass, alternate server, or mocked Stripe SDK.
+
+Stripe forbids automating its hosted payment frontends. The browser therefore
+drives every Murph action and proves the real Checkout, Invoice, and Portal
+surface, but never fills or submits a provider-protected final control. A pinned
+official Stripe CLI fixture confirms the exact Checkout Session; Stripe's test
+API pays the exact observed Invoice or applies the Portal-equivalent plan
+mutation. Real webhooks still return through the harness-owned listener and the
+browser must observe the reconciled Settings result. See Stripe's
+[automated-testing boundary](https://docs.stripe.com/automated-testing) and
+[CLI fixture guide](https://docs.stripe.com/stripe-cli/fixtures).
+
+Install the pinned, checksum-verified Stripe CLI and run the lane from the repo
+root:
+
+```bash
+pnpm stripe:cli:setup
+pnpm hosted-billing:live:preflight
+pnpm hosted-local e2e stripe-billing-browser-matrix
+pnpm hosted-billing:live:cleanup
+```
+
+The preflight, matrix, and cleanup commands require these names to be supplied
+by an operator-local shell or the dedicated GitHub Environment; values are not
+stored in the repository:
+
+```text
+MURPH_HOSTED_STRIPE_BILLING_LIVE=1
+MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY
+MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID
+MURPH_HOSTED_STRIPE_BILLING_RUN_ID
+NEXT_PUBLIC_PRIVY_APP_ID
+HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY
+HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY
+HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY
+HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY
+HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY
+HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY
+```
+
+The matrix additionally accepts `DATABASE_URL` as the local PostgreSQL base
+when the caller needs to select it explicitly.
+
+Use a dedicated Stripe sandbox account only. The four prices and Portal
+configuration are stable, pre-provisioned non-secret IDs. The configured Portal
+configuration is also the sandbox default because the Trial Settings action
+opens the general customer portal. The preflight rejects
+live-mode authority, the wrong sandbox account, malformed IDs, inactive or
+mispriced catalog entries, and a Portal configuration that is not the active
+default with plan updates enabled, Trial upgrades ending immediately, and
+immediate invoicing. The browser journey remains the authoritative proof that
+the provider actually exposes the dedicated Pulse and Edge products.
+The test-mode secret remains in the single Vitest coordinator; the web process
+receives only `STRIPE_SECRET_KEY`, the harness-owned Stripe CLI child receives
+only `STRIPE_API_KEY`, and browser/Cloudflare/Temporal/setup children receive
+neither. The CLI key is passed through its child environment, never a command
+argument. The matrix sets `MURPH_HOSTED_LOCAL_E2E_STRIPE_LISTENER=1` to claim
+the one isolated listener explicitly; other E2E scenarios still fail closed
+unless `MURPH_DEV_SKIP_STRIPE_LISTEN=1`.
+
+The matrix covers new-member Pulse Trial Checkout, Trial to paid Pulse with
+invoice-authoritative entitlement, the paused-Trial update-before-resume
+incident regression, Trial and paid Pulse upgrades to Edge through Customer
+Portal (with the Trial becoming paid Edge), Edge to Pulse as a renewal
+Subscription Schedule, Family Checkout, and
+contactless web Family invite activation. It separately proves the supported
+paid individual-to-Family path as an in-place update of the existing
+subscription. The named Family Checkout case starts from an authenticated
+lapsed individual with no active subscription so the browser also exercises
+the real Family Checkout owner. Test Clocks are used only for the paused-Trial
+fixture.
+
+All created or adopted resources carry an opaque run correlation. Normal
+teardown verifies exact run metadata before expiring Sessions, releasing
+Schedules, canceling Subscriptions, deleting Customers, or deleting ready Test
+Clocks. The standalone cleanup command can recover an interrupted Checkout by
+matching the opaque correlation already present in Murph-owned metadata, tags
+linked resources with exact run ownership, and then applies the same refusal
+checks. It never mutates or deletes shared products, prices, or unrelated
+sandbox objects. Polling is bounded against typed Stripe and Murph state; fixed
+sleeps are not accepted as correctness proof.
+
+The matrix contains a real Stripe control call proving that
+`default_payment_method` is rejected by Subscription Resume and then requires
+the product flow to emit a paused update carrying the inherited payment method
+before Resume creates a hosted resumption invoice. The browser observes that
+open positive-balance invoice even while Stripe still marks it unattempted;
+supported test-mode payment must then produce active provider and
+Settings state. The provider contract is pinned to Stripe's
+official documentation for [Subscription Update](https://docs.stripe.com/api/subscriptions/update),
+[Subscription Resume](https://docs.stripe.com/api/subscriptions/resume),
+[trials](https://docs.stripe.com/billing/subscriptions/trials),
+[Test Clocks](https://docs.stripe.com/billing/testing/test-clocks/api-advanced-usage),
+[Portal deep links](https://docs.stripe.com/customer-management/portal-deep-links),
+[webhooks](https://docs.stripe.com/webhooks), and
+[test-mode values](https://docs.stripe.com/testing).
+
+Stripe retains immutable provider history such as paid invoices, events, and
+terminal subscription records. The lane bounds that residue to the nine named
+scenarios in one dedicated sandbox run and removes every mutable owned resource;
+it does not claim to erase Stripe's audit history. No repository secret or
+variable value is configured in source. Trusted pull requests fail closed unless
+the dedicated `hosted-stripe-billing-sandbox` GitHub Environment contract is
+fully provisioned; forks and dependency-bot heads retain only hermetic proof.

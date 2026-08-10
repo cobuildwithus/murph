@@ -104,7 +104,7 @@ test("JoinInvitePageView renders verify copy without exposing the masked phone h
   });
 });
 
-test("JoinInvitePageView keeps manual phone fallback copy out of Telegram setup", () => {
+test("JoinInvitePageView renders shared auth options for manual invite verification", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
       model: createModel({
@@ -123,10 +123,10 @@ test("JoinInvitePageView keeps manual phone fallback copy out of Telegram setup"
     }),
   );
 
-  assert.match(markup, /Add your phone/);
-  assert.match(markup, /Add the phone number Murph should use for your private conversations\./);
+  assert.match(markup, /Log in or sign up/);
+  assert.match(markup, /Choose phone, Telegram, or email to continue with this invite\./);
   assert.match(markup, /data-phone-verification-island="true"/);
-  assert.doesNotMatch(markup, /Telegram/);
+  assert.doesNotMatch(markup, /Add the phone number Murph should use for your private conversations\./);
 });
 
 test("JoinInvitePageView renders invite email verification without phone setup copy", () => {

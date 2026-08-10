@@ -91,6 +91,7 @@ packageManagerStrictVersion: true
 patchedDependencies:
   '@cobuild/repo-tools@0.1.15': patches/@cobuild__repo-tools@0.1.15.patch
   incur@0.4.5: patches/incur@0.4.5.patch
+  ink@6.8.0: patches/ink@6.8.0.patch
 savePrefix: ''
 trustPolicy: no-downgrade
 # Ignore provenance-era drift for older releases that predate broad trusted publishing.

@@ -41,12 +41,10 @@ import {
   VAULT_LAYOUT,
 } from "@murphai/contracts";
 import {
-  ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
   appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
   ensureAutomaticMealCloseoutAutomation,
   getAssistantCronStatus,
-  hasDeliveredAssistantGroupPhoneCallPreview,
   listAssistantTranscriptEntries,
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   listAssistantOutboxIntents,
@@ -1284,6 +1282,116 @@ describe("hosted workspace runtime entrypoint", () => {
         0,
       );
       assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      expectedCriticalPath: false,
+      name: "a conversation import without a fresh assistant input",
+      outcome: "imported_without_input",
+    },
+    {
+      expectedCriticalPath: false,
+      name: "retryable blocked conversation work",
+      outcome: "retryable_blocked",
+    },
+    {
+      expectedCriticalPath: true,
+      name: "a fresh assistant input",
+      outcome: "fresh_input",
+    },
+  ] as const)("admits provider-start timing only for $name", async (scenario) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-provider-start-timing-admission-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const conversationItem = createMailboxItem({
+      id: `mailbox_item_provider_start_timing_${scenario.outcome}`,
+      laneSeq: "1",
+    });
+    const observedCriticalPathPresence: boolean[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await stageAssistantInputEventForMailboxItem({
+        item: createMailboxItem({
+          id: `mailbox_item_provider_start_timing_background_${scenario.outcome}`,
+          laneSeq: "99",
+          occurredAt: "2026-04-26T23:59:59.000Z",
+        }),
+        threadId: `thread_provider_start_timing_background_${scenario.outcome}`,
+        vaultRoot,
+      });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: `attempt_provider_start_timing_${scenario.outcome}`,
+            idleCheckpointDelayMs: 1,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "5".repeat(64),
+                key: `users/bundles/member-synthetic/provider-start-timing-${scenario.outcome}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            if (scenario.outcome === "retryable_blocked") {
+              return {
+                reasonCode: "synthetic_retryable_conversation_import",
+                retryable: true,
+                status: "blocked" as const,
+              };
+            }
+            if (scenario.outcome === "fresh_input") {
+              return {
+                assistantInputId: await stageAssistantInputEventForMailboxItem({
+                  item: item.item,
+                  threadId: "thread_provider_start_timing_fresh",
+                  vaultRoot,
+                }),
+                status: "imported" as const,
+              };
+            }
+            return { status: "imported" as const };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [conversationItem],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            observedCriticalPathPresence.push(
+              input.providerStartCriticalPath !== null
+                && input.providerStartCriticalPath !== undefined,
+            );
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.ok(observedCriticalPathPresence.length > 0);
+      assert.equal(
+        observedCriticalPathPresence[0],
+        scenario.expectedCriticalPath,
+      );
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -8485,6 +8593,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 replacementFenceClearElapsedMs: 5,
                 replacementFenceClearedAtEpochMs: 1_776_999_999_950,
                 replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
+                triggeredByWebDirect: false,
               },
               dispatch: {
                 invokeReceivedAtEpochMs: 1_777_000_000_000,
@@ -8532,7 +8641,7 @@ describe("hosted workspace runtime entrypoint", () => {
               replacementFenceClearElapsedMs: 5,
               replacementFenceClearedAtEpochMs: 1_776_999_999_950,
               replacementFenceClearStartedAtEpochMs: 1_776_999_999_945,
-              triggeredByWebDirect: true,
+              triggeredByWebDirect: false,
             },
             dispatch: {
               invokeReceivedAtEpochMs: 1_777_000_000_000,
@@ -20524,256 +20633,6 @@ describe("hosted workspace runtime entrypoint", () => {
       await removeTempRoot(vaultRoot);
     }
   });
-
-  test.each([
-    {
-      expectedAuthorized: true,
-      outcome: "sent_before_confirmation",
-    },
-    {
-      expectedAuthorized: false,
-      outcome: "sent_after_confirmation",
-    },
-    {
-      expectedAuthorized: false,
-      outcome: "retryable",
-    },
-    {
-      expectedAuthorized: false,
-      outcome: "terminal",
-    },
-    {
-      expectedAuthorized: false,
-      outcome: "ambiguous",
-    },
-  ] as const)(
-    "binds a late group confirmation to the preview delivery receipt: $outcome",
-    async ({ expectedAuthorized, outcome }) => {
-      const vaultRoot = await mkdtemp(path.join(
-        tmpdir(),
-        `murph-group-phone-preview-${outcome}-`,
-      ));
-      const events: string[] = [];
-      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-      const runtimeAbortController = new AbortController();
-      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-      const mailboxItems: HostedMailboxItem[] = [];
-      const sessionId = `session_group_phone_preview_${outcome}`;
-      let assistantPhaseCalls = 0;
-      let lateConfirmationInputId: string | null = null;
-      let phoneStartCount = 0;
-      let previewIntent: Awaited<
-        ReturnType<typeof createAssistantOutboxIntent>
-      > | null = null;
-
-      try {
-        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-
-        await runHostedWorkspaceRuntimeJobInProcess(
-          createWorkspaceRuntimeJobInput({
-            request: {
-              attemptId: `attempt_group_phone_preview_${outcome}`,
-              idleCheckpointDelayMs: 25,
-              leaseGeneration: "9",
-              userId: TEST_USER_ID,
-              workspaceVersion: "4",
-            },
-          }),
-          {
-            async createCheckpointSnapshot() {
-              return {
-                snapshotRef: createBundleRef({
-                  hash: "c".repeat(64),
-                  key: `users/bundles/member-synthetic/group-phone-preview-${outcome}.bundle.json`,
-                  size: 640,
-                }),
-              };
-            },
-            async importItem(item) {
-              const inputId = await stagePendingLinqAssistantInputForMailboxItem({
-                item: item.item,
-                threadId: "thread_group_phone_preview",
-                threadIsDirect: false,
-                vaultRoot,
-              });
-              lateConfirmationInputId = inputId;
-              return {
-                assistantInputId: inputId,
-                linqDeliveryContext: {
-                  directRecipientPhoneNumber: null,
-                  fromPhoneNumber: null,
-                  replyToMessageId: `msg_${item.item.id}`,
-                  routeAuthority: {
-                    accountLookupKey: "hbidx:thread_group_phone_preview",
-                    channel: "linq" as const,
-                    containerMemberId: TEST_USER_ID,
-                    threadId: "thread_group_phone_preview",
-                  },
-                  service: "iMessage",
-                  target: "thread_group_phone_preview",
-                  threadIsDirect: false,
-                },
-                status: "imported",
-              };
-            },
-            platform: createPlatform({
-              mailboxPort: createMailboxPort({
-                events,
-                items: mailboxItems,
-              }),
-              workspacePort: createWorkspacePort({
-                checkpointRequests,
-                events,
-                workspace: createWorkspaceState({
-                  nextWakeAt: TEST_NOW,
-                  nextWakeReason: "assistant",
-                  version: "4",
-                }),
-              }),
-            }),
-            runtimeWakeSignal,
-            async runAssistantPhase(input) {
-              assistantPhaseCalls += 1;
-              if (assistantPhaseCalls === 1) {
-                previewIntent = await createAssistantOutboxIntent({
-                  answeredMailboxItemIds: ["mailbox_item_group_phone_request"],
-                  channel: "linq",
-                  createdAt: "2026-04-27T00:00:00.000Z",
-                  dedupeToken: `group-phone-preview:${outcome}`,
-                  explicitTarget: "thread_group_phone_preview",
-                  identityId: "group-assistant",
-                  message: [
-                    ASSISTANT_GROUP_PHONE_CALL_PREVIEW_HEADING,
-                    "Destination: Public restaurant +12025550123",
-                    "Transfer to a participant: no",
-                  ].join("\n"),
-                  sessionId,
-                  threadId: "thread_group_phone_preview",
-                  threadIsDirect: false,
-                  turnId: `turn_group_phone_preview_${outcome}`,
-                  vault: vaultRoot,
-                });
-                mailboxItems.push(createMailboxItem({
-                  createdAt: "2026-04-27T00:00:10.000Z",
-                  id: `mailbox_item_group_phone_confirmation_${outcome}`,
-                  laneSeq: "1",
-                  occurredAt: "2026-04-27T00:00:10.000Z",
-                  updatedAt: "2026-04-27T00:00:10.000Z",
-                }));
-                runtimeWakeSignal.notify();
-                await waitUntil(() => {
-                  assert.ok(lateConfirmationInputId);
-                });
-
-                if (
-                  outcome === "sent_before_confirmation"
-                  || outcome === "sent_after_confirmation"
-                ) {
-                  const sentIntent = await markAssistantOutboxIntentSentById({
-                    delivery: {
-                      channel: "linq",
-                      idempotencyKey: null,
-                      messageLength: previewIntent.message.length,
-                      providerMessageId: `provider_${outcome}`,
-                      providerThreadId: "thread_group_phone_preview",
-                      sentAt:
-                        outcome === "sent_before_confirmation"
-                          ? "2026-04-27T00:00:05.000Z"
-                          : "2026-04-27T00:00:11.000Z",
-                      target: "thread_group_phone_preview",
-                      targetKind: "thread",
-                    },
-                    intentId: previewIntent.intentId,
-                    vault: vaultRoot,
-                  });
-                  assert.equal(sentIntent?.status, "sent");
-                } else {
-                  await saveAssistantOutboxIntent(vaultRoot, {
-                    ...previewIntent,
-                    deliveryConfirmationPending: outcome === "ambiguous",
-                    status:
-                      outcome === "retryable"
-                        ? "retryable"
-                        : outcome === "ambiguous"
-                          ? "abandoned"
-                          : "failed",
-                    updatedAt: "2026-04-27T00:00:11.000Z",
-                  });
-                }
-                return {
-                  checkpointReason: "outbox_receipt" as const,
-                  progressed: true,
-                };
-              }
-
-              const initialBatchInputIds =
-                input.initialAssistantInputBatch?.assistantInputIds ?? [];
-              const acceptedInputIds = initialBatchInputIds.length > 0
-                ? initialBatchInputIds
-                : input.initialMailboxImport.importResult.assistantInputIds
-                  ?? [];
-              if (acceptedInputIds.length === 0) {
-                return { progressed: false };
-              }
-              assert.ok(lateConfirmationInputId);
-              assert.deepEqual(acceptedInputIds, [lateConfirmationInputId]);
-              const authorized =
-                await hasDeliveredAssistantGroupPhoneCallPreview({
-                  acceptedInputIds,
-                  channel: "linq",
-                  sessionId,
-                  vault: vaultRoot,
-                });
-              if (outcome === "sent_before_confirmation") {
-                const persistedPreview =
-                  (await listAssistantOutboxIntents(vaultRoot))
-                    .find((intent) => intent.intentId === previewIntent?.intentId);
-                const confirmationInput = await readAssistantInputEvent({
-                  inputId: lateConfirmationInputId,
-                  vault: vaultRoot,
-                });
-                assert.equal(authorized, true, JSON.stringify({
-                  confirmationReceivedAt: confirmationInput?.receivedAt ?? null,
-                  preview: persistedPreview
-                    ? {
-                        answeredMailboxItemIds:
-                          persistedPreview.answeredMailboxItemIds,
-                        channel: persistedPreview.channel,
-                        sentAt: persistedPreview.sentAt,
-                        sessionId: persistedPreview.sessionId,
-                        status: persistedPreview.status,
-                        threadId: persistedPreview.threadId,
-                        threadIsDirect: persistedPreview.threadIsDirect,
-                      }
-                    : null,
-                }));
-              }
-              if (authorized) {
-                phoneStartCount += 1;
-              }
-              await writeSyntheticAssistantAutoReplyTerminalEvidence({
-                inputId: lateConfirmationInputId,
-                vaultRoot,
-              });
-              return {
-                checkpointReason: "assistant_runtime_commit" as const,
-                progressed: true,
-              };
-            },
-            signal: runtimeAbortController.signal,
-            vaultRoot,
-          },
-        );
-
-        assert.ok(assistantPhaseCalls >= 2);
-        assert.ok(lateConfirmationInputId);
-        assert.equal(phoneStartCount, expectedAuthorized ? 1 : 0);
-      } finally {
-        runtimeAbortController.abort();
-        await removeTempRoot(vaultRoot);
-      }
-    },
-  );
 
   test("same selected device-sync wake keeps checkpoint gate across idle wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-runtime-same-device-gate-"));

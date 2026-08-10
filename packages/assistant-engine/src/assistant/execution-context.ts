@@ -1,9 +1,11 @@
-import type { AssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import {
+  normalizeAssistantBackendTarget,
+  type AssistantModelTarget,
+} from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
 import type {
   AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
-import { normalizeAssistantBackendTarget } from '@murphai/operator-config/assistant-backend'
 import type { AssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import type {
   HostedExecutionExternalThreadRouteAuthority,
@@ -20,6 +22,7 @@ import type {
   AutomationSupportKind,
 } from '@murphai/contracts'
 import type {
+  HostedClinicalRecordsConnectLinkRequest,
   HostedClinicalRecordsConnectLinkResponse,
 } from '@murphai/hosted-execution/clinical-records'
 import type {
@@ -220,7 +223,10 @@ export type AssistantHostedAutomationToolResponse =
 export interface AssistantHostedAutomationTool {
   request(
     request: AssistantHostedAutomationToolRequest,
-    context?: { signal?: AbortSignal | null },
+    context?: {
+      onboardingFirstReadCompletionTransition?: true
+      signal?: AbortSignal | null
+    },
   ): Promise<AssistantHostedAutomationToolResponse>
 }
 
@@ -271,7 +277,10 @@ export interface AssistantHostedSubscriptionTool {
 
 export interface AssistantHostedClinicalRecordsConnectLinkTool {
   createConnectLink(
-    options?: { signal?: AbortSignal | null },
+    options?: {
+      requestKey?: HostedClinicalRecordsConnectLinkRequest['requestKey']
+      signal?: AbortSignal | null
+    },
   ): Promise<HostedClinicalRecordsConnectLinkResponse>
 }
 
@@ -293,6 +302,16 @@ export interface AssistantHostedGroupTool {
     request: HostedRuntimeGroupToolRequest,
     context?: { signal?: AbortSignal | null },
   ): Promise<HostedRuntimeGroupToolResponse>
+  /**
+   * Trusted-host answer for whether this turn can deliver an attachment to
+   * exactly one direct route, so a deterministically undeliverable request is
+   * refused before slow generation work. The model supplies no route
+   * authority. An absent implementation admits the request and leaves the
+   * existing post-generation route binding as the only gate.
+   */
+  directAttachmentRouteStatus?():
+    | { status: 'ok' }
+    | { status: 'unavailable'; unavailableReason: string }
 }
 
 export interface AssistantHostedGroupPermissionOfferRequest {
@@ -892,8 +911,15 @@ function normalizeAssistantGroupTool(
     return undefined
   }
 
+  // Keep the optional route probe bound alongside `request`. Dropping it here
+  // silently downgrades a pre-generation refusal into a post-generation one,
+  // because callers treat an absent probe as admission.
+  const directAttachmentRouteStatus = input.directAttachmentRouteStatus
   return {
     request: input.request.bind(input),
+    ...(typeof directAttachmentRouteStatus === 'function'
+      ? { directAttachmentRouteStatus: directAttachmentRouteStatus.bind(input) }
+      : {}),
   }
 }
 

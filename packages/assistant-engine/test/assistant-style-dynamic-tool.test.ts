@@ -206,6 +206,31 @@ describe('assistant style dynamic tool', () => {
     })
   })
 
+  it('forwards the exact tool call identity with hosted mutations', async () => {
+    hostedMocks.requestPersonalization.mockResolvedValue({
+      action: 'update_personality',
+      result: {
+        outcomes: { humor: 'saved' },
+        settings: personalitySettings({ humor: { source: 'custom', value: 8 } }),
+      },
+    })
+
+    const result = await executeStyleRequest(
+      { action: 'set', setting: 'humor', value: 8 },
+      true,
+      { hosted: true, toolCallId: 'call_style_one' },
+    )
+
+    expect(result.rpcResult.success).toBe(true)
+    expect(hostedMocks.requestPersonalization).toHaveBeenCalledWith({
+      action: 'update_personality',
+      personality: { humor: 8 },
+    }, {
+      assistantInputId: 'ain_0123456789abcdef0123456789abcdef',
+      toolCallId: 'call_style_one',
+    })
+  })
+
   it('sets the conversational-only Unhinged dial through the Web owner', async () => {
     hostedMocks.requestPersonalization.mockResolvedValue({
       action: 'update_personality',
@@ -515,13 +540,14 @@ function personalitySettings(overrides: Partial<{
   }
 }
 
-function readStyleRequest(argumentsValue: unknown) {
+function readStyleRequest(argumentsValue: unknown, toolCallId?: string) {
   return readMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: argumentsValue,
       namespace: 'murph',
       tool: 'assistant_style',
+      ...(toolCallId ? { callId: toolCallId } : {}),
     },
   })
 }
@@ -536,10 +562,11 @@ async function executeStyleRequest(
     settingsOverlay?: {
       settings: Partial<ReturnType<typeof personalitySettings>>
     }
+    toolCallId?: string
     vaultRoot?: string | null
   } = {},
 ) {
-  const request = readStyleRequest(argumentsValue)
+  const request = readStyleRequest(argumentsValue, options.toolCallId)
   if (!request) {
     throw new Error('Expected an assistant style dynamic tool request.')
   }

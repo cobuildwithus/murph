@@ -15,6 +15,7 @@ import {
   GroupSponsorshipManagementCard,
 } from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import {
+  type HostedUsageTopUpActivePurchase,
   type HostedUsageTopUpReturn,
 } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
@@ -46,6 +47,7 @@ import {
   type HostedGroupSponsorshipOfferCode,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
 import {
+  type HostedActiveUsageCreditPurchaseProjection,
   readHostedActiveUsageCreditPurchaseForPayer,
   readHostedUsageCreditPurchaseStatus,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-service";
@@ -150,8 +152,7 @@ export default async function GroupFundingPage({
   }
   const activePurchaseMatchesTarget =
     activePurchase?.target.kind === "group" &&
-    activePurchase.target.beneficiaryMemberId === target.runtimeMemberId &&
-    activePurchase.target.groupJoinCode === target.joinCode;
+    activePurchase.target.beneficiaryMemberId === target.runtimeMemberId;
   const frozenSponsorship =
     member && activePurchaseMatchesTarget && activePurchase
       ? await readHostedGroupSponsorshipDraftForCreator({
@@ -162,9 +163,9 @@ export default async function GroupFundingPage({
       : undefined;
   const visibleActivePurchase = activePurchase
     ? activePurchaseMatchesTarget
-      ? activePurchase
+      ? projectHostedGroupActivePurchaseForClient(activePurchase)
       : {
-          ...activePurchase,
+          ...projectHostedGroupActivePurchaseForClient(activePurchase),
           retryAllowed: false,
           targetConflict: true as const,
           url: undefined,
@@ -356,6 +357,20 @@ function formatUsageTopUpAmount(amountUsdCents: number): string {
   return cents === 0
     ? `$${wholeDollars}`
     : `$${wholeDollars}.${String(cents).padStart(2, "0")}`;
+}
+
+function projectHostedGroupActivePurchaseForClient(
+  purchase: HostedActiveUsageCreditPurchaseProjection,
+): HostedUsageTopUpActivePurchase {
+  return {
+    cancelAllowed: purchase.cancelAllowed,
+    offerCode: purchase.offerCode,
+    purchaseId: purchase.purchaseId,
+    restartAt: purchase.restartAt,
+    retryAllowed: purchase.retryAllowed,
+    status: purchase.status,
+    url: purchase.url,
+  };
 }
 
 function describeGroupKind(kind: string): string {

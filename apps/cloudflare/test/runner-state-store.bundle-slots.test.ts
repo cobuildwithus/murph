@@ -268,6 +268,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
       lastErrorAt: null,
       lastErrorCode: null,
       lastInvocationAt: null,
+      pendingRunnerContainerName: null,
       userId: "user-current",
       writeFence: null,
     });

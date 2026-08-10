@@ -37,6 +37,9 @@ import {
 const userId = `member_local_linq_scheduled_reminder_${Date.now()}`;
 const linqWebhookSecret = "linq-local-scheduled-reminder-secret";
 const reminderText = "Time to sleep. Put the phone down and get some rest.";
+const scheduledReminderImageAlt = "Sleep reminder illustration";
+const scheduledReminderDeliveredText =
+  `${reminderText}\n\n${scheduledReminderImageAlt}`;
 const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Show the daily nutrition summary as a card.";
 const overlapForegroundNutritionCard = {
@@ -59,8 +62,12 @@ const scheduledReminderLeadMs = scheduledReminderTiming.leadMs;
 const setupLeadText = scheduledReminderTiming.setupLeadText;
 const setupReplyText = `Done - I will remind you here in ${setupLeadText}.`;
 const setupRequestText = `Remind me here in ${setupLeadText} to go to sleep.`;
+const scheduledImageSetupRequestText =
+  `Remind me here in ${setupLeadText} to go to sleep with a simple illustration.`;
 const scheduledReminderInstructions =
   "Send the user the hosted-local sleep reminder: go to sleep.";
+const scheduledImageReminderInstructions =
+  "Send the user the hosted-local sleep reminder with a simple sleep illustration.";
 const scheduledReminderMinimumRunwayMs = 5_000;
 const scheduledReminderSendWaitMs = 60_000;
 const scheduledReminderCompletionWaitMs = 60_000;
@@ -132,9 +139,10 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     requireScenario().queueAssistantResponses(
       buildHostedAssistantAutomationSaveResponses({
         dueAtIso: scheduledReminderTimes.dueAtIso,
+        instructions: scheduledImageReminderInstructions,
         text: setupReplyText,
       }),
-      { matchInputContains: setupRequestText },
+      { matchInputContains: scheduledImageSetupRequestText },
     );
     const webhookResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
       userId,
@@ -142,7 +150,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       {
         eventId: `evt_scheduled_reminder_setup_${userId}`,
         messageId: `msg_scheduled_reminder_setup_${userId}`,
-        text: setupRequestText,
+        text: scheduledImageSetupRequestText,
       },
     ));
     expect(webhookResponse.status).toBe(202);
@@ -246,16 +254,24 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     assertScheduledReminderRunway(scheduledReminderTimes.dueAtIso);
 
     requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall("generate_image", {
+        alt: scheduledReminderImageAlt,
+        prompt: "Render a simple synthetic sleep reminder illustration.",
+      }),
       buildHostedAssistantNotificationDecisionResponse({
         privateSummary: "deliver sleep reminder",
         text: reminderText,
       }),
     ], {
-      matchInputContains: scheduledReminderInstructions,
+      matchInputContains: scheduledImageReminderInstructions,
     });
     const reminderSendBaselineCount = countScheduledReminderSendsWithoutNudge({
       expectedPath: reminderPath,
-      expectedText: reminderText,
+      expectedText: scheduledReminderDeliveredText,
+    });
+    const reminderAttachmentBaselineCount = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
     });
     const reminderProviderRequestBaselineCount =
       requireScenario().assistantProviderRequests.length;
@@ -264,13 +280,28 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const sendRequest = await waitForScheduledReminderSendWithoutNudge({
       baselineCount: reminderSendBaselineCount,
       expectedPath: reminderPath,
-      expectedText: reminderText,
+      expectedText: scheduledReminderDeliveredText,
       timeoutMs: scheduledReminderSendWaitMs,
       userId,
     });
 
     expect(sendRequest.method).toBe("POST");
-    expect(requireLinqStub().readObservedMessageText(sendRequest)).toBe(reminderText);
+    expect(requireLinqStub().readObservedMessageText(sendRequest))
+      .toBe(scheduledReminderDeliveredText);
+    expect(readObservedLinqMessageParts(sendRequest)).toEqual([
+      {
+        type: "text",
+        value: scheduledReminderDeliveredText,
+      },
+      expect.objectContaining({
+        attachment_id: expect.stringMatching(/^attachment_local_/u),
+        type: "media",
+      }),
+    ]);
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/attachments",
+    })).toBe(reminderAttachmentBaselineCount + 1);
     const reminderStatus = await requireScenario().waitForHostedCompletion(userId, {
       timeoutMs: scheduledReminderCompletionWaitMs,
     });
@@ -291,6 +322,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     requireScenario().queueAssistantResponses(
       buildHostedAssistantAutomationSaveResponses({
         dueAtIso: overlapSetupTimes.dueAtIso,
+        instructions: scheduledReminderInstructions,
         text: setupReplyText,
       }),
       { matchInputContains: setupRequestText },
@@ -404,7 +436,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
       expect(requireLinqStub().readObservedMessageText(overlapForegroundSend)).toBeNull();
       expect(requireLinqStub().readObservedMessageAppCard(overlapForegroundSend)).toMatchObject({
         fallback_text: "Ask Murph for this card in text",
-        interactive: false,
+        interactive: true,
         layout: {
           caption: "Jul 28 · 3 meals",
           subcaption: "1,490.25 cal",
@@ -412,7 +444,7 @@ describe("hosted local Linq scheduled reminder e2e", () => {
           trailing_subcaption: "34.75g fat",
         },
         type: "imessage_app",
-        url: "https://murph.ai",
+        url: expect.stringMatching(/^https:\/\/www\.withmurph\.ai\/#murph-card=/u),
       });
       expect(requireLinqStub().countObservedSends(reminderPath))
         .toBe(overlapForegroundSendBaselineCount + 1);
@@ -641,7 +673,9 @@ async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(inp
     memberId: input.memberId,
   });
   const cronRows = usageRows.filter((row) =>
-    row.triggerKind === "automation_cron" && row.occurredAt >= input.notBeforeIso
+    row.providerName === "hosted-openai"
+    && row.triggerKind === "automation_cron"
+    && row.occurredAt >= input.notBeforeIso
   );
   expect(cronRows.length).toBeGreaterThan(0);
 
@@ -710,13 +744,14 @@ async function startScenario(): Promise<void> {
 
 function buildHostedAssistantAutomationSaveResponses(input: {
   dueAtIso: string;
+  instructions: string;
   text: string;
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
     buildAssistantProviderMurphToolCall("automation", {
       action: "save",
       continuityPolicy: "preserve",
-      instructions: scheduledReminderInstructions,
+      instructions: input.instructions,
       schedule: { at: input.dueAtIso, kind: "at" },
       summary: "One-shot sleep reminder.",
       tags: ["assistant", "scheduled"],
@@ -976,6 +1011,15 @@ function summarizeObservedLinqRequests(): Array<{ method: string; url: string }>
     method: request.method,
     url: request.url,
   }));
+}
+
+function readObservedLinqMessageParts(request: ObservedLinqRequest): unknown[] {
+  const parsed = JSON.parse(request.body) as {
+    message?: {
+      parts?: unknown;
+    };
+  };
+  return Array.isArray(parsed.message?.parts) ? parsed.message.parts : [];
 }
 
 function createObservedLinqMessageTextMatcher(

@@ -494,6 +494,29 @@ describe("hosted-local E2E suite preparation", () => {
     }
   });
 
+  test("runs unrelated scenarios with shared Stripe checkout catalog values", async () => {
+    const sharedCatalog = {
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: "price_pulse",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: "price_edge",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: "price_familypulse",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: "price_familyedge",
+      HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: "price_familymax",
+      HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY:
+        "bpc_edge",
+    };
+
+    await runHostedLocalE2eSuite({
+      env: sharedCatalog,
+      prepareRunnerBundle: false,
+      scenario: "checkpoint-baseline",
+    });
+
+    const vitestCall = runForegroundCommand.mock.calls
+      .map(([call]) => call)
+      .find((call) => call.args.includes("vitest"));
+    expect(vitestCall?.env).toEqual(expect.objectContaining(sharedCatalog));
+  });
+
   test("gives live wearable login values only to the isolated device-connect Vitest child", async () => {
     const retiredOuraPassword = "retired-sentinel-oura-password";
     const liveValues = {

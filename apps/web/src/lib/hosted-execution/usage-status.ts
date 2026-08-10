@@ -14,6 +14,7 @@ import {
   canScheduleHostedBillingPlanChange,
   canUpgradeHostedBillingPlan,
   getHostedBillingPlanDefinition,
+  isHostedBillingPlanChangePortalConfigured,
   parseHostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import {
@@ -55,7 +56,8 @@ export async function readHostedPersonalAiUsageStatus(input: {
   subscriptionActionTargetPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
 }): Promise<HostedPlanUsageStatus> {
   const now = normalizeUsageStatusDate(input.now ?? new Date());
   const prisma = input.prisma ?? getPrisma();
@@ -90,7 +92,8 @@ export async function projectHostedPersonalAiUsageStatus(input: {
   subscriptionActionTargetPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
 }): Promise<HostedPlanUsageStatus> {
   const now = normalizeUsageStatusDate(input.now ?? new Date());
   const prisma = input.prisma ?? getPrisma();
@@ -227,11 +230,13 @@ export async function projectHostedPersonalAiUsageStatus(input: {
     ? "Family"
     : accessKind === "trial"
       ? "Pulse Trial"
-      : decision.billingPlanCode === "launch_edge_monthly"
-        ? "Edge"
-        : decision.billingPlanCode === "launch_group_monthly"
-          ? "Group"
-          : "Pulse";
+      : decision.billingPlanCode === "launch_max_monthly"
+        ? "Max"
+        : decision.billingPlanCode === "launch_edge_monthly"
+          ? "Edge"
+          : decision.billingPlanCode === "launch_group_monthly"
+            ? "Group"
+            : "Pulse";
   const shouldRecommendAction = exhausted
     || forecast !== null
     || usedPercent >= USAGE_ACTION_THRESHOLD_PERCENT;
@@ -495,7 +500,8 @@ interface HostedResolvedSubscriptionOffer {
   recommendedPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
 }
 
 const EMPTY_SUBSCRIPTION_OFFER: HostedResolvedSubscriptionOffer = {
@@ -511,7 +517,8 @@ async function resolveAvailableSubscriptionOffer(input: {
   requestedTargetPlanCode?:
     | "launch_group_monthly"
     | "launch_monthly"
-    | "launch_edge_monthly";
+    | "launch_edge_monthly"
+    | "launch_max_monthly";
   trialTiming?: "at_trial_end" | "now";
 }): Promise<HostedResolvedSubscriptionOffer> {
   if (input.accessKind === "family_sponsored") {
@@ -636,6 +643,12 @@ async function resolveAvailableSubscriptionOffer(input: {
           : null
     );
   if (!targetPlanCode || targetPlanCode === input.planCode) {
+    return EMPTY_SUBSCRIPTION_OFFER;
+  }
+  if (
+    targetPlanCode === "launch_max_monthly"
+    && !isHostedBillingPlanChangePortalConfigured(targetPlanCode)
+  ) {
     return EMPTY_SUBSCRIPTION_OFFER;
   }
   if (
@@ -778,7 +791,9 @@ function projectHostedScheduledPlan(
         ? "Group"
         : planCode === "launch_edge_monthly"
           ? "Edge"
-          : "Pulse",
+          : planCode === "launch_max_monthly"
+            ? "Max"
+            : "Pulse",
     effectiveAt:
       billingState?.scheduledBillingEffectiveAt?.toISOString() ?? null,
   };

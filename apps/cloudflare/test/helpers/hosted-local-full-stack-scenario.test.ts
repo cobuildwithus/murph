@@ -9,7 +9,16 @@ const mocks = vi.hoisted(() => ({
     secureCookieMode: input.secureCookieMode,
     sessionId: "session-id",
   })),
-  listHostedRuntimeLogsForTest: vi.fn(async () => []),
+  ensureHostedRuntimeLogDatabaseForTest: vi.fn(async () => {}),
+  listHostedRuntimeLogsForTest: vi.fn(async () => [{
+    at: "2026-08-07T12:00:00.000Z",
+    attemptId: "attempt_test",
+    component: "runner",
+    eventCode: "runner.lifecycle",
+    level: "info",
+    phase: "completed",
+    redactedJson: null,
+  }]),
   startHostedLocalDevHarness: vi.fn(),
   startHostedLocalOidcFixture: vi.fn(async () => ({
     jwksUrl: "http://127.0.0.1:4100/.well-known/jwks.json",
@@ -22,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("#hosted-web-testing", () => ({
   bindHostedActiveLinqHomeChat: vi.fn(async () => {}),
   bindHostedActiveTelegramMember: vi.fn(async () => {}),
+  ensureHostedRuntimeLogDatabaseForTest: mocks.ensureHostedRuntimeLogDatabaseForTest,
   issueHostedAppSessionForTest: mocks.issueHostedAppSessionForTest,
   listHostedRuntimeLogsForTest: mocks.listHostedRuntimeLogsForTest,
   readHostedJunctionDeviceSyncReplayDrainStatus: vi.fn(async () => ({})),
@@ -65,6 +75,8 @@ vi.mock("./hosted-local-wake.js", () => ({
 }));
 
 import {
+  assertHostedRunNoProviderEgressAuthFailures,
+  buildHostedLocalRuntimeLogDatabaseNameForTest,
   buildHostedLocalFullStackWebProcessEnvOverrides,
 } from "./hosted-local-full-stack-scenario.js";
 
@@ -86,6 +98,67 @@ describe("hosted local full-stack web process environment", () => {
       LINQ_API_BASE_URL: "https://api.linqapp.com/api/partner/v3",
     })).toEqual({});
   });
+
+  it("passes the dedicated runtime-log database to the web process", () => {
+    expect(buildHostedLocalFullStackWebProcessEnvOverrides({
+      HOSTED_RUNTIME_LOG_DATABASE_URL:
+        "postgresql://127.0.0.1:5432/murph_e2e_runtime_logs",
+    })).toEqual({
+      HOSTED_RUNTIME_LOG_DATABASE_URL:
+        "postgresql://127.0.0.1:5432/murph_e2e_runtime_logs",
+    });
+  });
+});
+
+it("bounds the derived runtime-log database name to PostgreSQL's identifier limit", () => {
+  const runtimeLogDatabaseName = buildHostedLocalRuntimeLogDatabaseNameForTest("p".repeat(63));
+
+  expect(runtimeLogDatabaseName).toBe(`${"p".repeat(50)}_runtime_logs`);
+  expect(runtimeLogDatabaseName).toHaveLength(63);
+});
+
+it("fails the negative runtime-log oracle when no evidence was persisted", async () => {
+  mocks.listHostedRuntimeLogsForTest.mockResolvedValueOnce([]);
+
+  await expect(assertHostedRunNoProviderEgressAuthFailures({
+    environment: {
+      HOSTED_RUNTIME_LOG_DATABASE_URL:
+        "postgresql://127.0.0.1:5432/murph_test_runtime_logs",
+    },
+    userId: "member_missing_runtime_log_evidence",
+  })).rejects.toThrow("completed without runtime-log evidence");
+});
+
+it("derives and authoritatively injects a stable runtime-log database for explicit database reuse", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness.mockResolvedValue(harness);
+
+  const scenario = await startScenario({
+    webProcessEnvOverrides: {
+      HOSTED_RUNTIME_LOG_DATABASE_URL:
+        "postgresql://127.0.0.1:5432/incorrect_runtime_logs",
+    },
+  });
+  try {
+    const runtimeLogDatabaseUrl =
+      "postgresql://127.0.0.1:5432/murph_test_runtime_logs";
+    expect(mocks.ensureHostedRuntimeLogDatabaseForTest).toHaveBeenCalledWith({
+      databaseUrl: runtimeLogDatabaseUrl,
+    });
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: expect.objectContaining({
+          DATABASE_URL: "postgresql://127.0.0.1:5432/murph_test",
+          HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
+        }),
+        webProcessEnvOverrides: expect.objectContaining({
+          HOSTED_RUNTIME_LOG_DATABASE_URL: runtimeLogDatabaseUrl,
+        }),
+      }),
+    );
+  } finally {
+    await scenario.stop();
+  }
 });
 
 it.each([false, true])(
@@ -271,6 +344,7 @@ function createScenarioHarness(input: {
 async function startScenario(input: {
   additionalEnv?: NodeJS.ProcessEnv;
   faultInjection?: boolean;
+  webProcessEnvOverrides?: NodeJS.ProcessEnv;
 } = {}) {
   const { startHostedLocalFullStackScenario } = await import(
     "./hosted-local-full-stack-scenario.js"
@@ -285,6 +359,7 @@ async function startScenario(input: {
     requiredRunnerEnvProfile: "default",
     reuseLocalDatabase: true,
     scenarioLabel: "Hosted local passive oracle helper test",
+    webProcessEnvOverrides: input.webProcessEnvOverrides,
   });
 }
 

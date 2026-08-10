@@ -27,13 +27,13 @@ import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
+import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
 import { ConnectSourcesGrid } from "./connect-page-client";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
   ConnectPageInitialLoadError,
   ConnectSource,
-  ConnectSourceSetupGuideId,
   LogoAsset,
 } from "./connect-page-types";
 
@@ -42,7 +42,10 @@ export const metadata: Metadata = createMurphPageMetadata({
   description: "Connect your wearables and health data sources.",
 });
 
-export type ConnectPageSearchParams = Record<string, string | string[] | undefined>;
+export type ConnectPageSearchParams = Record<
+  string,
+  string | string[] | undefined
+>;
 
 type ConnectSourceUi = Omit<ConnectSource, "id">;
 type ConnectSettingsSourceMatch = Pick<
@@ -69,9 +72,12 @@ type ConnectSourceConnectionState = {
   state: "active" | "reauthorization_required";
 };
 type ConnectSourceRecoveryKind = NonNullable<ConnectSource["recoveryKind"]>;
-type ConnectSourceDisconnectScope = NonNullable<ConnectSource["disconnectScope"]>;
+type ConnectSourceDisconnectScope = NonNullable<
+  ConnectSource["disconnectScope"]
+>;
 
-const MURPH_IOS_APP_STORE_URL = "https://apps.apple.com/us/app/murph-ai/id6786145859";
+const MURPH_IOS_APP_STORE_URL =
+  "https://apps.apple.com/us/app/murph-ai/id6786145859";
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>([
   "apple-health",
   "coros",
@@ -82,69 +88,24 @@ const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>([
   "zepp",
 ]);
 
-
-function appleHealthRelaySourceUi(input: {
-  description: string;
-  name: string;
-  setupGuideId: ConnectSourceSetupGuideId;
-}): ConnectSourceUi {
-  return {
-    description: input.description,
-    logo: logoAsset(
-      "wearable-relay.svg",
-      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-      64,
-      40,
-    ),
-    name: input.name,
-    setupGuideActionLabel: "Set up sync",
-    setupGuideId: input.setupGuideId,
-  };
-}
-
 const CONNECT_SOURCE_UI = {
-
   "apple-health": {
-    description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+    description:
+      "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
     logo: logoAsset("apple-health.png"),
     name: "Apple Health",
     unavailableActionLabel: "Download app",
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
   },
-  zepp: appleHealthRelaySourceUi({
-    description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
-    name: "Zepp / Amazfit",
-    setupGuideId: "zepp-apple-health",
-  }),
-  "xiaomi-mi-fitness": appleHealthRelaySourceUi({
-    description:
-      "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
-    name: "Xiaomi / Mi Fitness",
-    setupGuideId: "xiaomi-mi-fitness-apple-health",
-  }),
-  ringconn: appleHealthRelaySourceUi({
-    description: "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
-    name: "RingConn",
-    setupGuideId: "ringconn-apple-health",
-  }),
-  coros: appleHealthRelaySourceUi({
-    description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-    name: "COROS",
-    setupGuideId: "coros-apple-health",
-  }),
-  suunto: appleHealthRelaySourceUi({
-    description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-    name: "Suunto",
-    setupGuideId: "suunto-apple-health",
-  }),
-  "huawei-health": appleHealthRelaySourceUi({
-    description: "Selected watch and band data through Apple Health, where supported.",
-    name: "Huawei Health",
-    setupGuideId: "huawei-health-apple-health",
-  }),
+  ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
-    logo: logoAsset("whoop.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 96, 15),
+    logo: logoAsset(
+      "whoop.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      96,
+      15,
+    ),
     name: "Whoop",
   },
   mapmyfitness: {
@@ -164,12 +125,22 @@ const CONNECT_SOURCE_UI = {
   },
   renpho: {
     description: "Smart scale. Weight and body composition.",
-    logo: logoAsset("renpho.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 110, 22),
+    logo: logoAsset(
+      "renpho.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      110,
+      22,
+    ),
     name: "Renpho",
   },
   runkeeper: {
     description: "Runs, walks, routes, and pace.",
-    logo: logoAsset("runkeeper.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 132, 20),
+    logo: logoAsset(
+      "runkeeper.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      132,
+      20,
+    ),
     name: "Runkeeper",
   },
   "samsung-health": {
@@ -179,7 +150,12 @@ const CONNECT_SOURCE_UI = {
   },
   "tandem-source": {
     description: "Insulin pump and CGM therapy records.",
-    logo: logoAsset("tandem-source.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 120, 25),
+    logo: logoAsset(
+      "tandem-source.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      120,
+      25,
+    ),
     name: "Tandem Source",
   },
   beurer: {
@@ -189,7 +165,12 @@ const CONNECT_SOURCE_UI = {
   },
   strava: {
     description: "Rides, runs, power, and training load.",
-    logo: logoAsset("strava.svg", "h-auto max-h-9 w-auto max-w-[8rem] object-contain", 96, 20),
+    logo: logoAsset(
+      "strava.svg",
+      "h-auto max-h-9 w-auto max-w-[8rem] object-contain",
+      96,
+      20,
+    ),
     name: "Strava",
   },
   "freestyle-libre-ble": {
@@ -199,12 +180,22 @@ const CONNECT_SOURCE_UI = {
   },
   omron: {
     description: "Blood pressure, pulse, and weight.",
-    logo: logoAsset("omron.png", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 106, 40),
+    logo: logoAsset(
+      "omron.png",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      106,
+      40,
+    ),
     name: "Omron",
   },
   accuchek: {
     description: "Glucose meter readings and history.",
-    logo: logoAsset("accuchek.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 14),
+    logo: logoAsset(
+      "accuchek.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      122,
+      14,
+    ),
     name: "Accu-Chek",
   },
   "eight-sleep": {
@@ -239,7 +230,12 @@ const CONNECT_SOURCE_UI = {
   },
   oura: {
     description: "Smart ring. Sleep, readiness, temperature, and recovery.",
-    logo: logoAsset("oura.png", "h-auto max-h-8 w-auto max-w-[8rem] object-contain", 96, 30),
+    logo: logoAsset(
+      "oura.png",
+      "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+      96,
+      30,
+    ),
     name: "Oura",
   },
   peloton: {
@@ -249,7 +245,12 @@ const CONNECT_SOURCE_UI = {
   },
   wahoo: {
     description: "Cycling, running, heart rate, and power.",
-    logo: logoAsset("wahoo.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 108, 26),
+    logo: logoAsset(
+      "wahoo.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      108,
+      26,
+    ),
     name: "Wahoo",
   },
   "contour-ble": {
@@ -289,7 +290,12 @@ const CONNECT_SOURCE_UI = {
   },
   kardia: {
     description: "Portable ECG recordings and rhythm detection.",
-    logo: logoAsset("kardia.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 104, 20),
+    logo: logoAsset(
+      "kardia.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      104,
+      20,
+    ),
     name: "Kardia",
   },
   cronometer: {
@@ -299,7 +305,12 @@ const CONNECT_SOURCE_UI = {
   },
   polar: {
     description: "Training, sleep, heart rate, and recovery.",
-    logo: logoAsset("polar.svg", "h-auto max-h-7 w-auto max-w-[8rem] object-contain", 122, 20),
+    logo: logoAsset(
+      "polar.svg",
+      "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+      122,
+      20,
+    ),
     name: "Polar",
   },
 } satisfies Record<string, ConnectSourceUi>;
@@ -319,7 +330,10 @@ export default async function ConnectPage({
   const reconnectProviderBySourceId = new Map<string, string>();
   const reconnectTargetBySourceId = new Map<string, string>();
   const disconnectConnectionIdBySourceId = new Map<string, string>();
-  const disconnectScopeBySourceId = new Map<string, ConnectSourceDisconnectScope>();
+  const disconnectScopeBySourceId = new Map<
+    string,
+    ConnectSourceDisconnectScope
+  >();
   const disconnectSourceProviderSlugBySourceId = new Map<string, string>();
   let historicalResetIncompleteSourceIds = new Set<string>();
   let initialLoadError: ConnectPageInitialLoadError | null = null;
@@ -330,11 +344,15 @@ export default async function ConnectPage({
     zeppSyncContactAction,
     appleHealthRelaySyncContactActions,
   ] = await Promise.all([
-    resolveDeviceConnectRecoveryContactAction(Boolean(auth.authenticatedMember)),
+    resolveDeviceConnectRecoveryContactAction(
+      Boolean(auth.authenticatedMember),
+    ),
     resolveDeviceSyncVoiceMemoSources(auth.authenticatedMember?.id ?? null),
     resolveWhoopSyncContactAction(Boolean(auth.authenticatedMember)),
     resolveZeppSyncContactAction(Boolean(auth.authenticatedMember)),
-    resolveAppleHealthRelaySyncContactActions(Boolean(auth.authenticatedMember)),
+    resolveAppleHealthRelaySyncContactActions(
+      Boolean(auth.authenticatedMember),
+    ),
   ]);
 
   if (auth.authenticatedMember) {
@@ -342,7 +360,10 @@ export default async function ConnectPage({
       const response = await buildHostedDeviceSyncSettingsResponse({
         member: auth.authenticatedMember,
       });
-      for (const connection of resolveConnectSourceConnectionStates(CONNECT_SOURCES, response.sources)) {
+      for (const connection of resolveConnectSourceConnectionStates(
+        CONNECT_SOURCES,
+        response.sources,
+      )) {
         const sourceId = connection.sourceId;
         if (connection.recoveryKind) {
           recoveryKindBySourceId.set(sourceId, connection.recoveryKind);
@@ -352,7 +373,10 @@ export default async function ConnectPage({
           connectedSourceIds.add(sourceId);
         }
         if (connection.connectionId) {
-          disconnectConnectionIdBySourceId.set(sourceId, connection.connectionId);
+          disconnectConnectionIdBySourceId.set(
+            sourceId,
+            connection.connectionId,
+          );
         }
         if (connection.disconnectScope) {
           disconnectScopeBySourceId.set(sourceId, connection.disconnectScope);
@@ -365,7 +389,10 @@ export default async function ConnectPage({
         }
         if (connection.requiresReconnect) {
           if (connection.connectProvider) {
-            reconnectProviderBySourceId.set(sourceId, connection.connectProvider);
+            reconnectProviderBySourceId.set(
+              sourceId,
+              connection.connectProvider,
+            );
           }
           if (connection.connectTarget) {
             reconnectTargetBySourceId.set(sourceId, connection.connectTarget);
@@ -373,7 +400,10 @@ export default async function ConnectPage({
         }
       }
       historicalResetIncompleteSourceIds =
-        resolveHistoricalResetIncompleteConnectSourceIds(CONNECT_SOURCES, response.sources);
+        resolveHistoricalResetIncompleteConnectSourceIds(
+          CONNECT_SOURCES,
+          response.sources,
+        );
     } catch (error) {
       initialLoadError = isHostedOnboardingError(error)
         ? {
@@ -409,7 +439,10 @@ export default async function ConnectPage({
         authenticated={Boolean(auth.authenticatedMember)}
         deviceConnectRecoveryContactAction={recoveryContactAction}
         garminHistoricalDataVoiceMemoSrc={voiceMemoSources.garminHistoricalData}
-        initialCallback={resolveVerifiedInitialConnectCallback(resolvedSearchParams, sources)}
+        initialCallback={resolveVerifiedInitialConnectCallback(
+          resolvedSearchParams,
+          sources,
+        )}
         initialLoadError={initialLoadError}
         sources={sources}
         whoopSyncContactAction={whoopSyncContactAction}
@@ -439,16 +472,24 @@ export function listVisibleConnectSources(): ConnectSource[] {
               ? { setupGuideActionLabel: ui.setupGuideActionLabel }
               : {}),
             ...(ui.setupGuideId ? { setupGuideId: ui.setupGuideId } : {}),
-            ...(ui.unavailableActionLabel ? { unavailableActionLabel: ui.unavailableActionLabel } : {}),
-            ...(ui.unavailableActionUrl ? { unavailableActionUrl: ui.unavailableActionUrl } : {}),
-            ...(ui.unavailableMessage ? { unavailableMessage: ui.unavailableMessage } : {}),
+            ...(ui.unavailableActionLabel
+              ? { unavailableActionLabel: ui.unavailableActionLabel }
+              : {}),
+            ...(ui.unavailableActionUrl
+              ? { unavailableActionUrl: ui.unavailableActionUrl }
+              : {}),
+            ...(ui.unavailableMessage
+              ? { unavailableMessage: ui.unavailableMessage }
+              : {}),
           },
         ]
       : [];
   });
 }
 
-async function resolveDeviceConnectRecoveryContactAction(authenticated: boolean) {
+async function resolveDeviceConnectRecoveryContactAction(
+  authenticated: boolean,
+) {
   if (!authenticated) {
     return null;
   }
@@ -494,13 +535,16 @@ async function resolveAppleHealthRelaySyncContactActions(
   }
 
   const entries = await Promise.all(
-    APPLE_HEALTH_RELAY_SETUP_GUIDE_IDS.map(async (setupGuideId) => [
-      setupGuideId,
-      await resolveAppleHealthRelayContactAction(
-        authenticated,
-        `Help me set up ${readAppleHealthRelaySourceName(setupGuideId)} through Apple Health. Please walk me through it with a voice memo.`,
-      ),
-    ] as const),
+    APPLE_HEALTH_RELAY_SETUP_GUIDE_IDS.map(
+      async (setupGuideId) =>
+        [
+          setupGuideId,
+          await resolveAppleHealthRelayContactAction(
+            authenticated,
+            `Help me set up ${readAppleHealthRelaySourceName(setupGuideId)} through Apple Health. Please walk me through it with a voice memo.`,
+          ),
+        ] as const,
+    ),
   );
 
   return Object.fromEntries(entries);
@@ -540,9 +584,15 @@ async function resolveAppleHealthRelayContactAction(
   }
 }
 
-function isVisibleConnectSource(source: (typeof DEVICE_CONNECT_SOURCES)[number]): boolean {
-  return DISPLAY_ONLY_CONNECT_SOURCE_IDS.has(source.connectSourceId)
-    || source.routes.some((route) => route.kind === "direct" || route.kind === "junction_link");
+function isVisibleConnectSource(
+  source: (typeof DEVICE_CONNECT_SOURCES)[number],
+): boolean {
+  return (
+    DISPLAY_ONLY_CONNECT_SOURCE_IDS.has(source.connectSourceId) ||
+    source.routes.some(
+      (route) => route.kind === "direct" || route.kind === "junction_link",
+    )
+  );
 }
 
 export function resolveConfiguredConnectSources(
@@ -550,7 +600,10 @@ export function resolveConfiguredConnectSources(
   options: {
     connectedSourceIds?: ReadonlySet<string>;
     disconnectConnectionIdBySourceId?: ReadonlyMap<string, string>;
-    disconnectScopeBySourceId?: ReadonlyMap<string, ConnectSourceDisconnectScope>;
+    disconnectScopeBySourceId?: ReadonlyMap<
+      string,
+      ConnectSourceDisconnectScope
+    >;
     disconnectSourceProviderSlugBySourceId?: ReadonlyMap<string, string>;
     historicalResetIncompleteSourceIds?: ReadonlySet<string>;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
@@ -559,53 +612,74 @@ export function resolveConfiguredConnectSources(
     recoveryKindBySourceId?: ReadonlyMap<string, ConnectSourceRecoveryKind>;
   } = {},
 ): ConnectSource[] {
-  const connectTargetBySourceId = new Map(
+  const connectConfigBySourceId = new Map(
     listConfiguredDeviceSyncConnectTargets(
       readConfiguredDeviceSyncConnectTargetConfigs(process.env),
-    ).map((target) => [target.connectSourceId, target.connectTarget] as const),
+    ).map((target) => [target.connectSourceId, target] as const),
   );
 
   return sortConnectSourcesByConnectionState(
     sources.map((source) => {
-      const connectionAvailable = isDeviceConnectSourceAvailableForConnection(source.id);
-      const connectTarget = connectTargetBySourceId.get(source.id);
+      const connectionAvailable = isDeviceConnectSourceAvailableForConnection(
+        source.id,
+      );
+      const connectConfig = connectConfigBySourceId.get(source.id);
       const connected = options.connectedSourceIds?.has(source.id) === true;
-      const recoveryKind = !connected ? options.recoveryKindBySourceId?.get(source.id) : undefined;
-      const requiresReconnect = !connected && !recoveryKind
-        && options.reconnectSourceIds?.has(source.id) === true;
-      const historicalResetIncomplete = !connected && !recoveryKind && !requiresReconnect
-        && options.historicalResetIncompleteSourceIds?.has(source.id) === true;
-      const disconnectConnectionId = options.disconnectConnectionIdBySourceId?.get(source.id);
+      const recoveryKind = !connected
+        ? options.recoveryKindBySourceId?.get(source.id)
+        : undefined;
+      const requiresReconnect =
+        !connected &&
+        !recoveryKind &&
+        options.reconnectSourceIds?.has(source.id) === true;
+      const historicalResetIncomplete =
+        !connected &&
+        !recoveryKind &&
+        !requiresReconnect &&
+        options.historicalResetIncompleteSourceIds?.has(source.id) === true;
+      const disconnectConnectionId =
+        options.disconnectConnectionIdBySourceId?.get(source.id);
       const disconnectScope = options.disconnectScopeBySourceId?.get(source.id);
       const disconnectSourceProviderSlug =
         options.disconnectSourceProviderSlugBySourceId?.get(source.id);
-      const reconnectProvider = options.reconnectProviderBySourceId?.get(source.id);
+      const reconnectProvider = options.reconnectProviderBySourceId?.get(
+        source.id,
+      );
       const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
       const resolvedConnectTarget = connectionAvailable
-        ? reconnectTarget ?? connectTarget
+        ? (reconnectTarget ?? connectConfig?.connectTarget)
         : undefined;
+      const requiresVitalDisclosure =
+        connectionAvailable &&
+        connectConfig?.provider === "junction";
 
       return {
         ...source,
         connectionAvailable,
         ...(reconnectProvider ? { connectProvider: reconnectProvider } : {}),
-        ...(resolvedConnectTarget ? { connectTarget: resolvedConnectTarget } : {}),
+        ...(resolvedConnectTarget
+          ? { connectTarget: resolvedConnectTarget }
+          : {}),
         ...(disconnectConnectionId ? { disconnectConnectionId } : {}),
         ...(disconnectScope ? { disconnectScope } : {}),
-        ...(disconnectSourceProviderSlug ? { disconnectSourceProviderSlug } : {}),
+        ...(disconnectSourceProviderSlug
+          ? { disconnectSourceProviderSlug }
+          : {}),
         ...(historicalResetIncomplete ? { historicalResetIncomplete } : {}),
         ...(recoveryKind ? { recoveryKind } : {}),
         ...(requiresReconnect ? { requiresReconnect } : {}),
+        ...(requiresVitalDisclosure ? { requiresVitalDisclosure } : {}),
         ...(connected ? { connected } : {}),
       };
     }),
-  ).filter((source) =>
-    source.connectionAvailable !== false
-    || Boolean(source.setupGuideId)
-    || source.connected === true
-    || source.requiresReconnect === true
-    || Boolean(source.recoveryKind)
-    || source.historicalResetIncomplete === true
+  ).filter(
+    (source) =>
+      source.connectionAvailable !== false ||
+      Boolean(source.setupGuideId) ||
+      source.connected === true ||
+      source.requiresReconnect === true ||
+      Boolean(source.recoveryKind) ||
+      source.historicalResetIncomplete === true,
   );
 }
 
@@ -636,16 +710,23 @@ export function resolveHistoricalResetIncompleteConnectSourceIds(
   const resetIncompleteSourceIds = new Set<string>();
 
   for (const source of settingsSources) {
-    if (source.state !== "disconnected" || source.historicalResetIncomplete !== true) {
+    if (
+      source.state !== "disconnected" ||
+      source.historicalResetIncomplete !== true
+    ) {
       continue;
     }
 
     const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
-    const configuredSourceId = normalizeDeviceConnectSourceId(source.connectSourceId ?? null);
+    const configuredSourceId = normalizeDeviceConnectSourceId(
+      source.connectSourceId ?? null,
+    );
     if (configuredSourceId && visibleSourceIds.has(configuredSourceId)) {
       resetIncompleteSourceIds.add(configuredSourceId);
     }
-    const directSourceId = provider ? sourceIdByDirectProvider.get(provider) : null;
+    const directSourceId = provider
+      ? sourceIdByDirectProvider.get(provider)
+      : null;
     if (directSourceId) {
       resetIncompleteSourceIds.add(directSourceId);
     }
@@ -654,9 +735,13 @@ export function resolveHistoricalResetIncompleteConnectSourceIds(
     }
 
     for (const upstreamSource of source.upstreamSources) {
-      const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(upstreamSource.sourceProviderSlug);
+      const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(
+        upstreamSource.sourceProviderSlug,
+      );
       const sourceId = sourceProviderSlug
-        ? resolveDeviceConnectSourceIdForJunctionProviderSlug(sourceProviderSlug)
+        ? resolveDeviceConnectSourceIdForJunctionProviderSlug(
+            sourceProviderSlug,
+          )
         : null;
       if (sourceId && visibleSourceIds.has(sourceId)) {
         resetIncompleteSourceIds.add(sourceId);
@@ -675,8 +760,9 @@ export function resolveConnectedConnectSourceIds(
   >[],
 ): Set<string> {
   return new Set(
-    resolveConnectedConnectSourceConnections(sources, settingsSources)
-      .map((connection) => connection.sourceId),
+    resolveConnectedConnectSourceConnections(sources, settingsSources).map(
+      (connection) => connection.sourceId,
+    ),
   );
 }
 
@@ -684,10 +770,12 @@ export function resolveConnectedConnectSourceConnections(
   sources: readonly Pick<ConnectSource, "id">[],
   settingsSources: readonly ConnectSettingsSourceMatch[],
 ): { connectionId: string | null; sourceId: string }[] {
-  return resolveConnectSourceConnectionMatches(sources, settingsSources).map((connection) => ({
-    connectionId: connection.connectionId,
-    sourceId: connection.sourceId,
-  }));
+  return resolveConnectSourceConnectionMatches(sources, settingsSources).map(
+    (connection) => ({
+      connectionId: connection.connectionId,
+      sourceId: connection.sourceId,
+    }),
+  );
 }
 
 function resolveConnectSourceConnectionMatches(
@@ -708,32 +796,41 @@ function resolveConnectSourceConnectionMatches(
 
   for (const source of settingsSources) {
     const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
-    const sourceState = source.state === "active" || (
-      options.includeReauthorizationRequired === true
-      && isReauthorizationRequiredConnectSourceState(source.state)
-    )
-      ? source.state
-      : null;
-    const parentRequiresReconnect = isReauthorizationRequiredConnectSourceState(source.state);
+    const sourceState =
+      source.state === "active" ||
+      (options.includeReauthorizationRequired === true &&
+        isReauthorizationRequiredConnectSourceState(source.state))
+        ? source.state
+        : null;
+    const parentRequiresReconnect = isReauthorizationRequiredConnectSourceState(
+      source.state,
+    );
     const sourceRequiresReconnect = source.primaryAction?.kind === "reconnect";
-    const requiresReconnect = sourceRequiresReconnect || parentRequiresReconnect;
-    const connectionId = typeof source.connectionId === "string" && source.connectionId.trim()
-      ? source.connectionId
-      : null;
-    const connectTarget = typeof source.connectTarget === "string" && source.connectTarget.trim()
-      ? source.connectTarget
-      : null;
-    const hasJunctionUpstreamSources = provider === "junction" && source.upstreamSources.length > 0;
-    const unambiguousJunctionReconnectUpstreamCount = hasJunctionUpstreamSources && sourceRequiresReconnect
-      ? countLiveJunctionUpstreamSources(source.upstreamSources)
-      : 0;
+    const requiresReconnect =
+      sourceRequiresReconnect || parentRequiresReconnect;
+    const connectionId =
+      typeof source.connectionId === "string" && source.connectionId.trim()
+        ? source.connectionId
+        : null;
+    const connectTarget =
+      typeof source.connectTarget === "string" && source.connectTarget.trim()
+        ? source.connectTarget
+        : null;
+    const hasJunctionUpstreamSources =
+      provider === "junction" && source.upstreamSources.length > 0;
+    const unambiguousJunctionReconnectUpstreamCount =
+      hasJunctionUpstreamSources && sourceRequiresReconnect
+        ? countLiveJunctionUpstreamSources(source.upstreamSources)
+        : 0;
 
-    const configuredSourceId = normalizeDeviceConnectSourceId(source.connectSourceId ?? null);
+    const configuredSourceId = normalizeDeviceConnectSourceId(
+      source.connectSourceId ?? null,
+    );
     if (
-      sourceState
-      && configuredSourceId
-      && visibleSourceIds.has(configuredSourceId)
-      && !hasJunctionUpstreamSources
+      sourceState &&
+      configuredSourceId &&
+      visibleSourceIds.has(configuredSourceId) &&
+      !hasJunctionUpstreamSources
     ) {
       upsertConnectSourceConnection(connectedConnections, {
         connectionId,
@@ -768,45 +865,56 @@ function resolveConnectSourceConnectionMatches(
         continue;
       }
 
-      const upstreamNeedsConnectionReset = upstreamSource.recoveryKind === "connection_reset";
-      const upstreamOwnRequiresReconnect = upstreamSource.requiresReconnect === true;
+      const upstreamNeedsConnectionReset =
+        upstreamSource.recoveryKind === "connection_reset";
+      const upstreamOwnRequiresReconnect =
+        upstreamSource.requiresReconnect === true;
       const upstreamInheritsSourceReconnect =
-        sourceRequiresReconnect
-        && unambiguousJunctionReconnectUpstreamCount === 1
-        && isLiveJunctionUpstreamSource(upstreamSource);
+        sourceRequiresReconnect &&
+        unambiguousJunctionReconnectUpstreamCount === 1 &&
+        isLiveJunctionUpstreamSource(upstreamSource);
       // A connection reset never offers reconnect: the existing connection has to be
       // disconnected before a fresh connect can restart the historical export.
-      const upstreamRequiresReconnect = !upstreamNeedsConnectionReset && (
-        parentRequiresReconnect
-        || upstreamOwnRequiresReconnect
-        || upstreamInheritsSourceReconnect
-      );
+      const upstreamRequiresReconnect =
+        !upstreamNeedsConnectionReset &&
+        (parentRequiresReconnect ||
+          upstreamOwnRequiresReconnect ||
+          upstreamInheritsSourceReconnect);
       const upstreamConnectProvider = upstreamSource.connectProvider
         ? normalizeDeviceSyncConnectTargetKey(upstreamSource.connectProvider)
         : provider;
       const upstreamConnectTarget =
-        typeof upstreamSource.connectTarget === "string" && upstreamSource.connectTarget.trim()
+        typeof upstreamSource.connectTarget === "string" &&
+        upstreamSource.connectTarget.trim()
           ? upstreamSource.connectTarget
           : null;
 
       if (
-        sourceState === "active"
-        && upstreamSource.status !== "connected"
-        && !upstreamRequiresReconnect
-        && !upstreamNeedsConnectionReset
+        sourceState === "active" &&
+        upstreamSource.status !== "connected" &&
+        !upstreamRequiresReconnect &&
+        !upstreamNeedsConnectionReset
       ) {
         continue;
       }
 
-      const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(upstreamSource.sourceProviderSlug);
+      const sourceProviderSlug = normalizeDeviceSyncConnectTargetKey(
+        upstreamSource.sourceProviderSlug,
+      );
       const sourceId = sourceProviderSlug
-        ? resolveDeviceConnectSourceIdForJunctionProviderSlug(sourceProviderSlug)
+        ? resolveDeviceConnectSourceIdForJunctionProviderSlug(
+            sourceProviderSlug,
+          )
         : null;
       if (sourceId && visibleSourceIds.has(sourceId)) {
         upsertConnectSourceConnection(connectedConnections, {
           connectionId,
-          connectProvider: upstreamRequiresReconnect ? upstreamConnectProvider : provider,
-          connectTarget: upstreamRequiresReconnect ? upstreamConnectTarget : null,
+          connectProvider: upstreamRequiresReconnect
+            ? upstreamConnectProvider
+            : provider,
+          connectTarget: upstreamRequiresReconnect
+            ? upstreamConnectTarget
+            : null,
           // Resetting always disconnects the whole shared Junction connection, so keep
           // the disconnect account-scoped even when this is its only source.
           ...(upstreamNeedsConnectionReset && connectionId
@@ -815,7 +923,9 @@ function resolveConnectSourceConnectionMatches(
           ...(!upstreamNeedsConnectionReset && sourceProviderSlug
             ? { disconnectSourceProviderSlug: sourceProviderSlug }
             : {}),
-          ...(upstreamNeedsConnectionReset ? { recoveryKind: "connection_reset" as const } : {}),
+          ...(upstreamNeedsConnectionReset
+            ? { recoveryKind: "connection_reset" as const }
+            : {}),
           requiresReconnect: upstreamRequiresReconnect,
           sourceId,
           state: sourceState,
@@ -836,9 +946,11 @@ function countLiveJunctionUpstreamSources(
 function isLiveJunctionUpstreamSource(
   source: ConnectSettingsSourceMatch["upstreamSources"][number],
 ): boolean {
-  return source.status === "connected"
-    || source.status === "error"
-    || source.requiresReconnect === true;
+  return (
+    source.status === "connected" ||
+    source.status === "error" ||
+    source.requiresReconnect === true
+  );
 }
 
 function isDisconnectableJunctionUpstreamSource(
@@ -864,8 +976,13 @@ function compareConnectSourceStatePriority(
   return connectSourceStatePriority(left) - connectSourceStatePriority(right);
 }
 
-function connectSourceStatePriority(connection: ConnectSourceConnectionState): number {
-  if (connection.state === "active" && (connection.requiresReconnect || connection.recoveryKind)) {
+function connectSourceStatePriority(
+  connection: ConnectSourceConnectionState,
+): number {
+  if (
+    connection.state === "active" &&
+    (connection.requiresReconnect || connection.recoveryKind)
+  ) {
     return 5;
   }
 
@@ -877,12 +994,16 @@ function connectSourceStatePriority(connection: ConnectSourceConnectionState): n
 }
 
 function isReauthorizationRequiredConnectSourceState(
-  state: HostedDeviceSyncSettingsSource["state"] | ConnectSourceConnectionState["state"],
+  state:
+    | HostedDeviceSyncSettingsSource["state"]
+    | ConnectSourceConnectionState["state"],
 ): state is "reauthorization_required" {
   return state === "reauthorization_required";
 }
 
-function resolveInitialConnectCallback(searchParams: ConnectPageSearchParams): ConnectCallbackInput {
+function resolveInitialConnectCallback(
+  searchParams: ConnectPageSearchParams,
+): ConnectCallbackInput {
   const status = readSearchParamString(searchParams, "deviceSyncStatus");
 
   if (status !== "connected" && status !== "error") {
@@ -915,7 +1036,9 @@ function resolveVerifiedInitialConnectCallback(
     sources,
   });
   const confirmed = callbackSourceId
-    ? sources.some((source) => source.id === callbackSourceId && source.connected === true)
+    ? sources.some(
+        (source) => source.id === callbackSourceId && source.connected === true,
+      )
     : false;
 
   return confirmed ? callback : null;
@@ -928,22 +1051,28 @@ function findCallbackSourceId(input: {
   sources: readonly ConnectSource[];
 }): string | null {
   const source = normalizeDeviceConnectSourceId(input.connectSource);
-  const target = input.connectTarget ? normalizeDeviceSyncConnectTargetKey(input.connectTarget) : null;
-  const provider = input.provider ? normalizeDeviceSyncConnectTargetKey(input.provider) : null;
+  const target = input.connectTarget
+    ? normalizeDeviceSyncConnectTargetKey(input.connectTarget)
+    : null;
+  const provider = input.provider
+    ? normalizeDeviceSyncConnectTargetKey(input.provider)
+    : null;
 
-  return input.sources.find((candidate) => {
-    const sourceTarget = candidate.connectTarget
-      ? normalizeDeviceSyncConnectTargetKey(candidate.connectTarget)
-      : null;
-    const sourceId = normalizeDeviceSyncConnectTargetKey(candidate.id);
-    const normalizedSourceId = normalizeDeviceConnectSourceId(candidate.id);
+  return (
+    input.sources.find((candidate) => {
+      const sourceTarget = candidate.connectTarget
+        ? normalizeDeviceSyncConnectTargetKey(candidate.connectTarget)
+        : null;
+      const sourceId = normalizeDeviceSyncConnectTargetKey(candidate.id);
+      const normalizedSourceId = normalizeDeviceConnectSourceId(candidate.id);
 
-    return Boolean(
-      (source && normalizedSourceId === source)
-      || (target && (sourceTarget === target || sourceId === target))
-      || (provider && (sourceTarget === provider || sourceId === provider)),
-    );
-  })?.id ?? null;
+      return Boolean(
+        (source && normalizedSourceId === source) ||
+          (target && (sourceTarget === target || sourceId === target)) ||
+          (provider && (sourceTarget === provider || sourceId === provider)),
+      );
+    })?.id ?? null
+  );
 }
 
 function readSearchParamString(
@@ -974,7 +1103,10 @@ function logoAsset(
 }
 
 function readConnectSourceUi(connectSourceId: string): ConnectSourceUi | null {
-  return Object.prototype.hasOwnProperty.call(CONNECT_SOURCE_UI, connectSourceId)
+  return Object.prototype.hasOwnProperty.call(
+    CONNECT_SOURCE_UI,
+    connectSourceId,
+  )
     ? CONNECT_SOURCE_UI[connectSourceId as keyof typeof CONNECT_SOURCE_UI]
     : null;
 }

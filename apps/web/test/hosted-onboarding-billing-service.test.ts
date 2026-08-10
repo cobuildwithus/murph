@@ -1,5 +1,13 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const nextServerMocks = vi.hoisted(() => ({
+  after: vi.fn<(task: () => Promise<void>) => void>(),
+}));
+
+vi.mock("next/server", () => ({
+  after: nextServerMocks.after,
+}));
 
 const mocks = vi.hoisted(() => {
   const stripe = {
@@ -99,6 +107,11 @@ import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing
 import { createHostedStripeCustomerLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { buildHostedMemberBillingPrivateColumns } from "@/src/lib/hosted-onboarding/member-private-codecs";
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
 type BillingServiceInvite = {
   expiresAt: Date;
   id: string;
@@ -127,6 +140,7 @@ describe("createHostedBillingCheckout", () => {
       billingPlanCode: "launch_monthly",
       priceId: "price_123",
       stripe: mocks.stripe,
+      stripeLiveMode: false,
     });
     let checkoutSession: {
       client_reference_id: string;
@@ -1080,6 +1094,20 @@ describe("createHostedBillingCheckout", () => {
   it("reuses the durable attempt and idempotency key after an ambiguous Stripe failure", async () => {
     mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
     const prisma = makePrisma();
+    vi.stubEnv("RESEND_API_KEY", "re_test");
+    vi.stubEnv(
+      "HOSTED_LINQ_ALERT_EMAIL_FROM",
+      "Murph Alerts <alerts@example.com>",
+    );
+    vi.stubEnv("HOSTED_LINQ_ALERT_EMAILS", "operator@example.com");
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ id: "email_billing_failure" }),
+      {
+        headers: { "Content-Type": "application/json" },
+        status: 200,
+      },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
     const recoveredSession = {
       client_reference_id: "member_123",
       id: "cs_recovered",
@@ -1089,7 +1117,15 @@ describe("createHostedBillingCheckout", () => {
       url: "https://billing.example.test/recovered",
     };
     mocks.stripe.checkout.sessions.create
-      .mockRejectedValueOnce(new Error("connection closed after request"))
+      .mockRejectedValueOnce(Object.assign(
+        new Error("connection closed after request"),
+        {
+          rawType: "api_connection_error",
+          requestId: "req_billing_checkout_failed",
+          statusCode: 503,
+          type: "StripeConnectionError",
+        },
+      ))
       .mockImplementationOnce(async (params) => {
         recoveredSession.metadata = params.metadata;
         return recoveredSession;
@@ -1108,6 +1144,14 @@ describe("createHostedBillingCheckout", () => {
       now: new Date("2026-03-27T12:00:00.000Z"),
       prisma: prisma as never,
     })).rejects.toThrow("connection closed after request");
+    expect(nextServerMocks.after).toHaveBeenCalledTimes(1);
+    await nextServerMocks.after.mock.calls[0]?.[0]?.();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)))
+      .toMatchObject({
+        subject: "Murph Stripe operation failed — billing.checkout",
+      });
+    nextServerMocks.after.mockClear();
 
     await expect(createHostedBillingCheckout({
       inviteCode: "invite-code",
@@ -1125,6 +1169,7 @@ describe("createHostedBillingCheckout", () => {
       alreadyActive: false,
       url: "https://billing.example.test/recovered",
     });
+    expect(nextServerMocks.after).not.toHaveBeenCalled();
 
     const firstCall = mocks.stripe.checkout.sessions.create.mock.calls[0];
     const secondCall = mocks.stripe.checkout.sessions.create.mock.calls[1];

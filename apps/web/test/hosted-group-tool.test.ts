@@ -2,8 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
+const deadlineAnchors = vi.hoisted(() => [] as number[]);
+
 const mocks = vi.hoisted(() => ({
   admitHostedGroupDisclosurePermissionAppendTx: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
+  assertHostedLinqRecentInboundEngagementForRuntime: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   buildMurphHostedLinqContactCardVcf: vi.fn(),
   canonicalizeHostedGroupDisclosurePermissionText: vi.fn(),
@@ -11,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
   enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
+  finishHostedOnboardingTiming: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
   getHostedLinqChatSummary: vi.fn(),
   getHostedTelegramGroupTitle: vi.fn(),
@@ -39,7 +44,7 @@ const mocks = vi.hoisted(() => ({
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
   readHostedGroupMembershipsForMember: vi.fn(),
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId: vi.fn(),
-  readHostedGroupUsageStatus: vi.fn(),
+  readHostedGroupFundingRecoveryStatus: vi.fn(),
   readHostedGroupSharedDataByRuntimeMemberId: vi.fn(),
   readHostedOwnerAddressBookAdvisoryNames: vi.fn(),
   readHostedPendingGroupSetup: vi.fn(),
@@ -55,6 +60,13 @@ const mocks = vi.hoisted(() => ({
   resolveHostedAssistantNotificationDestination: vi.fn(),
   sendHostedLinqAttachmentMessage: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+  startHostedOnboardingTiming: vi.fn(
+    (step: string, baseDetails: Record<string, unknown> = {}) => ({
+      baseDetails,
+      startedAtMs: 0,
+      step,
+    }),
+  ),
   updateHostedGroupDisplayNameByRuntimeMemberIdTx: vi.fn(),
   updateHostedLinqChatAvatar: vi.fn(),
   updateHostedLinqChatDisplayName: vi.fn(),
@@ -118,6 +130,18 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
   updateHostedLinqChatDisplayName: mocks.updateHostedLinqChatDisplayName,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/hosted-onboarding/logging")
+  >("@/src/lib/hosted-onboarding/logging");
+
+  return {
+    ...actual,
+    finishHostedOnboardingTiming: mocks.finishHostedOnboardingTiming,
+    startHostedOnboardingTiming: mocks.startHostedOnboardingTiming,
+  };
+});
+
 vi.mock("@/src/lib/hosted-onboarding/telegram-client", () => ({
   getHostedTelegramGroupTitle: mocks.getHostedTelegramGroupTitle,
 }));
@@ -132,13 +156,36 @@ vi.mock("@/src/lib/hosted-onboarding/linq-contact-card", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-contact-card-share", () => ({
+  // A plain function, not a spy: the suite resets mock implementations between
+  // tests and a stripped resolver would silently disable the deadline check.
+  // These are the production numbers.
+  resolveHostedLinqPersonalizedContactCardDeadlines: (startedAtMs: number) => {
+    deadlineAnchors.push(startedAtMs);
+    return {
+      operationDeadlineAt: startedAtMs + 20_000,
+      preSendDeadlineAt: startedAtMs + 20_000 - 2 * 7_000,
+    };
+  },
   releaseHostedLinqContactCardShareAttempt: mocks.releaseHostedLinqContactCardShareAttempt,
   reserveHostedLinqContactCardShareAttempt: mocks.reserveHostedLinqContactCardShareAttempt,
   shareMurphHostedLinqContactCardVcfToChat: mocks.shareMurphHostedLinqContactCardVcfToChat,
 }));
 
+vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
+  requireHostedCloudflareCallbackJsonRequest: mocks.requireHostedCloudflareCallbackJsonRequest,
+}));
+
+vi.mock("@/src/lib/hosted-orchestration/mailbox-wake", () => ({
+  handoffHostedMailboxWake: vi.fn(async () => undefined),
+}));
+
 vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
   assertHostedLinqRouteEgressAuthority: mocks.assertHostedLinqRouteEgressAuthority,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/linq-egress-engagement", () => ({
+  assertHostedLinqRecentInboundEngagementForRuntime:
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime,
 }));
 
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
@@ -209,7 +256,8 @@ vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
     joinCode: string;
     publicBaseUrl: string;
   }) => `${input.publicBaseUrl}/groups/fund/${input.joinCode}`,
-  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
+  readHostedGroupFundingRecoveryStatus:
+    mocks.readHostedGroupFundingRecoveryStatus,
 }));
 
 vi.mock("@/src/lib/hosted-address-book/projection", () => ({
@@ -421,10 +469,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       }],
       truncated: false,
     });
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
+    mocks.readHostedGroupFundingRecoveryStatus.mockResolvedValue({
       fundingNeeded: true,
       fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "not_sponsored",
+      sponsorshipStatus: "sponsored",
     });
     mocks.revokeHostedGroupMemberEmailShareTx.mockResolvedValue({
       groupId: "hgrp_123",
@@ -671,7 +719,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     });
   });
 
-  it("returns only sponsorship state and a first-party funding handoff", async () => {
+  it("does not expose private sponsorship state to the runtime", async () => {
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_group_runtime",
       request: { action: "read_usage" },
@@ -683,11 +731,10 @@ describe("handleHostedRuntimeGroupTool", () => {
           fundingNeeded: true,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
-    expect(mocks.readHostedGroupUsageStatus).toHaveBeenCalledWith({
+    expect(mocks.readHostedGroupFundingRecoveryStatus).toHaveBeenCalledWith({
       runtimeMemberId: "member_group_runtime",
     });
   });
@@ -2882,6 +2929,17 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       groupChatIconUrl:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
+    expect(mocks.startHostedOnboardingTiming).toHaveBeenCalledWith(
+      "hosted-groups.set-chat-avatar",
+      { chatIdSuffix: "roup_1" },
+    );
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
+      "provider-request-accepted",
+    );
+    expect(JSON.stringify(mocks.finishHostedOnboardingTiming.mock.calls))
+      .not.toContain("private-media");
   });
 
   it("keeps queryless public Images avatars compatible during the Web-first rollout", async () => {
@@ -2992,8 +3050,22 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.updateHostedLinqChatAvatar).not.toHaveBeenCalled();
   });
 
-  it("reports group avatar provider failures as structured unavailability", async () => {
-    mocks.updateHostedLinqChatAvatar.mockRejectedValue(new Error("linq down"));
+  it.each([
+    {
+      error: new Error("network connection lost"),
+      label: "network failure",
+    },
+    {
+      error: hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        httpStatus: 502,
+        message: "Linq chat avatar update timed out.",
+        retryable: true,
+      }),
+      label: "transport timeout",
+    },
+  ])("reports an unconfirmed group avatar $label as structured unavailability", async ({ error }) => {
+    mocks.updateHostedLinqChatAvatar.mockRejectedValue(error);
 
     await expect(handleHostedRuntimeGroupTool({
       memberId: "member_container",
@@ -3010,6 +3082,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
+      "provider-request-unconfirmed",
+      {
+        errorName: error.name,
+        providerErrorCode: undefined,
+      },
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
   });
 
   it("preserves only validated HTTP provider diagnostics for group avatar failures", async () => {
@@ -3040,6 +3121,15 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+    expect(mocks.finishHostedOnboardingTiming).toHaveBeenCalledWith(
+      expect.objectContaining({ step: "hosted-groups.set-chat-avatar" }),
+      "provider-request-rejected",
+      {
+        errorName: "HostedOnboardingError",
+        providerErrorCode: 5006,
+      },
+    );
+    expect(mocks.updateHostedLinqChatAvatar).toHaveBeenCalledOnce();
   });
 
   it.each([
@@ -4577,6 +4667,142 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     );
   });
 
+  it("authorizes a generated contact card through the direct route owner, not the group thread store", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_direct_1",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+
+    // A direct home chat can never exist in the group thread-route store, so
+    // that assertion must not be the one gating this send.
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRecentInboundEngagementForRuntime)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        authorityCheckOnly: true,
+        memberId: "member_container",
+        target: "chat_direct_1",
+      }));
+    expect(mocks.hostedThreadContainerFindUnique).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "chat_direct_1",
+        idempotencyKeyPrefix: "personalized-contact-card",
+        imageUrl: contactCardImageUrl,
+        memberId: "member_container",
+        shareKey: "input_direct_1",
+      }),
+    );
+  });
+
+  it.each([
+    {
+      label: "the direct owner rejects the chat",
+      setup: () => {
+        mocks.assertHostedLinqRecentInboundEngagementForRuntime
+          .mockRejectedValue(new Error("route authority mismatch"));
+      },
+    },
+    {
+      label: "the resolved route is not direct",
+      setup: () => {
+        mocks.assertHostedLinqRecentInboundEngagementForRuntime
+          .mockResolvedValue({ targetOverride: null, threadIsDirect: false });
+      },
+    },
+  ])("refuses a generated contact card when $label", async ({ setup }) => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    setup();
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_direct_1",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "linq_thread_unauthorized",
+      },
+    });
+
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before group authorization when a personalized request lacks direct binding", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_direct_1",
+        linqThread: LINQ_THREAD,
+      } as never,
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "direct_attachment_route_unavailable",
+      },
+    });
+
+    expect(mocks.assertHostedLinqRecentInboundEngagementForRuntime)
+      .not.toHaveBeenCalled();
+    expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  });
+
+  it("rejects an untrusted generated contact-card image URL before fetching it", async () => {
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl: "https://example.invalid/avatar.png",
+        contactCardShareKey: "input_direct_1",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "contact_card_image_url_unavailable",
+      },
+    });
+
+    expect(mocks.hostedThreadContainerFindUnique).not.toHaveBeenCalled();
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  });
+
   it("does not share the contact card when the owner lacks active access even if participant-aware access is active", async () => {
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
@@ -4607,6 +4833,67 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     })).resolves.toEqual({
       action: "share_contact_card",
       result: { status: "already_shared" },
+    });
+  });
+
+  it("charges slow direct authorization against the pre-send deadline", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    // Authorization consumes no abort signal, so a slow one used to leave the
+    // whole send window intact and let this invocation run on after the caller
+    // had already stopped waiting. It is now charged against the deadline.
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockImplementation(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 6_050));
+        return { targetOverride: null, threadIsDirect: true };
+      },
+    );
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_first",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "contact_card_presend_deadline_exceeded",
+      },
+    });
+
+    // Refused before any provider work, so this is an ordinary unavailable
+    // rather than uncertainty, and no card can arrive later.
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+  }, 20_000);
+
+  it("reports an unconfirmed personalized send as unconfirmed, not as a failure", async () => {
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.jpg?exp=2000000000`;
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({
+      status: "unconfirmed",
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_container",
+      request: {
+        action: "share_contact_card",
+        contactCardImageUrl,
+        contactCardShareKey: "input_first",
+        directLinqChatId: "chat_direct_1",
+      },
+    })).resolves.toEqual({
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
     });
   });
 
@@ -4679,5 +4966,90 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
         unavailableReason: "provider_unavailable",
       },
     });
+  });
+});
+
+describe("hosted group tool route boundary", () => {
+  const PERSONALIZED_REQUEST = {
+    action: "share_contact_card",
+    contactCardImageUrl: "https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.aaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/group-avatar.jpg?exp=2000000000",
+    contactCardShareKey: "input_first",
+    directLinqChatId: "chat_direct_1",
+  } as const;
+
+  const postPersonalizedShare = async () => {
+    const route = await import(
+      "../app/api/internal/hosted-execution/groups/tool/route"
+    );
+    return await route.POST(new Request("https://web.test/api/internal/hosted-execution/groups/tool", {
+      body: JSON.stringify(PERSONALIZED_REQUEST),
+      method: "POST",
+    }));
+  };
+
+  beforeEach(() => {
+    vi.useRealTimers();
+    deadlineAnchors.length = 0;
+    // This file has no global mock clearing, so call counts otherwise carry
+    // over from every earlier test in it.
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockClear();
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockClear();
+    mocks.hostedThreadContainerFindUnique.mockResolvedValue(null);
+    mocks.assertHostedLinqRecentInboundEngagementForRuntime.mockResolvedValue({
+      targetOverride: null,
+      threadIsDirect: true,
+    });
+    mocks.shareMurphHostedLinqContactCardVcfToChat.mockResolvedValue({ status: "sent" });
+  });
+
+  it("charges signed-callback verification and nonce time to the send's own budget", async () => {
+    // The runner's hop is already running when the route is entered, so the
+    // body read, signature check, and nonce consumption below have to spend the
+    // same budget as the send. Before this, the clock started after them and
+    // the send could still be running once the caller had given up.
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => {
+        const payload = JSON.parse(await request.text()) as unknown;
+        await new Promise((resolve) => setTimeout(resolve, 6_100));
+        return { payload, userId: "member_container" };
+      },
+    );
+
+    const response = await postPersonalizedShare();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      action: "share_contact_card",
+      result: {
+        status: "unavailable",
+        unavailableReason: "contact_card_presend_deadline_exceeded",
+      },
+    });
+    // Refused before provider admission, so no card can arrive afterwards.
+    // Refused before provider admission, so no card can arrive afterwards.
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).not.toHaveBeenCalled();
+    // And the budget was anchored before the verification delay, not after it.
+    expect(deadlineAnchors).toHaveLength(1);
+    expect(Date.now() - (deadlineAnchors[0] ?? 0)).toBeGreaterThanOrEqual(6_000);
+  }, 30_000);
+
+  it("admits the send when the boundary work leaves budget", async () => {
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockImplementation(
+      async (request: Request) => ({
+        payload: JSON.parse(await request.text()) as unknown,
+        userId: "member_container",
+      }),
+    );
+
+    const response = await postPersonalizedShare();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      action: "share_contact_card",
+      result: { status: "sent" },
+    });
+    expect(mocks.shareMurphHostedLinqContactCardVcfToChat).toHaveBeenCalledWith(
+      expect.objectContaining({ operationDeadlineAt: expect.any(Number) }),
+    );
   });
 });

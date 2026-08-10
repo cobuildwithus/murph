@@ -90,7 +90,8 @@ export async function readHostedPersonalUsageCreditOfferCodes(input: {
     member.accountGroupMemberships.length > 0 ||
     parseHostedBillingPhase(billingRef.currentBillingPhase) !== "paid" ||
     (billingPlanCode !== "launch_monthly" &&
-      billingPlanCode !== "launch_edge_monthly") ||
+      billingPlanCode !== "launch_edge_monthly" &&
+      billingPlanCode !== "launch_max_monthly") ||
     isHostedPulseTrialBillingState({
       currentBillingPhase: billingRef.currentBillingPhase,
       currentCheckoutOffer: billingRef.currentCheckoutOffer,

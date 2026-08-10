@@ -72,6 +72,7 @@ export async function createHostedDeviceConnectIntentTx(input: {
     connectUrl: buildHostedDeviceConnectIntentUrl({
       claim,
       connectSourceId: input.connectSourceId,
+      provider: input.provider,
       request: input.request,
     }),
     deviceConnectUrl: buildHostedDeviceConnectIntentDirectUrl({
@@ -120,6 +121,7 @@ export function toHostedDeviceConnectIntentRecord(record: {
 function buildHostedDeviceConnectIntentUrl(input: {
   claim: string;
   connectSourceId: string;
+  provider: ConfiguredDeviceSyncProviderKey;
   request: Request;
 }): string {
   const baseUrl = resolveHostedPublicBaseUrl() ?? new URL(input.request.url).origin;
@@ -127,6 +129,7 @@ function buildHostedDeviceConnectIntentUrl(input: {
   const fragment = new URLSearchParams();
   fragment.set("deviceConnectIntent", input.claim);
   fragment.set("connectSource", input.connectSourceId);
+  fragment.set("connectProvider", input.provider);
   url.hash = fragment.toString();
   return url.toString();
 }

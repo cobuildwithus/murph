@@ -8,7 +8,7 @@ import {
   clinicalIsoDateTimeSchema,
   clinicalSourceSystemSchema,
 } from "@murphai/clinical-records";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 import {
   HOSTED_CLINICAL_RECORDS_AUTHORIZATION_REQUIRED_ERROR_CODE,
   HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
@@ -68,7 +68,9 @@ const errorCodeSchema = z
   .max(HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS)
   .regex(HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN);
 
-export const hostedClinicalRecordsConnectLinkRequestSchema = z.object({}).strict();
+export const hostedClinicalRecordsConnectLinkRequestSchema = z.object({
+  requestKey: z.string().regex(/^scheduled_[a-f0-9]{64}$/u).optional(),
+}).strict();
 
 const hostedClinicalRecordsConnectUrlSchema = z.string().url().max(2_048).refine(
   isHostedClinicalRecordsConnectUrl,
@@ -77,7 +79,7 @@ const hostedClinicalRecordsConnectUrlSchema = z.string().url().max(2_048).refine
 
 export const hostedClinicalRecordsConnectLinkResponseSchema = z.object({
   connectUrl: hostedClinicalRecordsConnectUrlSchema,
-  expiresAt: clinicalIsoDateTimeSchema,
+  expiresAt: clinicalIsoDateTimeSchema.nullable(),
   ok: z.literal(true),
 }).strict();
 
@@ -203,6 +205,9 @@ export type HostedClinicalRecordsRetrievalSlice = z.infer<
 export type HostedClinicalRecordsConnectLinkResponse = z.infer<
   typeof hostedClinicalRecordsConnectLinkResponseSchema
 >;
+export type HostedClinicalRecordsConnectLinkRequest = z.infer<
+  typeof hostedClinicalRecordsConnectLinkRequestSchema
+>;
 export type HostedClinicalRecordsRunDescriptor = z.infer<
   typeof hostedClinicalRecordsLegacyRunDescriptorSchema
 >;
@@ -258,8 +263,18 @@ function isHostedClinicalRecordsConnectUrl(value: string): boolean {
     || url.username.length > 0
     || url.password.length > 0
     || url.pathname !== "/records/connect"
-    || url.search.length > 0
   ) {
+    return false;
+  }
+
+  if (
+    url.hash.length === 0
+    && url.searchParams.size === 1
+    && url.searchParams.get("launch") === "clinical-records"
+  ) {
+    return true;
+  }
+  if (url.search.length > 0) {
     return false;
   }
 

@@ -37,7 +37,7 @@ describe('assistant food journal skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation',
     )
     expect(prompt).toContain(
       'When exact food or supplement identity, ingredients, allergens, dose, or movement instruction matters, follow the owning skill',
@@ -96,7 +96,7 @@ describe('assistant food journal skill', () => {
       'If the user arrives with a health question, decision, symptom, file, image,\nlab, meal, workout, data point, connection request, logging request, task, or\nsafety-sensitive need, handle it first.',
     )
     expect(onboarding).toContain(
-      'Do not append an onboarding question to a reply about a meal photo, symptom,\nurgent concern, failed task, or other health-data request that should stand\nalone. Resume on a later relevant turn or through the finite managed next-day\nrecovery occurrence.',
+      'Do not append an onboarding question to a reply about a meal photo, symptom,\nurgent concern, failed task, or other health-data request that should stand\nalone. Resume on a later relevant turn or through the finite managed next-day\nrecovery occurrence in `references/persistence-recovery-follow-up.md`.',
     )
   })
 })

@@ -1,5 +1,4 @@
-import type { ZodType } from "zod";
-import { ZodError } from "zod";
+import { ZodError, type ZodType } from "./zod-runtime.ts";
 
 export type ContractSchema<TOutput = unknown> = ZodType<TOutput>;
 

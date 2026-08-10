@@ -23,7 +23,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
-      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going. In a hosted group, a request to start or manage a Murph Family plan, seats, or invites is not room funding or a room usage top-up; use murph-family unless the same request explicitly asks about funding or usage for the current room.',
   },
   {
     slug: 'signup-link',
@@ -119,7 +119,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'body-composition',
     name: 'body-composition',
     triggerHint:
-      'Use for fat loss, muscle gain, recomposition, waist or weight trends, plateaus, calorie/protein tradeoffs, body composition measurement noise, and sustainable change. Route eating-disorder risk, aggressive cuts, or medication decisions to clinician support.',
+      'Use for intentional fat loss or weight loss, muscle or weight gain, cutting, bulking, recomposition, maintenance, waist or weight trends, plateaus, calorie/protein tradeoffs, body-composition measurement noise, and sustainable change. Route unintentional change, eating-disorder risk, aggressive cuts, underweight, pregnancy, or medication decisions through the skill’s safety and qualified-care boundaries.',
   },
   {
     slug: 'cycle-hormonal-health',
@@ -185,7 +185,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture, body-composition for fat loss/muscle gain/recomposition, and gut-digestion for digestive symptom strategy.',
+      'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
   },
   {
     slug: 'sleep-recovery-readiness',
@@ -203,7 +203,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'connected-apps',
     name: 'connected-apps',
     triggerHint:
-      'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; or connected-app context for another action. Owns account selection, narrow discovery and reads, limited calendar writes, privacy, and untrusted provider content.',
+      'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export or one-time import fallback for a health or fitness source without a proven direct Murph connection. Owns account selection, narrow discovery and reads, limited calendar writes, verified provider export handoffs, privacy, and untrusted provider content.',
   },
   {
     slug: 'computer-use',
@@ -221,7 +221,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'murph-family',
     name: 'murph-family',
     triggerHint:
-      'Use only for Murph Family product questions or account actions involving plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless Murph Family account access is also in scope.',
+      'Use only for Murph Family product questions or account actions involving plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. In a hosted group, requests to set up a plan for the requester\'s family, add family members, or manage Family stay here and are not group sponsorship, room funding, or room usage top-ups. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless Murph Family account access is also in scope.',
   },
   {
     slug: 'pdf',

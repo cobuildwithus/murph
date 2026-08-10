@@ -32,7 +32,7 @@ import {
 } from './assistant-codex.js'
 import {
   MURPH_GROUP_SHARED_READ_TOOL,
-} from './assistant-codex/dynamic-tools.js'
+} from './assistant-codex/dynamic-tool-catalog.js'
 import {
   MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,

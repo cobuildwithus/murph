@@ -40,6 +40,7 @@ import {
   buildHostedLinqGroupLineRecoveryEffectId,
   buildHostedLinqGroupLineRecoverySourceRef,
 } from "../src/lib/hosted-onboarding/linq-group-line-recovery";
+import { buildHostedLinqGroupSetupMessage } from "../src/lib/hosted-onboarding/linq-group-setup";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "../src/lib/hosted-onboarding/linq-observability-identifiers";
@@ -5199,7 +5200,7 @@ describe("Linq group chat auto-provision", () => {
     });
 
     // The gate is opt-in: with enforcement off the unknown sender is answered
-    // exactly as before, and the classifier is never asked for.
+    // without asking the classifier.
     expect(plan.response).toMatchObject({
       ok: true,
       reason: "sent-group-setup",
@@ -5239,6 +5240,54 @@ describe("Linq group chat auto-provision", () => {
     expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
       .toEqual(["group_setup"]);
     expect(plan.firstContactAdmissionRequest).toBeUndefined();
+  });
+
+  it("keeps one exact group/day room body when sender resolution changes", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    mockSenderLookup(null);
+
+    const unresolvedPlan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        eventId: "evt_group_unresolved_first",
+        messageId: "msg_group_unresolved_first",
+      }),
+      prisma: prisma as never,
+    });
+
+    mockSenderLookup({
+      ...senderCore,
+      billingStatus: HostedBillingStatus.paused,
+    });
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.paused,
+      suspendedAt: null,
+      threadContainer: null,
+    });
+    const inactivePlan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({
+        eventId: "evt_group_inactive_later",
+        messageId: "msg_group_inactive_later",
+      }),
+      prisma: prisma as never,
+    });
+
+    const unresolvedEffect = unresolvedPlan.desiredSideEffects.find(
+      ({ payload }) => payload.template === "group_setup",
+    );
+    const inactiveEffect = inactivePlan.desiredSideEffects.find(
+      ({ payload }) => payload.template === "group_setup",
+    );
+
+    expect(unresolvedEffect?.effectId).toBe(inactiveEffect?.effectId);
+    expect(unresolvedEffect?.payload).not.toHaveProperty("groupSetupReason");
+    expect(inactiveEffect?.payload).not.toHaveProperty("groupSetupReason");
+    expect(buildHostedLinqGroupSetupMessage({
+      seed: unresolvedEffect?.effectId ?? "",
+    })).toBe(buildHostedLinqGroupSetupMessage({
+      seed: inactiveEffect?.effectId ?? "different",
+    }));
   });
 
   it("does not screen an unknown group sender on a line it could not answer on", async () => {
@@ -7099,8 +7148,8 @@ describe("Linq group chat auto-provision", () => {
         prisma: prisma as never,
       });
 
-      // A member whose access lapsed is treated like any other sender who has
-      // not finished setup: one setup link, and no provisioning.
+      // A member whose access lapsed receives the canonical setup link without
+      // exposing the private access reason or provisioning the group.
       expect(plan.response).toMatchObject({
         ok: true,
         reason: "sent-group-setup",

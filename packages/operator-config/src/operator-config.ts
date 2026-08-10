@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   type AssistantChatProvider,
   type AssistantSelfDeliveryTarget,

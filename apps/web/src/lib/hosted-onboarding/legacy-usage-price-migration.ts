@@ -61,6 +61,7 @@ type HostedStripeLegacyUsageMigrationClassification =
   | {
     items: readonly HostedStripeLegacyUsageMigrationItem[];
     kind: "candidate";
+    planItem: HostedStripeLegacyUsageMigrationItem;
   }
   | { kind: "terminal" }
   | { kind: "unsupported" };
@@ -135,6 +136,7 @@ export function classifyHostedStripeLegacyUsageMigrationSubscription(input: {
   return {
     items: legacyItems,
     kind: "candidate",
+    planItem: planItems[0],
   };
 }
 
@@ -152,6 +154,7 @@ export async function runHostedStripeLegacyUsageMigration(input: {
   const summary = createEmptySummary();
   const candidates: Array<{
     items: readonly HostedStripeLegacyUsageMigrationItem[];
+    planItem: HostedStripeLegacyUsageMigrationItem;
     subscriptionId: string;
   }> = [];
 
@@ -177,6 +180,7 @@ export async function runHostedStripeLegacyUsageMigration(input: {
         summary.candidateItems += classification.items.length;
         candidates.push({
           items: classification.items,
+          planItem: classification.planItem,
           subscriptionId: subscription.id,
         });
         break;
@@ -199,7 +203,43 @@ export async function runHostedStripeLegacyUsageMigration(input: {
   });
 
   for (const candidate of candidates) {
-    for (const item of candidate.items) {
+    const refreshedBeforeDelete = await retrieveSubscriptionSafely(
+      input.client,
+      candidate.subscriptionId,
+    );
+    const refreshedClassification = classifyHostedStripeLegacyUsageMigrationSubscription({
+      knownPlanPriceIds,
+      subscription: refreshedBeforeDelete,
+    });
+    if (
+      refreshedClassification.kind === "already_clean"
+      && hostedStripeLegacyUsageMigrationPlanItemMatches({
+        actual: refreshedBeforeDelete.items.find((item) =>
+          knownPlanPriceIds.has(item.price.id)
+        ) ?? null,
+        expected: candidate.planItem,
+      })
+    ) {
+      summary.migratedSubscriptions += 1;
+      continue;
+    }
+    if (
+      refreshedClassification.kind !== "candidate"
+      || !hostedStripeLegacyUsageMigrationPlanItemMatches({
+        actual: refreshedClassification.planItem,
+        expected: candidate.planItem,
+      })
+      || !hostedStripeLegacyUsageMigrationItemsMatch({
+        actual: refreshedClassification.items,
+        expected: candidate.items,
+      })
+    ) {
+      throw new Error(
+        "Legacy usage migration candidate identity changed after audit; rerun dry-run before applying.",
+      );
+    }
+
+    for (const item of refreshedClassification.items) {
       await deleteLegacyItemSafely({
         client: input.client,
         item,
@@ -216,7 +256,13 @@ export async function runHostedStripeLegacyUsageMigration(input: {
       knownPlanPriceIds,
       subscription: refreshed,
     });
-    if (classification.kind !== "already_clean") {
+    if (
+      classification.kind !== "already_clean"
+      || !hostedStripeLegacyUsageMigrationPlanItemMatches({
+        actual: refreshed.items.find((item) => knownPlanPriceIds.has(item.price.id)) ?? null,
+        expected: candidate.planItem,
+      })
+    ) {
       throw new Error(
         "Legacy usage migration could not verify the cleaned subscription shape; rerun dry-run before retrying.",
       );
@@ -225,6 +271,44 @@ export async function runHostedStripeLegacyUsageMigration(input: {
   }
 
   return summary;
+}
+
+function hostedStripeLegacyUsageMigrationItemsMatch(input: {
+  actual: readonly HostedStripeLegacyUsageMigrationItem[];
+  expected: readonly HostedStripeLegacyUsageMigrationItem[];
+}): boolean {
+  if (input.actual.length !== input.expected.length) {
+    return false;
+  }
+  const expectedById = new Map(input.expected.map((item) => [item.id, item]));
+  return input.actual.every((actualItem) =>
+    hostedStripeLegacyUsageMigrationItemMatches({
+      actual: actualItem,
+      expected: expectedById.get(actualItem.id) ?? null,
+    })
+  );
+}
+
+function hostedStripeLegacyUsageMigrationPlanItemMatches(input: {
+  actual: HostedStripeLegacyUsageMigrationItem | null;
+  expected: HostedStripeLegacyUsageMigrationItem;
+}): boolean {
+  return hostedStripeLegacyUsageMigrationItemMatches(input)
+    && input.actual?.quantity === 1
+    && input.actual.price.recurring?.usageType === "licensed";
+}
+
+function hostedStripeLegacyUsageMigrationItemMatches(input: {
+  actual: HostedStripeLegacyUsageMigrationItem | null;
+  expected: HostedStripeLegacyUsageMigrationItem | null;
+}): boolean {
+  return Boolean(
+    input.actual
+    && input.expected
+    && input.actual.id === input.expected.id
+    && input.actual.price.id === input.expected.price.id
+    && input.actual.quantity === input.expected.quantity,
+  );
 }
 
 function projectMigrationItemForLegacyCheck(

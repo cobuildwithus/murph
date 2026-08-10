@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
@@ -7938,6 +7939,101 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
     assert.equal(snapshot.summaries?.sleep?.[0]?.id, "garmin-sleep-fetched-1");
     assert.equal(JSON.stringify(parsed.jobs).includes("junction-user-1"), false);
     assert.equal(JSON.stringify(importedSnapshots).includes("murph_blinded"), false);
+  }
+});
+
+test("Junction completion classification matches the pinned SDK serializer", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      summaryResources: ["sleep"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+
+  const baseData: Record<string, unknown> = {
+    user_id: "junction-user-1",
+    start_date: "2026-04-01",
+    end_date: "2026-04-02",
+    is_final: true,
+    provider: "garmin",
+    resource: "sleep",
+    id: "inline-record-if-not-completion",
+  };
+  const testCases: readonly {
+    label: string;
+    omit?: readonly string[];
+    overrides?: Readonly<Record<string, unknown>>;
+  }[] = [
+    { label: "calendar-date" },
+    {
+      label: "week-date",
+      overrides: { start_date: "2026-W14-3", end_date: "2026-W14-4" },
+    },
+    {
+      label: "ordinal-date",
+      overrides: { start_date: "2026-091", end_date: "2026-092" },
+    },
+    {
+      label: "date-time",
+      overrides: {
+        start_date: "2026-04-01T12:30:00Z",
+        end_date: "2026-04-02T12:30:00+00:00",
+      },
+    },
+    { label: "passthrough-field", overrides: { future_field: "retained" } },
+    { label: "malformed-date", overrides: { start_date: "2026-13-40" } },
+    { label: "missing-start-date", omit: ["start_date"] },
+    { label: "wrong-end-date-type", overrides: { end_date: 17 } },
+    { label: "non-final", overrides: { is_final: false } },
+    { label: "wrong-final-type", overrides: { is_final: "true" } },
+    { label: "missing-provider", omit: ["provider"] },
+    { label: "wrong-provider-type", overrides: { provider: 17 } },
+    { label: "missing-data-user-id", omit: ["user_id"] },
+    { label: "wrong-data-user-id-type", overrides: { user_id: 17 } },
+  ];
+
+  for (const testCase of testCases) {
+    const data = { ...baseData, ...testCase.overrides };
+    for (const field of testCase.omit ?? []) {
+      delete data[field];
+    }
+
+    const sdkUserId = typeof data.user_id === "string" && data.user_id.trim().length > 0
+      ? data.user_id.trim()
+      : "junction-user-1";
+    const sdkParsed = JunctionHistoricalPullCompletedSchema.parse(
+      { ...data, user_id: sdkUserId },
+      { unrecognizedObjectKeys: "passthrough" },
+    );
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "historical.data.sleep.created",
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data,
+      },
+      messageId: `msg_historical_completion_oracle_${testCase.label}`,
+      timestamp: "1775260800",
+    });
+
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-04T00:00:00.000Z",
+    });
+    const job = parsed.jobs[0];
+
+    assert.equal(parsed.jobs.length, 1, testCase.label);
+    assert.equal(job?.kind, "resource", testCase.label);
+    assert.equal(
+      "webhookDataJson" in (job?.payload ?? {}),
+      !sdkParsed.ok,
+      `${testCase.label} should match the pinned SDK completion classification`,
+    );
   }
 });
 

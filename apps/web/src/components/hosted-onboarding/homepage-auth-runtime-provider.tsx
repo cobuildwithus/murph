@@ -27,9 +27,11 @@ type WindowWithIdleCallback = typeof window & {
 
 export function HomepageAuthRuntimeProvider({
   authenticated,
+  authenticatedDestination,
   children,
 }: {
   authenticated: boolean;
+  authenticatedDestination?: string;
   children?: ReactNode;
 }) {
   if (authenticated) {
@@ -37,15 +39,19 @@ export function HomepageAuthRuntimeProvider({
   }
 
   return (
-    <UnauthenticatedHomepageAuthRuntimeProvider>
+    <UnauthenticatedHomepageAuthRuntimeProvider
+      authenticatedDestination={authenticatedDestination}
+    >
       {children}
     </UnauthenticatedHomepageAuthRuntimeProvider>
   );
 }
 
 function UnauthenticatedHomepageAuthRuntimeProvider({
+  authenticatedDestination,
   children,
 }: {
+  authenticatedDestination?: string;
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -91,9 +97,11 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
         return;
       }
 
-      navigateHostedAuthRedirect(HOSTED_APP_HOME_PATH);
+      navigateHostedAuthRedirect(
+        authenticatedDestination ?? HOSTED_APP_HOME_PATH,
+      );
     },
-    [],
+    [authenticatedDestination],
   );
   const value = useMemo(
     () => ({

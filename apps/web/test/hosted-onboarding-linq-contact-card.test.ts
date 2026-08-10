@@ -996,6 +996,51 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
     );
   });
 
+  it("keeps a local photo timeout when caller cancellation is supplied", async () => {
+    runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
+      publicBaseUrl: "https://www.withmurph.ai",
+    });
+    const callerSignal = new AbortController().signal;
+    const localTimeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(localTimeout.signal);
+    const fetchImpl = vi.fn((
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("Expected a photo-fetch abort signal."));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+
+    try {
+      const photoPromise = fetchMurphHostedLinqContactCardVcfPhoto({
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        signal: callerSignal,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+      const signal = fetchImpl.mock.calls[0]?.[1]?.signal;
+      if (!signal) {
+        throw new Error("Expected a composed photo-fetch abort signal.");
+      }
+      expect(signal).not.toBe(callerSignal);
+      expect(signal.aborted).toBe(false);
+
+      localTimeout.abort();
+
+      await expect(photoPromise).resolves.toBeNull();
+      expect(signal.aborted).toBe(true);
+      expect(callerSignal.aborted).toBe(false);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it("fails soft to null on provider errors and oversized bodies", async () => {
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
       publicBaseUrl: "https://www.withmurph.ai",

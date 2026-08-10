@@ -25,6 +25,10 @@ import {
   formatHostedBillingPrice,
   getHostedBillingPlanDefinition,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  CHECKOUT_CORE_FEATURES,
+  CHECKOUT_PULSE_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import type { HostedPulseTrialContinuationAction } from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
 import { cn } from "@/src/lib/utils";
 
@@ -53,20 +57,6 @@ const pulsePriceLabel = formatHostedBillingPrice(
   pulsePlan.recurringAmountUsdCents,
 );
 
-const PULSE_FEATURES = [
-  "Run experiments, see what changed",
-  "Sync your health data",
-  "Private before/after outcomes",
-  "Chat via iMessage, Telegram, or email",
-  "Guided experiment setup",
-  "Access to the most capable AI models",
-];
-const GROUP_FEATURES = [
-  "Keep your wearable syncing",
-  "Keep group activity current",
-  "Private Murph conversations",
-  "Lighter included AI usage",
-];
 
 export function StartPaidPulseButton(props: {
   block?: boolean;
@@ -571,8 +561,8 @@ export function StartPaidPlanConfirmationContent(props: {
   );
   const targetFeatures =
     props.targetPlanCode === "launch_group_monthly"
-      ? GROUP_FEATURES
-      : PULSE_FEATURES;
+      ? CHECKOUT_CORE_FEATURES
+      : CHECKOUT_PULSE_FEATURES;
   const title = props.status === "scheduled"
     ? `${targetPlanName} is set`
     : props.timing === "at_trial_end"

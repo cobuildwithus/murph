@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  hasHostedGroupAutomaticRefillAvailable: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
   readHostedAiUsageGate: vi.fn(),
   readHostedGroupSponsorshipPublicState: vi.fn(),
@@ -18,6 +19,8 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-sponsorship-authorization", () => ({
+  hasHostedGroupAutomaticRefillAvailable:
+    mocks.hasHostedGroupAutomaticRefillAvailable,
   readHostedGroupSponsorshipPublicState:
     mocks.readHostedGroupSponsorshipPublicState,
 }));
@@ -28,8 +31,10 @@ vi.mock("@/src/lib/hosted-web/public-url", () => ({
 
 import {
   buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl,
   normalizeHostedGroupUsageFundingLocator,
   normalizeHostedGroupUsageJoinCode,
+  readHostedGroupFundingRecoveryStatus,
   readHostedGroupUsageFundingLocatorRuntimeMemberId,
   readHostedGroupUsageFundingTargetByJoinCode,
   readHostedGroupUsageFundingTargetByLocator,
@@ -42,6 +47,7 @@ describe("hosted group usage funding", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.HOSTED_APP_SESSION_HMAC_KEY = TEST_HMAC_KEY;
+    mocks.hasHostedGroupAutomaticRefillAvailable.mockResolvedValue(false);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue(
       "not_sponsored",
@@ -80,6 +86,22 @@ describe("hosted group usage funding", () => {
     );
   });
 
+  it("keeps the funding page's private sponsor state in a separate projection", async () => {
+    const prisma = { kind: "prisma" } as never;
+    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue("sponsored");
+
+    await expect(readHostedGroupUsageStatus({
+      prisma,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toEqual({ sponsorshipStatus: "sponsored" });
+    expect(mocks.readHostedGroupSponsorshipPublicState).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_group_runtime",
+      prisma,
+    });
+    expect(mocks.readHostedAiUsageGate).not.toHaveBeenCalled();
+    expect(mocks.hasHostedGroupAutomaticRefillAvailable).not.toHaveBeenCalled();
+  });
+
   it.each([
     [3_000_000n, false],
     [900_000n, true],
@@ -107,18 +129,18 @@ describe("hosted group usage funding", () => {
       remainingUsdMicros,
     });
 
-    await expect(readHostedGroupUsageStatus({
+    await expect(readHostedGroupFundingRecoveryStatus({
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     })).resolves.toEqual({
       fundingNeeded,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "not_sponsored",
     });
+    expect(mocks.readHostedGroupSponsorshipPublicState).not.toHaveBeenCalled();
   });
 
-  it("collapses every live sponsorship state to a private-safe room projection", async () => {
+  it("always projects urgency when the room is exhausted", async () => {
     const prisma = {
       hostedGroup: {
         findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
@@ -135,16 +157,94 @@ describe("hosted group usage funding", () => {
       reason: "ai_usage_limit_exceeded",
       remainingUsdMicros: 0n,
     });
-    mocks.readHostedGroupSponsorshipPublicState.mockResolvedValue("sponsored");
-
-    await expect(readHostedGroupUsageStatus({
+    mocks.hasHostedGroupAutomaticRefillAvailable.mockResolvedValue(true);
+    await expect(readHostedGroupFundingRecoveryStatus({
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     })).resolves.toEqual({
-      fundingNeeded: false,
+      fundingNeeded: true,
       fundingUrl:
         "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "sponsored",
+    });
+    expect(mocks.hasHostedGroupAutomaticRefillAvailable).not.toHaveBeenCalled();
+    expect(mocks.readHostedGroupSponsorshipPublicState).not.toHaveBeenCalled();
+  });
+
+  it("does not create urgency for a healthy room", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      remainingUsdMicros: 3_000_000n,
+    });
+    await expect(readHostedGroupFundingRecoveryStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toMatchObject({
+      fundingNeeded: false,
+    });
+    expect(mocks.hasHostedGroupAutomaticRefillAvailable).not.toHaveBeenCalled();
+  });
+
+  it("suppresses low-capacity urgency while automatic recovery is available", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      remainingUsdMicros: 900_000n,
+    });
+    mocks.hasHostedGroupAutomaticRefillAvailable.mockResolvedValue(true);
+    await expect(readHostedGroupFundingRecoveryStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toMatchObject({
+      fundingNeeded: false,
+    });
+    expect(mocks.hasHostedGroupAutomaticRefillAvailable).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_group_runtime",
+      prisma,
+    });
+  });
+
+  it("projects low-capacity urgency when automatic recovery is unavailable", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({ joinCode: "group_join_code_1234" })),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+    mocks.readHostedAiUsageGate.mockResolvedValue({
+      allowanceSource: "thread_container",
+      allowed: true,
+      limitUsdMicros: 4_500_000n,
+      periodEnd: new Date("2026-08-01T00:00:00.000Z"),
+      remainingUsdMicros: 900_000n,
+    });
+    await expect(readHostedGroupFundingRecoveryStatus({
+      prisma: prisma as never,
+      runtimeMemberId: "member_group_runtime",
+    })).resolves.toMatchObject({
+      fundingNeeded: true,
     });
   });
 
@@ -166,7 +266,7 @@ describe("hosted group usage funding", () => {
       remainingUsdMicros: 0n,
     });
 
-    const status = await readHostedGroupUsageStatus({
+    const status = await readHostedGroupFundingRecoveryStatus({
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     });
@@ -176,9 +276,25 @@ describe("hosted group usage funding", () => {
     expect(status).toEqual({
       fundingNeeded: true,
       fundingUrl: `https://www.withmurph.ai/groups/fund/${encodeURIComponent(expectedLocator ?? "")}`,
-      sponsorshipStatus: "not_sponsored",
     });
     expect(expectedLocator).toMatch(/^gf1\.member_group_runtime\./u);
+  });
+
+  it("constructs and parses a signed funding URL on a configured hosted alias", () => {
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue(
+      "https://join.example.test",
+    );
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+
+    expect(locator).not.toBeNull();
+    expect(buildHostedGroupUsageFundingUrl({
+      joinCode: locator ?? "",
+    })).toBe(
+      `https://join.example.test/groups/fund/${encodeURIComponent(locator ?? "")}`,
+    );
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(locator))
+      .toBe("member_group_runtime");
   });
 
   it("derives the locator URL for a group row without a join code", async () => {
@@ -198,13 +314,12 @@ describe("hosted group usage funding", () => {
       remainingUsdMicros: 900_000n,
     });
 
-    const status = await readHostedGroupUsageStatus({
+    const status = await readHostedGroupFundingRecoveryStatus({
       prisma: prisma as never,
       runtimeMemberId: "member_group_runtime",
     });
 
     expect(status?.fundingNeeded).toBe(true);
-    expect(status?.sponsorshipStatus).toBe("not_sponsored");
     expect(status?.fundingUrl).toContain("/groups/fund/gf1.member_group_runtime.");
   });
 
@@ -282,6 +397,44 @@ describe("hosted group usage funding", () => {
       joinCode: locator,
       kind: "custom",
       runtimeMemberId: "member_group_runtime",
+    });
+  });
+
+  it("keeps a signed funding locator private from an owner-created join code", async () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+    const group = {
+      displayName: "Sunday sleep crew",
+      joinCode: "group_join_code_1234",
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    };
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => group),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({ memberId: "member_group_runtime" })),
+      },
+    };
+
+    const signedTarget = await readHostedGroupUsageFundingTargetByJoinCode({
+      joinCode: locator ?? "",
+      prisma: prisma as never,
+    });
+
+    expect(signedTarget).toMatchObject({
+      fundingPath: `/groups/fund/${encodeURIComponent(locator ?? "")}`,
+      joinCode: locator,
+      runtimeMemberId: "member_group_runtime",
+    });
+    expect(signedTarget).not.toEqual(expect.objectContaining({
+      fundingPath: expect.stringContaining(group.joinCode),
+      joinCode: group.joinCode,
+    }));
+    expect(prisma.hostedGroup.findUnique).toHaveBeenCalledWith({
+      select: { displayName: true, kind: true },
+      where: { runtimeMemberId: "member_group_runtime" },
     });
   });
 

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_RUNTIME_SUBSCRIPTION_ACTIONS = [
   "change_plan",
@@ -24,6 +24,7 @@ export const HOSTED_RUNTIME_DIRECT_BILLING_PLAN_CODES = [
   "launch_group_monthly",
   "launch_monthly",
   "launch_edge_monthly",
+  "launch_max_monthly",
 ] as const;
 
 const hostedRuntimeDirectBillingPlanCodeSchema = z.enum(
@@ -63,6 +64,15 @@ const hostedRuntimeEdgePlanTermsSchema = z
   })
   .strict();
 
+const hostedRuntimeMaxPlanTermsSchema = z
+  .object({
+    code: z.literal("launch_max_monthly"),
+    displayName: z.literal("Max"),
+    interval: z.literal("month"),
+    recurringAmountUsdCents: hostedRuntimeSubscriptionAmountSchema,
+  })
+  .strict();
+
 const hostedRuntimePulseResponseBase = {
   action: z.enum(["continue_pulse", "start_pulse_now"]),
   plan: hostedRuntimePulsePlanTermsSchema,
@@ -86,6 +96,13 @@ const hostedRuntimeHttpsUrlSchema = z
   .refine((value) => new URL(value).protocol === "https:", {
     message: "Expected an HTTPS payment URL.",
   });
+
+const hostedRuntimeDirectPlanTermsSchema = z.union([
+  hostedRuntimeGroupPlanTermsSchema,
+  hostedRuntimePulsePlanTermsSchema,
+  hostedRuntimeEdgePlanTermsSchema,
+  hostedRuntimeMaxPlanTermsSchema,
+]);
 
 export const hostedRuntimeSubscriptionToolRequestSchema = z
   .union([
@@ -125,21 +142,13 @@ export const hostedRuntimeSubscriptionToolResponseSchema = z.union([
   z.object({
     action: z.literal("change_plan"),
     effectiveAt: z.string().datetime({ offset: true }).optional(),
-    plan: z.union([
-      hostedRuntimeGroupPlanTermsSchema,
-      hostedRuntimePulsePlanTermsSchema,
-      hostedRuntimeEdgePlanTermsSchema,
-    ]),
+    plan: hostedRuntimeDirectPlanTermsSchema,
     status: hostedRuntimeNonPaymentResponseStatusSchema,
   }).strict(),
   z.object({
     action: z.literal("change_plan"),
     paymentUrl: hostedRuntimeHttpsUrlSchema,
-    plan: z.union([
-      hostedRuntimeGroupPlanTermsSchema,
-      hostedRuntimePulsePlanTermsSchema,
-      hostedRuntimeEdgePlanTermsSchema,
-    ]),
+    plan: hostedRuntimeDirectPlanTermsSchema,
     status: z.literal("payment_required"),
   }).strict(),
   z.object({

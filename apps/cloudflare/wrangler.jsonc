@@ -88,13 +88,14 @@
   "r2_buckets": [
     {
       "binding": "BUNDLES",
-      "bucket_name": "murph-hosted-bundles",
-      "preview_bucket_name": "murph-hosted-bundles-preview"
-    },
-    {
-      "binding": "BUNDLES_ENAM",
       "bucket_name": "murph-hosted-bundles-enam",
       "preview_bucket_name": "murph-hosted-bundles-preview-enam"
+    }
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "HOSTED_RUNTIME_RETRY_ANALYTICS",
+      "dataset": "murph_hosted_runtime_retries"
     }
   ],
   "ai": {
@@ -135,10 +136,7 @@
     "HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM": "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
     "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID": "cloudflare-automation:v1",
     "HOSTED_CRYPTO_ENV": "prod",
-    "HOSTED_R2_CUTOVER_PHASE": "source_active",
-    "HOSTED_R2_WRITE_ADMISSION": "open",
-    "HOSTED_R2_PRESIGN_BUCKET_NAME": "murph-hosted-bundles",
-    "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME": "murph-hosted-bundles-enam",
+    "HOSTED_R2_PRESIGN_BUCKET_NAME": "murph-hosted-bundles-enam",
     "HOSTED_EXECUTION_MAX_EVENT_ATTEMPTS": "3",
     "HOSTED_EXECUTION_RETRY_DELAY_MS": "30000",
     "HOSTED_EXECUTION_RUNNER_COMMIT_TIMEOUT_MS": "45000",

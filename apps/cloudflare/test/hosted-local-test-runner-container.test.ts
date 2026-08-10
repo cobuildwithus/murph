@@ -293,6 +293,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     });
 
     await expect(container.dropActiveOperationForTest({
+      loseCompletedInvocationResult: true,
       userId: "member_drop",
     })).resolves.toEqual({ ok: true });
 
@@ -305,6 +306,12 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
     expect(
       Object.hasOwn(container, "workspaceInvocationActiveOperation"),
     ).toBe(false);
+    expect(
+      Object.getOwnPropertyDescriptor(
+        container,
+        "loseCompletedInvocationResultForTest",
+      )?.value,
+    ).toBe(true);
   });
 
   it("uses SIGTERM for the shutdown checkpoint control", async () => {

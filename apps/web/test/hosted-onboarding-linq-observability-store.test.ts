@@ -35,6 +35,7 @@ import {
   buildHostedLinqGroupLineRecoveryEffectId,
   buildHostedLinqGroupLineRecoverySourceRef,
 } from "@/src/lib/hosted-onboarding/linq-group-line-recovery";
+import { HOSTED_LINQ_GROUP_SETUP_TEMPLATE } from "@/src/lib/hosted-onboarding/linq-group-setup";
 import {
   ingestHostedLinqProviderEventTx,
   markHostedLinqGroupJoinOfferHandledTx,
@@ -2601,6 +2602,62 @@ describe("hosted Linq observability stores", () => {
         }),
       }),
     );
+  });
+
+  it("treats provider-correlated group setup as completed across same-day sender changes", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildGroupSetupDeliveryFixture({
+        acceptedAt: new Date("2026-03-26T12:01:00.000Z"),
+        messageLookupKey: "hbid:linq-message:provider-message-setup",
+        status: "accepted",
+      }),
+    );
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKey: "linq-group-setup:stable-day",
+      linqChatId: "chat_group_setup",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "event_group_setup_later_sender",
+      targetKind: "thread",
+      template: HOSTED_LINQ_GROUP_SETUP_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_group_setup",
+      outcome: "completed",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps a recent uncorrelated group setup attempt in flight", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(
+      buildGroupSetupDeliveryFixture(),
+    );
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:05:00.000Z"),
+      idempotencyKey: "linq-group-setup:stable-day",
+      linqChatId: "chat_group_setup",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "event_group_setup_concurrent",
+      targetKind: "thread",
+      template: HOSTED_LINQ_GROUP_SETUP_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_group_setup",
+      retryAt: new Date("2026-03-26T12:15:00.000Z"),
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryCreateMany).not.toHaveBeenCalled();
   });
 
   it("does not mutate a stale signup row when the retry intent differs", async () => {
@@ -5348,6 +5405,56 @@ function buildGroupLineRecoveryDeliveryFixture(overrides: Partial<{
     status: "attempted",
     targetKind: "participant",
     template: "group_line_recovery",
+    updatedAt: new Date("2026-03-26T12:00:01.000Z"),
+    ...overrides,
+  };
+}
+
+function buildGroupSetupDeliveryFixture(overrides: Partial<{
+  acceptedAt: Date | null;
+  attemptedAt: Date;
+  deliveredAt: Date | null;
+  failureCode: string | null;
+  failedAt: Date | null;
+  groupJoinOutreachId: string | null;
+  groupJoinReplyOccurredAt: Date | null;
+  id: string;
+  lastReceiptAt: Date | null;
+  linqChatLookupKey: string | null;
+  messageLookupKey: string | null;
+  phoneNumberLookupKey: string | null;
+  retryAfterAt: Date | null;
+  skippedAt: Date | null;
+  source: string | null;
+  sourceRef: string | null;
+  status: string;
+  targetKind: string | null;
+  template: string | null;
+  updatedAt: Date;
+}> = {}) {
+  return {
+    acceptedAt: null,
+    attemptedAt: new Date("2026-03-26T12:00:00.000Z"),
+    deliveredAt: null,
+    failureCode: null,
+    failedAt: null,
+    groupJoinOutreachId: null,
+    groupJoinReplyOccurredAt: null,
+    id: "hld_group_setup",
+    lastReceiptAt: null,
+    linqChatLookupKey:
+      createHostedLinqChatLookupKeyReadCandidates("chat_group_setup")[0],
+    messageLookupKey: null,
+    phoneNumberLookupKey: null,
+    retryAfterAt: null,
+    skippedAt: null,
+    source: "hosted_webhook_side_effect",
+    sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+      "event_group_setup_first_sender",
+    ),
+    status: "attempted",
+    targetKind: "thread",
+    template: HOSTED_LINQ_GROUP_SETUP_TEMPLATE,
     updatedAt: new Date("2026-03-26T12:00:01.000Z"),
     ...overrides,
   };

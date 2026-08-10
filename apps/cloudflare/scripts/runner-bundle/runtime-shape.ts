@@ -1,6 +1,14 @@
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+const ZOD_BUILD_ONLY_PATHS = [
+  "src",
+  "v3",
+  "mini",
+  "v4-mini",
+  "v4/mini",
+] as const;
+
 export async function pruneRunnerBundle(bundleDir: string): Promise<void> {
   await Promise.all([
     removeBundlePathIfPresent(path.join(bundleDir, "README.md")),
@@ -8,6 +16,103 @@ export async function pruneRunnerBundle(bundleDir: string): Promise<void> {
     removeBundlePathIfPresent(path.join(bundleDir, "LICENSE")),
   ]);
   await pruneNonRuntimeFiles(bundleDir);
+}
+
+export async function pruneBundledRunnerDependencies(
+  bundleDir: string,
+): Promise<void> {
+  await assertRunnerUsesRetainedZodRuntimeSurfaces(bundleDir);
+  const zodPackageDir = path.join(bundleDir, "node_modules", "zod");
+
+  await Promise.all(
+    ZOD_BUILD_ONLY_PATHS.map((relativePath) =>
+      removeBundlePathIfPresent(path.join(zodPackageDir, relativePath)),
+    ),
+  );
+}
+
+async function assertRunnerUsesRetainedZodRuntimeSurfaces(
+  bundleDir: string,
+): Promise<void> {
+  const nodeModulesDir = path.join(bundleDir, "node_modules");
+  const installedPackageDirs = await listTopLevelInstalledPackages(nodeModulesDir);
+  const zodConsumerPackageDirs = (
+    await Promise.all(
+      installedPackageDirs.map(async (packageDir) =>
+        await packageDeclaresDependency(packageDir, "zod") ? packageDir : null
+      ),
+    )
+  ).filter((packageDir): packageDir is string => packageDir !== null);
+  const runtimeRoots = [
+    path.join(bundleDir, "dist"),
+    path.join(bundleDir, "dist-bundled"),
+    path.join(nodeModulesDir, "@murphai", "murph", ".bundle"),
+    ...zodConsumerPackageDirs,
+  ];
+
+  await Promise.all(runtimeRoots.map(async (runtimeRoot) => {
+    try {
+      await walkBundleFiles(runtimeRoot, assertFileUsesRetainedZodRuntimeSurfaces);
+    } catch (error) {
+      if (!isMissingFileError(error)) {
+        throw error;
+      }
+    }
+  }));
+
+  async function assertFileUsesRetainedZodRuntimeSurfaces(
+    entryPath: string,
+  ): Promise<void> {
+    if (!/\.(?:c|m)?js$/u.test(entryPath)) {
+      return;
+    }
+    const source = await readFile(entryPath, "utf8");
+    const importPattern =
+      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)["'](zod(?:\/[^"']*)?)["']/gu;
+
+    for (const match of source.matchAll(importPattern)) {
+      const specifier = match[1];
+
+      if (specifier && isRetainedZodRuntimeSpecifier(specifier)) {
+        continue;
+      }
+      throw new Error(
+        `runner bundle imports ${specifier ?? "an unknown Zod surface"} from ${path.relative(bundleDir, entryPath)} even though that surface is removed from the production payload; retain the surface or move the caller to zod or zod/v4.`,
+      );
+    }
+  }
+}
+
+async function packageDeclaresDependency(
+  packageDir: string,
+  dependencyName: string,
+): Promise<boolean> {
+  let packageJsonRaw: string;
+
+  try {
+    packageJsonRaw = await readFile(path.join(packageDir, "package.json"), "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false;
+    }
+    throw error;
+  }
+  const packageJson = JSON.parse(packageJsonRaw) as {
+    dependencies?: Record<string, string>;
+    optionalDependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+  };
+
+  return dependencyName in (packageJson.dependencies ?? {})
+    || dependencyName in (packageJson.optionalDependencies ?? {})
+    || dependencyName in (packageJson.peerDependencies ?? {});
+}
+
+function isRetainedZodRuntimeSpecifier(specifier: string): boolean {
+  return specifier === "zod"
+    || specifier === "zod/v4"
+    || (specifier.startsWith("zod/v4/")
+      && !specifier.startsWith("zod/v4/mini"));
 }
 
 async function pruneNonRuntimeFiles(rootDir: string): Promise<void> {

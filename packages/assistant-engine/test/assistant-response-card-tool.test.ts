@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer'
+
 import { describe, expect, it } from 'vitest'
 
 import type { AssistantResponseMedia } from '@murphai/operator-config/assistant-cli-contracts'
@@ -83,10 +85,77 @@ function readCardToolRequest(argumentsValue: unknown) {
   })
 }
 
+function isSchemaObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeCodexSchemaForSize(value: unknown): unknown {
+  if (!isSchemaObject(value)) {
+    return value
+  }
+  if ('$ref' in value || '$defs' in value || 'definitions' in value) {
+    throw new TypeError('The response-card tool schema must remain inline.')
+  }
+
+  const normalized: Record<string, unknown> = {}
+  for (const key of ['type', 'description', 'encrypted'] as const) {
+    if (key in value) {
+      normalized[key] = value[key]
+    }
+  }
+  if ('const' in value) {
+    normalized.enum = [value.const]
+  } else if ('enum' in value) {
+    normalized.enum = value.enum
+  }
+  if ('items' in value) {
+    normalized.items = normalizeCodexSchemaForSize(value.items)
+  }
+  if (isSchemaObject(value.properties)) {
+    normalized.properties = Object.fromEntries(
+      Object.entries(value.properties).map(([key, schema]) => [
+        key,
+        normalizeCodexSchemaForSize(schema),
+      ]),
+    )
+  }
+  if ('required' in value) {
+    normalized.required = value.required
+  }
+  if ('additionalProperties' in value) {
+    normalized.additionalProperties = isSchemaObject(value.additionalProperties)
+      ? normalizeCodexSchemaForSize(value.additionalProperties)
+      : value.additionalProperties
+  }
+  for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
+    const variants = value[key]
+    if (Array.isArray(variants)) {
+      normalized[key] = variants.map(normalizeCodexSchemaForSize)
+    }
+  }
+  return normalized
+}
+
 describe('murph.attach_response_card', () => {
+  it('keeps the complete input schema below the Codex compaction boundary', () => {
+    const serializedBytes = Buffer.byteLength(
+      JSON.stringify(normalizeCodexSchemaForSize(
+        MURPH_ATTACH_RESPONSE_CARD_TOOL.inputSchema,
+      )),
+      'utf8',
+    )
+
+    // Mirrors the supported-key projection used for the pinned App Server's
+    // 5,000-byte compaction decision; compaction erases nested card shapes.
+    expect(serializedBytes).toBeLessThan(5_000)
+  })
+
   it('describes the private on-demand canonical-read contract', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'current accepted member message explicitly requests it',
+      'saved instructions for the exact scheduled automation occurrence explicitly request it',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Occurrence authority alone is not card intent',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'single active tracked workout whose table was explicitly established earlier',

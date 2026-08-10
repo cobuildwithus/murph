@@ -50,6 +50,254 @@ function requireTestLinqParticipantContact(
 }
 
 describe("Linq group-chat visible access recovery", () => {
+  it("privately explains inactive access after neutral setup guidance is sent", async () => {
+    const event = buildGroupLinqEvent("evt_group_setup_private");
+    const sendHostedLinqChatMessage = vi.fn(async () => ({
+      chatId: "chat_private_member",
+      messageId: "msg_private_recovery",
+    }));
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => ({
+        handles: MATCHING_PRIVATE_HANDLES,
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: TRIAL_CONVERSION_MESSAGE,
+        noticeCode: "trial_conversion_pending" as const,
+        responseReason: "sent-trial-conversion-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+
+    const response = await withHostedVisibleSecondaryLinqOutcomes(
+      handler,
+      dependencies,
+    )({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(response).toEqual({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_private_member",
+      idempotencyKey: expect.stringMatching(
+        /^visible-secondary-private:[0-9a-f]{32}$/u,
+      ),
+      message: `${TRIAL_CONVERSION_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
+      replyToMessageId: null,
+    }));
+  });
+
+  it("stabilizes private recovery by group day, member, and recovery kind", async () => {
+    const idempotencyKeys: string[] = [];
+    const noticeSeeds: string[] = [];
+    const sendHostedLinqChatMessage:
+      HostedVisibleSecondaryLinqDependencies["sendHostedLinqChatMessage"] =
+      async (input) => {
+        if (!input.idempotencyKey) {
+          throw new Error("Expected private recovery to carry an idempotency key.");
+        }
+        idempotencyKeys.push(input.idempotencyKey);
+        return {
+          chatId: "chat_private_member",
+          messageId: `msg_private_${idempotencyKeys.length}`,
+        };
+      };
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+    const run = async (input: {
+      createdAt: string;
+      eventId: string;
+      recoveryKind?: "access-notice" | "signup";
+    }) => {
+      const event = buildGroupLinqEvent(
+        input.eventId,
+        GROUP_SENDER_PHONE,
+        input.createdAt,
+      );
+      const dependencies = buildLinqDependencies({
+        event,
+        getHostedLinqChatSummary: vi.fn(async () => ({
+          handles: MATCHING_PRIVATE_HANDLES,
+          isGroup: false,
+        })),
+        readHostedMemberRoutingState: vi.fn(async () => ({
+          linqChatId: "chat_private_member",
+          linqRecipientPhone: "+15550000000",
+        }) as never),
+        resolveHostedRecognizedInboundAccess: vi.fn(async (accessInput) => {
+          noticeSeeds.push(accessInput.noticeSeed);
+          return input.recoveryKind === "signup"
+            ? {
+                inviteCode: "invite-123",
+                inviteId: "invite_123",
+                joinUrl: "https://withmurph.ai/join/invite-123",
+                kind: "signup" as const,
+                message: SIGNUP_MESSAGE,
+                responseReason: "sent-signup-link" as const,
+              }
+            : {
+                kind: "access_notice" as const,
+                message: TRIAL_CONVERSION_MESSAGE,
+                noticeCode: "trial_conversion_pending" as const,
+                responseReason: "sent-trial-conversion-notice",
+              };
+        }),
+        sendHostedLinqChatMessage,
+      });
+
+      await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+        rawBody: JSON.stringify(event),
+        signature: "signature",
+        timestamp: "timestamp",
+      });
+    };
+
+    await run({
+      createdAt: "2026-07-27T12:00:00.000Z",
+      eventId: "evt_group_setup_same_day_a",
+    });
+    await run({
+      createdAt: "2026-07-27T20:00:00.000Z",
+      eventId: "evt_group_setup_same_day_b",
+    });
+    await run({
+      createdAt: "2026-07-28T12:00:00.000Z",
+      eventId: "evt_group_setup_next_day",
+    });
+    await run({
+      createdAt: "2026-07-27T22:00:00.000Z",
+      eventId: "evt_group_setup_changed_kind",
+      recoveryKind: "signup",
+    });
+
+    expect(idempotencyKeys).toHaveLength(4);
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[2]).not.toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[3]).not.toBe(idempotencyKeys[0]);
+    expect(noticeSeeds[1]).toBe(noticeSeeds[0]);
+    expect(noticeSeeds[2]).not.toBe(noticeSeeds[0]);
+    expect(noticeSeeds[3]).toBe(noticeSeeds[0]);
+    for (const idempotencyKey of idempotencyKeys) {
+      expect(idempotencyKey).toMatch(
+        /^visible-secondary-private:[0-9a-f]{32}$/u,
+      );
+    }
+  });
+
+  it("retries private recovery with the same provider key after room completion", async () => {
+    const event = buildGroupLinqEvent(
+      "evt_group_setup_private_retry",
+      GROUP_SENDER_PHONE,
+      "2026-07-27T12:00:00.000Z",
+    );
+    const retryableError = hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq outbound reply failed with HTTP 503.",
+      retryable: true,
+    });
+    const sendHostedLinqChatMessage = vi.fn()
+      .mockRejectedValueOnce(retryableError)
+      .mockResolvedValueOnce({
+        chatId: "chat_private_member",
+        messageId: "msg_private_retry",
+      });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => ({
+        handles: MATCHING_PRIVATE_HANDLES,
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: TRIAL_CONVERSION_MESSAGE,
+        noticeCode: "trial_conversion_pending" as const,
+        responseReason: "sent-trial-conversion-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+    const input = {
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    };
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(
+      handler,
+      dependencies,
+    )(input)).rejects.toBe(retryableError);
+    await expect(withHostedVisibleSecondaryLinqOutcomes(
+      handler,
+      dependencies,
+    )(input)).resolves.toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+
+    const providerKeys = sendHostedLinqChatMessage.mock.calls.map(
+      ([sendInput]) => sendInput.idempotencyKey,
+    );
+    expect(providerKeys).toHaveLength(2);
+    expect(providerKeys[1]).toBe(providerKeys[0]);
+    expect(providerKeys[0]).toMatch(
+      /^visible-secondary-private:[0-9a-f]{32}$/u,
+    );
+  });
+
+  it("adds no disclosure when setup guidance has no safe private route", async () => {
+    const event = buildGroupLinqEvent("evt_group_setup_no_private");
+    const sendHostedLinqChatMessage = vi.fn();
+    const dependencies = buildLinqDependencies({
+      event,
+      readHostedMemberRoutingState: vi.fn(async () => null),
+      resolveHostedRecognizedInboundAccess: vi.fn(),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      joinUrl: "https://withmurph.ai/groups/start",
+      ok: true as const,
+      reason: "sent-group-setup",
+    }));
+
+    await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
   it.each([
     "group-chat",
     "thread-container-inactive",
@@ -1017,10 +1265,11 @@ function buildLinqDependencies(input: {
 function buildGroupLinqEvent(
   eventId: string,
   senderHandle = GROUP_SENDER_PHONE,
+  createdAt = "2026-07-27T12:00:00.000Z",
 ): ReturnType<typeof requireHostedLinqMessageReceivedEvent> {
   return requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
-    created_at: "2026-07-27T12:00:00.000Z",
+    created_at: createdAt,
     data: {
       chat: {
         id: "chat_group_visible",
@@ -1048,7 +1297,7 @@ function buildGroupLinqEvent(
         id: "handle_sender",
         service: "imessage",
       },
-      sent_at: "2026-07-27T12:00:00.000Z",
+      sent_at: createdAt,
       service: "imessage",
     },
     event_id: eventId,

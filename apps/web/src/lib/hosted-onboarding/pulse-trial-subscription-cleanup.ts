@@ -252,11 +252,19 @@ export async function retrieveHostedPulseTrialCleanupTarget(input: {
   memberId: string;
   priceId: string;
   requestOptions?: Stripe.RequestOptions;
-  stripe: Pick<Stripe, "subscriptions">;
+  stripe: {
+    subscriptions: {
+      retrieve(
+        subscriptionId: string,
+        params?: Stripe.SubscriptionRetrieveParams,
+        options?: Stripe.RequestOptions,
+      ): Promise<Stripe.Subscription>;
+    };
+  };
   subscriptionId: string;
 }): Promise<Stripe.Subscription | null> {
   try {
-    const retrieveParams = input.expandCustomer
+    const retrieveParams: Stripe.SubscriptionRetrieveParams | null = input.expandCustomer
       ? { expand: ["customer"] }
       : null;
     const subscription = input.requestOptions

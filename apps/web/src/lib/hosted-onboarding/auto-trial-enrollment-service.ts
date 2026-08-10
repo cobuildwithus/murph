@@ -83,10 +83,14 @@ const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_TRANSACTION_TIMEOUT_MS = 30_000;
 const HOSTED_AUTO_PULSE_TRIAL_LOSER_CLEANUP_TRANSACTION_TIMEOUT_MS = 120_000;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_MAX_ATTEMPTS = 3;
 const HOSTED_AUTO_PULSE_TRIAL_FINALIZATION_RETRY_BASE_DELAY_MS = 25;
-const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS = {
+const HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_REQUEST_OPTIONS: Stripe.RequestOptions = {
   maxNetworkRetries: 0,
   timeout: HOSTED_AUTO_PULSE_TRIAL_STRIPE_AUTHORITY_TIMEOUT_MS,
-} as const satisfies Stripe.RequestOptions;
+};
+type HostedAutoPulseTrialMutationRequestOptions = Pick<
+  Stripe.RequestOptions,
+  "maxNetworkRetries" | "timeout"
+>;
 
 export type HostedAutoPulseTrialEnrollmentStatus =
   | "already_active"
@@ -1523,14 +1527,12 @@ function buildHostedAutoPulseTrialMetadata(
   memberId: string,
   pulseTrialStartSource: HostedPulseTrialStartSource,
 ): Record<string, string> {
-  return {
-    ...buildHostedBillingOfferMetadata({
-      billingPlanCode: "launch_monthly",
-      checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
-      memberId,
-      pulseTrialStartSource,
-    }),
-  };
+  return buildHostedBillingOfferMetadata({
+    billingPlanCode: "launch_monthly",
+    checkoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+    memberId,
+    pulseTrialStartSource,
+  });
 }
 
 async function createHostedAutoPulseTrialStripeSubscription(input: {
@@ -1538,10 +1540,26 @@ async function createHostedAutoPulseTrialStripeSubscription(input: {
   metadata: Record<string, string>;
   memberId: string;
   priceId: string;
-  requestOptions?: Stripe.RequestOptions;
+  requestOptions?: HostedAutoPulseTrialMutationRequestOptions;
   stripe: Stripe;
   stripeCustomerId: string;
 }): Promise<Stripe.Subscription> {
+  const requestOptions: Stripe.RequestOptions = {
+    idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
+      memberId: input.memberId,
+      policyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
+      priceId: input.priceId,
+      recoveryScope: input.idempotencyKeyScope,
+      stripeCustomerId: input.stripeCustomerId,
+    }),
+  };
+  if (input.requestOptions?.maxNetworkRetries !== undefined) {
+    requestOptions.maxNetworkRetries = input.requestOptions.maxNetworkRetries;
+  }
+  if (input.requestOptions?.timeout !== undefined) {
+    requestOptions.timeout = input.requestOptions.timeout;
+  }
+
   return withHostedStripeFailureLog(
     "subscription.create.auto-trial",
     () => input.stripe.subscriptions.create({
@@ -1559,16 +1577,7 @@ async function createHostedAutoPulseTrialStripeSubscription(input: {
           missing_payment_method: "pause",
         },
       },
-    }, {
-      ...input.requestOptions,
-      idempotencyKey: buildHostedAutoPulseTrialSubscriptionIdempotencyKey({
-        memberId: input.memberId,
-        policyVersion: HOSTED_PULSE_TRIAL_POLICY_VERSION,
-        priceId: input.priceId,
-        recoveryScope: input.idempotencyKeyScope,
-        stripeCustomerId: input.stripeCustomerId,
-      }),
-    }),
+    }, requestOptions),
   );
 }
 
@@ -1754,12 +1763,14 @@ async function listHostedAutoPulseTrialStripeSubscriptionsForRecovery(input: {
 
   try {
     for (;;) {
-      const params = {
+      const params: Stripe.SubscriptionListParams = {
         customer: input.stripeCustomerId,
         limit: 100,
-        ...(startingAfter ? { starting_after: startingAfter } : {}),
-        status: "all" as const,
+        status: "all",
       };
+      if (startingAfter) {
+        params.starting_after = startingAfter;
+      }
       const page = input.requestOptions
         ? await input.stripe.subscriptions.list(params, input.requestOptions)
         : await input.stripe.subscriptions.list(params);

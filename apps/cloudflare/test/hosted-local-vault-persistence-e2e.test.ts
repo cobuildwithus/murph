@@ -28,6 +28,7 @@ import {
   DEFAULT_DATABASE_URL,
 } from "@murphai/hosted-local-harness/dev-hosted-local/constants";
 import {
+  buildHostedLocalRuntimeLogDatabaseNameForTest,
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -421,13 +422,17 @@ async function createDatabase(name: string): Promise<string> {
 
 async function dropDatabase(name: string): Promise<void> {
   const adminUrl = new URL(DEFAULT_DATABASE_URL);
-  await execFileAsync("dropdb", [
-    "--if-exists",
-    "--force",
-    ...buildPostgresDatabaseCommandArgs(adminUrl, name),
-  ], {
-    env: buildPostgresDatabaseCommandEnv(adminUrl),
-  });
+  const commandEnv = buildPostgresDatabaseCommandEnv(adminUrl);
+  await Promise.all([
+    name,
+    buildHostedLocalRuntimeLogDatabaseNameForTest(name),
+  ].map(async (databaseName) =>
+    await execFileAsync("dropdb", [
+      "--if-exists",
+      "--force",
+      ...buildPostgresDatabaseCommandArgs(adminUrl, databaseName),
+    ], { env: commandEnv })
+  ));
 }
 
 function buildPostgresDatabaseCommandArgs(url: URL, databaseName: string): string[] {

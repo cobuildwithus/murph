@@ -141,7 +141,7 @@ describe('assistant execution prompt contract', () => {
       'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
     )
     expect(groupPrompt).toContain(
-      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 4`.',
+      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 8`.',
     )
     expect(groupPrompt).toContain(
       'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
@@ -156,12 +156,12 @@ describe('assistant execution prompt contract', () => {
       'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
     expect(groupPrompt).toContain(
-      'Never sleep more than 10 seconds total.',
+      'Never sleep more than 14 seconds total.',
     )
     expect(groupPrompt).toContain(
       'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
     )
-    expect(directPrompt).not.toContain('run shell `sleep 4`')
+    expect(directPrompt).not.toContain('run shell `sleep 8`')
     expect(directPrompt).not.toContain('Group texting rhythm:')
     expect(groupPrompt).toContain(
       'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',
@@ -1133,15 +1133,15 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).toContain('Reserved support bypasses discovery/classification; follow Support')
     expect(prompt).toContain('Never retry after any tool result')
     expect(prompt).toContain('external/transient failures')
-    expect(prompt).toContain('Use `feature_request` for a missing path')
+    expect(prompt).toContain('Use `feature_request` for missing paths')
     expect(prompt).toContain(
-      'Record only kind, a concise product-only summary, and relevant changelog ids when known; ids are optional',
+      'Record only kind, a concise product-only summary, and optional changelog ids',
     )
-    expect(prompt).toContain('Prefix inferred summaries `Speculative:`')
-    expect(prompt).toContain('assistant-observed summaries `Murph-observed:`')
-    expect(prompt).toContain('Do not log vague low-confidence guesses')
     expect(prompt).toContain(
-      'raw user wording or conversation text, health details, identifiers, contact details, secrets, or provider payloads',
+      'append a privacy-safe `Reproduction:` section in that same summary field',
+    )
+    expect(prompt).toContain(
+      'follow the tool schema for prefixes, privacy, and exact contents',
     )
     expect(prompt).not.toContain('structured kind/topic')
     expect(prompt).not.toContain('feedback tags')
@@ -1692,7 +1692,7 @@ describe('assistant consumption lookup guidance', () => {
       'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture and retrospective patterns; nutrition-strategy forward meal execution; body-composition weight/waist/recomposition; gut-digestion digestive symptoms; micronutrients-supplements supplement evidence, labels, dose, and safety.',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation; body-composition owns weight/waist/recomposition; gut-digestion owns digestive symptoms and elimination/reintroduction; micronutrients-supplements owns supplement evidence, labels, dose, and safety.',
     )
     expect(prompt).toContain(
       'Preserve medication state correctly: completed historical courses use `vault-cli medication history add`; current medication regimens use `regimen save --kind medication` with correct status and dates; one dose taken at a specific time uses `event medication-intake add`.',
@@ -1908,7 +1908,7 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_000)
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_050)
     // This layer is resident on every turn for every member, so it is a ratchet,
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
@@ -2193,7 +2193,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      'd19758fd9e43558a832e9aa9f880c30e10d30ad6ce6fc35e0d0b360854f7f23e',
+      '32daf4a053a3a6fc5221b98400c6e65350983e29c0679d3988f00f4635dbfcd5',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2563,6 +2563,9 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).toContain('Setup: murph-onboarding, hosted-low-usage, signup-link (explicit requests), experiment-onboarding, behavior-followthrough, self-management-experiments.')
     expect(prompt).toContain('Sleep/readiness: sleep-improvement, circadian-rhythm, sleep-recovery-readiness, hrv-resting-heart-rate, energy-fatigue.')
     expect(prompt).toContain('Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion, micronutrients-supplements, cardiometabolic-health, cycle-hormonal-health.')
+    expect(prompt).toContain(
+      'nutrition-strategy owns forward meal execution and named-diet evaluation',
+    )
     expect(prompt).toContain('Care logistics: appointment-scheduling.')
     expect(prompt).toContain('Transports and services: connected-apps, computer-use, phone-calls.')
     expect(prompt).toContain('Account products: murph-family.')

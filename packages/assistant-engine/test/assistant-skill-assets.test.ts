@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -53,6 +53,13 @@ const RESEARCHED_HEALTH_TOPIC_SKILL_SLUGS = [
   'gut-digestion',
   'general-eye-health',
 ] as const
+
+const MURPH_ONBOARDING_REFERENCE_FILES = [
+  'aspiration-foundation-delegation.md',
+  'persistence-recovery-follow-up.md',
+  'return-launch-completion.md',
+] as const
+const MURPH_ONBOARDING_ROOT_MAX_BYTES = 12 * 1024
 
 const managedGroupSkillsArePublicFallbacks = readFileSync(
   path.join(resolveAssistantSkillsRoot(), 'group-chat', 'SKILL.md'),
@@ -679,21 +686,29 @@ describe('assistant skill assets', () => {
     }
 
     expect(nutritionSkill.triggerHint).toContain(
-      'meal structure and protein',
+      'meal structure, named diets and dietary patterns, protein',
     )
     expect(nutritionSkill.triggerHint).toContain(
       'real-life food-system execution',
     )
     expect(nutritionSkill.triggerHint).toContain(
-      'body-composition for fat loss/muscle gain/recomposition',
+      'body-composition for intentional body change',
     )
     expect(nutritionSkill.triggerHint).toContain(
-      'gut-digestion for digestive symptom strategy',
+      'gut-digestion for digestive symptom strategy or elimination/reintroduction',
+    )
+    expect(nutritionSkill.triggerHint).toContain(
+      'clinical owners for therapeutic diets or medically complex cases',
     )
     expect(nutritionSkill.triggerHint).not.toContain('GI comfort')
     expect(nutritionSkill.triggerHint).not.toContain(
       'body composition, training fuel',
     )
+    const registeredSkillSlugs: ReadonlySet<string> = new Set(
+      ASSISTANT_SKILLS.map((skill) => skill.slug),
+    )
+    expect(registeredSkillSlugs.has('diet-patterns')).toBe(false)
+    expect(registeredSkillSlugs.has('named-diets')).toBe(false)
 
     const nutritionText = await readSkillFile(nutritionSkill)
     expect(nutritionText).toContain(
@@ -702,6 +717,22 @@ describe('assistant skill assets', () => {
     expect(nutritionText).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/gut-digestion/SKILL.md',
     )
+    expect(nutritionText).toContain('## Named Diets And Dietary Patterns')
+    expect(nutritionText).toContain(
+      'Child references are progressive disclosure, not separately registered skills.',
+    )
+    for (const reference of [
+      'intermittent-fasting.md',
+      'low-carbohydrate.md',
+      'ketogenic.md',
+      'mediterranean.md',
+      'carnivore-animal-based.md',
+      'vegan-plant-based.md',
+      'vegetarian-spectrum.md',
+      'dash.md',
+    ]) {
+      expect(nutritionText).toContain(`references/named-diets/${reference}`)
+    }
     expect(nutritionText).not.toContain('### Body composition')
     expect(nutritionText).not.toContain('### GI comfort and performance')
   })
@@ -1028,7 +1059,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
     expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
-    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from that scoring read\s+with only the exact scoring scope it proved `not_granted`/u)
+    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from the most recent\s+scoring read with only the exact eligible offer scope that same read proved\s+`not_granted`/u)
     expect(raw).toMatch(/record the offer as\s+handled only when the tool reports `status="ok"`/u)
     expect(raw).toMatch(/grant without `grantedAt`, a grant before `offeredAt`, a grant more\s+than 24 hours later, silence, an unresolved identity, unavailable recency\s+evidence, or an offer followed by materially changed challenge terms does not\s+establish buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group`')
@@ -1946,7 +1977,7 @@ describe('assistant skill assets', () => {
     )
   })
 
-  it('keeps aspiration-anchored, foundation-complete Murph onboarding details in the skill file', async () => {
+  it('ships Murph onboarding as a compact progressive-disclosure skill with single-owned rules', async () => {
     const murphOnboardingSkill = ASSISTANT_SKILLS.find(
       (skill) => skill.slug === 'murph-onboarding',
     )
@@ -1955,7 +1986,165 @@ describe('assistant skill assets', () => {
       return
     }
 
-    const raw = await readSkillFile(murphOnboardingSkill)
+    const skillDirectory = path.join(
+      resolveAssistantSkillsRoot(),
+      murphOnboardingSkill.slug,
+    )
+    const root = await readSkillFile(murphOnboardingSkill)
+    const referenceDirectory = path.join(skillDirectory, 'references')
+    const referenceInventory = (await readdir(referenceDirectory)).sort()
+
+    expect(Buffer.byteLength(root, 'utf8')).toBeLessThanOrEqual(
+      MURPH_ONBOARDING_ROOT_MAX_BYTES,
+    )
+    expect(referenceInventory).toEqual(
+      [...MURPH_ONBOARDING_REFERENCE_FILES].sort(),
+    )
+
+    const references = new Map<string, string>()
+    for (const referenceFile of MURPH_ONBOARDING_REFERENCE_FILES) {
+      expect(root).toContain(`references/${referenceFile}`)
+      references.set(
+        referenceFile,
+        await readFile(path.join(referenceDirectory, referenceFile), 'utf8'),
+      )
+    }
+
+    expect(root).toContain(ASSISTANT_FIRST_CONTACT_WELCOME_MESSAGE)
+    expect(root).toContain(
+      'vault-cli assistant onboarding resume-context --format json',
+    )
+    expect(root).toContain('## The immediate need wins')
+    expect(root).toContain('## Relationship promise')
+    expect(root).toContain('### 2. Minimal identity')
+    expect(root).toContain('Do not preload the stage references.')
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'persistence reference before handling any foundation answer that adds or confirms canonical context, including an explicit none or negative fact;',
+    )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'A vague opener—including bare “Let’s continue” without a visible onboarding referent—and generic saved records—even a goal plus aspiration readiness and all six areas—do not establish onboarding stage.',
+    )
+    expect(root.replace(/\s+/gu, ' ')).toContain(
+      'This skill may create only the scheduled early-stall check-in defined in `references/persistence-recovery-follow-up.md` and the post-completion first-personal-read one-shot defined in `references/return-launch-completion.md`.',
+    )
+    for (const movedSection of [
+      '## Delegating onboarding work',
+      '### 3. Find one or two aspiration anchors',
+      '#### Arm the early-stall check-in',
+      '### 6. Return to an open thread and choose together',
+      '## Context persistence',
+      '## Completion',
+      '### Finite three-day recovery',
+      '## Reply and follow-up rules',
+    ]) {
+      expect(root).not.toContain(movedSection)
+    }
+    expect(references.get('aspiration-foundation-delegation.md')).toContain(
+      '### 5. Resolve the foundation checkpoints',
+    )
+    expect(references.get('persistence-recovery-follow-up.md')).toContain(
+      '### Finite three-day recovery',
+    )
+    expect(references.get('return-launch-completion.md')).toContain(
+      '## Completion',
+    )
+
+    const ownedRules = [
+      {
+        owner: 'SKILL.md',
+        rule: 'Everything you share stays private to you, and the more I learn, the better my help fits.',
+      },
+      {
+        owner: 'SKILL.md',
+        rule: 'Do not append an onboarding question to a reply about a meal photo, symptom, urgent concern, failed task, or other health-data request that should stand alone.',
+      },
+      {
+        owner: 'aspiration-foundation-delegation.md',
+        rule: 'When all three families are present, start all three before the visible reply.',
+      },
+      {
+        owner: 'aspiration-foundation-delegation.md',
+        rule: 'A foundation answer is still context, not permission to solve a parked thread.',
+      },
+      {
+        owner: 'persistence-recovery-follow-up.md',
+        rule: 'Saving the same slug twice converges on one automation, so a duplicate save is harmless, but never save it on a later turn.',
+      },
+      {
+        owner: 'persistence-recovery-follow-up.md',
+        rule: 'Do not create a fake health record or an opaque onboarding step marker merely to track coverage.',
+      },
+      {
+        owner: 'persistence-recovery-follow-up.md',
+        rule: 'Send or skip consumes only the current local day\'s opportunity.',
+      },
+      {
+        owner: 'return-launch-completion.md',
+        rule: 'Before asking baseline, obstacle, prior-attempt, or support questions, ask which thread—if any—the user actually wants to work on now.',
+      },
+      {
+        owner: 'return-launch-completion.md',
+        rule: 'An experiment, plan, support loop, wearable connection, lab upload, group, or specific positive health fact is not required.',
+      },
+    ] as const
+    const files = new Map<string, string>([['SKILL.md', root], ...references])
+    const compactFiles = new Map(
+      [...files].map(([file, contents]) => [
+        file,
+        contents.replace(/\s+/gu, ' '),
+      ]),
+    )
+    const wholeSkill = [...compactFiles.values()].join('\n')
+
+    for (const { owner, rule } of ownedRules) {
+      expect(
+        compactFiles.get(owner),
+        `${rule} must remain owned by ${owner}`,
+      ).toContain(rule)
+      expect(
+        wholeSkill.split(rule).length - 1,
+        `${rule} must have exactly one owner`,
+      ).toBe(1)
+    }
+  })
+
+  it('keeps aspiration-anchored, foundation-complete Murph onboarding details in the skill asset', async () => {
+    const murphOnboardingSkill = ASSISTANT_SKILLS.find(
+      (skill) => skill.slug === 'murph-onboarding',
+    )
+    expect(murphOnboardingSkill).toBeTruthy()
+    if (!murphOnboardingSkill) {
+      return
+    }
+
+    const root = await readSkillFile(murphOnboardingSkill)
+    const referenceDirectory = path.join(
+      resolveAssistantSkillsRoot(),
+      murphOnboardingSkill.slug,
+      'references',
+    )
+    const referenceEntries = await Promise.all(
+      MURPH_ONBOARDING_REFERENCE_FILES.map((referenceFile) =>
+        readFile(path.join(referenceDirectory, referenceFile), 'utf8').then(
+          (contents) => [referenceFile, contents] as const,
+        ),
+      ),
+    )
+    const references = new Map(referenceEntries)
+    const aspirationReference = references.get(
+      'aspiration-foundation-delegation.md',
+    )
+    const persistenceReference = references.get(
+      'persistence-recovery-follow-up.md',
+    )
+    const returnReference = references.get('return-launch-completion.md')
+    expect(aspirationReference).toBeTruthy()
+    expect(persistenceReference).toBeTruthy()
+    expect(returnReference).toBeTruthy()
+    if (!aspirationReference || !persistenceReference || !returnReference) {
+      return
+    }
+    const raw = [root, ...references.values()].join('\n\n')
     const compact = raw.replace(/\s+/gu, ' ')
 
     expect(murphOnboardingSkill.triggerHint).toContain(
@@ -2001,6 +2190,15 @@ describe('assistant skill assets', () => {
     expect(compact).toContain('vault-cli blood-test list --format json')
     expect(compact).toContain(
       'Missing evidence is unresolved unless the visible conversation shows that the user said it was not relevant or explicitly skipped it.',
+    )
+    expect(root).toContain(
+      'Before the first aspiration read, visible conversation must show that the\nrelationship promise was delivered and bundled minimal identity was answered\nor skipped.',
+    )
+    expect(root).toContain(
+      'Once later-stage progression is established, missing early relationship or\nidentity wording in bounded history does not prove omission.',
+    )
+    expect(root).toContain(
+      'Preserve progress\nunless the current message or visible conversation affirmatively says a root\nprerequisite never happened;',
     )
     expect(raw).toContain('## The immediate need wins')
     expect(compact).toContain(
@@ -2150,7 +2348,7 @@ How old are you and what's your gender?
       'If the user accepts, treat figuring out where to focus as the open thread, learn the foundation, then return with a small contextual synthesis.',
     )
     expect(compact).toContain(
-      'If they decline, do not press or make the foundation mandatory merely because they named no problem; follow the skip and overall-decline rules below.',
+      'If they decline, do not press or make the foundation mandatory merely because they named no problem; follow the skip and overall-decline rules in `persistence-recovery-follow-up.md` and `return-launch-completion.md`.',
     )
     expect(raw).toContain('### 4. Reflect, save, and park the threads')
     expect(compact).toContain(
@@ -2166,7 +2364,7 @@ How old are you and what's your gender?
       'Keep Apple Health out of this provider-example clause; it is offered only through the separate native-app relay after a clear “none,” never as a `murph.device` provider.',
     )
     expect(compact).toContain(
-      'Before the visible reply, also save the confirmed definition of progress and reason it matters through the Context-memory rule below',
+      'Before the visible reply, also save the confirmed definition of progress and reason it matters through the Context-memory rule in `persistence-recovery-follow-up.md`',
     )
     expect(compact).toContain(
       'When the reason is known, keep it clearly subordinate to the threads rather than turning it into another thread.',
@@ -2218,6 +2416,9 @@ How old are you and what's your gender?
     expect(raw).not.toContain('Explain that this prevents duplicate or conflicting suggestions.')
     expect(raw).toContain('4. **Supplements.**')
     expect(raw).toContain('5. **Medical and safety context.**')
+    expect(compact).toContain(
+      'Prescription or OTC medications, diagnosed conditions, injury history, allergies or intolerances, and pregnancy or nursing.',
+    )
     expect(raw).toContain('6. **Recent blood tests or lab panels.**')
     expect(compact).toContain(
       'You can type it out instead — either works just as well.',
@@ -2424,32 +2625,49 @@ How old are you and what's your gender?
     expect(compact).toContain(
       'Do not add automatic launch media or make media an onboarding completion requirement.',
     )
-    const aspirationIndex = raw.indexOf('### 3. Find one or two aspiration anchors')
-    const parkIndex = raw.indexOf('### 4. Reflect, save, and park the threads')
-    const foundationIndex = raw.indexOf('### 5. Resolve the foundation checkpoints')
-    const returnIndex = raw.indexOf('### 6. Return to an open thread and choose together')
-    const completionIndex = raw.indexOf('## Completion')
-    const replyRulesIndex = raw.indexOf('## Reply and follow-up rules')
+    const aspirationIndex = aspirationReference.indexOf(
+      '### 3. Find one or two aspiration anchors',
+    )
+    const parkIndex = aspirationReference.indexOf(
+      '### 4. Reflect, save, and park the threads',
+    )
+    const foundationIndex = aspirationReference.indexOf(
+      '### 5. Resolve the foundation checkpoints',
+    )
+    const returnIndex = returnReference.indexOf(
+      '### 6. Return to an open thread and choose together',
+    )
+    const completionIndex = returnReference.indexOf('## Completion')
+    const replyRulesIndex = persistenceReference.indexOf(
+      '## Reply and follow-up rules',
+    )
     expect(aspirationIndex).toBeGreaterThan(-1)
     expect(parkIndex).toBeGreaterThan(aspirationIndex)
     expect(foundationIndex).toBeGreaterThan(parkIndex)
-    expect(returnIndex).toBeGreaterThan(foundationIndex)
+    expect(returnIndex).toBeGreaterThan(-1)
     expect(completionIndex).toBeGreaterThan(returnIndex)
-    expect(replyRulesIndex).toBeGreaterThan(completionIndex)
+    expect(replyRulesIndex).toBeGreaterThan(-1)
 
-    const aspirationSection = raw.slice(aspirationIndex, parkIndex)
-    const workedReplyStart = raw.indexOf('a\ncomplete reply can be:')
+    const aspirationSection = aspirationReference.slice(
+      aspirationIndex,
+      parkIndex,
+    )
+    const workedReplyStart = aspirationReference.indexOf(
+      'a\ncomplete reply can be:',
+    )
     expect(workedReplyStart).toBeGreaterThan(parkIndex)
-    const workedReplySection = raw.slice(
+    const workedReplySection = aspirationReference.slice(
       workedReplyStart,
-      raw.indexOf('Treat this as a worked example, not fixed copy.'),
+      aspirationReference.indexOf(
+        'Treat this as a worked example, not fixed copy.',
+      ),
     )
-    const returnSection = raw.slice(returnIndex, completionIndex)
-    const capabilityTourSection = raw.slice(
-      raw.indexOf('If they pick the\ntour'),
-      raw.indexOf('Return to the one or two open threads.'),
+    const returnSection = returnReference.slice(returnIndex, completionIndex)
+    const capabilityTourSection = returnReference.slice(
+      returnReference.indexOf('If they pick the\ntour'),
+      returnReference.indexOf('Return to the one or two open threads.'),
     )
-    const completionSection = raw.slice(completionIndex, replyRulesIndex)
+    const completionSection = returnReference.slice(completionIndex)
     expect(capabilityTourSection.match(/^- /gmu)).toHaveLength(6)
     expect(
       [...aspirationSection.matchAll(/^\d+\. (.+\?)$/gmu)]
@@ -2477,17 +2695,20 @@ How old are you and what's your gender?
     )
     expect(completionSection.match(/^\d+\. /gmu)).toHaveLength(8)
 
-    const immediateNeedSection = raw
+    const immediateNeedSection = root
       .slice(
-        raw.indexOf('## The immediate need wins'),
-        raw.indexOf('## Delegating onboarding work'),
+        root.indexOf('## The immediate need wins'),
+        root.indexOf('## Relationship promise'),
       )
       .replace(/\s+/gu, ' ')
-    const parkSection = raw
+    const parkSection = aspirationReference
       .slice(parkIndex, foundationIndex)
       .replace(/\s+/gu, ' ')
-    const persistenceSection = raw
-      .slice(raw.indexOf('## Context persistence'), completionIndex)
+    const persistenceSection = persistenceReference
+      .slice(
+        persistenceReference.indexOf('## Context persistence'),
+        persistenceReference.indexOf('### Finite three-day recovery'),
+      )
       .replace(/\s+/gu, ' ')
     const compactCompletionSection = completionSection.replace(/\s+/gu, ' ')
     const onboardingDecisionScenarios = [
@@ -2505,7 +2726,7 @@ How old are you and what's your gender?
       },
       {
         contract:
-          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence decide whether continuation is timely.',
+          'If they ask to pause, leave onboarding open and let the finite managed next-day recovery occurrence in `persistence-recovery-follow-up.md` decide whether continuation is timely.',
         section: parkSection,
         userMessage: 'Pause for now',
       },
@@ -2596,7 +2817,7 @@ How old are you and what's your gender?
       'For each change thread, Murph asked once for each missing progress signal and reason; both are known from the user\'s own words or explicitly unknown or declined.',
     )
     expect(compact).toContain(
-      'Before claiming the thread is saved, Murph durably associated both fields with the named goal or goals and read back the Goal and Context owners under the persistence rule above.',
+      'Before claiming the thread is saved, Murph durably associated both fields with the named goal or goals and read back the Goal and Context owners under the persistence rule in `persistence-recovery-follow-up.md`.',
     )
     expect(compact).not.toContain(
       'Murph asked once for a missing reason a desired change matters',
@@ -2624,7 +2845,7 @@ How old are you and what's your gender?
     )
     expect(raw).toContain('--reason user_declined')
     expect(compact).toContain(
-      'Except for the bundled minimal-identity prompt and the foundation brain-dump memo above, ask at most one question per reply.',
+      'Except for the bundled minimal-identity prompt in `../SKILL.md` and the foundation brain-dump memo in `aspiration-foundation-delegation.md`, ask at most one question per reply.',
     )
     expect(compact).toContain(
       'If the last onboarding question is still unanswered, do not send a different setup question.',

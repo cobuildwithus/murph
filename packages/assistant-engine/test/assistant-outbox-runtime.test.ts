@@ -25,6 +25,7 @@ import {
   upsertAutomation,
 } from '@murphai/core'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
+import { readMaterializedExportPackReceipt } from '@murphai/vault-usecases/export-packs'
 import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   renderAssistantResponseCardText,
@@ -35,6 +36,7 @@ import {
   hasAssistantSeenFirstContact,
   resolveAssistantFirstContactStateDocIds,
 } from '../src/assistant/first-contact.ts'
+import { ASSISTANT_GENERATED_DELIVERY_DIRECTORY } from '../src/assistant/generated-delivery-files.ts'
 import {
   completeAssistantOnboarding,
   reopenAssistantOnboarding,
@@ -151,6 +153,101 @@ afterEach(async () => {
 })
 
 describe('assistant outbox runtime', () => {
+  it('retires claimed export packs only after confirmed delivery', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-export-pack-retirement-',
+    )
+    const manifestPath = (packId: string) =>
+      path.join(vaultRoot, `exports/packs/${packId}/manifest.json`)
+    const sentManifestPath = manifestPath('sent-pack')
+    const failedManifestPath = manifestPath('failed-pack')
+    const changedManifestPath = manifestPath('changed-pack')
+    const missingManifestPath = manifestPath('missing-pack')
+    await Promise.all(
+      ['sent-pack', 'failed-pack', 'changed-pack', 'missing-pack'].map(
+        async (packId) => {
+          const target = manifestPath(packId)
+          await mkdir(path.dirname(target), { recursive: true })
+          await writeFile(target, JSON.stringify({ packId }))
+        },
+      ),
+    )
+
+    const [sentReceipt, failedReceipt, changedReceipt, missingReceipt] =
+      await Promise.all([
+        readMaterializedExportPackReceipt(vaultRoot, 'sent-pack'),
+        readMaterializedExportPackReceipt(vaultRoot, 'failed-pack'),
+        readMaterializedExportPackReceipt(vaultRoot, 'changed-pack'),
+        readMaterializedExportPackReceipt(vaultRoot, 'missing-pack'),
+      ])
+    await writeFile(
+      changedManifestPath,
+      JSON.stringify({ generation: 2, packId: 'changed-pack' }),
+    )
+    await rm(path.dirname(missingManifestPath), { force: true, recursive: true })
+
+    const media = (...receipts: (typeof sentReceipt)[]) => [{
+      approvalGeneration: null,
+      approvalId: null,
+      contentType: 'application/zip',
+      filename: 'vault.zip',
+      kind: 'vault_file' as const,
+      ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault.zip`,
+      retireExportPacks: receipts,
+      sha256: 'a'.repeat(64),
+      sizeBytes: 42,
+    }]
+    const sentIntent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      media: media(sentReceipt, changedReceipt, missingReceipt),
+      message: 'vault.zip',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({ channel: 'linq' }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: false,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const sent = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: sentIntent.intentId,
+      vault: vaultRoot,
+    })
+    expect(sent.intent.status).toBe('sent')
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, sentIntent.intentId),
+    ).resolves.toMatchObject({ status: 'sent' })
+    await expect(readFile(sentManifestPath)).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await expect(readFile(changedManifestPath, 'utf8')).resolves.toContain(
+      '"generation":2',
+    )
+
+    const failedIntent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      media: media(failedReceipt),
+      message: 'vault.zip',
+    })
+    mockedDeliverAssistantMessageOverBinding.mockRejectedValueOnce(
+      Object.assign(new Error('channel rejected the file'), {
+        code: 'CHANNEL_REJECTED',
+        context: { retryable: false },
+      }),
+    )
+    const failed = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: failedIntent.intentId,
+      vault: vaultRoot,
+    })
+    expect(failed.intent.status).toBe('failed')
+    await expect(readFile(failedManifestPath, 'utf8')).resolves.toContain(
+      'failed-pack',
+    )
+  })
+
   it('dedupes non-terminal intents, allows retries after permanent failure, and rejects blank messages', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-dedupe-')
 
@@ -1220,6 +1317,349 @@ describe('assistant outbox runtime', () => {
       delivery: {
         idempotencyKey: fallbackIdempotencyKey,
         providerMessageId: 'linq-card-fallback-text',
+      },
+    })
+  })
+
+  it('terminalizes an exhausted private Linq attachment upload without a new reservation', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-attachment-exhausted-',
+    )
+    const imageBytes = new Uint8Array([11, 12, 13, 14])
+    const intent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'linq_chat_attachment_exhausted',
+      media: [{
+        alt: 'Private generated image',
+        contentType: 'image/png',
+        filename: 'generated.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/generated.png',
+        sha256: 'a'.repeat(64),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      }],
+      message: 'Private generated image',
+      threadId: 'linq_chat_attachment_exhausted',
+    })
+    const providerFetch = vi.fn<LinqFetch>(async (url) => {
+      if (!url.endsWith('/attachments')) {
+        throw new Error(`Unexpected Linq provider request: ${url}`)
+      }
+      return new Response(JSON.stringify({
+        attachment_id: 'attachment_exhausted',
+        expires_at: '2026-08-06T21:00:00.000Z',
+        http_method: 'PUT',
+        required_headers: {
+          'content-type': 'image/png',
+        },
+        upload_url: 'https://uploads.example.test/private/exhausted',
+      }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    const publicFetch = vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'temporarily unavailable' }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': '0',
+        },
+        status: 503,
+      }))
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async (request) => await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: providerFetch,
+        loadVaultImage: async () => imageBytes,
+        publicFetchImplementation: publicFetch,
+      }),
+    )
+
+    await useActualOutboundDeliveryImplementation()
+    const failed = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-06T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(failed.intent).toMatchObject({
+      lastError: {
+        code: 'LINQ_API_REQUEST_FAILED',
+        diagnosticContext: expect.objectContaining({
+          operation: 'create_attachment_upload',
+          retryable: false,
+        }),
+      },
+      nextAttemptAt: null,
+      status: 'failed',
+    })
+    expect(providerFetch).toHaveBeenCalledTimes(1)
+    expect(publicFetch).toHaveBeenCalledTimes(3)
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+
+    const later = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      intentId: intent.intentId,
+      now: new Date('2026-08-07T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(later.intent.status).toBe('failed')
+    expect(providerFetch).toHaveBeenCalledTimes(1)
+    expect(publicFetch).toHaveBeenCalledTimes(3)
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+  })
+
+  it('abandons an ambiguous Linq attachment reservation without replaying it', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-attachment-reservation-ambiguous-',
+    )
+    const imageBytes = new Uint8Array([31, 32, 33, 34])
+    const intent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'linq_chat_attachment_ambiguous',
+      media: [{
+        alt: 'Private image with ambiguous reservation',
+        contentType: 'image/png',
+        filename: 'ambiguous.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/ambiguous.png',
+        sha256: 'c'.repeat(64),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      }],
+      message: 'Private image with ambiguous reservation',
+      threadId: 'linq_chat_attachment_ambiguous',
+    })
+    const providerFetch = vi.fn<LinqFetch>(async (url) => {
+      if (!url.endsWith('/attachments')) {
+        throw new Error(`Unexpected Linq provider request: ${url}`)
+      }
+      throw new TypeError('connection ended before the reservation response')
+    })
+    const publicFetch = vi.fn(async () => new Response(null, { status: 204 }))
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async (request) => await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: providerFetch,
+        loadVaultImage: async () => imageBytes,
+        publicFetchImplementation: publicFetch,
+      }),
+    )
+
+    await useActualOutboundDeliveryImplementation()
+    const abandoned = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-06T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(abandoned.intent).toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
+    })
+    expect(providerFetch).toHaveBeenCalledTimes(1)
+    expect(publicFetch).not.toHaveBeenCalled()
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+
+    const later = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      intentId: intent.intentId,
+      now: new Date('2026-08-07T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(later.intent.status).toBe('abandoned')
+    expect(providerFetch).toHaveBeenCalledTimes(1)
+    expect(publicFetch).not.toHaveBeenCalled()
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    {
+      context: { failureStage: 'transport', timedOut: true },
+      label: 'timeout',
+    },
+    {
+      context: { failureStage: 'http', status: 408 },
+      label: 'HTTP 408',
+    },
+    {
+      context: { failureStage: 'http', status: 503 },
+      label: 'HTTP 503',
+    },
+  ])('abandons an ambiguous Linq attachment reservation after $label', async ({
+    context,
+    label,
+  }) => {
+    const { vaultRoot } = await createAssistantVault(
+      `assistant-outbox-linq-attachment-reservation-${label.replaceAll(' ', '-')}-`,
+    )
+    const intent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'linq_chat_attachment_reservation_ambiguous',
+      message: 'Private image with ambiguous reservation',
+      threadId: 'linq_chat_attachment_reservation_ambiguous',
+    })
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async () => {
+        throw new VaultCliError(
+          'LINQ_API_REQUEST_FAILED',
+          'Linq attachment reservation ended without definitive no-effect proof.',
+          {
+            ...context,
+            method: 'POST',
+            operation: 'create_attachment_upload',
+            provider: 'linq',
+            retryable: false,
+          },
+        )
+      },
+    )
+
+    await useActualOutboundDeliveryImplementation()
+    const abandoned = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-06T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(abandoned.intent).toMatchObject({
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
+      },
+      nextAttemptAt: null,
+      status: 'abandoned',
+    })
+
+    const later = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      intentId: intent.intentId,
+      now: new Date('2026-08-07T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(later.intent.status).toBe('abandoned')
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovers a private Linq attachment inside one outbox dispatch and sends once', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-linq-attachment-recovered-',
+    )
+    const imageBytes = new Uint8Array([21, 22, 23, 24])
+    const intent = await createIntent(vaultRoot, {
+      channel: 'linq',
+      explicitTarget: 'linq_chat_attachment_recovered',
+      media: [{
+        alt: 'Recovered private image',
+        contentType: 'image/webp',
+        filename: 'recovered.webp',
+        kind: 'vault_image',
+        ref: 'raw/captures/recovered.webp',
+        sha256: 'b'.repeat(64),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      }],
+      message: 'Recovered private image',
+      threadId: 'linq_chat_attachment_recovered',
+    })
+    const finalMessageBodies: Array<Record<string, unknown>> = []
+    const providerFetch = vi.fn<LinqFetch>(async (url, init) => {
+      if (url.endsWith('/attachments')) {
+        return new Response(JSON.stringify({
+          attachment_id: 'attachment_recovered',
+          expires_at: '2026-08-06T21:00:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'image/webp',
+          },
+          upload_url: 'https://uploads.example.test/private/recovered',
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.endsWith('/chats/linq_chat_attachment_recovered/messages')) {
+        if (typeof init.body !== 'string') {
+          throw new Error('Expected a serialized Linq message body.')
+        }
+        finalMessageBodies.push(JSON.parse(init.body) as Record<string, unknown>)
+        return new Response(JSON.stringify({
+          message: { id: 'linq_image_message_recovered' },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected Linq provider request: ${url}`)
+    })
+    let uploadAttempt = 0
+    const publicFetch = vi.fn(async () => {
+      uploadAttempt += 1
+      if (uploadAttempt < 3) {
+        return new Response(JSON.stringify({ error: 'temporarily unavailable' }), {
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '0',
+          },
+          status: 503,
+        })
+      }
+      return new Response(null, { status: 204 })
+    })
+    const sendLinq = vi.fn<NonNullable<AssistantChannelDependencies['sendLinq']>>(
+      async (request) => await sendLinqMessage(request, {
+        env: {
+          LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+          LINQ_API_TOKEN: 'linq-token',
+        },
+        fetchImplementation: providerFetch,
+        loadVaultImage: async () => imageBytes,
+        publicFetchImplementation: publicFetch,
+      }),
+    )
+
+    await useActualOutboundDeliveryImplementation()
+    const sent = await dispatchAssistantOutboxIntent({
+      dependencies: { sendLinq },
+      force: true,
+      intentId: intent.intentId,
+      now: new Date('2026-08-06T20:00:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(sent.intent).toMatchObject({
+      delivery: {
+        channel: 'linq',
+        providerMessageId: 'linq_image_message_recovered',
+        target: 'linq_chat_attachment_recovered',
+      },
+      status: 'sent',
+    })
+    expect(providerFetch).toHaveBeenCalledTimes(2)
+    expect(publicFetch).toHaveBeenCalledTimes(3)
+    expect(sendLinq).toHaveBeenCalledTimes(1)
+    expect(finalMessageBodies).toHaveLength(1)
+    expect(finalMessageBodies[0]).toMatchObject({
+      message: {
+        parts: [
+          { type: 'text', value: 'Recovered private image' },
+          { attachment_id: 'attachment_recovered', type: 'media' },
+        ],
       },
     })
   })
@@ -2743,6 +3183,12 @@ describe('assistant outbox runtime', () => {
         idempotencyKey: null,
         messageLength: 0,
         providerMessageId: 'linq-voice-message',
+        providerMessageEffects: [
+          {
+            message: null,
+            providerMessageId: 'linq-voice-message',
+          },
+        ],
         providerThreadId: 'thread-linq-voice',
         sentAt: '2026-04-08T03:30:00.000Z',
         target: 'thread-linq-voice',
@@ -2776,6 +3222,12 @@ describe('assistant outbox runtime', () => {
       idempotencyKey: `assistant-outbox:${seeded.intentId}`,
       messageLength: 0,
       providerMessageId: 'linq-voice-message',
+      providerMessageEffects: [
+        {
+          message: null,
+          providerMessageId: 'linq-voice-message',
+        },
+      ],
       target: 'thread-linq-voice',
     })
     expect(dispatched.intent.media).toEqual(media)

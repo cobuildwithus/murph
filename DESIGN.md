@@ -135,7 +135,7 @@ A single-accent system. Sage green carries every affirmative signal; the rest of
 
 **The No Gray Rule.** All structural neutrals are tinted warm. Borders use `rgba(196, 168, 130, 0.25)`, not `#e0e0e0`. Cards sit on cream, not on gray. If a surface looks cold, it's wrong. Literal gray may appear inside a bounded identifying illustration, such as the Luna artwork, but does not become a page surface or general neutral token.
 
-**The Chalkboard Rule.** Data is presented on paper, as if written by hand. Stat numbers are serif (Fraunces), not the sans-serif dashboard default. Charts use dashed baseline + solid active lines, not filled areas.
+**The Chalkboard Rule.** Data is presented on paper, as if written by hand. Stat numbers are serif (Fraunces), not the sans-serif dashboard default. Charts use dashed reference rules and solid data lines. Restrained flat semantic range bands are allowed when they clarify a reference interval; decorative filled series areas and gradients are not.
 
 ## 3. Typography
 
@@ -214,25 +214,50 @@ cannot disagree. A hit uses primary sage. A miss uses Tailwind `red-700` as a
 deliberate binary target exception because the standard sienna warning token
 reads brown rather than the explicitly required red; always pair either color
 with `10% target hit` or `Below 10% target` text. A missing comparison stays
-neutral and must not claim that a snapshot exists. Active-user windows must not
-present intentionally retired group-sender evidence as an exact count: prefix
-an affected WAU or MAU with `At least`, explain the private evidence retirement
-in the supporting copy, and withhold a week-over-week rate when either compared
-window is incomplete.
+neutral and must not claim that a snapshot exists. Keep **Messaged Murph today**
+and **Messaged Murph · last 7 days** as prominent supporting readings beside the MRR
+lead; both count distinct people across personal and attributable group chats.
+Each person belongs to the UTC window when Murph durably receives their message,
+not the provider-reported event time. Describe them as retained senders. Account
+deletion removes personal and owned-group source rows; activity retained in
+another member's shared-group container follows normal content retention
+instead of an analytics-side deletion trail.
+Active-user windows must not present intentionally retired group-sender evidence
+as an exact count: prefix an affected today, WAU, or MAU count with `At least`,
+explain the private evidence retirement in the supporting copy, and withhold a
+week-over-week rate when either compared window is incomplete.
 
-Follow the scorecard with the existing two-column chart grid. Lead that grid
-with **Total messages sent**, a thin sage cumulative line seeded from the
+Follow the scorecard with the existing two-column chart grid. Begin with one
+full-width **People who messaged Murph** chart: a solid sage
+trailing-seven-day line and a dashed sand completed-day line, both built from
+anonymous daily snapshots. Keep the daily line above the rolling line so equal
+values remain distinguishable without color. Then
+show **Total messages sent**, a thin sage cumulative line seeded from the
 established historical base, and **Messages sent per day**, restrained sage
-bars for completed UTC days. Both derive from the existing daily growth
-snapshots. Shift each snapshot's prior-day counts onto the date when the
-messages occurred and always preserve the exact 30 completed-day UTC spine.
-Leave absent snapshots and legacy unknown counts as chart gaps rather than
-zeros. Once tracking has begun, an unavailable day also ends the exact
-cumulative line until the missing evidence is reconciled; later known daily
-bars may still render. State that the daily total combines inbound messages
-across supported channels with tracked Linq replies. Give each keyboard-enabled
-chart one visible focus surface named by its heading. Keep acquisition and
-revenue snapshots as the second chart row.
+bars for completed UTC days. Shift each snapshot's prior-day counts onto the
+UTC date when Murph received the activity and always preserve the exact 30
+completed-day UTC spine. Leave absent snapshots, incomplete sender windows, and
+legacy unknown counts as chart gaps rather than zeros. Once message tracking has begun, an
+unavailable day also ends the exact cumulative line until the missing evidence
+is reconciled; later known daily bars may still render. State that the daily
+message total combines inbound messages across supported channels with tracked
+Linq replies. Give each keyboard-enabled chart one visible focus surface named
+by its heading. Keep acquisition and revenue snapshots after the message charts.
+End the grid with **Monthly revenue**: restrained sage bars where each bar
+estimates one UTC month from the month's latest snapshot MRR plus fulfilled
+live-mode top-up and group-sponsorship cash. The card copy must say it is an
+estimate rather than invoices, that refunds are not subtracted, and that
+account deletion can remove past purchase cash or leave an old one-time group
+gift counted as a regular top-up, and it must name hover, tap, and focus as the
+breakdown affordances. The bar carries only the total; the keyboard-reachable
+tooltip lists personal subscriptions, family subscriptions, group sponsorship,
+and usage top-ups with a summed total row, and labels the window-end month
+"month to date". Months whose snapshots predate the subscription split columns
+show one combined subscription line rather than an invented split; a recorded
+split is trusted only when it sums to the snapshot's MRR total. A month with no
+snapshot withholds its total ("Unavailable") and leaves a bar gap while still
+listing its known one-time cash. Months before the first revenue evidence are
+trimmed.
 
 Below the chart grid, show trial-start provenance in one flat bordered surface:
 30-day UTC totals for Direct iMessage, Website, Companion, and Unknown followed
@@ -275,22 +300,24 @@ qualitative, and incompatible-unit context stays explicit near the chart or in
 the ledger. When the latest comparable result has a normalized lab range, place
 one quiet `Latest lab range` legend above dashed boundary rules for its
 two-sided band or one-sided limit. Preserve exact `<`, `<=`, `>`, and `>=`
-source boundaries in the legend. Extend the data-focused scale just enough to
-keep a one-sided limit visible; keep two-sided overlays clipped rather than
-flattening the historical trend to fit a wide interval. Label source context as
-latest so it does not imply that older labs shared the same range. If the latest
-comparable result has no usable numeric source range, an exact-unit authored
-Health Commons range may appear instead as `Published adult comparator`; it
-never changes the source status and appears only when the result's normalized
-specimen kind is explicitly eligible. State in the legend that the published
-comparator is not the reporting lab's range. Missing, mismatched, and
-context-dependent specimens omit it. Keep the authored source label in the chart
-legend. Qualified source ranges remain ledger-only and block a comparator from
-superseding more specific source context. Do not add a visible chart title or
-single-result trend instruction above or below this graph. Simplifying the
-hierarchy must not imply that excluded values were plotted. The loading skeleton
-mirrors the same latest-result, chart, and ledger structure rather than
-substituting a generic card grid.
+source boundaries in the legend. Fit the vertical scale to the union of the
+comparable results and the available range bounds. Shade the source range with
+very light sage and the visible below/above regions with very light sienna; keep
+the legend and dashed rules as non-color cues. Label source context as latest so
+it does not imply that older labs shared the same range. If the latest comparable
+result has no usable numeric source range, an exact-unit authored Health Commons
+range may appear instead as `Published adult comparator`; it never changes the
+source status and appears only when the result's normalized specimen kind is
+explicitly eligible. State in the legend that the published comparator is not
+the reporting lab's range, and render it with neutral dashed boundaries only,
+without sage/sienna bands. Missing, mismatched, and context-dependent specimens
+omit it. Keep the authored source label in the chart legend. Qualified source
+ranges remain ledger-only and block a comparator from superseding more specific
+source context. Do not add a visible chart title or single-result trend
+instruction above or below this graph. Simplifying the hierarchy must not imply
+that excluded values were plotted. The loading skeleton mirrors the same
+latest-result, chart, and ledger structure rather than substituting a generic
+card grid.
 
 ### Home Experiment History Cards
 Completed experiment cards on `/home` are compact index entries, not miniature
@@ -390,7 +417,7 @@ check. Keep the semantic radio visually hidden and place the visible check at
 the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
-When a choice materially changes cost-weighted included-capacity drawdown,
+When a choice materially changes included-capacity drawdown,
 state that difference before save and keep it visible beside the saved
 selection. It may appear in the option copy or the immediate pending-selection
 summary; do not hide it in a tooltip or mention it only after save.

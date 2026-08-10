@@ -1,3 +1,5 @@
+import type Stripe from "stripe";
+
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -45,13 +47,14 @@ export const POST = withJsonError(async (request: Request) => {
   const familyPortalConfigurationId = normalizeNullableString(
     process.env.HOSTED_ONBOARDING_STRIPE_FAMILY_PORTAL_CONFIGURATION_ID,
   );
-  const session = await stripe.billingPortal.sessions.create({
-    ...(billingScope === "family" && familyPortalConfigurationId
-      ? { configuration: familyPortalConfigurationId }
-      : {}),
+  const sessionParams: Stripe.BillingPortal.SessionCreateParams = {
     customer: stripeCustomerId,
     return_url: new URL("/settings", request.url).toString(),
-  });
+  };
+  if (billingScope === "family" && familyPortalConfigurationId) {
+    sessionParams.configuration = familyPortalConfigurationId;
+  }
+  const session = await stripe.billingPortal.sessions.create(sessionParams);
 
   if (!session.url) {
     throw hostedOnboardingError({

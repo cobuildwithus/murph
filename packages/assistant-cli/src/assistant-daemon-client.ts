@@ -1,4 +1,6 @@
 import {
+  assistantDaemonMessageWireFields,
+  assistantDaemonSessionResolutionWireFields,
   resolveAssistantDaemonClientConfig,
   type AssistantDaemonClientConfig,
 } from '@murphai/assistantd/client'
@@ -63,11 +65,9 @@ export function canUseAssistantDaemonForMessage(
     return false
   }
 
-  return (
-    input.abortSignal === undefined &&
-    input.executionContext === undefined &&
-    input.onProviderEvent === undefined &&
-    input.onTraceEvent === undefined
+  return hasOnlyAssistantDaemonWireFields(
+    input,
+    assistantDaemonMessageWireFields,
   )
 }
 
@@ -91,7 +91,13 @@ export async function maybeOpenAssistantConversationViaDaemon(
   input: AssistantSessionResolutionFields,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<AssistantDaemonOpenConversationResult | null> {
-  if (!resolveAssistantDaemonClientConfig(env)) {
+  if (
+    !resolveAssistantDaemonClientConfig(env) ||
+    !hasOnlyAssistantDaemonWireFields(
+      input,
+      assistantDaemonSessionResolutionWireFields,
+    )
+  ) {
     return null
   }
 
@@ -578,23 +584,49 @@ function buildAssistantDaemonHttpError(payload: unknown, status: number): Error 
 
 function serializeAssistantMessageInput(
   input: AssistantMessageInput,
-): Omit<
+): Pick<
   AssistantMessageInput,
-  'abortSignal' | 'onProviderEvent' | 'onTraceEvent'
+  (typeof assistantDaemonMessageWireFields)[number]
 > {
-  const {
-    abortSignal: _abortSignal,
-    onProviderEvent: _onProviderEvent,
-    onTraceEvent: _onTraceEvent,
-    ...serializableInput
-  } = input
-  return serializableInput
+  return pickAssistantDaemonWireFields(input, assistantDaemonMessageWireFields)
 }
 
 function serializeAssistantSessionResolutionFields(
   input: AssistantSessionResolutionFields,
-): AssistantSessionResolutionFields {
-  return input
+): Pick<
+  AssistantSessionResolutionFields,
+  (typeof assistantDaemonSessionResolutionWireFields)[number]
+> {
+  return pickAssistantDaemonWireFields(
+    input,
+    assistantDaemonSessionResolutionWireFields,
+  )
+}
+
+function hasOnlyAssistantDaemonWireFields(
+  input: object,
+  fields: readonly string[],
+): boolean {
+  const supportedFields = new Set(fields)
+  return Object.entries(input).every(
+    ([key, value]) => value === undefined || supportedFields.has(key),
+  )
+}
+
+function pickAssistantDaemonWireFields<
+  Input extends object,
+  Key extends keyof Input,
+>(
+  input: Input,
+  fields: readonly Key[],
+): Pick<Input, Key> {
+  const result = {} as Pick<Input, Key>
+  for (const field of fields) {
+    if (Object.hasOwn(input, field)) {
+      result[field] = input[field]
+    }
+  }
+  return result
 }
 
 function parseAssistantDaemonOpenConversationPayload(

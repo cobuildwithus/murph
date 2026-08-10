@@ -2153,7 +2153,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         expect(persistedPayload).toMatchObject({
           notification: {
             instructions: expect.stringContaining(
-              "$2.00 of cost-weighted usage credit for this room",
+              "about 10 more days of Murph usage for this room",
             ),
           },
         });
@@ -2424,7 +2424,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
               `usage-referral-reward:${referralId}`,
             deliveryDispatchMode: "queue-only",
             instructions: expect.stringContaining(
-              "$3.50 of cost-weighted usage credit for your Murph",
+              "about 14 more days of Murph usage for your Murph",
             ),
             responsePolicy: { kind: "require_send" },
             route: {
@@ -2897,10 +2897,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           beneficiaryMemberId,
           cashAmountMinor: 500,
           cashCurrency: "usd",
-          checkoutCancelUrl: "https://example.test/groups/fund/cancel",
+          checkoutCancelUrl:
+            `https://example.test/groups/fund/cancel?usageCheckout=cancel&usagePurchase=${activationPurchaseId}`,
           checkoutExpiresAt: periodEndsAt,
           checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
-          checkoutSuccessUrl: "https://example.test/groups/fund/return",
+          checkoutSuccessUrl:
+            `https://example.test/groups/fund/return?usageCheckout=success&usagePurchase=${activationPurchaseId}`,
           grantUsdMicros: 5_000_000n,
           groupSponsorshipAuthorizationId: authorizationId,
           groupSponsorshipPeriodStartedAt: periodStartedAt,
@@ -3050,10 +3052,12 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           beneficiaryMemberId,
           cashAmountMinor: 500,
           cashCurrency: "usd",
-          checkoutCancelUrl: "https://example.test/groups/fund/cancel",
+          checkoutCancelUrl:
+            `https://example.test/groups/fund/cancel?usageCheckout=cancel&usagePurchase=${activationPurchaseId}`,
           checkoutExpiresAt: periodEndsAt,
           checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
-          checkoutSuccessUrl: "https://example.test/groups/fund/return",
+          checkoutSuccessUrl:
+            `https://example.test/groups/fund/return?usageCheckout=success&usagePurchase=${activationPurchaseId}`,
           grantUsdMicros: 5_000_000n,
           groupSponsorshipAuthorizationId: authorizationId,
           groupSponsorshipPeriodStartedAt: periodStartedAt,
