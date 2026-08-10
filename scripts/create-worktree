@@ -67,10 +67,10 @@ fi
 
 if [[ -n "$data_reason" ]]; then
   MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$repo_root/scripts/worktree-storage-guard" \
-    --target-path "$target_path"
+    --creating-worktree --target-path "$target_path"
 else
   MURPH_WORKTREE_GUARD_LOCK_HELD=1 "$repo_root/scripts/worktree-storage-guard" \
-    --reserve-worktree --target-path "$target_path"
+    --creating-worktree --reserve-worktree --target-path "$target_path"
 fi
 
 args=()

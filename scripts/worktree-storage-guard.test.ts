@@ -76,6 +76,21 @@ printf 'testfs 100000000 10000000 90000000 10%% /\\n'
   return { fakeBin, primary, root, state, tempRoot }
 }
 
+function guardEnvironment(
+  harness: Harness,
+  overrides: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    PATH: `${harness.fakeBin}${path.delimiter}${process.env.PATH ?? ''}`,
+    MURPH_WORKTREE_GUARD_STATE_DIR: harness.state,
+    MURPH_WORKTREE_MAX_LIVE: '2',
+    MURPH_WORKTREE_MIN_FREE_GIB: '1',
+    MURPH_WORKTREE_TEMP_ROOTS: harness.tempRoot,
+    ...overrides,
+  }
+}
+
 function runScript(
   harness: Harness,
   script: 'worktree-storage-guard' | 'create-worktree' | 'install-git-hooks',
@@ -85,15 +100,7 @@ function runScript(
   return spawnSync('bash', [path.join('scripts', script), ...args], {
     cwd: harness.primary,
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      PATH: `${harness.fakeBin}${path.delimiter}${process.env.PATH ?? ''}`,
-      MURPH_WORKTREE_GUARD_STATE_DIR: harness.state,
-      MURPH_WORKTREE_MAX_LIVE: '2',
-      MURPH_WORKTREE_MIN_FREE_GIB: '1',
-      MURPH_WORKTREE_TEMP_ROOTS: harness.tempRoot,
-      ...overrides,
-    },
+    env: guardEnvironment(harness, overrides),
   })
 }
 
@@ -109,8 +116,14 @@ describe('worktree storage guard', () => {
   })
 
   it('runs from both repository commit entrypoints', () => {
-    expect(readFileSync(path.join(sourceRoot, '.githooks', 'pre-commit'), 'utf8')).toContain(
-      '"$guard_root/scripts/worktree-storage-guard"',
+    const preCommit = readFileSync(path.join(sourceRoot, '.githooks', 'pre-commit'), 'utf8')
+    expect(preCommit).toContain('"$guard_root/scripts/worktree-storage-guard"')
+    expect(preCommit).toContain('--current-worktree "$repo_root"')
+    expect(
+      readFileSync(path.join(sourceRoot, 'scripts', 'install-git-hooks'), 'utf8'),
+    ).toContain('--current-worktree "$repo_root"')
+    expect(readFileSync(path.join(sourceRoot, 'scripts', 'create-worktree'), 'utf8')).toContain(
+      '--creating-worktree',
     )
     expect(readFileSync(path.join(sourceRoot, 'scripts', 'committer'), 'utf8')).toContain(
       'scripts/install-git-hooks',
@@ -177,6 +190,20 @@ touch hook-installed
     })
     expect(result.status).toBe(2)
     expect(result.stderr).toContain('custom maximum requires isolated state')
+  })
+
+  it('keeps scoped commit and sanctioned creation modes disjoint', () => {
+    const harness = createHarness()
+    expect(
+      runScript(harness, 'worktree-storage-guard', [
+        '--creating-worktree',
+        '--current-worktree',
+        harness.primary,
+        '--target-path',
+        path.join(harness.root, 'target'),
+      ]).status,
+    ).toBe(2)
+    expect(runScript(harness, 'worktree-storage-guard', ['--creating-worktree']).status).toBe(2)
   })
 
   it('fails closed on malformed local ceiling state', () => {
@@ -494,6 +521,58 @@ done
     })
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('bypassed scripts/create-worktree')
+  })
+
+  it('isolates a raw sibling while sanctioned creation and commits continue', () => {
+    const harness = createHarness()
+    expect(
+      runScript(harness, 'worktree-storage-guard', [], {
+        MURPH_WORKTREE_MAX_LIVE: '4',
+      }).status,
+    ).toBe(0)
+
+    const raw = path.join(harness.root, 'raw-sibling')
+    runGit(harness.primary, ['worktree', 'add', '-b', 'raw-sibling', raw])
+    const globalAudit = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '4',
+    })
+    expect(globalAudit.status).toBe(1)
+    expect(globalAudit.stderr).toContain('bypassed scripts/create-worktree')
+
+    const sanctioned = path.join(harness.root, 'sanctioned-sibling')
+    const creation = runScript(
+      harness,
+      'create-worktree',
+      ['-b', 'sanctioned-sibling', sanctioned],
+      { MURPH_WORKTREE_MAX_LIVE: '4' },
+    )
+    expect(creation.status, creation.stderr).toBe(0)
+
+    const install = spawnSync('bash', ['scripts/install-git-hooks'], {
+      cwd: sanctioned,
+      encoding: 'utf8',
+      env: guardEnvironment(harness, { MURPH_WORKTREE_MAX_LIVE: '4' }),
+    })
+    expect(install.status, install.stderr).toBe(0)
+
+    writeFileSync(path.join(sanctioned, 'tracked.txt'), 'sanctioned change\n')
+    runGit(sanctioned, ['add', 'tracked.txt'])
+    const sanctionedCommit = spawnSync('git', ['commit', '-m', 'sanctioned commit'], {
+      cwd: sanctioned,
+      encoding: 'utf8',
+      env: guardEnvironment(harness, { MURPH_WORKTREE_MAX_LIVE: '4' }),
+    })
+    expect(sanctionedCommit.status, sanctionedCommit.stderr).toBe(0)
+
+    writeFileSync(path.join(raw, 'tracked.txt'), 'raw change\n')
+    runGit(raw, ['add', 'tracked.txt'])
+    const rawCommit = spawnSync('git', ['commit', '-m', 'raw commit'], {
+      cwd: raw,
+      encoding: 'utf8',
+      env: guardEnvironment(harness, { MURPH_WORKTREE_MAX_LIVE: '4' }),
+    })
+    expect(rawCommit.status).toBe(1)
+    expect(rawCommit.stderr).toContain('current worktree bypassed scripts/create-worktree')
   })
 
   it('rejects raw worktrees whose Git administrative paths are relative', () => {

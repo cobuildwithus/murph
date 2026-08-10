@@ -4,14 +4,25 @@ original_args=("$@")
 original_arg_count=$#
 
 usage() {
-  printf 'Usage: %s [--reserve-worktree] [--target-path <path>]\n' "$(basename "$0")" >&2
+  printf 'Usage: %s [--creating-worktree] [--current-worktree <path>] [--reserve-worktree] [--target-path <path>]\n' "$(basename "$0")" >&2
   exit 2
 }
 
 reserve=0
 target_path=''
+creating_worktree=0
+current_worktree_path=''
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --creating-worktree)
+      creating_worktree=1
+      shift
+      ;;
+    --current-worktree)
+      [[ $# -ge 2 && -n "$2" ]] || usage
+      current_worktree_path="$2"
+      shift 2
+      ;;
     --reserve-worktree)
       reserve=1
       shift
@@ -24,6 +35,14 @@ while [[ $# -gt 0 ]]; do
     *) usage ;;
   esac
 done
+
+if [[ -n "$current_worktree_path" ]] \
+  && (( creating_worktree == 1 || reserve == 1 || ${#target_path} > 0 )); then
+  usage
+fi
+if (( creating_worktree == 1 && reserve == 0 )) && [[ -z "$target_path" ]]; then
+  usage
+fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 max_regular="${MURPH_WORKTREE_MAX_LIVE:-100}"
@@ -52,6 +71,14 @@ if [[ -n "${MURPH_WORKTREE_MAX_LIVE+x}" && -z "${MURPH_WORKTREE_GUARD_STATE_DIR+
 fi
 mkdir -p "$state_dir"
 
+if [[ -n "$current_worktree_path" ]]; then
+  [[ -d "$current_worktree_path" ]] || {
+    printf 'worktree storage guard: current worktree could not be resolved\n' >&2
+    exit 1
+  }
+  current_worktree_path="$(cd "$current_worktree_path" && pwd -P)"
+fi
+
 if [[ "${MURPH_WORKTREE_GUARD_LOCK_HELD:-0}" != 1 ]]; then
   if command -v flock >/dev/null 2>&1; then
     if (( original_arg_count > 0 )); then
@@ -76,6 +103,8 @@ fi
 regular_count=0
 data_count=0
 unauthorized_count=0
+current_worktree_found=0
+current_worktree_unauthorized=0
 admin_dirs=()
 registered_paths=()
 disk_paths=("$repo_root")
@@ -87,6 +116,9 @@ count_record() {
   [[ -n "$record_path" && -d "$record_path" ]] || return 0
   canonical_record_path="$(cd "$record_path" 2>/dev/null && pwd -P)" || return 0
   registered_paths+=("$canonical_record_path")
+  if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
+    current_worktree_found=1
+  fi
   if [[ -d "$record_path/.git" ]]; then
     return 0
   fi
@@ -106,6 +138,9 @@ count_record() {
       disk_paths+=("$record_path")
       if [[ -f "$authorization_initialized" && ! -f "$admin_dir/murph-storage-guard-authorized" ]]; then
         unauthorized_count=$((unauthorized_count + 1))
+        if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
+          current_worktree_unauthorized=1
+        fi
       fi
       ;;
     *) return 0 ;;
@@ -133,7 +168,15 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done <<<"$worktree_output"
 count_record
 
-if (( unauthorized_count > 0 )); then
+if [[ -n "$current_worktree_path" ]] && (( current_worktree_found == 0 )); then
+  printf 'worktree storage guard: current worktree is not registered\n' >&2
+  exit 1
+fi
+if (( current_worktree_unauthorized == 1 )); then
+  printf 'worktree storage guard: current worktree bypassed scripts/create-worktree\n' >&2
+  exit 1
+fi
+if (( unauthorized_count > 0 && creating_worktree == 0 )) && [[ -z "$current_worktree_path" ]]; then
   printf 'worktree storage guard: %d worktree(s) bypassed scripts/create-worktree\n' \
     "$unauthorized_count" >&2
   exit 1

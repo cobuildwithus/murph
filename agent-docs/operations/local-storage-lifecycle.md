@@ -90,6 +90,14 @@ Any new unmanaged identity fails the guard even if another legacy clone
 disappeared at the same time. Registered worktrees, including locked
 `data/research:` worktrees, do not count as unmanaged.
 
+Registered-worktree authorization is checkout-scoped at commit time. The
+branch-independent hook supplies the committing checkout, so a raw worktree
+fails its own commit without blocking an authorized sibling. Sanctioned
+creation may also continue while a raw sibling exists because every registered
+worktree still consumes the global numeric and disk budget. Running
+`scripts/worktree-storage-guard` without a scoped checkout remains the explicit
+global audit and reports any unauthorized registered worktree.
+
 The ratchet does not delete a checkout. Preserve active/open-PR or dirty work.
 Retire a clean registered checkout with `scripts/retire-worktree` after its
 terminal gate is satisfied. A standalone legacy clone needs explicit operator
