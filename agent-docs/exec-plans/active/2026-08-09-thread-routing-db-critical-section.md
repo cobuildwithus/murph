@@ -246,10 +246,10 @@ Updated: 2026-08-09
   authoritative repeat reuses the same local rejection without database or
   provider replay. Recovered-setup candidates use the same retained boundary.
 - Hard-cap round-7 remediation proof: the nine affected non-PostgreSQL files
-  passed 508 tests together; the real PostgreSQL route-concurrency lane passed
+  passed 509 tests together; the real PostgreSQL route-concurrency lane passed
   9 tests and the pending-setup PostgreSQL lane passed 3 tests; app-local
   typecheck, scoped lint, and `git diff --check` passed.
-  Focused slices passed 105 tests across crypto/member-store coverage and 143
+  Focused slices passed 105 tests across crypto/member-store coverage and 144
   tests in the real Linq route suite. The correction may be pushed, but the
   seven-round cap requires explicit continuation before another substantive
   ReviewGPT run and the PR remains non-merge-ready until a later exact-head
@@ -378,7 +378,7 @@ Updated: 2026-08-09
   mailbox roots remain explicitly prewarmed by container id, while pending
   setup metadata itself remains transaction-owned.
 - Shape comparison: authored-source churn is 767 lines at the immutable
-  first-reviewed head and 1,394 lines on the round-7 remediation worktree,
+  first-reviewed head and 1,405 lines on the round-7 remediation worktree,
   below the 2,000-line threshold. The correction reuses the existing narrow
   core projection and request-scoped unwrap cache; it adds no schema, durable
   state, cache lifecycle owner, queue, service, lock, retry class, migration,
