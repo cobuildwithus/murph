@@ -243,7 +243,7 @@ function canOnlyRemainBelow(
   if (!lowerBound) return false;
   if (value < lowerBound.value) return true;
   if (value > lowerBound.value) return false;
-  return lowerBound.inclusive || !includesValue;
+  return !lowerBound.inclusive || !includesValue;
 }
 
 function canOnlyRemainAbove(
@@ -254,7 +254,7 @@ function canOnlyRemainAbove(
   if (!upperBound) return false;
   if (value > upperBound.value) return true;
   if (value < upperBound.value) return false;
-  return upperBound.inclusive || !includesValue;
+  return !upperBound.inclusive || !includesValue;
 }
 
 function canOnlyRemainWithinBelow(
