@@ -162,20 +162,23 @@ describe("ChangelogPage", () => {
   });
 
   it("renders explanatory visuals for the major new features", async () => {
-    const [latestPage, olderPage] = await Promise.all([
+    const [latestPage, previousPage, olderPage] = await Promise.all([
       ChangelogPage({ searchParams: Promise.resolve({}) }),
       ChangelogPage({
-        searchParams: Promise.resolve({ edition: "2026-07-28" }),
+        searchParams: Promise.resolve({ edition: "2026-07-29" }),
+      }),
+      ChangelogPage({
+        searchParams: Promise.resolve({ edition: "2026-07-26" }),
       }),
     ]);
-    const markup = [latestPage, olderPage]
+    const markup = [latestPage, previousPage, olderPage]
       .map((page) => renderToStaticMarkup(page))
       .join("\n");
 
     expect(markup).toContain("Add usage");
     expect(markup).toContain("Add to Contacts");
     expect(markup).toContain("Scheduled reminders");
-    expect(markup).toContain("Keep Murph going");
+    expect(markup).toContain("Group funding recovery");
     expect(markup).toContain("Verified line after setup");
     expect(markup).toContain("One-time follow-up");
     expect(markup).toContain("Sponsor this group");
