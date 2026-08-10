@@ -20,7 +20,7 @@ import {
 import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { decodeHostedMailboxStoredPayload } from "@/src/lib/hosted-mailbox/store";
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PULSE_TRIAL_DAYS,
   getHostedBillingPlanDefinition,
   getHostedFamilyBillingOfferDefinition,
@@ -401,7 +401,7 @@ export function calculateHostedGrowthCurrentMetrics(
 
     payingFamilyGroups += 1;
     payingFamilySeats += sumHostedFamilyPlanCapacities(capacities);
-    familyMrrUsdCents += HOSTED_PLAN_CODES.reduce(
+    familyMrrUsdCents += HOSTED_FAMILY_PLAN_CODES.reduce(
       (sum, planCode) => sum + capacities[planCode] *
         getHostedFamilyBillingOfferDefinition(planCode).recurringAmountUsdCents,
       0,

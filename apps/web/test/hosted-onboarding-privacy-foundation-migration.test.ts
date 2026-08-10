@@ -1084,6 +1084,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260806180000_fix_hosted_usage_plan_transition_bridge",
       "20260807140000_hosted_growth_snapshot_mrr_breakdown",
       "20260807210000_add_group_sponsorship_creative_request",
+      "20260809160000_add_hosted_family_max_plan_code",
       "20260810020000_device_sync_dirty_payload_credential_independence",
       "migration_lock.toml",
     ]);
