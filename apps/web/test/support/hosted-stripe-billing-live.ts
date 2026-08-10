@@ -30,6 +30,7 @@ export interface HostedStripeBillingCatalog {
   priceIds: {
     edge: string;
     familyEdge: string;
+    familyMax: string;
     familyPulse: string;
     pulse: string;
   };
@@ -137,6 +138,8 @@ export class HostedStripeBillingSandbox {
           this.priceIds.edge,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY:
           this.priceIds.familyEdge,
+        HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY:
+          this.priceIds.familyMax,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY:
           this.priceIds.familyPulse,
         HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY:
@@ -193,6 +196,11 @@ export class HostedStripeBillingSandbox {
         expectedAmount: 1_900,
         label: "Family Edge seat",
         priceId: this.priceIds.familyEdge,
+      }),
+      this.assertRecurringPrice({
+        expectedAmount: 4_900,
+        label: "Family Max seat",
+        priceId: this.priceIds.familyMax,
       }),
     ]);
 

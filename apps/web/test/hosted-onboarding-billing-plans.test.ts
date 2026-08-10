@@ -8,12 +8,17 @@ import {
   getHostedAiUsageMonthlyAllowanceUsdMicros,
   getHostedBillingPlanDefinition,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
+  getHostedFamilyBillingOfferDefinition,
+  getHostedFamilyBillingPlanCode,
+  getHostedFamilyRuntimePlanCode,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
   HOSTED_FAMILY_PLAN_DISPLAY,
   isHostedBillingPlanScheduledDowngrade,
   listHostedBillingPlanPresentations,
   parseHostedBillingCheckoutOffer,
+  parseHostedBillingPhase,
+  parseHostedFamilyPlanCode,
   requireHostedPulseTrialPolicy,
   resolveConfiguredHostedBillingPlanCodes,
   resolveHostedBillingReady,
@@ -55,6 +60,7 @@ describe("hosted billing plans", () => {
       plans: [
         { code: "pulse", recurringAmountUsdCents: 700 },
         { code: "edge", recurringAmountUsdCents: 1_900 },
+        { code: "max", recurringAmountUsdCents: 4_900 },
       ],
       recurringAmountUsdCentsPerSeat: 700,
     });
@@ -62,6 +68,20 @@ describe("hosted billing plans", () => {
       .toBe(5_600_000n);
     expect(getHostedFamilyAiUsageMonthlyAllowanceForPlan("edge"))
       .toBe(15_200_000n);
+    expect(getHostedFamilyAiUsageMonthlyAllowanceForPlan("max"))
+      .toBe(39_200_000n);
+  });
+
+  it("maps Family Max billing to the existing Edge runtime capability", () => {
+    expect(parseHostedFamilyPlanCode("max")).toBe("max");
+    expect(getHostedFamilyBillingOfferDefinition("max")).toMatchObject({
+      billingPlanCode: "launch_max_monthly",
+      displayName: "Max",
+      recurringAmountUsdCents: 4_900,
+      runtimePlanCode: "edge",
+    });
+    expect(getHostedFamilyBillingPlanCode("max")).toBe("launch_max_monthly");
+    expect(getHostedFamilyRuntimePlanCode("max")).toBe("edge");
   });
 
   it("allows only paid subscriptions to manage plan transitions", () => {
@@ -95,10 +115,17 @@ describe("hosted billing plans", () => {
   });
 
   it("keeps old trial metadata parseable only for rollout compatibility", () => {
+    expect(parseHostedBillingCheckoutOffer("standard")).toBe("standard");
     expect(parseHostedBillingCheckoutOffer("pulse_trial_7d"))
       .toBe("pulse_trial_7d");
+    expect(parseHostedBillingPhase("trial")).toBe("trial");
+    expect(parseHostedBillingPhase("paid")).toBe("paid");
     expect(requireHostedPulseTrialPolicy("pulse-trial-2026-07-15-v3"))
       .toEqual({ durationDays: 14, usageLimitUsdMicros: 4_500_000n });
+    expect(requireHostedPulseTrialPolicy("pulse-trial-2026-06-30-v2"))
+      .toEqual({ durationDays: 10, usageLimitUsdMicros: 4_500_000n });
+    expect(requireHostedPulseTrialPolicy("pulse-trial-2026-05-05-v1"))
+      .toEqual({ durationDays: 7, usageLimitUsdMicros: 4_500_000n });
   });
 
   it("orders paid downgrades without a trial branch", () => {

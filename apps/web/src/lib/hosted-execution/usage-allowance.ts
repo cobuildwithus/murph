@@ -31,12 +31,12 @@ import {
 
 import {
   getHostedAiUsageMonthlyAllowanceUsdMicros,
-  getHostedBillingPlanCodeForPlan,
   getHostedDefaultBillingPlanCode,
   getHostedFamilyAiUsageMonthlyAllowanceForPlan,
+  getHostedFamilyBillingPlanCode,
   isHostedBillingPlanImmediateUpgrade,
   parseHostedBillingPlanCode,
-  parseHostedPlanCode,
+  parseHostedFamilyPlanCode,
   type HostedBillingPlanCode,
 } from "../hosted-onboarding/billing-plans";
 import {
@@ -362,7 +362,7 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   if (!familyAccess) {
     return null;
   }
-  const planCode = parseHostedPlanCode(familyAccess.planCode);
+  const planCode = parseHostedFamilyPlanCode(familyAccess.planCode);
   if (!planCode) {
     return null;
   }
@@ -392,7 +392,8 @@ async function readHostedFamilySponsoredBillingRefForMember(input: {
   return {
     allowanceSource: "family_sponsored_plan",
     currentBillingPhase: "paid",
-    currentBillingPlanCode: getHostedBillingPlanCodeForPlan(planCode),
+    currentBillingPlanCode: getHostedFamilyBillingPlanCode(planCode),
+    currentCheckoutOffer: null,
     currentPeriodEnd,
     currentPeriodStart,
     stripeSubscriptionLookupKey: null,

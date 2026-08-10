@@ -13,40 +13,51 @@ import {
 
 const PRICE_IDS = {
   edge: "price_family_edge",
+  max: "price_family_max",
   pulse: "price_family_pulse",
 } as const;
 
 describe("hosted Family exact-tier capacity", () => {
   it("parses bounded exact quantities and rejects unknown tiers", () => {
-    expect(parseHostedFamilyPlanCapacities({ edge: 1, pulse: 2 })).toEqual({
+    expect(parseHostedFamilyPlanCapacities({ edge: 1, max: 1, pulse: 1 })).toEqual({
       edge: 1,
+      max: 1,
+      pulse: 1,
+    });
+    expect(parseHostedFamilyPlanCapacities({ pulse: 2 })).toEqual({
+      edge: 0,
+      max: 0,
       pulse: 2,
     });
-    expect(parseHostedFamilyPlanCapacities({ pulse: 2 })).toEqual({ edge: 0, pulse: 2 });
     expect(parseHostedFamilyPlanCapacities({ edge: 0, future: 1, pulse: 2 })).toBeNull();
     expect(parseHostedFamilyPlanCapacities({ edge: 0, pulse: 1 })).toBeNull();
     expect(parseHostedFamilyPlanCapacities({ edge: 2, pulse: 5 })).toBeNull();
     expect(parseHostedFamilyPlanCapacities({ edge: -1, pulse: 3 })).toBeNull();
     expect(parseHostedFamilyPlanCapacities({ edge: 0.5, pulse: 2 })).toBeNull();
-    expect(sumHostedFamilyPlanCapacities({ edge: 1, pulse: 3 })).toBe(4);
+    expect(sumHostedFamilyPlanCapacities({ edge: 1, max: 1, pulse: 2 })).toBe(4);
     expect(hostedFamilyPlanCapacitiesEqual(
-      { edge: 1, pulse: 3 },
-      { edge: 1, pulse: 3 },
+      { edge: 1, max: 1, pulse: 2 },
+      { edge: 1, max: 1, pulse: 2 },
     )).toBe(true);
-    expect(createEmptyHostedFamilyPlanCapacities()).toEqual({ edge: 0, pulse: 0 });
+    expect(createEmptyHostedFamilyPlanCapacities()).toEqual({
+      edge: 0,
+      max: 0,
+      pulse: 0,
+    });
   });
 
   it("reads one positive persisted row per known tier with a Pulse legacy fallback", () => {
     expect(readHostedFamilyPlanCapacities([
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 1, planCode: "edge" },
-    ])).toEqual({ edge: 1, pulse: 2 });
-    expect(readHostedFamilyPlanCapacities([], 3)).toEqual({ edge: 0, pulse: 3 });
-    expect(readHostedFamilyPlanCapacities([], 2)).toEqual({ edge: 0, pulse: 2 });
+      { billedQuantity: 1, planCode: "max" },
+    ])).toEqual({ edge: 1, max: 1, pulse: 2 });
+    expect(readHostedFamilyPlanCapacities([], 3)).toEqual({ edge: 0, max: 0, pulse: 3 });
+    expect(readHostedFamilyPlanCapacities([], 2)).toEqual({ edge: 0, max: 0, pulse: 2 });
     expect(readHostedFamilyPlanCapacities([
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 1, planCode: "edge" },
-    ], 6)).toEqual({ edge: 1, pulse: 2 });
+    ], 6)).toEqual({ edge: 1, max: 0, pulse: 2 });
     expect(readHostedFamilyPlanCapacities([
       { billedQuantity: 2, planCode: "pulse" },
       { billedQuantity: 1, planCode: "pulse" },
@@ -63,13 +74,22 @@ describe("hosted Family exact-tier capacity", () => {
   it("maps one monthly licensed Stripe subscription item per exact tier", () => {
     const pulseItem = subscriptionItem("si_pulse", PRICE_IDS.pulse, 2);
     const edgeItem = subscriptionItem("si_edge", PRICE_IDS.edge, 1);
+    const maxItem = subscriptionItem("si_max", PRICE_IDS.max, 1);
+    const mixedSubscription = subscription([pulseItem, edgeItem, maxItem]);
+
+    expect(readPreMaxHostedFamilyStripePlanState(mixedSubscription)).toBeNull();
+
     const state = readHostedFamilyStripePlanState({
       priceIdsByPlan: PRICE_IDS,
-      subscription: subscription([pulseItem, edgeItem]),
+      subscription: mixedSubscription,
     });
 
-    expect(state?.capacities).toEqual({ edge: 1, pulse: 2 });
-    expect(state?.itemsByPlan).toEqual({ edge: edgeItem, pulse: pulseItem });
+    expect(state?.capacities).toEqual({ edge: 1, max: 1, pulse: 2 });
+    expect(state?.itemsByPlan).toEqual({
+      edge: edgeItem,
+      max: maxItem,
+      pulse: pulseItem,
+    });
   });
 
   it("rejects unknown, duplicate, paginated, and incompatible Stripe items", () => {
@@ -117,26 +137,36 @@ describe("hosted Family exact-tier capacity", () => {
 
     expect(buildHostedFamilyStripeCapacityUpdateItems({
       current: {
-        capacities: { edge: 1, pulse: 2 },
+        capacities: { edge: 1, max: 0, pulse: 2 },
         itemsByPlan: { edge: edgeItem, pulse: pulseItem },
       },
       priceIdsByPlan: PRICE_IDS,
-      target: { edge: 3, pulse: 0 },
+      target: { edge: 0, max: 3, pulse: 0 },
     })).toEqual([
       { deleted: true, id: "si_pulse" },
-      { id: "si_edge", quantity: 3 },
+      { deleted: true, id: "si_edge" },
+      { price: PRICE_IDS.max, quantity: 3 },
     ]);
 
     expect(buildHostedFamilyStripeCapacityUpdateItems({
       current: {
-        capacities: { edge: 0, pulse: 2 },
+        capacities: { edge: 0, max: 0, pulse: 2 },
         itemsByPlan: { pulse: pulseItem },
       },
       priceIdsByPlan: PRICE_IDS,
-      target: { edge: 1, pulse: 2 },
+      target: { edge: 1, max: 0, pulse: 2 },
     })).toEqual([{ price: PRICE_IDS.edge, quantity: 1 }]);
   });
 });
+
+function readPreMaxHostedFamilyStripePlanState(
+  value: Stripe.Subscription,
+): Stripe.Subscription | null {
+  const supportedPriceIds = new Set<string>([PRICE_IDS.edge, PRICE_IDS.pulse]);
+  return value.items.data.every((item) => supportedPriceIds.has(item.price.id))
+    ? value
+    : null;
+}
 
 function subscriptionItem(
   id: string,
