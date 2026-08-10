@@ -760,19 +760,29 @@ done
     installLegacyWorktreeEntrypoints(harness.primary)
     runGit(harness.primary, ['add', '.githooks/pre-commit', 'scripts'])
     runGit(harness.primary, ['commit', '-m', 'base primary entrypoints'])
+    const baseRevision = runGit(harness.primary, ['rev-parse', 'HEAD'])
 
     const headSibling = path.join(harness.root, 'head-sibling')
     const headCreation = runScript(
       harness,
       'create-worktree',
       ['-b', 'head-sibling', headSibling, headRevision],
-      { MURPH_WORKTREE_MAX_LIVE: '5' },
+      { MURPH_WORKTREE_MAX_LIVE: '7' },
     )
     expect(headCreation.status, headCreation.stderr).toBe(0)
 
+    const baseSibling = path.join(harness.root, 'base-sibling')
+    const baseCreation = runScript(
+      harness,
+      'create-worktree',
+      ['-b', 'base-sibling', baseSibling, baseRevision],
+      { MURPH_WORKTREE_MAX_LIVE: '7' },
+    )
+    expect(baseCreation.status, baseCreation.stderr).toBe(0)
+
     const headEnvironment = guardEnvironment(harness, {
       MURPH_TEST_COMMITTER_BIN: path.join(harness.fakeBin, 'cobuild-committer'),
-      MURPH_WORKTREE_MAX_LIVE: '5',
+      MURPH_WORKTREE_MAX_LIVE: '7',
     })
     const headInstall = spawnSync('bash', ['scripts/install-git-hooks'], {
       cwd: headSibling,
@@ -836,6 +846,27 @@ done
     expect(blockedInstall.status).toBe(1)
     expect(blockedInstall.stderr).toContain('bypassed scripts/create-worktree')
 
+    const rawAdminDir = runGit(raw, ['rev-parse', '--path-format=absolute', '--git-dir'])
+    const rawAuthorizationMarker = path.join(
+      rawAdminDir,
+      'murph-storage-guard-authorized',
+    )
+    const rawIsolationMarker = path.join(rawAdminDir, 'murph-storage-guard-isolated')
+    const taskLocalScoped = spawnSync(
+      'bash',
+      [path.join('scripts', 'worktree-storage-guard'), '--current-worktree', headSibling],
+      { cwd: headSibling, encoding: 'utf8', env: headEnvironment },
+    )
+    expect(taskLocalScoped.status, taskLocalScoped.stderr).toBe(0)
+    expect(existsSync(rawAuthorizationMarker)).toBe(false)
+    expect(existsSync(rawIsolationMarker)).toBe(false)
+
+    const baseAuditAfterTaskScan = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '7',
+    })
+    expect(baseAuditAfterTaskScan.status).toBe(1)
+    expect(baseAuditAfterTaskScan.stderr).toContain('bypassed scripts/create-worktree')
+
     writeFileSync(path.join(raw, 'tracked.txt'), 'raw commit\n')
     runGit(raw, ['add', 'tracked.txt'])
     const rawCommit = spawnSync('git', ['commit', '-m', 'raw commit'], {
@@ -845,6 +876,63 @@ done
     })
     expect(rawCommit.status).toBe(1)
     expect(rawCommit.stderr).toContain('bypassed scripts/create-worktree')
+
+    for (const name of ['worktree-storage-guard', 'create-worktree', 'install-git-hooks']) {
+      executable(
+        path.join(harness.primary, 'scripts', name),
+        readFileSync(path.join(sourceRoot, 'scripts', name), 'utf8'),
+      )
+    }
+    executable(
+      path.join(harness.primary, '.githooks', 'pre-commit'),
+      readFileSync(path.join(sourceRoot, '.githooks', 'pre-commit'), 'utf8'),
+    )
+
+    const baseEnvironment = guardEnvironment(harness, {
+      MURPH_TEST_COMMITTER_BIN: path.join(harness.fakeBin, 'cobuild-committer'),
+      MURPH_WORKTREE_MAX_LIVE: '7',
+    })
+    const baseInstallAfterPrimaryUpgrade = spawnSync('bash', ['scripts/install-git-hooks'], {
+      cwd: baseSibling,
+      encoding: 'utf8',
+      env: baseEnvironment,
+    })
+    expect(baseInstallAfterPrimaryUpgrade.status, baseInstallAfterPrimaryUpgrade.stderr).toBe(0)
+    expect(existsSync(rawAuthorizationMarker)).toBe(true)
+    expect(existsSync(rawIsolationMarker)).toBe(true)
+
+    writeFileSync(path.join(baseSibling, 'tracked.txt'), 'historical after primary upgrade\n')
+    runGit(baseSibling, ['add', 'tracked.txt'])
+    const baseCommitAfterPrimaryUpgrade = spawnSync(
+      'bash',
+      ['scripts/committer', '-m', 'historical after primary upgrade'],
+      { cwd: baseSibling, encoding: 'utf8', env: baseEnvironment },
+    )
+    expect(baseCommitAfterPrimaryUpgrade.status, baseCommitAfterPrimaryUpgrade.stderr).toBe(0)
+
+    const baseSuccessor = path.join(harness.root, 'base-successor')
+    const baseSuccessorCreation = spawnSync(
+      'bash',
+      ['scripts/create-worktree', '-b', 'base-successor', baseSuccessor],
+      { cwd: baseSibling, encoding: 'utf8', env: baseEnvironment },
+    )
+    expect(baseSuccessorCreation.status, baseSuccessorCreation.stderr).toBe(0)
+
+    const primaryAuditAfterUpgrade = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '7',
+    })
+    expect(primaryAuditAfterUpgrade.status).toBe(1)
+    expect(primaryAuditAfterUpgrade.stderr).toContain('bypassed scripts/create-worktree')
+
+    const rawCommitAfterUpgrade = spawnSync('git', ['commit', '-m', 'raw after upgrade'], {
+      cwd: raw,
+      encoding: 'utf8',
+      env: baseEnvironment,
+    })
+    expect(rawCommitAfterUpgrade.status).toBe(1)
+    expect(rawCommitAfterUpgrade.stderr).toContain(
+      'current worktree bypassed scripts/create-worktree',
+    )
   })
 
   it('fails closed for malformed isolation-marker filesystem nodes', () => {

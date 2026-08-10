@@ -25,6 +25,8 @@ Updated: 2026-08-10
   the older primary remains globally fail-closed if a raw sibling exists.
 - Isolation is durable before legacy compatibility authorization is exposed,
   and malformed or interrupted marker states remain fail-closed.
+- Only the primary guard may publish the isolation and compatibility markers;
+  a newer task-local guard cannot weaken an older primary's authority model.
 - The explicit no-argument guard continues to fail when any unauthorized
   registered worktree exists when run from the primary checkout.
 
@@ -59,6 +61,8 @@ Updated: 2026-08-10
   continued to fail as designed.
 - The preliminary ReviewGPT pass identified historical-entrypoint and scoped
   resource-budget coverage gaps. Final round 1 then identified inverse-version
-  compatibility and marker-write ordering gaps. All accepted findings were
-  remediated and await exact-head reruns.
+  compatibility and marker-write ordering gaps. Round 2 required a
+  retrospective because task-local marker publication repeated the same
+  authority-exposure mechanism. The recorded decision shrinks publication to
+  the existing primary owner. All accepted findings await exact-head reruns.
 - Pending: exact-head ReviewGPT and GitHub Actions.

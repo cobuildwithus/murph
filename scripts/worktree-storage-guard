@@ -71,6 +71,18 @@ if [[ -n "${MURPH_WORKTREE_MAX_LIVE+x}" && -z "${MURPH_WORKTREE_GUARD_STATE_DIR+
 fi
 mkdir -p "$state_dir"
 
+primary_worktree="$(
+  git -C "$repo_root" worktree list --porcelain |
+    awk '$1 == "worktree" && !found { print substr($0, 10); found = 1 }'
+)"
+[[ -n "$primary_worktree" && -d "$primary_worktree" ]] || {
+  printf 'worktree storage guard: primary checkout could not be resolved\n' >&2
+  exit 1
+}
+primary_worktree="$(cd "$primary_worktree" && pwd -P)"
+guard_owns_authorization=0
+[[ "$repo_root" == "$primary_worktree" ]] && guard_owns_authorization=1
+
 # Historical installers invoke the primary checkout's guard without arguments
 # while their working directory remains the authorized historical checkout.
 # Preserve that rollout path without weakening a no-argument audit run from the
@@ -156,7 +168,8 @@ count_record() {
       if [[ -f "$authorization_initialized" ]]; then
         authorization_marker="$admin_dir/murph-storage-guard-authorized"
         isolation_marker="$admin_dir/murph-storage-guard-isolated"
-        if [[ ! -f "$authorization_marker" && ! -e "$isolation_marker" \
+        if (( guard_owns_authorization == 1 )) \
+          && [[ ! -f "$authorization_marker" && ! -e "$isolation_marker" \
           && ! -L "$isolation_marker" ]]; then
           # Make isolation durable before exposing the legacy compatibility
           # marker. Noclobber prevents a concurrently inserted filesystem node
@@ -174,7 +187,8 @@ count_record() {
           # Only a regular, non-symlink isolation marker is a completed current
           # migration state. Once isolation is proven, retry the legacy marker
           # so preceding-version sanctioned entrypoints can enforce budgets.
-          if [[ -f "$isolation_marker" && ! -L "$isolation_marker" \
+          if (( guard_owns_authorization == 1 )) \
+            && [[ -f "$isolation_marker" && ! -L "$isolation_marker" \
             && ! -f "$authorization_marker" ]]; then
             : >"$authorization_marker"
           fi
@@ -220,7 +234,7 @@ if (( unauthorized_count > 0 && creating_worktree == 0 )) && [[ -z "$current_wor
   exit 1
 fi
 
-if [[ ! -f "$authorization_initialized" ]]; then
+if [[ ! -f "$authorization_initialized" ]] && (( guard_owns_authorization == 1 )); then
   if (( ${#admin_dirs[@]} > 0 )); then
     for admin_dir in "${admin_dirs[@]}"; do
       : >"$admin_dir/murph-storage-guard-authorized"
