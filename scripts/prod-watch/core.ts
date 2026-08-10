@@ -57,13 +57,19 @@ const MAX_SOURCE_HEALTH = WATCH_SOURCES.length;
 const MAX_RELEASE_CONTEXT = 12;
 const MAX_COUNTERS = 128;
 const MAX_LATENCY = 64;
-const MAX_FINGERPRINTS = 25;
-const MAX_ANOMALIES = 20;
-const MAX_FAILURES = 8;
 const MAX_PROVIDER_RELEASE_CONTEXT = 4;
 const MAX_PROVIDER_COUNTERS = 32;
 const MAX_PROVIDER_LATENCY = 16;
 const MAX_PROVIDER_FINGERPRINTS = 8;
+const MAX_DATABASE_FINGERPRINTS = 13;
+const MAX_FINGERPRINTS = MAX_DATABASE_FINGERPRINTS
+  + (WATCH_SOURCES.length - 1) * MAX_PROVIDER_FINGERPRINTS;
+const MAX_FAILURES = 8;
+const MAX_ANOMALIES = MAX_FAILURES
+  + MAX_SOURCE_HEALTH * 2
+  + MAX_COUNTERS
+  + MAX_LATENCY
+  + MAX_FINGERPRINTS;
 const MAX_INCIDENTS = 2_000;
 const MAX_TRANSITIONS = 32;
 const INCIDENT_RETENTION_MS = 180 * 24 * 60 * 60 * 1_000;
@@ -518,6 +524,15 @@ export function parseProviderEvidence(value: unknown): ProviderEvidenceEnvelope 
     if (evidence.latency.some((summary) => !PROVIDER_LATENCY_METRICS.has(summary.metric))) {
       throw new Error("provider_latency_metric_forbidden");
     }
+    if (evidence.status === "ok" && evidence.auth !== "ok") {
+      throw new Error("provider_ok_auth_unproven");
+    }
+    if (
+      evidence.status === "ok"
+      && !evidence.counters.some((counter) => counter.metric === "provider_request_count")
+    ) {
+      throw new Error("provider_ok_collection_unproven");
+    }
   }
   const sourceNames = sources.map((source) => source.source);
   if (new Set(sourceNames).size !== sources.length) {
@@ -578,11 +593,20 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
         ...(failure === undefined ? {} : { errorCode: failure.code }),
       };
     }
+    const providerCollectionProven = source === "database"
+      || (
+        evidence.auth === "ok"
+        && evidence.counters.some((counter) => counter.metric === "provider_request_count")
+      );
     return {
       source,
       status: evidence.status,
       auth: evidence.auth,
-      coverage: evidence.status === "ok" ? "complete" : evidence.status === "degraded" ? "partial" : "none",
+      coverage: evidence.status === "ok" && providerCollectionProven
+        ? "complete"
+        : evidence.status === "unavailable"
+          ? "none"
+          : "partial",
       access: source === "database" ? "deterministic" : "mcp_on_demand",
       collectedAt: evidence.collectedAt,
       freshnessSeconds: Math.max(
@@ -613,7 +637,7 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
     .flatMap((evidence) => evidence.latency)
     .sort(compareLatency)
     .slice(0, MAX_LATENCY);
-  const fingerprints = input.evidences
+  const allFingerprints = input.evidences
     .flatMap((evidence) => evidence.fingerprints.map((fingerprint) => ({
       ...fingerprint,
       fingerprint: stableHash(["source-fingerprint", evidence.source, fingerprint.rawFingerprint]),
@@ -623,18 +647,18 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
       || left.source.localeCompare(right.source)
       || left.component.localeCompare(right.component)
       || left.phase.localeCompare(right.phase)
-      || left.fingerprint.localeCompare(right.fingerprint))
-    .slice(0, MAX_FINGERPRINTS);
+      || left.fingerprint.localeCompare(right.fingerprint));
   const failures = [...input.failures].sort(compareFailures).slice(0, MAX_FAILURES);
-  const anomalies = evaluateAnomalies({
+  const anomalies = selectBoundedAnomalies(evaluateAnomalies({
     now: finishedAt,
     sourceHealth,
     releaseContext,
     counters,
     latency,
-    fingerprints,
+    fingerprints: allFingerprints,
     failures,
-  }).slice(0, MAX_ANOMALIES);
+  }));
+  const fingerprints = selectBoundedFingerprints(allFingerprints, anomalies);
   const collectedSources = sourceHealth
     .filter((source) => source.status === "ok" || source.status === "degraded")
     .map((source) => source.source);
@@ -698,6 +722,50 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
       maxAnomalyCandidates: MAX_ANOMALIES,
     },
   };
+}
+
+function isMandatoryAnomaly(candidate: AnomalyCandidate): boolean {
+  return candidate.category === "sensitive"
+    || candidate.severity === "critical"
+    || candidate.automationClass === "alert_only";
+}
+
+function selectBoundedAnomalies(candidates: AnomalyCandidate[]): AnomalyCandidate[] {
+  const mandatory = candidates.filter(isMandatoryAnomaly);
+  if (mandatory.length > MAX_ANOMALIES) {
+    throw new Error("mandatory_anomaly_capacity_exceeded");
+  }
+  const selected = new Set(mandatory.map((candidate) => candidate.fingerprint));
+  for (const candidate of candidates) {
+    if (selected.size >= MAX_ANOMALIES) {
+      break;
+    }
+    selected.add(candidate.fingerprint);
+  }
+  return candidates.filter((candidate) => selected.has(candidate.fingerprint));
+}
+
+function selectBoundedFingerprints(
+  fingerprints: FingerprintSummary[],
+  anomalies: AnomalyCandidate[],
+): FingerprintSummary[] {
+  const mandatoryReferences = new Set(
+    anomalies
+      .filter(isMandatoryAnomaly)
+      .flatMap((candidate) => candidate.sourceFingerprint === undefined ? [] : [candidate.sourceFingerprint]),
+  );
+  const mandatory = fingerprints.filter((fingerprint) => mandatoryReferences.has(fingerprint.fingerprint));
+  if (mandatory.length > MAX_FINGERPRINTS) {
+    throw new Error("mandatory_fingerprint_capacity_exceeded");
+  }
+  const selected = new Set(mandatory.map((fingerprint) => fingerprint.fingerprint));
+  for (const fingerprint of fingerprints) {
+    if (selected.size >= MAX_FINGERPRINTS) {
+      break;
+    }
+    selected.add(fingerprint.fingerprint);
+  }
+  return fingerprints.filter((fingerprint) => selected.has(fingerprint.fingerprint));
 }
 
 export function evaluateAnomalies(input: {
@@ -1296,6 +1364,9 @@ export function transitionIncident(
   if (!INCIDENT_TRANSITIONS[from].has(target)) {
     throw new Error(`incident_transition_invalid_${from}_to_${target}`);
   }
+  if (TERMINAL_INCIDENT_STATES.has(target)) {
+    assertTerminalTransitionAuthority(next, incident, target, now);
+  }
   incident.state = target;
   if (TERMINAL_INCIDENT_STATES.has(target)) {
     incident.owner = undefined;
@@ -1306,6 +1377,37 @@ export function transitionIncident(
   appendTransition(incident, { at: now.toISOString(), from, to: target, sessionId });
   next.updatedAt = now.toISOString();
   return next;
+}
+
+function assertTerminalTransitionAuthority(
+  state: ProductionWatchState,
+  incident: IncidentRecord,
+  target: IncidentState,
+  now: Date,
+): void {
+  if (incident.category === "sensitive" || incident.source === "stripe") {
+    throw new Error("incident_terminal_escalation_only");
+  }
+  const { monitor } = state;
+  if (
+    monitor.lastMonitorStatus !== "healthy"
+    || monitor.lastEvidenceComplete !== true
+    || monitor.lastRunAt === undefined
+    || monitor.lastCompleteEvidenceAt === undefined
+    || monitor.lastRunAt !== monitor.lastCompleteEvidenceAt
+  ) {
+    throw new Error("incident_terminal_evidence_incomplete");
+  }
+  const evidenceAgeMs = now.getTime() - Date.parse(monitor.lastRunAt);
+  if (evidenceAgeMs < 0 || evidenceAgeMs > 10 * 60 * 1_000) {
+    throw new Error("incident_terminal_evidence_stale");
+  }
+  if (
+    target === "resolved"
+    && Date.parse(monitor.lastCompleteEvidenceAt) <= Date.parse(incident.lastDetectedAt)
+  ) {
+    throw new Error("incident_resolution_requires_later_clean_evidence");
+  }
 }
 
 export function filterSnapshotForIncident(
@@ -1335,7 +1437,11 @@ export function filterSnapshotForIncident(
     ),
     anomalyCandidates: snapshot.anomalyCandidates.filter(
       (candidate) => candidate.fingerprint === incident.fingerprint
-        || candidate.sourceFingerprint === incident.sourceFingerprint,
+        || (
+          incident.sourceFingerprint !== undefined
+          && candidate.source === incident.source
+          && candidate.sourceFingerprint === incident.sourceFingerprint
+        ),
     ),
   };
 }
@@ -1356,11 +1462,12 @@ export function renderActiveIncidents(state: ProductionWatchState): string {
     return lines.join("\n");
   }
   lines.push(
-    "| Severity | State | Fingerprint | Signal | First seen | Last seen | Session | Lease expiry |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Incident ID | Severity | State | Fingerprint | Signal | First seen | Last seen | Session | Lease expiry |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const incident of active) {
     lines.push([
+      incident.id,
       incident.severity,
       incident.state,
       incident.fingerprint.slice(0, 16),
@@ -1384,11 +1491,12 @@ export function renderIncidentHistory(state: ProductionWatchState): string {
     "",
     `Generated: ${state.updatedAt}`,
     "",
-    "| Fingerprint | Severity | State | Discovered | Last seen | Sessions | Resolved |",
-    "| --- | --- | --- | --- | --- | --- | --- |",
+    "| Incident ID | Fingerprint | Severity | State | Discovered | Last seen | Sessions | Resolved |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const incident of incidents) {
     lines.push([
+      incident.id,
       incident.fingerprint.slice(0, 16),
       incident.severity,
       incident.state,

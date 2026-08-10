@@ -180,14 +180,14 @@
     },
     "fingerprints": {
       "type": "array",
-      "maxItems": 25,
+      "maxItems": 37,
       "items": {
         "$ref": "#/$defs/fingerprint"
       }
     },
     "anomalyCandidates": {
       "type": "array",
-      "maxItems": 20,
+      "maxItems": 245,
       "items": {
         "$ref": "#/$defs/anomaly"
       }
@@ -220,10 +220,10 @@
           "const": false
         },
         "maxFingerprints": {
-          "const": 25
+          "const": 37
         },
         "maxAnomalyCandidates": {
-          "const": 20
+          "const": 245
         }
       }
     }

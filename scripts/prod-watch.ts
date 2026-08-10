@@ -250,7 +250,7 @@ async function runIncidentCommand(argv: string[]): Promise<void> {
     if (argv.length !== 1) {
       throw new Error("incident_list_arguments_invalid");
     }
-    const state = await readState(statePath, parseConfiguredSources(process.env.MURPH_PROD_WATCH_SOURCES), new Date());
+    const state = await readState(statePath, [...WATCH_SOURCES], new Date());
     process.stdout.write(renderActiveIncidents(state));
     return;
   }
@@ -258,7 +258,7 @@ async function runIncidentCommand(argv: string[]): Promise<void> {
     throw new Error("incident_target_required");
   }
   const sessionId = readRequiredFlag(rest, "--session-id");
-  const configuredSources = parseConfiguredSources(process.env.MURPH_PROD_WATCH_SOURCES);
+  const configuredSources = [...WATCH_SOURCES];
   const next = await withStateLock(randomUUID(), async () => {
     const state = await readState(statePath, configuredSources, new Date());
     const incident = findIncident(state, target);
@@ -776,31 +776,12 @@ function parseCommonOptions(
     ...(readOptionalFlag(argv, "--provider-evidence") === undefined
       ? {}
       : { providerEvidencePath: readOptionalFlag(argv, "--provider-evidence") }),
-    configuredSources: parseConfiguredSources(process.env.MURPH_PROD_WATCH_SOURCES),
+    configuredSources: [...WATCH_SOURCES],
     dryRun,
     mode: defaults.mode,
     scheduled,
     ...(readOptionalFlag(argv, "--output") === undefined ? {} : { outputPath: readOptionalFlag(argv, "--output") }),
   };
-}
-
-function parseConfiguredSources(value: string | undefined): WatchSource[] {
-  const raw = value === undefined || value.trim().length === 0
-    ? [...WATCH_SOURCES]
-    : value.split(",").map((source) => source.trim()).filter(Boolean);
-  const result: WatchSource[] = [];
-  for (const source of raw) {
-    if (!(WATCH_SOURCES as readonly string[]).includes(source)) {
-      throw new Error(`configured_source_invalid_${normalizeToken(source)}`);
-    }
-    if (!result.includes(source as WatchSource)) {
-      result.push(source as WatchSource);
-    }
-  }
-  if (!result.includes("database")) {
-    result.unshift("database");
-  }
-  return result;
 }
 
 function assertNoUnknownFlags(argv: string[], allowed: Set<string>): void {
@@ -924,21 +905,33 @@ async function installScheduler(): Promise<void> {
   const existing = await readManagedSchedulerFile(plistPath);
   const domain = `gui/${process.getuid?.() ?? 0}`;
   if (existing !== undefined) {
-    await spawnCaptured("launchctl", ["bootout", domain, plistPath], { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 });
+    await stopLaunchdService(domain, plistPath);
+  } else {
+    const priorState = await inspectLaunchdService(domain);
+    if (priorState === "loaded") {
+      throw new Error("launchd_service_loaded_without_managed_plist");
+    }
+    if (priorState === "unknown") {
+      throw new Error("launchd_service_state_unknown");
+    }
   }
   await atomicWriteText(plistPath, await renderLaunchdPlist(), { privateDirectory: false });
   const bootstrap = await spawnCaptured("launchctl", ["bootstrap", domain, plistPath], { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 });
   if (bootstrap.status !== 0) {
+    await stopLaunchdService(domain, plistPath).catch(() => undefined);
     throw new Error("launchd_bootstrap_failed");
   }
   const enable = await spawnCaptured("launchctl", ["enable", `${domain}/${LAUNCHD_LABEL}`], { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 });
   if (enable.status !== 0) {
-    await spawnCaptured("launchctl", ["bootout", domain, plistPath], {
-      timeoutMs: 10_000,
-      outputLimitBytes: 64 * 1_024,
-    }).catch(() => undefined);
-    await unlink(plistPath).catch(() => undefined);
+    try {
+      await stopLaunchdService(domain, plistPath);
+    } catch {
+      throw new Error("launchd_enable_cleanup_failed");
+    }
     throw new Error("launchd_enable_failed");
+  }
+  if (await inspectLaunchdService(domain) !== "loaded") {
+    throw new Error("launchd_install_state_unconfirmed");
   }
 }
 
@@ -949,38 +942,33 @@ async function uninstallScheduler(): Promise<void> {
   const launchAgents = path.join(os.homedir(), "Library", "LaunchAgents");
   const plistPath = path.join(launchAgents, `${LAUNCHD_LABEL}.plist`);
   const existing = await readManagedSchedulerFile(plistPath);
-  if (existing === undefined) {
-    return;
-  }
   const domain = `gui/${process.getuid?.() ?? 0}`;
-  await spawnCaptured("launchctl", ["bootout", domain, plistPath], { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 });
-  await unlink(plistPath).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  });
+  await stopLaunchdService(domain, existing === undefined ? undefined : plistPath);
+  if (existing !== undefined) {
+    await unlink(plistPath).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    });
+  }
 }
 
 async function printSchedulerStatus(): Promise<void> {
   const now = new Date();
-  const configuredSources = parseConfiguredSources(process.env.MURPH_PROD_WATCH_SOURCES);
-  const state = await readState(statePath, configuredSources, now);
+  const state = await readState(statePath, [...WATCH_SOURCES], now);
   let installed = false;
-  let loaded = false;
+  let launchdState: "loaded" | "absent" | "unknown" = "absent";
   if (process.platform === "darwin") {
     const plistPath = path.join(os.homedir(), "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
     installed = await pathExists(plistPath);
     const domain = `gui/${process.getuid?.() ?? 0}`;
-    const status = await spawnCaptured("launchctl", ["print", `${domain}/${LAUNCHD_LABEL}`], {
-      timeoutMs: 5_000,
-      outputLimitBytes: 256 * 1_024,
-    });
-    loaded = status.status === 0;
+    launchdState = await inspectLaunchdService(domain);
   }
   process.stdout.write(`${JSON.stringify({
     label: LAUNCHD_LABEL,
     installed,
-    loaded,
+    loaded: launchdState === "loaded" ? true : launchdState === "absent" ? false : null,
+    launchdState,
     monitorStatus: state.monitor.lastMonitorStatus ?? null,
     evidenceComplete: state.monitor.lastEvidenceComplete ?? null,
     lastRunAt: state.monitor.lastRunAt ?? null,
@@ -995,6 +983,40 @@ async function printSchedulerStatus(): Promise<void> {
     sourceHealth: state.monitor.lastSourceHealth,
     activeIncidents: state.incidents.filter((incident) => !["false_positive", "resolved"].includes(incident.state)).length,
   }, null, 2)}\n`);
+}
+
+async function stopLaunchdService(domain: string, plistPath?: string): Promise<void> {
+  await spawnCaptured(
+    "launchctl",
+    plistPath === undefined
+      ? ["bootout", `${domain}/${LAUNCHD_LABEL}`]
+      : ["bootout", domain, plistPath],
+    { timeoutMs: 10_000, outputLimitBytes: 64 * 1_024 },
+  );
+  const state = await inspectLaunchdService(domain);
+  if (state === "loaded") {
+    throw new Error("launchd_service_still_loaded");
+  }
+  if (state === "unknown") {
+    throw new Error("launchd_service_state_unknown");
+  }
+}
+
+async function inspectLaunchdService(domain: string): Promise<"loaded" | "absent" | "unknown"> {
+  const result = await spawnCaptured("launchctl", ["print", `${domain}/${LAUNCHD_LABEL}`], {
+    timeoutMs: 5_000,
+    outputLimitBytes: 256 * 1_024,
+  });
+  if (result.status === 0 && !result.timedOut) {
+    return "loaded";
+  }
+  if (
+    !result.timedOut
+    && /(?:could not find (?:specified )?service|service not found)/iu.test(`${result.stdout}\n${result.stderr}`)
+  ) {
+    return "absent";
+  }
+  return "unknown";
 }
 
 function xmlEscape(value: string): string {

@@ -39,10 +39,7 @@ describe.runIf(liveDatabaseEnabled)("production-watch live read-only database bo
       {
         cwd: repoRoot,
         encoding: "utf8",
-        env: {
-          ...process.env,
-          MURPH_PROD_WATCH_SOURCES: "database",
-        },
+        env: process.env,
         timeout: 60_000,
       },
     );
@@ -75,8 +72,8 @@ describe.runIf(liveDatabaseEnabled)("production-watch live read-only database bo
     if (
       databaseHealth?.status !== "ok"
       || validated.collectorFailures.some((failure) => failure.source === "database")
-      || validated.monitor.status !== "healthy"
-      || !validated.monitor.evidenceComplete
+      || validated.monitor.status !== "partial"
+      || validated.monitor.evidenceComplete
     ) {
       throw new Error("live_database_snapshot_unhealthy");
     }

@@ -283,6 +283,42 @@
     "adapterEvidence": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "ok"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "auth": {
+                "const": "ok"
+              },
+              "counters": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "properties": {
+                    "metric": {
+                      "const": "provider_request_count"
+                    }
+                  },
+                  "required": [
+                    "metric"
+                  ]
+                },
+                "minContains": 1
+              }
+            }
+          }
+        }
+      ],
       "required": [
         "schemaVersion",
         "source",

@@ -24,7 +24,7 @@ Use this skill only for Murph production-watch runs and incidents.
    ```
 
 2. When provider coverage is part of this session, query only aggregate health, release, count/rate, and latency surfaces from the configured Vercel, Cloudflare Observability, and Stripe MCPs. Do not retrieve individual events, requests, customers, charges, prompts, or payload bodies.
-3. Emit one JSON object conforming to `scripts/prod-watch/schemas/provider-evidence.v1.schema.json` into a current-user-owned `0600` file inside a `0700` temporary directory. Use only the allowed dimensions and metric names. A provider auth, rate-limit, timeout, schema, or availability problem belongs in `failures`; do not invent zero counts.
+3. Emit one JSON object conforming to `scripts/prod-watch/schemas/provider-evidence.v1.schema.json` into a current-user-owned `0600` file inside a `0700` temporary directory. Use only the allowed dimensions and metric names. An `ok` source requires `auth: ok` plus an explicit `provider_request_count` aggregate; a measured zero is valid, but an absent query is not. A provider auth, rate-limit, timeout, schema, or availability problem belongs in `failures`; do not invent zero counts.
 4. Merge and evaluate the evidence with:
 
    ```sh
@@ -35,7 +35,7 @@ Use this skill only for Murph production-watch runs and incidents.
 
 ## Incident triage
 
-- List active incidents with `pnpm --silent prod-watch incident list`.
+- List active incidents with `pnpm --silent prod-watch incident list` and use the displayed Incident ID for every subsequent command.
 - Claim before drill-down:
 
   ```sh

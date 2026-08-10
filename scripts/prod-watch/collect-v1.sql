@@ -49,7 +49,13 @@ issue_fingerprints AS (
     issue.issue_kind,
     coalesce(issue.error_code, 'none'),
     issue.release_sha
-  ORDER BY current_count DESC, previous_count DESC
+  ORDER BY
+    (
+      concat_ws(' ', issue.component, issue.phase, issue.issue_kind, coalesce(issue.error_code, 'none'))
+      ~* '(auth|billing|canonical|clinical|consent|corrupt|credential|delet|erasure|health|hipaa|idempot|medical|patient|payment|privacy|replay|stripe|loss)'
+    ) DESC,
+    current_count DESC,
+    previous_count DESC
   LIMIT 13
 ),
 ingress_counts AS (

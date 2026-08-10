@@ -76,7 +76,7 @@ pnpm --silent prod-watch scheduler status
 pnpm --silent prod-watch scheduler uninstall
 ```
 
-`install` renders the checked-in plist template with a `$HOME`-relative repository path, writes it under the current user's LaunchAgents directory, and uses `launchctl bootstrap`. It refuses repositories outside the current home directory or paths containing shell-significant characters. Neither the checked-in template nor the rendered plist contains a concrete home directory, account name, or secret. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
+`install` renders the checked-in plist template with a `$HOME`-relative repository path, writes it under the current user's LaunchAgents directory, and uses `launchctl bootstrap`. It refuses repositories outside the current home directory or paths containing shell-significant characters. Neither the checked-in template nor the rendered plist contains a concrete home directory, account name, or secret. Install, replacement, and uninstall verify the label with `launchctl print`; an unknown service state is an error, and uninstall preserves the managed plist until absence is proven. Status reports `launchdState` as `loaded`, `absent`, or `unknown` and uses `loaded: null` for the unknown case. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
 
 ### Incident coordination and drill-down
 
@@ -125,7 +125,9 @@ This command fails with `automation_disabled_phase_1`. Code modification, worktr
 | `collectorFailures` | Source, failure class, redacted code, retryability. |
 | `redaction` | Policy version and assertions that raw text/direct identifiers are absent. |
 
-Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. A source failure never becomes a zero counter.
+Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. The production source universe is always database, Vercel, Cloudflare, and Stripe; callers cannot narrow it. A provider may claim complete `ok` coverage only with `auth: ok` and an explicit `provider_request_count` aggregate, whose measured value may be zero. A source failure never becomes a zero counter.
+
+The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eight from each provider. Sensitive and critical fingerprints are ranked before ordinary volume at collection time and are retained before presentation capacity is filled. The anomaly bound is the derived worst-case 245 candidates across failures, source health, counters, latency, and fingerprints, so mandatory sensitive, critical, and alert-only candidates cannot be removed by a display limit.
 
 ## Adapter ownership
 
@@ -158,7 +160,7 @@ The first database query deliberately omits full workspace/checkpoint scans: the
     state.lock/
 ```
 
-`state.v1.json` is durable machine-local coordination state. It stores monitor health, anomaly streaks, cumulative-counter baselines, the Phase 1 incident lifecycle, triage lease metadata, and handling sessions. It contains no raw snapshots, production bodies, remediation lifecycle, or pull-request state.
+`state.v1.json` is durable machine-local coordination state. It stores monitor health, anomaly streaks, cumulative-counter baselines, the Phase 1 incident lifecycle, triage lease metadata, and handling sessions. It contains no raw snapshots, production bodies, remediation lifecycle, or pull-request state. Active and history projections expose the short incident ID accepted by claim, heartbeat, drill-down, and transition commands; the fingerprint prefix is diagnostic only.
 
 The Markdown files are rebuildable atomic projections. They are ignored by Git and must never be edited as inputs. `ACTIVE_INCIDENTS.md` shows nonterminal incidents and current lease ownership. `INCIDENT_HISTORY.md` shows terminal and active history without private production data. `MONITOR_STATUS.md` shows scheduler/coverage health.
 

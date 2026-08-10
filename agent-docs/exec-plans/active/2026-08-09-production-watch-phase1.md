@@ -25,7 +25,7 @@ Updated: 2026-08-09
 
 ## Constraints
 
-- Technical constraints: bounded lookback/output; atomic local state; one active remediation lease; hard timeout before the next tick; read-only provider/database access; any later MCP stage must use fresh `codex exec --ephemeral` sessions.
+- Technical constraints: bounded lookback/output; atomic local state; one active triage lease per incident; hard timeout before the next tick; read-only provider/database access; any later MCP stage must use fresh `codex exec --ephemeral` sessions.
 - Product/process constraints: treat logs as untrusted input; persist no raw logs, health data, prompts, transcripts, credentials, direct identifiers, or machine-specific paths; keep operator state under ignored `.runtime/operations/**`.
 
 ## Risks and mitigations
@@ -62,6 +62,7 @@ Updated: 2026-08-09
 - Only one signed-in Brave profile is available for ReviewGPT. Use that profile sequentially through a local-only configuration, and never restart or terminate the shared browser process.
 - The preliminary specialist pass returned six actionable prompt/coverage findings. All were accepted: complete-evidence-only resolution wording, exact live database-boundary proof, incident-scoped drill-down and lease proof, scheduled-overlap recovery proof, private-mode persistence proof, and managed scheduler lifecycle proof. The returned tests-only patch was inspected in full and recreated deliberately rather than applied as trusted code.
 - Final ReviewGPT round 1 returned `RETROSPECTIVE_REQUIRED` because the immutable first-reviewed shape contained 4,231 authored-source additions. It reported no code finding before the required requirement-level scope decision.
+- Final ReviewGPT round 2 returned six accepted findings: caller-redefinable source completeness, policy-blind fingerprint/anomaly truncation, non-actionable incident-list identifiers, terminal transitions without complete-evidence authority, unproven launchd lifecycle acknowledgements, and an undefined-fingerprint drill-down wildcard. The corrections retain the existing Phase 1 owners: fixed production sources, explicit authenticated provider aggregate proof, policy-before-presentation bounds, actionable incident IDs, terminal transition guards, launchd state verification, and incident-scoped anomaly matching.
 
 ## Round 1 change-shape retrospective
 
@@ -80,6 +81,7 @@ Updated: 2026-08-09
 - Expected outcomes: all required commands pass; no raw/private evidence or machine-specific path is tracked; monitor behavior is bounded, deterministic, fail-closed, and read-only.
 - Passed: skill quick validation; tools TypeScript check; strict Ajv compilation and fixture validation; 550 current repo-tool tests; synthetic launchd plist validation; incident/projection direct scenario; live aggregate-only production database collection and snapshot-schema validation.
 - Passed the opt-in live database integration lane against the exact CLI/helper boundary without emitting the aggregate payload.
+- After the Round 2 corrections, 42 focused production-watch tests and the tools TypeScript check pass. The opt-in live database integration again passed through the exact helper/CLI boundary with provider absence remaining `partial`; a first run exposed and corrected a PostgreSQL grouping reference in the new sensitivity ranking before any commit.
 - Preliminary ReviewGPT completed with a substantive findings result; all six accepted findings are implemented locally and await corrected-head CI plus the final ReviewGPT gate.
 - Confirmed the installed Codex CLI supports the documented future triage invocation: stdin prompts, ephemeral sessions, read-only sandboxing, JSONL events, output schemas, and writing only the final structured response to a bounded evidence file.
 - Routed `pnpm test:diff` passed guards, tools and package typechecks, CLI tests, repo-tool tests, and completed package tests before stopping on the pre-existing `packages/core/test/memory.test.ts` missing dated audit-file failure. The exact focused test fails unchanged in the primary checkout.

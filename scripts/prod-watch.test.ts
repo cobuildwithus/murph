@@ -13,6 +13,7 @@ import {
   buildSnapshot,
   claimIncident,
   createInitialState,
+  filterSnapshotForIncident,
   parseState,
   parseAdapterEvidence,
   parseProviderEvidence,
@@ -86,6 +87,117 @@ describe("production-watch snapshot contract", () => {
     expect(snapshot.monitor).toMatchObject({ status: "healthy", evidenceComplete: true });
     expect(snapshot.sourceHealth.every((source) => source.coverage === "complete")).toBe(true);
     expect(snapshot.anomalyCandidates).toEqual([]);
+  });
+
+  it("requires authenticated aggregate collection proof before provider coverage is complete", () => {
+    const raw = JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as { sources: Array<{ auth: string; counters: Array<{ metric: string; current: number }> }> };
+    raw.sources[0]!.auth = "unknown";
+    expect(() => parseProviderEvidence(raw)).toThrow("provider_ok_auth_unproven");
+
+    raw.sources[0]!.auth = "ok";
+    raw.sources[0]!.counters = raw.sources[0]!.counters.filter(
+      (counter) => counter.metric !== "provider_request_count",
+    );
+    expect(() => parseProviderEvidence(raw)).toThrow("provider_ok_collection_unproven");
+
+    const zeroAggregate = JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as { sources: Array<{ counters: Array<{ metric: string; current: number }> }> };
+    const requestCount = zeroAggregate.sources[0]!.counters.find(
+      (counter) => counter.metric === "provider_request_count",
+    );
+    requestCount!.current = 0;
+    expect(() => parseProviderEvidence(zeroAggregate)).not.toThrow();
+  });
+
+  it("keeps unproven direct provider evidence partial even outside envelope parsing", () => {
+    const now = new Date("2026-08-09T20:00:00.000Z");
+    const provider = parseProviderEvidence(JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as unknown);
+    const unproven = structuredClone(
+      provider.sources.find((source) => source.source === "vercel")!,
+    ) as AdapterEvidence;
+    unproven.auth = "unknown";
+    unproven.counters = [];
+    const snapshot = buildSnapshot({
+      now,
+      runId: "test-unproven-provider",
+      mode: "collect",
+      dryRun: true,
+      startedAt: new Date(now.getTime() - 100),
+      timeoutMs: 240000,
+      skippedOverlap: false,
+      previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+      currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+      end: now,
+      lookbackMinutes: 15,
+      settlingDelaySeconds: 0,
+      configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+      evidences: [
+        rebaseEvidence(readFixture("healthy"), now),
+        rebaseEvidence(unproven, now),
+        ...provider.sources
+          .filter((source) => source.source !== "vercel")
+          .map((source) => rebaseEvidence(source, now)),
+      ],
+      failures: [],
+    });
+
+    expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
+    expect(snapshot.sourceHealth.find((source) => source.source === "vercel"))
+      .toMatchObject({ status: "ok", auth: "unknown", coverage: "partial" });
+  });
+
+  it("retains every bounded mandatory fingerprint and anomaly under capacity pressure", () => {
+    const now = new Date("2026-08-09T20:00:00.000Z");
+    const provider = parseProviderEvidence(JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as unknown);
+    const database = rebaseEvidence(readFixture("healthy"), now);
+    const makeSensitiveFingerprints = (source: AdapterEvidence["source"], count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        rawFingerprint: `mandatory_${source}_${index}`,
+        source,
+        component: "privacy_boundary",
+        phase: "write",
+        severity: "low" as const,
+        count: 1,
+        previousCount: 0,
+        firstSeenAt: new Date(now.getTime() - 60_000).toISOString(),
+        lastSeenAt: now.toISOString(),
+        errorCode: `privacy_loss_${index}`,
+      }));
+    database.fingerprints = makeSensitiveFingerprints("database", 13);
+    const providers = provider.sources.map((source) => ({
+      ...rebaseEvidence(source, now),
+      fingerprints: makeSensitiveFingerprints(source.source, 8),
+    }));
+
+    const snapshot = buildSnapshot({
+      now,
+      runId: "test-mandatory-capacity",
+      mode: "collect",
+      dryRun: true,
+      startedAt: new Date(now.getTime() - 100),
+      timeoutMs: 240000,
+      skippedOverlap: false,
+      previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+      currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+      end: now,
+      lookbackMinutes: 15,
+      settlingDelaySeconds: 0,
+      configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+      evidences: [database, ...providers],
+      failures: [],
+    });
+
+    expect(snapshot.fingerprints).toHaveLength(37);
+    expect(snapshot.anomalyCandidates.filter((candidate) => candidate.category === "sensitive"))
+      .toHaveLength(37);
+    expect(snapshot.redaction).toMatchObject({ maxFingerprints: 37, maxAnomalyCandidates: 245 });
   });
 
   it("keeps every Stripe anomaly alert-only even when its metric name is generic", () => {
@@ -271,8 +383,7 @@ describe("production-watch snapshot contract", () => {
 describe("production-watch incident coordination", () => {
   it("enforces one owner per incident and records human-readable projections", () => {
     const snapshot = buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z"));
-    const initial = createInitialState(new Date("2026-08-09T19:55:00.000Z"), ["database"]);
-    const promoted = updateStateFromSnapshot(initial, snapshot).state;
+    const promoted = buildPromotedSuspiciousState();
     const incident = promoted.incidents[0];
     expect(incident).toBeDefined();
 
@@ -288,7 +399,30 @@ describe("production-watch incident coordination", () => {
       new Date("2026-08-09T20:03:00.000Z"),
     );
     expect(renderActiveIncidents(escalated)).toContain("session-a");
+    expect(renderActiveIncidents(escalated)).toContain(incident!.id);
+    expect(renderIncidentHistory(escalated)).toContain(incident!.id);
     expect(renderIncidentHistory(escalated)).toContain(incident!.fingerprint.slice(0, 16));
+  });
+
+  it("keeps drill-down anomalies scoped when unrelated incidents lack source fingerprints", () => {
+    const snapshot = buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z"));
+    const primary = snapshot.anomalyCandidates.find(
+      (candidate) => candidate.source === "database" && candidate.sourceFingerprint === undefined,
+    );
+    expect(primary).toBeDefined();
+    snapshot.anomalyCandidates.push({
+      ...primary!,
+      fingerprint: "f".repeat(64),
+      source: "vercel",
+      titleCode: "unrelated_vercel_signal",
+    });
+    const promoted = buildPromotedSuspiciousState();
+    const incident = promoted.incidents.find((candidate) => candidate.fingerprint === primary!.fingerprint);
+    expect(incident).toBeDefined();
+
+    const filtered = filterSnapshotForIncident(snapshot, incident!);
+    expect(filtered.anomalyCandidates.map((candidate) => candidate.fingerprint))
+      .toEqual([primary!.fingerprint]);
   });
 
   it("does not downgrade a durable escalation when its triage lease expires", () => {
@@ -353,19 +487,18 @@ describe("production-watch incident coordination", () => {
     }
   });
 
-  it("enforces the Phase 1 incident state machine", () => {
-    const snapshot = buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z"));
-    const initial = createInitialState(new Date("2026-08-09T19:55:00.000Z"), ["database"]);
-    const promoted = updateStateFromSnapshot(initial, snapshot).state;
-    const incident = promoted.incidents[0]!;
-    const claimed = claimIncident(promoted, incident.fingerprint, "session-a", new Date("2026-08-09T20:01:00.000Z"), 15);
+  it("requires later fresh complete evidence before resolving a nonsensitive incident", () => {
+    const promoted = buildPromotedSuspiciousState();
+    const incident = promoted.incidents.find((candidate) => candidate.category !== "sensitive")!;
+    expect(incident).toBeDefined();
+    const claimed = claimIncident(promoted, incident.fingerprint, "session-a", new Date("2026-08-09T20:06:00.000Z"), 15);
 
     expect(() => transitionIncident(
       claimed,
       incident.fingerprint,
       "session-a",
       "resolved",
-      new Date("2026-08-09T20:02:00.000Z"),
+      new Date("2026-08-09T20:07:00.000Z"),
     )).toThrow("incident_transition_invalid_claimed_triage_to_resolved");
 
     const confirmed = transitionIncident(
@@ -373,20 +506,163 @@ describe("production-watch incident coordination", () => {
       incident.fingerprint,
       "session-a",
       "confirmed",
-      new Date("2026-08-09T20:02:00.000Z"),
+      new Date("2026-08-09T20:07:00.000Z"),
     );
-    const resolved = transitionIncident(
+    expect(() => transitionIncident(
       confirmed,
       incident.fingerprint,
       "session-a",
       "resolved",
-      new Date("2026-08-09T20:03:00.000Z"),
+      new Date("2026-08-09T20:08:00.000Z"),
+    )).toThrow("incident_terminal_evidence_incomplete");
+
+    const cleanSnapshot = buildCompleteSnapshot(new Date("2026-08-09T20:10:00.000Z"));
+    const afterCleanEvidence = updateStateFromSnapshot(confirmed, cleanSnapshot).state;
+    const resolved = transitionIncident(
+      afterCleanEvidence,
+      incident.fingerprint,
+      "session-a",
+      "resolved",
+      new Date("2026-08-09T20:11:00.000Z"),
     );
     expect(resolved.incidents.find((candidate) => candidate.fingerprint === incident.fingerprint)).toMatchObject({
       state: "resolved",
-      resolvedAt: "2026-08-09T20:03:00.000Z",
+      resolvedAt: "2026-08-09T20:11:00.000Z",
     });
     expect(resolved.incidents.find((candidate) => candidate.fingerprint === incident.fingerprint)?.owner).toBeUndefined();
+  });
+
+  it("rejects terminal transitions for sensitive incidents and stale or still-observed evidence", () => {
+    const promoted = buildPromotedSuspiciousState();
+    const sensitive = promoted.incidents.find((candidate) => candidate.category === "sensitive")!;
+    let sensitiveState = claimIncident(
+      promoted,
+      sensitive.fingerprint,
+      "session-sensitive",
+      new Date("2026-08-09T20:06:00.000Z"),
+      15,
+    );
+    sensitiveState = transitionIncident(
+      sensitiveState,
+      sensitive.fingerprint,
+      "session-sensitive",
+      "confirmed",
+      new Date("2026-08-09T20:07:00.000Z"),
+    );
+    sensitiveState = updateStateFromSnapshot(
+      sensitiveState,
+      buildCompleteSnapshot(new Date("2026-08-09T20:10:00.000Z")),
+    ).state;
+    expect(() => transitionIncident(
+      sensitiveState,
+      sensitive.fingerprint,
+      "session-sensitive",
+      "resolved",
+      new Date("2026-08-09T20:11:00.000Z"),
+    )).toThrow("incident_terminal_escalation_only");
+
+    const nonsensitive = promoted.incidents.find((candidate) => candidate.category !== "sensitive")!;
+    let nonsensitiveState = claimIncident(
+      promoted,
+      nonsensitive.fingerprint,
+      "session-normal",
+      new Date("2026-08-09T20:06:00.000Z"),
+      60,
+    );
+    nonsensitiveState = transitionIncident(
+      nonsensitiveState,
+      nonsensitive.fingerprint,
+      "session-normal",
+      "confirmed",
+      new Date("2026-08-09T20:07:00.000Z"),
+    );
+    const stillObserved = buildCompleteSnapshot(new Date("2026-08-09T20:10:00.000Z"));
+    stillObserved.anomalyCandidates = [
+      buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:10:00.000Z")).anomalyCandidates
+        .find((candidate) => candidate.fingerprint === nonsensitive.fingerprint)!,
+    ].map((candidate) => ({ ...candidate, observedAt: stillObserved.generatedAt }));
+    nonsensitiveState = updateStateFromSnapshot(nonsensitiveState, stillObserved).state;
+    expect(() => transitionIncident(
+      nonsensitiveState,
+      nonsensitive.fingerprint,
+      "session-normal",
+      "resolved",
+      new Date("2026-08-09T20:11:00.000Z"),
+    )).toThrow("incident_resolution_requires_later_clean_evidence");
+
+    const clean = updateStateFromSnapshot(
+      nonsensitiveState,
+      buildCompleteSnapshot(new Date("2026-08-09T20:15:00.000Z")),
+    ).state;
+    expect(() => transitionIncident(
+      clean,
+      nonsensitive.fingerprint,
+      "session-normal",
+      "resolved",
+      new Date("2026-08-09T20:25:00.001Z"),
+    )).toThrow("incident_terminal_evidence_stale");
+  });
+
+  it("allows false-positive classification only from complete current nonsensitive evidence", () => {
+    const promoted = buildPromotedSuspiciousState();
+    const nonsensitive = promoted.incidents.find((candidate) => candidate.category !== "sensitive")!;
+    const claimed = claimIncident(
+      promoted,
+      nonsensitive.fingerprint,
+      "session-false-positive",
+      new Date("2026-08-09T20:06:00.000Z"),
+      15,
+    );
+    expect(() => transitionIncident(
+      claimed,
+      nonsensitive.fingerprint,
+      "session-false-positive",
+      "false_positive",
+      new Date("2026-08-09T20:07:00.000Z"),
+    )).toThrow("incident_terminal_evidence_incomplete");
+
+    const complete = updateStateFromSnapshot(
+      claimed,
+      buildCompleteSnapshot(new Date("2026-08-09T20:10:00.000Z")),
+    ).state;
+    const degraded = structuredClone(complete);
+    degraded.monitor.lastMonitorStatus = "degraded";
+    degraded.monitor.lastEvidenceComplete = false;
+    expect(() => transitionIncident(
+      degraded,
+      nonsensitive.fingerprint,
+      "session-false-positive",
+      "false_positive",
+      new Date("2026-08-09T20:11:00.000Z"),
+    )).toThrow("incident_terminal_evidence_incomplete");
+    expect(transitionIncident(
+      complete,
+      nonsensitive.fingerprint,
+      "session-false-positive",
+      "false_positive",
+      new Date("2026-08-09T20:11:00.000Z"),
+    ).incidents.find((candidate) => candidate.fingerprint === nonsensitive.fingerprint)?.state)
+      .toBe("false_positive");
+
+    const sensitive = promoted.incidents.find((candidate) => candidate.category === "sensitive")!;
+    const sensitiveClaimed = claimIncident(
+      promoted,
+      sensitive.fingerprint,
+      "session-sensitive-false-positive",
+      new Date("2026-08-09T20:06:00.000Z"),
+      15,
+    );
+    const sensitiveComplete = updateStateFromSnapshot(
+      sensitiveClaimed,
+      buildCompleteSnapshot(new Date("2026-08-09T20:10:00.000Z")),
+    ).state;
+    expect(() => transitionIncident(
+      sensitiveComplete,
+      sensitive.fingerprint,
+      "session-sensitive-false-positive",
+      "false_positive",
+      new Date("2026-08-09T20:11:00.000Z"),
+    )).toThrow("incident_terminal_escalation_only");
   });
 });
 
@@ -687,20 +963,34 @@ describe("production-watch locking and dry-run behavior", () => {
       .toBe(true);
   });
 
-  it("filters a complete provider envelope to the configured source set", () => {
+  it("keeps the production source universe fixed across environment changes", () => {
     const runtimeRoot = makeTempRoot();
-    const result = runProdWatch([
+    const first = runProdWatch([
       "collect",
       "--fixture",
       "healthy",
       "--provider-evidence",
       path.join(fixtureRoot, "healthy.providers.json"),
-    ], runtimeRoot, { MURPH_PROD_WATCH_SOURCES: "database,vercel" });
+    ], runtimeRoot, { MURPH_PROD_WATCH_SOURCES: "database" });
 
-    expect(result.status).toBe(0);
-    const snapshot = JSON.parse(result.stdout) as ProductionWatchSnapshot;
-    expect(snapshot.monitor.configuredSources).toEqual(["database", "vercel"]);
-    expect(snapshot.sourceHealth.map((source) => source.source)).toEqual(["database", "vercel"]);
+    expect(first.status).toBe(0);
+    const snapshot = JSON.parse(first.stdout) as ProductionWatchSnapshot;
+    expect(snapshot.monitor.configuredSources).toEqual(["database", "vercel", "cloudflare", "stripe"]);
+    expect(snapshot.sourceHealth.map((source) => source.source))
+      .toEqual(["database", "vercel", "cloudflare", "stripe"]);
+
+    const persistedFirst = runProdWatch(
+      ["run", "--fixture", "healthy"],
+      runtimeRoot,
+      { MURPH_PROD_WATCH_SOURCES: "database" },
+    );
+    const persistedSecond = runProdWatch(
+      ["run", "--fixture", "healthy"],
+      runtimeRoot,
+      { MURPH_PROD_WATCH_SOURCES: "database,vercel" },
+    );
+    expect(persistedFirst.status).toBe(0);
+    expect(persistedSecond.status).toBe(0);
   });
 
   it("rebases checked-in provider fixtures for executable dry runs", () => {
@@ -727,6 +1017,32 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ schemaVersion: "prod-watch.snapshot.v1" });
     expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"))).toBe(false);
     expect(existsSync(path.join(runtimeRoot, "projections", "prod-watch", "ACTIVE_INCIDENTS.md"))).toBe(false);
+  });
+
+  it("uses the listed incident ID through the real triage command journey", () => {
+    const runtimeRoot = makeTempRoot();
+    expect(runProdWatch(["run", "--fixture", "suspicious"], runtimeRoot).status).toBe(0);
+    const listing = runProdWatch(["incident", "list"], runtimeRoot);
+    expect(listing.status).toBe(0);
+    const incidentId = listing.stdout.match(/\| (pw_[A-Za-z0-9]+) \|/u)?.[1];
+    expect(incidentId).toBeDefined();
+
+    expect(runProdWatch([
+      "incident", "claim", incidentId!, "--session-id", "session-cli",
+    ], runtimeRoot).status).toBe(0);
+    expect(runProdWatch([
+      "drill-down", incidentId!, "--session-id", "session-cli", "--fixture", "suspicious",
+    ], runtimeRoot).status).toBe(0);
+    expect(runProdWatch([
+      "incident", "heartbeat", incidentId!, "--session-id", "session-cli",
+    ], runtimeRoot).status).toBe(0);
+    expect(runProdWatch([
+      "incident", "transition", incidentId!, "--session-id", "session-cli", "--state", "escalated",
+    ], runtimeRoot).status).toBe(0);
+    expect(readFileSync(
+      path.join(runtimeRoot, "projections", "prod-watch", "INCIDENT_HISTORY.md"),
+      "utf8",
+    )).toContain(incidentId);
   });
 
   it("keeps the Phase 1 remediation command disabled at the CLI boundary", () => {
@@ -798,6 +1114,8 @@ describe("production-watch static safety contracts", () => {
     expect(sql).toContain("::timestamptz AT TIME ZONE 'UTC' AS previous_start");
     expect(sql).toContain("coalesce(first_seen_at, params.current_start) AT TIME ZONE 'UTC'");
     expect(sql).toContain("md5(fingerprint)");
+    expect(sql).toContain("~* '(auth|billing|canonical|clinical|consent|corrupt|credential|");
+    expect(sql.indexOf("~* '(auth|billing")).toBeLessThan(sql.indexOf("LIMIT 13"));
     expect(sql).toContain("issue.severity IN ('info', 'warning', 'error')");
     expect(sql).toContain("trace.source IN ('linq', 'telegram')");
     expect(sql).toContain("'current', false");
@@ -839,7 +1157,7 @@ describe("production-watch static safety contracts", () => {
   });
 
   it.runIf(process.platform === "darwin")(
-    "protects unmanaged launchd files and cleans up a failed managed installation",
+    "keeps launchd lifecycle acknowledgements proven and retryable",
     () => {
       const testRoot = makeTempRoot();
       const fakeHome = path.join(testRoot, "home");
@@ -847,6 +1165,7 @@ describe("production-watch static safety contracts", () => {
       const binRoot = path.join(testRoot, "bin");
       const runtimeRoot = path.join(testRoot, "runtime");
       const launchctlLog = path.join(testRoot, "launchctl.log");
+      const launchctlState = path.join(testRoot, "launchctl.state");
       const launchAgentsRoot = path.join(fakeHome, "Library", "LaunchAgents");
       const plistPath = path.join(launchAgentsRoot, "com.murph.prod-watch.plist");
       mkdirSync(fakeHome, { recursive: true });
@@ -860,7 +1179,24 @@ describe("production-watch static safety contracts", () => {
         [
           "#!/bin/sh",
           "printf '%s\\n' \"$*\" >> \"$LAUNCHCTL_LOG\"",
-          "if [ \"${LAUNCHCTL_FAIL_ENABLE:-0}\" = \"1\" ] && [ \"$1\" = \"enable\" ]; then exit 1; fi",
+          "case \"$1\" in",
+          "  bootout)",
+          "    if [ \"${LAUNCHCTL_FAIL_BOOTOUT:-0}\" = \"1\" ]; then exit 1; fi",
+          "    printf 'absent\\n' > \"$LAUNCHCTL_STATE\"",
+          "    ;;",
+          "  bootstrap)",
+          "    printf 'loaded\\n' > \"$LAUNCHCTL_STATE\"",
+          "    ;;",
+          "  enable)",
+          "    if [ \"${LAUNCHCTL_FAIL_ENABLE:-0}\" = \"1\" ]; then exit 1; fi",
+          "    ;;",
+          "  print)",
+          "    if [ \"${LAUNCHCTL_PRINT_UNKNOWN:-0}\" = \"1\" ]; then printf 'unknown failure\\n' >&2; exit 1; fi",
+          "    if [ \"$(cat \"$LAUNCHCTL_STATE\" 2>/dev/null)\" = \"loaded\" ]; then exit 0; fi",
+          "    printf 'Could not find service\\n' >&2",
+          "    exit 113",
+          "    ;;",
+          "esac",
           "exit 0",
           "",
         ].join("\n"),
@@ -870,6 +1206,7 @@ describe("production-watch static safety contracts", () => {
       const sharedEnv = {
         HOME: fakeHome,
         LAUNCHCTL_LOG: launchctlLog,
+        LAUNCHCTL_STATE: launchctlState,
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
       };
 
@@ -886,6 +1223,7 @@ describe("production-watch static safety contracts", () => {
       expect(existsSync(launchctlLog)).toBe(false);
 
       writeFileSync(plistPath, "<!-- murph-prod-watch-managed:v1 -->\n", { mode: 0o600 });
+      writeFileSync(launchctlState, "loaded\n");
       const replacement = runProdWatchFromCheckout(
         ["scheduler", "install"],
         runtimeRoot,
@@ -894,10 +1232,12 @@ describe("production-watch static safety contracts", () => {
       );
       expect(replacement.status).toBe(0);
       const replacementCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
-      expect(replacementCalls).toHaveLength(3);
+      expect(replacementCalls).toHaveLength(5);
       expect(replacementCalls[0]).toContain("bootout");
-      expect(replacementCalls[1]).toContain("bootstrap");
-      expect(replacementCalls[2]).toContain("enable");
+      expect(replacementCalls[1]).toContain("print");
+      expect(replacementCalls[2]).toContain("bootstrap");
+      expect(replacementCalls[3]).toContain("enable");
+      expect(replacementCalls[4]).toContain("print");
       expect(readFileSync(plistPath, "utf8")).toContain("murph-prod-watch-managed:v1");
 
       writeFileSync(launchctlLog, "");
@@ -909,14 +1249,76 @@ describe("production-watch static safety contracts", () => {
       );
       expect(enableFailure.status).toBe(1);
       expect(enableFailure.stderr).toContain("launchd_enable_failed");
-      expect(existsSync(plistPath)).toBe(false);
+      expect(existsSync(plistPath)).toBe(true);
       const failureCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
       expect(failureCalls.map((call) => call.split(" ")[0])).toEqual([
         "bootout",
+        "print",
         "bootstrap",
         "enable",
         "bootout",
+        "print",
       ]);
+
+      writeFileSync(launchctlLog, "");
+      writeFileSync(launchctlState, "loaded\n");
+      const uncertainUninstall = runProdWatchFromCheckout(
+        ["scheduler", "uninstall"],
+        runtimeRoot,
+        checkoutRoot,
+        { ...sharedEnv, LAUNCHCTL_FAIL_BOOTOUT: "1" },
+      );
+      expect(uncertainUninstall.status).toBe(1);
+      expect(uncertainUninstall.stderr).toContain("launchd_service_still_loaded");
+      expect(existsSync(plistPath)).toBe(true);
+
+      writeFileSync(launchctlState, "absent\n");
+      const confirmedAbsentUninstall = runProdWatchFromCheckout(
+        ["scheduler", "uninstall"],
+        runtimeRoot,
+        checkoutRoot,
+        { ...sharedEnv, LAUNCHCTL_FAIL_BOOTOUT: "1" },
+      );
+      expect(confirmedAbsentUninstall.status).toBe(0);
+      expect(existsSync(plistPath)).toBe(false);
+
+      const unknownInstall = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        { ...sharedEnv, LAUNCHCTL_PRINT_UNKNOWN: "1" },
+      );
+      expect(unknownInstall.status).toBe(1);
+      expect(unknownInstall.stderr).toContain("launchd_service_state_unknown");
+      expect(existsSync(plistPath)).toBe(false);
+
+      writeFileSync(launchctlState, "absent\n");
+      const failedEnableCleanup = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        {
+          ...sharedEnv,
+          LAUNCHCTL_FAIL_ENABLE: "1",
+          LAUNCHCTL_FAIL_BOOTOUT: "1",
+        },
+      );
+      expect(failedEnableCleanup.status).toBe(1);
+      expect(failedEnableCleanup.stderr).toContain("launchd_enable_cleanup_failed");
+      expect(existsSync(plistPath)).toBe(true);
+      expect(readFileSync(launchctlState, "utf8").trim()).toBe("loaded");
+
+      const unknownStatus = runProdWatchFromCheckout(
+        ["scheduler", "status"],
+        runtimeRoot,
+        checkoutRoot,
+        { ...sharedEnv, LAUNCHCTL_PRINT_UNKNOWN: "1" },
+      );
+      expect(unknownStatus.status).toBe(0);
+      expect(JSON.parse(unknownStatus.stdout)).toMatchObject({
+        loaded: null,
+        launchdState: "unknown",
+      });
 
       writeFileSync(plistPath, "operator-owned\n", { mode: 0o600 });
       const unmanagedUninstall = runProdWatchFromCheckout(
@@ -930,6 +1332,7 @@ describe("production-watch static safety contracts", () => {
       expect(readFileSync(plistPath, "utf8")).toBe("operator-owned\n");
 
       writeFileSync(plistPath, "<!-- murph-prod-watch-managed:v1 -->\n", { mode: 0o600 });
+      writeFileSync(launchctlState, "loaded\n");
       const managedUninstall = runProdWatchFromCheckout(
         ["scheduler", "uninstall"],
         runtimeRoot,
@@ -976,6 +1379,47 @@ describe("production-watch static safety contracts", () => {
 
 function buildFixtureSnapshot(name: "healthy" | "suspicious", now: Date): ProductionWatchSnapshot {
   return buildFromEvidence(readFixture(name), now);
+}
+
+function buildCompleteSnapshot(now: Date): ProductionWatchSnapshot {
+  const provider = parseProviderEvidence(JSON.parse(
+    readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+  ) as unknown);
+  return buildSnapshot({
+    now,
+    runId: "test-complete-run",
+    mode: "collect",
+    dryRun: true,
+    startedAt: new Date(now.getTime() - 100),
+    timeoutMs: 240000,
+    skippedOverlap: false,
+    previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+    currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+    end: now,
+    lookbackMinutes: 15,
+    settlingDelaySeconds: 0,
+    configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+    evidences: [
+      rebaseEvidence(readFixture("healthy"), now),
+      ...provider.sources.map((source) => rebaseEvidence(source, now)),
+    ],
+    failures: [],
+  });
+}
+
+function buildPromotedSuspiciousState() {
+  const initial = createInitialState(
+    new Date("2026-08-09T19:55:00.000Z"),
+    ["database", "vercel", "cloudflare", "stripe"],
+  );
+  const first = updateStateFromSnapshot(
+    initial,
+    buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z")),
+  ).state;
+  return updateStateFromSnapshot(
+    first,
+    buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:05:00.000Z")),
+  ).state;
 }
 
 function buildFromEvidence(evidence: AdapterEvidence, now: Date): ProductionWatchSnapshot {
