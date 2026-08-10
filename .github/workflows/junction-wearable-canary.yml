@@ -53,31 +53,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install Codex CLI for hosted-local model catalog
+      - name: Expose pinned workspace Codex CLI for hosted-local model catalog
         shell: bash
         run: |
           set -euo pipefail
 
-          codex_cli_version="$(
-            sed -n 's/^ARG CODEX_CLI_VERSION=//p' Dockerfile.cloudflare-hosted-runner-base | tail -n 1
-          )"
-          if [[ -z "${codex_cli_version}" ]]; then
-            echo "Missing CODEX_CLI_VERSION in Dockerfile.cloudflare-hosted-runner-base" >&2
-            exit 1
-          fi
-
-          npm_prefix="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/hosted-local-codex-npm"
-          mkdir -p "${npm_prefix}"
-          npm install \
-            --prefix "${npm_prefix}" \
-            --global \
-            --omit=dev \
-            --no-audit \
-            --no-fund \
-            --ignore-scripts \
-            "@openai/codex@${codex_cli_version}"
-          echo "${npm_prefix}/bin" >> "$GITHUB_PATH"
-          "${npm_prefix}/bin/codex" --version
+          codex_bin_dir="$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin"
+          echo "${codex_bin_dir}" >> "$GITHUB_PATH"
+          "${codex_bin_dir}/codex" --version
 
       - name: Install Chromium
         run: pnpm --dir apps/web exec playwright install --with-deps chromium

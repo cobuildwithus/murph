@@ -154,14 +154,16 @@ pnpm --dir packages/hosted-local-harness exec vitest run \
   test/junction-wearable-canary-workflow.test.ts
 ```
 
-The workflow must install and smoke-check the exact Codex CLI version declared
-by `Dockerfile.cloudflare-hosted-runner-base` before hosted-local model-catalog
-preparation. Keep that setup step free of Environment secrets; only the final
-browser-canary step may receive Junction sandbox authority and the dedicated
-WHOOP login. A real sign-in proof remains available only after the exact
-workflow reaches protected `main`, where non-canceling concurrency serializes
-the dedicated provider account. Do not weaken the protected-branch gate or
-expose live credentials to a pull request to obtain earlier proof.
+The workflow must expose and smoke-check the exact workspace Codex CLI installed
+by the frozen root dependency graph before hosted-local model-catalog
+preparation; the existing runner image contract keeps that dependency aligned
+with `Dockerfile.cloudflare-hosted-runner-base`. Keep that setup step free of
+Environment secrets; only the final browser-canary step may receive Junction
+sandbox authority and the dedicated WHOOP login. A real sign-in proof remains
+available only after the exact workflow reaches protected `main`, where
+non-canceling concurrency serializes the dedicated provider account. Do not
+weaken the protected-branch gate or expose live credentials to a pull request
+to obtain earlier proof.
 
 ## Verification Execution Location
 
