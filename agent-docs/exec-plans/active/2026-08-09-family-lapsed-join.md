@@ -296,10 +296,11 @@ Updated: 2026-08-10
     are byte-identical to the inspected local captures.
   - `git diff --check` passes.
 - Round 7 remediation proof on the local candidate:
-  - Nine focused unit/UI files pass with 530 tests, including immutable
-    claim-Price recovery, mismatched invoice rejection, exact old-Price invoice
-    settlement after catalog rotation, the paid-Pulse pending label, and the
-    absence of a current-price reconfirmation in the pending dialog.
+  - Nine focused unit/UI files pass with 531 tests, including immutable
+    claim-Price recovery, fail-closed missing-Price recovery before Stripe,
+    mismatched invoice rejection, exact old-Price invoice settlement after
+    catalog rotation, the paid-Pulse pending label, and the absence of a
+    current-price reconfirmation in the pending dialog.
   - The additive migration applies cleanly to the isolated worktree database.
     All six focused real-PostgreSQL orderings pass; the exact Core recovery
     ordering now rotates the configured catalog Price after selection and still
