@@ -71,7 +71,13 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // baseline + ~25-30% headroom. If a violation fires, investigate the listed
 // largest inputs first; only raise the budget deliberately for growth that
 // is understood and intended.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_000;
+//
+// Bounded Health Commons search plus the reviewed current-sender private
+// completion and response-card paths extend existing CLI/assistant chunks
+// without adding a forbidden input. Exact macOS production assembly measured
+// 9,012,752B on 2026-08-10; retain the established 32KB reviewed-addition
+// allowance above that combined baseline.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_012_752 + 32_768;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live
