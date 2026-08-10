@@ -1,6 +1,6 @@
 # Vercel cron cadence reduction
 
-Status: active — corrected candidate verified locally; publication and exact-head gates pending
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -77,7 +77,7 @@ Updated: 2026-08-09
 6. [x] Run focused Web tests, typecheck, diff, privacy, and schedule-math checks.
 7. [x] Commit and push the remediation, then update the PR body and finding
    ledger for the exact corrected head.
-8. [ ] Complete final review, exact-head CI, ReviewGPT, and plan closure.
+8. [x] Complete final review, exact-head CI, ReviewGPT, and plan closure.
 
 ## Decisions
 
@@ -123,8 +123,8 @@ Updated: 2026-08-09
   and confirmed the referral minute owner, feedback DST window, recovery
   semantics, and executable schedule proof.
 - The first final round-1 response completed below the repository trust floor
-  and was discarded. A fresh same-head round-1 audit and current-head round 2
-  remain pending.
+  and was discarded. The trusted same-head round-1 retry and current-head
+  full-snapshot round 2 both passed with no findings.
 
 ## Verification
 
@@ -135,4 +135,8 @@ Updated: 2026-08-09
 - Web typecheck passed.
 - After merging current main, the exact production cron guard passed 50 tests
   and the Family telemetry census/redaction repair passed 10 tests.
-- Pending exact-head GitHub Actions and required review gates.
+- Exact-head GitHub Actions passed on the reviewed candidate. Final ReviewGPT
+  round 2 passed with no findings, and the parent final scope/call-path review
+  found no additional issue. The documentation-only plan-closure head requires
+  the ordinary final exact-head CI confirmation.
+Completed: 2026-08-09
