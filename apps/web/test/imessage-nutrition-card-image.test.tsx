@@ -134,7 +134,10 @@ const DENSE_TABLE_CARD: CompactTablePresentationCardV1 = {
   rows: Array.from({ length: 8 }, (_, rowIndex) => ({
     label: `Exercise ${rowIndex + 1} movement pattern`,
     values: Array.from({ length: 4 }, (_, columnIndex) => {
-      const cellLength = rowIndex === 7 && columnIndex === 3 ? 17 : 22;
+      if (rowIndex === 7 && columnIndex === 3) {
+        return "Bodyweight × 16";
+      }
+      const cellLength = 22;
       return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, "x");
     }),
   })),
@@ -414,11 +417,13 @@ test("dense contract-valid tables wrap every value into measured row height", as
   const [imageTree, init] = getImageResponseCall();
   const expectedSize = getCompactTableCardImageSize(DENSE_TABLE_CARD);
   assert.equal(init.height, expectedSize.height);
-  assert.ok(expectedSize.height > 1_120);
+  assert.ok(expectedSize.height > 1_000);
   const serialized = renderToStaticMarkup(imageTree);
-  assert.match(serialized, /data-card-text-lines="4"/u);
+  assert.match(serialized, /data-card-text-lines="2"/u);
   assert.match(serialized, /white-space:pre-wrap/u);
-  assert.match(serialized, /11xxxx\nxxxxxx\nxxxxx/u);
+  assert.match(serialized, /Bodyweight ×\n16/u);
+  assert.doesNotMatch(serialized, /Bodywe\night/u);
+  assert.match(serialized, /1xxxxxxxxxxx\nxxxxxxxxxx/u);
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {

@@ -113,6 +113,13 @@ Success criteria:
   and reserved header gutter that the corrected nutrition raster had already
   removed. The shared renderer now follows the same provider-owned chrome
   contract, while inner progress and set-state rounding remain unchanged.
+- Accepted from PR #1576's preliminary specialist pass: the existing
+  character-count wrapper split ordinary words that fit within a value column,
+  including `Bodyweight`. The renderer now measures a deterministic
+  font-aligned word candidate before wrapping and reserves grapheme-aware hard
+  breaks for genuinely overwide tokens. Focused coverage proves both paths,
+  and the 390px catalog study uses a smaller preview scale so the final column
+  remains visible.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. PR #1502 merged externally before that gate closed; the follow-up must stay draft until the missing evidence is captured.
 
@@ -173,6 +180,12 @@ Success criteria:
   capture with legible content and no overflow. The required Claude UI
   double-check was attempted, but Fable reported explicit usage-credit
   exhaustion, so no substitute review was run.
+- The accepted word-wrapping remediation passed the same 12-test Web
+  route/render suite, Web typecheck, and scoped Web ESLint. Fresh direct PNG
+  proof keeps `Bodyweight ×` intact while moving only the trailing count, and
+  the updated 390px design-catalog capture preserves all four value columns.
+  Both updated catalog captures were inspected locally and through the hosted
+  lossless design-proof variant.
 
 ## Parent product-experience revalidation
 
@@ -183,7 +196,7 @@ real Messages transcript badge, bubble sizing, forwarding, composer insertion,
 offline reopening, static-image failure behavior, accessibility behavior, or
 App Store affordance on macOS and an iPhone without the extension. Those checks
 remain an explicit physical-device release gate rather than a claim of current
-proof. Hosted desktop/mobile catalog screenshots also remain open while the
-in-app browser has no usable tab.
+proof. Hosted desktop/mobile catalog screenshots now cover the synthetic Web
+component, but cannot substitute for that provider-owned physical-device chrome.
 
 The plan remains active until the native V4 reader is released before broad backend V4 emission.

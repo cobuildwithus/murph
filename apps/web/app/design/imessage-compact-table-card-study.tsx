@@ -128,12 +128,9 @@ export function ImessageCompactTableCardStudy() {
       <div className="flex flex-col gap-5 sm:hidden">
         <ScaledCompactTableCard
           card={SYNTHETIC_TARGETLESS_WORKOUT_CARD}
-          scale={0.285}
+          scale={0.25}
         />
-        <ScaledCompactTableCard
-          card={SYNTHETIC_DENSE_TABLE_CARD}
-          scale={0.285}
-        />
+        <ScaledCompactTableCard card={SYNTHETIC_DENSE_TABLE_CARD} scale={0.25} />
       </div>
     </div>
   );
