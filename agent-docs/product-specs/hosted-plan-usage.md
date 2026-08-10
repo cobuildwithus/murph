@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 Status: Implemented current-state contract
 
 ## Goal
@@ -551,6 +551,20 @@ through an authenticated fixed-pack page; anonymous funding remains
 unimplemented.
 
 ## Deployment
+
+The non-expiring Starter contract is a strict Web/runtime schema hard cut. The
+new Web response uses `accessKind: starter`, `planName: Starter`, and
+`periodKind: lifetime`; the new runner no longer accepts the retired trial
+values. Neither direction is compatible across the cut. Pause affected hosted
+usage before applying the Starter migrations, then deploy Web and the
+Cloudflare Worker/runner bundle from the same commit while the path remains
+paused. The Cloudflare deploy must use `container_rollout=immediate`. Resume
+only after managed-container smoke reports that commit's exact runner-bundle
+fingerprint and a signed `murph.plan_usage` read proves an active or exhausted
+Starter response through the deployed adapter. Also verify one exact eligible
+subscription quote before normal processing resumes. If the cutover fails,
+keep the path paused and roll Web and Cloudflare back to the same compatible
+pair; never roll back either plane independently.
 
 For the capacity-epoch change, deploy the assistant runtime that timestamps
 every provider operation at its own request start, then wait for work accepted
