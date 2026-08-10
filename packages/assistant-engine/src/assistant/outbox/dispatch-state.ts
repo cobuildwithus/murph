@@ -967,6 +967,7 @@ function sameAssistantDeliveryProviderMessageEffects(
     normalizedLeft.every((effect, index) => {
       const other = normalizedRight[index]
       return other !== undefined &&
+        effect.carriesIntentMedia === other.carriesIntentMedia &&
         effect.providerMessageId === other.providerMessageId &&
         effect.message === other.message
     })

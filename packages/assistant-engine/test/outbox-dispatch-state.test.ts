@@ -21,6 +21,7 @@ import {
   markAssistantOutboxIntentMirrorTerminal,
   persistAssistantOutboxIntentLinqAppCardTextFallback,
   resetAssistantOutboxPreparedDispatch,
+  sameAssistantChannelDelivery,
   updateAssistantOutboxAfterDispatchFailure,
 } from '../src/assistant/outbox/dispatch-state.ts'
 import { resolveAssistantOutboxIntentPath } from '../src/assistant/outbox/intents.ts'
@@ -36,6 +37,33 @@ type AssistantMessageChannelDelivery = Extract<
   AssistantChannelDelivery,
   { kind?: 'message' }
 >
+
+it('distinguishes physical media ownership in delivery equality', () => {
+  const delivery = {
+    channel: 'linq',
+    idempotencyKey: 'delivery-media-owner',
+    messageLength: 0,
+    providerMessageEffects: [{
+      message: null,
+      providerMessageId: 'provider-message-media-owner',
+    }],
+    providerMessageId: 'provider-message-media-owner',
+    providerMessageIds: ['provider-message-media-owner'],
+    providerThreadId: 'thread-media-owner',
+    sentAt: '2030-04-13T00:30:00.000Z',
+    target: 'thread-media-owner',
+    targetKind: 'thread',
+  } satisfies AssistantChannelDelivery
+
+  expect(sameAssistantChannelDelivery(delivery, {
+    ...delivery,
+    providerMessageEffects: [{
+      carriesIntentMedia: true,
+      message: null,
+      providerMessageId: 'provider-message-media-owner',
+    }],
+  })).toBe(false)
+})
 
 const OUTBOX_RESPONSE_CARD = {
   kind: 'daily_nutrition',

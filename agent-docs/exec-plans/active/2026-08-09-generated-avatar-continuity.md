@@ -207,6 +207,17 @@ Updated: 2026-08-10
   live-provider cases skipped behind their credential gate, the 64-test
   Operator Config Linq runtime file, and both affected package typechecks.
   After removing redundant projection code instead of raising a ratchet, exact
-  hosted-local assembly passes at 8,999,571-byte vault CLI total and a
-  1,659,616-byte runner entry, 8,018,897-byte static closure, and 9,996,715-byte
+  hosted-local assembly passes at 8,999,629-byte vault CLI total and a
+  1,659,616-byte runner entry, 8,018,955-byte static closure, and 9,996,773-byte
   runner total.
+- Exact-head CI exposed the expected downstream generated-artifact seam: the
+  provider-effect schema changed the built CLI fingerprint, but the tracked
+  Vault CLI skill hash still described the previous tree. The canonical Incur
+  generator changed only `vault-cli-skill-hash.generated.ts`; exact package
+  shape verification and the two focused skill-hash tests pass. The stale-head
+  ReviewGPT run was stopped before a result and will restart on the corrected
+  pushed head.
+- Delivery equality now compares the optional media-owner fact so mirror
+  reconciliation cannot treat marked and unmarked physical effects as the same
+  persisted result. Its focused 29-test dispatch-state file and the Assistant
+  Engine typecheck pass.
