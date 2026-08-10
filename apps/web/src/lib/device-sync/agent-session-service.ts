@@ -37,6 +37,12 @@ import {
   persistProviderTokenRefreshErrorStatus,
   refreshProviderTokens,
 } from "./agent-session-token-refresh";
+import {
+  resolveDeviceProviderApplicationForConnection,
+} from "./provider-applications";
+import {
+  createHostedDeviceSyncRegistryWithProviderConfigs,
+} from "./providers";
 import { toIsoTimestamp } from "./shared";
 
 export type { HostedTokenExport } from "./agent-session-token-bundle";
@@ -557,7 +563,11 @@ export class HostedDeviceSyncAgentSessionService {
       return currentRefreshState;
     }
 
-    const provider = await this.requireConfiguredRefreshProvider(currentRefreshState.account.provider);
+    const provider = await this.requireConfiguredRefreshProvider({
+      connectionId: input.connectionId,
+      providerId: currentRefreshState.account.provider,
+      userId: input.session.userId,
+    });
     const leasedRefreshState = await this.claimRefreshLeaseOrResolveCurrent({
       ...input,
       currentRefreshState,
@@ -1139,13 +1149,27 @@ export class HostedDeviceSyncAgentSessionService {
     return this.registry;
   }
 
-  private async requireConfiguredRefreshProvider(providerId: string): Promise<DeviceSyncProvider> {
-    const provider = (await this.requireRegistry()).get(providerId);
+  private async requireConfiguredRefreshProvider(input: {
+    connectionId: string;
+    providerId: string;
+    userId: string;
+  }): Promise<DeviceSyncProvider> {
+    const application = await resolveDeviceProviderApplicationForConnection({
+      connectionId: input.connectionId,
+      memberId: input.userId,
+      prisma: this.store.prisma,
+    });
+    const registry = application
+      ? createHostedDeviceSyncRegistryWithProviderConfigs({
+          providerConfigs: application.providerConfigs,
+        })
+      : await this.requireRegistry();
+    const provider = registry.get(input.providerId);
     if (!provider) {
       throw deviceSyncError({
         code: "PROVIDER_NOT_CONFIGURED",
         message:
-          `Hosted device-sync provider ${providerId} is not configured in the shared device-sync provider registry.`,
+          `Hosted device-sync provider ${input.providerId} is not configured for this connection.`,
         retryable: false,
         httpStatus: 404,
       });

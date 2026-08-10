@@ -20,6 +20,7 @@ import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
+import type { DeviceProviderApplicationBinding } from "./provider-applications/types";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
 import { PrismaHostedConnectionStore } from "./prisma-store/connections";
@@ -145,6 +146,22 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.oauthSessions.createOAuthState(input);
   }
 
+  async createOAuthStateWithProviderApplication(
+    input: OAuthStateRecord,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<OAuthStateRecord> {
+    return this.oauthSessions.createOAuthStateWithProviderApplication(input, binding);
+  }
+
+  async readOAuthStateProviderApplicationBinding(input: {
+    expectedOwnerId: string;
+    expectedProvider: string;
+    now: string;
+    state: string;
+  }): Promise<DeviceProviderApplicationBinding | null> {
+    return this.oauthSessions.readOAuthStateProviderApplicationBinding(input);
+  }
+
   async consumeOAuthState(
     state: string,
     now: string,
@@ -162,6 +179,13 @@ export class PrismaDeviceSyncControlPlaneStore
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     return this.connections.upsertConnectionWithPrevious(input);
+  }
+
+  async upsertConnectionWithProviderApplication(
+    input: UpsertPublicDeviceSyncConnectionInput,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    return this.connections.upsertConnectionWithProviderApplication(input, binding);
   }
 
   async markConnectionSetupFailed(
