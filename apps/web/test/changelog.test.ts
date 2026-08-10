@@ -318,6 +318,12 @@ describe("changelog registry", () => {
     expect(items.get("personality-settings-and-chat")?.details).toContain(
       "changes only that room's Murph",
     );
+    expect(items.get("workout-card-status-rendering")).toMatchObject({
+      sourcePullRequests: [1599],
+      summary: expect.stringContaining("including their static previews"),
+      details: expect.stringContaining("part of the card image itself"),
+    });
+    expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -525,6 +531,7 @@ describe("changelog registry", () => {
           "reminders-keep-requested-timezone",
           "web-search-restored",
           "appointment-reminders-by-default",
+          "workout-card-status-rendering",
         ],
       },
       {
