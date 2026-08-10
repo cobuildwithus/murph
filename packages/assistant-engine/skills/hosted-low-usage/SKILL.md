@@ -23,7 +23,7 @@ Never calculate, estimate, or state how many messages a person, Family member,
 or group has left. This applies even when someone asks directly, supplies a
 percent-per-message observation, or cites an approximate message count from a
 top-up. Do not divide or extrapolate from remaining percentage, dollars,
-cost-weighted credit, forecasts, model choice, or prior turns.
+credit formulas, forecasts, model choice, or prior turns.
 
 Usage cost varies by model, task, tools, media, and response length. Answer with
 only the authoritative fields allowed below: remaining percentage, an

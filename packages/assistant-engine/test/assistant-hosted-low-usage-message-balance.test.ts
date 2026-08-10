@@ -24,7 +24,7 @@ describe('assistant hosted low-usage message-balance policy', () => {
       'even when someone asks directly, supplies a percent-per-message observation',
     )
     expect(normalizedSkill).toContain(
-      'Do not divide or extrapolate from remaining percentage, dollars, cost-weighted credit, forecasts, model choice, or prior turns.',
+      'Do not divide or extrapolate from remaining percentage, dollars, credit formulas, forecasts, model choice, or prior turns.',
     )
     expect(normalizedSkill).toContain(
       'Answer with only the authoritative fields allowed below: remaining percentage, an applicable monthly reset date, or days forecast.',
