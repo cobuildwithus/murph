@@ -58,4 +58,13 @@ describe('appointment reminder system prompt', () => {
     expect(prompt).not.toContain('Private appointment follow-through:')
     expect(prompt).not.toContain('exactly one one-shot reminder')
   })
+
+  it('does not attach personal appointment reminder policy to an unverified external audience', () => {
+    const prompt = buildAssistantSystemPrompt(
+      createPromptInput('unverified-external'),
+    )
+
+    expect(prompt).not.toContain('Private appointment follow-through:')
+    expect(prompt).not.toContain('exactly one one-shot reminder')
+  })
 })
