@@ -1,8 +1,8 @@
 # Generated image avatar continuity
 
-Status: active — accepted review findings remediated locally
+Status: active — ReviewGPT round 2 remediation awaiting exact-head review
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -142,3 +142,18 @@ Updated: 2026-08-09
   forbidden boot input. The static and total ratchets now use those exact
   measurements with the established cross-platform and 32 KiB reviewed-change
   allowances; the 42-test bundle-policy suite and exact assembly both passed.
+- Final ReviewGPT round 2 found that Linq's ordinary generated-image delivery
+  persists the image alt text as a non-null provider message effect, while the
+  reply resolver used a null message as the gate for exact generated-image
+  provenance. The recorded retrospective kept the existing outbox, transcript,
+  and media owners and reset the invariant: visible fallback text must not erase
+  the provider-message-to-exact-media binding.
+- The remediation deletes that null-message gate and resolves a matching
+  runtime-authored marker before falling back to quoted text. A
+  production-shaped regression now creates and dispatches two private images
+  with the same ordinary alt text through the real attachment-upload and Linq
+  send path, reads their persisted provider effects, and proves a native reply
+  to the first delivery exposes only its exact ref and hash while retaining the
+  bounded visible text. The focused regression, full 68-test event-path file,
+  seven-file affected suite (317 passed, 35 credential-gated skipped), and
+  Assistant Engine typecheck pass.

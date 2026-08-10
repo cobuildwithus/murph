@@ -558,7 +558,7 @@ describe('assistant auto-reply event-first path', () => {
   it('binds an exact native reply to the first of two generated captures', async () => {
     const vault = await createTempVault()
     const firstMedia = {
-      alt: 'First generated avatar',
+      alt: 'Generated image',
       contentType: 'image/png',
       filename: 'first-avatar.png',
       kind: 'vault_image',
@@ -569,7 +569,6 @@ describe('assistant auto-reply event-first path', () => {
     } as const
     const secondMedia = {
       ...firstMedia,
-      alt: 'Second generated avatar',
       filename: 'second-avatar.png',
       ref: 'raw/captures/2026/08/second-avatar/second-avatar.png',
       sha256: '2'.repeat(64),
@@ -603,29 +602,114 @@ describe('assistant auto-reply event-first path', () => {
         }),
       },
     ])
-    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
-      createOutboxMessage({
+    let attachmentCount = 0
+    let messageCount = 0
+    const fetchImplementation = vi.fn(async (request, init) => {
+      const url = String(request)
+      if (url.endsWith('/attachments')) {
+        attachmentCount += 1
+        return new Response(JSON.stringify({
+          attachment_id: `attachment-generated-avatar-${attachmentCount}`,
+          expires_at: '2026-08-07T21:20:00.000Z',
+          http_method: 'PUT',
+          required_headers: {
+            'content-type': 'image/png',
+          },
+          upload_url:
+            `https://uploads.example.test/generated-avatar-${attachmentCount}`,
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.startsWith('https://uploads.example.test/generated-avatar-')) {
+        expect(init?.method).toBe('PUT')
+        return new Response(null, { status: 204 })
+      }
+      if (url.endsWith('/chats/thread-1/messages')) {
+        messageCount += 1
+        return new Response(JSON.stringify({
+          message: {
+            id: messageCount === 1
+              ? 'linq-msg-first-generated-avatar'
+              : 'linq-msg-second-generated-avatar',
+          },
+        }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected Linq request: ${init?.method} ${url}`)
+    })
+    const sendLinq = vi.fn(async (request) => await sendLinqMessage(request, {
+      env: {
+        LINQ_API_BASE_URL: 'https://linq.example.test/api/partner/v3',
+        LINQ_API_TOKEN: 'linq-token',
+      },
+      fetchImplementation,
+      loadVaultImage: async (media) => new Uint8Array(media.sizeBytes),
+    }))
+    const createAndDispatch = async (input: {
+      createdAt: string
+      dedupeToken: string
+      media: typeof firstMedia | typeof secondMedia
+      turnId: string
+    }) => {
+      const intent = await createAssistantOutboxIntent({
         channel: 'linq',
-        intentId: 'intent-first-generated-avatar',
-        media: [firstMedia],
+        createdAt: input.createdAt,
+        dedupeToken: input.dedupeToken,
+        explicitTarget: 'thread-1',
+        identityId: 'identity-generated-avatars',
+        media: [input.media],
         message: '',
+        sessionId: 'session-generated-avatars',
+        threadId: 'thread-1',
+        threadIsDirect: false,
+        turnId: input.turnId,
+        vault,
+      })
+      const dispatched = await dispatchAssistantOutboxIntent({
+        dependencies: { sendLinq },
+        force: true,
+        intentId: intent.intentId,
+        now: new Date(input.createdAt),
+        vault,
+      })
+      expect(dispatched.intent.status).toBe('sent')
+      const persisted = await readAssistantOutboxIntent(vault, intent.intentId)
+      if (!persisted) {
+        throw new Error('expected persisted generated-image Linq delivery')
+      }
+      return persisted
+    }
+    const firstDelivery = await createAndDispatch({
+      createdAt: '2026-08-07T21:08:00.000Z',
+      dedupeToken: 'first-generated-avatar',
+      media: firstMedia,
+      turnId: 'turn-first-generated-avatar',
+    })
+    const secondDelivery = await createAndDispatch({
+      createdAt: '2026-08-07T21:09:00.000Z',
+      dedupeToken: 'second-generated-avatar',
+      media: secondMedia,
+      turnId: 'turn-second-generated-avatar',
+    })
+    expect(attachmentCount).toBe(2)
+    expect(messageCount).toBe(2)
+    expect(firstDelivery.delivery).toMatchObject({
+      providerMessageEffects: [{
+        message: 'Generated image',
         providerMessageId: 'linq-msg-first-generated-avatar',
-        sentAt: '2026-08-07T21:08:00.000Z',
-        sessionId: 'session-generated-avatars',
-        target: 'thread-1',
-        turnId: 'turn-first-generated-avatar',
-      }),
-      createOutboxMessage({
-        channel: 'linq',
-        intentId: 'intent-second-generated-avatar',
-        media: [secondMedia],
-        message: '',
+      }],
+    })
+    expect(secondDelivery.delivery).toMatchObject({
+      providerMessageEffects: [{
+        message: 'Generated image',
         providerMessageId: 'linq-msg-second-generated-avatar',
-        sentAt: '2026-08-07T21:09:00.000Z',
-        sessionId: 'session-generated-avatars',
-        target: 'thread-1',
-        turnId: 'turn-second-generated-avatar',
-      }),
+      }],
+    })
+    replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
+      firstDelivery,
+      secondDelivery,
     ])
     const reply = createLinqGroupCandidate({
       inputId: 'ain_17171717171717171717171717171717',
@@ -653,6 +737,8 @@ describe('assistant auto-reply event-first path', () => {
     expect(prompt).toContain(firstMedia.sha256)
     expect(prompt).not.toContain(secondMedia.ref)
     expect(prompt).not.toContain(secondMedia.sha256)
+    expect(prompt).toContain('Visible text sent with that image:')
+    expect(prompt).toContain('Generated image')
     expect(prompt).toContain('no effect authority')
     expect(replyEventPathMocks.listAssistantTranscriptEntries)
       .toHaveBeenCalledTimes(1)
