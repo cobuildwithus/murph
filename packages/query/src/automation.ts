@@ -12,6 +12,7 @@ import {
   automationScheduleKindValues,
   automationStatusValues,
   automationSupportKindValues,
+  normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
   VAULT_LAYOUT,
   type AutomationAssistantTargetOverride,
@@ -67,6 +68,7 @@ export interface AutomationQueryRecord {
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
+  scheduleAnchorAt?: string;
   updatedAt: string;
   instructions: string;
   relativePath: string;
@@ -177,10 +179,20 @@ function assertDeviceActivityCursorShape(input: {
   }
 }
 
-function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
-  if (Object.hasOwn(object, "timeZone")) {
-    throw new Error("schedule.timeZone is not supported for canonical automation schedules.");
+function normalizeRecurringScheduleTimeZone(
+  object: Record<string, unknown>,
+): string | undefined {
+  if (!Object.hasOwn(object, "timeZone") || object.timeZone === undefined) {
+    return undefined;
   }
+
+  const timeZone = requireStringValue(object.timeZone, "schedule.timeZone");
+  const normalized = normalizeIanaTimeZone(timeZone);
+  if (normalized === null) {
+    throw new Error("schedule.timeZone must be a valid IANA timezone.");
+  }
+
+  return normalized;
 }
 
 function normalizeAutomationStatus(value: unknown): AutomationStatus {
@@ -268,23 +280,26 @@ function normalizeAutomationSchedule(value: unknown): AutomationSchedule {
         everyMs,
       };
     }
-    case "cron":
-      rejectRecurringScheduleTimeZone(object);
+    case "cron": {
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
       return {
         kind,
         expression: requireStringValue(object.expression, "schedule.expression"),
+        ...(timeZone === undefined ? {} : { timeZone }),
       };
+    }
     case "dailyLocal": {
       const localTime = requireStringValue(object.localTime, "schedule.localTime");
       if (!dailyLocalTimePattern.test(localTime)) {
         throw new Error("schedule.localTime must use HH:MM format.");
       }
 
-      rejectRecurringScheduleTimeZone(object);
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
 
       return {
         kind,
         localTime,
+        ...(timeZone === undefined ? {} : { timeZone }),
       };
     }
     case "deviceActivity": {
@@ -480,6 +495,7 @@ function parseAutomationRecord(
   ) {
     throw new Error("activeUntil must be after schedule.at for a one-shot automation.");
   }
+  const createdAt = requireStringValue(attributes.createdAt, "createdAt");
 
   return {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
@@ -498,7 +514,11 @@ function parseAutomationRecord(
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),
-    createdAt: requireStringValue(attributes.createdAt, "createdAt"),
+    createdAt,
+    scheduleAnchorAt: requireStringValue(
+      attributes.scheduleAnchorAt ?? createdAt,
+      "scheduleAnchorAt",
+    ),
     updatedAt: requireStringValue(attributes.updatedAt, "updatedAt"),
     instructions: normalizeInstructions(parsed.body),
     relativePath,

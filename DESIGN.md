@@ -588,10 +588,10 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
 - Dynamic OG image: `apps/web/app/opengraph-image.tsx` (1200×630, Fraunces + DM Sans, hero.jpg background)
-- Static iMessage nutrition image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200×568, DM Sans, immutable bounded snapshot)
+- Static iMessage response-card image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200px wide, content-sized, DM Sans, immutable bounded V1-V4 snapshot)
 - Canonical hero image: `apps/web/public/hero.jpg` (3583×2000)
 - Supporting texture: `apps/web/public/warmglow.png` (1376×768)
-- Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`)
+- Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`; nutrition and compact-table image studies live on the components tab)
 
 ### Photography
 Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunrise/sunset light, soft haze, low-contrast tonal transitions. One person held small in frame, off-center near an edge; preserve a calm side for copy. Use `public/hero.jpg` as the reference image when continuity matters.
@@ -605,6 +605,12 @@ Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunr
 > Create an ultra-wide social header for Murph. Keep a lone figure small on the right side of the frame and leave a calm, open copy area on the left. Use soft golden-hour light, low-contrast atmosphere, and a grounded natural landscape. The image should feel warm, spacious, and quietly intelligent, not epic or motivational.
 
 Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room for copy, (3) real place with real light, (4) quiet human presence, (5) still feels like Murph without the logo.
+
+### Personal Patterns Matrix
+
+Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and next-day outcomes on columns. Circle size shows the size of the difference. Fill color shows the evidence stage: amber for a new clue, sage for a link seen again, and dark sage with a ring for a link worth testing. The plus or minus sign shows direction. Color must not label higher values as good or lower values as bad.
+
+Keep the copy observational. Use “lined up with” or “was associated with.” Never use “caused,” “proved,” or a moral label. Show matched-day counts and comparison means in the cell detail. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 
 ## 6. Do's and Don'ts
 

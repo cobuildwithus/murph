@@ -5984,6 +5984,10 @@
                                   "maximum": 9007199254740991,
                                   "description": "One-based set order. Read the active workout and pass it explicitly."
                                 },
+                                "requireExistingSet": {
+                                  "description": "Fail instead of appending when the selected set no longer exists.",
+                                  "type": "boolean"
+                                },
                                 "type": {
                                   "type": "string",
                                   "enum": [
@@ -10565,6 +10569,36 @@
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 30
+                        }
+                      }
+                    }
+                  }
+                },
+                "patterns": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "date": {
+                          "description": "Optional last action date in YYYY-MM-DD form. Defaults to today.",
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                        },
+                        "windowDays": {
+                          "default": 120,
+                          "description": "Calendar-day window for matched personal patterns. Defaults to 120 days.",
+                          "type": "integer",
+                          "minimum": 28,
+                          "maximum": 366
                         }
                       }
                     }

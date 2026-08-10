@@ -36,6 +36,7 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   applyMurphManagedAutomations,
+  getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
@@ -45,6 +46,7 @@ import {
   readAssistantInputEvent,
   readAssistantOutboxIntent,
   refreshReminderAvailability,
+  resolveAssistantCronDefaultTimeZoneProjection,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -1548,10 +1550,11 @@ function createHostedAssistantAutomationTool(input: {
           title: request.title,
           vaultRoot: input.vaultRoot,
         });
-        return buildHostedAutomationToolResponse({
+        return await buildHostedAutomationToolResponse({
           action: "save",
           result,
           routeBinding: "current_conversation",
+          vaultRoot: input.vaultRoot,
         });
       }
 
@@ -1617,12 +1620,13 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.title === undefined ? {} : { title: request.title }),
         vaultRoot: input.vaultRoot,
       });
-      return buildHostedAutomationToolResponse({
+      return await buildHostedAutomationToolResponse({
         action: "patch",
         result,
         routeBinding: request.retargetToCurrentConversation === true
           ? "current_conversation"
           : "preserved",
+        vaultRoot: input.vaultRoot,
       });
     },
   };
@@ -1784,18 +1788,74 @@ function assertActiveHostedAutomationRoute(input: {
   }
 }
 
-function buildHostedAutomationToolResponse(input: {
+async function buildHostedAutomationToolResponse(input: {
   action: "patch" | "save";
   result: Awaited<ReturnType<typeof upsertAutomation>>;
   routeBinding: "current_conversation" | "preserved";
-}): Awaited<ReturnType<HostedAssistantAutomationTool["request"]>> {
+  vaultRoot: string;
+}): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
+  const schedule = input.result.record.schedule;
+  let effectiveTimeZone =
+    schedule.kind === "cron" || schedule.kind === "dailyLocal"
+      ? schedule.timeZone ?? null
+      : null;
+  let nextOccurrenceAt: string | null = null;
+  let timingVerified = true;
+  let defaultTimeZone: string | undefined;
+  if (schedule.kind !== "deviceActivity") {
+    const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
+      input.vaultRoot,
+    );
+    defaultTimeZone = timeZoneProjection.timeZone;
+    if (
+      (schedule.kind === "cron" || schedule.kind === "dailyLocal")
+      && effectiveTimeZone === null
+    ) {
+      effectiveTimeZone = timeZoneProjection.timeZone;
+      if (!timeZoneProjection.vaultTimeZoneVerified) {
+        timingVerified = false;
+      }
+    }
+  }
+  if (
+    input.result.record.status !== "archived"
+    && schedule.kind !== "deviceActivity"
+  ) {
+    try {
+      if (defaultTimeZone === undefined) {
+        throw new Error("Automation timing projection requires a default timezone.");
+      }
+      const projection = await getAssistantCronAutomationTimingProjection(
+        input.vaultRoot,
+        input.result.record.relativePath,
+        defaultTimeZone,
+      );
+      const { job } = projection;
+      nextOccurrenceAt = projection.nextOccurrenceAt;
+      if (!projection.occurrenceVerified) {
+        timingVerified = false;
+      }
+      if (
+        job.updatedAt !== input.result.record.updatedAt
+        || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
+      ) {
+        timingVerified = false;
+      }
+    } catch {
+      timingVerified = false;
+    }
+  }
   return {
     action: input.action,
     automationId: input.result.record.automationId,
     created: input.result.created,
+    effectiveTimeZone,
     lookupId: input.result.record.slug,
+    nextOccurrenceAt,
     routeBinding: input.routeBinding,
+    schedule,
     status: input.result.record.status,
+    timingVerified,
   };
 }
 

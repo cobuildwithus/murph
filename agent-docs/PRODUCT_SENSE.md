@@ -181,9 +181,9 @@ default destination for every goal or the definition of activation.
 - connected health records and device data
 - private experiment runs and outcome cards when the experiment primitive is
   used
-- private-direct nutrition cards whose installed-iPhone presentation is native
-  and whose macOS or app-absent presentation remains a complete, legible static
-  image with compact native context beneath it
+- private-direct nutrition and compact-table cards whose installed-iPhone
+  presentation is native and whose macOS or app-absent presentation remains a
+  complete, legible static image with full semantic context beneath it
 - explicitly shared group contexts with scope and consent
 - public Health Commons protocols and sources, with aggregate outcomes as a
   future contribution-backed layer

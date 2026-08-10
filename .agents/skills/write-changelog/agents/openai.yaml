@@ -1,0 +1,4 @@
+interface:
+  display_name: "Write Changelog"
+  short_description: "Publish complete, visual Murph release notes"
+  default_prompt: "Use $write-changelog to turn shipped Murph changes into a complete visual changelog edition."
