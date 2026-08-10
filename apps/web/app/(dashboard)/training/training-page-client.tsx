@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
 import {
   Check,
   ChevronDown,
@@ -46,12 +47,34 @@ export default function TrainingPageClient({
 }) {
   const { error, refresh, refreshPending, status } = useBrowserVault();
   const training = useBrowserVaultSelector(selectBrowserVaultTraining);
+  const refreshAfterContactRef = useRef(false);
+  const markContactHandoff = useCallback(() => {
+    refreshAfterContactRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    const refreshAfterContact = () => {
+      if (!refreshAfterContactRef.current || document.visibilityState === "hidden") {
+        return;
+      }
+      refreshAfterContactRef.current = false;
+      void refresh({ background: true, requestRuntimeRefresh: true });
+    };
+
+    window.addEventListener("focus", refreshAfterContact);
+    document.addEventListener("visibilitychange", refreshAfterContact);
+    return () => {
+      window.removeEventListener("focus", refreshAfterContact);
+      document.removeEventListener("visibilitychange", refreshAfterContact);
+    };
+  }, [refresh]);
 
   return (
     <TrainingPageView
       authenticated={authenticated}
       continueContactOptions={continueContactOptions}
       error={error}
+      onContactAction={markContactHandoff}
       onRefresh={() => void refresh()}
       refreshPending={refreshPending}
       startContactOptions={startContactOptions}
@@ -65,6 +88,7 @@ export function TrainingPageView({
   authenticated,
   continueContactOptions,
   error,
+  onContactAction,
   onRefresh,
   refreshPending,
   startContactOptions,
@@ -74,6 +98,7 @@ export function TrainingPageView({
   authenticated: boolean;
   continueContactOptions: readonly MurphContactOption[];
   error: string | null;
+  onContactAction?: () => void;
   onRefresh: () => void;
   refreshPending: boolean;
   startContactOptions: readonly MurphContactOption[];
@@ -114,6 +139,7 @@ export function TrainingPageView({
             authenticated={authenticated}
             className="w-full sm:w-auto"
             label={primaryActionLabel}
+            onContactAction={onContactAction}
             option={primaryContactOption}
           />
         ) : null}
@@ -174,6 +200,7 @@ export function TrainingPageView({
         <EmptyTraining
           authenticated={authenticated}
           contactOption={startContactOptions[0] ?? null}
+          onContactAction={onContactAction}
         />
       ) : null}
 
@@ -630,9 +657,11 @@ function ProgressValue({
 function EmptyTraining({
   authenticated,
   contactOption,
+  onContactAction,
 }: {
   authenticated: boolean;
   contactOption: MurphContactOption | null;
+  onContactAction?: () => void;
 }) {
   return (
     <section className="rounded-2xl border border-border/70 bg-card/70 px-6 py-10 md:px-10 md:py-12">
@@ -650,6 +679,7 @@ function EmptyTraining({
         authenticated={authenticated}
         className="mt-6 w-full sm:w-fit"
         label="Start workout"
+        onContactAction={onContactAction}
         option={contactOption}
       />
       <div className="mt-9 border-t border-border/70 pt-7">
@@ -703,11 +733,13 @@ function ContactAction({
   authenticated,
   className,
   label,
+  onContactAction,
   option,
 }: {
   authenticated: boolean;
   className?: string;
   label: string;
+  onContactAction?: () => void;
   option: MurphContactOption | null;
 }) {
   if (!authenticated) {
@@ -737,6 +769,7 @@ function ContactAction({
       aria-label={`${label} with ${option.label}`}
       className={cn(buttonVariants({ size: "lg" }), className)}
       href={option.href}
+      onClick={onContactAction}
       rel={option.rel}
       target={option.target}
     >
@@ -805,13 +838,23 @@ function formatTrainingSet(set: TrainingSetView): string {
           ? "Bodyweight"
           : null;
 
-  if (load && set.reps !== null) return `${load} × ${set.reps}`;
-  if (load) return load;
-  if (set.reps !== null) return `${set.reps} ${pluralize(set.reps, "rep")}`;
-  if (set.durationSeconds !== null) {
-    return formatDuration(set.durationSeconds);
+  const measurements: string[] = [];
+  if (load && set.reps !== null) {
+    measurements.push(`${load} × ${set.reps}`);
+  } else if (load) {
+    measurements.push(load);
+  } else if (set.reps !== null) {
+    measurements.push(`${set.reps} ${pluralize(set.reps, "rep")}`);
   }
-  if (set.distanceMeters !== null) return formatDistance(set.distanceMeters);
+  if (set.durationSeconds !== null) {
+    measurements.push(formatDuration(set.durationSeconds));
+  }
+  if (set.distanceMeters !== null) {
+    measurements.push(formatDistance(set.distanceMeters));
+  }
+  if (measurements.length > 0) {
+    return measurements.join(" · ");
+  }
   if (set.note) return set.note;
   return "Completed";
 }

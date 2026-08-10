@@ -493,6 +493,10 @@ function hasComparableBestMeasurement(set: TrainingSetView): boolean {
     return false;
   }
 
+  if (set.durationSeconds !== null && set.distanceMeters !== null) {
+    return false;
+  }
+
   return set.weight !== null
     || set.addedWeightKg !== null
     || set.assistanceKg !== null

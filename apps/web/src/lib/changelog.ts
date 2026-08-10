@@ -77,7 +77,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Open Training to see your active workout, recent sessions, 30-day consistency, and exercise progress from workouts already saved with Murph.",
         details:
-          "The page is read-only and intentionally stays out of Home navigation. Keep logging and changes in your private Murph conversation; while an older vault view refreshes, Training waits instead of calling saved history empty.",
+          "The page is read-only and intentionally stays out of Home navigation. Keep logging and changes in your private Murph conversation; when you return, Training checks for the saved update while keeping the last private view visible.",
         relevanceTags: ["workouts", "training", "dashboard", "privacy"],
         sourcePullRequests: [1495],
         tryIt: {

@@ -1349,6 +1349,60 @@ describe("browser vault session route", () => {
     });
   });
 
+  it("signals a requested refresh even when the known replica is current", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("b"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        knownReplicaRef: replicaRef,
+        requestRefresh: true,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      replicaRef,
+      refreshPending: true,
+      state: "not_modified",
+    });
+  });
+
+  it("rejects a malformed explicit refresh flag", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        requestRefresh: "yes",
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: {
+        code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      },
+    });
+  });
+
   it("does not return not_modified when only the dataVersion matches", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();

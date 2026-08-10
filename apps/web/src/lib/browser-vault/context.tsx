@@ -18,6 +18,7 @@ import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/bro
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 
 import { type BrowserVaultFreshness, type BrowserVaultSessionMetadata } from "./loader";
+import { browserVaultReplicaRefsMatch } from "./ref";
 import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation";
 import {
   abortBrowserVaultInFlightLoad,
@@ -31,8 +32,9 @@ import {
 
 export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
 
-const BROWSER_VAULT_STALE_POLL_INTERVAL_MS = 1_500;
-const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
+const BROWSER_VAULT_STALE_POLL_INITIAL_INTERVAL_MS = 1_500;
+const BROWSER_VAULT_STALE_POLL_MAX_INTERVAL_MS = 10_000;
+const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 210_000;
 const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   deviceSyncImportPending: false,
   freshness: "stale",
@@ -53,7 +55,10 @@ export interface BrowserVaultContextValue {
   freshness: BrowserVaultFreshness;
   ref: HostedBrowserVaultReplicaRef | null;
   refreshPending: boolean;
-  refresh(options?: { background?: boolean }): Promise<void>;
+  refresh(options?: {
+    background?: boolean;
+    requestRuntimeRefresh?: boolean;
+  }): Promise<void>;
   status: BrowserVaultStatus;
   workspaceVersion: string | null;
 }
@@ -131,8 +136,16 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const providerStartedLoadRef = useRef(false);
+  const runtimeRefreshTargetRef = useRef<HostedBrowserVaultReplicaRef | null>(null);
 
   const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
+    const awaitingRequestedReplacement = browserVaultReplicaRefsMatch(
+      runtimeRefreshTargetRef.current,
+      snapshot.ref,
+    );
+    if (runtimeRefreshTargetRef.current && !awaitingRequestedReplacement) {
+      runtimeRefreshTargetRef.current = null;
+    }
     clientRef.current = snapshot.client;
     setClient(snapshot.client);
     setRef(snapshot.ref);
@@ -140,11 +153,14 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     setError(null);
     setDeviceSyncImportPending(snapshot.metadata.deviceSyncImportPending);
     setFreshness(snapshot.metadata.freshness);
-    setRefreshPending(snapshot.metadata.refreshPending);
+    setRefreshPending(
+      snapshot.metadata.refreshPending || awaitingRequestedReplacement,
+    );
     setWorkspaceVersion(snapshot.metadata.workspaceVersion);
   }, []);
 
   const commitEmpty = useCallback((metadata: BrowserVaultSessionMetadata) => {
+    runtimeRefreshTargetRef.current = null;
     clientRef.current = null;
     setClient(null);
     setRef(null);
@@ -227,6 +243,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     async (options: {
       authorityPathname?: string;
       background?: boolean;
+      requestRuntimeRefresh?: boolean;
     } = {}) => {
       const background = options.background ?? false;
       const { authorityPathname } = options;
@@ -267,6 +284,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       const outcome = await startBrowserVaultWarmLoad({
         expectedMemberId: initialMemberId,
+        requestRefresh: options.requestRuntimeRefresh,
       });
       if (startedLoad) {
         providerStartedLoadRef.current = false;
@@ -278,17 +296,29 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         return;
       }
 
+      if (options.requestRuntimeRefresh && outcome.status === "ready") {
+        runtimeRefreshTargetRef.current = outcome.snapshot.ref;
+      }
       applyOutcome(outcome, { authorityPathname, background });
     },
     [applyOutcome, initialMemberId],
   );
 
   const refresh = useCallback(
-    async (options: { background?: boolean } = {}) => {
+    async (options: {
+      background?: boolean;
+      requestRuntimeRefresh?: boolean;
+    } = {}) => {
       await runProviderLoad(
         options.background
-          ? { background: true }
-          : { authorityPathname: pathname },
+          ? {
+              background: true,
+              requestRuntimeRefresh: options.requestRuntimeRefresh,
+            }
+          : {
+              authorityPathname: pathname,
+              requestRuntimeRefresh: options.requestRuntimeRefresh,
+            },
       );
     },
     [pathname, runProviderLoad],
@@ -352,6 +382,24 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     let cancelled = false;
     const startedAt = Date.now();
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let pollAttempt = 0;
+
+    const schedulePoll = (poll: () => void) => {
+      const remainingMs = BROWSER_VAULT_STALE_POLL_WINDOW_MS
+        - (Date.now() - startedAt);
+      if (cancelled || remainingMs <= 0) {
+        runtimeRefreshTargetRef.current = null;
+        return;
+      }
+
+      const delayMs = Math.min(
+        BROWSER_VAULT_STALE_POLL_INITIAL_INTERVAL_MS * (2 ** pollAttempt),
+        BROWSER_VAULT_STALE_POLL_MAX_INTERVAL_MS,
+        remainingMs,
+      );
+      pollAttempt += 1;
+      timeoutId = setTimeout(poll, delayMs);
+    };
 
     const poll = () => {
       if (cancelled || Date.now() - startedAt > BROWSER_VAULT_STALE_POLL_WINDOW_MS) {
@@ -359,13 +407,11 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       }
 
       void pollStaleReplica().finally(() => {
-        if (!cancelled && Date.now() - startedAt <= BROWSER_VAULT_STALE_POLL_WINDOW_MS) {
-          timeoutId = setTimeout(poll, BROWSER_VAULT_STALE_POLL_INTERVAL_MS);
-        }
+        schedulePoll(poll);
       });
     };
 
-    timeoutId = setTimeout(poll, BROWSER_VAULT_STALE_POLL_INTERVAL_MS);
+    schedulePoll(poll);
 
     return () => {
       cancelled = true;

@@ -52,6 +52,7 @@ export function createBrowserVaultSessionRoute() {
       body.knownReplicaRef ?? null,
       "Browser vault session request knownReplicaRef",
     );
+    const requestRefresh = readOptionalRequestRefresh(body.requestRefresh);
     const [workspace, deviceSyncImportPending] = await Promise.all([
       readHostedWorkspace({ userId: auth.member.id }),
       new PrismaHostedDirtyConnectionStore(prisma).hasPendingDirtyConnectionForUser(
@@ -80,7 +81,7 @@ export function createBrowserVaultSessionRoute() {
       );
     };
 
-    if (freshnessAssessment.shouldRefresh) {
+    if (freshnessAssessment.shouldRefresh || requestRefresh) {
       scheduleRefreshAfterResponse();
     }
 
@@ -102,7 +103,7 @@ export function createBrowserVaultSessionRoute() {
         replicaAad: null,
         replicaKeyEnvelope: null,
         replicaRef,
-        refreshPending: freshnessAssessment.shouldRefresh,
+        refreshPending: freshnessAssessment.shouldRefresh || requestRefresh,
         state: "not_modified",
         workspaceVersion,
       });
@@ -128,7 +129,7 @@ export function createBrowserVaultSessionRoute() {
           })),
           deviceSyncImportPending,
           freshness,
-          refreshPending: freshnessAssessment.shouldRefresh,
+          refreshPending: freshnessAssessment.shouldRefresh || requestRefresh,
           workspaceVersion,
         },
       );
@@ -194,4 +195,18 @@ async function scheduleBrowserVaultRefreshBestEffort(input: {
   } catch {
     // Browser-vault freshness is a best-effort derived read-model refresh.
   }
+}
+
+function readOptionalRequestRefresh(value: unknown): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  if (typeof value !== "boolean") {
+    throw hostedOnboardingError({
+      code: "BROWSER_VAULT_SESSION_INVALID_REQUEST",
+      message: "Browser vault session request refresh flag must be a boolean.",
+      httpStatus: 400,
+    });
+  }
+  return value;
 }

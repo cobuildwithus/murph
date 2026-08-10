@@ -54,6 +54,7 @@ export interface LoadBrowserVaultReplicaInput {
   expectedMemberId?: string | null;
   fetchImpl?: typeof fetch;
   knownReplicaRef: HostedBrowserVaultReplicaRef | null;
+  requestRefresh?: boolean;
   signal?: AbortSignal;
 }
 
@@ -76,6 +77,7 @@ export async function loadBrowserVaultReplica({
   expectedMemberId,
   fetchImpl = fetch,
   knownReplicaRef,
+  requestRefresh = false,
   signal,
 }: LoadBrowserVaultReplicaInput): Promise<BrowserVaultSessionLoadResult> {
   assertNotAborted(signal);
@@ -89,6 +91,7 @@ export async function loadBrowserVaultReplica({
       ...(authorization ? { authorization } : {}),
       browserPublicKeyJwk: publicKeyJwk,
       knownReplicaRef,
+      ...(requestRefresh ? { requestRefresh: true } : {}),
     }),
     credentials: "same-origin",
     headers: {

@@ -254,6 +254,49 @@ test("Training renders live progress, history and a continuation action for the 
   assert.match(markup, /Same weight, 8 reps/);
 });
 
+test("Training requests one runtime-owned refresh after its messaging handoff returns", async () => {
+  const refresh = vi.fn(async () => {});
+  mocks.useBrowserVault.mockReturnValue({
+    error: null,
+    refresh,
+    refreshPending: false,
+    status: "ready",
+  });
+  const rendered = await renderClientComponent(
+    createElement(TrainingPageClient, {
+      authenticated: true,
+      continueContactOptions,
+      startContactOptions,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+    await Promise.resolve();
+    assert.equal(refresh.mock.calls.length, 0);
+
+    const continueLink = [...rendered.container.querySelectorAll("a")]
+      .find((link) => link.textContent?.includes("Continue workout"));
+    assert.ok(continueLink);
+    continueLink.dispatchEvent(
+      new rendered.window.Event("click", { bubbles: true }),
+    );
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+    await Promise.resolve();
+    assert.deepEqual(refresh.mock.calls, [[{
+      background: true,
+      requestRuntimeRefresh: true,
+    }]]);
+
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+    await Promise.resolve();
+    assert.equal(refresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("Training gives a zero-data member one clear conversational start", () => {
   mocks.useBrowserVaultSelector.mockReturnValue({
     ...trainingFixture,
@@ -470,6 +513,94 @@ test("Training handles an empty active workout without presenting false zero-per
   assert.match(markup, /Tell Murph your first exercise/);
   assert.doesNotMatch(markup, /0%/);
   assert.doesNotMatch(markup, /role="progressbar"/);
+});
+
+test("Training shows both cardio measurements without calling a slower effort Best", () => {
+  const fiveMinuteSet = {
+    addedWeightKg: null,
+    assistanceKg: null,
+    bodyweightKg: null,
+    completed: true,
+    distanceMeters: 1_000,
+    durationSeconds: 300,
+    id: "cardio-five-minutes",
+    note: null,
+    order: 1,
+    reps: null,
+    rpe: null,
+    weight: null,
+    weightUnit: null,
+  };
+  const sixMinuteSet = {
+    ...fiveMinuteSet,
+    durationSeconds: 360,
+    id: "cardio-six-minutes",
+    order: 2,
+  };
+  const cardioTraining: BrowserTrainingView = {
+    ...trainingFixture,
+    activeSession: null,
+    exerciseProgress: [
+      {
+        bestSet: null,
+        id: "EX_CARDIO_ROW",
+        lastPerformedDate: "2026-08-09",
+        lastSet: sixMinuteSet,
+        name: "Row",
+        sessionCount: 1,
+        setCount: 2,
+      },
+    ],
+    recentSessions: [
+      {
+        activityType: "cardio",
+        completedSetCount: 2,
+        date: "2026-08-09",
+        durationMinutes: 11,
+        endedAt: "2026-08-09T17:11:00.000Z",
+        exerciseCount: 1,
+        exercises: [
+          {
+            id: "EX_CARDIO_ROW",
+            name: "Row",
+            note: null,
+            order: 1,
+            sets: [fiveMinuteSet, sixMinuteSet],
+            sourceExerciseId: "EX_CARDIO_ROW",
+          },
+        ],
+        id: "cardio-session",
+        note: null,
+        setCount: 2,
+        startedAt: "2026-08-09T17:00:00.000Z",
+        state: "completed",
+        title: "Row intervals",
+      },
+    ],
+    summary: {
+      exerciseCount: 1,
+      setCount: 2,
+      trainingDayCount: 1,
+      workoutCount: 1,
+    },
+  };
+  const markup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions,
+      error: null,
+      onRefresh: () => {},
+      refreshPending: false,
+      startContactOptions,
+      status: "ready",
+      training: cardioTraining,
+    }),
+  );
+
+  assert.match(markup, /5 min · 1 km/);
+  assert.match(markup, /6 min · 1 km/);
+  assert.match(markup, /Best<\/p><p[^>]*>—<\/p>/);
+  assert.doesNotMatch(markup, /Best<\/p><p[^>]*>6 min · 1 km<\/p>/);
 });
 
 test("Training design study renders the production dashboard with synthetic data", () => {

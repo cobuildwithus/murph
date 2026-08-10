@@ -42,11 +42,13 @@ export type BrowserVaultWarmLoadOutcome =
 
 export interface StartBrowserVaultWarmLoadOptions {
   expectedMemberId?: string | null;
+  requestRefresh?: boolean;
 }
 
 let readySnapshot: BrowserVaultReadySnapshot | null = null;
 let inFlight: Promise<BrowserVaultWarmLoadOutcome> | null = null;
 let inFlightController: AbortController | null = null;
+let inFlightRequestsRefresh = false;
 let generation = 0;
 let stopSessionInvalidationListener: (() => void) | null = null;
 
@@ -74,12 +76,16 @@ export function startBrowserVaultWarmLoad(
   ensureBrowserVaultSessionInvalidationListener();
 
   if (inFlight) {
+    if (options.requestRefresh && !inFlightRequestsRefresh) {
+      return inFlight.then(() => startBrowserVaultWarmLoad(options));
+    }
     return inFlight;
   }
 
   const loadGeneration = generation;
   const controller = new AbortController();
   inFlightController = controller;
+  inFlightRequestsRefresh = options.requestRefresh === true;
 
   const loadPromise = (async (): Promise<BrowserVaultWarmLoadOutcome> => {
     try {
@@ -89,6 +95,7 @@ export function startBrowserVaultWarmLoad(
           ? options.expectedMemberId
           : readySnapshot?.memberId,
         knownReplicaRef: readySnapshot?.ref ?? null,
+        requestRefresh: options.requestRefresh,
         signal: controller.signal,
       });
 
@@ -155,6 +162,7 @@ export function startBrowserVaultWarmLoad(
       if (loadGeneration === generation) {
         inFlight = null;
         inFlightController = null;
+        inFlightRequestsRefresh = false;
       }
     }
   })();
@@ -173,6 +181,7 @@ export function abortBrowserVaultInFlightLoad(): void {
   inFlightController?.abort();
   inFlightController = null;
   inFlight = null;
+  inFlightRequestsRefresh = false;
 }
 
 /**
@@ -185,6 +194,7 @@ export function clearBrowserVaultWarmState(): void {
   inFlightController?.abort();
   inFlightController = null;
   inFlight = null;
+  inFlightRequestsRefresh = false;
   readySnapshot = null;
   stopSessionInvalidationListener?.();
   stopSessionInvalidationListener = null;

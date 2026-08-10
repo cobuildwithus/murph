@@ -516,6 +516,64 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
   );
 });
 
+test("Training keeps multi-axis cardio results visible without inventing a Best", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T18:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-multi-axis-cardio",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "cardio_intervals",
+          {
+            activityType: "cardio",
+            workout: {
+              endedAt: "2026-08-09T17:30:00.000Z",
+              exercises: [
+                {
+                  name: "Row",
+                  order: 1,
+                  sets: [
+                    { distanceMeters: 1_000, durationSeconds: 300, order: 1 },
+                    { distanceMeters: 1_000, durationSeconds: 360, order: 2 },
+                  ],
+                  sourceExerciseId: "EX_CARDIO_ROW",
+                },
+              ],
+              startedAt: "2026-08-09T17:00:00.000Z",
+            },
+          },
+          "2026-08-09T17:00:00.000Z",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
+  const progress = view.exerciseProgress.find(
+    (entry) => entry.id === "EX_CARDIO_ROW",
+  );
+  const completedSets = view.recentSessions[0]?.exercises[0]?.sets ?? [];
+
+  assert.deepEqual(
+    completedSets.map((set) => ({
+      completed: set.completed,
+      distanceMeters: set.distanceMeters,
+      durationSeconds: set.durationSeconds,
+    })),
+    [
+      { completed: true, distanceMeters: 1_000, durationSeconds: 300 },
+      { completed: true, distanceMeters: 1_000, durationSeconds: 360 },
+    ],
+  );
+  assert.equal(progress?.bestSet, null);
+  assert.equal(progress?.lastSet?.durationSeconds, 360);
+  assert.equal(progress?.lastSet?.distanceMeters, 1_000);
+});
+
 
 test("Training preserves a completed next-local-day workout before UTC midnight", async () => {
   const createReplica = (endedAt?: string) => createBrowserVaultReplica({
