@@ -272,6 +272,11 @@ Last verified: 2026-08-09
   delete only explicitly marked metered companion Items next to exactly one
   known licensed monthly direct-plan Item, must dry-run before apply, and may
   emit aggregate counts only.
+- Subscription management remains an authenticated billing-owner capability
+  after Murph access is suspended. Suspension may block new entitlement or
+  payment effects, but it must not block the exact Customer Portal owner from
+  canceling or repairing the subscription. Portal return state remains
+  display-only and never restores access.
 - Usage-credit Checkout is an authenticated payment boundary, not an assistant
   or browser-selected billing primitive. Settings routes must enforce the
   normal app-session and same-origin/CSRF protections. Personal checkout binds
@@ -304,6 +309,12 @@ Last verified: 2026-08-09
   payable URL or retry permission only for an exact server-approved target.
   Former Family beneficiaries are always status/cancel-only; historical labels
   and contact hints are display data, not payment authority.
+- A Family invitation binds a normalized contact only through its keyed blind
+  index. Before reserving or buying a seat, issue-time admission must reject an
+  exact active owner or member match; acceptance repeats the same-group
+  membership check under the group transaction as a concurrency backstop.
+  Contact hints, names, stale invitations, and a browser-supplied member id are
+  never membership or payment authority.
 - Group sponsorship separates funding authority from permission to speak into
   the room. A valid current funding locator may identify only the frozen group
   beneficiary. Alias, note, or running-bit content is accepted only from the
@@ -378,7 +389,8 @@ Last verified: 2026-08-09
   authenticated payer action. Automatic refill
   authority is rechecked under the beneficiary lock against the exact
   authorization, anchored period, ordinal, payer, pending-plus-fulfilled cap
-  headroom, and still-unbound purchase before provider confirmation. Only one
+  headroom, still-unsuspended payer, and still-unbound purchase before provider
+  confirmation. Only one
   live authorization per beneficiary is database-enforced. Recovery, cap, payer,
   and charge details route only to the payer's direct notification destination;
   the room may learn only that Murph is sponsored. The server
@@ -421,7 +433,8 @@ Last verified: 2026-08-09
   explicit **Add usage**, one-time contribution, or monthly sponsor action
   authorizes only the exact server-projected purchase or cap change. Current-policy Checkout fallback saves the entered card for
   later explicit top-ups. No raw card data enters Murph.
-- Direct-purchase cancellation requires only authenticated payer ownership of
+- Direct-purchase and group-sponsorship cancellation require only authenticated
+  payer ownership of
   the opaque purchase ID. Beneficiary, group-locator, or current target
   authority may gate retry but must not gate cancellation. Payer deletion may
   detach a fulfilled sessionless purchase only after clearing payer-encrypted
@@ -429,7 +442,9 @@ Last verified: 2026-08-09
   later refund or dispute reconciliation. PostgreSQL enforces that proof
   directly: a detached fulfilled row must remain paid, terminal, reconciled,
   and carry both lookup keys, while the separate ciphertext constraint rejects
-  any retained payer-encrypted Stripe value.
+  any retained payer-encrypted Stripe value. A canceled, inactive, or departed
+  group beneficiary therefore degrades the payer surface to cancellation-only
+  management rather than trapping the recurring authorization.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session or PaymentIntent state must never grant credit.
   The verified Stripe receipt owner must re-fetch and bind the live one-time
@@ -584,6 +599,15 @@ Last verified: 2026-08-09
 - The automatic authenticated Linq speaker-label read is a third presentation-only consumer of that same route-authorized address-book projection. Web must first resolve exact current room membership: one unsuspended member's authorized `profile-name.v0` snapshot wins; ambiguous or suspended matches stay unnamed; and only a canonical phone with zero matches or one unsuspended match without a profile name may reach the existing set-based owner-contact reader. The response may contain only the sender handle, bounded display name, explicit profile or unverified-contact provenance, and exact handles proven to have no name after every applicable authorized source was checked—never a member id or participant id. The runner keeps only an operation memo plus the bounded private 14-day-positive/six-hour-proven-negative file cache under `.runtime/cache/**`; cache keys are opaque and route-scoped, the cache is excluded from snapshots, and corrupt, stale, unauthorized, or unreadable state is a miss. Neither the response nor either cache supplies identity, membership, consent, routing, matching, persistence, delivery, or effect authority. Only an exact accepted message reference plus trusted server derivation may authorize a participant-scoped effect.
 - A speaker-label result is cacheable only after its source is complete at the existing authority boundary. An active `profile-name.v0` grant with a null pending snapshot is unavailable, never evidence of profile absence or permission to fall through to an owner contact. The address-book reader checks at most 16 exact phones; only those submitted handles may receive contact labels or negative evidence, and batch overflow remains operation-local. This uses the existing next-operation recovery path and adds no invalidation or readiness state.
 - Messages mini-app credentials are random, member-scoped, and persisted only as Messages-domain-separated lookup hashes in one deterministic Messages-owned row per member in the existing short-lived session table; never persist the raw-token hash that the historical unscoped device-agent reader used. Before enrollment reads identity or authority, it must finish validating the bounded request body. Credential issuance must then lock the hosted member and active sponsorship rows, re-check active access and current launch consent, and atomically rotate that one feature-owned row in the same transaction so repeated enrollment stays bounded and account deletion serializes without post-deletion recreation. Every rotation mints a fresh bearer, replaces the lookup hash and expiry, clears revocation/replacement state, and leaves ordinary device-agent rows untouched. Explicit revocation and expired-session cleanup must compare-and-set on the exact authenticated lookup hash as well as the stable row id, so a stale credential generation cannot revoke its replacement. Device-agent routes must also require their distinct `hbds_agent_` prefix before hashing so an `hbds_imessage_` credential can never export wearable credentials across current operation or reader rollback. Re-check active hosted access and historical launch consent on every proof action (proof taps happen inside the extension with no consent UI, so stale document versions must not break them while members with no launch grant stay fail-closed), while keeping authenticated self-revocation available after access or consent is lost so cleanup cannot be blocked. Keep the message URL capability-less: the only private-state exception is a bounded V3 compact-table fragment containing immutable values already visible in that private-direct message. The fragment may contain health-related presentation values, but never a member identity, canonical record reference, credential, token, or other authority; it is decoded locally and never requested from the Web origin. Never log the full compact-table URL. Never link Privy into the extension, and never copy, persist, log, or share a raw Privy access, refresh, or identity token. The containing app must explicitly address the shared Keychain group for the derived credential while keeping each target's private group first so Privy's default Keychain storage remains private.
+- The same narrow capability-less presentation exception includes V4 workout
+  envelopes: neither V3 nor V4 carries tracking,
+  identity, canonical references, credentials, tokens, or write authority.
+  V1-V4 presentation envelopes may also reach the bounded queryless
+  `/imessage/card/v1/:payload.png` route for Linq's static fallback. That path is
+  immutable message content, not an authenticated card API: strict parsing runs
+  before bundled asset reads, the renderer performs no database or remote read,
+  writes no application log or analytics event, and returns private
+  no-store/no-index headers. Never log either complete URL or encoded payload.
 - The authenticated companion WHOOP overnight-PRV route accepts only the strict,
   size-bounded six-field `murph.companion.overnight-prv-rmssd.v1` envelope:
   `schema`, `methodVersion`, `nightDate`, `rmssdMs`, `completedWindowCount`,

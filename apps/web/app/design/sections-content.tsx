@@ -473,7 +473,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Changelog archive edition">
+      <StudySection title="Changelog archive with explanatory visuals">
         <div data-design-section="changelog-archive">
           <ChangelogArchiveStudy />
         </div>
@@ -495,7 +495,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Family billing recovery on Join">
+      <StudySection title="Family billing recovery and management on Join">
         <JoinFamilyBillingRecoveryStudy />
       </StudySection>
 
@@ -537,7 +537,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings and Family sign-in handoffs">
+      <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
         <SettingsAuthRequiredStudy />
       </StudySection>
 
@@ -549,7 +549,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -589,7 +589,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group sponsorship with optional creative response">
+      <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
         <GroupUsageFundingStudy />
       </StudySection>
 

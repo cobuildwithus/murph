@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 
 import type {
+  CompactTablePresentationCardV1,
   DailyNutritionResponseCardV1,
   DailyNutritionResponseCardV2,
+} from "@murphai/contracts";
+import {
+  buildWorkoutSessionAppCardEnvelopeV4,
+  IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
 } from "@murphai/contracts";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -101,6 +106,54 @@ const CARD_WITH_COMPLETE_UNAVAILABLE_CALORIES: DailyNutritionResponseCardV2 = {
   goals: {
     ...CARD.goals,
     calories: { target: 2_200, status: "unavailable" },
+  },
+};
+
+const TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Weekly plan",
+  subtitle: "Three focused sessions",
+  rowHeader: "Day",
+  columns: ["Focus", "Sets"],
+  rows: [
+    { label: "Monday", values: ["Upper body", "14"] },
+    { label: "Wednesday", values: ["Lower body", "16"] },
+    { label: "Saturday", values: ["Full body", "12"] },
+  ],
+  footer: "Adjust load when form slows down.",
+};
+
+const WORKOUT_CARD: Extract<
+  CompactTablePresentationCardV1,
+  { workout: unknown }
+> = {
+  kind: "compact_table",
+  version: 1,
+  title: "Push day",
+  subtitle: "3 of 6 sets complete",
+  footer: "Tap an exercise to log or correct a set.",
+  workout: {
+    version: 1,
+    state: "active",
+    exercises: [
+      {
+        name: "Bench press",
+        sets: [
+          { status: "completed", target: "185 lb × 8", actual: "185 lb × 8" },
+          { status: "completed", target: "185 lb × 8", actual: "185 lb × 7" },
+          { status: "pending", target: "185 lb × 6–8", actual: null },
+        ],
+      },
+      {
+        name: "Incline dumbbell press",
+        sets: [
+          { status: "completed", target: "55 lb × 10", actual: "55 lb × 10" },
+          { status: "pending", target: "55 lb × 8–10", actual: null },
+          { status: "pending", target: null, actual: null },
+        ],
+      },
+    ],
   },
 };
 
@@ -234,13 +287,63 @@ test("nutrition card image route preserves the neutral ring for partial unavaila
   );
 });
 
-test("nutrition card image route rejects malformed, non-nutrition, and query-bearing URLs before asset reads", async () => {
+test("response-card image route renders the exact V3 generic table snapshot", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({ schemaVersion: 3, card: TABLE_CARD });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  assert.equal(init.width, 1_200);
+  assert.equal(init.height, 670);
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /imessage-native-compact-table-card/u);
+  assert.match(serialized, /Weekly plan/u);
+  assert.match(serialized, /Upper body/u);
+  assert.match(serialized, /Wednesday/u);
+  assert.match(serialized, />16</u);
+});
+
+test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload(buildWorkoutSessionAppCardEnvelopeV4({
+    title: WORKOUT_CARD.title,
+    subtitle: WORKOUT_CARD.subtitle,
+    footer: WORKOUT_CARD.footer,
+    workout: WORKOUT_CARD.workout,
+  }));
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  assert.equal(init.width, 1_200);
+  assert.equal(init.height, 580);
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /Push day/u);
+  assert.match(serialized, /Bench press/u);
+  assert.match(serialized, /Next: 185 lb × 6–8/u);
+  assert.match(serialized, /data-workout-progress="0\.5000"/u);
+  assert.match(serialized, /data-exercise-state="in-progress"/u);
+  assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
+});
+
+test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const invalidPayloads = [
     "not-base64.png",
     encodePayload({ schemaVersion: 3, card: { kind: "compact_table" } }),
+    encodePayload({
+      schemaVersion: 3,
+      card: { ...TABLE_CARD, tracking: null },
+    }),
     encodePayload({ schemaVersion: 2, card: CARD, extra: true }),
-    `${"a".repeat(1_901)}.png`,
+    `${"a".repeat(IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH + 1)}.png`,
   ];
 
   for (const payload of invalidPayloads) {

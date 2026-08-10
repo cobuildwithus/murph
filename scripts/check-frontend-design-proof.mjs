@@ -250,6 +250,7 @@ if (isDirectRun) {
 export {
   findRenderedListItem,
   isFrontendUiPath,
+  readChangedPaths,
   readRenderedSection,
   renderPrBody,
   renderedText,

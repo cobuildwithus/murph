@@ -48,6 +48,7 @@ describe('assistant tracked workout table skill', () => {
     expect(matches[0]?.triggerHint).toContain('workout table')
     expect(matches[0]?.triggerHint).toContain('structured tracker')
     expect(matches[0]?.triggerHint).toContain('live workout log')
+    expect(matches[0]?.triggerHint).toContain('start or resume a live workout')
     expect(matches[0]?.triggerHint).toContain('updated/refreshed table')
   })
 
@@ -61,6 +62,7 @@ describe('assistant tracked workout table skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md',
     )
     expect(strengthSkill).toContain('put a workout log in a table')
+    expect(strengthSkill).toContain('start or resume a canonical live workout')
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
 
@@ -96,6 +98,8 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Use `--clear-workout` only')
     expect(skill).toContain('remove the entire record')
     expect(skill).toContain('Finish only when the member explicitly says they are done')
+    expect(skill).toContain('already-completed return is convergence')
+    expect(skill).not.toContain('Complete workout exercise')
     expect(skill).toContain('Never infer weight, repetitions, effort, assistance')
   })
 

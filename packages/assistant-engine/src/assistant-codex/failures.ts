@@ -6,13 +6,20 @@ import {
   normalizeStatusText,
   type CodexStructuredErrorInfo,
 } from '../assistant-codex-events.js'
+import {
+  readCodexNonEmptyString,
+  readCodexRecord,
+  readCodexServerNotification,
+  readCodexServerRequest,
+  readCodexString,
+} from './app-server-protocol.js'
 
 type CodexTurnMessage = Record<string, unknown>
 
 export const ASSISTANT_CODEX_USAGE_LIMIT_ERROR_CODE =
   'ASSISTANT_CODEX_USAGE_LIMIT'
 
-// CodexErrorInfo variants (app-server protocol, pinned codex 0.145.0) that
+// CodexErrorInfo variants (app-server protocol, pinned codex 0.147.0) that
 // describe a lost or unusable provider connection. These map to the
 // retryable ASSISTANT_CODEX_CONNECTION_LOST process-exit classification.
 const CODEX_CONNECTION_LOSS_ERROR_INFO_KINDS = new Set([
@@ -49,136 +56,91 @@ function buildCodexErrorInfoContext(
 }
 
 export function extractCodexThreadIdFromResult(result: unknown): string | null {
-  const record = asRecord(result)
-  const thread = asRecord(record?.thread)
-  return (
-    normalizeNullableString(asString(thread?.id)) ??
-    normalizeNullableString(asString(record?.threadId)) ??
-    null
+  return readCodexNonEmptyString(
+    readCodexRecord(readCodexRecord(result)?.thread)?.id,
   )
 }
 
 export function extractCodexThreadPathFromResult(result: unknown): string | null {
-  const record = asRecord(result)
-  const thread = asRecord(record?.thread)
-  return (
-    normalizeNullableString(asString(thread?.path)) ??
-    normalizeNullableString(asString(record?.path)) ??
-    null
+  return readCodexNonEmptyString(
+    readCodexRecord(readCodexRecord(result)?.thread)?.path,
   )
 }
 
 export function extractCodexTurnIdFromResult(result: unknown): string | null {
-  const record = asRecord(result)
-  const turn = asRecord(record?.turn)
-  return (
-    normalizeNullableString(asString(turn?.id)) ??
-    normalizeNullableString(asString(record?.turnId)) ??
-    normalizeNullableString(asString(record?.turn_id)) ??
-    null
+  return readCodexNonEmptyString(
+    readCodexRecord(readCodexRecord(result)?.turn)?.id,
   )
 }
 
 export function extractCodexTurnIdFromMessage(
   message: CodexTurnMessage,
 ): string | null {
-  const params = asRecord(message.params)
-  const data = asRecord(message.data)
-  const turn =
-    asRecord(params?.turn) ??
-    asRecord(data?.turn) ??
-    asRecord(message.turn)
+  const params =
+    readCodexServerNotification(message)?.params ??
+    readCodexServerRequest(message)?.params
+  if (!params) {
+    return null
+  }
+
   return (
-    normalizeNullableString(asString(turn?.id)) ??
-    normalizeNullableString(asString(params?.turnId)) ??
-    normalizeNullableString(asString(params?.turn_id)) ??
-    normalizeNullableString(asString(data?.turnId)) ??
-    normalizeNullableString(asString(data?.turn_id)) ??
-    normalizeNullableString(asString(message.turnId)) ??
-    normalizeNullableString(asString(message.turn_id)) ??
-    null
+    readCodexNonEmptyString(
+      readCodexRecord(params.turn)?.id,
+    ) ??
+    readCodexNonEmptyString(params.turnId)
   )
 }
 
-// Codex app-server notifications are thread-scoped: every event names the
-// thread it belongs to. Spawned subagent threads broadcast on the same
-// connection, so callers use this to route foreign-thread events away from
-// the single-turn correlation path instead of rejecting the parent turn.
+// Codex app-server notifications are thread-scoped. Spawned subagent threads
+// broadcast on the same connection, so callers route foreign-thread events
+// away from the parent turn rather than rejecting the parent turn.
 export function extractCodexThreadIdFromMessage(
   message: CodexTurnMessage,
 ): string | null {
-  const params = asRecord(message.params)
-  const data = asRecord(message.data)
-  const thread =
-    asRecord(params?.thread) ??
-    asRecord(data?.thread) ??
-    asRecord(message.thread)
+  const params =
+    readCodexServerNotification(message)?.params ??
+    readCodexServerRequest(message)?.params
+  if (!params) {
+    return null
+  }
+
   return (
-    normalizeNullableString(asString(thread?.id)) ??
-    normalizeNullableString(asString(params?.threadId)) ??
-    normalizeNullableString(asString(params?.thread_id)) ??
-    normalizeNullableString(asString(data?.threadId)) ??
-    normalizeNullableString(asString(data?.thread_id)) ??
-    normalizeNullableString(asString(message.threadId)) ??
-    normalizeNullableString(asString(message.thread_id)) ??
-    null
+    readCodexNonEmptyString(params.threadId) ??
+    readCodexNonEmptyString(
+      readCodexRecord(params.thread)?.id,
+    )
   )
 }
 
 export function extractCodexTurnStatus(
   message: CodexTurnMessage,
 ): string | null {
-  const params = asRecord(message.params)
-  const data = asRecord(message.data)
-  const paramsTurn = asRecord(params?.turn)
-  const dataTurn = asRecord(data?.turn)
-  const messageTurn = asRecord(message.turn)
-  return normalizeNullableString(
-    asString(paramsTurn?.status) ??
-      asString(params?.status) ??
-      asString(dataTurn?.status) ??
-      asString(data?.status) ??
-      asString(messageTurn?.status) ??
-      asString(message.status),
-  )
+  const notification = readCodexServerNotification(message)
+  return notification
+    ? readCodexNonEmptyString(
+        readCodexRecord(notification.params.turn)?.status,
+      )
+    : null
 }
 
 export function extractCodexTurnErrorMessage(
   message: CodexTurnMessage,
 ): string | null {
-  const params = asRecord(message.params)
-  const data = asRecord(message.data)
-  const paramsTurn = asRecord(params?.turn)
-  const dataTurn = asRecord(data?.turn)
-  const messageTurn = asRecord(message.turn)
-  const error =
-    asRecord(paramsTurn?.error) ??
-    asRecord(params?.error) ??
-    asRecord(dataTurn?.error) ??
-    asRecord(data?.error) ??
-    asRecord(messageTurn?.error) ??
-    asRecord(message.error)
-  return normalizeStatusText(
-    asString(error?.message) ??
-      asString(paramsTurn?.error) ??
-      asString(params?.error) ??
-      asString(dataTurn?.error) ??
-      asString(data?.error) ??
-      asString(messageTurn?.error) ??
-      asString(message.error) ??
-      null,
-  )
+  const notification = readCodexServerNotification(message)
+  if (!notification) {
+    return null
+  }
+
+  const error = notification.method === 'error'
+    ? readCodexRecord(notification.params.error)
+    : readCodexRecord(
+        readCodexRecord(notification.params.turn)?.error,
+      )
+  return normalizeStatusText(readCodexString(error?.message))
 }
 
 export function isFailedCodexTurnStatus(status: string | null): boolean {
-  const normalized = status?.toLowerCase() ?? null
-  return (
-    normalized === 'failed' ||
-    normalized === 'error' ||
-    normalized === 'cancelled' ||
-    normalized === 'canceled' ||
-    normalized === 'interrupted'
-  )
+  return status === 'failed' || status === 'interrupted'
 }
 
 export function buildCodexTurnFailedError(input: {
@@ -452,8 +414,8 @@ export function buildCodexResumeStaleMessage(input: {
 }
 
 export function readNodeErrorCode(error: unknown): string | null {
-  const record = asRecord(error)
-  return normalizeNullableString(asString(record?.code))
+  const record = readCodexRecord(error)
+  return normalizeNullableString(readCodexString(record?.code))
 }
 
 function buildCodexFailureMessage(input: {
@@ -614,16 +576,6 @@ function readNodeErrorMessage(error: unknown): string | null {
     return normalizeStatusText(error.message) ?? error.message
   }
 
-  const record = asRecord(error)
-  return normalizeStatusText(asString(record?.message) ?? null)
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null
+  const record = readCodexRecord(error)
+  return normalizeStatusText(readCodexString(record?.message))
 }
