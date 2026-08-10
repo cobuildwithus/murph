@@ -90,6 +90,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /data-checkout-plan="launch_monthly"/);
     assert.match(markup, /data-checkout-plan="launch_edge_monthly"/);
     assert.doesNotMatch(markup, /trial|days? left|expires/i);
+    assert.doesNotMatch(markup, /recent pace|run out in about|days? remaining/i);
   });
 
   test("explains exhaustion without inventing a time-based reset", async () => {
