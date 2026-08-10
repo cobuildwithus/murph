@@ -33,7 +33,7 @@ Use this skill only for Murph production-watch runs and incidents.
 
 5. Remove the temporary provider envelope after the merge completes or fails. A `partial` snapshot is not healthy. Missing provider evidence must stay explicit. Only fresh, complete, authenticated, successful source evidence may contribute production counters, latency, fingerprints, or provider release context; degraded, partial, stale, failed, or unauthenticated evidence contributes monitor-health incidents only.
 
-Synthetic fixtures are read-only parser/scorer inputs for `collect` and tests. Never pass `--fixture` to `run` or `drill-down`; both stateful commands reject it before acquiring a lock, extending a lease, or writing state/projections. Provider streaks advance only on a strictly newer scorable observation from that provider. Replaying an envelope or running a database-only tick neither promotes nor resets a provider streak.
+Synthetic fixtures are read-only parser/scorer inputs for `collect` and tests. Never pass `--fixture` to `run` or `drill-down`; both stateful commands reject it before acquiring a lock, extending a lease, or writing state/projections. Evidence in any status is identified by that source's `collectedAt`; a fresh deterministic collection/admission failure without evidence is identified by its attempt time; an absent source is not an observation. Replaying one observation or running a database-only tick does not advance provider-owned state. A strictly newer non-scorable observation may advance only monitor recurrence and preserves production streaks plus cumulative baselines; a newer complete clean observation resets source streaks and may replace trusted cumulative totals.
 
 ## Incident triage
 

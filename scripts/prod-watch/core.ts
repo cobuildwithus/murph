@@ -379,6 +379,19 @@ export interface IncidentRecord {
   transitions: IncidentTransition[];
 }
 
+type SourceObservationClassification =
+  | "scorable"
+  | "degraded"
+  | "failed"
+  | "stale"
+  | "unauthenticated"
+  | "unavailable";
+
+interface SourceObservation {
+  observedAt: string;
+  classification: SourceObservationClassification;
+}
+
 export interface ProductionWatchState {
   schemaVersion: typeof STATE_SCHEMA_VERSION;
   updatedAt: string;
@@ -392,11 +405,13 @@ export interface ProductionWatchState {
     skippedOverlapCount: number;
     configuredSources: WatchSource[];
     sourceFailureStreaks: Partial<Record<WatchSource, number>>;
+    sourceObservations: Partial<Record<WatchSource, SourceObservation>>;
     lastMonitorStatus?: ProductionWatchSnapshot["monitor"]["status"];
     lastEvidenceComplete?: boolean;
     lastSourceHealth: SourceHealth[];
   };
   anomalyStreaks: Record<string, {
+    category: AnomalyCandidate["category"];
     count: number;
     lastSeenAt: string;
     source: WatchSource;
@@ -1122,6 +1137,7 @@ export function createInitialState(now: Date, configuredSources: WatchSource[]):
       skippedOverlapCount: 0,
       configuredSources: [...configuredSources],
       sourceFailureStreaks: {},
+      sourceObservations: {},
       lastSourceHealth: [],
     },
     anomalyStreaks: {},
@@ -1157,6 +1173,7 @@ export function parseState(value: unknown): ProductionWatchState {
     "lastSuccessfulCollectionAt",
     "skippedOverlapCount",
     "sourceFailureStreaks",
+    "sourceObservations",
   ], "state monitor", true);
   const configuredSources = readArray(monitor.configuredSources, "state configured sources", WATCH_SOURCES.length)
     .map((source) => readWatchSource(source, "state configured source"));
@@ -1191,6 +1208,7 @@ export function parseState(value: unknown): ProductionWatchState {
     skippedOverlapCount: readNonNegativeInteger(monitor.skippedOverlapCount, "skippedOverlapCount"),
     configuredSources,
     sourceFailureStreaks: parseSourceFailureStreaks(monitor.sourceFailureStreaks),
+    sourceObservations: parseSourceObservations(monitor.sourceObservations),
     ...(monitor.lastMonitorStatus === undefined
       ? {}
       : { lastMonitorStatus: readEnum(monitor.lastMonitorStatus, ["healthy", "partial", "degraded"] as const, "lastMonitorStatus") }),
@@ -1213,10 +1231,48 @@ export function parseState(value: unknown): ProductionWatchState {
   if (Object.keys(initial.monitor.sourceFailureStreaks).some((source) => !configuredSources.includes(source as WatchSource))) {
     throw new Error("state_source_failure_streak_unconfigured");
   }
+  if (Object.keys(initial.monitor.sourceObservations).some((source) => !configuredSources.includes(source as WatchSource))) {
+    throw new Error("state_source_observation_unconfigured");
+  }
   initial.incidents = readArray(object.incidents, "state incidents", MAX_INCIDENTS).map(parseIncidentRecord);
   assertUniqueBy(initial.incidents, (incident) => incident.id, "state_incident_id_duplicate");
   assertUniqueBy(initial.incidents, (incident) => incident.fingerprint, "state_incident_fingerprint_duplicate");
   return initial;
+}
+
+function sourceObservationsFromSnapshot(
+  snapshot: ProductionWatchSnapshot,
+): Map<WatchSource, SourceObservation> {
+  const observations = new Map<WatchSource, SourceObservation>();
+  for (const health of snapshot.sourceHealth) {
+    const failure = snapshot.collectorFailures.find((candidate) => candidate.source === health.source);
+    const observedAt = health.collectedAt
+      ?? (failure === undefined ? undefined : snapshot.generatedAt);
+    if (observedAt === undefined) {
+      continue;
+    }
+    let classification: SourceObservationClassification;
+    if (health.auth === "failed" || failure?.class === "auth") {
+      classification = "unauthenticated";
+    } else if (failure !== undefined) {
+      classification = "failed";
+    } else if (health.status === "unavailable") {
+      classification = "unavailable";
+    } else if ((health.freshnessSeconds ?? Number.POSITIVE_INFINITY) > 1_800) {
+      classification = "stale";
+    } else if (health.status === "degraded" || health.coverage !== "complete") {
+      classification = "degraded";
+    } else if (
+      health.status === "ok"
+      && (health.auth === "ok" || health.auth === "not_required")
+    ) {
+      classification = "scorable";
+    } else {
+      classification = "unavailable";
+    }
+    observations.set(health.source, { observedAt, classification });
+  }
+  return observations;
 }
 
 export function updateStateFromSnapshot(
@@ -1239,29 +1295,32 @@ export function updateStateFromSnapshot(
   if (snapshot.run.skippedOverlap) {
     next.monitor.skippedOverlapCount += 1;
   }
-  const databaseHealthy = snapshot.sourceHealth.some(
-    (source) => source.source === "database" && source.status === "ok",
-  );
-  next.monitor.consecutiveCollectionFailures = databaseHealthy
-    ? 0
-    : next.monitor.consecutiveCollectionFailures + 1;
-  if (databaseHealthy) {
-    next.monitor.lastSuccessfulCollectionAt = snapshot.generatedAt;
+  const currentSourceObservations = sourceObservationsFromSnapshot(snapshot);
+  const advancingSourceObservations = new Map<WatchSource, SourceObservation>();
+  for (const [source, observation] of currentSourceObservations) {
+    const previous = next.monitor.sourceObservations[source];
+    if (previous === undefined || Date.parse(observation.observedAt) > Date.parse(previous.observedAt)) {
+      advancingSourceObservations.set(source, observation);
+      next.monitor.sourceObservations[source] = observation;
+    }
+  }
+  const databaseObservation = advancingSourceObservations.get("database");
+  if (databaseObservation !== undefined) {
+    const databaseHealthy = databaseObservation.classification === "scorable";
+    next.monitor.consecutiveCollectionFailures = databaseHealthy
+      ? 0
+      : next.monitor.consecutiveCollectionFailures + 1;
+    if (databaseHealthy) {
+      next.monitor.lastSuccessfulCollectionAt = snapshot.generatedAt;
+    }
   }
   if (snapshot.monitor.evidenceComplete) {
     next.monitor.lastCompleteEvidenceAt = snapshot.generatedAt;
   }
-  for (const source of snapshot.monitor.configuredSources) {
-    const health = snapshot.sourceHealth.find((candidate) => candidate.source === source);
-    const failed = health !== undefined && (
-      health.status === "unavailable"
-      || health.status === "degraded"
-      || health.auth === "failed"
-      || (health.freshnessSeconds !== undefined && health.freshnessSeconds > 1_800)
-    );
-    next.monitor.sourceFailureStreaks[source] = failed
-      ? (next.monitor.sourceFailureStreaks[source] ?? 0) + 1
-      : 0;
+  for (const [source, observation] of advancingSourceObservations) {
+    next.monitor.sourceFailureStreaks[source] = observation.classification === "scorable"
+      ? 0
+      : (next.monitor.sourceFailureStreaks[source] ?? 0) + 1;
   }
 
   const previousStreaks = next.anomalyStreaks;
@@ -1272,32 +1331,21 @@ export function updateStateFromSnapshot(
   );
   const promotedIncidentIds: string[] = [];
   const runWindowMs = snapshot.run.window.lookbackMinutes * 60 * 1_000;
-  const scorableSourceObservations = new Map(snapshot.sourceHealth
-    .filter((health) => (
-      health.status === "ok"
-      && health.coverage === "complete"
-      && (health.auth === "ok" || health.auth === "not_required")
-      && health.collectedAt !== undefined
-      && (health.freshnessSeconds ?? Number.POSITIVE_INFINITY) <= 1_800
-      && !snapshot.collectorFailures.some((failure) => failure.source === health.source)
-    ))
-    .map((health) => [health.source, health.collectedAt!]));
   for (const [fingerprint, streak] of Object.entries(newStreaks)) {
-    const observedAt = scorableSourceObservations.get(streak.source);
+    const observation = advancingSourceObservations.get(streak.source);
     if (
-      observedAt !== undefined
-      && Date.parse(observedAt) > Date.parse(streak.sourceObservedAt)
+      observation !== undefined
+      && (observation.classification === "scorable" || streak.category === "monitor")
     ) {
       delete newStreaks[fingerprint];
     }
   }
   for (const candidate of snapshot.anomalyCandidates) {
-    const sourceObservedAt = candidate.category === "monitor"
-      ? snapshot.generatedAt
-      : scorableSourceObservations.get(candidate.source);
-    if (sourceObservedAt === undefined) {
+    const sourceObservation = advancingSourceObservations.get(candidate.source);
+    if (sourceObservation === undefined) {
       continue;
     }
+    const sourceObservedAt = sourceObservation.observedAt;
     const previous = previousStreaks[candidate.fingerprint];
     if (
       previous !== undefined
@@ -1311,6 +1359,7 @@ export function updateStateFromSnapshot(
       && Date.parse(sourceObservedAt) - Date.parse(previous.sourceObservedAt) <= runWindowMs * 2 + 60_000;
     const streak = previousStillAdjacent ? previous.count + 1 : 1;
     newStreaks[candidate.fingerprint] = {
+      category: candidate.category,
       count: streak,
       lastSeenAt: snapshot.generatedAt,
       source: candidate.source,
@@ -1355,7 +1404,17 @@ export function updateStateFromSnapshot(
     }
   }
   next.anomalyStreaks = newStreaks;
-  next.cumulativeCounters = extractCumulativeCounters(snapshot.counters);
+  const scorableAdvancingSources = new Set(
+    [...advancingSourceObservations]
+      .filter(([, observation]) => observation.classification === "scorable")
+      .map(([source]) => source),
+  );
+  next.cumulativeCounters = {
+    ...next.cumulativeCounters,
+    ...extractCumulativeCounters(snapshot.counters.filter(
+      (counter) => scorableAdvancingSources.has(counter.dimensions.source as WatchSource),
+    )),
+  };
   next.incidents = pruneIncidents(next.incidents, now);
   return { state: next, promotedIncidentIds };
 }
@@ -2766,6 +2825,31 @@ function parseSourceFailureStreaks(value: unknown): Partial<Record<WatchSource, 
   return result;
 }
 
+function parseSourceObservations(
+  value: unknown,
+): ProductionWatchState["monitor"]["sourceObservations"] {
+  const object = readObject(value, "source observations");
+  if (Object.keys(object).length > WATCH_SOURCES.length) {
+    throw new Error("source_observations_too_many");
+  }
+  return Object.fromEntries(Object.entries(object).map(([key, raw]) => {
+    const source = readWatchSource(key, "source observation key");
+    const observation = readObject(raw, "source observation");
+    assertExactKeys(observation, ["classification", "observedAt"], "source observation");
+    return [source, {
+      observedAt: readIsoTimestamp(observation.observedAt, "source observation observedAt"),
+      classification: readEnum(observation.classification, [
+        "scorable",
+        "degraded",
+        "failed",
+        "stale",
+        "unauthenticated",
+        "unavailable",
+      ] as const, "source observation classification"),
+    }];
+  }));
+}
+
 function parseAnomalyStreaks(value: unknown): ProductionWatchState["anomalyStreaks"] {
   const object = readObject(value, "anomaly streaks");
   if (Object.keys(object).length > 256) {
@@ -2773,8 +2857,15 @@ function parseAnomalyStreaks(value: unknown): ProductionWatchState["anomalyStrea
   }
   return Object.fromEntries(Object.entries(object).map(([fingerprint, raw]) => {
     const streak = readObject(raw, "anomaly streak");
-    assertExactKeys(streak, ["count", "lastSeenAt", "source", "sourceObservedAt"], "anomaly streak");
+    assertExactKeys(streak, ["category", "count", "lastSeenAt", "source", "sourceObservedAt"], "anomaly streak");
     return [readHash(fingerprint, "anomaly streak fingerprint"), {
+      category: readEnum(streak.category, [
+        "availability",
+        "latency",
+        "monitor",
+        "pressure",
+        "sensitive",
+      ] as const, "anomaly streak category"),
       count: readNonNegativeInteger(streak.count, "anomaly streak count"),
       lastSeenAt: readIsoTimestamp(streak.lastSeenAt, "anomaly streak lastSeenAt"),
       source: readWatchSource(streak.source, "anomaly streak source"),

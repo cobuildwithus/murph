@@ -561,6 +561,188 @@ describe("production-watch snapshot contract", () => {
     expect(expired.anomalyStreaks[fingerprint]).toBeUndefined();
   });
 
+  it("uses the same source observation identity for failed-provider monitor streaks", () => {
+    const makeProviderFailureSnapshot = (
+      runAt: Date,
+      vercelObservedAt: Date,
+    ): ProductionWatchSnapshot => {
+      const provider = parseProviderEvidence(JSON.parse(
+        readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+      ) as unknown);
+      const evidences = provider.sources.map((source) => rebaseEvidence(source, runAt));
+      const vercel = evidences.find((source) => source.source === "vercel")!;
+      vercel.status = "unavailable";
+      vercel.auth = "unknown";
+      vercel.collectedAt = vercelObservedAt.toISOString();
+      vercel.freshnessSeconds = Math.max(0, runAt.getTime() - vercelObservedAt.getTime()) / 1_000;
+      vercel.releaseContext = [];
+      vercel.counters = [];
+      vercel.latency = [];
+      vercel.fingerprints = [];
+      return buildSnapshot({
+        now: runAt,
+        runId: `provider-failure-${runAt.toISOString()}`,
+        mode: "collect",
+        dryRun: true,
+        startedAt: new Date(runAt.getTime() - 100),
+        timeoutMs: 240000,
+        skippedOverlap: false,
+        previousStart: new Date(runAt.getTime() - 30 * 60 * 1000),
+        currentStart: new Date(runAt.getTime() - 15 * 60 * 1000),
+        end: runAt,
+        lookbackMinutes: 15,
+        settlingDelaySeconds: 0,
+        configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+        evidences: [rebaseEvidence(readFixture("healthy"), runAt), ...evidences],
+        failures: [{
+          source: "vercel",
+          class: "rate_limit",
+          code: "rate_limited",
+          retryable: true,
+        }],
+      });
+    };
+    const makeDatabaseOnlySnapshot = (runAt: Date): ProductionWatchSnapshot => buildSnapshot({
+      now: runAt,
+      runId: `database-only-${runAt.toISOString()}`,
+      mode: "collect",
+      dryRun: true,
+      startedAt: new Date(runAt.getTime() - 100),
+      timeoutMs: 240000,
+      skippedOverlap: false,
+      previousStart: new Date(runAt.getTime() - 30 * 60 * 1000),
+      currentStart: new Date(runAt.getTime() - 15 * 60 * 1000),
+      end: runAt,
+      lookbackMinutes: 15,
+      settlingDelaySeconds: 0,
+      configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+      evidences: [rebaseEvidence(readFixture("healthy"), runAt)],
+      failures: [],
+    });
+
+    const firstObservedAt = new Date("2026-08-09T20:00:00.000Z");
+    const first = makeProviderFailureSnapshot(firstObservedAt, firstObservedAt);
+    const fingerprint = first.anomalyCandidates.find((candidate) => (
+      candidate.source === "vercel" && candidate.ruleId === "source_collection_failure"
+    ))!.fingerprint;
+    let state = createInitialState(
+      new Date("2026-08-09T19:55:00.000Z"),
+      ["database", "vercel", "cloudflare", "stripe"],
+    );
+    state = updateStateFromSnapshot(state, first).state;
+    expect(state.anomalyStreaks[fingerprint]?.count).toBe(1);
+    expect(state.monitor.sourceFailureStreaks.vercel).toBe(1);
+
+    const replay = structuredClone(first) as ProductionWatchSnapshot;
+    replay.generatedAt = "2026-08-09T20:05:00.000Z";
+    replay.run.runId = "provider-failure-replay";
+    replay.run.finishedAt = replay.generatedAt;
+    state = updateStateFromSnapshot(state, replay).state;
+    expect(state.anomalyStreaks[fingerprint]?.count).toBe(1);
+    expect(state.monitor.sourceFailureStreaks.vercel).toBe(1);
+    expect(state.incidents.some((incident) => incident.fingerprint === fingerprint)).toBe(false);
+
+    state = updateStateFromSnapshot(
+      state,
+      makeDatabaseOnlySnapshot(new Date("2026-08-09T20:07:00.000Z")),
+    ).state;
+    expect(state.anomalyStreaks[fingerprint]?.count).toBe(1);
+    expect(state.monitor.sourceFailureStreaks.vercel).toBe(1);
+
+    state = updateStateFromSnapshot(
+      state,
+      makeProviderFailureSnapshot(
+        new Date("2026-08-09T20:10:00.000Z"),
+        new Date("2026-08-09T20:10:00.000Z"),
+      ),
+    ).state;
+    expect(state.incidents.some((incident) => incident.fingerprint === fingerprint)).toBe(true);
+    expect(state.monitor.sourceFailureStreaks.vercel).toBe(2);
+
+    state = updateStateFromSnapshot(
+      state,
+      buildCompleteSnapshot(new Date("2026-08-09T20:15:00.000Z")),
+    ).state;
+    expect(state.anomalyStreaks[fingerprint]).toBeUndefined();
+    expect(state.monitor.sourceFailureStreaks.vercel).toBe(0);
+  });
+
+  it("preserves a trusted cumulative baseline across a failed database tick", () => {
+    const makeDatabaseSnapshot = (
+      runAt: Date,
+      deadlocks: number,
+      previousCumulativeCounters: Record<string, number>,
+    ): ProductionWatchSnapshot => {
+      const evidence = rebaseEvidence(readFixture("healthy"), runAt);
+      evidence.counters.find((counter) => counter.metric === "db_deadlocks_total")!.current = deadlocks;
+      return buildSnapshot({
+        now: runAt,
+        runId: `database-cumulative-${runAt.toISOString()}`,
+        mode: "collect",
+        dryRun: true,
+        startedAt: new Date(runAt.getTime() - 100),
+        timeoutMs: 240000,
+        skippedOverlap: false,
+        previousStart: new Date(runAt.getTime() - 30 * 60 * 1000),
+        currentStart: new Date(runAt.getTime() - 15 * 60 * 1000),
+        end: runAt,
+        lookbackMinutes: 15,
+        settlingDelaySeconds: 0,
+        configuredSources: ["database"],
+        evidences: [evidence],
+        failures: [],
+        previousCumulativeCounters,
+      });
+    };
+    const failedDatabaseSnapshot = (runAt: Date): ProductionWatchSnapshot => buildSnapshot({
+      now: runAt,
+      runId: `database-failed-${runAt.toISOString()}`,
+      mode: "collect",
+      dryRun: true,
+      startedAt: new Date(runAt.getTime() - 100),
+      timeoutMs: 240000,
+      skippedOverlap: false,
+      previousStart: new Date(runAt.getTime() - 30 * 60 * 1000),
+      currentStart: new Date(runAt.getTime() - 15 * 60 * 1000),
+      end: runAt,
+      lookbackMinutes: 15,
+      settlingDelaySeconds: 0,
+      configuredSources: ["database"],
+      evidences: [],
+      failures: [{ source: "database", class: "timeout", code: "helper_timeout", retryable: true }],
+    });
+
+    let state = createInitialState(new Date("2026-08-09T19:55:00.000Z"), ["database"]);
+    state = updateStateFromSnapshot(
+      state,
+      makeDatabaseSnapshot(new Date("2026-08-09T20:00:00.000Z"), 10, state.cumulativeCounters),
+    ).state;
+    const trustedBaseline = structuredClone(state.cumulativeCounters);
+    expect(Object.values(trustedBaseline)).toContain(10);
+
+    state = updateStateFromSnapshot(
+      state,
+      failedDatabaseSnapshot(new Date("2026-08-09T20:05:00.000Z")),
+    ).state;
+    expect(state.cumulativeCounters).toEqual(trustedBaseline);
+
+    const recovered = makeDatabaseSnapshot(
+      new Date("2026-08-09T20:10:00.000Z"),
+      11,
+      state.cumulativeCounters,
+    );
+    expect(recovered.anomalyCandidates).toContainEqual(expect.objectContaining({
+      ruleId: "database_deadlock_observed",
+      source: "database",
+    }));
+    state = updateStateFromSnapshot(state, recovered).state;
+    expect(state.incidents).toContainEqual(expect.objectContaining({
+      ruleId: "database_deadlock_observed",
+      source: "database",
+    }));
+    expect(Object.values(state.cumulativeCounters)).toContain(11);
+  });
+
   it("scores production anomalies only from fresh complete successful source evidence", () => {
     type EvidenceMode = "degraded" | "failed" | "fresh" | "stale" | "unauthenticated" | "unavailable";
     const makeSnapshot = (mode: EvidenceMode, now: Date): ProductionWatchSnapshot => {
