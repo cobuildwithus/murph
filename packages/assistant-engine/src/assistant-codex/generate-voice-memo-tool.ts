@@ -63,7 +63,7 @@ export type VoiceMemoToolRuntimeResult =
   | {
       attachmentId: string
       filename: string
-      ok: true
+      ok?: true
     }
   | {
       failure: VoiceMemoToolRuntimeFailure
@@ -246,7 +246,7 @@ async function executeGeneratedVoiceMemo(input: {
     }
   }
 
-  if (!runtimeResult.ok) {
+  if (runtimeResult.ok === false) {
     return {
       rpcSuccess: false,
       rpcText: describeVoiceMemoRuntimeFailure(label, runtimeResult.failure),
