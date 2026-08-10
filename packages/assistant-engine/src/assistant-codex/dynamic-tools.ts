@@ -660,6 +660,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
+      confirmedTrialConversion: z.literal(true).optional(),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
@@ -5524,6 +5525,9 @@ function parseFamilyPlanArguments(
       ok: true,
       request: {
         action: 'start_checkout',
+        ...(parsed.data.confirmedTrialConversion
+          ? { confirmedTrialConversion: true as const }
+          : {}),
       },
     }
   }

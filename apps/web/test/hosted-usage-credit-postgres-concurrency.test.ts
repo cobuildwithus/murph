@@ -34,6 +34,7 @@ import {
 } from "@/src/lib/hosted-growth/usage-referral";
 import {
   admitHostedGroupSponsorshipRefillTx,
+  cancelHostedGroupSponsorshipsForPayerAccountDeletionTx,
   hasHostedGroupSponsorshipPaymentAuthorityTx,
   prepareHostedGroupSponsorshipRecoveryTx,
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
@@ -65,6 +66,13 @@ const runPostgresConcurrencyProof =
 const detachedDirectProofMigrationSql = readFileSync(
   new URL(
     "../prisma/migrations/20260727040000_relax_hosted_usage_credit_detached_direct_proof/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const detachedAutomaticRefillFailureMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260810050000_relax_detached_automatic_refill_failure/migration.sql",
     import.meta.url,
   ),
   "utf8",
@@ -334,6 +342,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       await client.connect();
       try {
         await client.query(detachedDirectProofMigrationSql);
+        await client.query(detachedAutomaticRefillFailureMigrationSql);
         await client.query(referralCreditEntryConstraintMigrationSql);
         const armedPolicyIndex = await client.query<{ present: boolean }>(`
           SELECT EXISTS (
@@ -2853,6 +2862,116 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
       } finally {
         await cleanupUsageCreditFixture(fixture);
+      }
+    });
+
+    it("detaches a terminal unbound automatic-refill failure under the migrated constraint", async () => {
+      const fixtureId = randomUUID();
+      const beneficiaryMemberId = `member_refill_failure_beneficiary_${fixtureId}`;
+      const payerMemberId = `member_refill_failure_payer_${fixtureId}`;
+      const authorizationId = `hgsa_refill_failure_${fixtureId}`;
+      const purchaseId = `hucp_refill_failure_${fixtureId}`;
+      const periodStartedAt = new Date("2026-08-01T00:00:00.000Z");
+      const periodEndsAt = new Date("2026-09-01T00:00:00.000Z");
+      const failedAt = new Date("2026-08-10T12:00:00.000Z");
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+
+      try {
+        await observer.hostedMember.createMany({
+          data: [
+            { billingStatus: "active", id: beneficiaryMemberId },
+            { billingStatus: "active", id: payerMemberId },
+          ],
+        });
+        await observer.hostedGroupSponsorshipAuthorization.create({
+          data: {
+            anchorDay: 1,
+            anchorEndOfMonth: false,
+            beneficiaryMemberId,
+            id: authorizationId,
+            monthlyCapMinor: 1_000,
+            payerMemberId,
+            periodEndsAt,
+            periodStartedAt,
+            recoveryStartedAt: failedAt,
+            status: HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+          },
+        });
+        await observer.hostedUsageCreditPurchase.create({
+          data: {
+            beneficiaryMemberId,
+            cashAmountMinor: 500,
+            cashCurrency: "usd",
+            checkoutCancelUrl: "https://example.test/groups/fund/cancel",
+            checkoutExpiresAt: periodEndsAt,
+            checkoutRequestPolicyVersion: "hosted-usage-credit-checkout-v4",
+            checkoutSuccessUrl: "https://example.test/groups/fund/success",
+            clientRequestKey: `refill:${fixtureId}`,
+            grantUsdMicros: 5_000_000n,
+            groupSponsorshipAuthorizationId: authorizationId,
+            groupSponsorshipChargeOrdinal: 1,
+            groupSponsorshipPeriodStartedAt: periodStartedAt,
+            id: purchaseId,
+            lastReconciledAt: failedAt,
+            offerCode: "usage_5_usd",
+            payerMemberId,
+            status: HostedUsageCreditPurchaseStatus.payment_failed,
+            stripeCustomerIdEncrypted: `encrypted-customer:${fixtureId}`,
+            stripeCustomerLookupKey: `customer-lookup:${fixtureId}`,
+            stripeLiveMode: false,
+            stripePriceIdEncrypted: `encrypted-price:${fixtureId}`,
+            stripePriceLookupKey: `price-lookup:${fixtureId}`,
+            terminalAt: failedAt,
+          },
+        });
+        await observer.hostedMember.update({
+          data: { suspendedAt: failedAt },
+          where: { id: payerMemberId },
+        });
+
+        await observer.$transaction(async (tx) => {
+          await cancelHostedGroupSponsorshipsForPayerAccountDeletionTx({
+            now: new Date(failedAt.getTime() + 1_000),
+            payerMemberIds: [payerMemberId],
+            tx,
+          });
+          await assertHostedUsageCreditPurchasesReadyForAccountDeletionTx({
+            memberIds: [payerMemberId],
+            now: new Date(failedAt.getTime() + 1_000),
+            prisma: tx,
+          });
+          await tx.hostedMember.delete({ where: { id: payerMemberId } });
+        }, transactionOptions);
+
+        await expect(observer.hostedUsageCreditPurchase.findUniqueOrThrow({
+          select: {
+            beneficiaryMemberId: true,
+            payerMemberId: true,
+            status: true,
+            stripeChargeLookupKey: true,
+            stripeCheckoutSessionLookupKey: true,
+            stripePaymentIntentLookupKey: true,
+          },
+          where: { id: purchaseId },
+        })).resolves.toEqual({
+          beneficiaryMemberId,
+          payerMemberId: null,
+          status: HostedUsageCreditPurchaseStatus.payment_failed,
+          stripeChargeLookupKey: null,
+          stripeCheckoutSessionLookupKey: null,
+          stripePaymentIntentLookupKey: null,
+        });
+      } finally {
+        await observer.hostedUsageCreditPurchase.deleteMany({
+          where: { id: purchaseId },
+        }).catch(() => undefined);
+        await observer.hostedGroupSponsorshipAuthorization.deleteMany({
+          where: { id: authorizationId },
+        }).catch(() => undefined);
+        await observer.hostedMember.deleteMany({
+          where: { id: { in: [beneficiaryMemberId, payerMemberId] } },
+        }).catch(() => undefined);
+        await observer.$disconnect();
       }
     });
 

@@ -493,13 +493,14 @@ const HOSTED_TELEGRAM_FAMILY_INVITE_ACCEPTANCE_MISS_CODES = new Set([
   "HOSTED_FAMILY_INVITE_NOT_ACTIVE",
   "HOSTED_FAMILY_INVITE_NOT_FOUND",
   "HOSTED_FAMILY_INVITE_TELEGRAM_MISMATCH",
+  "HOSTED_FAMILY_MEMBER_ALREADY_IN_GROUP",
   "HOSTED_FAMILY_MEMBER_ALREADY_SPONSORED",
   "HOSTED_FAMILY_OWNER_ALREADY_IN_GROUP",
   "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
   "HOSTED_FAMILY_TELEGRAM_IDENTITY_AMBIGUOUS",
 ]);
 
-function isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error: unknown): boolean {
+export function isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error: unknown): boolean {
   return isHostedOnboardingError(error)
     && !error.retryable
     && HOSTED_TELEGRAM_FAMILY_INVITE_ACCEPTANCE_MISS_CODES.has(error.code);

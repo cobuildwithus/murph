@@ -3,6 +3,11 @@
 import { useState } from "react";
 
 import { Button } from "@/src/components/ui/button";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/src/components/ui/alert";
 import { ChoiceCard } from "@/src/components/ui/choice-card";
 import {
   FieldLegend,
@@ -23,10 +28,12 @@ export interface GroupSponsorshipManagementProjection {
 type MonthlyCapMinor = GroupSponsorshipManagementProjection["monthlyCapMinor"];
 
 export function GroupSponsorshipManagementCard({
+  cancelOnly = false,
   endpoint,
   inert = false,
   management: initialManagement,
 }: {
+  cancelOnly?: boolean;
   endpoint: string;
   inert?: boolean;
   management: GroupSponsorshipManagementProjection;
@@ -36,6 +43,7 @@ export function GroupSponsorshipManagementCard({
     initialManagement.pendingMonthlyCapMinor ?? initialManagement.monthlyCapMinor,
   );
   const [busy, setBusy] = useState(false);
+  const [canceled, setCanceled] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async (body: Record<string, unknown>) => {
@@ -70,6 +78,10 @@ export function GroupSponsorshipManagementCard({
         return;
       }
       if (value.management === null) {
+        if (body.action === "cancel") {
+          setCanceled(true);
+          return;
+        }
         window.location.reload();
         return;
       }
@@ -96,6 +108,10 @@ export function GroupSponsorshipManagementCard({
     management.pendingMonthlyCapMinor ?? management.monthlyCapMinor;
   const capChanged = selectedMonthlyCapMinor !== appliedMonthlyCapMinor;
   const capIncrease = selectedMonthlyCapMinor > management.monthlyCapMinor;
+
+  if (canceled) {
+    return <GroupSponsorshipCanceledReceipt />;
+  }
 
   const applyCap = () => {
     if (selectedMonthlyCapMinor === appliedMonthlyCapMinor) {
@@ -162,7 +178,11 @@ export function GroupSponsorshipManagementCard({
         </div>
       </dl>
 
-      {management.status === "recovery_required" ? (
+      {cancelOnly ? (
+        <p className="text-sm leading-6 text-muted-foreground">
+          Billing changes are unavailable, but you can still stop future automatic refills.
+        </p>
+      ) : management.status === "recovery_required" ? (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
           <p className="font-medium">Payment needs attention</p>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
@@ -180,7 +200,7 @@ export function GroupSponsorshipManagementCard({
         </div>
       ) : null}
 
-      {management.status !== "pending_activation" ? (
+      {!cancelOnly && management.status !== "pending_activation" ? (
         <FieldSet className="space-y-3" disabled={busy || inert}>
           <FieldLegend>Monthly limit</FieldLegend>
           <RadioGroup
@@ -236,11 +256,11 @@ export function GroupSponsorshipManagementCard({
             </div>
           ) : null}
         </FieldSet>
-      ) : (
+      ) : !cancelOnly ? (
         <p className="text-sm leading-6 text-muted-foreground">
           The $5 activation is being confirmed.
         </p>
-      )}
+      ) : null}
 
       {error ? (
         <p role="alert" className="text-sm text-destructive">
@@ -249,7 +269,7 @@ export function GroupSponsorshipManagementCard({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-1">
-        {management.status === "active" ? (
+        {!cancelOnly && management.status === "active" ? (
           <Button
             type="button"
             size="sm"
@@ -259,7 +279,7 @@ export function GroupSponsorshipManagementCard({
           >
             Pause automatic refills
           </Button>
-        ) : management.status === "paused" ? (
+        ) : !cancelOnly && management.status === "paused" ? (
           <Button
             type="button"
             size="sm"
@@ -289,6 +309,23 @@ export function GroupSponsorshipManagementCard({
         </Button>
       </div>
     </section>
+  );
+}
+
+export function GroupSponsorshipCanceledReceipt() {
+  return (
+    <Alert
+      data-component="group-sponsorship-management"
+      data-state="canceled"
+      role="status"
+    >
+      <AlertTitle>
+        Monthly sponsorship canceled
+      </AlertTitle>
+      <AlertDescription>
+        Future automatic refills are stopped. Usage credit already purchased stays with the group.
+      </AlertDescription>
+    </Alert>
   );
 }
 

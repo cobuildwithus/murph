@@ -27,6 +27,7 @@ export const POST = withJsonError(async (request: Request) => {
     }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   const checkout = await createHostedFamilyBillingCheckout({
+    confirmedTrialConversion: body.confirmedTrialConversion,
     groupId: group.id,
     ownerMemberId: auth.member.id,
     prisma,
