@@ -5,7 +5,7 @@ export {
 export {
   selectBrowserVaultLabBiomarkerDetail,
   selectBrowserVaultMeasuredBiomarkers,
-} from "./browser-replica/lab-results.ts";
+} from "./browser-replica/lab-result-status.ts";
 export {
   BROWSER_VAULT_DEVICE_METRIC_SOURCE_KINDS,
   selectBrowserVaultDeviceMetricSummary,

@@ -49,6 +49,11 @@ export interface BrowserVaultNormalizedLabReferenceRange
 export interface BrowserVaultPresentedLabResultRow
   extends BrowserVaultLabResultRow {
   normalizedReferenceRange: BrowserVaultNormalizedLabReferenceRange | null;
+  statusSource:
+    | "published_comparator"
+    | "reported"
+    | "reporting_lab_flag"
+    | "reporting_lab_range";
 }
 
 export interface BrowserVaultLabBiomarkerDetail {
@@ -125,7 +130,9 @@ export function toBrowserVaultLabResultRows(input: {
 }
 
 function readLabSpecimenKind(value: unknown): BrowserVaultLabSpecimenKind | null {
-  return value === "serum" || value === "plasma" ? value : null;
+  return value === "serum" || value === "plasma" || value === "whole_blood"
+    ? value
+    : null;
 }
 
 export function labResultRowMatchesFilters(
@@ -253,31 +260,47 @@ function toPresentedLabResultRow(
   if (row.unit === null) {
     return {
       ...row,
-      normalizedReferenceRange: null,
+      normalizedReferenceRange: normalizeLabReferenceRange({
+        ...row,
+        normalizedUnit: null,
+        normalizedValue: null,
+      }),
       normalizedUnit: null,
       normalizedValue: null,
+      statusSource: row.flag?.trim() ? "reporting_lab_flag" : "reported",
     };
   }
   return {
     ...row,
     normalizedReferenceRange: normalizeLabReferenceRange(row),
+    statusSource: row.flag?.trim() ? "reporting_lab_flag" : "reported",
   };
 }
 
 function normalizeLabReferenceRange(
   row: BrowserVaultLabResultRow,
 ): BrowserVaultNormalizedLabReferenceRange | null {
-  if (
-    row.normalizedValue === null
-    || row.normalizedUnit === null
-    || row.referenceRange === null
-  ) {
+  if (row.referenceRange === null) {
     return null;
   }
 
   const parsed = parseNumericLabReferenceRange(row.referenceRange, row.unit);
   if (!parsed) {
     return null;
+  }
+
+  if (row.normalizedValue === null || row.normalizedUnit === null) {
+    const rawUnitsMatch = (parsed.unit === null && row.unit === null)
+      || unitsEquivalent(parsed.unit, row.unit);
+    if (row.value === null || !rawUnitsMatch) {
+      return null;
+    }
+    return {
+      ...(parsed.high !== undefined ? { high: parsed.high } : {}),
+      ...(parsed.highComparator ? { highComparator: parsed.highComparator } : {}),
+      ...(parsed.low !== undefined ? { low: parsed.low } : {}),
+      ...(parsed.lowComparator ? { lowComparator: parsed.lowComparator } : {}),
+    };
   }
 
   const low = parsed.low === undefined

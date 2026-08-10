@@ -10,6 +10,7 @@ import {
   type BrowserVaultEntityLink,
   type BrowserVaultLabResultReferenceRange,
   type BrowserVaultLabResultRow,
+  type BrowserVaultLabSpecimenKind,
   type BrowserVaultMetricGoalProgressRow,
   type BrowserVaultMetricRow,
   type BrowserVaultMetricSelectionRow,
@@ -148,10 +149,13 @@ function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResult
   };
 }
 
-function readNullableLabSpecimenKind(value: unknown, label: string): "plasma" | "serum" | null {
+function readNullableLabSpecimenKind(
+  value: unknown,
+  label: string,
+): BrowserVaultLabSpecimenKind | null {
   if (value === null || value === undefined) return null;
-  if (value === "plasma" || value === "serum") return value;
-  throw new TypeError(`${label} must be plasma, serum, or null.`);
+  if (value === "plasma" || value === "serum" || value === "whole_blood") return value;
+  throw new TypeError(`${label} must be plasma, serum, whole_blood, or null.`);
 }
 
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
