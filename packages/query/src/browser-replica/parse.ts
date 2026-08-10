@@ -154,7 +154,8 @@ function readNullableLabSpecimenKind(
   label: string,
 ): BrowserVaultLabSpecimenKind | null {
   if (value === null || value === undefined) return null;
-  if (value === "plasma" || value === "serum" || value === "whole_blood") return value;
+  if (value === "plasma" || value === "serum") return value;
+  if (value === "whole_blood") return value as BrowserVaultLabSpecimenKind;
   throw new TypeError(`${label} must be plasma, serum, whole_blood, or null.`);
 }
 
