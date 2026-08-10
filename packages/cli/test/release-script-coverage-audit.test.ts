@@ -1711,7 +1711,7 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
         },
       })
       expect(localResult.status, localResult.stderr).toBe(0)
-      expect(localResult.stdout.trim()).toBe('eragon|1')
+      expect(localResult.stdout.trim()).toBe('main|1')
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
       const defaultResult = spawnSync('bash', ['-c', configHarness], {
@@ -1725,7 +1725,7 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
         },
       })
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
-      expect(defaultResult.stdout.trim().split('|')[1]).toBe('4')
+      expect(defaultResult.stdout.trim()).toBe('main|4')
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,

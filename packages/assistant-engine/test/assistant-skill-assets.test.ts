@@ -721,9 +721,18 @@ describe('assistant skill assets', () => {
     expect(nutritionText).toContain(
       'Child references are progressive disclosure, not separately registered skills.',
     )
-    expect(nutritionText).toContain(
-      'Mapped child references in this tranche:** none.',
-    )
+    for (const reference of [
+      'intermittent-fasting.md',
+      'low-carbohydrate.md',
+      'ketogenic.md',
+      'mediterranean.md',
+      'carnivore-animal-based.md',
+      'vegan-plant-based.md',
+      'vegetarian-spectrum.md',
+      'dash.md',
+    ]) {
+      expect(nutritionText).toContain(`references/named-diets/${reference}`)
+    }
     expect(nutritionText).not.toContain('### Body composition')
     expect(nutritionText).not.toContain('### GI comfort and performance')
   })

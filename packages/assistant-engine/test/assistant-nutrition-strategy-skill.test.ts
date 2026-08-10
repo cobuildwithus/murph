@@ -48,7 +48,7 @@ describe('assistant nutrition strategy skill', () => {
       'Nutrition/metabolic: food-journal, nutrition-strategy, body-composition, gut-digestion',
     )
     expect(prompt).toContain(
-      'Food-journal owns capture/retrospective; nutrition-strategy meals/named diets; body-composition weight/waist/recomp; gut-digestion symptoms/elimination/reintro',
+      'Food-journal owns capture and retrospective patterns; nutrition-strategy owns forward meal execution and named-diet evaluation; body-composition owns weight/waist/recomposition; gut-digestion owns digestive symptoms and elimination/reintroduction',
     )
     expect(prompt).toContain('$MURPH_ASSISTANT_SKILLS_ROOT/<slug>/SKILL.md')
     expect(prompt).not.toContain(
@@ -98,9 +98,18 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain(
       'Child references are progressive disclosure, not separately registered skills.',
     )
-    expect(nutrition).toContain(
-      'Mapped child references in this tranche:** none.',
-    )
+    for (const reference of [
+      'intermittent-fasting.md',
+      'low-carbohydrate.md',
+      'ketogenic.md',
+      'mediterranean.md',
+      'carnivore-animal-based.md',
+      'vegan-plant-based.md',
+      'vegetarian-spectrum.md',
+      'dash.md',
+    ]) {
+      expect(nutrition).toContain(`references/named-diets/${reference}`)
+    }
     expect(foodJournal).toContain(
       'Use `nutrition-strategy` for forward-looking decisions about what to eat or change',
     )
@@ -172,7 +181,7 @@ describe('assistant nutrition strategy skill', () => {
     )
   })
 
-  it('routes named diets without creating child skill ownership yet', async () => {
+  it('routes named diets through bounded, non-registered child references', async () => {
     const { nutrition } = await readSkills()
 
     expect(nutrition).toContain('## Named Diets And Dietary Patterns')
@@ -188,6 +197,9 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain('preserve the useful core with the least avoidable restriction')
     expect(nutrition).toContain('Do not use purity, moral, identity, or compliance framing.')
     expect(nutrition).toContain('do not scan the directory, invent an absent file, or preload references')
+    expect(nutrition).toContain('Read at most one mapped child for a narrow question')
+    expect(nutrition).toContain('two only when the user explicitly compares two patterns')
+    expect(nutrition).toContain('For an unmapped named diet, use this parent contract')
     expect(nutrition).not.toContain('diet-patterns/SKILL.md')
     expect(nutrition).not.toContain('named-diets/SKILL.md')
   })

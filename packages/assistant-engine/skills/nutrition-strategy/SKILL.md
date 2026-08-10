@@ -74,7 +74,18 @@ For ordinary execution, preserve the useful core with the least avoidable restri
 
 Child references are progressive disclosure, not separately registered skills. A supported child must be explicitly mapped in this section to `references/named-diets/<slug>.md`. Read at most one mapped child for a narrow question, or two only when the user explicitly compares two patterns and both files materially change the answer. Confirm the mapped file exists before reading it; do not scan the directory, invent an absent file, or preload references. The parent contract owns routing and universal safety, and no child may weaken it.
 
-**Mapped child references in this tranche:** none. Use this parent contract and current authoritative evidence until a child is added and explicitly mapped.
+**Mapped child references in this tranche:**
+
+- Intermittent fasting, time-restricted eating, TRE, 16:8, 14:10, 5:2, alternate-day fasting, ADF, or OMAD -> `references/named-diets/intermittent-fasting.md`.
+- Low-carbohydrate or low-carb eating that is not explicitly ketogenic -> `references/named-diets/low-carbohydrate.md`.
+- Ketogenic or keto diets -> `references/named-diets/ketogenic.md`.
+- Mediterranean or Mediterranean-style diets -> `references/named-diets/mediterranean.md`.
+- Carnivore or animal-based diets -> `references/named-diets/carnivore-animal-based.md`.
+- Vegan, plant-only, whole-food plant-based, or WFPB diets -> `references/named-diets/vegan-plant-based.md`.
+- Vegetarian, lacto-ovo, lacto-vegetarian, ovo-vegetarian, pescatarian, or flexitarian patterns -> `references/named-diets/vegetarian-spectrum.md`.
+- DASH or Dietary Approaches to Stop Hypertension -> `references/named-diets/dash.md`.
+
+For an unmapped named diet, use this parent contract and current authoritative evidence rather than guessing a child reference.
 
 For a named-diet answer, usually cover only what the question needs from: what it is and common variants; what evidence supports and does not support; likely benefits sought; material downsides and who should be cautious; the lowest-risk practical version; feedback and stop conditions; and the right handoff.
 
