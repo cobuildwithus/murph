@@ -48,11 +48,13 @@ import {
 import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantResponseCardJsonSchema,
-  challengeStandingsResponseCardJsonSchema,
 } from '@murphai/operator-config/assistant-response-cards'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
 } from '../assistant/group-shared-read-limits.js'
+import {
+  groupChallengeResponseCardAuthoringJsonSchema,
+} from '../assistant/group-challenge-response-card-schema.js'
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from '../assistant/generated-delivery-files.js'
@@ -266,15 +268,8 @@ export const MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_response_card',
   description:
-    'Attach one challenge_standings card for the current authenticated Linq group only when the current accepted room message or the saved instructions for this exact scheduled occurrence explicitly request a current shared-challenge snapshot. First read the canonical challenge page and run the deterministic score-challenge command. Copy only room-facing labels already authorized in this group and scorer-owned points, target, order, and coverage. The title is the exact canonical room-facing challenge title. Subtitle and footer may only copy exact canonical room-facing challenge text, otherwise keep them null; never author score, rank, coverage, missing-data, count, or arithmetic claims there. For individual or team snapshots, attach only when the entire canonical ranked result contains at most eight entries; never truncate the ranking or omit a waiting participant. Attach any format only when its exact room-authorized labels and snapshot text fit the closed schema and URL; never shorten labels to fit the card. If any read_shared result used for this score has status="partial" or a nonempty omittedParticipantIds list, do not attach any challenge card; answer with the truthful ordinary-text incomplete update instead. Collective cards have no row cap, but the same capacity-omission refusal applies. Individual entries use verifiedPoints and coverage. Team entries use verifiedPoints only when non-null, so an incomplete average remains unscored even when a verified subtotal exists. Copy scoreboard.coverage exactly into collective coverageCounts; do not recalculate counts. Collective coverage is complete only when every participant is complete, unscored only when every participant is unscored, and partial otherwise; an all-unscored collective keeps collectivePoints null. Partial scores are verified lower bounds and unscored scores stay null. Entry detail is always null; never expose private health details, recalculate points, treat missing data as zero, or attach nutrition or workout cards here. The card replaces the entire final response, does not send by itself, and cannot combine with response media.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      card: challengeStandingsResponseCardJsonSchema,
-    },
-    required: ['card'],
-  },
+    'Attach one challenge_standings card for the current authenticated Linq group only when the current accepted room message or the saved instructions for this exact scheduled occurrence explicitly request a current shared-challenge snapshot. Read the canonical challenge page and every required bounded read first. Run score-challenge, persist its result on the existing challenge page, then pass the exact same normalized score input here; this tool runs the deterministic scorer again and owns points, target, order, coverage, counts, ranks, and ties. The title is the exact canonical room-facing challenge title. Subtitle and footer may only copy exact canonical room-facing challenge text, otherwise keep them null; never author score, rank, coverage, missing-data, count, or arithmetic claims there. For an individual snapshot, provide exactly one room-authorized label for each participant id in scoreInput; team names come from scoreInput, and team or collective cards require an empty participantLabels array. For individual or team snapshots, attach only when the entire canonical ranked result contains at most eight entries; never truncate the ranking or omit a waiting participant. Attach any format only when its exact room-authorized labels and snapshot text fit the closed card schema and URL; never shorten labels to fit the card. If any read_shared result used for this score has status="partial" or a nonempty omittedParticipantIds list, do not attach any challenge card; answer with the truthful ordinary-text incomplete update instead. Collective cards have no row cap, but the same capacity-omission refusal applies. Partial scores are verified lower bounds and unscored scores stay null. The card replaces the entire final response, does not send by itself, and cannot combine with response media.',
+  inputSchema: groupChallengeResponseCardAuthoringJsonSchema,
 } as const
 
 export const MURPH_GENERATE_IMAGE_TOOL = {

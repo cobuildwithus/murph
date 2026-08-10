@@ -123,7 +123,7 @@ describe('challenge standings response cards', () => {
       'Coverage: 0 complete, 0 partial, 3 unscored (3 total).',
     )
     expect(buildLinqIMessageAppLayout(allUnscoredCollective).subcaption).toBe(
-      'Waiting for score',
+      'Waiting for score\nWaiting for shared data.',
     )
   })
 
@@ -132,11 +132,13 @@ describe('challenge standings response cards', () => {
       [
         'Weird Health Week — Day 4 of 7',
         '',
-        '1. Maya: 120 points',
-        '2. Jon: 90+ points',
+        '— Maya: 120 points',
+        '— Jon: 90+ points',
         '— Priya: unscored',
         '',
         'Scores marked + are verified lower bounds.',
+        '',
+        'Ranks are withheld until every score is complete.',
       ].join('\n'),
     )
 
@@ -169,17 +171,23 @@ describe('challenge standings response cards', () => {
     )
 
     expect(buildLinqIMessageAppLayout(COLLECTIVE_CARD)).toEqual({
-      caption: 'Move Atlanta Together',
-      subcaption: '640+ / 1,000 pts',
-      trailing_caption: 'OPEN',
+      caption: "Move Atlanta Together — Updated after Friday's check-in",
+      subcaption: '640+ / 1,000 pts\nMore progress may be pending.',
+      trailing_caption:
+        'Coverage · 1 complete · 1 partial · 1 unscored · 3 total',
+      trailing_subcaption: 'Verified lower-bound progress.',
     })
   })
 
   it('builds a truthful static layout for ranked standings', () => {
     expect(buildLinqIMessageAppLayout(INDIVIDUAL_CARD)).toEqual({
-      caption: 'Weird Health Week',
-      subcaption: 'Maya · 120 pts',
-      trailing_caption: 'OPEN',
+      caption: 'Weird Health Week — Day 4 of 7',
+      subcaption: '— Maya: 120 points\n— Jon: 90+ points',
+      trailing_caption: '— Priya: unscored',
+      trailing_subcaption: [
+        'Scores marked + are verified lower bounds.',
+        'Ranks are withheld until every score is complete.',
+      ].join(' · '),
     })
   })
 
@@ -187,7 +195,9 @@ describe('challenge standings response cards', () => {
     expect(buildLinqIMessageAppLayout({
       ...INDIVIDUAL_CARD,
       objective: { kind: 'target', targetPoints: 150 },
-    }).subcaption).toBe('Maya · 120 / 150 pts')
+    }).subcaption).toBe(
+      '— Maya: 120 / 150 points\n— Jon: 90+ / 150 points',
+    )
   })
 
   it('encodes the exact schema-v4 snapshot consumed by iOS', () => {
@@ -217,6 +227,13 @@ describe('challenge standings response cards', () => {
     const maximumUrl = encodeChallengeStandingsAppCardUrl(maximumRankedCard)
     expect(maximumUrl.startsWith(IMESSAGE_APP_CARD_URL_PREFIX)).toBe(true)
     expect(maximumUrl.length).toBe(1_945)
+    const maximumLayout = buildLinqIMessageAppLayout(maximumRankedCard)
+    expect(Object.values(maximumLayout).every((value) => value.length <= 512))
+      .toBe(true)
+    expect([
+      maximumLayout.subcaption,
+      maximumLayout.trailing_caption ?? '',
+    ].join('\n').split('\n')).toHaveLength(challengeStandingsCardV1Bounds.entries)
 
     const makeBoundaryCard = (multibyteCharacters: number) => {
       const titleMultibyteCharacters = Math.min(multibyteCharacters, 60)

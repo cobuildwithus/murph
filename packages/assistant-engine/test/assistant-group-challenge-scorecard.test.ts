@@ -2,17 +2,16 @@ import { describe, expect, it } from 'vitest'
 
 import {
   challengeStandingsResponseCardV1Schema,
-  type ChallengeStandingsCoverage,
-  type ChallengeStandingsResponseCardV1,
 } from '@murphai/contracts'
 
 import {
+  buildGroupChallengeResponseCard,
+} from '../src/assistant/group-challenge-response-card.js'
+import {
   GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS,
   scoreGroupChallenge,
-  type GroupChallengeCoverageSummary,
   type GroupChallengeParticipantObservation,
   type GroupChallengeScorecard,
-  type GroupChallengeScoreboard,
 } from '../src/assistant/group-challenge-scorecard.js'
 
 const weightedScorecard = {
@@ -81,82 +80,17 @@ const zeroTieParticipants = [
   },
 ] as const satisfies readonly GroupChallengeParticipantObservation[]
 
-function cardCoverageFromSummary(
-  coverage: GroupChallengeCoverageSummary,
-): ChallengeStandingsCoverage {
-  if (coverage.completeParticipants === coverage.totalParticipants) {
-    return 'complete'
-  }
-  if (coverage.unscoredParticipants === coverage.totalParticipants) {
-    return 'unscored'
-  }
-  return 'partial'
-}
-
-function mapScoreboardToCard(
-  scoreboard: GroupChallengeScoreboard,
-  participantLabels: ReadonlyMap<string, string> = new Map(),
-): ChallengeStandingsResponseCardV1 {
-  const common = {
-    kind: 'challenge_standings' as const,
-    version: 1 as const,
-    title: 'Canonical challenge title',
-    subtitle: null,
+function buildCard(
+  scoreInput: Parameters<typeof scoreGroupChallenge>[0],
+  participantLabels: readonly { label: string; participantId: string }[] = [],
+) {
+  return buildGroupChallengeResponseCard({
     footer: null,
-  }
-  switch (scoreboard.kind) {
-    case 'individual':
-      return {
-        ...common,
-        format: 'individual',
-        objective: { kind: 'ranking' },
-        entries: scoreboard.entries.map((entry) => {
-          const label = participantLabels.get(entry.participantId)
-          if (!label) {
-            throw new TypeError('Expected a room-facing participant label.')
-          }
-          return {
-            label,
-            points: entry.coverage === 'unscored' ? null : entry.verifiedPoints,
-            coverage: entry.coverage,
-            detail: null,
-          }
-        }),
-      }
-    case 'teams':
-      return {
-        ...common,
-        format: 'teams',
-        objective: { kind: 'ranking' },
-        entries: scoreboard.entries.map((entry) => {
-          const coverage = entry.verifiedPoints === null
-            ? 'unscored'
-            : cardCoverageFromSummary(entry.coverage)
-          return {
-            label: entry.name,
-            points: coverage === 'unscored' ? null : entry.verifiedPoints,
-            coverage,
-            detail: null,
-          }
-        }),
-      }
-    case 'collective': {
-      const coverage = cardCoverageFromSummary(scoreboard.coverage)
-      return {
-        ...common,
-        format: 'collective',
-        objective: {
-          kind: 'target',
-          targetPoints: scoreboard.objectiveProgress.targetPoints,
-        },
-        collectivePoints: coverage === 'unscored'
-          ? null
-          : scoreboard.verifiedPoints,
-        coverage,
-        coverageCounts: scoreboard.coverage,
-      }
-    }
-  }
+    participantLabels,
+    scoreInput,
+    subtitle: null,
+    title: 'Canonical challenge title',
+  })
 }
 
 describe('group challenge additive scorecards', () => {
@@ -206,11 +140,12 @@ describe('group challenge additive scorecards', () => {
   })
 
   it('orders a verified zero before an unscored zero for a valid standings card', () => {
-    const result = scoreGroupChallenge({
+    const scoreInput = {
       format: { kind: 'individual', objective: { kind: 'ranking' } },
       participants: zeroTieParticipants,
       scorecard: zeroTieScorecard,
-    })
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
 
     expect(result.scoreboard).toMatchObject({
       kind: 'individual',
@@ -230,11 +165,10 @@ describe('group challenge additive scorecards', () => {
     if (result.scoreboard.kind !== 'individual') {
       throw new TypeError('Expected an individual challenge scoreboard.')
     }
-    const roomFacingLabels = new Map([
-      ['participant_alpha_unscored', 'Alpha'],
-      ['participant_zulu_zero', 'Zulu'],
+    const card = buildCard(scoreInput, [
+      { label: 'Alpha', participantId: 'participant_alpha_unscored' },
+      { label: 'Zulu', participantId: 'participant_zulu_zero' },
     ])
-    const card = mapScoreboardToCard(result.scoreboard, roomFacingLabels)
     expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
   })
 
@@ -434,7 +368,7 @@ describe('group challenge additive scorecards', () => {
   })
 
   it('orders a verified-zero team before an unscored-zero team', () => {
-    const result = scoreGroupChallenge({
+    const scoreInput = {
       format: {
         aggregation: 'sum',
         kind: 'teams',
@@ -454,7 +388,8 @@ describe('group challenge additive scorecards', () => {
       },
       participants: zeroTieParticipants,
       scorecard: zeroTieScorecard,
-    })
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
 
     expect(result.scoreboard).toMatchObject({
       kind: 'teams',
@@ -474,7 +409,7 @@ describe('group challenge additive scorecards', () => {
     if (result.scoreboard.kind !== 'teams') {
       throw new TypeError('Expected a team challenge scoreboard.')
     }
-    const card = mapScoreboardToCard(result.scoreboard)
+    const card = buildCard(scoreInput)
     expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
     if (card.format !== 'teams') {
       throw new TypeError('Expected a team challenge card.')
@@ -486,7 +421,7 @@ describe('group challenge additive scorecards', () => {
   })
 
   it('withholds an unequal-team average until every included score is complete', () => {
-    const result = scoreGroupChallenge({
+    const scoreInput = {
       format: {
         aggregation: 'average',
         kind: 'teams',
@@ -498,7 +433,8 @@ describe('group challenge additive scorecards', () => {
       },
       participants: weightedParticipants,
       scorecard: weightedScorecard,
-    })
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
 
     expect(result.scoreboard).toMatchObject({
       kind: 'teams',
@@ -508,7 +444,7 @@ describe('group challenge additive scorecards', () => {
         { teamId: 'south', verifiedPoints: null, verifiedSubtotalPoints: 455 },
       ],
     })
-    const card = mapScoreboardToCard(result.scoreboard)
+    const card = buildCard(scoreInput)
     expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
     if (card.format !== 'teams') {
       throw new TypeError('Expected a team challenge card.')
@@ -521,14 +457,15 @@ describe('group challenge additive scorecards', () => {
   })
 
   it('turns the same participant scores into conservative collective target progress', () => {
-    const result = scoreGroupChallenge({
+    const scoreInput = {
       format: {
         kind: 'collective',
         objective: { kind: 'target', targetPoints: 2_000 },
       },
       participants: weightedParticipants,
       scorecard: weightedScorecard,
-    })
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
 
     expect(result.scoreboard).toEqual({
       coverage: {
@@ -549,10 +486,10 @@ describe('group challenge additive scorecards', () => {
     if (result.scoreboard.kind !== 'collective') {
       throw new TypeError('Expected a collective challenge scoreboard.')
     }
-    const card = mapScoreboardToCard(result.scoreboard)
+    const card = buildCard(scoreInput)
     expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
 
-    const unscored = scoreGroupChallenge({
+    const unscoredScoreInput = {
       format: {
         kind: 'collective',
         objective: { kind: 'target', targetPoints: 2_000 },
@@ -562,8 +499,8 @@ describe('group challenge additive scorecards', () => {
         components: [{ componentId: 'steps', status: 'missing' as const }],
       })),
       scorecard: zeroTieScorecard,
-    })
-    const unscoredCard = mapScoreboardToCard(unscored.scoreboard)
+    } as const
+    const unscoredCard = buildCard(unscoredScoreInput)
     expect(challengeStandingsResponseCardV1Schema.parse(unscoredCard)).toEqual(
       unscoredCard,
     )

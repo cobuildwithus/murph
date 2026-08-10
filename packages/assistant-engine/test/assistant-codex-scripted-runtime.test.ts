@@ -1574,6 +1574,101 @@ if (!tool) {
     }
   })
 
+  it('scores group challenge authoring input through the code-mode App Server boundary', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const authoringInput = {
+      footer: null,
+      participantLabels: [
+        { label: 'Maya', participantId: 'participant_maya' },
+        { label: 'Jon', participantId: 'participant_jon' },
+      ],
+      scoreInput: {
+        format: {
+          kind: 'individual',
+          objective: { kind: 'ranking' },
+        },
+        participants: [
+          {
+            components: [{
+              componentId: 'steps',
+              quantity: 4_000,
+              status: 'available',
+            }],
+            participantId: 'participant_maya',
+          },
+          {
+            components: [{ componentId: 'steps', status: 'pending' }],
+            participantId: 'participant_jon',
+          },
+        ],
+        scorecard: {
+          components: [{
+            id: 'steps',
+            label: 'Steps',
+            perQuantity: 100,
+            points: 3,
+            quantityUnit: 'steps',
+          }],
+        },
+      },
+      subtitle: 'Current verified progress',
+      title: 'Weird Health Week',
+    } as const
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: [
+            `const result = await tools.murph__attach_response_card(${JSON.stringify(authoringInput)});`,
+            'text(result);',
+          ].join('\n'),
+          name: 'exec',
+        },
+      },
+      { text: 'CARD_ATTACHED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        groupChallengeResponseCardsAvailable: true,
+        responseCardsAvailable: false,
+      }),
+      groupConversation: true,
+      prompt: 'Attach the requested synthetic group challenge card.',
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(toolOutputs).toContain('response card attached')
+    expect(result.runtimeIssueInputs).toEqual([])
+    expect(result.responseCard).toEqual({
+      entries: [
+        {
+          coverage: 'complete',
+          detail: null,
+          label: 'Maya',
+          points: 120,
+        },
+        {
+          coverage: 'unscored',
+          detail: null,
+          label: 'Jon',
+          points: null,
+        },
+      ],
+      footer: null,
+      format: 'individual',
+      kind: 'challenge_standings',
+      objective: { kind: 'ranking' },
+      subtitle: 'Current verified progress',
+      title: 'Weird Health Week',
+      version: 1,
+    })
+  })
+
   it('discovers deferred Murph schemas through native Codex tool_search', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

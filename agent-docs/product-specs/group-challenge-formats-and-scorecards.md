@@ -232,6 +232,13 @@ result on the existing challenge page in the same turn.
 A command failure is an invalid normalized input or ruling. Murph fixes that input
 instead of silently falling back to model arithmetic.
 
+When a requested Linq group update is eligible for the native standings card, the
+attachment tool accepts this same normalized scorer input rather than accepting a
+model-authored scoreboard. It runs the scorer again and maps the result into the
+bounded presentation contract, so card points, target, order, coverage, counts,
+ranks, and ties remain deterministic even though the model still owns authorized
+record interpretation and room-facing labels.
+
 ## Durable ownership
 
 The existing group challenge knowledge page is the sole durable owner. There is no

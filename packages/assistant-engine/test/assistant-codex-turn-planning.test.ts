@@ -2169,7 +2169,9 @@ describe('assistant Codex turn planning', () => {
     })
     expect(groupTool).toBeDefined()
     const groupSchema = JSON.stringify(groupTool!.inputSchema)
-    expect(groupSchema).toContain('challenge_standings')
+    expect(groupSchema).toContain('scoreInput')
+    expect(groupSchema).toContain('participantLabels')
+    expect(groupSchema).not.toContain('challenge_standings')
     expect(groupSchema).not.toContain('daily_nutrition')
     expect(groupSchema).not.toContain('compact_table')
 

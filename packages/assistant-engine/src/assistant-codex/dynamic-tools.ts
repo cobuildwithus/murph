@@ -104,6 +104,12 @@ import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from '../assistant/group-shared-read-limits.js'
+import {
+  buildGroupChallengeResponseCard,
+} from '../assistant/group-challenge-response-card.js'
+import {
+  groupChallengeResponseCardAuthoringInputSchema,
+} from '../assistant/group-challenge-response-card-schema.js'
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
@@ -258,6 +264,9 @@ const attachResponseCardArgumentsSchema = z
     card: assistantResponseCardSchema,
   })
   .strict()
+
+const attachGroupChallengeResponseCardArgumentsSchema =
+  groupChallengeResponseCardAuthoringInputSchema
 
 const attachResponseMediaArgumentsSchema = z
   .object({
@@ -1018,6 +1027,10 @@ export type MurphDynamicToolRequest =
       card: AssistantResponseCard
     }
   | {
+      kind: 'attach-group-challenge-response-card'
+      card: AssistantResponseCard
+    }
+  | {
       kind: 'generate-image'
       args: GenerateImageToolArgs
       messageRef?: string
@@ -1334,7 +1347,9 @@ export function readMurphDynamicToolRequest(
       }
 
       return {
-        kind: 'attach-response-card',
+        kind: parsed.groupChallenge
+          ? 'attach-group-challenge-response-card'
+          : 'attach-response-card',
         card: parsed.card,
       }
     }
@@ -1834,14 +1849,20 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
+    case 'attach-group-challenge-response-card':
     case 'attach-response-card': {
-      if (input.request.card.kind === 'challenge_standings') {
+      if (input.request.kind === 'attach-group-challenge-response-card') {
         if (input.groupChallengeResponseCardAllowed !== true) {
           return toolTextResult(
             false,
             'challenge standings response cards require an authenticated Linq group conversation',
           )
         }
+      } else if (input.request.card.kind === 'challenge_standings') {
+        return toolTextResult(
+          false,
+          'challenge standings response cards require scorer-owned authoring input',
+        )
       } else if (input.privateDirectResponseCardAllowed !== true) {
         return toolTextResult(
           false,
@@ -6015,12 +6036,19 @@ function parseComputerArguments<TArgs>(input: {
 function parseAttachResponseCardArguments(
   value: unknown,
 ):
-  | { ok: true; card: AssistantResponseCard }
+  | { ok: true; card: AssistantResponseCard; groupChallenge: boolean }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
   const parsed = attachResponseCardArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
+  if (parsed.success) {
+    return {
+      card: parsed.data.card,
+      groupChallenge: false,
+      ok: true,
+    }
+  }
+  if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
@@ -6032,10 +6060,42 @@ function parseAttachResponseCardArguments(
       }),
     }
   }
+  const groupChallengeParsed =
+    attachGroupChallengeResponseCardArgumentsSchema.safeParse(value)
+  if (!groupChallengeParsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: groupChallengeParsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachGroupChallengeResponseCardArgumentsSchema,
+        ),
+        toolName,
+      }),
+    }
+  }
 
-  return {
-    card: parsed.data.card,
-    ok: true,
+  try {
+    return {
+      card: buildGroupChallengeResponseCard(groupChallengeParsed.data),
+      groupChallenge: true,
+      ok: true,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachGroupChallengeResponseCardArgumentsSchema,
+        ),
+        toolName,
+      }),
+    }
   }
 }
 

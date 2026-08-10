@@ -61,6 +61,39 @@ const CHALLENGE_CARD: AssistantResponseCard = {
   footer: null,
 }
 
+const CHALLENGE_CARD_AUTHORING_INPUT = {
+  footer: null,
+  participantLabels: [{
+    label: 'Maya',
+    participantId: 'participant_maya',
+  }],
+  scoreInput: {
+    format: {
+      kind: 'individual',
+      objective: { kind: 'ranking' },
+    },
+    participants: [{
+      components: [{
+        componentId: 'steps',
+        quantity: 4_000,
+        status: 'available',
+      }],
+      participantId: 'participant_maya',
+    }],
+    scorecard: {
+      components: [{
+        id: 'steps',
+        label: 'Steps',
+        perQuantity: 100,
+        points: 3,
+        quantityUnit: 'steps',
+      }],
+    },
+  },
+  subtitle: 'Day 4 of 7',
+  title: 'Weird Health Week',
+} as const
+
 const IMAGE: AssistantResponseMedia = {
   alt: null,
   kind: 'image',
@@ -179,15 +212,21 @@ describe('murph.attach_response_card', () => {
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).not.toContain('challenge_standings')
-    expect(groupSchema).toContain('challenge_standings')
+    expect(groupSchema).toContain('scoreInput')
+    expect(groupSchema).toContain('participantLabels')
+    expect(groupSchema).toContain('individual')
+    expect(groupSchema).toContain('collective')
+    expect(groupSchema).not.toContain('challenge_standings')
+    expect(groupSchema).not.toContain('verifiedPoints')
+    expect(groupSchema).not.toContain('coverageCounts')
     expect(groupSchema).not.toContain('daily_nutrition')
     expect(groupSchema).not.toContain('compact_table')
-    expect(groupTool!.description).toContain('deterministic score-challenge')
+    expect(groupTool!.description).toContain('runs the deterministic scorer')
     expect(groupTool!.description).toContain(
-      'an incomplete average remains unscored',
+      'persist its result on the existing challenge page',
     )
     expect(groupTool!.description).toContain(
-      'an all-unscored collective keeps collectivePoints null',
+      'owns points, target, order, coverage, counts, ranks, and ties',
     )
     expect(groupTool!.description).toContain(
       'entire canonical ranked result contains at most eight entries',
@@ -202,9 +241,7 @@ describe('murph.attach_response_card', () => {
     )
     expect(groupTool!.description).toContain('nonempty omittedParticipantIds')
     expect(groupTool!.description).toContain('Collective cards have no row cap')
-    expect(groupTool!.description).toContain(
-      'Copy scoreboard.coverage exactly into collective coverageCounts',
-    )
+    expect(groupTool!.description).toContain('empty participantLabels array')
   })
 
   it('describes the private on-demand canonical-read contract', () => {
@@ -249,6 +286,16 @@ describe('murph.attach_response_card', () => {
     expect(readCardToolRequest({ card: CHALLENGE_CARD })).toEqual({
       card: CHALLENGE_CARD,
       kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT)).toEqual({
+      card: CHALLENGE_CARD,
+      kind: 'attach-group-challenge-response-card',
+    })
+    expect(readCardToolRequest({
+      ...CHALLENGE_CARD_AUTHORING_INPUT,
+      entries: CHALLENGE_CARD.entries,
+    })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
       kind: 'invalid-response-card-arguments',
@@ -309,19 +356,23 @@ describe('murph.attach_response_card', () => {
     })
     expect(privateChallenge.rpcResult).toEqual({
       contentItems: [{
-        text: 'challenge standings response cards require an authenticated Linq group conversation',
+        text: 'challenge standings response cards require scorer-owned authoring input',
         type: 'inputText',
       }],
       success: false,
     })
 
+    const groupRequest = readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT)
+    if (
+      !groupRequest
+      || groupRequest.kind !== 'attach-group-challenge-response-card'
+    ) {
+      throw new TypeError('Expected a scorer-owned challenge card request.')
+    }
     const groupChallenge = await executeCardTool({
       groupChallengeResponseCardAllowed: true,
       privateDirectResponseCardAllowed: false,
-      request: {
-        card: CHALLENGE_CARD,
-        kind: 'attach-response-card',
-      },
+      request: groupRequest,
     })
     expect(groupChallenge).toMatchObject({
       responseCardPatch: { card: CHALLENGE_CARD },

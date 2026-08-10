@@ -15,7 +15,7 @@ The response-card kind is `challenge_standings`, card version `1`, carried in Me
 - `complete` means the displayed score is the currently supported score.
 - `partial` means the displayed score is a verified lower bound and is rendered with `+`.
 - `unscored` requires a null score and is rendered as waiting for data, never as zero.
-- Ranked entries are descending, ties are derived from equal points, and unscored entries are last.
+- Ranked entries are descending by verified points and unscored entries are last. Ordinal ranks and ties are shown only when every entry has complete coverage; partial or unscored snapshots preserve the scorer order but label every row unranked.
 - Collective cards require a positive target. Reaching a target with partial coverage is safe because the verified lower bound has already reached it.
 - Internal entity ids, evidence paths, and tracking metadata are not embedded in the Messages URL.
 - The V1 entry `detail` key is retained as null-only wire shape; per-person free text is not authorized for the group card.
@@ -28,7 +28,9 @@ The response-card kind is `challenge_standings`, card version `1`, carried in Me
 
 The response-card tool is available for this card in authenticated Linq group conversations, including exact scheduled challenge occurrences. Outside private direct conversations, runtime and outbox validation admit only `challenge_standings`; nutrition and workout cards remain private. Other group channels remain text-only until they have a native delivery contract.
 
-The existing response-card tool validates the closed schema and emits semantic text for non-native routes. Linq receives a static fallback layout plus a bounded `https://www.withmurph.ai/#murph-card=...` URL. The URL must remain below 2,048 characters. The iOS Messages extension decodes that immutable snapshot offline; it does not fetch, score, reconcile identities, or persist challenge state.
+The group response-card tool accepts the same normalized observation input as `score-challenge` plus exact room-facing presentation labels. It runs the deterministic scorer again and derives every point total, target, order, coverage state, coverage count, rank, and tie at the attachment boundary; the model cannot submit those derived values directly. The existing response-card pipeline then validates the closed card schema and emits semantic text for non-native routes.
+
+Linq receives a complete static fallback layout plus a bounded `https://www.withmurph.ai/#murph-card=...` URL. The static layout carries the heading, every ranked row or the full collective score and coverage summary, lower-bound/rank qualifications, and the canonical footer when present. The value-free `fallback_text` remains free of dates and numbers so Messages does not demote the app card to an ordinary text bubble; recipients without the extension see the complete static layout. The URL must remain below 2,048 characters. The iOS Messages extension decodes that immutable snapshot offline; it does not fetch, score, reconcile identities, or persist challenge state.
 
 ## Non-goals
 

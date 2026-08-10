@@ -5726,6 +5726,7 @@ function isSerializedDynamicToolRequest(
     request.kind === 'generate-image' ||
     request.kind === 'generate-voice-memo' ||
     request.kind === 'generate-song' ||
+    request.kind === 'attach-group-challenge-response-card' ||
     request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'send-vault-file' ||
@@ -5748,7 +5749,8 @@ function isSerializedDynamicToolRequest(
 function isResponseAttachmentDynamicToolRequest(
   request: MurphDynamicToolRequest,
 ): boolean {
-  return request.kind === 'attach-response-card' ||
+  return request.kind === 'attach-group-challenge-response-card' ||
+    request.kind === 'attach-response-card' ||
     request.kind === 'attach-response-media' ||
     request.kind === 'generate-image' ||
     request.kind === 'generate-song' ||

@@ -360,7 +360,9 @@ function renderChallengeStandingsResponseCardText(
   }
 
   const rows = card.entries.map((entry, index) => {
-    const rank = challengeRank(card.entries, index)
+    const rank = challengeRankingComplete(card.entries)
+      ? challengeRank(card.entries, index)
+      : null
     const prefix = rank === null ? '—' : `${rank}.`
     const score = renderChallengeEntryScore(entry, card.objective)
     return `${prefix} ${entry.label}: ${score}`
@@ -368,8 +370,11 @@ function renderChallengeStandingsResponseCardText(
   const partial = card.entries.some((entry) => entry.coverage === 'partial')
     ? ['', 'Scores marked + are verified lower bounds.']
     : []
+  const ranking = challengeRankingComplete(card.entries)
+    ? []
+    : ['', 'Ranks are withheld until every score is complete.']
   const footer = card.footer === null ? [] : ['', card.footer]
-  return [heading, '', ...rows, ...partial, ...footer].join('\n')
+  return [heading, '', ...rows, ...partial, ...ranking, ...footer].join('\n')
 }
 
 function renderChallengeEntryScore(
@@ -404,36 +409,84 @@ function challengeRank(
   return firstMatchingIndex + 1
 }
 
+function challengeRankingComplete(
+  entries: readonly ChallengeStandingsEntryV1[],
+): boolean {
+  return entries.every((entry) => entry.coverage === 'complete')
+}
+
 function buildChallengeStandingsLinqLayout(
   card: ChallengeStandingsResponseCardV1,
 ): LinqIMessageAppLayout {
+  const heading = card.subtitle === null
+    ? card.title
+    : `${card.title} — ${card.subtitle}`
   if (card.format === 'collective') {
     const score = card.collectivePoints === null
       ? 'Waiting for score'
       : `${formatChallengePoints(card.collectivePoints)}${
           card.coverage === 'partial' ? '+' : ''
         } / ${formatChallengePoints(card.objective.targetPoints)} pts`
+    const status = card.collectivePoints === null
+      ? 'Waiting for shared data.'
+      : card.collectivePoints >= card.objective.targetPoints
+        ? 'Goal reached.'
+        : card.coverage === 'partial'
+          ? 'More progress may be pending.'
+          : `${formatChallengePoints(
+              card.objective.targetPoints - card.collectivePoints,
+            )} points to go.`
+    const counts = card.coverageCounts
+    const notes = [
+      ...(card.coverage === 'partial'
+        ? ['Verified lower-bound progress.']
+        : []),
+      ...(card.footer === null ? [] : [card.footer]),
+    ]
     return {
-      caption: card.title,
-      subcaption: score,
-      trailing_caption: 'OPEN',
+      caption: heading,
+      subcaption: `${score}\n${status}`,
+      trailing_caption: `Coverage · ${counts.completeParticipants} complete · ${
+        counts.partialParticipants
+      } partial · ${counts.unscoredParticipants} unscored · ${
+        counts.totalParticipants
+      } total`,
+      ...(notes.length === 0
+        ? {}
+        : { trailing_subcaption: notes.join(' · ') }),
     }
   }
 
-  const leader = card.entries[0]
-  const subcaption = leader?.points === null || leader === undefined
-    ? card.format === 'teams' ? 'Team standings' : 'Leaderboard'
-    : `${leader.label} · ${formatChallengePoints(leader.points)}${
-        leader.coverage === 'partial' ? '+' : ''
-      }${
-        card.objective.kind === 'target'
-          ? ` / ${formatChallengePoints(card.objective.targetPoints)}`
-          : ''
-      } pts`
+  const rankingComplete = challengeRankingComplete(card.entries)
+  const rows = card.entries.map((entry, index) => {
+    const rank = rankingComplete ? challengeRank(card.entries, index) : null
+    const prefix = rank === null ? '—' : `${rank}.`
+    return `${prefix} ${entry.label}: ${renderChallengeEntryScore(
+      entry,
+      card.objective,
+    )}`
+  })
+  const splitAt = Math.ceil(rows.length / 2)
+  const firstRows = rows.slice(0, splitAt).join('\n')
+  const remainingRows = rows.slice(splitAt).join('\n')
+  const notes = [
+    ...(card.entries.some((entry) => entry.coverage === 'partial')
+      ? ['Scores marked + are verified lower bounds.']
+      : []),
+    ...(rankingComplete
+      ? []
+      : ['Ranks are withheld until every score is complete.']),
+    ...(card.footer === null ? [] : [card.footer]),
+  ]
   return {
-    caption: card.title,
-    subcaption,
-    trailing_caption: 'OPEN',
+    caption: heading,
+    subcaption: firstRows,
+    ...(remainingRows.length === 0
+      ? {}
+      : { trailing_caption: remainingRows }),
+    ...(notes.length === 0
+      ? {}
+      : { trailing_subcaption: notes.join(' · ') }),
   }
 }
 
