@@ -109,6 +109,7 @@ import {
 } from '../assistant/group-challenge-response-card.js'
 import {
   groupChallengeResponseCardToolInputSchema,
+  readGroupChallengeDefinition,
   type GroupChallengeResponseCardToolInput,
   upsertGroupChallengeStandingsSnapshot,
 } from '../assistant/group-challenge-response-card-schema.js'
@@ -1889,7 +1890,7 @@ export async function executeMurphDynamicToolRequest(input: {
       if (input.request.card.kind === 'challenge_standings') {
         return toolTextResult(
           false,
-          'challenge standings response cards require scorer-owned authoring input',
+          'challenge standings response cards require page-authorized observation input',
         )
       }
       if (input.privateDirectResponseCardAllowed !== true) {
@@ -3564,38 +3565,10 @@ async function executeGroupChallengeResponseCardAttachment(input: {
     return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
   }
 
-  const participantIds = input.request.scoreInput.participants.map(
-    (participant) => participant.participantId,
-  )
   const participantById = new Map(
     proof.roster.map((participant) => [participant.participantId, participant]),
   )
-  if (
-    participantById.size !== proof.roster.length
-    || new Set(participantIds).size !== participantIds.length
-    || participantIds.some((participantId) => !participantById.has(participantId))
-  ) {
-    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
-  }
-
-  const componentIds = input.request.scoreInput.scorecard.components.map(
-    (component) => component.id,
-  )
-  if (!hasExactStringEntries(
-    input.request.componentProjectionScopeKeys.map((entry) => entry.componentId),
-    componentIds,
-  )) {
-    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
-  }
-  const readProjectionScopeKeys = new Set(
-    proof.readProjectionScopeKeyBatches.flat(),
-  )
-  if (input.request.componentProjectionScopeKeys.some((entry) =>
-    new Set(entry.projectionScopeKeys).size !== entry.projectionScopeKeys.length
-    || entry.projectionScopeKeys.some((scopeKey) =>
-      !readProjectionScopeKeys.has(scopeKey)
-    )
-  )) {
+  if (participantById.size !== proof.roster.length) {
     return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
   }
 
@@ -3604,8 +3577,80 @@ async function executeGroupChallengeResponseCardAttachment(input: {
       slug: input.request.challengeSlug,
       vault: input.vaultRoot,
     })
-    const participantLabels = input.request.scoreInput.format.kind === 'individual'
-      ? input.request.scoreInput.participants.map((scoreParticipant) => {
+    if (pageResult.page.pageType !== 'challenge') {
+      throw new TypeError('Challenge standings require a challenge knowledge page.')
+    }
+    const definition = readGroupChallengeDefinition(pageResult.page.body)
+    const challengeParticipants = definition.participants.filter(
+      (participant) => participant.state === 'in',
+    )
+    if (challengeParticipants.length === 0) {
+      throw new TypeError('Challenge standings require an opted-in participant.')
+    }
+    const observationById = new Map(
+      input.request.participantObservations.map((observation) => [
+        observation.participantId,
+        observation,
+      ]),
+    )
+    if (
+      observationById.size !== input.request.participantObservations.length
+      || observationById.size !== challengeParticipants.length
+    ) {
+      throw new TypeError(
+        'Challenge observations must cover every opted-in participant exactly once.',
+      )
+    }
+    const participants = challengeParticipants.map((challengeParticipant) => {
+      if (!participantById.has(challengeParticipant.participantId)) {
+        throw new TypeError(
+          'Every challenge participant must be present in the trusted room roster.',
+        )
+      }
+      const observation = observationById.get(challengeParticipant.participantId)
+      if (!observation) {
+        throw new TypeError(
+          'Challenge observations must match the page-owned participant roster.',
+        )
+      }
+      return observation
+    })
+    const componentProjectionScopeKeys = definition.scorecard.components.map(
+      (component) => ({
+        componentId: component.id,
+        projectionScopeKeys: component.projectionScopeKeys,
+      }),
+    )
+    const readProjectionScopeKeys = new Set(
+      proof.readProjectionScopeKeyBatches.flat(),
+    )
+    if (componentProjectionScopeKeys.some((entry) =>
+      entry.projectionScopeKeys.some((scopeKey) =>
+        !readProjectionScopeKeys.has(scopeKey)
+      )
+    )) {
+      throw new TypeError(
+        'Every challenge component scope must be backed by the trusted read.',
+      )
+    }
+    const scoreInput = {
+      format: definition.format,
+      participants,
+      scorecard: {
+        components: definition.scorecard.components.map((component) => ({
+          id: component.id,
+          label: component.label,
+          ...(component.maxPoints === undefined
+            ? {}
+            : { maxPoints: component.maxPoints }),
+          perQuantity: component.perQuantity,
+          points: component.points,
+          quantityUnit: component.quantityUnit,
+        })),
+      },
+    }
+    const participantLabels = scoreInput.format.kind === 'individual'
+      ? scoreInput.participants.map((scoreParticipant) => {
           const participant = participantById.get(scoreParticipant.participantId)
           if (!participant) {
             throw new TypeError(
@@ -3626,19 +3671,19 @@ async function executeGroupChallengeResponseCardAttachment(input: {
     const card = buildGroupChallengeResponseCard({
       footer: null,
       participantLabels,
-      scoreInput: input.request.scoreInput,
+      scoreInput,
       subtitle: null,
       title: pageResult.page.title,
     })
-    const scoreResult = scoreGroupChallengeJson(input.request.scoreInput)
+    const scoreResult = scoreGroupChallengeJson(scoreInput)
     const body = upsertGroupChallengeStandingsSnapshot(
       normalizeKnowledgeBody(pageResult.page.body),
       {
-        componentProjectionScopeKeys:
-          input.request.componentProjectionScopeKeys,
+        componentProjectionScopeKeys,
         readProjectionScopeKeyBatches:
           proof.readProjectionScopeKeyBatches,
-        scoreInput: input.request.scoreInput,
+        rulesRevision: definition.rulesRevision,
+        scoreInput,
         scoreResult,
         version: 1,
       },

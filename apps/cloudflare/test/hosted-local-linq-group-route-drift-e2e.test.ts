@@ -36,39 +36,20 @@ const rejectedStandingsReplyText =
   "I could not verify a complete standings card, so I am keeping this update in text.";
 const challengeCardAuthoringInput = {
   challengeSlug: "weird-health-week",
-  componentProjectionScopeKeys: [{
-    componentId: "steps",
-    projectionScopeKeys: ["steps-days.v0"],
-  }],
-  scoreInput: {
-    format: {
-      kind: "individual",
-      objective: { kind: "ranking" },
-    },
-    participants: [
-      {
-        components: [{
-          componentId: "steps",
-          quantity: 4_000,
-          status: "available",
-        }],
-        participantId: "participant_maya",
-      },
-      {
-        components: [{ componentId: "steps", status: "pending" }],
-        participantId: "participant_jon",
-      },
-    ],
-    scorecard: {
+  participantObservations: [
+    {
       components: [{
-        id: "steps",
-        label: "Steps",
-        perQuantity: 100,
-        points: 3,
-        quantityUnit: "steps",
+        componentId: "steps",
+        quantity: 4_000,
+        status: "available",
       }],
+      participantId: "participant_maya",
     },
-  },
+    {
+      components: [{ componentId: "steps", status: "pending" }],
+      participantId: "participant_jon",
+    },
+  ],
 } as const;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";

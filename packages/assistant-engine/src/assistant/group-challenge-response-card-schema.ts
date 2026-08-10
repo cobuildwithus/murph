@@ -4,9 +4,16 @@ import {
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
+  groupChallengeFormatSchema,
+  groupChallengeParticipantIdSchema,
+  groupChallengeParticipantObservationsSchema,
+  groupChallengeScorecardComponentSchema,
   groupChallengeScoreInputSchema,
   groupChallengeScoreResultSchema,
 } from './group-challenge-scorecard-schema.js'
+import {
+  GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS,
+} from './group-challenge-scorecard.js'
 
 const singleLineCardText = (maxLength: number) => z
   .string()
@@ -52,11 +59,7 @@ const componentProjectionScopeKeysSchema = z.object({
 
 export const groupChallengeResponseCardToolInputSchema = z.object({
   challengeSlug: challengeSlugSchema,
-  componentProjectionScopeKeys: z
-    .array(componentProjectionScopeKeysSchema)
-    .min(1)
-    .max(5),
-  scoreInput: groupChallengeScoreInputSchema,
+  participantObservations: groupChallengeParticipantObservationsSchema,
 }).strict()
 
 export type GroupChallengeResponseCardToolInput = z.infer<
@@ -78,11 +81,94 @@ const groupChallengeStandingsSnapshotSchema = z.object({
     .min(1),
   scoreInput: groupChallengeScoreInputSchema,
   scoreResult: groupChallengeScoreResultSchema,
+  rulesRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
   version: z.literal(1),
 }).strict()
 
+const persistedChallengeComponentSchema = groupChallengeScorecardComponentSchema
+  .extend({
+    evaluationRule: z.string().trim().min(1).max(2_000),
+    projectionScopeKeys: z.array(projectionScopeKeySchema).min(1).max(3),
+    settlementMode: z.enum(['daily-additive', 'window-total']),
+  })
+  .strict()
+
+const persistedChallengeParticipantSchema = z.object({
+  participantId: groupChallengeParticipantIdSchema,
+  state: z.enum(['declined', 'in', 'pending', 'withdrawn']),
+}).strict()
+
+export const groupChallengeDefinitionSchema = z.object({
+  format: groupChallengeFormatSchema,
+  participants: z.array(persistedChallengeParticipantSchema).min(1).max(32),
+  rulesRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  scorecard: z.object({
+    components: z
+      .array(persistedChallengeComponentSchema)
+      .min(1)
+      .max(GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS),
+  }).strict(),
+  version: z.literal(1),
+}).strict().refine(
+  (definition) => new Set(
+    definition.participants.map((participant) => participant.participantId),
+  ).size === definition.participants.length,
+  'Challenge definition participant ids must be unique.',
+).refine(
+  (definition) => definition.scorecard.components.every(
+    (component) => new Set(component.projectionScopeKeys).size
+      === component.projectionScopeKeys.length,
+  ),
+  'Challenge definition component scope keys must be unique.',
+)
+
+export type GroupChallengeDefinition = z.infer<
+  typeof groupChallengeDefinitionSchema
+>
+
+const DEFINITION_START = '<!-- murph:group-challenge-definition:v1:start -->'
+const DEFINITION_END = '<!-- murph:group-challenge-definition:v1:end -->'
+
 const SNAPSHOT_START = '<!-- murph:challenge-standings-snapshot:v1:start -->'
 const SNAPSHOT_END = '<!-- murph:challenge-standings-snapshot:v1:end -->'
+
+export function renderGroupChallengeDefinitionSection(value: unknown): string {
+  const definition = groupChallengeDefinitionSchema.parse(value)
+  return [
+    DEFINITION_START,
+    '## Challenge definition',
+    '',
+    '```json',
+    JSON.stringify(definition, null, 2),
+    '```',
+    DEFINITION_END,
+  ].join('\n')
+}
+
+export function readGroupChallengeDefinition(body: string): GroupChallengeDefinition {
+  const start = body.indexOf(DEFINITION_START)
+  const end = body.indexOf(DEFINITION_END)
+  if (
+    start === -1
+    || end < start
+    || body.indexOf(DEFINITION_START, start + DEFINITION_START.length) !== -1
+    || body.indexOf(DEFINITION_END, end + DEFINITION_END.length) !== -1
+  ) {
+    throw new TypeError('Expected exactly one complete challenge definition section.')
+  }
+  const section = body.slice(start + DEFINITION_START.length, end).trim()
+  const match = /^## Challenge definition\n\n```json\n([\s\S]+)\n```$/u.exec(section)
+  if (!match?.[1]) {
+    throw new TypeError('Expected one closed JSON challenge definition block.')
+  }
+  let value: unknown
+  try {
+    value = JSON.parse(match[1])
+  } catch {
+    throw new TypeError('Expected valid JSON in the challenge definition section.')
+  }
+  return groupChallengeDefinitionSchema.parse(value)
+}
 
 export function upsertGroupChallengeStandingsSnapshot(
   body: string,

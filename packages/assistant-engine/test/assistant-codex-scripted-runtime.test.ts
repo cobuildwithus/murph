@@ -63,6 +63,9 @@ import {
   upsertKnowledgePage,
 } from '../src/knowledge/service.ts'
 import {
+  renderGroupChallengeDefinitionSection,
+} from '../src/assistant/group-challenge-response-card-schema.ts'
+import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.ts'
 import {
@@ -90,41 +93,47 @@ const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
 
+const GROUP_CHALLENGE_DEFINITION = {
+  format: {
+    kind: 'individual',
+    objective: { kind: 'ranking' },
+  },
+  participants: [
+    { participantId: 'participant_maya', state: 'in' },
+    { participantId: 'participant_jon', state: 'in' },
+  ],
+  rulesRevision: 1,
+  scorecard: {
+    components: [{
+      evaluationRule: 'Sum settled shared steps in the challenge window.',
+      id: 'steps',
+      label: 'Steps',
+      perQuantity: 100,
+      points: 3,
+      projectionScopeKeys: ['steps-days.v0'],
+      quantityUnit: 'steps',
+      settlementMode: 'window-total',
+    }],
+  },
+  version: 1,
+} as const
+
 const GROUP_CHALLENGE_AUTHORING_INPUT = {
   challengeSlug: 'weird-health-week',
-  componentProjectionScopeKeys: [{
-    componentId: 'steps',
-    projectionScopeKeys: ['steps-days.v0'],
-  }],
-  scoreInput: {
-    format: {
-      kind: 'individual',
-      objective: { kind: 'ranking' },
-    },
-    participants: [
-      {
-        components: [{
-          componentId: 'steps',
-          quantity: 4_000,
-          status: 'available',
-        }],
-        participantId: 'participant_maya',
-      },
-      {
-        components: [{ componentId: 'steps', status: 'pending' }],
-        participantId: 'participant_jon',
-      },
-    ],
-    scorecard: {
+  participantObservations: [
+    {
       components: [{
-        id: 'steps',
-        label: 'Steps',
-        perQuantity: 100,
-        points: 3,
-        quantityUnit: 'steps',
+        componentId: 'steps',
+        quantity: 4_000,
+        status: 'available',
       }],
+      participantId: 'participant_maya',
     },
-  },
+    {
+      components: [{ componentId: 'steps', status: 'pending' }],
+      participantId: 'participant_jon',
+    },
+  ],
 } as const
 
 const GROUP_CHALLENGE_DYNAMIC_TOOLS = [
@@ -178,7 +187,12 @@ async function prepareGroupChallengeVault(
     vault: vaultRoot,
   })
   await upsertKnowledgePage({
-    body: 'The current room challenge rules and canon.',
+    body: [
+      'The current room challenge rules and canon.',
+      '',
+      renderGroupChallengeDefinitionSection(GROUP_CHALLENGE_DEFINITION),
+    ].join('\n'),
+    pageType: 'challenge',
     slug: 'weird-health-week',
     title: 'Weird Health Week',
     vault: vaultRoot,
@@ -1675,7 +1689,7 @@ if (!tool) {
     }
   })
 
-  it('scores group challenge authoring input through the code-mode App Server boundary', {
+  it('scores page-authorized group challenge observations through the code-mode App Server boundary', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
