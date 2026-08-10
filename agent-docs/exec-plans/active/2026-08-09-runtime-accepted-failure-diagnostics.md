@@ -1,6 +1,6 @@
 # runtime accepted-failure diagnostics
 
-Status: active — local candidate complete; publication and exact-head gates pending
+Status: active — round-4 RPC-boundary remediation is locally proven; exact-head gates pending
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -65,6 +65,13 @@ Updated: 2026-08-09
    Mitigation: keep the historical safe code in `errorCodeDetail`, carry the
    exact phase in a separate member of the same response details object, and
    prove the reconstructed safe detail and final redacted phase together.
+6. Risk: Cloudflare Durable Object RPC preserves standard `Error` fields but
+   drops custom own properties, which would erase the structured phase and
+   source code between RunnerContainer and UserRunner.
+   Mitigation: return a bounded plain-data failure variant from
+   `ensureProcessing`, validate its categorical fields in the UserRunner realm,
+   reconstruct the local error there, and prove the result through a real
+   Workers-runtime namespace stub.
 
 ## Tasks
 
@@ -102,6 +109,11 @@ Updated: 2026-08-09
   changing canonical message-derived classification while preserving the phase
   in structured redacted metadata. A prior safe source code remains in the
   sanitized reconstructed detail instead of being replaced by the phase.
+- RunnerContainer no longer throws an enriched `Error` across Durable Object
+  RPC for invocation failures. Its existing `ensureProcessing` result union now
+  carries only canonical code, safe source code, exact allowlisted phase, and
+  bounded status primitives; UserRunner validates and reconstructs the local
+  error before the existing retry and persistence owners see it.
 
 ## Verification
 
@@ -142,6 +154,15 @@ Updated: 2026-08-09
   Cloudflare propagation slice passes with 268 tests, including natural
   `type_error`, direct `EACCES`, phase persistence, legacy overlap, and private
   path/cause rejection; Hosted Execution and Cloudflare typechecks pass.
+- Final ReviewGPT round 4 proved the reconstructed `Error.details` object would
+  be lost over the actual Durable Object RPC seam because custom `Error` own
+  properties are not transported. Accepted: non-shutdown invocation failures
+  now return one serializable `failed` result, and UserRunner reconstructs the
+  error locally without changing retry or state ownership. The full three-file
+  propagation slice passes with 269 tests, Cloudflare typecheck passes, and the
+  complete Workers-runtime suite passes with 6 tests across 5 files, including
+  proof that the complete failure value survives
+  `getByName(...).ensureProcessing()` RPC.
 - The PR also includes the one-line current-main CI repair registering the new
   static `/family/setup` route with the existing canonical telemetry allowlist;
   its focused census/redaction test passes all 10 cases.

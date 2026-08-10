@@ -24,6 +24,7 @@ import {
   RunnerContainer,
   type HostedExecutionContainerNamespaceLike,
   type HostedExecutionContainerStubLike,
+  type RunnerContainerEnsureProcessingResult,
 } from "../src/runner-container.js";
 import {
   classifyRunnerJobError,
@@ -210,31 +211,38 @@ describe("runtime invocation transport failure fence handling", () => {
       storage,
     });
 
-    const reconstructedFailure = await container.invoke({
-      job: {
-        kind: "workspace-invocation",
-        request: {
-          attemptId: "attempt_control_plane_phase",
-          leaseGeneration: "1",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
+    const processingFailure = await container.ensureProcessing({
+      invoke: {
+        job: {
+          kind: "workspace-invocation",
+          request: {
+            attemptId: "attempt_control_plane_phase",
+            leaseGeneration: "1",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
         },
+        timeoutMs: 10_000,
+        userId: TEST_USER_ID,
       },
-      timeoutMs: 10_000,
       userId: TEST_USER_ID,
-    }).catch((error: unknown) => error);
-
-    expect(reconstructedFailure).toMatchObject({
-      code: "runtime_error",
-      details: {
-        errorCodeDetail: "type_error",
-        runtimeFailurePhaseCode: "runtime_phase:workspace.read",
-      },
-      message: "Hosted execution runtime failed. Code: type_error. Status: 500.",
     });
 
+    expect(processingFailure).toEqual({
+      failure: {
+        code: "runtime_error",
+        errorCodeDetail: "type_error",
+        runtimeFailurePhaseCode: "runtime_phase:workspace.read",
+        status: 500,
+      },
+      kind: "failed",
+    });
+    if (processingFailure.kind !== "failed") {
+      throw new Error("Expected RunnerContainer to return a processing failure.");
+    }
+
     const harness = await createTransportFailureHarness({
-      invocationError: reconstructedFailure as Error,
+      ensureProcessingFailure: processingFailure,
       readActiveRuntimeUserFence: async (token) => ({
         active: true,
         attemptId: token.attemptId,
@@ -243,7 +251,16 @@ describe("runtime invocation transport failure fence handling", () => {
       }),
     });
 
-    await expect(harness.invoke()).rejects.toBe(reconstructedFailure);
+    await expect(harness.invoke()).rejects.toMatchObject({
+      code: "runtime_error",
+      details: {
+        errorCodeDetail: "type_error",
+        runtimeFailurePhaseCode: "runtime_phase:workspace.read",
+      },
+      message: "Hosted execution runtime failed. Code: type_error. Status: 500.",
+      status: 500,
+      statusCode: 500,
+    });
     expect(harness.loggedFailureEntries()).toEqual([
       expect.objectContaining({
         errorCode: "runtime_error",
@@ -257,6 +274,49 @@ describe("runtime invocation transport failure fence handling", () => {
       }),
     ]);
     expect(JSON.stringify(harness.loggedFailureEntries())).not.toContain(hiddenCauseMessage);
+  });
+
+  it("preserves a typed failure and safe source code through the plain RPC result", async () => {
+    const harness = await createTransportFailureHarness({
+      ensureProcessingFailure: {
+        failure: {
+          code: "type_error",
+          errorCodeDetail: "EACCES",
+          runtimeFailurePhaseCode: null,
+          status: 500,
+        },
+        kind: "failed",
+      },
+      readActiveRuntimeUserFence: async (token) => ({
+        active: true,
+        attemptId: token.attemptId,
+        leaseGeneration: token.leaseGeneration,
+        userId: TEST_USER_ID,
+      }),
+    });
+
+    await expect(harness.invoke()).rejects.toMatchObject({
+      code: "type_error",
+      details: {
+        errorCodeDetail: "EACCES",
+      },
+      message: "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+      name: "TypeError",
+      status: 500,
+      statusCode: 500,
+    });
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        errorCode: "type_error",
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          errorCode: "type_error",
+          errorCodeDetail: "type_error",
+          safeErrorDetail:
+            "Hosted execution runtime failed. Code: EACCES. Status: 500.",
+        }),
+      }),
+    ]);
   });
 
   it("keeps the write fence when the invocation is still active in the container", async () => {
@@ -944,6 +1004,10 @@ function createRunnerContainerStorageDouble() {
 }
 
 async function createTransportFailureHarness(input: {
+  ensureProcessingFailure?: Extract<
+    RunnerContainerEnsureProcessingResult,
+    { kind: "failed" }
+  >;
   invocationError?: Error;
   /** `null` omits the probe method from the container stub entirely. */
   readActiveRuntimeUserFence:
@@ -1006,6 +1070,7 @@ async function createTransportFailureHarness(input: {
       workspace: null,
     }),
     runnerContainerNamespace: createFailingInvokeContainerNamespace({
+      ensureProcessingFailure: input.ensureProcessingFailure,
       invocationError: input.invocationError,
       readActiveRuntimeUserFence: readActiveRuntimeUserFenceInput
         ? (() => readActiveRuntimeUserFenceInput(token))
@@ -1048,14 +1113,31 @@ async function createTransportFailureHarness(input: {
 }
 
 function createFailingInvokeContainerNamespace(input: {
+  ensureProcessingFailure?: Extract<
+    RunnerContainerEnsureProcessingResult,
+    { kind: "failed" }
+  >;
   invocationError?: Error;
   readActiveRuntimeUserFence:
     | (() => Promise<WorkerActiveRuntimeUserFenceResult>)
     | null;
 }): HostedExecutionContainerNamespaceLike {
+  const ensureProcessingFailure = input.ensureProcessingFailure;
   const readActiveRuntimeUserFenceInput = input.readActiveRuntimeUserFence;
   const stub: HostedExecutionContainerStubLike = {
     destroyInstance: async () => {},
+    ...(ensureProcessingFailure
+      ? {
+          ensureProcessing: createDirectOnlyRpcMethod<
+            NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+          >(
+            async function (this: HostedExecutionContainerStubLike) {
+              expect(this).toBe(stub);
+              return ensureProcessingFailure;
+            },
+          ),
+        }
+      : {}),
     invoke: async () => {
       throw input.invocationError ?? new Error("container transport failed");
     },
