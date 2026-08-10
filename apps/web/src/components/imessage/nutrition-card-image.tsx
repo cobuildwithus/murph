@@ -6,6 +6,11 @@ import type {
   NutritionCardMetric,
 } from "@murphai/contracts";
 
+import {
+  IMESSAGE_CARD_COLOR,
+  ImessageCardBadge,
+} from "./card-image-chrome";
+
 export const IMESSAGE_NUTRITION_CARD_IMAGE_SIZE = {
   width: 1200,
   height: 568,
@@ -17,13 +22,7 @@ const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
 });
 
 const COLOR = {
-  balloon: "#FFF5E6",
-  badge: "#FCFAF5",
-  badgeBorder: "rgba(20,18,23,0.08)",
-  badgeMark: "rgba(186,130,74,0.55)",
-  primary: "#141217",
-  secondary: "#666163",
-  progressTrack: "rgba(102,97,99,0.12)",
+  ...IMESSAGE_CARD_COLOR,
   farFromTarget: "#B3332B",
   offTarget: "#995E08",
   onTarget: "#337338",
@@ -92,7 +91,7 @@ export function NutritionCardImage({
         fontFamily: "DM Sans",
       }}
     >
-      <SystemBadge />
+      <ImessageCardBadge />
 
       <div
         style={{
@@ -152,61 +151,6 @@ export function NutritionCardImage({
           <Metric key={presentation.label} presentation={presentation} />
         ))}
       </div>
-    </div>
-  );
-}
-
-function SystemBadge() {
-  const dotOffsets = [
-    [0, -23],
-    [23, 0],
-    [0, 23],
-    [-23, 0],
-  ] as const;
-
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        top: 30,
-        left: 30,
-        display: "flex",
-        width: 135,
-        height: 101,
-        border: `2px solid ${COLOR.badgeBorder}`,
-        borderRadius: 999,
-        backgroundColor: COLOR.badge,
-        boxShadow: "0 2px 4px rgba(20,18,23,0.08)",
-      }}
-    >
-      <span
-        style={{
-          position: "absolute",
-          top: 43,
-          left: 60,
-          display: "flex",
-          width: 15,
-          height: 15,
-          borderRadius: 999,
-          backgroundColor: COLOR.badgeMark,
-        }}
-      />
-      {dotOffsets.map(([x, y]) => (
-        <span
-          key={`${x}:${y}`}
-          style={{
-            position: "absolute",
-            top: 46 + y,
-            left: 63 + x,
-            display: "flex",
-            width: 10,
-            height: 10,
-            borderRadius: 999,
-            backgroundColor: COLOR.badgeMark,
-          }}
-        />
-      ))}
     </div>
   );
 }

@@ -1513,25 +1513,29 @@ not recreate the explicit-target override or replace the turn's thread binding.
 Linq explicitly requests interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
-layout with a generated nutrition image that mirrors the compact balloon's
-default visual state plus native captions that repeat the date, meal count,
-every available total, the partial state, and each available V2 goal target and
-status. The image derives a quantitative calorie arc only from a complete total
-and an assessed non-null goal; V1, partial, null-goal, and unavailable-status
-snapshots retain only the neutral ring track. The extension URL keeps the
-immutable V1 or V2
-snapshot in a bounded Base64URL fragment that the extension decodes offline.
-The static image URL carries that same bounded presentation envelope in one
-queryless path so the Web image route can render it and Linq can rehost it.
-Encoding is not encryption: either representation may contain only the same
-private-direct card values and never member identity, canonical record
-references, credentials, or
-other authority. The image route performs no database or remote read, writes no
-application log or analytics event, returns private no-store/no-index headers,
-and rejects malformed input before reading render assets. The fallback body
-remains value-free and names a truthful text-recovery action to avoid Apple
-data-detector downgrade. No persisted card state, authenticated card API,
-cleanup owner, extension network read, or second queue exists.
+layout with a generated image that mirrors the same compact native presentation.
+Nutrition images retain the calorie ring and metric row; compact-table images
+retain the table grid or workout progress and exercise rows. Native captions
+independently repeat the complete immutable semantics, including nutrition
+totals and goal states, every generic table cell, or every workout set status,
+target, and actual value, so a missing raster never erases the useful response.
+The nutrition image derives a quantitative calorie arc only from a complete
+total and an assessed non-null goal; V1, partial, null-goal, and
+unavailable-status snapshots retain only the neutral ring track. The extension
+URL keeps the immutable V1, V2, V3, or V4 snapshot in a bounded Base64URL
+fragment that the extension decodes offline. The static image URL carries that
+same bounded presentation envelope in one queryless path so the Web image route
+can render it and Linq can rehost it. V3 strips its canonical tracking reference
+before either encoding, and V4 contains no canonical event reference or write
+authority. Encoding is not encryption: either representation may contain only
+the same private-direct card values and never member identity, canonical record
+references, credentials, or other authority. The image route performs no
+database or remote read, writes no application log or analytics event, returns
+private no-store/no-index headers, and rejects malformed input before reading
+render assets. The fallback body remains value-free and names a truthful
+text-recovery action to avoid Apple data-detector downgrade. No persisted card
+state, authenticated card API, cleanup owner, extension network read, or second
+queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -2630,27 +2634,34 @@ for recipients without the extension. A compact card is a bounded
 presentation snapshot, never a mutable tracker: canonical workout events remain
 the only workout authority, qualitative set annotations live on canonical set
 notes, and an update is complete only after a successful workout re-read
-followed by a new V3 snapshot.
+followed by a new V4 workout snapshot. Generic compact tables continue to use
+V3.
 
 The optional tracking reference is one exact canonical event ULID plus a
 canonical UTC snapshot instant. That reference remains in semantic transcript
 history so a later turn can reopen the workout without a second table store;
-the native presentation projection omits it before encoding the card URL.
-Linq requires an HTTPS app-card URL, so V3 compact-table envelopes use a
-bounded Base64URL fragment on the fixed canonical
-`https://www.withmurph.ai/` origin. The
-fragment stays inside the immutable message URL, is not sent to the Web origin
-by an HTTPS request, and is decoded locally by the Messages extension. This is
-a narrow presentation exception to the fixed-URL rule: the fragment may contain
-the same bounded health-related values visible in the immutable message, but it
-must never contain a member identity, canonical record reference, credential,
-or other authority. The provider request rejects encoded URLs at 2,048
-characters, while the contract applies the same aggregate bound before
-delivery. Nutrition V1 and V2 cards use the same bounded fragment family
-without a tracking field, while the provider-rendered summary remains their
-fallback layout. The Messages extension remains offline and read-only. This
-adds no card API, database, background synchronization owner, authentication
-surface, or mutable message state.
+both presentation projections omit it before encoding the card URL. Linq
+requires an HTTPS app-card URL, so V3 generic-table and V4 workout envelopes use
+a bounded Base64URL fragment on the fixed canonical
+`https://www.withmurph.ai/` origin. The fragment stays inside the immutable
+message URL, is not sent to the Web origin by an HTTPS request, and is decoded
+locally by the Messages extension. Recipients without that extension receive a
+provider static layout whose `image_url` carries the exact same authority-free
+envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
+stateless Web renderer accepts only strict V1-V4 presentation envelopes, reads
+no database or remote service, logs no card values, and returns private
+no-store/no-index headers. This is a narrow presentation exception to the
+fixed-URL rule: either URL may contain the same bounded health-related values
+visible in the immutable private-direct message, but never a member identity,
+canonical record reference, credential, tracking reference, or other authority.
+The provider request rejects encoded URLs at 2,048 characters, while the
+contract applies the tighter of the fragment and image-path bounds before
+delivery. Complete provider captions preserve every table cell or workout set
+detail independently of raster availability. Nutrition V1 and V2 cards use the
+same bounded fragment and image-path family without a tracking field. The
+Messages extension remains offline and read-only. This adds no card API,
+database, background synchronization owner, authentication surface, or mutable
+message state.
 
 ## Scheduled assistant tool authority
 

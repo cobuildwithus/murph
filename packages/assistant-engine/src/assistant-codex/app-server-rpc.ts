@@ -3,13 +3,19 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import { normalizeStatusText } from '../assistant-codex-events.js'
+import {
+  isCodexRpcId,
+  parseCodexAppServerMessage,
+  readCodexRecord,
+  readCodexString,
+  type CodexRpcId,
+  type CodexRpcMessage,
+} from './app-server-protocol.js'
 import { buildCodexResumeStaleMessage } from './failures.js'
 
 const CODEX_APP_SERVER_STOP_TIMEOUT_MS = 3_000
 
-export type CodexRpcId = number
-
-export type CodexRpcMessage = Record<string, unknown>
+export type { CodexRpcId, CodexRpcMessage } from './app-server-protocol.js'
 
 export interface PendingCodexRpcRequest {
   method: string
@@ -307,7 +313,7 @@ export function readCodexRpcResponseId(message: CodexRpcMessage): CodexRpcId | n
   if (typeof message.method === 'string') {
     return null
   }
-  return typeof message.id === 'number' ? message.id : null
+  return isCodexRpcId(message.id) ? message.id : null
 }
 
 export function readCodexRpcServerRequestId(
@@ -316,7 +322,7 @@ export function readCodexRpcServerRequestId(
   if (typeof message.method !== 'string') {
     return null
   }
-  return typeof message.id === 'number' ? message.id : null
+  return isCodexRpcId(message.id) ? message.id : null
 }
 
 export function resolvePendingCodexRpcRequest(input: {
@@ -330,7 +336,7 @@ export function resolvePendingCodexRpcRequest(input: {
   }
   input.pendingRequests.delete(input.responseId)
 
-  const error = asRecord(input.message.error)
+  const error = readCodexRecord(input.message.error)
   if (error) {
     pending.reject(
       buildCodexRpcRequestError({
@@ -437,8 +443,8 @@ export function tryParseJsonLine(
 
   try {
     const parsed: unknown = JSON.parse(trimmed)
-    const record = asRecord(parsed)
-    return record ? { ok: true, value: record } : { ok: false }
+    const message = parseCodexAppServerMessage(parsed)
+    return message ? { ok: true, value: message } : { ok: false }
   } catch {
     return { ok: false }
   }
@@ -449,7 +455,7 @@ function buildCodexRpcRequestError(input: {
   method: string
 }): VaultCliError {
   const message =
-    normalizeStatusText(asString(input.error.message)) ??
+    normalizeStatusText(readCodexString(input.error.message)) ??
     `Codex app-server ${input.method} failed.`
   const staleResume =
     input.method === 'thread/resume' && isCodexResumeStaleText(message)
@@ -480,14 +486,4 @@ function isCodexResumeStaleText(value: string): boolean {
     normalized.includes('thread not found') ||
     normalized.includes('could not resume thread')
   )
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null
-}
-
-function asString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null
 }

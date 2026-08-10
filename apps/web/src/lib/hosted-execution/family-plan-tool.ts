@@ -18,9 +18,15 @@ import {
   readHostedFamilyOwnerSnapshotForMember,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
+  HOSTED_FAMILY_PLAN_DISPLAY,
   HOSTED_FAMILY_MAX_SEATS,
   HOSTED_FAMILY_MIN_SEATS,
+  parseHostedBillingPhase,
+  parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  readHostedMemberStripeBillingRef,
+} from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
@@ -49,7 +55,10 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
   if (input.request.action === "start_checkout") {
     return {
       action: "start_checkout",
-      result: await startHostedRuntimeFamilyPlanCheckout(input.memberId),
+      result: await startHostedRuntimeFamilyPlanCheckout(
+        input.memberId,
+        input.request.confirmedTrialConversion,
+      ),
     };
   }
   const request = input.request;
@@ -92,6 +101,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
 
 async function startHostedRuntimeFamilyPlanCheckout(
   memberId: string,
+  confirmedTrialConversion?: true,
 ): Promise<HostedRuntimeFamilyPlanToolStartCheckoutResponse> {
   const prisma = getPrisma();
   const ownerSnapshot = await readHostedFamilyOwnerSnapshotForMember({
@@ -134,6 +144,9 @@ async function startHostedRuntimeFamilyPlanCheckout(
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const checkout = await createHostedFamilyBillingCheckout({
+    ...(confirmedTrialConversion
+      ? { confirmedTrialConversion: true }
+      : {}),
     groupId: group.id,
     ownerMemberId: memberId,
     prisma,
@@ -158,11 +171,39 @@ async function startHostedRuntimeFamilyPlanCheckout(
 async function readHostedRuntimeFamilyPlanToolStatus(
   memberId: string,
 ): Promise<HostedRuntimeFamilyPlanToolStatusResponse> {
-  const snapshot = await readHostedFamilyOwnerSnapshotForMember({
-    memberId,
-  });
+  const prisma = getPrisma();
+  const [snapshot, directBillingRef, familyAccess, member] = await Promise.all([
+    readHostedFamilyOwnerSnapshotForMember({ memberId, prisma }),
+    readHostedMemberStripeBillingRef({ memberId, prisma }),
+    readHostedFamilyAccessForMember({ memberId, prisma }),
+    prisma.hostedMember.findUnique({
+      select: { billingStatus: true, suspendedAt: true },
+      where: { id: memberId },
+    }),
+  ]);
+  const activeTrialConversion =
+    !snapshot?.billingActive
+    && !familyAccess
+    && member?.billingStatus === "active"
+    && !member.suspendedAt
+    && parseHostedBillingPhase(directBillingRef?.currentBillingPhase) === "trial"
+    && parseHostedBillingPlanCode(directBillingRef?.currentBillingPlanCode)
+      === "launch_monthly"
+    && Boolean(directBillingRef?.stripeCustomerId)
+    && Boolean(directBillingRef?.stripeSubscriptionId)
+      ? {
+          includedPulseSeats: HOSTED_FAMILY_PLAN_DISPLAY.minSeats,
+          monthlyAmountUsdCents:
+            HOSTED_FAMILY_PLAN_DISPLAY.minSeats
+            * HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+          perSeatMonthlyAmountUsdCents:
+            HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat,
+          trialEndsImmediately: true as const,
+        }
+      : null;
   if (!snapshot) {
     return {
+      activeTrialConversion,
       billingActive: false,
       billingStatus: "none",
       members: [],
@@ -174,6 +215,7 @@ async function readHostedRuntimeFamilyPlanToolStatus(
   }
 
   return {
+    activeTrialConversion,
     billingActive: snapshot.billingActive,
     billingStatus: snapshot.billingStatus,
     members: snapshot.members.map((member) => ({

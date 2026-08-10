@@ -164,33 +164,20 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
 // retain that removal without changing the startup tolerances.
 //
-// Adding the personalized generated contact card puts its request contract,
-// exact-shape parser, direct route resolution, and acknowledgement handling in
-// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
-// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
-// only the total ceiling and keep both startup baselines and all tolerances.
-//
-// Adding the single-message group offer, exact reply ownership, and weekly
-// contextualization instructions grows only that lazy assistant output. Exact
-// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
-// baselines and established total tolerance.
-//
-// Subsequent reviewed biomarker ranges, hosted
-// runtime-control compaction, and named-diet guidance moved exact ubuntu total
-// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
-// remain within their existing ceilings and no forbidden subsystem enters the
-// boot graph, so ratchet only the total ceiling and keep both startup baselines
-// and all tolerances.
-//
-// Bounded group-tool failure diagnostics plus the strict included-usage read
-// contract measured a 9,938,038B total on ubuntu and a 7,983,431B static
-// closure on macOS before the mainline additions above were merged. Exact local
-// production assembly of the combined graph measured a 9,986,541B total on
-// 2026-08-10. Ratchet to that merged measurement and retain the established
-// allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_986_541 + 32_768;
+// Adding the workout response-card contract, canonical command reconciliation,
+// and generated CLI option puts their code in the runner output. Exact Ubuntu
+// assembly measured a 9,922,798B total on 2026-08-10. The matching macOS
+// assembly measured a 9,969,877B total and 7,994,746B static boot closure; use
+// the larger cross-host measurements while keeping the entry baseline and all
+// tolerances unchanged.
+// Main's later reviewed biomarker, runtime-control, and named-diet changes
+// measured 9,933,847B total on Ubuntu. The combined merged tree measured a
+// 9,994,210B total and 8,019,079B static boot closure on macOS; retain those
+// larger cross-host measurements while keeping the entry baseline and every
+// tolerance unchanged.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_994_210 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_983_431;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

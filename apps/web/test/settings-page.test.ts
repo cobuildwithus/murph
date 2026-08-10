@@ -95,6 +95,7 @@ const mocks = vi.hoisted(() => ({
     currentBillingPhase?: unknown;
     currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
+    familyBillingOwner?: boolean;
     familyState?: "none" | "owner" | "sponsored";
     groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
@@ -300,6 +301,10 @@ vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  isHostedFamilyBillingPortalManageable: (billingStatus: string) =>
+    ["active", "incomplete", "past_due", "paused", "unpaid"].includes(
+      billingStatus,
+    ),
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
@@ -684,6 +689,27 @@ test("SettingsPage keeps a signed-out Core payment return recoverable", async ()
   assert.match(markup, /One more step/);
   assert.doesNotMatch(markup, /Payment method saved/);
   assert.doesNotMatch(markup, /Core has not started/);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps a signed-out usage-credit return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "success",
+      usagePurchase: "hucp_abcdefghijklmnop",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -2480,11 +2506,70 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
+    familyBillingOwner: false,
     familyState: "none",
   }), undefined);
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
     expect.objectContaining({
       usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+});
+
+test.each([
+  HostedBillingStatus.incomplete,
+  HostedBillingStatus.past_due,
+  HostedBillingStatus.paused,
+  HostedBillingStatus.unpaid,
+])("SettingsPage keeps %s Family billing recoverable from Subscription", async (billingStatus) => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: false,
+    billingStatus,
+    displayName: null,
+    groupId: "group_123",
+    invites: [],
+    members: [],
+    ownerMemberId: "member_123",
+    plans: {
+      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+    },
+    seats: {
+      active: 1,
+      billed: 2,
+      invited: 0,
+      max: 6,
+      min: 2,
+      remaining: 1,
+      used: 1,
+    },
+    suspendedAt: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      canStartFamily: false,
+      familyBillingOwner: true,
+      familyState: "none",
     }),
     undefined,
   );

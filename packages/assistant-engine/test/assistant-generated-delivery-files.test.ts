@@ -1,8 +1,8 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it } from 'vitest'
 
 import {
   MURPH_SEND_VAULT_FILE_TOOL,
-  readMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
@@ -65,7 +65,7 @@ describe('assistant generated delivery files', () => {
   })
 
   it('parses exact export-pack ids from the vault-file tool boundary', () => {
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       id: 1,
       method: 'item/tool/call',
       params: {

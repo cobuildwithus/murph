@@ -14,6 +14,6 @@ export const DESIGN_INFERENCE_CONNECTION: HostedInferenceConnectionView = {
   revision: 4,
   selected: false,
   supportsImages: false,
-  verificationProfile: "murph-codex-0.145.0-portable-responses-v1",
+  verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
   verifiedAt: "2026-07-30T22:00:00.000Z",
 };

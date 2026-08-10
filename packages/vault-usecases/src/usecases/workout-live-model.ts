@@ -49,6 +49,7 @@ export interface LogLiveWorkoutSetInput
   extends LiveWorkoutLookupInput,
     LiveWorkoutExerciseLookup {
   setOrder: number
+  requireExistingSet?: boolean
   type?: SetType
   note?: string
   reps?: number
