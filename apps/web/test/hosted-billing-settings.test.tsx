@@ -1738,9 +1738,110 @@ describe("HostedBillingSettings", () => {
     });
 
     assert.match(rendered.window.document.body.textContent ?? "", /Billing is still finishing/);
+    assert.match(rendered.window.document.body.textContent ?? "", /need to cancel or choose another plan/);
     assert.match(rendered.window.document.body.textContent ?? "", /Check status/);
-    assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+    assert.match(rendered.window.document.body.textContent ?? "", /Close/);
+    assert.doesNotMatch(rendered.window.document.body.textContent ?? "", /Open billing/);
+    assert.doesNotMatch(rendered.window.document.body.textContent ?? "", /charged immediately/);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
     assert.equal(rendered.assign.mock.calls.length, 0);
+
+    await rendered.cleanup();
+  });
+
+  test("refreshes into the exact Core recovery action and keeps it after closing", async () => {
+    mocks.requestHostedTrialPlanStartPaid
+      .mockResolvedValueOnce({ status: "billing_pending" })
+      .mockResolvedValueOnce({ status: "started" });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const initialProps = {
+      authenticated: true,
+      billingStatus: "paused",
+      canStartFamily: true,
+      canStartPaidPulse: true,
+      canSwitchToGroup: false,
+      canUpgradeToEdge: true,
+      currentBillingPhase: "trial",
+      currentBillingPlanCode: "launch_monthly",
+      currentCheckoutOffer: "pulse_trial_7d",
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      showGroupPlan: true,
+    } as const;
+    const rendered = await renderClientComponent(
+      createElement(HostedBillingSettings, initialProps),
+      { requireButton: false },
+    );
+
+    const startCoreButton = findButtonByText(
+      rendered.window.document,
+      "Start Core",
+      rendered.window,
+    );
+    await act(async () => {
+      startCoreButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+    const confirmCoreButton = findLastButtonByText(
+      rendered.window.document,
+      "Start Core",
+      rendered.window,
+    );
+    await act(async () => {
+      confirmCoreButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+      await Promise.resolve();
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.rerender(createElement(HostedBillingSettings, {
+      ...initialProps,
+      billingStatus: "incomplete",
+      currentBillingPhase: null,
+      currentBillingPlanCode: "launch_group_monthly",
+    }));
+    const closeButton = findLastButtonByText(
+      rendered.window.document,
+      "Close",
+      rendered.window,
+    );
+    await act(async () => {
+      closeButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+
+    const recoveredText = rendered.window.document.body.textContent ?? "";
+    assert.match(recoveredText, /Check Core status/);
+    assert.doesNotMatch(recoveredText, /Start Pulse plan|Start Core|Choose Family/);
+    assert.doesNotMatch(recoveredText, /Manage billing|Open billing/);
+
+    const checkCoreButton = findButtonByText(
+      rendered.window.document,
+      "Check Core status",
+      rendered.window,
+    );
+    await act(async () => {
+      checkCoreButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+    });
+    const checkStatusButton = findButtonByText(
+      rendered.window.document,
+      "Check status",
+      rendered.window,
+    );
+    await act(async () => {
+      checkStatusButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+      }));
+      await Promise.resolve();
+    });
+    assert.equal(mocks.requestHostedTrialPlanStartPaid.mock.calls.length, 2);
+    assert.equal(mocks.routerRefresh.mock.calls.length, 2);
 
     await rendered.cleanup();
   });

@@ -300,17 +300,25 @@ resume wins the lock, it commits `incomplete` and the exact Pulse-or-Core
 recovery target in the existing member billing reference before either a
 provider mutation or payment-method portal. That durable claim remains
 Family-blocking until invoice reconciliation; Stripe idempotency retention is
-not the owner of product intent. Same-target retries recover the transition,
-while a different target fails stale before provider access. The request path
-never projects `active` from the resume response, and paused subscription
-receipts preserve the claimed target while the projection remains
-`incomplete`. Settings and assistant recovery expose only that target. If
-Family wins the lock, the stale recovery opens no portal and performs no
-provider mutation. A locally
-reconciled paid invoice is the authority for the `active` promotion and
-executes any Family-sponsored cleanup outcome after its transaction rather
-than discarding it. The owner exception remains limited to the exact direct
-subscription being handed to the Family group.
+not the owner of product intent. The locked claim admits only the exact
+`incomplete` target or the original active-trial/paused source on the unchanged
+customer and subscription binding. The same already-paid target is an
+idempotent success; a different paid target, suspension, terminal projection,
+or changed provider binding wins as authoritative state before provider
+access. Same-target retries recover the transition, while a different target
+fails stale before provider access. The request path never projects `active`
+from the resume response, and paused subscription receipts preserve the
+claimed target while the projection remains `incomplete`. A terminal deleted
+receipt supersedes a delayed direct claim and leaves the lapsed member eligible
+for Family acceptance. Settings and assistant recovery expose only the exact
+target. If Family wins the lock, the stale recovery opens no portal and
+performs no provider mutation. A locally reconciled paid invoice is the
+authority for the `active` promotion only when its line Price matches the
+canonical target subscription; an older invoice for another plan cannot
+activate the current target. Reconciliation executes any Family-sponsored
+cleanup outcome after its transaction rather than discarding it. The owner
+exception remains limited to the exact direct subscription being handed to the
+Family group.
 
 If a direct checkout opened before Family billing claimed the member and
 completes afterward, reconciliation leaves it unbound and cancels that

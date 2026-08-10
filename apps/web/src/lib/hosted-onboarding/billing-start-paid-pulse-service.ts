@@ -352,11 +352,17 @@ async function transitionHostedPulseTrialPaidPlan<
     });
   }
 
-  assertHostedPulseTrialStartPaidRecoverableSourceState({
+  const sourceDisposition = resolveHostedPulseTrialStartPaidSourceDisposition({
     billingRef,
     billingStatus: member.billingStatus,
     targetPlanCode: input.targetPlanCode,
   });
+  if (sourceDisposition === "already_started") {
+    return {
+      billingPlanCode: input.targetPlanCode,
+      status: "started",
+    };
+  }
   const currentBillingPhase =
     parseHostedBillingPhase(billingRef?.currentBillingPhase);
   const canStart = currentBillingPhase === "trial";
@@ -578,11 +584,12 @@ async function transitionHostedPulseTrialPaidPlan<
   );
 }
 
-function assertHostedPulseTrialStartPaidRecoverableSourceState(input: {
+function resolveHostedPulseTrialStartPaidSourceDisposition(input: {
   billingRef: Awaited<ReturnType<typeof readHostedMemberStripeBillingRef>>;
   billingStatus: HostedBillingStatus;
+  requireClaimableState?: boolean;
   targetPlanCode: HostedTrialPaidPlanCode;
-}): void {
+}): "already_started" | "claim" {
   const currentPlanCode = parseHostedBillingPlanCode(
     input.billingRef?.currentBillingPlanCode,
   );
@@ -593,9 +600,15 @@ function assertHostedPulseTrialStartPaidRecoverableSourceState(input: {
     throw buildHostedPulseTrialStartPaidUnsupportedError();
   }
 
-  if (input.billingStatus === HostedBillingStatus.incomplete) {
+  const currentBillingPhase = parseHostedBillingPhase(
+    input.billingRef?.currentBillingPhase,
+  );
+  if (
+    input.billingStatus === HostedBillingStatus.active &&
+    currentBillingPhase === "paid"
+  ) {
     if (currentPlanCode === input.targetPlanCode) {
-      return;
+      return "already_started";
     }
     if (
       currentPlanCode === "launch_group_monthly" ||
@@ -606,8 +619,36 @@ function assertHostedPulseTrialStartPaidRecoverableSourceState(input: {
     throw buildHostedPulseTrialStartPaidUnsupportedError();
   }
 
-  if (currentPlanCode === START_PAID_PULSE_PLAN) {
-    return;
+  if (input.billingStatus === HostedBillingStatus.incomplete) {
+    if (currentPlanCode === input.targetPlanCode) {
+      return "claim";
+    }
+    if (
+      currentPlanCode === "launch_group_monthly" ||
+      currentPlanCode === "launch_monthly"
+    ) {
+      throw buildHostedPulseTrialStartPaidChoiceChangedError();
+    }
+    throw buildHostedPulseTrialStartPaidUnsupportedError();
+  }
+
+  const originalPulseTrial =
+    currentPlanCode === START_PAID_PULSE_PLAN &&
+    isHostedPulseTrialBillingState({
+      currentBillingPhase: input.billingRef?.currentBillingPhase,
+      currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
+    });
+  if (originalPulseTrial && input.requireClaimableState !== true) {
+    return "claim";
+  }
+  if (
+    originalPulseTrial &&
+    (
+      input.billingStatus === HostedBillingStatus.paused ||
+      input.billingStatus === HostedBillingStatus.active
+    )
+  ) {
+    return "claim";
   }
 
   throw buildHostedPulseTrialStartPaidUnsupportedError();
@@ -937,6 +978,7 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult<
   invoice: Stripe.Invoice | null;
   memberId: string;
   now: Date;
+  priceId: string;
   prisma: PrismaClient;
   stripeCustomerId: string;
   stripeSubscriptionId: string;
@@ -944,6 +986,7 @@ async function maybeResolveHostedPulseTrialStartPaidInvoiceResult<
   targetPlanCode: TPlanCode;
 }): Promise<HostedTrialStartPaidResult<TPlanCode> | null> {
   if (!input.invoice || !isHostedPulseTrialStartPaidInvoiceForSubscription({
+    expectedPriceId: input.priceId,
     invoice: input.invoice,
     stripeSubscriptionId: input.stripeSubscriptionId,
   })) {
@@ -1030,6 +1073,7 @@ async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult<
   });
 
   if (!input.invoice || !isHostedPulseTrialStartPaidInvoiceForSubscription({
+    expectedPriceId: input.priceId,
     invoice: input.invoice,
     stripeSubscriptionId: input.stripeSubscriptionId,
   })) {
@@ -1207,22 +1251,10 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
   // fence and its exact target before a portal or provider mutation. The first
   // selection is therefore durable beyond Stripe's bounded idempotency cache,
   // and invoice reconciliation alone may promote the projection to `active`.
-  await withHostedMemberStripeMutationLock({
+  const claimDisposition = await withHostedMemberStripeMutationLock({
     memberId: input.memberId,
     prisma: input.prisma,
     run: async (tx) => {
-      await assertHostedBillingPlanSelectable({
-        memberId: input.memberId,
-        prisma: tx,
-        targetPlanCode: input.targetPlanCode,
-      });
-      const familyClaim = await readHostedMemberFamilyBillingClaim({
-        memberId: input.memberId,
-        prisma: tx,
-      });
-      if (familyClaim) {
-        throw buildHostedFamilyBillingClaimError(familyClaim);
-      }
       const lockedMember = await readHostedMemberCoreState({
         memberId: input.memberId,
         prisma: tx,
@@ -1238,11 +1270,35 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
           message: "Finish signup from your latest Murph link before continuing.",
         });
       }
-      assertHostedPulseTrialStartPaidRecoverableSourceState({
-        billingRef: lockedBillingRef,
-        billingStatus: lockedMember.billingStatus,
+      assertHostedMemberNotSuspended(lockedMember);
+      if (
+        lockedBillingRef?.stripeCustomerId !== input.stripeCustomerId ||
+        lockedBillingRef?.stripeSubscriptionId !== input.stripeSubscriptionId
+      ) {
+        throw buildHostedPulseTrialStartPaidChoiceChangedError();
+      }
+      const lockedSourceDisposition =
+        resolveHostedPulseTrialStartPaidSourceDisposition({
+          billingRef: lockedBillingRef,
+          billingStatus: lockedMember.billingStatus,
+          requireClaimableState: true,
+          targetPlanCode: input.targetPlanCode,
+        });
+      if (lockedSourceDisposition === "already_started") {
+        return lockedSourceDisposition;
+      }
+      await assertHostedBillingPlanSelectable({
+        memberId: input.memberId,
+        prisma: tx,
         targetPlanCode: input.targetPlanCode,
       });
+      const familyClaim = await readHostedMemberFamilyBillingClaim({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      if (familyClaim) {
+        throw buildHostedFamilyBillingClaimError(familyClaim);
+      }
       await writeHostedMemberStripeBillingRefTx({
         currentBillingPlanCode: input.targetPlanCode,
         memberId: input.memberId,
@@ -1253,8 +1309,15 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
         memberId: input.memberId,
         prisma: tx,
       });
+      return lockedSourceDisposition;
     },
   });
+  if (claimDisposition === "already_started") {
+    return {
+      billingPlanCode: input.targetPlanCode,
+      status: "started",
+    };
+  }
 
   if (!paymentMethodUpdate) {
     return {
@@ -1455,11 +1518,22 @@ async function reconcileHostedPulseTrialStartPaidInvoice(input: {
 }
 
 function isHostedPulseTrialStartPaidInvoiceForSubscription(input: {
+  expectedPriceId: string;
   invoice: Stripe.Invoice;
   stripeSubscriptionId: string;
 }): boolean {
   return coerceStripeInvoiceSubscriptionId(input.invoice) === input.stripeSubscriptionId &&
-    readHostedStripeInvoiceBillingReason(input.invoice) !== "subscription_create";
+    readHostedStripeInvoiceBillingReason(input.invoice) !== "subscription_create" &&
+    readHostedStripeInvoicePriceIds(input.invoice).includes(input.expectedPriceId);
+}
+
+function readHostedStripeInvoicePriceIds(invoice: Stripe.Invoice): string[] {
+  return invoice.lines?.data.flatMap((line) => {
+    const priceId = coerceStripeObjectId(
+      line.pricing?.price_details?.price,
+    );
+    return priceId ? [priceId] : [];
+  }) ?? [];
 }
 
 function assertHostedPulseTrialStartPaidInvoiceMatchesCustomer(input: {

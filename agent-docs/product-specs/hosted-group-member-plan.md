@@ -107,9 +107,18 @@ while a different target conflicts before provider access and returns the
 existing stale-choice recovery. Subscription receipts preserve the target
 while invoice confirmation remains incomplete. Settings and assistant offers
 expose only that exact status-check action instead of another plan choice or a
-generic billing-portal link. The claim has no automatic expiry: Murph cannot
-prove that an interrupted request did not already mutate the provider, so
-releasing it on a timer would reopen the direct-versus-Family charge race.
+generic billing-portal link. Web immediately refreshes the canonical billing
+projection when the request reports pending, and closing the confirmation
+preserves the exact status-check action; the close control does not claim to
+cancel provider work. The locked retry proceeds only while the customer and
+subscription binding is unchanged and the source is the exact incomplete
+target or the original active-trial/paused subscription. The same paid target
+is idempotently complete, while another paid target, suspension, or terminal
+state wins before provider access. Invoice confirmation must contain the
+target subscription Price, so an older Pulse invoice cannot activate Core (or
+vice versa). The claim has no automatic expiry: Murph cannot prove that an
+interrupted request did not already mutate the provider, so releasing it on a
+timer would reopen the direct-versus-Family charge race.
 
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Core to the private catalog must not make it publicly selectable.

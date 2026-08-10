@@ -432,6 +432,7 @@ describe.skipIf(!runPostgresProof)(
         latestInvoice: buildDraftPulseResumeInvoice({
           customerId: stripeCustomerId,
           invoiceId: `in_family_resume_${fixtureId}`,
+          priceId: groupPriceId,
           subscriptionId: stripeSubscriptionId,
         }),
         paymentMethodId,
@@ -648,6 +649,373 @@ describe.skipIf(!runPostgresProof)(
           familyClient.$disconnect(),
           observer.$disconnect(),
           resumeClient.$disconnect(),
+        ]);
+      }
+    }, 60_000);
+
+    it("rejects a delayed Core claim after Pulse paid reconciliation wins", async () => {
+      const startClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const reconcileClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_paid_claim_race_${fixtureId}`;
+      const stripeCustomerId = `cus_paid_claim_race_${fixtureId}`;
+      const stripeSubscriptionId = `sub_paid_claim_race_${fixtureId}`;
+      const stripeEventId = `evt_paid_claim_race_${fixtureId}`;
+      const stripeInvoiceId = `in_paid_claim_race_${fixtureId}`;
+      const pulsePriceId = `price_paid_claim_pulse_${fixtureId}`;
+      const groupPriceId = `price_paid_claim_group_${fixtureId}`;
+      const edgePriceId = `price_paid_claim_edge_${fixtureId}`;
+      const webhookSecret = "whsec_paid_claim_race_fixture";
+      const now = new Date("2026-07-01T13:47:00.000Z");
+      const retrieveReached = createDeferred();
+      const releaseRetrieve = createDeferred();
+      let retrieveCount = 0;
+      const pausedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId: `pm_paid_claim_${fixtureId}`,
+        priceId: pulsePriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const activePulseSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId: `pm_paid_claim_${fixtureId}`,
+        priceId: pulsePriceId,
+        status: "active",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const subscriptions: Record<string, Stripe.Subscription> = {
+        [stripeSubscriptionId]: pausedSubscription,
+      };
+      const paidEvent = buildInvoicePaidEvent({
+        created: Math.floor(now.getTime() / 1_000),
+        customerId: stripeCustomerId,
+        eventId: stripeEventId,
+        invoiceId: stripeInvoiceId,
+        priceId: pulsePriceId,
+        subscriptionId: stripeSubscriptionId,
+      });
+      const stripeFixture = await startHostedStripeHttpFixture({
+        beforeRetrieveSubscription: async () => {
+          retrieveCount += 1;
+          if (retrieveCount === 1) {
+            retrieveReached.resolve();
+            await releaseRetrieve.promise;
+          }
+        },
+        events: { [stripeEventId]: paidEvent },
+        prices: {
+          [groupPriceId]: buildHostedMonthlyPrice({
+            priceId: groupPriceId,
+            unitAmount: 350,
+          }),
+          [pulsePriceId]: buildHostedMonthlyPrice({
+            priceId: pulsePriceId,
+            unitAmount: 800,
+          }),
+        },
+        subscriptions,
+      });
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+      let startPromise: ReturnType<typeof startHostedTrialPaidPlan> | null = null;
+
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId,
+        groupPriceId,
+        pulsePriceId,
+        stripe: stripeFixture.stripe,
+        webhookSecret,
+      });
+
+      try {
+        await startClient.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.paused,
+            id: memberId,
+          },
+        });
+        await startClient.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            currentBillingPhase: null,
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+            currentTrialEndsAt: now,
+            memberId,
+            stripeCustomerId,
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+
+        startPromise = startHostedTrialPaidPlan({
+          memberId,
+          now,
+          prisma: startClient,
+          targetPlanCode: "launch_group_monthly",
+          timing: "now",
+        });
+        await retrieveReached.promise;
+
+        subscriptions[stripeSubscriptionId] = activePulseSubscription;
+        await postSignedHostedStripeEvent({
+          event: paidEvent,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma: reconcileClient,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({
+          accepted: true,
+          required: false,
+        });
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma: reconcileClient,
+        })).resolves.toMatchObject({
+          billingRef: {
+            currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_monthly",
+          },
+          core: { billingStatus: HostedBillingStatus.active },
+        });
+
+        releaseRetrieve.resolve();
+        await expect(startPromise).rejects.toMatchObject({
+          code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+          httpStatus: 409,
+        });
+        expect(stripeFixture.observedRequests.filter((request) =>
+          request.method === "POST" &&
+          request.pathname.startsWith(`/v1/subscriptions/${stripeSubscriptionId}`)
+        )).toEqual([]);
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma: reconcileClient,
+        })).resolves.toMatchObject({
+          billingRef: {
+            currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_monthly",
+          },
+          core: { billingStatus: HostedBillingStatus.active },
+        });
+      } finally {
+        releaseRetrieve.resolve();
+        await Promise.allSettled(startPromise ? [startPromise] : []);
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await stripeFixture.stop();
+        await reconcileClient.hostedStripeEvent.deleteMany({
+          where: { eventId: stripeEventId },
+        });
+        await reconcileClient.hostedMember.deleteMany({
+          where: { id: memberId },
+        });
+        await Promise.all([
+          reconcileClient.$disconnect(),
+          startClient.$disconnect(),
+        ]);
+      }
+    }, 60_000);
+
+    it("preserves a deleted receipt against a delayed Core claim so Family can join", async () => {
+      const startClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const reconcileClient = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const ownerMemberId = `hbm_deleted_claim_owner_${fixtureId}`;
+      const memberId = `hbm_deleted_claim_member_${fixtureId}`;
+      const groupId = `hbag_deleted_claim_${fixtureId}`;
+      const inviteId = `hbagi_deleted_claim_${fixtureId}`;
+      const inviteCode = `family-deleted-claim-${fixtureId}`;
+      const stripeCustomerId = `cus_deleted_claim_${fixtureId}`;
+      const stripeSubscriptionId = `sub_deleted_claim_${fixtureId}`;
+      const stripeEventId = `evt_deleted_claim_${fixtureId}`;
+      const pulsePriceId = `price_deleted_claim_pulse_${fixtureId}`;
+      const groupPriceId = `price_deleted_claim_group_${fixtureId}`;
+      const edgePriceId = `price_deleted_claim_edge_${fixtureId}`;
+      const webhookSecret = "whsec_deleted_claim_race_fixture";
+      const now = new Date("2026-07-01T13:48:00.000Z");
+      const retrieveReached = createDeferred();
+      const releaseRetrieve = createDeferred();
+      let retrieveCount = 0;
+      const pausedSubscription = buildPulseResumeSubscription({
+        customerId: stripeCustomerId,
+        paymentMethodId: `pm_deleted_claim_${fixtureId}`,
+        priceId: pulsePriceId,
+        status: "paused",
+        subscriptionId: stripeSubscriptionId,
+      });
+      const canceledSubscription = {
+        ...pausedSubscription,
+        status: "canceled" as const,
+      } satisfies Stripe.Subscription;
+      const subscriptions: Record<string, Stripe.Subscription> = {
+        [stripeSubscriptionId]: pausedSubscription,
+      };
+      const deletedEvent = buildSubscriptionUpdatedEvent({
+        created: Math.floor(now.getTime() / 1_000),
+        eventId: stripeEventId,
+        eventType: "customer.subscription.deleted",
+        subscription: canceledSubscription,
+      });
+      const stripeFixture = await startHostedStripeHttpFixture({
+        beforeRetrieveSubscription: async () => {
+          retrieveCount += 1;
+          if (retrieveCount === 1) {
+            retrieveReached.resolve();
+            await releaseRetrieve.promise;
+          }
+        },
+        events: { [stripeEventId]: deletedEvent },
+        prices: {
+          [groupPriceId]: buildHostedMonthlyPrice({
+            priceId: groupPriceId,
+            unitAmount: 350,
+          }),
+          [pulsePriceId]: buildHostedMonthlyPrice({
+            priceId: pulsePriceId,
+            unitAmount: 800,
+          }),
+        },
+        subscriptions,
+      });
+      const runtimeGlobals = readHostedStripeRuntimeGlobals();
+      let startPromise: ReturnType<typeof startHostedTrialPaidPlan> | null = null;
+
+      configureHostedStripeFixtureEnvironment({
+        edgePriceId,
+        groupPriceId,
+        pulsePriceId,
+        stripe: stripeFixture.stripe,
+        webhookSecret,
+      });
+
+      try {
+        await startClient.hostedMember.createMany({
+          data: [
+            { id: ownerMemberId },
+            {
+              billingStatus: HostedBillingStatus.paused,
+              id: memberId,
+            },
+          ],
+        });
+        await seedHostedMemberActivationProof({
+          memberId,
+          prisma: startClient,
+          sequence: 1n,
+        });
+        await startClient.$transaction((tx) =>
+          writeHostedMemberStripeBillingRefTx({
+            currentBillingPhase: null,
+            currentBillingPlanCode: "launch_monthly",
+            currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER,
+            currentTrialEndsAt: now,
+            memberId,
+            stripeCustomerId,
+            stripeSubscriptionId,
+            tx,
+          })
+        );
+        await startClient.hostedAccountGroup.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: groupId,
+            ownerMemberId,
+            planCapacities: {
+              create: {
+                billedQuantity: 2,
+                planCode: "pulse",
+              },
+            },
+          },
+        });
+        await startClient.hostedAccountGroupInvite.create({
+          data: {
+            expiresAt: new Date(now.getTime() + 60_000),
+            groupId,
+            id: inviteId,
+            inviteCode,
+            invitedByMemberId: ownerMemberId,
+          },
+        });
+
+        startPromise = startHostedTrialPaidPlan({
+          memberId,
+          now,
+          prisma: startClient,
+          targetPlanCode: "launch_group_monthly",
+          timing: "now",
+        });
+        await retrieveReached.promise;
+
+        subscriptions[stripeSubscriptionId] = canceledSubscription;
+        await postSignedHostedStripeEvent({
+          event: deletedEvent,
+          stripe: stripeFixture.stripe,
+          webhookSecret,
+        });
+        await expect(processRecordedHostedStripeWebhookEvent({
+          eventId: stripeEventId,
+          prisma: reconcileClient,
+          timeoutMs: 5_000,
+        })).resolves.toEqual({
+          accepted: true,
+          required: false,
+        });
+        await expect(readHostedMemberBillingSnapshot({
+          memberId,
+          prisma: reconcileClient,
+        })).resolves.toMatchObject({
+          core: { billingStatus: HostedBillingStatus.canceled },
+        });
+
+        releaseRetrieve.resolve();
+        await expect(startPromise).rejects.toMatchObject({
+          code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+          httpStatus: 409,
+        });
+        expect(stripeFixture.observedRequests.filter((request) =>
+          request.method === "POST" &&
+          request.pathname.startsWith(`/v1/subscriptions/${stripeSubscriptionId}`)
+        )).toEqual([]);
+        await expect(startClient.$transaction((tx) =>
+          acceptHostedFamilyInviteTx({
+            acceptedMemberId: memberId,
+            inviteCode,
+            now,
+            tx,
+          }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS)
+        ).resolves.toMatchObject({
+          groupId,
+          memberId,
+          role: "member",
+          status: "active",
+        });
+        await expect(startClient.hostedAccountGroupInvite.findUnique({
+          select: { status: true },
+          where: { id: inviteId },
+        })).resolves.toEqual({ status: "accepted" });
+        await expect(startClient.hostedAccountGroupMembership.count({
+          where: { groupId, memberId, status: "active" },
+        })).resolves.toBe(1);
+      } finally {
+        releaseRetrieve.resolve();
+        await Promise.allSettled(startPromise ? [startPromise] : []);
+        clearHostedStripeFixtureEnvironment(runtimeGlobals);
+        await stripeFixture.stop();
+        await reconcileClient.hostedStripeEvent.deleteMany({
+          where: { eventId: stripeEventId },
+        });
+        await reconcileClient.hostedAccountGroup.deleteMany({
+          where: { id: groupId },
+        });
+        await reconcileClient.hostedMember.deleteMany({
+          where: { id: { in: [ownerMemberId, memberId] } },
+        });
+        await Promise.all([
+          reconcileClient.$disconnect(),
+          startClient.$disconnect(),
         ]);
       }
     }, 60_000);
@@ -1687,6 +2055,7 @@ describe.skipIf(!runPostgresProof)(
         customerId: stripeCustomerId,
         eventId: stripeEventId,
         invoiceId: stripeInvoiceId,
+        priceId: pulsePriceId,
         subscriptionId: stripeSubscriptionId,
       });
       const stripeFixture = await startHostedStripeHttpFixture({
@@ -2459,6 +2828,7 @@ function buildActiveDirectSubscription(input: {
 function buildSubscriptionUpdatedEvent(input: {
   created: number;
   eventId: string;
+  eventType?: "customer.subscription.deleted" | "customer.subscription.updated";
   subscription: Stripe.Subscription;
 }): Stripe.Event {
   return {
@@ -2478,7 +2848,7 @@ function buildSubscriptionUpdatedEvent(input: {
       id: null,
       idempotency_key: null,
     },
-    type: "customer.subscription.updated",
+    type: input.eventType ?? "customer.subscription.updated",
   } as Stripe.Event;
 }
 
@@ -2487,6 +2857,7 @@ function buildInvoicePaidEvent(input: {
   customerId: string;
   eventId: string;
   invoiceId: string;
+  priceId: string;
   subscriptionId: string;
 }): Stripe.Event {
   const invoiceFields = {
@@ -2495,6 +2866,18 @@ function buildInvoicePaidEvent(input: {
     charge: `ch_${input.invoiceId}`,
     customer: input.customerId,
     id: input.invoiceId,
+    lines: {
+      data: [{
+        pricing: {
+          price_details: {
+            price: input.priceId,
+            product: `prod_${input.invoiceId}`,
+          },
+          type: "price_details",
+          unit_amount_decimal: "800",
+        },
+      }],
+    },
     object: "invoice",
     payment_intent: `pi_${input.invoiceId}`,
     payments: {
@@ -2838,6 +3221,7 @@ function buildHostedMonthlyPrice(input: {
 function buildDraftPulseResumeInvoice(input: {
   customerId: string;
   invoiceId: string;
+  priceId: string;
   subscriptionId: string;
 }): Stripe.Invoice {
   return {
@@ -2845,6 +3229,18 @@ function buildDraftPulseResumeInvoice(input: {
     customer: input.customerId,
     hosted_invoice_url: null,
     id: input.invoiceId,
+    lines: {
+      data: [{
+        pricing: {
+          price_details: {
+            price: input.priceId,
+            product: `prod_${input.invoiceId}`,
+          },
+          type: "price_details",
+          unit_amount_decimal: "800",
+        },
+      }],
+    },
     object: "invoice",
     status: "draft",
     subscription: input.subscriptionId,

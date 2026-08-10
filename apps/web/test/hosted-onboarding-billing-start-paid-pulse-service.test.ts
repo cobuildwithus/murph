@@ -2206,10 +2206,102 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
-  test("does not resume paused subscriptions when local billing state is already paid", async () => {
+  test("returns success without touching Stripe when the exact plan is already paid", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
       currentBillingPhase: "paid",
     }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).resolves.toEqual({
+      billingPlanCode: "launch_monthly",
+      status: "started",
+    });
+
+    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
+  test("rejects a different target when another tab already completed paid billing", async () => {
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+      currentBillingPhase: "paid",
+    }));
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
+  test("rejects a delayed Core claim after Pulse becomes paid under the member lock", async () => {
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-06T00:00:00.000Z"),
+      });
+    mocks.readHostedMemberStripeBillingRef
+      .mockResolvedValueOnce(makeBillingRef({ currentBillingPhase: null }))
+      .mockResolvedValueOnce(makeBillingRef({ currentBillingPhase: "paid" }));
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      status: "paused",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).rejects.toMatchObject({
+      code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
+      httpStatus: 409,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
+  test("rejects a paused claim when its Stripe binding changed under the member lock", async () => {
+    const pausedMember = {
+      billingStatus: HostedBillingStatus.paused,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+      id: "member_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+    };
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce(pausedMember)
+      .mockResolvedValueOnce(pausedMember);
+    mocks.readHostedMemberStripeBillingRef
+      .mockResolvedValueOnce(makeBillingRef({ currentBillingPhase: null }))
+      .mockResolvedValueOnce(makeBillingRef({
+        currentBillingPhase: null,
+        stripeSubscriptionId: "sub_replaced",
+      }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       status: "paused",
       trialEnd: null,
@@ -2219,13 +2311,43 @@ describe("startHostedPulseTrialPaidPlan", () => {
       memberId: "member_123",
       now: new Date("2026-05-06T00:00:00.000Z"),
     })).rejects.toMatchObject({
-      code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
+      code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
       httpStatus: 409,
     });
 
-    expect(mocks.stripe.billingPortal.sessions.create).not.toHaveBeenCalled();
+    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
+    expect(mocks.updateHostedMemberCoreState).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
+  test("does not accept an older Pulse invoice as proof for a Core transition", async () => {
+    const coreSubscription = makeSubscription({
+      items: [makeSubscriptionItem({
+        priceId: "price_group_recurring",
+        quantity: 1,
+        usageType: "licensed",
+      })],
+      latestInvoice: makeInvoice({
+        priceId: "price_pulse_recurring",
+        status: "paid",
+      }),
+      status: "active",
+      trialEnd: null,
+    });
+    mocks.stripe.subscriptions.update.mockResolvedValueOnce(coreSubscription);
+
+    await expect(startHostedTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+      targetPlanCode: "launch_group_monthly",
+      timing: "now",
+    })).resolves.toEqual({
+      billingPlanCode: "launch_group_monthly",
+      status: "billing_pending",
+    });
+
+    expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
   });
 
   test("uses the expanded customer default payment method before requiring payment setup", async () => {
@@ -2615,6 +2737,8 @@ function makeBillingRef(input: {
   currentBillingPhase?: string | null;
   currentBillingPlanCode?: string | null;
   scheduledBillingPlanCode?: string | null;
+  stripeCustomerId?: string;
+  stripeSubscriptionId?: string;
 } = {}) {
   return {
     currentBillingPhase: input.currentBillingPhase === undefined ? "trial" : input.currentBillingPhase,
@@ -2626,8 +2750,8 @@ function makeBillingRef(input: {
     currentTrialEndsAt: new Date("2026-05-13T00:00:00.000Z"),
     memberId: "member_123",
     scheduledBillingPlanCode: input.scheduledBillingPlanCode ?? null,
-    stripeCustomerId: "cus_123",
-    stripeSubscriptionId: "sub_123",
+    stripeCustomerId: input.stripeCustomerId ?? "cus_123",
+    stripeSubscriptionId: input.stripeSubscriptionId ?? "sub_123",
   };
 }
 
@@ -2754,6 +2878,7 @@ function makeInvoice(input: {
   customer?: string;
   hostedInvoiceUrl?: string | null;
   paymentIntentStatus?: Stripe.PaymentIntent.Status | null;
+  priceId?: string;
   status: Stripe.Invoice.Status;
 }): Stripe.Invoice {
   return {
@@ -2765,6 +2890,18 @@ function makeInvoice(input: {
       ? "https://invoice.stripe.test/in_123"
       : input.hostedInvoiceUrl,
     id: "in_123",
+    lines: {
+      data: [{
+        pricing: {
+          price_details: {
+            price: input.priceId ?? "price_pulse_recurring",
+            product: "prod_hosted_trial",
+          },
+          type: "price_details",
+          unit_amount_decimal: "800",
+        },
+      }],
+    },
     object: "invoice",
     payment_intent: input.paymentIntentStatus
       ? {

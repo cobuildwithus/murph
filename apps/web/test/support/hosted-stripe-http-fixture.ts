@@ -23,6 +23,7 @@ export interface HostedStripeHttpFixture {
 
 export async function startHostedStripeHttpFixture(input: {
   beforeBillingPortalSession?: () => Promise<void>;
+  beforeRetrieveSubscription?: (subscriptionId: string) => Promise<void>;
   beforeResumeSubscription?: (subscriptionId: string) => Promise<void>;
   billingPortalSessionUrl?: string;
   events?: Readonly<Record<string, Stripe.Event>>;
@@ -102,6 +103,7 @@ export async function startHostedStripeHttpFixture(input: {
     if (observed.method === "GET" && subscriptionId) {
       const subscription = input.subscriptions?.[subscriptionId];
       if (subscription) {
+        await input.beforeRetrieveSubscription?.(subscriptionId);
         writeJsonResponse(response, 200, subscription);
         return;
       }

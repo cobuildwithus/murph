@@ -2230,9 +2230,23 @@ function isHostedStripeAcceptedTrialConversionInvoice(input: {
     return false;
   }
 
+  const invoicePriceIds = readHostedStripeInvoicePriceIds(input.invoice);
+  const subscriptionPriceIds = readHostedStripeSubscriptionPriceIds(
+    input.subscription,
+  );
   return input.subscription.id === input.subscriptionId &&
     input.subscription.status === "active" &&
-    readHostedStripeInvoiceBillingReason(input.invoice) !== "subscription_create";
+    readHostedStripeInvoiceBillingReason(input.invoice) !== "subscription_create" &&
+    subscriptionPriceIds.some((priceId) => invoicePriceIds.includes(priceId));
+}
+
+function readHostedStripeInvoicePriceIds(invoice: Stripe.Invoice): string[] {
+  return invoice.lines?.data.flatMap((line) => {
+    const priceId = coerceStripeObjectId(
+      line.pricing?.price_details?.price,
+    );
+    return priceId ? [priceId] : [];
+  }) ?? [];
 }
 
 function readHostedStripeInvoiceBillingReason(invoice: Stripe.Invoice): string | null {

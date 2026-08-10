@@ -32,6 +32,11 @@ Updated: 2026-08-09
 - A paused subscription receipt cannot erase a committed resume fence or its
   target; the existing billing-plan projection durably owns the first
   Pulse/Core choice before provider access.
+- A paid or deleted provider receipt that wins before the locked claim remains
+  authoritative: paid exact-target replay is idempotent, a different target is
+  stale, and terminal cancellation leaves the member eligible for Family.
+- Paid-invoice activation requires the invoice line Price to match the
+  canonical target subscription, not only the subscription identifier.
 - The direct recovery claim is committed before cardless payment setup, so
   Family-first returns no portal while direct-first remains exactly recoverable
   from Settings and assistant without a forced refresh.
@@ -169,6 +174,22 @@ Updated: 2026-08-09
   provider-mutated claim could admit overlapping sponsorship. This replaces
   provider-cache target ownership without a new field, queue, lease, enum, or
   lifecycle owner.
+- Final ReviewGPT round 5 found that the exact-target fence still accepted an
+  original trial binding after a paid or terminal receipt won, and that
+  subscription identity alone let an older plan invoice confirm a different
+  current target. It also found that Web kept pending state only inside the
+  open dialog and offered a generic billing portal with a false `Cancel`
+  affordance.
+- Round 5 requirement decision: re-read the exact customer, subscription,
+  status, phase, plan, suspension, and Family authority under the existing
+  member lock before claiming. Admit only the original active-trial/paused
+  source or exact incomplete target; treat the same active paid target as
+  idempotent and every conflicting or terminal projection as authoritative.
+  Require the invoice line Price to match the target, refresh canonical Web
+  state on pending, preserve its exact recovery after dialog close, and remove
+  the generic portal and false cancellation affordance. Real PostgreSQL
+  paid-wins and deleted-wins interleavings cover both receipt orders without
+  adding state or another lifecycle owner.
 - The required Claude Code UI double-check was attempted against the final
   desktop/mobile catalog evidence and stopped on explicit Fable usage-credit
   exhaustion. Per the completion workflow, no second Claude request or local
@@ -180,7 +201,7 @@ Updated: 2026-08-09
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-family-plan.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-billing-start-paid-pulse-service.test.ts`
   - `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-onboarding-stripe-billing-status.test.ts apps/web/test/hosted-onboarding-billing-plans.test.ts apps/web/test/hosted-billing-settings.test.tsx apps/web/test/hosted-usage-status.test.ts`
-  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_dev_family_lapsed_join MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps the Core recovery target and Family fence while a paused receipt races the resume response|commits the direct recovery fence before opening card setup'`
+  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/murph_dev_family_lapsed_join MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-stripe-webhook-entitlement-postgres.test.ts -t 'rejects Family acceptance after Checkout binds before status projection|keeps the Core recovery target and Family fence while a paused receipt races the resume response|rejects a delayed Core claim after Pulse paid reconciliation wins|preserves a deleted receipt against a delayed Core claim so Family can join|commits the direct recovery fence before opening card setup'`
   - `pnpm hosted-billing:ci-guard`
   - `pnpm --dir apps/web typecheck`
   - `pnpm --dir apps/web lint`
@@ -196,6 +217,20 @@ Updated: 2026-08-09
   - Exact paused-plan retries reuse the target-specific provider claim;
     conflicting Pulse/Core choices fail stale before provider access, and only
     the claimed recovery remains visible in Settings and assistant output.
+  - Paid and deleted receipt winners cannot be overwritten by a delayed claim;
+    exact-price invoice proof prevents cross-plan activation, and terminal
+    cancellation permits the existing Family admission path.
   - Billing request-shape/contract guards, typecheck, and lint remain green.
   - No new persisted state, external call, dependency, component, or UI screen
     appears.
+- Round 5 remediation proof on the local candidate:
+  - Eight focused unit/UI files pass with 468 tests.
+  - The five focused real-PostgreSQL orderings pass, including paid-wins and
+    deleted-wins against a delayed Core claim.
+  - Hosted billing CI guard and Web typecheck pass.
+  - Full Web lint passes with zero errors; its 37 warnings are outside the
+    changed files.
+  - Desktop 1440 CSS px at 2x and mobile 390 CSS px at 3x catalog crops render
+    the real pending confirmation state, pass native-resolution inspection,
+    and match their hosted PNGs byte-for-byte.
+  - `git diff --check` passes.

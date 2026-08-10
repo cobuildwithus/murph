@@ -107,6 +107,26 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Exact Core status check while Stripe confirmation is pending"
+        state="payment-recovery-pending-confirmation"
+      >
+        <div
+          className="mx-auto grid w-full max-w-md gap-6 rounded-2xl border border-[#c4a882]/25 bg-[#fffcf6] p-6 text-[#2d3436] ring-[#c4a882]/25 md:p-7"
+          inert
+        >
+          <StartPaidPlanConfirmationContent
+            errorMessage={null}
+            onClose={() => undefined}
+            onConfirm={() => undefined}
+            staticPresentation
+            status="billing_pending"
+            targetPlanCode="launch_group_monthly"
+            timing="now"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
         label="Group member on the $3.50 Core plan"
         state="active-core-usage"
       >

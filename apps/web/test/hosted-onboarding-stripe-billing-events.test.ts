@@ -1630,6 +1630,7 @@ describe("hosted onboarding stripe billing events", () => {
       makeStripeSubscription({
         currentPeriodEnd: 1_747_612_800,
         currentPeriodStart: 1_745_020_800,
+        items: ["price_pulse_base"],
         metadata: {
           checkoutOffer: "pulse_trial_7d",
         },
@@ -1652,6 +1653,50 @@ describe("hosted onboarding stripe billing events", () => {
         now: eventCreatedAt,
         tx: {},
       });
+  });
+
+  it("does not project Core from an older paid Pulse conversion invoice", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.incomplete,
+      billingRef: {
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_group_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await expect(applyStripeInvoicePaid(
+      makeStripeInvoice({
+        billingReason: "subscription_cycle",
+        id: "in_older_pulse_conversion",
+        priceId: "price_pulse_base",
+        subscription: "sub_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_older_pulse_conversion",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        items: ["price_core_base"],
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "active",
+      }),
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
   it("does not replay a trial-conversion wake for a different event timestamp", async () => {
@@ -1698,6 +1743,7 @@ describe("hosted onboarding stripe billing events", () => {
       {} as never,
       HostedBillingStatus.active,
       makeStripeSubscription({
+        items: ["price_pulse_base"],
         metadata: {
           checkoutOffer: "pulse_trial_7d",
         },
@@ -2546,6 +2592,7 @@ function makeStripeInvoice(
     customerEmail: string | null;
     id: string;
     invoicePayments: Stripe.InvoicePayment[];
+    priceId: string;
     paymentIntent: string | null;
     subscription: string | null;
   }>,
@@ -2558,6 +2605,18 @@ function makeStripeInvoice(
     customer: overrides?.customer ?? "cus_123",
     customer_email: overrides?.customerEmail ?? null,
     id: overrides?.id ?? "in_123",
+    lines: {
+      data: [{
+        pricing: {
+          price_details: {
+            price: overrides?.priceId ?? "price_pulse_base",
+            product: "prod_hosted_trial",
+          },
+          type: "price_details",
+          unit_amount_decimal: "800",
+        },
+      }],
+    },
     payment_intent: overrides?.paymentIntent ?? "pi_123",
     payments: {
       data: overrides?.invoicePayments ?? [],

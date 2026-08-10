@@ -11,7 +11,6 @@ import {
   requestHostedTrialPlanStartPaid,
   type HostedTrialPaidPlanCode,
 } from "@/src/components/hosted-onboarding/client-api";
-import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { Button } from "@/src/components/ui/button";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
@@ -78,10 +77,14 @@ export function StartPaidPulseButton(props: {
   const [status, setStatus] = useState<StartPaidPulseStatus>(
     props.initialStatus ?? "idle",
   );
-  const isSubmitting = status === "submitting";
+  const displayedStatus =
+    status === "scheduled" || status === "submitting"
+      ? status
+      : props.initialStatus ?? status;
+  const isSubmitting = displayedStatus === "submitting";
   const label = isSubmitting
     ? "Starting..."
-    : status === "billing_pending"
+    : displayedStatus === "billing_pending"
       ? `Check ${targetPlan.displayName} status`
       : props.children ?? `Start ${targetPlan.displayName} plan`;
   const disabled = props.disabled === true || isSubmitting;
@@ -89,7 +92,12 @@ export function StartPaidPulseButton(props: {
   function setConfirmationOpenState(open: boolean) {
     setConfirmationOpen(open);
     if (!open) {
-      setStatus(props.initialStatus ?? "idle");
+      if (
+        status !== "billing_pending" &&
+        props.initialStatus !== "billing_pending"
+      ) {
+        setStatus("idle");
+      }
       setErrorMessage(null);
     }
   }
@@ -118,6 +126,7 @@ export function StartPaidPulseButton(props: {
 
       if (result.status === "billing_pending") {
         setStatus("billing_pending");
+        router.refresh();
         return;
       }
 
@@ -183,7 +192,7 @@ export function StartPaidPulseButton(props: {
       ) : null}
       <StartPaidPulseConfirmationDialog
         errorMessage={errorMessage}
-        status={status}
+        status={displayedStatus}
         onConfirm={() => void handleStartPaidPulse()}
         onOpenChange={setConfirmationOpenState}
         open={confirmationOpen}
@@ -567,16 +576,20 @@ export function StartPaidPlanConfirmationContent(props: {
     props.targetPlanCode === "launch_group_monthly"
       ? CHECKOUT_CORE_FEATURES
       : CHECKOUT_PULSE_FEATURES;
-  const title = props.status === "scheduled"
-    ? `${targetPlanName} is set`
-    : props.timing === "at_trial_end"
-      ? `Continue with ${targetPlanName}`
-      : `Start ${targetPlanName}`;
-  const description = props.status === "scheduled"
-    ? `Your trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
-    : props.timing === "at_trial_end"
-      ? `Your current trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
-      : `Your trial ends now and ${targetPlanName} begins at ${targetPriceLabel}/month. You will be charged immediately.`;
+  const title = props.status === "billing_pending"
+    ? `${targetPlanName} is still starting`
+    : props.status === "scheduled"
+      ? `${targetPlanName} is set`
+      : props.timing === "at_trial_end"
+        ? `Continue with ${targetPlanName}`
+        : `Start ${targetPlanName}`;
+  const description = props.status === "billing_pending"
+    ? `Billing is still finishing. We're waiting to confirm your exact ${targetPlanName} plan.`
+    : props.status === "scheduled"
+      ? `Your trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
+      : props.timing === "at_trial_end"
+        ? `Your current trial continues. ${targetPlanName} begins at ${targetPriceLabel}/month when it ends.`
+        : `Your trial ends now and ${targetPlanName} begins at ${targetPriceLabel}/month. You will be charged immediately.`;
 
   return (
     <>
@@ -616,22 +629,14 @@ export function StartPaidPlanConfirmationContent(props: {
           </p>
         ) : null}
         {props.status === "billing_pending" ? (
-          // This state can outlast the confirmation window, and when it does the
-          // check never clears on its own. Offer the billing page in the same
-          // breath so the member has a way through instead of a wait with no end.
           <div
             role="status"
             aria-live="polite"
             className="flex flex-col gap-2 rounded-lg border border-[#c4a882]/25 bg-white/50 p-3 text-sm text-[#736a58]"
           >
-            <p>
-              Billing is still finishing. Check again, or open billing to finish it there.
+            <p className="text-pretty">
+              You don&apos;t need to cancel or choose another plan. Check again in a moment.
             </p>
-            <BillingPortalButton
-              billingScope="member"
-              variant="ghost"
-              label="Open billing"
-            />
           </div>
         ) : null}
         {isSubmitting ? (
@@ -673,7 +678,7 @@ export function StartPaidPlanConfirmationContent(props: {
               disabled={isSubmitting}
               className="w-full"
             >
-              Cancel
+              {props.status === "billing_pending" ? "Close" : "Cancel"}
             </Button>
           ) : null}
         </div>
