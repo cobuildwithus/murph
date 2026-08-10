@@ -1,7 +1,26 @@
+/**
+ * Reviewed against the pinned upstream source tree below. Base-relative paths
+ * are recorded separately because native linkers may concatenate their string
+ * literals differently across targets; changing the Codex pin requires a fresh
+ * source-tree review rather than trusting one platform's binary layout.
+ */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   upstreamCommit: "be6e8eac029b183056b7e4402879f15d2c85f61b",
+  upstreamSourceTree: "194e2411ddbd71f839df530635d10dc103559d85",
   upstreamTag: "rust-v0.147.0",
   version: "0.147.0",
+  baseRelativeProviderRoutes: [
+    "alpha/search",
+    "images/edits",
+    "images/generations",
+    "live",
+    "memories/trace_summarize",
+    "models",
+    "realtime",
+    "realtime/calls",
+    "responses",
+    "responses/compact",
+  ],
   reviewedSources: [
     "codex-rs/codex-api/src/endpoint/compact.rs",
     "codex-rs/codex-api/src/endpoint/images.rs",
@@ -130,7 +149,7 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       feature: "frameless realtime websocket",
       method: "GET",
       owner: "codex",
-      pathname: "/v1/live/rtc_route_contract",
+      pathname: "/v1/live",
       proof: "reviewed_source",
       source: "codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs",
       transport: "websocket",
@@ -184,10 +203,22 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
       reason: "OTLP export uses an operator-configured telemetry endpoint.",
     },
     {
+      candidate: "/v1/resp",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "This exact Linux printable token terminates before an uppercase binary byte and is not an HTTP route.",
+    },
+    {
       candidate: "/v1/scrypt",
       disposition: "binary_false_positive",
       owner: "dependency",
       reason: "This printable binary token is not an HTTP route.",
+    },
+    {
+      candidate: "/v1/toke",
+      disposition: "binary_false_positive",
+      owner: "dependency",
+      reason: "This exact Linux printable token terminates before an uppercase binary byte and is not an HTTP route.",
     },
     {
       candidate: "/v1/token",

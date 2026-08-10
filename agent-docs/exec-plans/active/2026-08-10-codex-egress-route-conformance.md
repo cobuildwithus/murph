@@ -95,16 +95,27 @@ Updated: 2026-08-10
   suite therefore keeps reviewed dispositions in a test-only fixture, scans the
   exact installed native artifact, and exercises deterministic reachable routes
   through the production Worker boundary.
+- Preliminary ReviewGPT accepted two coverage gaps: unknown provider-anchored
+  base-relative literals were not retained generically, and proof labels were
+  not derived from observed real-Codex requests. The suite now covers both.
+- Final ReviewGPT found that the blocked frameless realtime WebSocket used a
+  synthetic suffix. The fixture and Worker proof now use the real exact
+  `GET /v1/live` route, deleting the alias.
+- Exact-head Linux CI exposed target-specific Rust literal concatenations. The
+  scanner now normalizes only those exact reviewed tokens and explicitly
+  classifies the two truncated non-route fragments; an independently downloaded
+  pinned Linux artifact reports 19 classified candidates.
 
 ## Verification
 
-- Passed focused Codex conformance: 7 tests, including a real pinned App Server
+- Passed focused Codex conformance: 8 tests, including a real pinned App Server
   responses/search/responses turn through `hostedRunnerIntercept`.
 - Passed focused adjacent conformance/interceptor suite: 3 files, 253 tests.
 - Passed `@murphai/cloudflare-runner` typecheck.
-- Passed the complete Cloudflare node suite: 141 files, 2,383 tests passed and 2
+- Passed the corrected complete Cloudflare node suite: 141 files, 2,384 tests passed and 2
   skipped.
 - Passed `pnpm test:diff`, including the affected Cloudflare node and Workers
   suites plus repository architecture, boundary, dependency, and log guards.
-- Pending exact-head CI, preliminary specialist ReviewGPT, final ReviewGPT, and
-  plan closure.
+- Preliminary specialist and final ReviewGPT round 1 completed with accepted
+  findings; corrections are implemented and locally verified.
+- Pending corrected exact-head CI, final ReviewGPT round 2, and plan closure.

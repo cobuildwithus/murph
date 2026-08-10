@@ -78,6 +78,8 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toBe(`rust-v${expectedVersion}`);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit)
       .toMatch(/^[0-9a-f]{40}$/u);
+    expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceTree)
+      .toMatch(/^[0-9a-f]{40}$/u);
   });
 
   it("keeps every route disposition unique and tied to reviewed source provenance", () => {
@@ -95,6 +97,22 @@ describe("pinned Codex OpenAI egress conformance", () => {
     for (const route of PINNED_CODEX_OPENAI_EGRESS_INVENTORY.chatGptAuthOnlyRoutes) {
       expect(reviewedSources.has(route.source), route.feature).toBe(true);
     }
+    const providerPathnames = new Set(
+      PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes.map((route) => route.pathname),
+    );
+    for (const relativeRoute of PINNED_CODEX_OPENAI_EGRESS_INVENTORY
+      .baseRelativeProviderRoutes) {
+      expect(providerPathnames.has(`/v1/${relativeRoute}`), relativeRoute)
+        .toBe(true);
+    }
+    expect(new Set(PINNED_CODEX_OPENAI_EGRESS_INVENTORY
+      .baseRelativeProviderRoutes).size)
+      .toBe(PINNED_CODEX_OPENAI_EGRESS_INVENTORY
+        .baseRelativeProviderRoutes.length);
+    expect([...PINNED_CODEX_OPENAI_EGRESS_INVENTORY
+      .baseRelativeProviderRoutes].sort())
+      .toEqual([...PINNED_CODEX_OPENAI_EGRESS_INVENTORY
+        .baseRelativeProviderRoutes]);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes
       .filter((route) => route.pathname.startsWith("/v1/images/"))
       .map((route) => route.owner))
@@ -103,13 +121,12 @@ describe("pinned Codex OpenAI egress conformance", () => {
 
   it("requires an explicit disposition for every installed Codex binary route candidate", async () => {
     const binary = await readFile(resolveInstalledCodexBinary());
-    const discovered = discoverCodexBinaryRouteCandidates(binary);
+    const discovered = discoverCodexBinaryRouteCandidates(binary, {
+      reviewedRelativeProviderRoutes:
+        PINNED_CODEX_OPENAI_EGRESS_INVENTORY.baseRelativeProviderRoutes,
+    });
     const classified = new Set<string>([
-      ...PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes.map((route) =>
-        route.pathname === "/v1/live/rtc_route_contract"
-          ? "/v1/live"
-          : route.pathname
-      ),
+      ...PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes.map((route) => route.pathname),
       ...PINNED_CODEX_OPENAI_EGRESS_INVENTORY.nonProviderBinaryCandidates
         .map((entry) => entry.candidate),
     ]);
@@ -129,6 +146,15 @@ describe("pinned Codex OpenAI egress conformance", () => {
     ]));
 
     expect(discovered).toContain("/v1/future_route/items");
+  });
+
+  it("retains an unknown provider-anchored base-relative route as a scanner candidate", () => {
+    const discovered = discoverCodexBinaryRouteCandidates(Buffer.from([
+      ...Buffer.from("https://api.openai.com/v1 future/items"),
+      0,
+    ]));
+
+    expect(discovered).toContain("/v1/future/items");
   });
 
   it("keeps every reviewed route aligned with the production Worker decision", async () => {
@@ -309,6 +335,15 @@ describe("pinned Codex OpenAI egress conformance", () => {
           { method: "POST", pathname: "/v1/alpha/search" },
           { method: "POST", pathname: "/v1/responses" },
         ]);
+        const observedRealCodexRoutes = new Set(forwardedRequests.map((request) =>
+          `${request.method} ${new URL(request.url).pathname} http`
+        ));
+        const requiredRealCodexRoutes = PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes
+          .filter((route) => route.proof === "real_codex_worker")
+          .map((route) => `${route.method} ${route.pathname} ${route.transport}`);
+        expect(requiredRealCodexRoutes.filter((route) =>
+          !observedRealCodexRoutes.has(route)
+        )).toEqual([]);
         for (const request of forwardedRequests) {
           expect(request.headers.get("authorization"))
             .toBe("Bearer openai-worker-secret");
