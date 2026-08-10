@@ -126,13 +126,25 @@ const detachedAutomaticRefillFailureMigrationSql = readFileSync(
   ),
   "utf8",
 );
-const referralCreditEntryConstraintMigrationSql = readFileSync(
+const starterUsageMigrationSql = readFileSync(
   new URL(
-    "../prisma/migrations/20260728030000_hosted_usage_referral_credit_entry_constraints/migration.sql",
+    "../prisma/migrations/20260807204000_non_expiring_starter_usage/migration.sql",
     import.meta.url,
   ),
   "utf8",
 );
+const starterUsageConstraintMigrationStatements = [
+  extractRequiredMigrationStatement(
+    starterUsageMigrationSql,
+    /ALTER TABLE "hosted_usage_credit_entry"[\s\S]*?NOT VALID;/u,
+    "Starter usage-credit ledger checks",
+  ),
+  extractRequiredMigrationStatement(
+    starterUsageMigrationSql,
+    /ALTER TABLE "hosted_usage_credit_entry"\s+VALIDATE CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",\s+VALIDATE CONSTRAINT "hosted_usage_credit_entry_source_shape_valid";/u,
+    "Starter usage-credit ledger check validation",
+  ),
+];
 const composableUsageReferralMissionsMigrationSql = readFileSync(
   new URL(
     "../prisma/migrations/20260729190000_composable_usage_referral_missions/migration.sql",
@@ -1260,7 +1272,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       try {
         await client.query(detachedDirectProofMigrationSql);
         await client.query(detachedAutomaticRefillFailureMigrationSql);
-        await client.query(referralCreditEntryConstraintMigrationSql);
+        for (const statement of starterUsageConstraintMigrationStatements) {
+          await client.query(statement);
+        }
         await applyGrantProjectionRuntimeMigration(client);
         const armedPolicyIndex = await client.query<{ present: boolean }>(`
           SELECT EXISTS (
@@ -1429,6 +1443,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         const enumLabels = enumResult.rows.map(({ enumLabel }) => enumLabel);
 
         expect(new Set(enumLabels)).toEqual(new Set([
+          "starter_grant",
           "purchase_grant",
           "referral_grant",
           "usage_debit",
