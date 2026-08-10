@@ -131,12 +131,16 @@ required to drain already-created provider objects.
 
 Use this rollout order:
 
-1. deploy the additive ledger-kind/check-constraint migration and Starter
-   backfill;
-2. deploy the new Web code, then wait until every old Web deployment that could
-   create a Stripe trial is drained;
-3. let delayed Stripe events and the runtime compatibility owner convert exact
-   post-migration legacy objects through the canonical Starter grant path;
+1. prepare the new Web release, then use an atomic traffic cutover or a brief
+   affected-usage maintenance window so no old Web deployment can serve usage
+   after the Starter backfill becomes visible;
+2. while the affected path is no longer routed to old Web, apply the additive
+   ledger-kind/check-constraint migration and Starter backfill, route traffic
+   exclusively to the new Web release, and only then resume affected usage;
+3. confirm every old Web deployment capable of creating a Stripe trial is
+   drained, then let delayed Stripe events and the runtime compatibility owner
+   convert exact post-migration legacy objects through the canonical Starter
+   grant path;
 4. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
    in dry-run mode and review the aggregate candidate and provider-status
    counts;

@@ -643,23 +643,31 @@ async function resolveAvailableSubscriptionOffer(input: {
         memberId: input.memberId,
         prisma: input.prisma,
       });
-    const groupPlanAvailable = hasConfirmedGroupMembership
-      && await isHostedBillingPlanSelectionAvailable({
-        billingPlanCode: "launch_group_monthly",
-      });
-    const pulsePlanAvailable =
-      await isHostedBillingPlanSelectionAvailable({
+    const maxPlanConfigured =
+      isHostedBillingPlanChangePortalConfigured("launch_max_monthly");
+    const [
+      groupPlanAvailable,
+      pulsePlanAvailable,
+      edgePlanAvailable,
+      maxPlanAvailable,
+    ] = await Promise.all([
+      hasConfirmedGroupMembership
+        ? isHostedBillingPlanSelectionAvailable({
+            billingPlanCode: "launch_group_monthly",
+          })
+        : false,
+      isHostedBillingPlanSelectionAvailable({
         billingPlanCode: "launch_monthly",
-      });
-    const edgePlanAvailable =
-      await isHostedBillingPlanSelectionAvailable({
+      }),
+      isHostedBillingPlanSelectionAvailable({
         billingPlanCode: "launch_edge_monthly",
-      });
-    const maxPlanAvailable =
-      isHostedBillingPlanChangePortalConfigured("launch_max_monthly")
-      && await isHostedBillingPlanSelectionAvailable({
-        billingPlanCode: "launch_max_monthly",
-      });
+      }),
+      maxPlanConfigured
+        ? isHostedBillingPlanSelectionAvailable({
+            billingPlanCode: "launch_max_monthly",
+          })
+        : false,
+    ]);
     const availablePlanCodes = resolveVisibleHostedBillingPlanCodes({
       currentPlanCode: null,
       groupPlanConfigured: groupPlanAvailable,
