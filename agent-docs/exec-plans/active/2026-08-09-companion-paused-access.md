@@ -119,19 +119,24 @@ Updated: 2026-08-10
   credential-independent canonical import/delete jobs, and suppresses
   device-activity automation scheduling. Junction source-reference imports and
   credential-scoped wearable jobs remain queued for ordinary active/default
-  execution. A failed preparation or
-  post-checkpoint receipt, a successful receipt that reports `stillDirty`, or
-  another exact local device item may persist one exact device-sync retry
-  marker and `device-sync.reconcile` wake. A still-dirty receipt clears its
-  spent receipt record and requeues the same item as executable work. Web holds
-  its existing health-data admission lock across the dirty acknowledgement and
-  pending-dirty query, serializing both commit orders with companion ingress.
-  Only a successful clean receipt for the last device item clears the marker.
+  execution. A failed preparation or post-checkpoint receipt, a scheduled
+  provider-egress-free local retry, or another exact local device item may
+  persist one exact device-sync retry marker and `device-sync.reconcile` wake.
+  Generic dirty state alone is not executable paused work: after
+  acknowledgement the restricted path retains the item only when its filtered
+  local worker schedule has an eligible retry. Deferred provider payloads remain
+  durable without a paused marker or reconcile wake. Web holds its existing
+  health-data admission lock across the dirty acknowledgement and pending-dirty
+  query, serializing both commit orders with companion ingress. Each new
+  companion payload appends a payload-identity mailbox wake even while the
+  connection is dirty, so later companion ingress does not depend on a
+  clean-to-dirty transition.
   The restricted pass always commits the post-receipt exact local queue,
   marker, and wake in its normal final `idle_shutdown` snapshot before return,
   while every earlier canonical checkpoint that can advance the system
   watermark carries that same exact continuation so committed-progress
-  recovery cannot strand it if the final checkpoint fails.
+  recovery cannot strand it if the final checkpoint fails. An exact empty
+  device-item reread clears the marker and any stale paired device wake.
 - The native repository has no release tag or other durable mapping from the
   App Store binary to a source commit. Compatibility is therefore based on the
   unchanged HTTP shapes plus inspection of the current native resume/connect
@@ -259,9 +264,29 @@ Updated: 2026-08-10
   predicate with the restricted worker authority, leaving those jobs queued
   until active/default processing while self-contained inline imports remain
   eligible.
+- A sixth same-number diagnostic capture again had inconclusive model
+  attestation and found that generic `stillDirty` acknowledgement semantics
+  could requeue a paused item forever when only provider-dependent payloads
+  remained. The correction takes paused retry timing from the restricted local
+  worker schedule, retires deferred-only items and stale device wakes, and gives
+  every newly accepted companion payload a deterministic payload-identity
+  mailbox handoff. The production-shaped cold-restore regression starts with a
+  persisted Junction source-reference payload, proves zero paused provider
+  egress and a dormant durable payload without a retry loop, then proves the
+  ordinary active pass still executes the provider lookup.
+- Passed after the sixth diagnostic correction: the three central hosted
+  runtime suites (3 files, 596 tests) and the focused Web hosted device-sync
+  wake suite (1 file, 117 tests). The production-shaped runtime case proves a
+  deferred provider payload cannot preserve a paused marker or immediate wake,
+  while the Web case proves a later accepted companion payload receives its
+  own deterministic handoff while the connection remains dirty.
+- Passed after the sixth diagnostic correction: assistant-runtime and Web
+  typechecks, scoped Web ESLint, agent-docs drift, `git diff --check`, and the
+  changed-diff direct-identifier scan.
 - Required after remediation: final ReviewGPT round-5 retry and exact-head
   GitHub Actions.
-- Required after the user-requested review-tool refresh: verify the installed
-  CLI reports 0.5.124, run the directly coupled release coverage test and
-  typecheck, commit the dependency metadata, then restart the final review on
-  that exact head.
+- Passed after the user-requested review-tool refresh: npm `latest` and the
+  workspace-installed CLI both report 0.5.124; frozen install, CLI typecheck,
+  and the directly coupled release/configuration coverage suite pass. The
+  final review retry must run from that workspace-installed version on the
+  exact remediated head.

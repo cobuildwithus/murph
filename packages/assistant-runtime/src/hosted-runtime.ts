@@ -1288,9 +1288,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         vaultRoot: restored.vaultRoot,
       });
       if (!candidate.at) {
+        const staleDeviceSyncWake = projection.nextWakeReason
+          === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON;
         return {
-          ...projection,
+          nextWakeAt: staleDeviceSyncWake ? null : projection.nextWakeAt,
+          nextWakeReason: staleDeviceSyncWake ? null : projection.nextWakeReason,
           pending: false,
+          redactedStatus: staleDeviceSyncWake
+            || projection.redactedStatus.hostedPausedCompanionDeviceSyncRetryPending === true
+            ? {
+                ...projection.redactedStatus,
+                hostedPausedCompanionDeviceSyncRetryPending: false,
+              }
+            : projection.redactedStatus,
         };
       }
 

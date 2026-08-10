@@ -1,6 +1,6 @@
 # Device Sync Hosted Control Plane
 
-Last verified against repo layout: 2026-07-27
+Last verified against repo layout: 2026-08-10
 
 ## Current split
 
@@ -225,11 +225,16 @@ provider work also remains queued for ordinary active/default processing. The
 restricted run also suppresses new device-activity automation scheduling. Dirty
 acknowledgement and the following pending-dirty query run in the same health-data
 admission transaction used by companion ingress. If an acknowledgement remains
-dirty, the runtime clears the spent post-checkpoint record and requeues that same
-exact device item for execution. Preparation or receipt failure, a still-dirty
-acknowledgement, or another exact local device item retains the
-`device-sync.reconcile` wake and persisted paused-companion retry marker. A
-successful clean receipt for the last device item clears them. The restricted
+dirty, the restricted runtime requeues that same exact device item only when its
+provider-egress-free local worker schedule still has executable work. Dirty rows
+that are deliberately deferred to active/default execution remain durable but do
+not manufacture a paused retry. Preparation or receipt failure, a scheduled
+restricted job, or another exact local device item retains the
+`device-sync.reconcile` wake and persisted paused-companion retry marker. An
+exact empty device-item reread clears them and any stale device wake. Each newly
+accepted companion payload appends a mailbox wake keyed by its durable payload
+id even when the connection was already dirty, so serialized overlapping ingress
+cannot be stranded behind deferred provider work. The restricted
 lane re-reads the exact local device queue at checkpoint time, so a future
 backoff item that prevents pass progress cannot hide a later imported device
 item. It carries that exact marker and device wake in every intermediate
@@ -402,7 +407,7 @@ Webhook ingress separates level-triggered dirty hints from event-triggered durab
 
 Provider webhook traces remain exact for side-effect-bearing accepted deliveries. Accepted level dirty hints write sparse audit signals and upsert `device_sync_dirty_connection` only when they create fresh dirty work; later level hints for an already-pending connection can be accepted before trace claim. Durable webhook work still passes through exact trace claim and durable acceptance so provider-owned event work is not lost. The steady-state architecture does not use per-webhook hosted mailbox items or Vercel Workflows for freshness.
 
-When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional level hints while already dirty are coalesced without another ingress wake. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion overnight PRV row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. Exact missed-wake recovery would need a future explicit pending-handoff ledger, not a dirty sweeper. Webhook and app paths do not send runner nudges directly to Cloudflare.
+When a connection transitions from clean to dirty, webhook ingress commits the dirty state, appends one deterministic `device-sync.wake` mailbox handoff, and completes the trace in the same transaction. Additional provider level hints while already dirty are coalesced without another ingress wake. Companion app payloads are different: every newly accepted encrypted payload appends a deterministic wake keyed by its durable payload id, including while deferred provider work keeps the connection dirty; an exact replay resolves to the same mailbox identity. Durable webhook work appends independent encrypted payload rows under exact trace claim and is acknowledged by explicit payload row id, so concurrent durable deliveries do not need a connection-scoped acceptance lock. A retained generic payload follows the local job's retry wake and is removed after executed success or terminal failure, preventing both tight replay loops and dead-job recreation while preserving cold-restore reconstruction. A machine-local disconnect cannot release it; the next authoritative hosted snapshot decides active replay versus terminal disposition. A companion overnight PRV row stays pending through canonical local import so a yielded or restored runtime can refetch the authoritative encrypted observation. Dirty rows and remaining payload rows drain through dirty-pending and dirty-ack callbacks; there is no dirty-row recovery sweep. Exact missed-wake recovery would need a future explicit pending-handoff ledger, not a dirty sweeper. Webhook and app paths do not send runner nudges directly to Cloudflare.
 
 Temporal is the only normal wake orchestrator. When mailbox signals or reconciliation facts show durable work, it calls Cloudflare's signed `ensure-processing` adapter; Cloudflare returns `runtime_processing_accepted` or `retry_later` and owns runner start, wake, active-fence alarm cleanup, and execution cleanup.
 

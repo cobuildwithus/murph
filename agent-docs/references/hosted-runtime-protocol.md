@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Decision
 
@@ -510,11 +510,16 @@ acknowledgement and reads pending dirty work in the same member-then-connection
 health-data admission transaction used by companion ingress, so either ingress
 commits first and the acknowledgement observes it, or the acknowledgement
 commits first and later ingress requests a fresh wake. A `stillDirty` result
-clears the spent post-checkpoint record and requeues the same exact local device
-item as pending executable work. A failed preparation or receipt, a requeued
-still-dirty item, or any other exact local device item retains the persisted
-paused-companion retry marker and `device-sync.reconcile` wake; only a
-successful clean receipt for the last device item clears them. The restricted
+requeues the same exact local device item only when the restricted worker's
+provider-egress-free local schedule has another executable attempt. A dirty
+payload deferred to active/default execution stays durable without creating a
+paused retry. A failed preparation or receipt, a scheduled restricted item, or
+any other exact local device item retains the persisted paused-companion retry
+marker and `device-sync.reconcile` wake; an exact empty device queue clears the
+pair and any stale device wake. Every newly accepted companion payload appends
+the existing mailbox handoff under its durable payload identity even if the
+connection remains dirty, so later paused-executable work does not depend on a
+clean-to-dirty transition. The restricted
 lane re-reads the exact local device queue at checkpoint time instead of using
 pass progress as queue evidence. A future first item can therefore block
 execution without hiding a later imported device item or erasing the existing

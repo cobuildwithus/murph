@@ -7,13 +7,16 @@ Last verified: 2026-08-10
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
-Paused-companion health sync keeps its exact local device item executable until
-the Web-owned dirty acknowledgement is clean. Companion ingress and dirty
+Paused-companion health sync keeps an exact local device item executable until
+its credential-free work is complete. Companion ingress and dirty
 acknowledgement share the existing member-then-connection health-data admission
-lock, while any failed, still-dirty, or remaining exact device item retains the
-single paused retry marker. Intermediate and final checkpoint projection
-re-reads that exact local queue, including future backoff items and successors
-behind them; only a final empty-queue reread clears the marker and paired wake.
+lock, and each accepted companion payload appends a payload-identity wake even
+when the Web-owned connection was already dirty. Failed or remaining exact
+device items retain the single paused retry marker; Web's generic still-dirty
+truth cannot requeue a provider-dependent payload that the paused pass deferred.
+Intermediate and final checkpoint projection re-read the exact local queue,
+including future backoff items and successors behind them; only a final
+empty-queue reread clears the marker and paired wake.
 The restricted pass receives no device credential material, does not run the
 provider scheduler, and claims only provider-egress-free credential-independent
 import/delete jobs. Junction source-reference imports and all credential-scoped

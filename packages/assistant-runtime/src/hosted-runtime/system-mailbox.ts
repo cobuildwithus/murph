@@ -476,6 +476,7 @@ function upsertHostedSystemMailboxPendingItem(
 }
 
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
+  deviceSyncWakeSource?: "control_plane" | "local_record";
   item: HostedSystemMailboxPendingItem;
   operatorHomeRoot?: string | null;
   runtime: HostedSystemMailboxRuntime;
@@ -513,14 +514,25 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       runtime: input.runtime,
       signal: input.signal ?? null,
     });
+    const localDeviceSyncWakeAt =
+      readHostedSystemMailboxDeviceSyncPostCheckpointWakeAt(
+        input.item.postCheckpointRecord,
+      );
+    const dirtyDeviceSyncWakeAt = input.deviceSyncWakeSource === "local_record"
+      ? localDeviceSyncWakeAt
+      : recordResult.nextWakeAt;
     if (
       recordResult.stillDirty
       && input.item.routeAction === "run-device-sync-wake"
+      && (
+        input.deviceSyncWakeSource !== "local_record"
+        || localDeviceSyncWakeAt !== null
+      )
     ) {
       await requeueClaimedHostedSystemMailboxItem({
         clearPostCheckpointRecord: true,
         item: input.item,
-        nextAttemptAt: recordResult.nextWakeAt,
+        nextAttemptAt: dirtyDeviceSyncWakeAt,
         vaultRoot: input.vaultRoot,
       });
     } else {
@@ -539,7 +551,7 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
     const nextWake = selectHostedRuntimeWakeCandidate([
       pendingWake,
       createHostedRuntimeWakeCandidate(
-        recordResult.nextWakeAt,
+        dirtyDeviceSyncWakeAt,
         HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON,
       ),
     ]);
@@ -578,6 +590,18 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       stillDirty: false,
     };
   }
+}
+
+function readHostedSystemMailboxDeviceSyncPostCheckpointWakeAt(
+  record: HostedSystemMailboxPostCheckpointRecord,
+): string | null {
+  if (
+    record.kind !== "device-sync.dirty-processed"
+    && record.kind !== "device-sync.dirty-processed-batch"
+  ) {
+    return null;
+  }
+  return record.nextWakeAt ?? null;
 }
 
 export async function readHostedSystemMailboxCheckpointRollbackState(input: {

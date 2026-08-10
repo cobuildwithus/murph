@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-07
+Last verified: 2026-08-10
 
 ## Accepted-Message Targeting
 
@@ -1288,6 +1288,18 @@ reconciliation, and remap tooling is operational research rather than deployed
 application code.
 
 ## Trust Boundaries
+
+Companion health ingress is the deliberate exception to provider webhook
+clean-to-dirty wake coalescing. Each newly accepted encrypted companion dirty
+payload appends a deterministic `device-sync.wake` mailbox handoff keyed by its
+durable payload id, including while provider-dependent work keeps the connection
+dirty; an exact payload replay keeps the same mailbox identity. In paused
+system-mailbox execution, generic hosted `stillDirty` state does not itself own
+a retry. The runtime retains the exact local device item, paused marker, and
+`device-sync.reconcile` wake only while the restricted provider-egress-free
+worker schedule has executable work (or receipt/preparation failed), and an
+exact empty local device queue clears any stale paired device wake. Deferred
+provider work remains durable for an ordinary active/default pass.
 
 - Canonical vault storage is file-native under the vault root.
 - Human-facing truth lives in Markdown documents such as `CORE.md`, journal pages, and experiment pages.

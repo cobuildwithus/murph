@@ -1482,6 +1482,96 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("retires a paused device-sync item when only unscheduled deferred dirty work remains", async () => {
+    const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
+    const ackDirtyStateProcessed = vi.fn().mockResolvedValue({
+      connectionId: "dsc_deferred_only",
+      dirtyRevision: "52",
+      nextWakeAt: "2026-04-27T00:00:00.000Z",
+      processedRevision: "52",
+      recorded: true,
+      stillDirty: true,
+      userId: "member_123",
+    });
+    const wake = buildHostedExecutionDeviceSyncWake({
+      eventId: "device-sync.wake:deferred-only",
+      occurredAt: FIXED_NOW,
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    mocks.executeHostedMailboxEvent.mockResolvedValue({
+      bootstrapResult: null,
+      conversationMetrics: null,
+      mailboxLane: "device-sync",
+      nextWakeAt: null,
+      postCheckpointRecord: {
+        connectionId: "dsc_deferred_only",
+        kind: "device-sync.dirty-processed",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_companion_complete"],
+        processedRevision: "52",
+      },
+      redactedLogEntries: [],
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedDeviceSyncItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({
+        deviceSyncPort: {
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called");
+          },
+          ackDirtyStateProcessed,
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            throw new Error("fetchSnapshot should not be called");
+          },
+        },
+      });
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        allowedRouteActions: ["run-device-sync-wake"],
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime,
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+      assert.equal(prepared?.status, "processed");
+
+      await expect(recordHostedSystemMailboxItemAfterCheckpoint({
+        deviceSyncWakeSource: "local_record",
+        item: prepared.item,
+        runtime,
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toEqual({
+        deviceSyncPending: false,
+        failed: 0,
+        nextWakeAt: null,
+        recorded: 1,
+        stillDirty: true,
+      });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([]);
+      expect(ackDirtyStateProcessed).toHaveBeenCalledTimes(1);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   it("reports a pending paused device-sync item after recording an earlier item", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const firstWake = buildHostedExecutionDeviceSyncWake({

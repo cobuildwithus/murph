@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Non-Negotiable Rules
 
@@ -588,12 +588,16 @@ Last verified: 2026-08-09
   automation scheduling. Web serializes a dirty acknowledgement
   and its pending-work check through the same member-then-connection
   health-data admission lock used by companion ingress. If the acknowledgement
-  reports remaining dirty work, the runtime clears the spent receipt record and
-  requeues that same exact device item as executable local work. A failed
-  preparation or receipt, a still-dirty acknowledgement, or any other exact
+  reports remaining dirty work, the restricted runtime clears the spent receipt
+  record and requeues that same exact device item only when its filtered local
+  worker schedule has provider-egress-free work. Provider-dependent dirty rows
+  stay durable for active/default execution without creating a paused retry. A
+  failed preparation or receipt, a scheduled restricted item, or any other exact
   local device item preserves the `device-sync.reconcile` wake and persisted
-  paused-companion retry marker; only a successful clean receipt for the last
-  device item clears them. Checkpoint projection re-reads the exact local
+  paused-companion retry marker; an exact empty device queue clears the pair and
+  any stale device wake. Every newly accepted companion payload appends a
+  deterministic mailbox handoff keyed by its durable payload id even while the
+  connection is already dirty. Checkpoint projection re-reads the exact local
   device queue instead of trusting whether the current pass reported progress:
   a future backoff item may block selection while a later imported device item
   still remains behind it. Every intermediate canonical checkpoint that can

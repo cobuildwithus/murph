@@ -1853,19 +1853,29 @@ async function persistHostedDeviceSyncCompanionResource(input: {
             httpStatus: 429,
           });
         }
-        if (!dirtyUpdate.shouldRequestWake) {
+        const dirtyPayloadId = Object.values(dirtyUpdate.dirty.dirtyResources)
+          .find((resource) => resource.dirtyPayloadId)?.dirtyPayloadId ?? null;
+        if (!dirtyUpdate.shouldRequestWake && !dirtyPayloadId) {
           return { wakeMailboxItemId: null };
         }
 
         const wake = buildHostedDeviceSyncWake({
           connectionId: connection.id,
-          eventId: buildHostedDeviceSyncDirtyTransitionWakeEventId({
-            connectionId: connection.id,
-            dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
-            expectedConnectedAt: connection.connectedAt,
-            provider: connection.provider,
-            userId: input.userId,
-          }),
+          eventId: dirtyPayloadId
+            ? buildHostedDeviceSyncCompanionPayloadWakeEventId({
+                connectionId: connection.id,
+                dirtyPayloadId,
+                expectedConnectedAt: connection.connectedAt,
+                provider: connection.provider,
+                userId: input.userId,
+              })
+            : buildHostedDeviceSyncDirtyTransitionWakeEventId({
+                connectionId: connection.id,
+                dirtyRevision: dirtyUpdate.dirty.dirtyRevision,
+                expectedConnectedAt: connection.connectedAt,
+                provider: connection.provider,
+                userId: input.userId,
+              }),
           expectedConnectedAt: connection.connectedAt,
           hint: {
             eventType: input.eventType,
@@ -2354,6 +2364,25 @@ function buildHostedDeviceSyncDirtyTransitionWakeEventId(input: {
     input.connectionId,
     input.expectedConnectedAt,
     input.dirtyRevision.toString(),
+  ].join(":");
+}
+
+function buildHostedDeviceSyncCompanionPayloadWakeEventId(input: {
+  connectionId: string;
+  dirtyPayloadId: string;
+  expectedConnectedAt: string;
+  provider: string;
+  userId: string;
+}): string {
+  return [
+    "device-sync",
+    "companion-payload",
+    HOSTED_DEVICE_SYNC_WAKE_EVENT_SCHEMA,
+    input.userId,
+    input.provider,
+    input.connectionId,
+    input.expectedConnectedAt,
+    input.dirtyPayloadId,
   ].join(":");
 }
 

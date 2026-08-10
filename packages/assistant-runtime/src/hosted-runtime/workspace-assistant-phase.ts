@@ -5764,7 +5764,14 @@ async function runSystemMailboxPostCheckpointPhase(input: {
   });
 
   if ("item" in input.systemMailboxPreparation) {
+    const pausedCompanionDeviceSyncRecord =
+      input.input.systemMailboxRouteActions?.length === 1
+      && input.input.systemMailboxRouteActions[0] === "run-device-sync-wake"
+      && input.systemMailboxPreparation.item.routeAction === "run-device-sync-wake";
     const statusCallbackInput = {
+      ...(pausedCompanionDeviceSyncRecord
+        ? { deviceSyncWakeSource: "local_record" as const }
+        : {}),
       item: input.systemMailboxPreparation.item,
       operatorHomeRoot: input.input.restored.operatorHomeRoot,
       runtime: input.input.runtime,
@@ -5813,16 +5820,11 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       deferredSystemMailboxRecord?.afterDurableCheckpoint ?? null,
       dirtyPostCheckpoint?.afterDurableCheckpoint ?? null,
     );
-    const pausedCompanionDeviceSyncRecord =
-      input.input.systemMailboxRouteActions?.length === 1
-      && input.input.systemMailboxRouteActions[0] === "run-device-sync-wake"
-      && input.systemMailboxPreparation.item.routeAction === "run-device-sync-wake";
     const pausedCompanionDeviceSyncRetryPending =
       pausedCompanionDeviceSyncRecord
       && (
         statusCallback.deviceSyncPending === true
         || statusCallback.failed > 0
-        || statusCallback.stillDirty === true
       );
     const statusCallbackWakeReason = pausedCompanionDeviceSyncRecord
       && pausedCompanionDeviceSyncRetryPending

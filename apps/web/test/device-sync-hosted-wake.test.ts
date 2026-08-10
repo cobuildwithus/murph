@@ -1445,7 +1445,22 @@ describe("hosted device-sync wakes", () => {
     });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.upsertDirtyConnection.mockResolvedValue({
-      dirty,
+      dirty: {
+        ...dirty,
+        dirtyResources: {
+          companion: {
+            count: 1,
+            dirtyPayloadId: "dsp_companion_metadata_first",
+            jobKind: "resource",
+            payload: {},
+            resource: "companion_health_metadata",
+            resourceCategory: "summary",
+            sourceProviderSlug: "apple_health_kit",
+            windowEnd: null,
+            windowStart: null,
+          },
+        },
+      },
       shouldRequestWake: true,
     });
     mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(16);
@@ -1513,7 +1528,7 @@ describe("hosted device-sync wakes", () => {
     }));
     const wakeEnvelope = mocks.appendHostedMailboxEnvelope.mock.calls[0]?.[0]?.envelope;
     expect(wakeEnvelope).toMatchObject({
-      eventId: `device-sync:dirty:v1:user-123:junction:${connection.id}:${connection.connectedAt}:1`,
+      eventId: `device-sync:companion-payload:v1:user-123:junction:${connection.id}:${connection.connectedAt}:dsp_companion_metadata_first`,
       expectedConnectedAt: connection.connectedAt,
       hint: {
         eventType: "companion.health_metadata.v1",
@@ -1530,7 +1545,7 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
-  it("does not append a second wake while companion dirty work is already pending", async () => {
+  it("appends a payload-identity wake while companion dirty work is already pending", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
     mocks.getConnectionForUser.mockResolvedValue(connection);
     mocks.listConnectionSources.mockResolvedValue([{
@@ -1538,7 +1553,22 @@ describe("hosted device-sync wakes", () => {
       status: "connected",
     }]);
     mocks.upsertDirtyConnection.mockResolvedValue({
-      dirty: buildDirtyConnectionRecord({ provider: "junction" }),
+      dirty: {
+        ...buildDirtyConnectionRecord({ provider: "junction" }),
+        dirtyResources: {
+          companion: {
+            count: 1,
+            dirtyPayloadId: "dsp_companion_metadata_successor",
+            jobKind: "resource",
+            payload: {},
+            resource: "companion_health_metadata",
+            resourceCategory: "summary",
+            sourceProviderSlug: "apple_health_kit",
+            windowEnd: null,
+            windowStart: null,
+          },
+        },
+      },
       shouldRequestWake: false,
     });
 
@@ -1562,8 +1592,16 @@ describe("hosted device-sync wakes", () => {
     });
 
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
-    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
-    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          eventId: `device-sync:companion-payload:v1:user-123:junction:${connection.id}:${connection.connectedAt}:dsp_companion_metadata_successor`,
+        }),
+      }),
+    );
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledWith({
+      mailboxItemId: "mailbox_123",
+    });
   });
 
   it("rejects companion metadata while the connection backlog is full", async () => {

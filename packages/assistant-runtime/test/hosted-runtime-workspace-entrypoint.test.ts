@@ -9383,6 +9383,11 @@ describe("hosted workspace runtime entrypoint", () => {
     const dueAt = "2026-04-26T23:00:00.000Z";
     const accessTokenExpiresAt = "2099-01-01T00:00:00.000Z";
     const snapshotCredentialMaterialRequests: Array<boolean | null> = [];
+    const dirtyAckRequests: Array<
+      Parameters<HostedRuntimeDeviceSyncPort["ackDirtyStateProcessed"]>[0]
+    > = [];
+    const providerReferenceDirtyPayloadId =
+      "dsp_paused_restricted_provider_reference";
     const providerFetch = vi.fn<typeof fetch>(async (request) => {
       const url = typeof request === "string"
         ? request
@@ -9600,8 +9605,17 @@ describe("hosted workspace runtime entrypoint", () => {
     try {
 
       const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
-        async ackDirtyStateProcessed() {
-          throw new Error("Paused restricted provider test has no dirty acknowledgement.");
+        async ackDirtyStateProcessed(request) {
+          dirtyAckRequests.push(request);
+          return {
+            connectionId: junctionConnectionId,
+            dirtyRevision: "1",
+            nextWakeAt: TEST_NOW,
+            processedRevision: "1",
+            recorded: true,
+            stillDirty: true,
+            userId: TEST_USER_ID,
+          };
         },
         async applyUpdates(request) {
           return {
@@ -9616,7 +9630,42 @@ describe("hosted workspace runtime entrypoint", () => {
         async fetchDirtyStates() {
           return {
             hasMore: false,
-            items: [],
+            items: [{
+              connectionId: junctionConnectionId,
+              dirtyRevision: "1",
+              dirtyResources: [{
+                count: 1,
+                dirtyPayloadId: providerReferenceDirtyPayloadId,
+                jobKind: "resource",
+                payload: {
+                  eventType: "daily.data.sleep.created",
+                  objectId: "synthetic-provider-reference-dirty-sleep",
+                  occurredAt: TEST_NOW,
+                  resource: "sleep",
+                  resourceCategory: "summary",
+                  sourceProviderSlug: "garmin",
+                  webhookDataJson: JSON.stringify({
+                    id: "synthetic-provider-reference-dirty-sleep",
+                    provider_connection_id: "provider-garmin-1",
+                    sourceProviderSlug: "garmin",
+                  }),
+                },
+                resource: "sleep",
+                resourceCategory: "summary",
+                sourceProviderSlug: "garmin",
+                windowEnd: TEST_NOW,
+                windowStart: "2026-04-26T00:00:00.000Z",
+              }],
+              eventCount: "1",
+              latestDirtyAt: TEST_NOW,
+              processedRevision: "0",
+              provider: "junction",
+              resourceCategoryCounts: { summary: 1 },
+              sourceProviderCounts: { garmin: 1 },
+              userId: TEST_USER_ID,
+              windowEnd: TEST_NOW,
+              windowStart: "2026-04-26T00:00:00.000Z",
+            }],
             nextWakeAt: null,
             userId: TEST_USER_ID,
           };
@@ -9819,9 +9868,19 @@ describe("hosted workspace runtime entrypoint", () => {
       } finally {
         pausedStore.close();
       }
-      assert.deepEqual(snapshotCredentialMaterialRequests, [false, false]);
+      assert.ok(snapshotCredentialMaterialRequests.length > 0);
+      assert.deepEqual([...new Set(snapshotCredentialMaterialRequests)], [false]);
       assert.equal(providerFetch.mock.calls.length, 0);
-      assert.equal(pausedResult.status, "scheduled");
+      assert.equal(dirtyAckRequests.length, 1);
+      assert.deepEqual(dirtyAckRequests[0]?.processedDirtyPayloadIds ?? [], []);
+      assert.equal(
+        pausedResult.redactedStatus?.hostedPausedCompanionDeviceSyncRetryPending,
+        false,
+      );
+      assert.equal(pausedResult.nextWakeReason, undefined);
+      assert.equal(pausedResult.nextWakeAt, null);
+      assert.equal(pausedResult.status, "idle");
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
 
       const activeResult = await runHostedDeviceSyncPass(
