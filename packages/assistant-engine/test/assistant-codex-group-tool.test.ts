@@ -48,6 +48,7 @@ import type {
 } from "../src/assistant/message-target-selection.ts";
 import {
   executeMurphDynamicToolRequest,
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   MURPH_DYNAMIC_TOOLS,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
@@ -197,9 +198,15 @@ describe("murph.group dynamic tool", () => {
       .toContain("immediately preceding read_chat_name result");
     expect(MURPH_GROUP_TOOL.inputSchema.properties).not.toHaveProperty("messageTemplate");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+      .toContain("every selectable permission by default");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+      .toContain("exact narrower set requested");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("Existing membership and other grants remain unchanged");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
       .toContain("trusted host owns the exact consent copy");
+    expect(MURPH_GROUP_TOOL.inputSchema.properties.projectionScopes.description)
+      .toContain("actual scope snapshot");
     expect(MURPH_GROUP_TOOL.inputSchema.properties.membershipId.description)
       .toContain("immediately preceding list_memberships result");
     expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
@@ -3431,6 +3438,7 @@ describe("murph.group dynamic tool", () => {
         offeredAt: "2026-07-31T12:01:00.000Z",
         presentation: "native",
         recencyEvidence: "eligible",
+        responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
         status: "ok",
       },
     });
@@ -3440,6 +3448,8 @@ describe("murph.group dynamic tool", () => {
     expect(JSON.stringify(readGroupToolPayload(nativeResult))).not.toContain(
       "native-hidden",
     );
+    expect(standaloneResult.finalActionPatch).toBeUndefined();
+    expect(nativeResult.finalActionPatch).toBeUndefined();
   });
 
   it("shows a fresh exact link for a reused native offer and fails closed without recency evidence", async () => {
@@ -3550,6 +3560,9 @@ describe("murph.group dynamic tool", () => {
         status: "ok",
       },
     });
+    expect(reusedResult.finalActionPatch).toBeUndefined();
+    expect(legacyResult.finalActionPatch).toBeUndefined();
+    expect(replayedProviderResult.finalActionPatch).toBeUndefined();
   });
 
   it("normalizes a host-substituted access link after requesting the native path", async () => {
@@ -5125,15 +5138,24 @@ describe("murph.newsletter dynamic tool", () => {
             }],
             participants: [
               {
-                authorizedShares: [{
-                  projectionScopeKey: "steps-days.v0",
-                  shareId: "share-member-a",
-                }],
+                authorizedShares: [
+                  {
+                    projectionScopeKey: "steps-days.v0",
+                    shareId: "share-member-a-steps",
+                  },
+                  {
+                    projectionScopeKey: "workouts.v0",
+                    shareId: "share-member-a-workouts",
+                  },
+                ],
                 hasEmail: true,
                 memberId: "member_a",
               },
               {
-                authorizedShares: [],
+                authorizedShares: [{
+                  projectionScopeKey: "workouts.v0",
+                  shareId: "share-opted-out-workouts",
+                }],
                 hasEmail: false,
                 memberId: "member_opted_out",
               },
@@ -5156,6 +5178,7 @@ describe("murph.newsletter dynamic tool", () => {
         }) => {
           sequence.push("shared.read");
           expect(projectionScopes).toEqual([
+            { projectionKind: "workouts.v0" },
             { projectionKind: "steps-days.v0" },
           ]);
           return {
@@ -5165,31 +5188,52 @@ describe("murph.newsletter dynamic tool", () => {
                 displayName: "Ada",
                 memberId: "member_a",
                 participantId: "participant_a",
-                projections: [{
-                  dataStatus: "available",
-                  grantStatus: "granted",
-                  projectionScope: { projectionKind: "steps-days.v0" },
-                  projectionScopeKey: "steps-days.v0",
-                  records: [
-                    "2026-06-30",
-                    "2026-07-01",
-                    "2026-07-02",
-                    "2026-07-03",
-                    "2026-07-04",
-                    "2026-07-05",
-                    "2026-07-06",
-                    "2026-07-07",
-                  ].map((date, index) => ({
-                    data: {
-                      date,
-                      metricKey: "steps",
-                      unit: "count",
-                      value: (index + 1) * 1_000,
-                    },
-                    occurredAt: `${date}T00:00:00.000Z`,
-                    recordKey: date,
-                  })),
-                }],
+                projections: [
+                  {
+                    dataStatus: "available",
+                    grantStatus: "granted",
+                    projectionScope: { projectionKind: "steps-days.v0" },
+                    projectionScopeKey: "steps-days.v0",
+                    records: [
+                      "2026-06-30",
+                      "2026-07-01",
+                      "2026-07-02",
+                      "2026-07-03",
+                      "2026-07-04",
+                      "2026-07-05",
+                      "2026-07-06",
+                      "2026-07-07",
+                    ].map((date, index) => ({
+                      data: {
+                        date,
+                        metricKey: "steps",
+                        unit: "count",
+                        value: (index + 1) * 1_000,
+                      },
+                      occurredAt: `${date}T00:00:00.000Z`,
+                      recordKey: date,
+                    })),
+                  },
+                  {
+                    dataStatus: "available",
+                    grantStatus: "granted",
+                    projectionScope: { projectionKind: "workouts.v0" },
+                    projectionScopeKey: "workouts.v0",
+                    records: [
+                      newsletterWorkoutsRecord("2026-07-04", [
+                        { kind: "running", minutes: 20, startLocalMs: 1_000 },
+                        { kind: "running", minutes: 40, startLocalMs: 2_000 },
+                        { kind: "strength", minutes: 45, startLocalMs: 3_000 },
+                      ]),
+                      newsletterWorkoutsRecord("2026-07-06", [
+                        { kind: "running", minutes: 30, startLocalMs: 4_000 },
+                      ]),
+                      newsletterWorkoutsRecord("2026-07-07", [
+                        { kind: "running", minutes: 300, startLocalMs: 5_000 },
+                      ]),
+                    ],
+                  },
+                ],
               },
               {
                 currentTurnHandles: [],
@@ -5199,18 +5243,13 @@ describe("murph.newsletter dynamic tool", () => {
                 projections: [{
                   dataStatus: "available",
                   grantStatus: "granted",
-                  projectionScope: { projectionKind: "steps-days.v0" },
-                  projectionScopeKey: "steps-days.v0",
-                  records: [{
-                    data: {
-                      date: "2026-07-06",
-                      metricKey: "steps",
-                      unit: "count",
-                      value: 20_000,
-                    },
-                    occurredAt: "2026-07-06T00:00:00.000Z",
-                    recordKey: "2026-07-06",
-                  }],
+                  projectionScope: { projectionKind: "workouts.v0" },
+                  projectionScopeKey: "workouts.v0",
+                  records: [newsletterWorkoutsRecord("2026-07-06", [{
+                    kind: "running",
+                    minutes: 500,
+                    startLocalMs: 6_000,
+                  }])],
                 }],
               },
               {
@@ -5218,16 +5257,29 @@ describe("murph.newsletter dynamic tool", () => {
                 displayName: "No current data",
                 memberId: "member_stale_grant",
                 participantId: "participant_stale_grant",
-                projections: [{
-                  dataStatus: "missing",
-                  grantStatus: "granted",
-                  projectionScope: { projectionKind: "steps-days.v0" },
-                  projectionScopeKey: "steps-days.v0",
-                  records: [],
-                }],
+                projections: [
+                  {
+                    dataStatus: "missing",
+                    grantStatus: "granted",
+                    projectionScope: { projectionKind: "steps-days.v0" },
+                    projectionScopeKey: "steps-days.v0",
+                    records: [],
+                  },
+                  {
+                    dataStatus: "available",
+                    grantStatus: "granted",
+                    projectionScope: { projectionKind: "workouts.v0" },
+                    projectionScopeKey: "workouts.v0",
+                    records: [newsletterWorkoutsRecord("2026-07-06", [{
+                      kind: "running",
+                      minutes: 600,
+                      startLocalMs: 7_000,
+                    }])],
+                  },
+                ],
               },
             ],
-            requestedProjectionScopeKeys: ["steps-days.v0"],
+            requestedProjectionScopeKeys: ["steps-days.v0", "workouts.v0"],
             status: "ok",
           };
         }),
@@ -5260,22 +5312,56 @@ describe("murph.newsletter dynamic tool", () => {
           members: [{
             displayName: "Ada",
             memberId: "member_a",
-            weeklyStats: [{
-              completedDaysAvg: 4_000,
-              observedDayCount: 7,
-              observedDates: [
-                "2026-06-30",
-                "2026-07-01",
-                "2026-07-02",
-                "2026-07-03",
-                "2026-07-04",
-                "2026-07-05",
-                "2026-07-06",
-              ],
-              stream: "steps",
-              throughDate: "2026-07-06",
-              unit: "count",
-            }],
+            weeklyStats: [
+              {
+                completedDaysAvg: 4_000,
+                observedDayCount: 7,
+                observedDates: [
+                  "2026-06-30",
+                  "2026-07-01",
+                  "2026-07-02",
+                  "2026-07-03",
+                  "2026-07-04",
+                  "2026-07-05",
+                  "2026-07-06",
+                ],
+                stream: "steps",
+                throughDate: "2026-07-06",
+                unit: "count",
+              },
+              {
+                completedDaysAvg: 1.5,
+                observedDayCount: 2,
+                observedDates: ["2026-07-04", "2026-07-06"],
+                stream: "workout-kind-running-count",
+                throughDate: "2026-07-06",
+                unit: "count",
+              },
+              {
+                completedDaysAvg: 45,
+                observedDayCount: 2,
+                observedDates: ["2026-07-04", "2026-07-06"],
+                stream: "workout-kind-running-minutes",
+                throughDate: "2026-07-06",
+                unit: "minutes",
+              },
+              {
+                completedDaysAvg: 1,
+                observedDayCount: 1,
+                observedDates: ["2026-07-04"],
+                stream: "workout-kind-strength-count",
+                throughDate: "2026-07-04",
+                unit: "count",
+              },
+              {
+                completedDaysAvg: 45,
+                observedDayCount: 1,
+                observedDates: ["2026-07-04"],
+                stream: "workout-kind-strength-minutes",
+                throughDate: "2026-07-04",
+                unit: "minutes",
+              },
+            ],
           }],
           missingEmailParticipants: [
             { hasEmail: false, memberId: "member_opted_out" },
@@ -5289,6 +5375,9 @@ describe("murph.newsletter dynamic tool", () => {
           status: "ok",
         },
       });
+      const serialized = JSON.stringify(readNewsletterToolPayload(result));
+      expect(serialized).not.toContain("startLocalMs");
+      expect(serialized).not.toContain("calendarClosedThroughDate");
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -5907,6 +5996,26 @@ function readNewsletterToolPayload(
     throw new Error("Expected text tool payload.");
   }
   return JSON.parse(item.text);
+}
+
+function newsletterWorkoutsRecord(
+  date: string,
+  workouts: Array<{
+    kind: string;
+    minutes: number;
+    startLocalMs: number;
+  }>,
+) {
+  return {
+    data: {
+      calendarClosedThroughDate: "2026-07-06",
+      date,
+      timeSemantics: "canonical-event-zone-or-vault-zone.v0" as const,
+      workouts,
+    },
+    occurredAt: `${date}T00:00:00.000Z`,
+    recordKey: date,
+  };
 }
 
 function readGroupToolPayload(

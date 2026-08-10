@@ -78,6 +78,7 @@ export async function decryptHostedWebNullableFields(input: {
     value: string | null | undefined;
   }>;
   prisma?: HostedWebEncryptionPrismaClient;
+  retainFailureInScopedCache?: boolean;
   signal?: AbortSignal;
 }): Promise<Array<string | null>> {
   return openHostedUserSecureBoxStrings({
@@ -94,6 +95,12 @@ export async function decryptHostedWebNullableFields(input: {
     })),
     lane: "hosted-member-private-field",
     prisma: input.prisma,
+    ...(input.retainFailureInScopedCache === undefined
+      ? {}
+      : {
+          retainFailureInScopedCache:
+            input.retainFailureInScopedCache,
+        }),
     signal: input.signal,
   });
 }

@@ -147,8 +147,26 @@ it has been explicitly elevated to a cross-cutting invariant.
 
 ## Foreground Reply Critical Path
 
-- A durably accepted current conversation message is the runtime's
-  highest-priority work.
+- A durably accepted current conversation message, or a ready trusted
+  completion for work that message already launched, is the runtime's
+  highest-priority work. Unfinished detached provider work remains background.
+- When an exact generated-image completion and newer conversation input are
+  both waiting at the next provider boundary, admit the completion immediately
+  before that input in the same frozen batch. Later conversation input may join
+  through the existing live foreground loop.
+- This ordering is durable rather than wake-owned. A restored background pass
+  or a replacement invocation with fresh input derives the same
+  completion-first batch from structurally trusted completion events already
+  held by the pending-input index; the assistant wake remains a droppable
+  scheduling hint.
+- Restored completion folding is origin-bounded. Admit only same-route
+  conversation events whose canonical cursor is strictly after the trusted
+  completion origin. Older same-route backlog and every other route remain
+  pending under ordinary batching rules.
+- For that exact trusted-completion match, authenticated group-route identity
+  comes from the channel, account, thread, directness, actor boundary, and
+  delivery target. A provider continuation session is not route identity;
+  ordinary non-completion batching still keeps its existing session boundary.
 - From durable acceptance through provider start and durable reply handoff,
   await only loading and decrypting the accepted current input, minimal
   current-conversation context, assistant execution, and persistence of the

@@ -790,6 +790,9 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
     'Opaque Message ref shown beside an accepted inbound message in the current prompt. This is not a provider message id.',
 } as const
 
+export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
+  'The native consent message completes the offer portion. If no other requested output remains, call murph.finish_without_reply. Otherwise answer the remaining request without adding a companion consent acknowledgment.'
+
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
@@ -1022,7 +1025,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
+          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
       },
       standaloneLink: {
         type: 'boolean',
