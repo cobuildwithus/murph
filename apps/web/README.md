@@ -744,11 +744,12 @@ Hosted onboarding extras:
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
 - `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` enables the five-minute production
-  reply-latency monitor when the shared Resend operational-alert transport is
-  fully configured through `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`,
-  and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
-  shared operational configuration; the latency path never sends through or
-  falls back to Linq/iMessage. The monitor uses the fixed 30-second product
+  reply-latency and runtime-progress monitors when the shared Resend
+  operational-alert transport is fully configured through `RESEND_API_KEY`,
+  `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`. The historical
+  Linq-prefixed email names are shared operational configuration; neither path
+  sends through or falls back to Linq/iMessage. The latency monitor uses the
+  fixed 30-second product
   boundary for the first accepted user-visible response: either a progress
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
@@ -784,6 +785,16 @@ Hosted onboarding extras:
   expires clears the incident. Persisted evidence remains aggregate
   counts/timings plus sanitized provider failure status in the existing
   operational-alert row.
+  The separate progress monitor detects an active runtime whose live
+  conversation or system mailbox lane has retained work beyond its durable
+  clean-handling high-water for at least 15 minutes. It uses the mailbox
+  owner's existing expiry and 14-day retention rules, the canonical set-based
+  active-access projection, and the health-data-consent gate. A conversation
+  head with a valid AI-usage denial and no later execution evidence is an
+  intentional pause rather than a stall. The monitor reports aggregate runtime,
+  lane, age, and pending-item counts only. It has its own singleton incident
+  row, so an active reply-latency incident cannot suppress a newly discovered
+  progress stall; recovery silently rearms each monitor independently.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
@@ -1112,7 +1123,7 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
-- To receive reply-latency emails, configure `RESEND_API_KEY`,
+- To receive reply-latency and runtime-progress emails, configure `RESEND_API_KEY`,
   `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`, then set
   `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's IANA time zone.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
@@ -1662,8 +1673,8 @@ Notes:
 - Hosted internal cron paths accept only Vercel cron bearer auth via
   `CRON_SECRET`.
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
-  latency facts every five minutes. It does not signal Temporal, wake
-  Cloudflare, or participate in message processing.
+  latency and durable mailbox-progress facts every five minutes. It does not
+  signal Temporal, wake Cloudflare, or participate in message processing.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning. Later successful invoices for an already

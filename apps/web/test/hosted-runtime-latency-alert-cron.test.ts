@@ -2,11 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   runHostedRuntimeLatencyAlertMonitor: vi.fn(),
+  runHostedRuntimeProgressAlertMonitor: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-runtime-latency/alert-monitor", () => ({
   runHostedRuntimeLatencyAlertMonitor:
     mocks.runHostedRuntimeLatencyAlertMonitor,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-progress/alert-monitor", () => ({
+  runHostedRuntimeProgressAlertMonitor:
+    mocks.runHostedRuntimeProgressAlertMonitor,
 }));
 
 import { GET } from "@/app/api/internal/hosted-runtime/latency-alert/cron/route";
@@ -18,6 +24,14 @@ describe("hosted runtime latency alert cron", () => {
     process.env.CRON_SECRET = "latency-cron-secret";
     mocks.runHostedRuntimeLatencyAlertMonitor.mockReset();
     mocks.runHostedRuntimeLatencyAlertMonitor.mockResolvedValue({
+      configured: true,
+      health: {
+        anomalous: false,
+      },
+      outcome: "healthy",
+    });
+    mocks.runHostedRuntimeProgressAlertMonitor.mockReset();
+    mocks.runHostedRuntimeProgressAlertMonitor.mockResolvedValue({
       configured: true,
       health: {
         anomalous: false,
@@ -48,6 +62,9 @@ describe("hosted runtime latency alert cron", () => {
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).toHaveBeenCalledWith({
       signal: expect.any(AbortSignal),
     });
+    expect(mocks.runHostedRuntimeProgressAlertMonitor).toHaveBeenCalledWith({
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("rejects unauthenticated requests without evaluating latency", async () => {
@@ -57,5 +74,6 @@ describe("hosted runtime latency alert cron", () => {
 
     expect(response.status).toBe(401);
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).not.toHaveBeenCalled();
+    expect(mocks.runHostedRuntimeProgressAlertMonitor).not.toHaveBeenCalled();
   });
 });
