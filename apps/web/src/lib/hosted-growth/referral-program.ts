@@ -1,15 +1,15 @@
 import {
   HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY,
+  HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
   isHostedSignupReferralRewardEnabled,
 } from "./signup-referral-policy";
-import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
-
-const HOSTED_PUBLIC_REFERRAL_USD_FORMATTER = new Intl.NumberFormat("en-US", {
-  currency: "USD",
-  maximumFractionDigits: 2,
-  minimumFractionDigits: 2,
-  style: "currency",
-});
+import {
+  formatHostedReferralRewardUsageDays,
+} from "./referral-reward-days";
+import {
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+  isHostedUsageReferralEnabled,
+} from "./usage-referral-policy";
 
 export type HostedPublicReferralRewardId =
   | "active-group"
@@ -19,8 +19,9 @@ export type HostedPublicReferralRewardId =
 export interface HostedPublicReferralReward {
   availabilityLabel: string;
   description: string;
-  estimatedUsageDays: number;
   id: HostedPublicReferralRewardId;
+  policyCode: "active_group_v1" | "new_person_activation_v1";
+  policyVersion: string;
   rewardUsdMicros: bigint;
   title: string;
 }
@@ -34,9 +35,10 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
   {
     availabilityLabel: "Personal referral link",
     description:
-      "Share your stable link. A genuinely new completed signup can earn the fixed usage credit after Murph’s eligibility and rolling-limit checks pass.",
-    estimatedUsageDays: 10,
+      "Share your stable link. A genuinely new completed signup can earn more days of Murph usage after Murph’s eligibility and rolling-limit checks pass.",
     id: "signup-link",
+    policyCode: "new_person_activation_v1",
+    policyVersion: HOSTED_SIGNUP_REFERRAL_POLICY_VERSION,
     rewardUsdMicros: 2_000_000n,
     title: HOSTED_SIGNUP_REFERRAL_POLICY_DISPLAY.title,
   },
@@ -44,8 +46,9 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
     availabilityLabel: "Fresh iMessage group",
     description:
       "Tell Murph first, then make a fresh group with someone new. It completes after they set up their own Murph and join the conversation.",
-    estimatedUsageDays: 10,
     id: "new-person-group",
+    policyCode: "new_person_activation_v1",
+    policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
     rewardUsdMicros: 2_000_000n,
     title: "Bring someone new to Murph",
   },
@@ -53,8 +56,9 @@ export const HOSTED_PUBLIC_REFERRAL_REWARDS = [
     availabilityLabel: "Supported group chats",
     description:
       "Tell Murph first, then make the fresh group genuinely active: 15 human messages, including 8 from at least 2 other people, across at least 10 minutes.",
-    estimatedUsageDays: 14,
     id: "active-group",
+    policyCode: "active_group_v1",
+    policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
     rewardUsdMicros: 3_500_000n,
     title: "Start an active group",
   },
@@ -74,24 +78,13 @@ export function getAvailableHostedPublicReferralRewards(
 }
 
 export function formatHostedPublicReferralRewardValue(
-  rewardUsdMicros: bigint,
+  reward: Pick<
+    HostedPublicReferralReward,
+    "policyCode" | "policyVersion" | "rewardUsdMicros"
+  >,
 ): string {
-  return `${formatHostedPublicReferralRewardAmount(
-    rewardUsdMicros,
-  )} of cost-weighted usage credit`;
-}
-
-export function formatHostedPublicReferralRewardAmount(
-  rewardUsdMicros: bigint,
-): string {
-  const cents = (rewardUsdMicros + 5_000n) / 10_000n;
-  return HOSTED_PUBLIC_REFERRAL_USD_FORMATTER.format(
-    Number(cents) / 100,
-  );
-}
-
-export function formatHostedPublicReferralRewardDays(
-  estimatedUsageDays: number,
-): string {
-  return `${estimatedUsageDays} days of Murph`;
+  return formatHostedReferralRewardUsageDays({
+    ...reward,
+    sentenceCase: true,
+  });
 }

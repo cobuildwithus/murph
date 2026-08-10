@@ -37,6 +37,12 @@ Internal control routes:
   latency leaf, and starts, wakes, or accepts a pending runtime wake for only
   the bound user's runtime, returning after that start/wake intent is accepted,
   not after the runtime reaches idle
+- `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
+  Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
+  distinguishes those two existing callers; an empty legacy request remains
+  accepted as `unknown`. It rechecks live admission and returns after the named
+  container registers an asynchronous start attempt; it does not wait for
+  readiness or create runtime authority.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
@@ -240,11 +246,22 @@ takes admission priority after an earlier page, any currently owed telemetry
 travels in that same immutable body while replayable gauges remain excluded;
 pure deferred evidence keeps its stored check time, an aggregate containing a
 new current delta uses the latest included check, and telemetry keeps its own
-condition-local observation time. Concrete unsafe conditions retain their
-30-minute recurrence. The object writes Linq provider-attempt
-admission before egress, never attempts more than once per 30 minutes across all
-incidents, and reuses the exact body plus idempotency key after an ambiguous
-send. The alert-state and sample-evidence columns are added idempotently without advancing the
+condition-local observation time. Concrete unsafe conditions retain an hourly
+recurrence. The object writes Linq provider-attempt admission before egress,
+never attempts more than once per hour across all incidents, and reuses the
+exact body plus idempotency key after an ambiguous send. Concrete-pressure
+bodies select deterministically by persisted incident and alert identity from
+one hundred reviewed, observation-scoped openings. Those openings say only
+that the recorded check met alert criteria; condition-specific and current-
+state claims come from evidence that proves them. Retries therefore keep a
+truthful body after recovery, while consecutive pages avoid broadcast-shaped
+repetition without padding or filler. Telemetry-
+only pages remain evidence-led and one-shot for each unresolved monitoring
+window. The one-hundred-entry size is a bounded operator deliverability
+requirement, not a guarantee about carrier or platform filtering: at the hourly
+cap, one incident traverses one hundred reviewed leads before repeating one.
+The bank stays literal reviewed data rather than generated prose or another
+runtime dependency. The alert-state and sample-evidence columns are added idempotently without advancing the
 schema version, so the previously deployed Worker can ignore them during a
 rollback. If that Worker acknowledges a telemetry pending body, current code
 recognizes its cleared key/body plus retained marker and prevents duplicate
@@ -340,7 +357,23 @@ murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
 ```
 
 Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
-window. The report deduplicates causal rows by runtime attempt and keeps direct
+window. The first result groups uniquely matched Web-direct Linq runtime
+attempts by the causal typing shell-prewarm observation consumed by their
+container readiness call. It shows causal-hint lead time plus
+accepted-to-runner, provider, and reply percentiles, all from the same ingress
+trace and same reply runtime attempt. Instant-start, unknown-source, ambiguous,
+backlog, and reply-handoff rows are omitted rather than inferred. A
+`no_observed_prewarm` row is a comparison cohort, not proof that no hint was
+sent, because stop, destroy, or Durable Object eviction may clear optional
+in-memory diagnostics. `prewarm_start_issued_warm` means the platform start call
+completed without a newly observed lifecycle start;
+`prewarm_cold_start_observed` means the same container lifecycle did observe a
+cold start. Neither means health readiness completed. One observation contains
+one terminal operation outcome; later hints may increase only its bounded
+coalesced-hint count and never launch another operation before readiness
+consumes it.
+
+The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
 row in its runtime attempt whose Web direct-ensure orchestration id exactly
 matches the id attached only after that request acquires the fresh runtime

@@ -41,6 +41,11 @@ const footerLinks = {
     { label: "Referrals", href: "/refer", external: false },
     { label: "Changelog", href: "/changelog", external: false },
     {
+      label: "iOS app",
+      href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+      external: true,
+    },
+    {
       label: "Status",
       href: "https://status.withmurph.ai",
       external: true,
@@ -96,7 +101,7 @@ export function SiteFooter({
                 Murph
               </span>
               <nav
-                className="grid gap-2 sm:grid-flow-col sm:grid-rows-4 sm:gap-x-12"
+                className="grid gap-2 sm:grid-flow-col sm:grid-rows-5 sm:gap-x-12 md:grid-rows-4"
                 aria-label="Product links"
               >
                 {productLinks.map((link) => (

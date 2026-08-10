@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-07
+Last verified: 2026-08-09
 
 ## Current Guardrails
 
@@ -253,7 +253,7 @@ Last verified: 2026-08-07
   and only an acknowledged provider response clears it. Provider entry is
   globally fenced by the persisted last-attempt
   timestamp, so neither a new incident, recurrence, retry, nor worker restart
-  can attempt Linq more often than once every 30 minutes. The attempt time is
+  can attempt Linq more often than once every hour. The attempt time is
   actual wall time, not the Cron slot, and is written before network egress.
   The message's UTC check time likewise comes from the actual completed
   collection run while the Cron slot remains only the persisted sample
@@ -279,11 +279,21 @@ Last verified: 2026-08-07
   distinct recipients clears the pending alert. An idempotent replay of a
   destination that already succeeded cannot produce another recipient-visible
   message. Acknowledged concrete-condition recurrences advance the alert
-  sequence and choose another fixed opening from current metric evidence.
+  sequence and deterministically select from one hundred reviewed,
+  observation-scoped openings by persisted incident and alert identity. An
+  opening may say only that the recorded check met alert criteria; current-state
+  or condition-specific claims must come from evidence that proves them. The
+  recorded evidence and check time make each body specific, while a retry
+  retains that truthful exact body after recovery. The bank size is an explicit
+  bounded operator deliverability contract rather than a claim about platform
+  filtering: at the hourly cap, one incident traverses one hundred reviewed
+  leads before repeating one. Literal reviewed data avoids a prose generator,
+  provider dependency, or second runtime copy owner.
   Telemetry-only copy instead states that monitoring is incomplete or
   unavailable and cannot claim that the database itself is under pressure.
   Message variation must remain contextual and deterministic, never random
-  padding. Database pages intentionally have no quiet hours.
+  padding, filler, invisible characters, or provider-generated prose. Database
+  pages intentionally have no quiet hours.
 - Linq edit delivery is at-least-once and remains owned by the existing hosted
   mailbox. A per-source advisory lock serializes correction planners from
   lineage read through correction append; ordinary accepted messages write the
