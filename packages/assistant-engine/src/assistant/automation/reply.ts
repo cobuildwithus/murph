@@ -5238,17 +5238,16 @@ function readCurrentHostedGroupRunningBit(
 function buildTrustedHostedImageCompletionEffectRestriction(
   context: AssistantAutoReplyGroupContext,
 ): AssistantHostedImageCompletionEffectRestriction | null {
-  if (context.items.length !== 1) {
+  const trustedCompletions = context.items.flatMap((item) => {
+    const event = item.inputCandidate?.event
+    const completion = event ? readTrustedHostedImageCompletion(event) : null
+    return event && completion ? [{ completion, event }] : []
+  })
+  const trustedCompletion = trustedCompletions.at(0)
+  if (trustedCompletions.length !== 1 || !trustedCompletion) {
     return null
   }
-  const event = context.items[0]?.inputCandidate?.event
-  if (!event) {
-    return null
-  }
-  const completion = readTrustedHostedImageCompletion(event)
-  if (completion === null) {
-    return null
-  }
+  const { completion, event } = trustedCompletion
   return {
     authorizedOriginAssistantInputId:
       completion.status === 'ready' &&

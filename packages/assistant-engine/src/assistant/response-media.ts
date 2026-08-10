@@ -118,12 +118,14 @@ export function readAssistantGeneratedImageDeliveryTranscriptMarker(
 }
 
 export function resolveAssistantGeneratedImageDelivery(input: {
+  generatedImageOriginKnown?: boolean
   imageRef: string
   intents: readonly AssistantOutboxIntent[]
   sessionId: string
   transcriptEntries: readonly AssistantTranscriptEntry[]
 }): boolean {
-  let generatedCompletion = false
+  let generatedImageOriginKnown = input.generatedImageOriginKnown === true
+  let matchingMarkerFound = false
   const delivered = input.transcriptEntries.some((entry) => {
     const marker = entry.kind === 'status'
       ? readAssistantGeneratedImageDeliveryTranscriptMarker(entry.text)
@@ -131,7 +133,8 @@ export function resolveAssistantGeneratedImageDelivery(input: {
     if (marker?.ref !== input.imageRef) {
       return false
     }
-    generatedCompletion = true
+    matchingMarkerFound = true
+    generatedImageOriginKnown = true
     return input.intents.some((intent) =>
       intent.operation === null &&
       intent.sessionId === input.sessionId &&
@@ -140,7 +143,18 @@ export function resolveAssistantGeneratedImageDelivery(input: {
       hasAssistantOutboxDeliveryEvidence(intent, true)
     )
   })
-  return !generatedCompletion || delivered
+  if (delivered || !generatedImageOriginKnown) {
+    return true
+  }
+  if (matchingMarkerFound) {
+    return false
+  }
+  return input.intents.some((intent) =>
+    intent.operation === null &&
+    intent.sessionId === input.sessionId &&
+    matchesAssistantGeneratedImageDeliveryIntentRef(intent, input.imageRef) &&
+    hasAssistantOutboxDeliveryEvidence(intent, true)
+  )
 }
 
 function matchesAssistantGeneratedImageDeliveryIntentMedia(
@@ -153,6 +167,14 @@ function matchesAssistantGeneratedImageDeliveryIntentMedia(
     media.sha256 === marker.sha256 &&
     media.contentType === marker.contentType &&
     media.sizeBytes === marker.sizeBytes
+}
+
+function matchesAssistantGeneratedImageDeliveryIntentRef(
+  intent: AssistantOutboxIntent,
+  imageRef: string,
+): boolean {
+  const media = intent.media.length === 1 ? intent.media[0] : null
+  return media?.kind === 'vault_image' && media.ref === imageRef
 }
 
 export function hasAssistantOutboxDeliveryEvidence(

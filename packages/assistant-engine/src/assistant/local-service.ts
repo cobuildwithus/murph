@@ -16,6 +16,10 @@ import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
+  CAPTURE_LOOKUP_INDEX_PATH,
+  readStoredCaptureLookupIndex,
+} from '@murphai/core'
+import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntries,
   appendAssistantTranscriptEntriesWithRefs,
@@ -812,11 +816,29 @@ export async function sendAssistantMessageLocal(
               pendingVaultFilesAvailable,
               verifyGeneratedImageDelivery: async (imageRef) => {
                 try {
-                  const [intents, transcriptEntries] = await Promise.all([
-                    runtimeState.outbox.listIntents(),
-                    runtimeState.transcripts.list(currentSession.sessionId),
-                  ])
+                  const knownFromCurrentCompletion =
+                    currentInput.hostedImageCompletionEffectRestriction
+                      ?.exactMedia?.some((media) => media.ref === imageRef) === true
+                  const [intents, transcriptEntries, captureLookupIndex] =
+                    await Promise.all([
+                      runtimeState.outbox.listIntents(),
+                      runtimeState.transcripts.list(currentSession.sessionId),
+                      (async () => {
+                        await hostedExecutionContext
+                          ?.materializeWorkspaceArtifacts?.([
+                            CAPTURE_LOOKUP_INDEX_PATH,
+                          ])
+                        return await readStoredCaptureLookupIndex({
+                          vaultRoot: input.vault,
+                        })
+                      })(),
+                    ])
                   return resolveAssistantGeneratedImageDelivery({
+                    generatedImageOriginKnown:
+                      knownFromCurrentCompletion ||
+                      Object.values(captureLookupIndex.entries).some(
+                        (entry) => entry.attachmentRef === imageRef,
+                      ),
                     imageRef,
                     intents,
                     sessionId: currentSession.sessionId,

@@ -2448,6 +2448,73 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
+  it('keeps one trusted image completion restriction through a compound group turn', async () => {
+    const completionInputId = `ain_${'b'.repeat(32)}`
+    const originAssistantInputId = `ain_${'c'.repeat(32)}`
+    const media = {
+      alt: 'Generated group avatar',
+      contentType: 'image/webp',
+      filename: 'compound-avatar.webp',
+      kind: 'vault_image',
+      ref: 'raw/captures/2026/08/generated-avatar/compound-avatar.webp',
+      sha256: 'b'.repeat(64),
+      sizeBytes: 12,
+      source: 'gpt-image-2',
+    } as const
+    const completionText = renderAssistantHostedImageCompletionSystemText({
+      originAssistantInputId,
+      originAssistantInputIdExact: true,
+      result: {
+        media,
+        runtimeIssue: null,
+        savedImageRef: media.ref,
+      },
+    })
+    const sourceIdentity = `image-completion:${'b'.repeat(64)}`
+    const completion = createLinqGroupCandidate({
+      inputId: completionInputId,
+      messageId: sourceIdentity,
+      occurredAt: '2026-08-08T16:02:00.000Z',
+      sourceRef: {
+        dedupeKey: sourceIdentity,
+        eventId: sourceIdentity,
+        itemId: sourceIdentity,
+        kind: 'hosted-mailbox',
+        lane: 'system',
+        laneSeq: sourceIdentity,
+        payloadSchema: 'murph.hosted-image-completion.v1',
+        payloadSource: 'inline',
+        source: 'hosted-mailbox',
+        wakeSchema: 'murph.hosted-image-completion.v1',
+      },
+      text: completionText,
+    })
+    const laterGroupInput = createLinqGroupCandidate({
+      inputId: `ain_${'d'.repeat(32)}`,
+      messageId: 'linq-msg-after-image-completion',
+      occurredAt: '2026-08-08T16:03:00.000Z',
+      text: 'Use that as the group picture.',
+    })
+
+    await processAssistantAutoReplyGroup({
+      allowSelfAuthored: false,
+      context: createReplyContextFromCandidates([completion, laterGroupInput]),
+      enabledChannels: ['linq'],
+      inboxServices: createInboxServices(),
+      requestId: null,
+      sessionMaxAgeMs: null,
+      vault: await createTempVault(),
+    })
+
+    const sendInput = readSentInput()
+    expect(sendInput).not.toHaveProperty('assistantStyleSettingsAuthorized')
+    expect(sendInput.hostedImageCompletionEffectRestriction).toEqual({
+      authorizedOriginAssistantInputId: originAssistantInputId,
+      completionAssistantInputId: completionInputId,
+      exactMedia: [media],
+    })
+  })
+
   it.each([
     ['null', null],
     [

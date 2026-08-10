@@ -154,6 +154,12 @@ it has been explicitly elevated to a cross-cutting invariant.
   both waiting at the next provider boundary, admit the completion immediately
   before that input in the same frozen batch. Later conversation input may join
   through the existing live foreground loop.
+- Compound admission must not erase generated-image provenance. When the batch
+  contains exactly one runtime-attested completion, retain its turn-local effect
+  restriction even when newer same-route input is also present. A later
+  generated-ref mutation remains independently authorized and must still prove
+  accepted physical delivery through the outbox; the current restriction or
+  generated-capture lookup may classify origin but cannot authorize the effect.
 - This ordering is durable rather than wake-owned. A restored background pass
   or a replacement invocation with fresh input derives the same
   completion-first batch from structurally trusted completion events already

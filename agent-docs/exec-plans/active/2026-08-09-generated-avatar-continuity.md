@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — exact-head round 9 candidate ready for push
+Status: active — round 9 finding remediated; round 10 candidate verification
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -425,3 +425,34 @@ Updated: 2026-08-10
   Engine/Operator Config/Cloudflare typechecks, docs drift, whitespace checks,
   merge-tree proof, and candidate privacy/secret scans. The worktree is clean;
   push, exact-head CI, and substantive ReviewGPT round 9 remain.
+- Final ReviewGPT round 9 found that generated-origin provenance could disappear
+  at two boundaries: the restriction builder rejected the intentionally
+  completion-first compound batch, and bounded transcript retention could later
+  remove the marker while the generated capture remained live. The repeated-
+  mechanism retrospective was recorded before remediation at
+  https://github.com/cobuildwithus/murph/pull/1533#issuecomment-5243496768.
+- Focused tests failed before the correction. A runtime-shaped trusted
+  completion plus later authenticated group input received no effect
+  restriction, and a known-generated ref with no retained marker inherited the
+  ordinary capture path despite having no delivered outbox intent.
+- The correction derives provenance from existing owners only. Exactly one
+  trusted completion retains its restriction through a compound batch. The
+  later group boundary classifies the requested ref as generated from that
+  in-flight restriction or the lazily materialized generated-capture lookup;
+  it then requires the existing same-session singleton outbox intent and
+  accepted physical-delivery evidence. A retained marker keeps the stricter
+  turn/ref/hash/type/size join, while a trimmed marker recovers through exact-ref
+  outbox evidence. Ordinary refs absent from the marker, restriction, and lookup
+  keep their existing path. No queue, database, state machine, alternate
+  delivery owner, or retention exception was added.
+- The two initial regressions now pass within a 176-test focused suite;
+  Assistant Engine and Core package typechecks pass, and the two Core capture
+  owner files pass 13 tests. The complete affected Assistant Engine set passes
+  623 tests with 47 credential-gated live-provider cases skipped. The full
+  Cloudflare Node lane passes 2,376 tests with two expected skips; docs drift,
+  whitespace, and package builds pass.
+- Exact hosted-local assembly after the correction passes without a ratchet
+  change: Vault CLI 9,031,808 bytes of 9,100,000; runner entry 1,672,620 bytes;
+  static boot closure 8,047,551 bytes; total 10,028,548 bytes of 10,059,562;
+  no forbidden boot input entered the graph. Round 10 full-patch review,
+  exact-head CI, and final mergeability proof remain.

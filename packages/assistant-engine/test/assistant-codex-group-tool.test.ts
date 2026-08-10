@@ -4576,6 +4576,13 @@ describe("murph.group dynamic tool", () => {
         targetKind: "thread" as const,
       };
       expect(resolveAssistantGeneratedImageDelivery({
+        generatedImageOriginKnown: true,
+        imageRef,
+        intents: [intent],
+        sessionId,
+        transcriptEntries: [],
+      })).toBe(false);
+      expect(resolveAssistantGeneratedImageDelivery({
         imageRef,
         intents: [intent],
         sessionId,
@@ -4597,6 +4604,7 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries,
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        generatedImageOriginKnown: true,
         imageRef,
         intents: [{
           ...intent,
@@ -4604,7 +4612,7 @@ describe("murph.group dynamic tool", () => {
           status: "retryable",
         }],
         sessionId,
-        transcriptEntries,
+        transcriptEntries: [],
       })).toBe(true);
       expect(resolveAssistantGeneratedImageDelivery({
         imageRef,
