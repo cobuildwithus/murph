@@ -1,0 +1,29 @@
+name: Export device-sync dirty current source
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-current-source
+    paths:
+      - .github/workflows/agent-export-device-sync-dirty-source.yml
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Archive tracked source
+        shell: bash
+        run: git archive --format=tar.gz --output=device-sync-dirty-current-source.tar.gz HEAD
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-sync-dirty-current-source
+          path: device-sync-dirty-current-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
