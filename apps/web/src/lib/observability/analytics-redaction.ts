@@ -3,6 +3,7 @@ import type { BeforeSendEvent as VercelAnalyticsBeforeSendEvent } from "@vercel/
 export const VERCEL_TELEMETRY_PATHNAMES = [
   "/",
   "/biomarkers",
+  "/blog",
   "/changelog",
   "/clubs",
   "/connect",
@@ -49,6 +50,13 @@ const VERCEL_TELEMETRY_PATHNAME_SET = new Set<string>(
 );
 const PUBLIC_PATH_SEGMENT_PATTERN = String.raw`[a-z0-9][a-z0-9._~-]*`;
 const VERCEL_TELEMETRY_DYNAMIC_PATHNAME_RULES = [
+  {
+    pattern: new RegExp(
+      `^/blog/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[slug\\])$`,
+      "iu",
+    ),
+    pathname: "/blog/[article]",
+  },
   {
     pattern: new RegExp(
       `^/biomarkers/(?:${PUBLIC_PATH_SEGMENT_PATTERN}|\\[biomarkerId\\])$`,
