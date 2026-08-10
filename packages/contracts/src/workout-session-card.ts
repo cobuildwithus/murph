@@ -10,6 +10,9 @@ export const workoutSessionCardV1Bounds = {
   setsPerExercise: 8,
 } as const;
 
+const singleLineTextPattern =
+  /^[^\u0000-\u001F\u007F\u2028\u2029\r\n]+$/u;
+
 function singleLineText(maxLength: number) {
   return z
     .string()
@@ -18,10 +21,7 @@ function singleLineText(maxLength: number) {
     .refine((value) => value === value.trim(), {
       message: "Expected text without surrounding whitespace.",
     })
-    .regex(
-      /^[^\u0000-\u001F\u007F\u2028\u2029\r\n]+$/u,
-      "Expected one printable line of text.",
-    );
+    .regex(singleLineTextPattern, "Expected one printable line of text.");
 }
 
 export const workoutSessionCardStateValues = [
@@ -156,6 +156,13 @@ export type WorkoutSessionAppCardEnvelopeV4 = {
   };
 };
 
+export type WorkoutSessionAppCardPresentationV4 = {
+  title: string;
+  subtitle: string | null;
+  footer: string | null;
+  workout: WorkoutSessionDetailV1;
+};
+
 export function buildWorkoutSessionAppCardEnvelopeV4(input: {
   title: string;
   subtitle: string | null;
@@ -185,4 +192,121 @@ export function buildWorkoutSessionAppCardEnvelopeV4(input: {
       f: input.footer,
     },
   };
+}
+
+/**
+ * Restores the readable, authority-free presentation snapshot from the compact
+ * V4 wire. Canonical workout tracking remains intentionally absent.
+ */
+export function parseWorkoutSessionAppCardEnvelopeV4(
+  value: unknown,
+): WorkoutSessionAppCardPresentationV4 | null {
+  if (
+    !isExactRecord(value, ["schemaVersion", "card"])
+    || value.schemaVersion !== 4
+    || !isExactRecord(value.card, ["k", "v", "t", "u", "s", "e", "f"])
+  ) {
+    return null;
+  }
+  const card = value.card;
+  if (
+    card.k !== "w"
+    || card.v !== 1
+    || !isSingleLineText(card.t, workoutSessionCardV1Bounds.title)
+    || !isNullableSingleLineText(
+      card.u,
+      workoutSessionCardV1Bounds.subtitle,
+    )
+    || (card.s !== "a" && card.s !== "c")
+    || !Array.isArray(card.e)
+    || !isNullableSingleLineText(card.f, workoutSessionCardV1Bounds.footer)
+  ) {
+    return null;
+  }
+
+  const exercises: WorkoutSessionDetailV1["exercises"] = [];
+  for (const exercise of card.e) {
+    if (
+      !Array.isArray(exercise)
+      || exercise.length !== 2
+      || !isSingleLineText(
+        exercise[0],
+        workoutSessionCardV1Bounds.exerciseName,
+      )
+      || !Array.isArray(exercise[1])
+    ) {
+      return null;
+    }
+    const sets: WorkoutSessionSetV1[] = [];
+    for (const set of exercise[1]) {
+      if (
+        !Array.isArray(set)
+        || set.length !== 3
+        || (set[0] !== "p" && set[0] !== "c" && set[0] !== "s")
+        || !isNullableSingleLineText(
+          set[1],
+          workoutSessionCardV1Bounds.setValue,
+        )
+        || !isNullableSingleLineText(
+          set[2],
+          workoutSessionCardV1Bounds.setValue,
+        )
+      ) {
+        return null;
+      }
+      sets.push({
+        status:
+          set[0] === "p"
+            ? "pending"
+            : set[0] === "c"
+              ? "completed"
+              : "skipped",
+        target: set[1],
+        actual: set[2],
+      });
+    }
+    exercises.push({ name: exercise[0], sets });
+  }
+
+  const workout = workoutSessionDetailV1Schema.safeParse({
+    version: 1,
+    state: card.s === "a" ? "active" : "completed",
+    exercises,
+  });
+  if (!workout.success) {
+    return null;
+  }
+
+  return {
+    title: card.t,
+    subtitle: card.u,
+    footer: card.f,
+    workout: workout.data,
+  };
+}
+
+function isExactRecord(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && Object.keys(value).length === keys.length
+    && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isSingleLineText(value: unknown, maxLength: number): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= maxLength
+    && value === value.trim()
+    && singleLineTextPattern.test(value);
+}
+
+function isNullableSingleLineText(
+  value: unknown,
+  maxLength: number,
+): value is string | null {
+  return value === null || isSingleLineText(value, maxLength);
 }

@@ -81,7 +81,7 @@ a boundary. This contract is jointly specified by `ARCHITECTURE.md`,
 
 Hosted inbound reply-thread binding, active-turn route preservation, ephemeral
 delivery-context preservation, and provider-rendered iMessage response-card
-fallback are jointly specified by
+image and semantic-caption fallback are jointly specified by
 `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.
 
@@ -96,9 +96,10 @@ docs.
 
 Response-card request eligibility, multi-input live-turn invalidation,
 whole-response semantics, delivery ownership, interactive Messages-extension
-transcript rendering with a truthful provider-static fallback, one trusted provider
-reply-thread binding, and bounded offline V3 compact-table plus V4 workout-session
-fragments are specified by
+transcript rendering with a truthful provider-static fallback, one trusted
+provider reply-thread binding, bounded offline V3 compact-table plus V4
+workout-session fragments, and the shared strict queryless static-image route
+are specified by
 `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`,
 `agent-docs/RELIABILITY.md`,
@@ -169,7 +170,7 @@ the rule that alerts never become billing or retry authority are jointly specifi
 | `agent-docs/compliance/vendor-health-data-addendum.md` | Vendor clause library and procurement checklist for providers that process identifiable health data or health-context metadata. | Vendor health-data contracting | High | 2026-04-29 |
 | `agent-docs/compliance/health-data-tracking-and-ads-rule.md` | Hard rule and review checklist for analytics, telemetry, ad pixels, attribution, and marketing tools on health-data surfaces. | Health-data tracking policy | High | 2026-04-29 |
 | `agent-docs/product-specs/index.md` | Index for product-spec docs. | Product-spec inventory | High | 2026-07-16 |
-| `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards, closed generic/workout payload shapes, bounded positional V4 native wire encoding, display-to-canonical coordinate reconciliation, member-entered actuals, fail-closed explicit commands, immutable native snapshots, privacy boundaries, persisted-owner rollback floors, and reader-first release gating. | iMessage workout product spec | High | 2026-08-09 |
+| `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards, closed generic/workout payload shapes, bounded positional V4 native wire encoding, display-to-canonical coordinate reconciliation, member-entered actuals, fail-closed explicit commands, immutable native and stateless image snapshots, complete semantic captions, privacy boundaries, persisted-owner rollback floors, and reader-first release gating. | iMessage workout product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/bring-your-own-inference.md` | Personal custom inference contract covering verified member-owned endpoints, explicit selection, no silent fallback, privacy, metering, and recovery. | Hosted assistant/custom inference product spec | High | 2026-07-31 |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated measured-biomarker navigation over preserved private lab history, including explicit admission, alias, and disclosure-layout contracts. | Biomarkers product spec | High | 2026-07-20 |
 | `agent-docs/product-specs/repo.md` | Canonical repository posture and success criteria. | Current repo product spec | High | 2026-04-06 |

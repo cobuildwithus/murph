@@ -5,6 +5,7 @@ import { contractIdMaxLength, idPattern } from "./ids.ts";
 import { isStrictIsoDateTime } from "./time.ts";
 import {
   buildWorkoutSessionAppCardEnvelopeV4,
+  parseWorkoutSessionAppCardEnvelopeV4,
   workoutSessionDetailV1Schema,
 } from "./workout-session-card.ts";
 
@@ -23,10 +24,15 @@ export const compactTableCardV1Bounds = {
 export const IMESSAGE_APP_CARD_URL_PREFIX =
   `${MURPH_PRODUCT_ORIGIN}/#murph-card=`;
 export const IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048;
-export const IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX =
+export const IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX =
   "/imessage/card/v1/";
-export const IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX = ".png";
-export const IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH = 1_900;
+export const IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX = ".png";
+export const IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH =
+  IMESSAGE_APP_CARD_URL_MAX_LENGTH
+  - `${MURPH_PRODUCT_ORIGIN}${IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX}${
+    IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX
+  }`.length
+  - 1;
 const EVENT_ID_PATTERN = new RegExp(idPattern(ID_PREFIXES.event), "u");
 
 function singleLineText(maxLength: number) {
@@ -86,14 +92,37 @@ export const compactTableRowV1Schema = z
 
 export type CompactTableRowV1 = z.infer<typeof compactTableRowV1Schema>;
 
-function encodedAppCardUrlLength(envelope: unknown): number {
+function encodedAppCardPayloadLength(envelope: unknown): number {
   const payloadByteLength = new TextEncoder().encode(
     JSON.stringify(envelope),
   ).byteLength;
   const base64PaddingLength = (3 - (payloadByteLength % 3)) % 3;
-  const encodedLength =
-    4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
-  return IMESSAGE_APP_CARD_URL_PREFIX.length + encodedLength;
+  return 4 * Math.ceil(payloadByteLength / 3) - base64PaddingLength;
+}
+
+function addEncodedLengthIssues(
+  envelope: unknown,
+  context: z.RefinementCtx,
+  subject: string,
+): void {
+  const encodedLength = encodedAppCardPayloadLength(envelope);
+  if (
+    IMESSAGE_APP_CARD_URL_PREFIX.length + encodedLength >=
+    IMESSAGE_APP_CARD_URL_MAX_LENGTH
+  ) {
+    context.addIssue({
+      code: "custom",
+      message: `The ${subject} exceeds the inline Messages card limit.`,
+      path: [],
+    });
+  }
+  if (encodedLength > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
+    context.addIssue({
+      code: "custom",
+      message: `The ${subject} exceeds the static image payload limit.`,
+      path: [],
+    });
+  }
 }
 
 const compactTableResponseCardHeaderV1Shape = {
@@ -137,16 +166,7 @@ const compactTableGenericResponseCardV1Schema = z
       card: presentationCard,
     };
 
-    if (
-      encodedAppCardUrlLength(envelope) >=
-      IMESSAGE_APP_CARD_URL_MAX_LENGTH
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "The compact table exceeds the inline Messages card limit.",
-        path: [],
-      });
-    }
+    addEncodedLengthIssues(envelope, context, "compact table");
   });
 
 const compactTableWorkoutResponseCardV1Schema = z
@@ -164,16 +184,7 @@ const compactTableWorkoutResponseCardV1Schema = z
       footer: card.footer,
       workout: card.workout,
     });
-    if (
-      encodedAppCardUrlLength(envelope) >=
-      IMESSAGE_APP_CARD_URL_MAX_LENGTH
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "The workout session exceeds the inline Messages card limit.",
-        path: [],
-      });
-    }
+    addEncodedLengthIssues(envelope, context, "workout session");
   });
 
 export const compactTableResponseCardV1Schema = z.union([
@@ -192,3 +203,63 @@ export type CompactTableWorkoutResponseCardV1 = z.infer<
 export type CompactTableResponseCardV1 = z.infer<
   typeof compactTableResponseCardV1Schema
 >;
+
+export type CompactTablePresentationCardV1 =
+  | Omit<CompactTableGenericResponseCardV1, "tracking">
+  | Omit<CompactTableWorkoutResponseCardV1, "tracking">;
+
+/**
+ * Parses the authority-free V3 or V4 envelope used by both the offline native
+ * reader and the stateless image renderer.
+ */
+export function parseCompactTableAppCardEnvelope(
+  value: unknown,
+): CompactTablePresentationCardV1 | null {
+  if (!isExactAppCardEnvelope(value)) {
+    return null;
+  }
+
+  if (value.schemaVersion === 3) {
+    if (
+      typeof value.card !== "object"
+      || value.card === null
+      || Array.isArray(value.card)
+      || Object.hasOwn(value.card, "tracking")
+    ) {
+      return null;
+    }
+    const parsed = compactTableGenericResponseCardV1Schema.safeParse({
+      ...value.card,
+      tracking: null,
+    });
+    if (!parsed.success) {
+      return null;
+    }
+    const { tracking: _tracking, ...presentation } = parsed.data;
+    return presentation;
+  }
+
+  if (value.schemaVersion === 4) {
+    const parsed = parseWorkoutSessionAppCardEnvelopeV4(value);
+    return parsed === null
+      ? null
+      : {
+          kind: "compact_table",
+          version: 1,
+          ...parsed,
+        };
+  }
+
+  return null;
+}
+
+function isExactAppCardEnvelope(
+  value: unknown,
+): value is { schemaVersion: unknown; card: unknown } {
+  return typeof value === "object"
+    && value !== null
+    && !Array.isArray(value)
+    && Object.keys(value).length === 2
+    && Object.hasOwn(value, "schemaVersion")
+    && Object.hasOwn(value, "card");
+}

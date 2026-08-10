@@ -228,9 +228,16 @@ describe('workout session response cards', () => {
 
   it('builds a truthful Messages preview layout', () => {
     expect(buildLinqIMessageAppLayout(ACTIVE_WORKOUT_CARD)).toEqual({
-      caption: 'Push day',
-      subcaption: '3/6 sets · ACTIVE',
-      trailing_caption: 'OPEN',
+      caption: 'Push day — 3 of 6 sets complete',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: [
+        'Active workout · 3/6 sets complete',
+        'Bench press: set 1: 185 lb × 8 · set 2: 185 lb × 7 · set 3: target 185 lb × 6–8',
+        'Incline dumbbell press: set 1: 55 lb × 10 · set 2: target 55 lb × 8–10 · set 3: pending',
+      ].join('\n'),
+      trailing_caption: 'Tap an exercise to log or correct a set.',
     })
   })
 
@@ -379,8 +386,14 @@ describe('workout session response cards', () => {
     )
     expect(buildLinqIMessageAppLayout(completedCard)).toEqual({
       caption: 'Push day',
-      subcaption: '3/6 sets · COMPLETE',
-      trailing_caption: 'OPEN',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: [
+        'Completed workout · 3/6 sets complete',
+        'Bench press: set 1: 185 lb × 8 · set 2: 185 lb × 7 · set 3: skipped (target 185 lb × 6–8)',
+        'Incline dumbbell press: set 1: 55 lb × 10 · set 2: skipped (target 55 lb × 8–10) · set 3: skipped',
+      ].join('\n'),
     })
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(completedCard),

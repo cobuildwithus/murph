@@ -3,9 +3,9 @@ import { Buffer } from 'node:buffer'
 import {
   IMESSAGE_APP_CARD_URL_MAX_LENGTH,
   IMESSAGE_APP_CARD_URL_PREFIX,
-  IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
-  IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX,
-  IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX,
+  IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
+  IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX,
+  IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX,
   MURPH_PRODUCT_ORIGIN,
   assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
@@ -160,21 +160,14 @@ export function buildLinqIMessageAppLayout(
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'compact_table') {
-    if ('workout' in parsed) {
-      const progress = countWorkoutSessionSets(parsed.workout)
-      return {
-        caption: parsed.title,
-        subcaption: `${progress.completed}/${progress.total} sets · ${
-          parsed.workout.state === 'active' ? 'ACTIVE' : 'COMPLETE'
-        }`,
-        trailing_caption: 'OPEN',
-      }
-    }
-
+    const semantic = renderCompactTableSemanticPresentation(parsed)
     return {
-      caption: 'Murph',
-      subcaption: parsed.tracking === null ? 'Table' : 'Workout table',
-      trailing_caption: 'OPEN',
+      caption: semantic.heading,
+      image_url: buildLinqIMessageAppCardImageUrl(parsed),
+      subcaption: semantic.detailLines.join('\n'),
+      ...(semantic.footer === null
+        ? {}
+        : { trailing_caption: semantic.footer }),
     }
   }
 
@@ -191,19 +184,18 @@ export function buildLinqIMessageAppLayout(
 }
 
 export function buildLinqIMessageAppCardImageUrl(
-  card: DailyNutritionResponseCard,
+  card: AssistantResponseCard,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
-  if (parsed.kind !== 'daily_nutrition') {
-    throw new TypeError('Expected a daily nutrition response card.')
-  }
-  const encoded = encodeDailyNutritionAppCardPayload(parsed)
-  if (encoded.length > IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
+  const encoded = parsed.kind === 'daily_nutrition'
+    ? encodeDailyNutritionAppCardPayload(parsed)
+    : encodeCompactTableAppCardPayload(parsed)
+  if (encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
     throw new TypeError('The encoded app card image payload is too large.')
   }
   const url = `${MURPH_PRODUCT_ORIGIN}${
-    IMESSAGE_NUTRITION_CARD_IMAGE_PATH_PREFIX
-  }${encoded}${IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX}`
+    IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX
+  }${encoded}${IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX}`
   if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
     throw new TypeError('The encoded app card image exceeds the inline size limit.')
   }
@@ -245,20 +237,7 @@ function encodeDailyNutritionAppCardPayload(
 export function encodeCompactTableAppCardUrl(
   card: CompactTableResponseCardV1,
 ): string {
-  const parsed = assistantResponseCardSchema.parse(card)
-  if (parsed.kind !== 'compact_table') {
-    throw new TypeError('Expected a compact table response card.')
-  }
-  if ('workout' in parsed) {
-    return encodeWorkoutSessionAppCardUrl(parsed)
-  }
-
-  const { tracking: _tracking, ...presentationCard } = parsed
-  const envelope: AppCardEnvelopeV3 = {
-    schemaVersion: 3,
-    card: presentationCard,
-  }
-  return encodeAppCardEnvelopeUrl(encodeAppCardEnvelopePayload(envelope))
+  return encodeAppCardEnvelopeUrl(encodeCompactTableAppCardPayload(card))
 }
 
 export function encodeWorkoutSessionAppCardUrl(
@@ -270,15 +249,35 @@ export function encodeWorkoutSessionAppCardUrl(
       'Expected a compact table with workout session detail.',
     )
   }
-  return encodeAppCardEnvelopeUrl(
-    encodeAppCardEnvelopePayload(
-      buildWorkoutSessionAppCardEnvelopeV4({
-        title: parsed.title,
-        subtitle: parsed.subtitle,
-        footer: parsed.footer,
-        workout: parsed.workout,
-      }),
-    ),
+  return encodeAppCardEnvelopeUrl(encodeWorkoutSessionAppCardPayload(parsed))
+}
+
+function encodeCompactTableAppCardPayload(
+  card: CompactTableResponseCardV1,
+): string {
+  const parsed = compactTableResponseCardV1Schema.parse(card)
+  if ('workout' in parsed) {
+    return encodeWorkoutSessionAppCardPayload(parsed)
+  }
+
+  const { tracking: _tracking, ...presentationCard } = parsed
+  const envelope: AppCardEnvelopeV3 = {
+    schemaVersion: 3,
+    card: presentationCard,
+  }
+  return encodeAppCardEnvelopePayload(envelope)
+}
+
+function encodeWorkoutSessionAppCardPayload(
+  card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
+): string {
+  return encodeAppCardEnvelopePayload(
+    buildWorkoutSessionAppCardEnvelopeV4({
+      title: card.title,
+      subtitle: card.subtitle,
+      footer: card.footer,
+      workout: card.workout,
+    }),
   )
 }
 
@@ -305,44 +304,52 @@ function renderCompactTableResponseCardText(
   card: CompactTableResponseCardV1,
   includeTracking: boolean,
 ): string {
-  if ('workout' in card) {
-    return renderWorkoutSessionResponseCardText(
-      card,
-      card.workout,
-      includeTracking,
-    )
-  }
-
-  const heading = card.subtitle === null
-    ? card.title
-    : `${card.title} — ${card.subtitle}`
-  const rows = card.rows.map((row) => {
-    const values = row.values.map((value, index) =>
-      `${card.columns[index]}: ${value}`
-    )
-    return `${row.label}: ${values.join(' · ')}`
-  })
-  const footer = card.footer === null ? [] : ['', card.footer]
+  const semantic = renderCompactTableSemanticPresentation(card)
   const tracking = renderWorkoutTrackingMarker(
     card.tracking,
     includeTracking,
   )
-  return [heading, '', ...rows, ...footer, ...tracking].join('\n')
+  const details = 'workout' in card
+    ? semantic.detailLines.flatMap((line, index) =>
+        index === 1 ? ['', line] : [line]
+      )
+    : ['', ...semantic.detailLines]
+  return [
+    semantic.heading,
+    ...details,
+    ...(semantic.footer === null ? [] : ['', semantic.footer]),
+    ...tracking,
+  ].join('\n')
 }
 
-function renderWorkoutSessionResponseCardText(
+function renderCompactTableSemanticPresentation(
   card: CompactTableResponseCardV1,
-  workout: WorkoutSessionDetailV1,
-  includeTracking: boolean,
-): string {
-  const progress = countWorkoutSessionSets(workout)
+): {
+  heading: string
+  detailLines: string[]
+  footer: string | null
+} {
   const heading = card.subtitle === null
     ? card.title
     : `${card.title} — ${card.subtitle}`
-  const state = workout.state === 'active'
+  if (!('workout' in card)) {
+    return {
+      heading,
+      detailLines: card.rows.map((row) => {
+        const values = row.values.map((value, index) =>
+          `${card.columns[index]}: ${value}`
+        )
+        return `${row.label}: ${values.join(' · ')}`
+      }),
+      footer: card.footer,
+    }
+  }
+
+  const progress = countWorkoutSessionSets(card.workout)
+  const state = card.workout.state === 'active'
     ? 'Active workout'
     : 'Completed workout'
-  const exercises = workout.exercises.map((exercise) => {
+  const exercises = card.workout.exercises.map((exercise) => {
     const sets = exercise.sets.map((set, index) => {
       const label = `set ${index + 1}`
       switch (set.status) {
@@ -360,19 +367,14 @@ function renderWorkoutSessionResponseCardText(
     })
     return `${exercise.name}: ${sets.join(' · ')}`
   })
-  const footer = card.footer === null ? [] : ['', card.footer]
-  const tracking = renderWorkoutTrackingMarker(
-    card.tracking,
-    includeTracking,
-  )
-  return [
+  return {
     heading,
-    `${state} · ${progress.completed}/${progress.total} sets complete`,
-    '',
-    ...exercises,
-    ...footer,
-    ...tracking,
-  ].join('\n')
+    detailLines: [
+      `${state} · ${progress.completed}/${progress.total} sets complete`,
+      ...exercises,
+    ],
+    footer: card.footer,
+  }
 }
 
 function renderWorkoutTrackingMarker(

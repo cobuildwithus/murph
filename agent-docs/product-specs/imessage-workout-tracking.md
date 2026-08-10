@@ -36,6 +36,22 @@ Generic compact tables keep the existing schema-version-3 native envelope. Enhan
 
 The readable response-card contract remains object-shaped for authoring and runtime validation. Only the immutable V4 native wire uses positional exercise tuples `[name, sets]` and set tuples `[status, target, actual]`; removing repeated wire keys keeps realistic six-exercise, four-set initial, late-active, and completed snapshots below the same URL ceiling without adding another projection owner.
 
+## Static fallback
+
+Recipients without the Messages extension, including Messages on macOS,
+receive a generated static image that mirrors the compact native workout or
+generic-table balloon. The provider captions independently retain every table
+cell or every workout state, set status, target, and actual value, so image
+failure does not erase the response semantics.
+
+The image URL carries the exact same strict authority-free V3 or V4 presentation
+envelope as the native fragment in a bounded queryless path. V3 tracking remains
+in the semantic transcript only and is stripped before either encoding; V4 has
+no tracking or canonical event reference. The stateless Web renderer accepts no
+identity, credential, canonical reference, or write authority, reads no database
+or remote service, logs no card values, and returns private no-store/no-index
+headers. It adds no card API, persistence owner, cache, queue, or retry path.
+
 ## Plan versus actual
 
 Targets and actual results must remain distinct:
@@ -64,6 +80,15 @@ Finish branches before the active-only set preflight. The assistant invokes the 
 
 ## Rollout
 
-Deploy the native schema-version-4 reader before enabling broad schema-version-4 emission. Older app versions retain truthful text and Linq fallback layouts, but do not provide the drill-down workout interface.
+Deploy the native schema-version-4 reader first, the shared Web image route
+second, and the Worker and runner producer last. Older app versions retain
+truthful captions and the static image but do not provide the drill-down workout
+interface. Keep the Web route available while any sent image URL may still be
+fetched.
 
 The backend also has a persisted-state compatibility floor. Deploy V4-capable Worker and runner bundles before any V4 card can be emitted. The accepted outbox intent and hosted delivery side effect both persist the full response card; after the first V4-bearing record exists, those bundle versions are the rollback floor. A warm older bundle must not process that state because its strict parser rejects the workout branch, and the local runner can quarantine the pending intent out of the retry inventory. Recovery is a coordinated forward fix or explicit restoration of the quarantined intent after the compatible bundle is live, not rollback below the floor. Focused local-outbox and hosted-side-effect round-trip tests pin both persisted owners.
+
+Static rollout also requires physical macOS and no-extension iPhone proof of the
+final balloon, image-failure behavior, accessibility behavior, and App Store
+affordance. Provider acceptance, direct route renders, and delivery receipts do
+not prove those device behaviors.

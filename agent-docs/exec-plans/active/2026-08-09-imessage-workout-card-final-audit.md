@@ -12,11 +12,15 @@ Success criteria:
 - Ambiguous card commands fail closed instead of mutating a guessed workout.
 - Display positions reconcile to canonical sparse workout coordinates before mutation.
 - Targets remain plan-only; every actual result is member-entered.
+- macOS and iPhones without the extension receive a compact static workout or
+  generic-table image whose captions retain every presentation value.
 - Focused typechecks, contract tests, skill tests, and documentation drift checks pass.
 
 ## Scope
 
-- In: workout response-card contracts and encoding, assistant authoring schema, tracked-workout skill guidance, cross-platform fixture, focused tests, and card documentation.
+- In: workout response-card contracts and encoding, assistant authoring schema,
+  tracked-workout skill guidance, cross-platform fixture, compact-table static
+  image fallback, focused tests, and card documentation.
 - Out: workout storage, event mutation primitives, native networking or persistence, rollout enablement, and unrelated response-card kinds.
 
 ## Constraints
@@ -35,6 +39,8 @@ Success criteria:
 5. Route ordinary start/resume requests through the workout and tracked-table owners.
 6. Remove the ambiguous complete-at-target shortcut and preserve idempotent Finish replay.
 7. Remove temporary remediation artifacts and run focused verification.
+8. Reuse the nutrition image route for strict V3/V4 envelopes, render the native
+   compact-table presentation, and preserve complete provider captions.
 
 ## Review disposition
 
@@ -52,6 +58,11 @@ Success criteria:
 - Final ReviewGPT round 3 passed with no qualifying finding. Parent triage accepted its App Server evidence discrepancy and added one structured-workout call to the real boundary test; the compact authoring schema remains intentionally smaller than the authoritative strict runtime schema, and optional subtitle copy is not a second structured state projection.
 - Accepted from exact-head CI: Ubuntu's full assistant coverage lane measured the resident route layer at 57,050 characters after applying current main's named-diet guidance, while the pre-merge focused lane measured 56,973. A same-head rerun reproduced the Ubuntu result. The existing live-workout route hint is shortened without changing its two-skill instruction; after merging current main the focused layer is 56,973 and the 57,000 ratchet remains unchanged.
 - Accepted from final ReviewGPT round 5: the object-keyed V4 wire exceeded 2,048 characters for a realistic six-exercise, four-set workout late in the session. Only the immutable native serialization now uses positional exercise and set tuples; the readable authoring/runtime contract, canonical event, delivery owners, and mutation path remain unchanged. Production-faithful initial, 18-of-24 active, and completed fixtures pin the capacity boundary, and the coordinated Swift reader strictly decodes the same tuple shape.
+- Accepted from the static-fallback extension: the prior provider layout reduced
+  workout and generic tables to a short caption. V3/V4 now reuse the stateless
+  image route and native visual language, while complete captions retain every
+  cell and workout-set semantic independently of raster availability. V3
+  tracking remains transcript-only and V4 remains authority-free.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. Neither coordinated PR is ready or merged.
 
@@ -81,11 +92,23 @@ Success criteria:
 - The focused resident-prompt ratchet passed at 56,896 characters before the current-main merge and 56,973 after it, under the unchanged 57,000 ratchet.
 - The current-main runner-budget conflict was resolved from a combined assembly: 9,994,210 total bytes, 8,019,079 static-closure bytes, and 1,659,616 entry bytes. The total and static baselines use those measurements; the entry baseline and every tolerance remain unchanged.
 - ReviewGPT round 4 passed the pre-merge remediation head. Round 5 on the merged head found the realistic V4 wire-capacity failure described above. Its tuple-wire remediation passed 7 contract tests, 9 operator encoder/fixture tests, 2 focused assistant boundary/tool tests, all 3 affected package typechecks, documentation drift, and the 42-test runner bundle budget policy suite. Full runner assembly passed at 9,994,191 total bytes, 8,019,060 static-closure bytes, and 1,659,616 entry bytes under the reviewed baselines and unchanged tolerances. Final backend ReviewGPT round 6 passed the exact product head `caac73f092ef68c3c3272e7ea8e38733987f8f57`, and all exact-head GitHub Actions passed. The coordinated native decoder passed SwiftFormat and all 45 Messages-extension tests; native ReviewGPT round 4 and both exact-head verification lanes passed `399d90b5eba89a826ecb8d0cef6f3c7e29169ef4`. Physical-device Messages proof remains the only open release gate, so both PRs remain draft and unmerged.
+- The shared response-card route rendered a real 1200×580 active-workout PNG and
+  a real 1200×670 generic-table PNG from their exact V4 and V3 envelopes.
+  Focused Web route/render tests passed for nutrition, generic-table, workout,
+  malformed, oversized, tracked, and query-bearing inputs. The in-app browser
+  exposed no usable tab, so hosted desktop/mobile catalog screenshots remain an
+  explicit evidence gap rather than a claimed proof.
 
 ## Parent product-experience revalidation
 
 Product purpose verdict: the smallest complete experience is one ordinary start or resume request that produces the verified workout card, one member-entered set action per pending set, a replay-safe Finish action, and one narrow clarification only when transcript context cannot identify a single workout. The remediated flow meets that purpose without another identifier, authority owner, or setup step. No evidence-backed product-experience finding remains.
 
-Evidence gap: simulator and contract proof cannot establish the real Messages transcript badge, bubble sizing, forwarding, composer insertion, or offline reopening. Those checks remain an explicit physical-device release gate rather than a claim of current proof.
+Evidence gap: simulator, route-render, and contract proof cannot establish the
+real Messages transcript badge, bubble sizing, forwarding, composer insertion,
+offline reopening, static-image failure behavior, accessibility behavior, or
+App Store affordance on macOS and an iPhone without the extension. Those checks
+remain an explicit physical-device release gate rather than a claim of current
+proof. Hosted desktop/mobile catalog screenshots also remain open while the
+in-app browser has no usable tab.
 
 The plan remains active until the native V4 reader is released before broad backend V4 emission.

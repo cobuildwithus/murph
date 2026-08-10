@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   assistantResponseCardSchema,
+  buildWorkoutSessionAppCardEnvelopeV4,
   compactTableResponseCardV1Schema,
+  parseCompactTableAppCardEnvelope,
   workoutSessionCardV1Bounds,
   workoutSessionDetailV1Schema,
   type CompactTableResponseCardV1,
@@ -75,6 +77,38 @@ describe("workout session compact-table contract", () => {
     expect(assistantResponseCardSchema.parse(TRACKED_WORKOUT_CARD)).toEqual(
       TRACKED_WORKOUT_CARD,
     );
+  });
+
+  it("restores the compact V4 wire without restoring workout authority", () => {
+    if (!("workout" in TRACKED_WORKOUT_CARD)) {
+      throw new TypeError("Expected the workout card fixture.");
+    }
+    const envelope = buildWorkoutSessionAppCardEnvelopeV4({
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+
+    expect(parseCompactTableAppCardEnvelope(envelope)).toEqual({
+      kind: "compact_table",
+      version: 1,
+      title: TRACKED_WORKOUT_CARD.title,
+      subtitle: TRACKED_WORKOUT_CARD.subtitle,
+      footer: TRACKED_WORKOUT_CARD.footer,
+      workout: TRACKED_WORKOUT_CARD.workout,
+    });
+    expect(parseCompactTableAppCardEnvelope({
+      ...envelope,
+      card: { ...envelope.card, extra: true },
+    })).toBeNull();
+    expect(parseCompactTableAppCardEnvelope({
+      ...envelope,
+      card: {
+        ...envelope.card,
+        e: [["Bench press", [["c", "185 lb × 8", null]]]],
+      },
+    })).toBeNull();
   });
 
   it("accepts a completed workout with completed and skipped sets", () => {
