@@ -99,5 +99,8 @@ Updated: 2026-08-09
   request could hide an existing member's older active grant. The remediation
   deleted the model template surface, made Web own the canonical sentence, and
   derives existing-member controls from current request plus active grants.
+- Exact-head Ubuntu app verification exposed a stale test mirror of the
+  intentionally ratcheted runner total-byte budget. The mirror now matches the
+  production constant, and its focused 42-test bundle suite passes.
 - Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
   candidate.
