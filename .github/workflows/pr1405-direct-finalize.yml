@@ -1,0 +1,127 @@
+name: Direct PR 1405 finalization
+
+on:
+  push:
+    branches:
+      - codex/pr1405-direct-final
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr1405-direct-final
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: github.event.head_commit.message == 'chore: run direct PR 1405 finalization'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/pr1405-direct-final
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Apply, verify, and publish isolated result
+        shell: bash
+        run: |
+          set -uo pipefail
+          LOG=/tmp/pr1405-direct-final.log
+          : > "$LOG"
+          FAILED=0
+
+          run_step() {
+            local name="$1"
+            shift
+            echo "===== $name =====" | tee -a "$LOG"
+            "$@" >> "$LOG" 2>&1
+            local code=$?
+            echo "exit: $code" | tee -a "$LOG"
+            if [ "$code" -ne 0 ]; then
+              FAILED=1
+              return 1
+            fi
+            return 0
+          }
+
+          run_step apply python3 .github/scripts/pr1405-direct-finalize.py || true
+          if [ "$FAILED" -eq 0 ]; then
+            run_step install pnpm install --frozen-lockfile || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            run_step build-dependencies pnpm --filter '@murphai/murph^...' build || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            run_step generate-health-commons pnpm --dir packages/health-commons generate || true
+            run_step generate-cli pnpm --dir packages/cli gen:config-schema || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            run_step verify-health-commons pnpm --dir packages/health-commons verify || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            run_step typecheck-cli pnpm --dir packages/cli typecheck || true
+            run_step test-cli pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/commons-command-coverage.test.ts packages/cli/test/incur-smoke.test.ts packages/cli/test/incur-skill-hash.test.ts || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            run_step typecheck-assistant pnpm --dir packages/assistant-engine typecheck || true
+            run_step test-assistant pnpm exec vitest run --config packages/assistant-engine/vitest.config.ts --no-coverage packages/assistant-engine/test/model-behavior.test.ts packages/assistant-engine/test/assistant-skill-assets.test.ts || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            run_step typecheck-cloudflare pnpm --dir apps/cloudflare typecheck || true
+            run_step test-cloudflare pnpm --dir apps/cloudflare test:node -- test/deploy-artifacts.test.ts test/runner-bundle-workspace-artifacts.test.ts || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            if rg -n "red-light-therapy" packages/assistant-engine/src packages/assistant-engine/skills >> "$LOG" 2>&1; then
+              echo "active red-light topic-skill references remain" >> "$LOG"
+              FAILED=1
+            fi
+          fi
+          if [ "$FAILED" -eq 0 ]; then
+            run_step diff-check git diff --check || true
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          if [ "$FAILED" -ne 0 ]; then
+            {
+              echo '# PR 1405 direct finalization failed'
+              echo
+              echo '```text'
+              tail -n 500 "$LOG"
+              echo '```'
+            } > .github/pr1405-direct-finalization-failure.md
+            git add .github/pr1405-direct-finalization-failure.md
+            git commit -m 'chore: record PR 1405 finalization failure' || true
+            git push origin HEAD:codex/pr1405-direct-final
+            exit 1
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+          active = Path('agent-docs/exec-plans/active/2026-08-07-health-commons-agent-knowledge.md')
+          completed = Path('agent-docs/exec-plans/completed/2026-08-07-health-commons-agent-knowledge.md')
+          text = active.read_text().replace('Status: active', 'Status: completed', 1).rstrip()
+          completed.parent.mkdir(parents=True, exist_ok=True)
+          completed.write_text(text + '\n\nCompleted: 2026-08-10\n')
+          active.unlink()
+          PY
+
+          rm -f .github/pr1405-direct-finalization-failure.md
+          rm -f .github/pr1405-direct-trigger
+          rm -f .github/scripts/pr1405-direct-finalize.py
+          rm -f .github/workflows/pr1405-direct-finalize.yml
+          git diff --check
+          git add -A
+          git diff --cached --check
+          git commit -m 'refactor(health-commons): simplify agent knowledge access'
+          git push origin HEAD:codex/pr1405-direct-final
