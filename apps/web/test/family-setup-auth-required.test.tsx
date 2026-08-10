@@ -1,28 +1,24 @@
 import { act, createElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 
+import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/types";
+
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as {
-    onCompleted?: (payload: {
-      activationPending: boolean;
-      inviteCode: string;
-      joinUrl: string;
-      stage: "active" | "activating" | "blocked" | "checkout" | "expired" | "invalid" | "verify";
-    }) => Promise<void> | void;
+    onCompleted?: (
+      payload: HostedPrivyCompletionPayload,
+    ) => Promise<void> | void;
     open?: boolean;
   } | null,
 }));
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
-    onCompleted?: (payload: {
-      activationPending: boolean;
-      inviteCode: string;
-      joinUrl: string;
-      stage: "active" | "activating" | "blocked" | "checkout" | "expired" | "invalid" | "verify";
-    }) => Promise<void> | void;
+    onCompleted?: (
+      payload: HostedPrivyCompletionPayload,
+    ) => Promise<void> | void;
     open?: boolean;
   }) {
     mocks.authDialogProps = props;
