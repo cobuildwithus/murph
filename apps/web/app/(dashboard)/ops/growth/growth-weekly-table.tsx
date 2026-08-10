@@ -26,8 +26,8 @@ export function GrowthWeeklyTable(input: GrowthWeeklyTableProps) {
           Weekly intake and activation
         </h2>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          Rolling seven-day member-record creation and trial-start volumes,
-          newest first. A member record can predate activation, so use Trial
+          Rolling seven-day member-record creation and starter-activation volumes,
+          newest first. A member record can predate activation, so use Starter
           start paths for acquisition provenance.
         </p>
       </div>
@@ -38,8 +38,8 @@ export function GrowthWeeklyTable(input: GrowthWeeklyTableProps) {
               <TableHead>Window</TableHead>
               <TableHead className="text-right">Member records</TableHead>
               <TableHead className="text-right">Record change</TableHead>
-              <TableHead className="text-right">Trial starts</TableHead>
-              <TableHead className="text-right">Trial change</TableHead>
+              <TableHead className="text-right">Starter activations</TableHead>
+              <TableHead className="text-right">Activation change</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

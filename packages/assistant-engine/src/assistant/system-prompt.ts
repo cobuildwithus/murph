@@ -38,6 +38,9 @@ import type { AssistantMaintenanceProfile } from "./maintenance-evidence.js";
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "./generated-delivery-files.js";
+import {
+  ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION,
+} from "./group-shared-freshness.js";
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
@@ -467,7 +470,7 @@ function buildAssistantLowUsageGuidanceText(
     "Low hosted usage:",
     "- Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md` before answering an explicit hosted plan, AI-usage, billing, Family-member usage, or group-funding request, or acting on trusted low-usage context. On a trusted low-usage turn, complete the user's current request first.",
     `- Follow the skill's explicit-request or first-heads-up route as applicable. Use its single final usage-segment contract only for an assistant-initiated heads-up. ${assistantInitiatedHeadsUpShape} Do not send a separate warning or repeat one already visible in the recent conversation.`,
-    `- Billing truth: \`murph.plan_usage\` is read-only and changes neither billing, Family state, nor usage credit. For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route. For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`, or \`reason\` is \`trial_conversion_pending\`; never provide it for \`group_not_supported\` or \`hosted_access_inactive\`. For a target-specific personal plan change, use only signed \`change_plan\` after \`plan_usage\` returns the exact target, price, and timing and the member confirms those current terms; never use an unquoted legacy subscription action.`,
+    `- Billing truth: \`murph.plan_usage\` is read-only and changes neither billing, Family state, nor usage credit. For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route. For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`; never provide it for \`group_not_supported\` or \`hosted_access_inactive\`. For a target-specific personal plan change, use only signed \`change_plan\` after \`plan_usage\` returns the exact target, price, and timing and the member confirms those current terms; never use an unquoted legacy subscription action.`,
   ].join("\n");
 }
 
@@ -643,6 +646,11 @@ function buildAssistantHostedGroupGuidanceText(
         ]
       : []),
     `- \`murph.group action="read_current"\` is membership/permission setup only, never shared records. Use \`action="read_shared"\` as the only hosted path for shared facts. Request one to three exact \`projectionScopes\`; the host resolves live authority lazily after the tool call. \`status="ok"\` is complete. Model-size \`status="partial"\` lists current \`omittedParticipantIds\`; never infer their departure, score, diagnostics, or permission, or call the standings complete. For attribution, an exact \`Sender:\` handle must appear in exactly one returned member's \`currentTurnHandles\`; use that row's group-scoped \`participantId\`, never name, order, values, \`Profile name (display only):\`, \`${currentTurnOwnerContactLabel}\`, \`Speaker name:\`, or global id. Scheduled and detached reads have no current-turn handles. Keep \`not_granted\`, \`granted\` plus \`missing\`, and \`available\` distinct; never use raw \`vault-share/**\` files.`,
+    ...(conversationScope === "group"
+      ? [
+          `- ${ASSISTANT_GROUP_SHARED_FRESHNESS_INSTRUCTION}`,
+        ]
+      : []),
     "- After read_current, use the group-chat skill's core permissions only for `status=none`; existing groups use workflow scopes.",
     "- When `action=\"read_chat_participants\"` and `action=\"share_contact_card\"` are available for the current group chat, check the participants once on your first reply. If someone does not use Murph, share the card and naturally mention that they can save your contact, text you to get set up, and come back and say hi in the group once setup is done. Use your own words, not a fixed script. Do not repeat the invitation unprompted or when someone joins later. If someone asks you to resend the card, share it again. If someone asks why they have not been added or how to get Murph, answer directly and remind them to save your contact and text you to get set up. If you are not sure whether this is your first reply in the room, skip the card and invitation. SMS supports the same roster and group-access workflow; only provider-specific reactions, attachments, and chat customization may be unavailable. `action=\"offer_access\"` is the sole model-facing join or permission action. The trusted host returns `presentation=\"native\"` when it handled the native consent path; this does not prove UI was newly posted or is currently visible. It returns `presentation=\"link\"` with the exact first-party URL to include once, or `status=\"unavailable\"` when no consent surface is proven. Existing members keep their membership and other grants unchanged.",
     ...(conversationScope === "group"
@@ -1699,7 +1707,7 @@ function buildAssistantSharedAutomationActionText(
   hostedRuntime: boolean
 ): string {
   const actionGuidance = hostedRuntime
-    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
+    ? `Use ${code("murph.automation")} with ${code("action: save")} to create an ordinary automation and ${code("action: patch")} to change one. Recurring cron and daily-local values are wall-clock times: when the user names a timezone, keep the requested clock time and pass its IANA name as ${code("schedule.timeZone")}; never convert the clock time to UTC inside the cron or local-time field. On save, omit ${code("schedule.timeZone")} only when the recurrence should follow this vault's canonical timezone. On patch, a replacement recurring wall-clock schedule that omits ${code("schedule.timeZone")} preserves the stored explicit timezone; do not ask the user to repeat it or guess it from current conversation context. After saving or patching, inspect the stored ${code("schedule")} and ${code("status")}. For an active ${code("deviceActivity")} schedule, confirm the persisted event trigger directly: a null ${code("nextOccurrenceAt")} means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, confirm timing only from a result with ${code("timingVerified: true")}, using its stored ${code("schedule")}, ${code("effectiveTimeZone")}, and ${code("nextOccurrenceAt")}; a verified null ${code("nextOccurrenceAt")} means no later deliverable occurrence is scheduled, never a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. When a time-based result has ${code("timingVerified: false")}, say that the save or update succeeded but the next occurrence could not be verified, state no time, and offer one inspect-or-update recovery action; do not retry the write. Patch ${code("status")} to pause, reactivate, or archive an existing automation. Ordinary patches preserve its stored route. For plan-owned support, pass the exact ${code("supportSeriesId")}, ${code("supportKind")}, and finite ${code("activeUntil")} when required; use ${code("action: reconcile")} with the exact ${code("desiredAutomationIds")} to retire stale members of that series.`
     : `Use ${code(
         "vault-cli automation save"
       )} with typed schedule and instruction fields to create or update ordinary automations.`;
@@ -1740,6 +1748,11 @@ function buildAssistantSharedAutomationPreferenceText(
         )} and offer a finite conversational ${code("check_in")}. Never tell the user to respond with status keywords; ask an ordinary question and accept any natural reply that resolves or changes the loop. Its accepted automation instructions must let the next occurrence combine the immediately preceding unresolved action with the current cue in one message, never accumulate older occurrences as debt, and return ${code("skip")} after that combined grace check-in also receives no related reply until the user re-engages, changes, or restarts the loop. Use ${code(
           hostedRuntime ? "continuityPolicy: preserve" : "--continuity-policy preserve"
         )} so the scheduled turn can inspect the recent reply loop.`
+      : null,
+    conversationScope === "direct"
+      ? `For a confirmed future care appointment in private, follow ${code(
+          buildAssistantSkillFileRef("appointment-scheduling")
+        )}.`
       : null
   );
   return `${openingGuidance}

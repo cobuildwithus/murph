@@ -878,15 +878,42 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   usage-bearing work is denied only when included capacity and generic usage
   credit are both exhausted; the crossing operation may finish, and accepted
   input remains durable and pending. Included capacity is consumed before
-  carryover credit. Credit entries, their remaining projections, and the
-  compact balance/version projection serialize under the beneficiary member
-  while base allowance stays separate. Purchase and referral producers share
-  that immutable ledger; only purchase-backed entries participate in Stripe
-  refund/dispute reversal, while earned referral rewards are final. Web derives
-  Settings and read-only `murph.plan_usage` from that same owner without
-  persisting a forecast or granting runtime billing authority; synthetic
-  thread containers receive a bounded unavailable result rather than personal
-  plan facts.
+  carryover credit. The beneficiary row lock is the sole serialization point
+  for usage-credit grants, purchase reservations, debits, projection
+  adjustments, the compact balance/version projection, and relevant
+  checkout/refill admission; base allowance remains separate. An admission
+  path that also locks a distinct payer takes the beneficiary lock first. A
+  beneficiary may occupy at most 32 grant slots: a positive active grant
+  projection or an unfulfilled purchase whose provider-final release marker,
+  `grantSlotReleasedAt`, is null. Every shared capacity inspection reads at most
+  33 combined occupied rows; a 33rd fails closed as overflow. Grant projections
+  carry immutable beneficiary/FIFO identity behind a partial active-grant index,
+  and unfulfilled reservations have a matching partial beneficiary index, so
+  those bounded reads do not scan zero-balance or terminal history. At the boundary,
+  purchase fulfillment may replace only its exact reservation; an unreserved
+  grant is rejected. Settlement similarly locks and inspects at most 33
+  positive grants, rejects more than 32, and computes FIFO allocation with
+  window sums. The same data-modifying SQL statement updates affected grant and
+  purchase projections set-wise, updates the beneficiary projection once, and
+  inserts every debit.
+  Replay reads at most 33 debit rows and rejects more than 32 before bounded
+  validation. Refund and dispute convergence performs one final shared capacity
+  inspection after all signed adjustments; crossing the slot boundary rolls the
+  transaction back before the Stripe receipt binds so its existing retry owner
+  can replay. Purchase and referral producers share that immutable ledger; only
+  purchase-backed entries participate in Stripe refund/dispute reversal, while
+  earned referral rewards are final. Web derives Settings and read-only
+  `murph.plan_usage` from that same owner without persisting a forecast or
+  granting runtime billing authority; synthetic thread containers receive a
+  bounded unavailable result rather than personal plan facts.
+
+  A genuinely new personal, Family, or group purchase that reaches the 32-slot
+  boundary returns the distinct `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` HTTP 409;
+  true eligibility failures remain 403 and exact purchase replay resolves before
+  capacity admission. Group funding preflights that serialized capacity before
+  Customer preparation, then revalidates after preparation before reserving a
+  slot. The shared top-up dialog maps only that exact code to a truthful temporary
+  block with no alternate-amount suggestion.
 
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time offers. Hosted-group funding keeps the same purchase owner and
@@ -895,8 +922,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   ordinary $5 usage-credit purchase available at any current group-capacity
   state. Later purchases are deterministic exact-$5 `HostedUsageCreditPurchase`
   rows admitted only at the existing beneficiary-serialized
-  settlement/capacity seam when capacity is low or exhausted. The
-  authorization stores status, selected cap, and anchored period only; fulfilled
+  settlement/capacity seam when capacity is low or exhausted. Ordinary
+  automatic refill admission returns no refill at 32 occupied slots; overflow
+  is an invariant failure. The authorization stores status, selected cap, and
+  anchored period only; fulfilled
   plus pending purchases derive the current-period commitment, while
   `HostedUsageCreditEntry` remains the sole balance and carries unused credit
   across sponsorship periods. A partial unique database index permits only one
@@ -941,8 +970,8 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   one fixed server-catalog grant and one source-mailbox celebration fence. A new
   grant clears the current block when capacity becomes positive and requests
   the normal runtime recheck through the durable event owner so pending
-  accepted work can resume. Inactive, suspended, malformed or expired trial
-  entitlement, and separate daily Linq anti-abuse gates, remain enforceable.
+  accepted work can resume. Inactive, suspended, or malformed entitlement, and separate daily Linq
+  anti-abuse gates, remain enforceable.
 
   The current group-tool privacy projection is
   `{fundingNeeded,fundingUrl,includedUsageUsedPercent}`. A successful current
@@ -1395,7 +1424,7 @@ application code.
   model id and provider pricing source. Specialized
   tools retain their existing provider owners independently of the core choice.
 - Assistant input follows one spine for local and hosted execution: source adapter -> `AssistantInputEvent` -> `AssistantInputSource` -> scanner/active turn -> accepted-input journal -> Codex. Source adapters may project accepted input into inbox for search, attachments, UI, and diagnostics, but inbox projection success is not the gate that decides whether Codex can see a decoded conversation message. `AssistantInputEvent` may carry bounded prompt-readiness facts such as attachment descriptors and minimized channel source metadata; prompt construction must read those first and use inbox capture/envelope data only as projection enrichment.
-- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Murph stores local assistant transcript copies, minimal manual aliases, explicit conversation bindings, fixed auto-reply channel enablement state, timestamps/turn counts, provider session references, runtime automation run history, compact system-emitted turn receipts, idempotent outbound intent state, diagnostics counters/warnings, and persisted status snapshots under `vault/.runtime/operations/assistant/**`. Assistant runtime directories must stay private (`0700`) and assistant runtime files must stay private (`0600`). Secret-bearing provider headers for persisted sessions live only in private sidecars under `vault/.runtime/operations/assistant/secrets/**`; the general session JSON keeps only public headers, diagnostics/runtime-event writes redact inline secret material before persistence, and `assistant doctor --repair` can tighten permissive assistant runtime modes in place. Inline secret findings indicate stale local session data rather than a supported migration path. Fresh sessions may inject a small canonical memory block from `bank/memory.md`, and assistant turns now use one shared CLI-first Murph runtime surface plus a small helper-tool layer across manual and message-triggered automation turns. Codex App Server is the hard-cut assistant adapter: it reaches the canonical `vault-cli` surface through native local CLI/filesystem/env authority, defaults to unsandboxed execution plus no approval friction, and is trusted as a local operator path. Assistant-engine keeps one Codex App Server process warm across ordinary turns for the warm container or Node-process lifetime; each ordinary turn is an RPC into that process. Prompts, session/thread/turn ids, delivery routes, and invocation-scoped automation or device authority stay in request data rather than process launch identity. Those capabilities are exposed only through narrow typed tools on the current root turn and are absent from the App Server and descendant shell environments. Process replacement is limited to owner shutdown, process exit, proven unhealthy or poisoned protocol state, explicit operator shutdown, explicit workspace invocation abort/preemption, or a genuine process-level configuration change that Codex cannot accept through RPC. An explicit abort synchronously stops the exact owned App Server before the container job slot can be reused; ordinary turn and invocation completion do not. Codex App Server owns provider-native web-search behavior; Murph normalizes Codex `web.search` events into assistant trace and status output without carrying a separate Murph-side search provider or web-read tool layer. Accepted inbound channel messages are therefore treated as operator-authorized actions for the bound vault and may use the assistant runtime, canonical `memory`, canonical `automation`, self-target, and vault query/write surface. Murph owns transcript policy, turn orchestration, and tool/runtime planning, while canonical vault records remain authoritative on conflicts.
+- Provider transcript history and channel-native delivery history should stay with upstream adapters when possible; Murph stores local assistant transcript copies, minimal manual aliases, explicit conversation bindings, fixed auto-reply channel enablement state, timestamps/turn counts, provider session references, runtime automation run history, compact system-emitted turn receipts, idempotent outbound intent state, diagnostics counters/warnings, and persisted status snapshots under `vault/.runtime/operations/assistant/**`. Assistant runtime directories must stay private (`0700`) and assistant runtime files must stay private (`0600`). Secret-bearing provider headers for persisted sessions live only in private sidecars under `vault/.runtime/operations/assistant/secrets/**`; the general session JSON keeps only public headers, diagnostics/runtime-event writes redact inline secret material before persistence, and `assistant doctor --repair` can tighten permissive assistant runtime modes in place. Inline secret findings indicate stale local session data rather than a supported migration path. Fresh sessions may inject a small canonical memory block from `bank/memory.md`, and assistant turns now use one shared CLI-first Murph runtime surface plus a small helper-tool layer across manual and message-triggered automation turns. Codex App Server is the hard-cut assistant adapter: it reaches the canonical `vault-cli` surface through native local CLI/filesystem/env authority, defaults to unsandboxed execution plus no approval friction, and is trusted as a local operator path. Assistant-engine keeps one Codex App Server process warm across ordinary turns for the warm container or Node-process lifetime; each ordinary turn is an RPC into that process. Prompts, session/thread/turn ids, delivery routes, and invocation-scoped automation or device authority stay in request data rather than process launch identity. Those capabilities are exposed only through narrow typed tools on the current root turn and are absent from the App Server and descendant shell environments. Process replacement is limited to owner shutdown, process exit, proven unhealthy or poisoned protocol state, explicit operator shutdown, explicit workspace invocation abort/preemption, or a genuine process-level configuration change that Codex cannot accept through RPC. An explicit abort synchronously stops the exact owned App Server before the container job slot can be reused; ordinary turn and invocation completion do not. Codex App Server owns provider-native web-search behavior; Murph normalizes Codex `web.search` events into assistant trace and status output without carrying a separate Murph-side search provider or web-read tool layer. Managed OpenAI standalone search crosses the existing Worker credential boundary only as exact `POST /v1/alpha/search`; the Worker revalidates the provider/user/runner identity, injects the Worker-owned OpenAI credential, and strips runner authority before forwarding it. Accepted inbound channel messages are therefore treated as operator-authorized actions for the bound vault and may use the assistant runtime, canonical `memory`, canonical `automation`, self-target, and vault query/write surface. Murph owns transcript policy, turn orchestration, and tool/runtime planning, while canonical vault records remain authoritative on conflicts.
 Assistant-engine intentionally keeps one Codex App Server slot warm across
 ordinary turns during each warm Node runtime/container lifetime. Overlapping
 turns fail busy instead of spawning parallel app-server processes. Owner
@@ -1514,11 +1543,18 @@ Linq explicitly requests interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
-Nutrition images retain the calorie ring and metric row; compact-table images
-retain the table grid or workout progress and exercise rows. Native captions
-independently repeat the complete immutable semantics, including nutrition
-totals and goal states, every generic table cell, or every workout set status,
-target, and actual value, so a missing raster never erases the useful response.
+Nutrition images retain the calorie ring and metric row while remaining
+rectangular and badge-free so the provider owns the outer mask. The installed
+Messages extension retains its native icon and interactive identity. The
+provider request omits the optional App Store id so app-absent static cards do
+not substitute square App Store artwork into the wider Messages icon slot.
+Their concise native caption keeps only the date and meal count instead of
+repeating visible totals or target amounts. A short subcaption appears only
+when some totals are partial or an assessed V2 goal needs its directional
+status preserved. Compact-table images retain the table grid or workout
+progress and exercise rows, and their native captions
+independently repeat every generic table cell or every workout set status,
+target, and actual value so a missing raster never erases the useful response.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension
@@ -1589,10 +1625,10 @@ Native companion account admission is a bearer-authenticated member lifecycle
 boundary, not a device-sync lifecycle boundary. `POST
 /api/device-sync/companion/admission` accepts only an optional validated IANA
 time zone, delegates canonical identity creation/recovery, historical launch
-consent, untouched-member Pulse trial enrollment, and active-access assertion
+consent, untouched-member starter-usage enrollment, and active-access assertion
 to the existing companion member-access owner, and returns only the fixed
 non-identifying success response. This account-only caller suppresses the
-ordinary signup welcome while preserving the canonical trial activation and
+ordinary signup welcome while preserving the canonical starter activation and
 internal `member.activated` fact, so admission neither assigns a Linq home line
 nor queues or emails a welcome. On failure it preserves the stable native
 login, consent, access, suspension, and alternate-sign-in identity-conflict
@@ -1604,7 +1640,7 @@ retry only the retryable outcome and must not loop the terminal support
 outcome. The route must remain outside shared device-sync public ingress and
 may not create, resume, reactivate, or otherwise mutate a Junction connection.
 
-11. The hosted `apps/web` control plane accepts provider OAuth and webhook traffic plus authenticated browser and agent control traffic, keeps provider tokens away from browsers, records sparse routing and token-audit state, and owns the hosted member slices plus all hosted control-plane facts in Postgres. Hosted onboarding identity is anchored on the verified phone plus blind lookup keys in Postgres, while `HostedMemberIdentity`, `HostedMemberRouting`, `HostedMemberBillingRef`, `HostedMemberEmailAuthorization`, and `HostedWebSession` keep recoverable member facts and first-party browser app sessions on their owning rows; app-session tokens are opaque to the browser and stored only by hash. Privy is fresh proof for login, linking, and security-sensitive identity operations, while the Murph app session is normal hosted browser auth. When Privy completion carries an existing Murph app session, it is same-member reauthentication rather than account switching: both the fresh Privy user and resolved member must match that app session before a replacement session is issued. The only human browser wearable-management surface is `/api/settings/device-sync/**`, and browser assertion routes such as `POST /api/device-sync/agents/pair` must still rely on short-lived signed assertions with consumed nonces. Native iOS and Android device-sync routes under `/api/device-sync/companion/**` authenticate with a Privy identity token in `Authorization: Bearer` through the same server-side Privy verification as browser sessions (no cookie fallback). Before minting a Junction SDK sign-in token, the companion sign-in route accepts only the closed `ios | android` platform union and applies lifecycle intent against durable connection state through the shared device-syncd ingress path: known same-member passive repair sends `resume` and requires exactly one established row; fresh or unproven legacy iOS installation omits intent, under which durable state resumes exactly one established row or establishes only when zero provider rows exist; and terminal or ambiguous state rejects without mutation. Android's visible Connect Health Connect action and a future visible hosted-health/Junction Reconnect action may send `connect`; passive launch, foreground return, and data ingress may not. The route returns the short-lived token exactly once without logging or persisting it. Companion status may scope to a normalized Junction source. `DeviceSyncSignal.sourceProviderSlug` records that source only when the provider-owned webhook parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null. Source-scoped status filters both connected-source availability and receipt timestamps, so those null-source rows cannot make Health Connect borrow Apple Health success. The companion health-metadata route accepts only bounded versioned Recovery/Strain records with client-hashed identity inside a 366-day history horizon and 24-hour future-clock allowance, caps pending payloads at 16 per connection, stores each accepted batch as one encrypted dirty payload on the active member-owned Junction runtime lane, and emits a value-free mailbox wake. That active connection is the ingestion authority; source rows are projection evidence used only to disambiguate multiple active Junction lanes, not a prerequisite for the zero-provider-row omitted-intent bootstrap. `device-syncd` validates the closed payload again, preserves Apple HealthKit as canonical provenance with only an unverified WHOOP-metadata hint, and canonical health writes still flow only through `packages/importers` and `packages/core`. The sole pre-login exception is `POST /api/device-sync/companion/auth-diagnostics`: it accepts only a small allowlisted auth-failure envelope, uses the same closed optional platform union with legacy iOS defaulting, re-sanitizes the bounded provider message, writes one structured hosted warning, and applies per-client plus aggregate in-process throttles without persisting identity or contact data. Vercel WAF owns the cross-instance production rate limit for that route; the in-process window is a bounded fallback, not shared enforcement. Hosted onboarding Linq and Telegram webhook ingress verifies provider payloads in the route/service, stores sparse routing in hosted member owner tables, records quota counters where applicable, appends one canonical encrypted `conversation.message` mailbox item with channel-specific payload detail, and signals the per-user Temporal runtime workflow with no raw payload. Cloudflare Email ingress verifies either a signed reply alias for an active member or the fixed public sender route plus trusted sender authentication, stores the encrypted raw message, appends the same canonical mailbox item through a signed web callback, and signals the same pointer-only Temporal workflow through a signed web callback. Raw provider bodies, raw email messages, message content, verification headers, and provider secrets are not Workflow inputs. Cloudflare-bound hosted execution from exact message ingress and onboarding activation must first append encrypted hosted mailbox rows in the same transaction as the originating state mutation. Device-sync webhook freshness records trace/audit plus per-connection dirty state, appends one bounded `device-sync.wake` mailbox handoff on clean-to-dirty transitions, and completes trace acceptance in the same transaction. The runner pulls dirty rows through signed callbacks only when no fresh conversation input is pending. Hosted Linq, Telegram, and email ingress routes return success after durable classification/append or intentional ignore; post-append Temporal signal failures are logged as best-effort handoff failures instead of forcing provider retries. Device-sync webhook routes return success after durable trace/dirty acceptance; post-commit clean-to-dirty Temporal signal failures are logged as best-effort handoff failures, with no Vercel dirty-sweeper cron cadence and no dirty-row recovery sweep. The Temporal-owned global recovery reconciler is due-reconcile-only. Mailbox event-id dedupe and Temporal signal coalescing keep duplicate attempts safe, but web no longer runs a mailbox-lag cron backstop; a DB-backed pending-handoff reconciler remains future hardening for exact workflow-start failure journaling. Web does not own message-processing completion, assistant channel enablement state, same-conversation turn revision, outbox finalization, or internal runtime timers; those remain inside the restored local runtime checkpoint. Hosted device connection persistence stays provider-generic, hosted registry assembly should reuse the shared `device-syncd` config/factory seam, and provider-specific webhook-admin secrets must stay on provider-owned config rather than generic hosted env shapes. Hosted webhook receipts remain retry journals for receipt-local side effects only, not a second dispatch lifecycle owner. Stripe webhook ingress verifies the event and writes minimal receipt state synchronously, then starts a Vercel Workflow with only the Stripe event id; that workflow uses one event-id step to re-fetch Stripe, commit billing plus inline `member.activated` mailbox facts transactionally, perform the explicit activation-time crypto provisioning path after commit, and signal Temporal when activation appended work. Step inputs and outputs remain pointer-only, with member or activation ids re-derived inside the step when a Temporal signal follows a completed receipt. Raw Stripe request bodies, signatures, customer objects, and invoice objects are not Workflow inputs or step outputs. Billing remains monotonic: `invoice.paid` is the normal positive Stripe entitlement source, with one metadata-gated exception where `checkout.session.completed` can activate a valid Pulse Trial subscription in `trial` phase. A Family-sponsored direct loser is canceled or refunded only while holding the Family owner lock before the member lock and revalidating the exact active membership, paid Family subscription, and direct Stripe identity; an authority change leaves the receipt retryable and preserves the Checkout attempt so replay can bind direct billing. Paid allowance still requires the paid phase from an accepted non-trial invoice, and hosted UI or API reads should follow eventual execution state rather than synchronous Cloudflare responses. Usage-credit Checkout is a separate one-time payment branch: reconciliation verifies the frozen purchase against live Session, line-item, PaymentIntent, Charge, Customer, currency, and mode facts before appending one grant. Browser return and status state never grants credit; an authenticated cancel return may re-fetch and idempotently expire only an open unpaid Session. Matching usage-credit refund or dispute events are intercepted before subscription handling; live re-fetched financial state appends capped signed `refund_adjustment` or `dispute_adjustment` entries under the beneficiary lock, while failures remain in the durable event retry lane and never suspend entitlement.
+11. The hosted `apps/web` control plane accepts provider OAuth and webhook traffic plus authenticated browser and agent control traffic, keeps provider tokens away from browsers, records sparse routing and token-audit state, and owns the hosted member slices plus all hosted control-plane facts in Postgres. Hosted onboarding identity is anchored on the verified phone plus blind lookup keys in Postgres, while `HostedMemberIdentity`, `HostedMemberRouting`, `HostedMemberBillingRef`, `HostedMemberEmailAuthorization`, and `HostedWebSession` keep recoverable member facts and first-party browser app sessions on their owning rows; app-session tokens are opaque to the browser and stored only by hash. Privy is fresh proof for login, linking, and security-sensitive identity operations, while the Murph app session is normal hosted browser auth. When Privy completion carries an existing Murph app session, it is same-member reauthentication rather than account switching: both the fresh Privy user and resolved member must match that app session before a replacement session is issued. The only human browser wearable-management surface is `/api/settings/device-sync/**`, and browser assertion routes such as `POST /api/device-sync/agents/pair` must still rely on short-lived signed assertions with consumed nonces. Native iOS and Android device-sync routes under `/api/device-sync/companion/**` authenticate with a Privy identity token in `Authorization: Bearer` through the same server-side Privy verification as browser sessions (no cookie fallback). Before minting a Junction SDK sign-in token, the companion sign-in route accepts only the closed `ios | android` platform union and applies lifecycle intent against durable connection state through the shared device-syncd ingress path: known same-member passive repair sends `resume` and requires exactly one established row; fresh or unproven legacy iOS installation omits intent, under which durable state resumes exactly one established row or establishes only when zero provider rows exist; and terminal or ambiguous state rejects without mutation. Android's visible Connect Health Connect action and a future visible hosted-health/Junction Reconnect action may send `connect`; passive launch, foreground return, and data ingress may not. The route returns the short-lived token exactly once without logging or persisting it. Companion status may scope to a normalized Junction source. `DeviceSyncSignal.sourceProviderSlug` records that source only when the provider-owned webhook parser identifies an actual data-bearing source; data-less historical completions, lifecycle events, and legacy rows keep it null. Source-scoped status filters both connected-source availability and receipt timestamps, so those null-source rows cannot make Health Connect borrow Apple Health success. The companion health-metadata route accepts only bounded versioned Recovery/Strain records with client-hashed identity inside a 366-day history horizon and 24-hour future-clock allowance, caps pending payloads at 16 per connection, stores each accepted batch as one encrypted dirty payload on the active member-owned Junction runtime lane, and emits a value-free mailbox wake. That active connection is the ingestion authority; source rows are projection evidence used only to disambiguate multiple active Junction lanes, not a prerequisite for the zero-provider-row omitted-intent bootstrap. `device-syncd` validates the closed payload again, preserves Apple HealthKit as canonical provenance with only an unverified WHOOP-metadata hint, and canonical health writes still flow only through `packages/importers` and `packages/core`. The sole pre-login exception is `POST /api/device-sync/companion/auth-diagnostics`: it accepts only a small allowlisted auth-failure envelope, uses the same closed optional platform union with legacy iOS defaulting, re-sanitizes the bounded provider message, writes one structured hosted warning, and applies per-client plus aggregate in-process throttles without persisting identity or contact data. Vercel WAF owns the cross-instance production rate limit for that route; the in-process window is a bounded fallback, not shared enforcement. Hosted onboarding Linq and Telegram webhook ingress verifies provider payloads in the route/service, stores sparse routing in hosted member owner tables, records quota counters where applicable, appends one canonical encrypted `conversation.message` mailbox item with channel-specific payload detail, and signals the per-user Temporal runtime workflow with no raw payload. Cloudflare Email ingress verifies either a signed reply alias for an active member or the fixed public sender route plus trusted sender authentication, stores the encrypted raw message, appends the same canonical mailbox item through a signed web callback, and signals the same pointer-only Temporal workflow through a signed web callback. Raw provider bodies, raw email messages, message content, verification headers, and provider secrets are not Workflow inputs. Cloudflare-bound hosted execution from exact message ingress and onboarding activation must first append encrypted hosted mailbox rows in the same transaction as the originating state mutation. Device-sync webhook freshness records trace/audit plus per-connection dirty state, appends one bounded `device-sync.wake` mailbox handoff on clean-to-dirty transitions, and completes trace acceptance in the same transaction. The runner pulls dirty rows through signed callbacks only when no fresh conversation input is pending. Hosted Linq, Telegram, and email ingress routes return success after durable classification/append or intentional ignore; post-append Temporal signal failures are logged as best-effort handoff failures instead of forcing provider retries. Device-sync webhook routes return success after durable trace/dirty acceptance; post-commit clean-to-dirty Temporal signal failures are logged as best-effort handoff failures, with no Vercel dirty-sweeper cron cadence and no dirty-row recovery sweep. The Temporal-owned global recovery reconciler is due-reconcile-only. Mailbox event-id dedupe and Temporal signal coalescing keep duplicate attempts safe, but web no longer runs a mailbox-lag cron backstop; a DB-backed pending-handoff reconciler remains future hardening for exact workflow-start failure journaling. Web does not own message-processing completion, assistant channel enablement state, same-conversation turn revision, outbox finalization, or internal runtime timers; those remain inside the restored local runtime checkpoint. Hosted device connection persistence stays provider-generic, hosted registry assembly should reuse the shared `device-syncd` config/factory seam, and provider-specific webhook-admin secrets must stay on provider-owned config rather than generic hosted env shapes. Hosted webhook receipts remain retry journals for receipt-local side effects only, not a second dispatch lifecycle owner. Stripe webhook ingress verifies the event and writes minimal receipt state synchronously, then starts a Vercel Workflow with only the Stripe event id; that workflow uses one event-id step to re-fetch Stripe, commit billing plus inline `member.activated` mailbox facts transactionally, perform the explicit activation-time crypto provisioning path after commit, and signal Temporal when activation appended work. Step inputs and outputs remain pointer-only, with member or activation ids re-derived inside the step when a Temporal signal follows a completed receipt. Raw Stripe request bodies, signatures, customer objects, and invoice objects are not Workflow inputs or step outputs. Billing remains monotonic: starter access is activated only by the Web-owned non-expiring starter-usage enrollment service, while `invoice.paid` is the sole positive Stripe subscription-entitlement source. A Family-sponsored direct loser is canceled or refunded only while holding the Family owner lock before the member lock and revalidating the exact active membership, paid Family subscription, and direct Stripe identity; an authority change leaves the receipt retryable and preserves the Checkout attempt so replay can bind direct billing. Paid allowance still requires the paid phase from an accepted invoice, and hosted UI or API reads should follow eventual execution state rather than synchronous Cloudflare responses. Usage-credit Checkout is a separate one-time payment branch: reconciliation verifies the frozen purchase against live Session, line-item, PaymentIntent, Charge, Customer, currency, and mode facts before appending one grant. Browser return and status state never grants credit; an authenticated cancel return may re-fetch and idempotently expire only an open unpaid Session. Matching usage-credit refund or dispute events are intercepted before subscription handling; live re-fetched financial state appends capped signed `refund_adjustment` or `dispute_adjustment` entries under the beneficiary lock, while failures remain in the durable event retry lane and never suspend entitlement.
 Direct saved-card funding remains inside that same one-time
 usage-credit branch. Reconciliation accepts only the exact PaymentIntent
 durably bound to the purchase, re-fetches its amount, Customer, environment,
@@ -1661,7 +1697,10 @@ The Linq AT_RISK home-line and recovered-setup paths genuinely inspect private
 home-line state before `BEGIN`; those speculative reads retain a failed root
 unwrap only in the existing request-scoped cache so their authoritative
 transaction rechecks fail locally instead of repeating KMS under a connection
-or authority lock.
+or authority lock. When an opted-in speculative batch fails during envelope
+metadata lookup or verification, it retains that same rejection for every
+affected uncached root reference. A later mixed cached-and-uncached request
+observes cached failures before starting new metadata or provider work.
 Established Linq direct messages resolve only a narrow blind-index/member-id
 target and unwrap the mailbox-payload ingress root; established Linq and
 Telegram group routes also retain the exact observed delivery-route ciphertext,
@@ -1670,7 +1709,10 @@ decrypt-only control root named by that ciphertext, and prewarm the mailbox
 root. For an eligible unbound group, Web generates the
 synthetic member id, prepares all four domain-root envelopes, pre-seals the
 delivery route, and prewarms the prepared control and mailbox roots before
-`BEGIN`. These reads and crypto results grant no authority: the planner repeats
+`BEGIN`. Parallel route/mailbox preparation and four-domain candidate
+preparation preserve the first observed failure but drain every started sibling
+before opening the transaction or finalizing request-scoped crypto state. These
+reads and crypto results grant no authority: the planner repeats
 route, identity, activation, access, line, pending-setup, and participant checks
 inside the transaction. A new route then commits the synthetic member,
 prepared root envelopes, container, unique external-thread route, and activation
@@ -2370,43 +2412,40 @@ exhaustion, and OpenAI quota or credits exhaustion, intentionally fail open by
 recording a deterministic allow decision so a legitimate first contact is not
 permanently dropped. With enforcement off, only a genuinely unknown member on a
 provider-authenticated direct iMessage from a configured E.164 phone prefix may
-use a persisted model-source allow to enter instant start. The selected permanent
-home line must be the same line the person contacted, and the existing no-card
-Pulse-trial owner must start from an unbound Stripe customer so an old saved card
-cannot silently auto-convert a text-initiated trial. The first planner transaction
-creates the canonical member, verified phone identity, pending route, and invite.
-That invite carries only the event id of the persisted model-source allow and is
-the single-owner token for that exact original inbound. Only the transaction
-creating a genuinely new member may mint that token; an existing inactive
-member without the exact same-event token remains on the signup path. The phone
-identity owner reports whether its unique insert actually won; a stale outer
-lookup that loses that insert exits retryably before invite or accounting work.
-While the token remains pending, a different inbound for the inactive member
-exits retryably before counting or creating an effect; it cannot continue or
-cancel the admitted start.
-The existing Stripe/activation owner locks the member, revalidates the exact
-invite and event before any Stripe mutation, then clears the token atomically
-with activation. A second ordinary planner pass counts and appends the original
-inbound exactly once after active access is visible. Ordinary signup delivery
-retains its existing exact-invite and member-ownership checks. Any block,
-deterministic fail-open, unsupported prefix/channel, cross-line route, existing
-member or billing customer, or definitive enrollment failure keeps the existing
-signup-link or ignored behavior. Active members, explicit thread routes, own
+use a persisted model-source allow to enter instant start. The selected
+permanent home line must be the same line the person contacted. The first
+planner transaction creates the canonical member, verified phone identity,
+pending route, and invite. That invite carries only the event id of the
+persisted model-source allow and is the single-owner token for that exact
+original inbound. Only the transaction creating a genuinely new member may
+mint that token; an existing inactive member without the exact same-event token
+remains on the signup path. The phone identity owner reports whether its unique
+insert actually won; a stale outer lookup that loses that insert exits
+retryably before invite or accounting work. While the token remains pending, a
+different inbound for the inactive member exits retryably before counting or
+creating an effect; it cannot continue or cancel the admitted start. The
+starter-usage owner then locks the beneficiary and member, revalidates the
+exact invite and event, appends the one semantic-keyed $4.50 starter grant when
+absent, activates the member, and clears the token atomically. It creates no
+Stripe Customer or Subscription. A second ordinary planner pass counts and
+appends the original inbound exactly once after active access is visible. Any
+block, deterministic fail-open, unsupported prefix/channel, cross-line route,
+existing member, conflicting billing history, or definitive enrollment failure
+keeps the existing signup-link or ignored behavior. Active members, explicit thread routes, own
 messages, group chats, local guard rejects, deterministic URL/STOP-style spam,
 and other non-invite paths bypass the classifier.
 
-Pulse-trial acquisition provenance is descriptive, not entitlement authority.
-The auto-enrollment owner writes `web_onboarding`, `companion_onboarding`, or
-`linq_instant_start` into Stripe subscription metadata. The card-based website
-fallback writes `web_onboarding` into its existing Checkout Session and
-subscription metadata. Both acceptance paths copy the canonical subscription
-value to `HostedMemberBillingRef.pulseTrialStartSource` beside the redeemed
-timestamp. Retries therefore recover the event-time source from the existing
-provider record without another state owner. Historical billing rows and
-in-flight legacy Checkout sessions remain null rather than inferring provenance
-from mutable identity state. The ops growth read maps null or invalid values to
-Unknown and exposes only the existing masked phone hint; it never decrypts
-contact data for attribution.
+Starter-usage acquisition provenance is descriptive, not entitlement
+authority. The starter grant records `web_onboarding`,
+`companion_onboarding`, `linq_instant_start`, or `legacy_trial_migration` in
+its bounded source-reference lookup key. Duplicate enrollment paths converge
+on the member's policy-versioned semantic grant key. Historical billing rows
+and delayed legacy Stripe events retain their old nullable trial metadata only
+for bounded provider cleanup and audit compatibility; those fields never grant
+capacity. The ops growth read derives current starter activation from the
+immutable starter grant and maps invalid source references to Unknown while
+exposing only the existing masked phone hint; it never decrypts contact data
+for attribution.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

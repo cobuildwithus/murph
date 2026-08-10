@@ -145,7 +145,7 @@ function buildFaqs(input: {
   }
   faqs.push({
     answer:
-      "Yes. To keep referrals fair, there are limits on how often rewards can be earned. Murph shows the options available right now.",
+      "Yes. To keep referrals fair, there are limits on how often rewards can be earned. Murph shows the options available right now. Rewards add usage capacity but do not change your subscription renewal date.",
     question: "Are there limits?",
   });
 

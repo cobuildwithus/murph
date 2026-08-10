@@ -29,6 +29,7 @@ import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import { ValidationSlide } from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -57,7 +58,6 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
-import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
@@ -69,6 +69,7 @@ import {
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
+import { PersonalPatternsStudy } from "./personal-patterns-study";
 
 function StudySection({
   children,
@@ -253,6 +254,12 @@ export function SectionsContent() {
 
       <StudySection title="Private Environment print report">
         <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Patterns page">
+        <PersonalPatternsStudy />
       </StudySection>
 
       <Separator />
@@ -533,13 +540,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Pulse billing return confirmation">
-        <PulseTrialBillingContinuationStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -609,7 +610,20 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with sponsorship accounting, messaging-activity, message-volume, and monthly-revenue history">
+      <StudySection title="Pitch deck progress slide">
+        <div
+          id="pitch-progress-slide"
+          data-design-section="pitch-progress-slide"
+          className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ValidationSlide />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
         <div inert>
           <GrowthScorecardStudy />
         </div>

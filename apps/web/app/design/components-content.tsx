@@ -51,7 +51,6 @@ import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-
 import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
-import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import {
   HostedAuthPanelAlternateMethods,
@@ -136,7 +135,6 @@ import {
   JOIN_EDGE_FEATURES,
   JOIN_FAMILY_FEATURES,
   JOIN_PULSE_FEATURES,
-  PULSE_TRIAL_FEATURES,
   SETTINGS_CORE_FEATURES,
   SETTINGS_EDGE_FEATURES,
   SETTINGS_FAMILY_FEATURES,
@@ -148,7 +146,6 @@ import { HostedFamilyManager } from "@/src/components/settings/hosted-family-set
 import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
-import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -161,6 +158,9 @@ import {
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
@@ -176,6 +176,7 @@ import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-stu
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
+import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
@@ -625,6 +626,7 @@ export function ComponentsContent() {
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
     useState(false);
+  const [usageCapacityPreviewKey, setUsageCapacityPreviewKey] = useState(0);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -646,20 +648,6 @@ export function ComponentsContent() {
             {DESIGN_HOME_HISTORY_CARDS.map((card) => (
               <HomeExperimentCard key={card.id} card={card} variant="history" />
             ))}
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Pulse billing return confirmation">
-          <div inert>
-            <PulseTrialBillingContinuationView
-              action="start_pulse_now"
-              errorMessage={null}
-              onConfirm={() => {}}
-              onDismiss={() => {}}
-              status="confirming"
-            />
           </div>
         </Section>
 
@@ -918,6 +906,23 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="personal-patterns"
+          id="personal-patterns-component"
+          inert
+        >
+          <Section title="Personal patterns matrix">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production overview component. It compares repeated actions with
+              next-day outcomes and shows evidence strength without causal or
+              good-versus-bad labels.
+            </p>
+            <PersonalPatternsComponentStudy />
+          </Section>
+        </div>
 
         <Separator />
 
@@ -1310,7 +1315,7 @@ export function ComponentsContent() {
         <Section title="Setup Loader">
           <p className="text-sm text-muted-foreground">
             Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
-            the auto-trial is provisioned. The Murph mark fires a sonar ripple from its two
+            Starter usage is activated. The Murph mark fires a sonar ripple from its two
             largest core dots outward — each dot&apos;s delay is proportional to its distance
             from center, so the wave radiates through the constellation rather than pulsing
             uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
@@ -1427,7 +1432,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-nutrition-card"
-          title="iMessage nutrition card"
+          title="iMessage nutrition card preview"
         >
           <ImessageNutritionCardStudy />
         </Section>
@@ -1436,7 +1441,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage compact table card"
+          title="iMessage compact table card states"
         >
           <ImessageCompactTableCardStudy />
         </Section>
@@ -1578,7 +1583,7 @@ export function ComponentsContent() {
                 Add one-time usage with a saved card or continue securely in
                 Stripe when needed.
               </p>
-              <div className="mt-6">
+              <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   inert
@@ -1586,6 +1591,31 @@ export function ComponentsContent() {
                   payerMemberId="design_usage_top_up_payer"
                   scope="personal"
                 />
+                <div
+                  className="contents"
+                  data-design-state="usage-top-up-capacity-conflict"
+                >
+                  <Button
+                    variant="outline"
+                    onClick={() => setUsageCapacityPreviewKey((key) => key + 1)}
+                  >
+                    Preview capacity response
+                  </Button>
+                  {usageCapacityPreviewKey > 0 ? (
+                    <HostedUsageTopUpDialog
+                      key={usageCapacityPreviewKey}
+                      checkoutUrl="/api/design/usage-credit-preview"
+                      inert
+                      initialCheckoutErrorCode={
+                        HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE
+                      }
+                      initialOpen
+                      offers={[]}
+                      payerMemberId="design_usage_top_up_payer"
+                      scope="personal"
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
             <div
@@ -2409,9 +2439,9 @@ export function ComponentsContent() {
         <Section title="Progress">
           <div className="flex flex-col gap-2">
             <div className="flex justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
-              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
+              <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
             </div>
             <Progress value={54} className="h-1.5" />
           </div>
@@ -2510,7 +2540,7 @@ export function ComponentsContent() {
           <div className="flex items-end gap-8">
             <div className="flex flex-col items-center gap-2">
               <PlanVisual tier="free" />
-              <span className="text-xs text-muted-foreground">Free</span>
+              <span className="text-xs text-muted-foreground">Starter</span>
             </div>
             <div className="flex flex-col items-center gap-2">
               <PlanVisual tier="pulse" />
@@ -2528,12 +2558,11 @@ export function ComponentsContent() {
         <Section title="Plan selling points">
           <p className="-mt-3 text-xs text-muted-foreground">
             Canonical bullet lists from lib/hosted-onboarding/plan-features.ts. The join page,
-            billing settings, and the plan dialogs all render from these lists, so a wording
+            billing settings, and checkout dialogs all render from these lists, so a wording
             change here is the wording change everywhere. Only Edge may claim the most capable
             AI models; the top model requires an active paid Edge plan.
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <PlanBulletListStudy title="Pulse trial · join page" features={PULSE_TRIAL_FEATURES} />
             <PlanBulletListStudy title="Pulse · join page" features={JOIN_PULSE_FEATURES} />
             <PlanBulletListStudy title="Edge · join page" features={JOIN_EDGE_FEATURES} />
             <PlanBulletListStudy title="Family · join page" features={JOIN_FAMILY_FEATURES} />
@@ -2542,11 +2571,11 @@ export function ComponentsContent() {
             <PlanBulletListStudy title="Edge · settings" features={SETTINGS_EDGE_FEATURES} />
             <PlanBulletListStudy title="Family · settings" features={SETTINGS_FAMILY_FEATURES} />
             <PlanBulletListStudy
-              title="Pulse · start-paid dialog"
+              title="Pulse · checkout"
               features={CHECKOUT_PULSE_FEATURES}
             />
             <PlanBulletListStudy
-              title="Core · start-paid dialog"
+              title="Core · checkout"
               features={CHECKOUT_CORE_FEATURES}
             />
             <PlanBulletListStudy
@@ -2554,15 +2583,6 @@ export function ComponentsContent() {
               features={EDGE_ONLY_FEATURES}
             />
           </div>
-        </Section>
-
-        <Section title="Trial Billing Banner">
-          <p className="-mt-3 text-xs text-muted-foreground">
-            Shown on Home when a Pulse trial is paused with billing still attached. It is the
-            dashboard&apos;s only billing-recovery action, which is why lapsed members are sent
-            to the Subscription controls rather than here.
-          </p>
-          <TrialBillingBanner />
         </Section>
 
         <Separator />

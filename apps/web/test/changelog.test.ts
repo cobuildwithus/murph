@@ -38,6 +38,22 @@ describe("changelog registry", () => {
     expect(invalidItems).toEqual([]);
   });
 
+  it("bounds restored web search to the managed OpenAI provider", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "web-search-restored",
+    );
+
+    expect(item).toMatchObject({
+      details: expect.stringContaining("managed OpenAI"),
+      summary: expect.stringContaining("managed OpenAI"),
+      title: expect.stringContaining("Managed OpenAI"),
+    });
+    expect(item?.tryIt).toBeUndefined();
+    expect(`${item?.title} ${item?.summary} ${item?.details}`).not.toContain(
+      "Murph can search the web",
+    );
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -276,11 +292,26 @@ describe("changelog registry", () => {
     );
   });
 
-  it("keeps the August 7 through August 9 feature claims bounded", () => {
+  it("keeps the August 7 through August 10 feature claims bounded", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
+      sourcePullRequests: [1546],
+      summary: expect.stringContaining("preserves that local time"),
+      details: expect.stringContaining("next deliverable occurrence"),
+      tryIt: {
+        label: "Schedule a local-time reminder",
+        prompt: "Remind me every day at 9 PM Central to wind down.",
+      },
+    });
+    expect(items.get("workout-card-status-rendering")).toMatchObject({
+      sourcePullRequests: [1599],
+      summary: expect.stringContaining("including their static previews"),
+      details: expect.stringContaining("part of the card image itself"),
+    });
+    expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -472,16 +503,28 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 9 shipment set", () => {
+  it("publishes the complete July 20 through August 10 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 21).map((edition) => ({
+      listChangelogEditions().slice(0, 22).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
       {
+        id: "2026-08-10",
+        itemIds: [
+          "non-expiring-starter-access",
+          "personal-patterns",
+          "reminders-keep-requested-timezone",
+          "web-search-restored",
+          "appointment-reminders-by-default",
+          "workout-card-status-rendering",
+        ],
+      },
+      {
         id: "2026-08-09",
         itemIds: [
+          "group-sleep-challenges-use-fresh-data",
           "public-referral-home",
           "murph-max-plan",
           "generated-contact-card-avatar",
@@ -492,6 +535,7 @@ describe("changelog registry", () => {
           "group-replies-respect-the-room",
           "sponsorship-creative-opt-in",
           "response-cards-survive-long-turns",
+          "cleaner-imessage-nutrition-cards",
           "typing-prewarms-private-chat",
           "automation-output-variety",
           "ios-app-footer-link",
@@ -823,6 +867,22 @@ describe("changelog registry", () => {
     ]);
   });
 
+  it("keeps Personal Patterns historical and non-causal", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "personal-patterns",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [1563],
+      tryIt: {
+        href: "/patterns",
+        label: "View your patterns",
+      },
+    });
+    expect(item?.details).toContain("existing history");
+    expect(item?.details).toContain("association rather than cause");
+  });
+
   it("keeps historical one-time sponsorship copy and publishes monthly sponsorship only in the current edition", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
@@ -942,8 +1002,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-09");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-03");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
   });
 
   it("resolves only known canonical edition cursors", () => {

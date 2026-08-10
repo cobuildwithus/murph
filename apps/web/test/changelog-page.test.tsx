@@ -59,6 +59,12 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain(
+      "Starter access, patterns, reminders, cards, and web search",
+    );
+    expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Completed workout rows keep their checkmark");
+    expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
@@ -72,7 +78,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("More ways to connect, prepare, and finish");
     expect(markup).toContain("Ask about images and video on X");
     expect(markup).toContain("More control over data, models, and connections");
-    expect(markup).toContain(
+    expect(markup).not.toContain(
       "Connected apps recover with a clearer next step",
     );
     expect(markup).not.toContain("Recovery that stops at the right moment");
@@ -100,7 +106,10 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-08-02"');
+    expect(markup).toContain('href="/changelog?edition=2026-08-03"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-10#personal-patterns"',
+    );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
     );
@@ -144,6 +153,12 @@ describe("ChangelogPage", () => {
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
       expect.arrayContaining([
+        {
+          message: {
+            body: "Remind me every day at 9 PM Central to wind down.",
+            subject: "Try it: Reminders keep the time you asked for",
+          },
+        },
         {
           message: {
             body: "Look at the images or video in this X post and tell me what they show: [paste X post URL]",
@@ -222,12 +237,18 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Live storage maintenance");
   });
 
-  it("renders the real archive section against synthetic design data", () => {
+  it("renders the latest production edition and synthetic archive studies", () => {
     const markup = renderToStaticMarkup(<ChangelogArchiveStudy />);
 
     expect(markup).toContain('data-design-study="changelog-archive"');
+    expect(markup).toContain('data-design-state="latest-production-edition"');
+    expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");
+    expect(markup).toContain("Confirmed appointments come with a reminder");
+    expect(markup).toContain("Tell Murph about an appointment");
+    expect(markup).toContain("Confirmed appointment");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
@@ -240,6 +261,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
     expect(markup).toContain('href="#design-follow-up"');
+    expect(markup).toContain('href="#appointment-reminders-by-default"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
   });

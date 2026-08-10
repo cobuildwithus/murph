@@ -95,10 +95,10 @@ import {
   type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
 import {
-  ensureHostedLinqInstantStartPulseTrialEnrollment,
+  ensureHostedLinqInstantStartStarterUsageEnrollment,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
   type HostedLinqInstantStartDeferredActivationWake,
-} from "./auto-trial-enrollment-service";
+} from "./starter-usage-enrollment-service";
 import {
   isHostedLinqInstantStartEventCandidate,
 } from "./linq-instant-start";
@@ -694,7 +694,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         });
         let enrollmentFailed = false;
         try {
-          const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
+          const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
             admissionEventId: instantStartEnrollment.admissionEventId,
             inviteCode: instantStartEnrollment.inviteCode,
             memberId: instantStartEnrollment.memberId,
@@ -1914,6 +1914,39 @@ interface HostedThreadRoutingCryptoPreparation {
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
 }
 
+async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
+  prepareDeliveryRoute: () => Promise<PreparedHostedThreadContainerDeliveryRoute>;
+  warmMailboxRoot: () => Promise<void>;
+}): Promise<PreparedHostedThreadContainerDeliveryRoute> {
+  let firstError: unknown;
+  let hasError = false;
+  const preserveFirstError = async <T>(operation: () => Promise<T>): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
+      throw error;
+    }
+  };
+  const [deliveryRouteResult, mailboxRootResult] = await Promise.allSettled([
+    preserveFirstError(input.prepareDeliveryRoute),
+    preserveFirstError(input.warmMailboxRoot),
+  ]);
+  if (hasError) {
+    throw firstError;
+  }
+  if (deliveryRouteResult.status === "rejected") {
+    throw deliveryRouteResult.reason;
+  }
+  if (mailboxRootResult.status === "rejected") {
+    throw mailboxRootResult.reason;
+  }
+  return deliveryRouteResult.value;
+}
+
 async function prepareHostedLinqThreadRoutingCrypto(input: {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
@@ -1942,22 +1975,24 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
         "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
       );
     }
-    const [preparedThreadDeliveryRoute] = await Promise.all([
-      prepareHostedThreadContainerDeliveryRoute({
-        accountLookupKey,
-        channel: "linq",
-        containerMemberId: threadRoute.containerMemberId,
-        observedDeliveryRouteEncrypted:
-          threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
-        prisma: input.prisma,
-        threadId: context.summary.chatId,
-      }),
-      warmHostedLinqMailboxPayloadRoot({
-        event: input.event,
-        prisma: input.prisma,
-        threadRoute,
-      }),
-    ]);
+    const preparedThreadDeliveryRoute =
+      await prepareHostedThreadDeliveryRouteAndWarmMailbox({
+        prepareDeliveryRoute: () =>
+          prepareHostedThreadContainerDeliveryRoute({
+            accountLookupKey,
+            channel: "linq",
+            containerMemberId: threadRoute.containerMemberId,
+            observedDeliveryRouteEncrypted:
+              threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
+            prisma: input.prisma,
+            threadId: context.summary.chatId,
+          }),
+        warmMailboxRoot: () => warmHostedLinqMailboxPayloadRoot({
+          event: input.event,
+          prisma: input.prisma,
+          threadRoute,
+        }),
+      });
     return { preparedThreadDeliveryRoute };
   }
 
@@ -2051,26 +2086,28 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
     };
   }
 
-  const [preparedThreadDeliveryRoute] = await Promise.all([
-    prepareHostedThreadContainerDeliveryRoute({
-      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
-      channel: "telegram",
-      containerMemberId: threadRoute.containerMemberId,
-      observedDeliveryRouteEncrypted:
-        threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
-      prisma: input.prisma,
-      threadId: message.threadId,
-    }),
-    (async () => {
-      const root = await unwrapHostedDomainRootForWeb({
-        domain: getHostedCryptoDomainForLane("mailbox-payload"),
-        prisma: input.prisma,
-        retainFailureInScopedCache: true,
-        userId: threadRoute.containerMemberId,
-      });
-      root.rootKey.fill(0);
-    })(),
-  ]);
+  const preparedThreadDeliveryRoute =
+    await prepareHostedThreadDeliveryRouteAndWarmMailbox({
+      prepareDeliveryRoute: () =>
+        prepareHostedThreadContainerDeliveryRoute({
+          accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+          channel: "telegram",
+          containerMemberId: threadRoute.containerMemberId,
+          observedDeliveryRouteEncrypted:
+            threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
+          prisma: input.prisma,
+          threadId: message.threadId,
+        }),
+      warmMailboxRoot: async () => {
+        const root = await unwrapHostedDomainRootForWeb({
+          domain: getHostedCryptoDomainForLane("mailbox-payload"),
+          prisma: input.prisma,
+          retainFailureInScopedCache: true,
+          userId: threadRoute.containerMemberId,
+        });
+        root.rootKey.fill(0);
+      },
+    });
   return { preparedSenderMemberId, preparedThreadDeliveryRoute };
 }
 

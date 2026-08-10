@@ -131,7 +131,7 @@ const WORKOUT_CARD: Extract<
   kind: "compact_table",
   version: 1,
   title: "Push day",
-  subtitle: "3 of 6 sets complete",
+  subtitle: "4 of 6 sets complete",
   footer: "Tap an exercise to log or correct a set.",
   workout: {
     version: 1,
@@ -142,7 +142,7 @@ const WORKOUT_CARD: Extract<
         sets: [
           { status: "completed", target: "185 lb × 8", actual: "185 lb × 8" },
           { status: "completed", target: "185 lb × 8", actual: "185 lb × 7" },
-          { status: "pending", target: "185 lb × 6–8", actual: null },
+          { status: "completed", target: "185 lb × 6–8", actual: "185 lb × 6" },
         ],
       },
       {
@@ -209,6 +209,8 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
   assert.doesNotMatch(
     serialized,
     /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Under target|Goal unavailable|Complete total/u,
@@ -327,9 +329,12 @@ test("response-card image route restores and renders the exact compact V4 workou
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /Push day/u);
   assert.match(serialized, /Bench press/u);
-  assert.match(serialized, /Next: 185 lb × 6–8/u);
-  assert.match(serialized, /data-workout-progress="0\.5000"/u);
+  assert.match(serialized, /Next: 55 lb × 8–10/u);
+  assert.match(serialized, /data-workout-progress="0\.6667"/u);
+  assert.match(serialized, /data-exercise-state="resolved"/u);
   assert.match(serialized, /data-exercise-state="in-progress"/u);
+  assert.match(serialized, /data-exercise-checkmark="true"/u);
+  assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
 });
 

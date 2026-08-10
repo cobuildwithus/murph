@@ -14,6 +14,7 @@ export interface LockedHostedUsageCreditBeneficiary
 
 export interface LockedHostedUsageCreditPurchase {
   beneficiaryMemberId: string;
+  grantSlotReleasedAt: Date | null;
   grantUsdMicros: bigint;
   id: string;
   paidAt: Date | null;
@@ -84,6 +85,7 @@ export async function lockHostedUsageCreditPurchaseTx(input: {
     SELECT
       "id",
       "beneficiary_member_id" AS "beneficiaryMemberId",
+      "grant_slot_released_at" AS "grantSlotReleasedAt",
       "grant_usd_micros" AS "grantUsdMicros",
       "remaining_credit_usd_micros" AS "remainingCreditUsdMicros",
       "status"::text AS "status",

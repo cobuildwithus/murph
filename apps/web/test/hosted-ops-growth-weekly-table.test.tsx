@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { GrowthWeeklyTable } from "../app/(dashboard)/ops/growth/growth-weekly-table";
 
 describe("ops growth weekly table", () => {
-  it("labels raw member creation separately from trial activation", () => {
+  it("labels raw member creation separately from starter activation", () => {
     const markup = renderToStaticMarkup(
       <GrowthWeeklyTable
         rows={[
@@ -23,7 +23,7 @@ describe("ops growth weekly table", () => {
     expect(markup).toContain("Weekly intake and activation");
     expect(markup).toContain("Member records");
     expect(markup).toContain("Record change");
-    expect(markup).toContain("Trial starts");
+    expect(markup).toContain("Starter activations");
     expect(markup).toContain("+20% week over week");
     expect(markup).toContain("No week baseline");
     expect(markup).not.toContain("New members");

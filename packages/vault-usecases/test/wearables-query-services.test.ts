@@ -605,3 +605,57 @@ test("showWearableSleepPattern forwards the normalized window and preserves ever
   assert.equal(loadCoreRuntime.mock.calls.length, 0);
   assert.equal(loadImporterRuntime.mock.calls.length, 0);
 });
+
+test("showPersonalPatterns forwards one shared date window to the query runtime", async () => {
+  const report = {
+    asOfDate: "2026-08-06",
+    cells: [],
+    factors: [],
+    lagDays: 1 as const,
+    notes: [],
+    outcomes: [],
+    repeatableCellCount: 0,
+    testedCellCount: 0,
+    windowDays: 90,
+  };
+  const buildPersonalPatternReportRuntime = vi.fn(async () => report);
+  const loadCoreRuntime = vi.fn();
+  const loadImporterRuntime = vi.fn();
+  const loadQueryRuntime = vi.fn(async () => ({
+    buildPersonalPatternReportRuntime,
+  }));
+
+  const integratedServicesModule = await importWithMocks<
+    typeof import("../src/usecases/integrated-services.ts")
+  >("../src/usecases/integrated-services.ts", {
+    "../src/usecases/runtime.ts": () => ({
+      createUnwiredMethod: vi.fn(),
+      loadCoreRuntime,
+      loadImporterRuntime,
+      loadQueryRuntime,
+    }),
+  });
+
+  const services = integratedServicesModule.createIntegratedVaultServices();
+  const result = await services.query.showPersonalPatterns({
+    date: "2026-08-06",
+    requestId: null,
+    vault: "./vault",
+    windowDays: 90,
+  });
+
+  assert.deepEqual(buildPersonalPatternReportRuntime.mock.calls, [["./vault", {
+    asOf: "2026-08-06",
+    windowDays: 90,
+  }]]);
+  assert.deepEqual(result, {
+    filters: {
+      date: "2026-08-06",
+      windowDays: 90,
+    },
+    report,
+  });
+  assert.equal(loadQueryRuntime.mock.calls.length, 1);
+  assert.equal(loadCoreRuntime.mock.calls.length, 0);
+  assert.equal(loadImporterRuntime.mock.calls.length, 0);
+});

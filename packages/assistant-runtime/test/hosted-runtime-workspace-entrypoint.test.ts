@@ -29210,6 +29210,100 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("retries the requested browser-vault refresh after a browser-only wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const browserItems: HostedMailboxItem[] = [];
+    const refreshImplementation =
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
+    let assistantPhaseCount = 0;
+    let refreshCount = 0;
+
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async () => {
+      refreshCount += 1;
+      if (refreshCount === 1) {
+        events.push("browser.refresh:deferred");
+        browserItems.push(createMailboxItem({
+          dedupeKey: "runtime-control:browser-vault-refresh:later",
+          id: "mailbox_browser_refresh_later",
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "1",
+        }));
+        runtimeWakeSignal.notify();
+        return {
+          source: { fileCount: 0, totalBytes: 0 },
+          status: "deferred_runtime_wake",
+        };
+      }
+      events.push("browser.refresh:completed");
+      return { status: "skipped_no_port" };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_browser_refresh_browser_only_wake",
+            idleCheckpointDelayMs: 1,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/browser-refresh-order.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: browserItems }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCount += 1;
+            return assistantPhaseCount === 1
+              ? {
+                  browserVaultReplicaRefreshRequested: true,
+                  checkpointReason: "canonical_runtime_commit",
+                  progressed: true,
+                }
+              : { progressed: false };
+          },
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      const deferredIndex = events.indexOf("browser.refresh:deferred");
+      const completedIndex = events.indexOf("browser.refresh:completed");
+      expect(deferredIndex).toBeGreaterThan(-1);
+      expect(completedIndex).toBeGreaterThan(deferredIndex);
+      expect(events.slice(deferredIndex + 1, completedIndex)).toContain("mailbox.fetch");
+    } finally {
+      if (refreshImplementation) {
+        mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+          refreshImplementation,
+        );
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("skips no-progress browser-vault refresh after shutdown begins", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
