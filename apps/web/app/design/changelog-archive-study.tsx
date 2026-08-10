@@ -1,6 +1,12 @@
-import type { ChangelogEdition } from "@/src/lib/changelog";
+import {
+  listChangelogEditions,
+  type ChangelogEdition,
+} from "@/src/lib/changelog";
 
-import { ChangelogEditionSection } from "../changelog/changelog-edition-section";
+import {
+  ChangelogEditionSection,
+  type ResolvedChangelogTryIt,
+} from "../changelog/changelog-edition-section";
 import { PhoneMock } from "../changelog/phone-mock";
 import {
   CalendarMock,
@@ -142,6 +148,49 @@ const DESIGN_VISUALS = {
   ),
 } as const;
 
+const LATEST_PRODUCTION_ITEM_IDS = new Set([
+  "appointment-reminders-by-default",
+  "web-search-restored",
+]);
+const LATEST_PRODUCTION_SOURCE_EDITION = listChangelogEditions().find(
+  (edition) =>
+    edition.items.some((item) => LATEST_PRODUCTION_ITEM_IDS.has(item.id)),
+);
+const LATEST_PRODUCTION_CHANGELOG_EDITION = LATEST_PRODUCTION_SOURCE_EDITION
+  ? {
+      ...LATEST_PRODUCTION_SOURCE_EDITION,
+      items: LATEST_PRODUCTION_SOURCE_EDITION.items.filter((item) =>
+        LATEST_PRODUCTION_ITEM_IDS.has(item.id),
+      ),
+    }
+  : null;
+const LATEST_PRODUCTION_TRY_IT_BY_ITEM_ID: ReadonlyMap<
+  string,
+  ResolvedChangelogTryIt
+> = new Map([
+    [
+      "appointment-reminders-by-default",
+      {
+        authenticated: false,
+        label: "Tell Murph about an appointment",
+        options: [],
+        prompt:
+          "I have a confirmed dentist appointment next Thursday at 2 PM.",
+      },
+    ],
+]);
+
+const LATEST_PRODUCTION_VISUALS = {
+  "appointment-reminders-by-default": (
+    <CalendarMock
+      entries={[
+        { day: "Thu", time: "2:00 PM", what: "Dentist appointment" },
+      ]}
+      label="Confirmed appointment"
+    />
+  ),
+} as const;
+
 export function ChangelogArchiveStudy() {
   return (
     <div
@@ -151,12 +200,28 @@ export function ChangelogArchiveStudy() {
       inert
     >
       <div className="mx-auto max-w-[1080px]">
-        <ChangelogEditionSection
-          buildItemHref={(itemId) => `#${itemId}`}
-          edition={DESIGN_CHANGELOG_EDITION}
-          isFirst
-          visuals={DESIGN_VISUALS}
-        />
+        {LATEST_PRODUCTION_CHANGELOG_EDITION ? (
+          <div
+            data-design-state="latest-production-edition"
+            id="changelog-archive-latest"
+          >
+            <ChangelogEditionSection
+              buildItemHref={(itemId) => `#${itemId}`}
+              edition={LATEST_PRODUCTION_CHANGELOG_EDITION}
+              isFirst
+              tryItByItemId={LATEST_PRODUCTION_TRY_IT_BY_ITEM_ID}
+              visuals={LATEST_PRODUCTION_VISUALS}
+            />
+          </div>
+        ) : null}
+        <div className="mt-20 border-t border-[#c4a882]/35 pt-20">
+          <ChangelogEditionSection
+            buildItemHref={(itemId) => `#${itemId}`}
+            edition={DESIGN_CHANGELOG_EDITION}
+            isFirst
+            visuals={DESIGN_VISUALS}
+          />
+        </div>
       </div>
     </div>
   );

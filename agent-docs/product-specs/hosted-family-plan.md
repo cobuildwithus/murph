@@ -100,15 +100,19 @@ subscription webhook writes the paid projection and clears the old direct
 billing reference in the same transaction, so entitlement ownership changes
 once and never advances Stripe's event watermark from local wall time.
 
-Converting an active direct Pulse trial is a consequential billing action: it
-ends the free trial and starts the two-seat Family minimum immediately. Settings
+During the bounded Starter rollout compatibility window, converting an exact
+legacy direct Pulse trial is a consequential billing action: it ends that
+provider trial and starts the two-seat Family minimum immediately. Settings
 must show the exact $14/month total, $7/person Pulse price, two included seats,
 and immediate trial end in a confirmation dialog before sending the request.
-Keeping the trial sends no request. The server requires the explicit
+Keeping the legacy trial sends no request. The server requires the explicit
 trial-conversion confirmation and rejects an old or crafted client that omits
 it before any Stripe mutation. The confirmed conversion updates the existing
 trial subscription rather than creating a competing subscription; webhook
-reconciliation remains the projection owner.
+reconciliation remains the projection owner. This is not a Starter conversion
+path. Remove the UI, request flag, server branch, tests, and this paragraph
+together after old trial creators are gone, the retirement dry-run reaches
+zero, and the maximum delayed-event horizon passes.
 
 Changing a member's tier is one owner-confirmed action. Web records the target
 in the membership's nullable `pendingPlanCode` while the current tier and access

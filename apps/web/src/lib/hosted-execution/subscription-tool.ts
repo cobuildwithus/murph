@@ -24,22 +24,19 @@ import {
   type HostedBillingPlanSwitchResult,
 } from "../hosted-onboarding/billing-plan-switch-to-pulse-service";
 import {
+  buildHostedBillingPlanQuoteStaleError,
   buildHostedBillingPlanQuoteState,
   verifyHostedBillingPlanQuote,
   type HostedBillingPlanQuoteTiming,
 } from "../hosted-onboarding/billing-plan-quote";
 import {
-  continueHostedPulseTrialPaidPlan,
-  startHostedTrialPaidPlan,
-  startHostedPulseTrialPaidPlan,
-  type HostedTrialPaidPlanTransitionResult,
-  type HostedPulseTrialContinueResult,
-  type HostedPulseTrialStartPaidResult,
-} from "../hosted-onboarding/billing-start-paid-pulse-service";
+  createHostedBillingCheckout,
+} from "../hosted-onboarding/billing-service";
 import {
   readHostedMemberBillingEligibilityState,
 } from "../hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberCoreState } from "../hosted-onboarding/hosted-member-store";
+import { issueHostedInvite } from "../hosted-onboarding/invite-service";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -110,24 +107,11 @@ export async function handleHostedSubscriptionTool(input: {
       });
     }
     case "continue_pulse":
-      return projectPulseResult({
-        action: input.request.action,
-        planCode: "launch_monthly",
-        result: await continueHostedPulseTrialPaidPlan({
-          memberId: input.memberId,
-          paymentMethodContinuation: "conversation",
-          prisma,
-        }),
-      });
     case "start_pulse_now":
-      return projectPulseResult({
+      return startHostedPlanCheckoutFromConversation({
         action: input.request.action,
-        planCode: "launch_monthly",
-        result: await startHostedPulseTrialPaidPlan({
-          memberId: input.memberId,
-          paymentMethodContinuation: "conversation",
-          prisma,
-        }),
+        memberId: input.memberId,
+        targetPlanCode: "launch_monthly",
       });
     case "upgrade_edge":
       return projectPlanUpgradeResult({
@@ -204,20 +188,10 @@ async function handleHostedQuotedPlanChange(input: {
   targetPlanCode: HostedRuntimeDirectBillingPlanCode;
 }): Promise<HostedRuntimeSubscriptionToolResponse> {
   const prisma = getPrisma();
-  if (
-    input.quoteTiming === "now"
-    || input.quoteTiming === "at_trial_end"
-  ) {
-    return projectQuotedPlanChangeResult({
-      result: await startHostedTrialPaidPlan({
-        memberId: input.memberId,
-        paymentMethodContinuation: "conversation",
-        prisma,
-        targetPlanCode: requireHostedTrialPaidTargetPlanCode(
-          input.targetPlanCode,
-        ),
-        timing: input.quoteTiming,
-      }),
+  if (input.quoteTiming === "now") {
+    return startHostedPlanCheckoutFromConversation({
+      action: "change_plan",
+      memberId: input.memberId,
       targetPlanCode: input.targetPlanCode,
     });
   }
@@ -249,15 +223,13 @@ async function handleHostedQuotedPlanChange(input: {
 function projectQuotedPlanChangeResult(input: {
   result:
     | HostedBillingPlanSwitchResult
-    | HostedBillingPlanUpgradeResult
-    | HostedTrialPaidPlanTransitionResult;
+    | HostedBillingPlanUpgradeResult;
   targetPlanCode: HostedRuntimeDirectBillingPlanCode;
 }): HostedRuntimeSubscriptionToolResponse {
   const plan = projectHostedSubscriptionPlan(input.targetPlanCode);
 
   switch (input.result.status) {
     case "already_on_plan":
-    case "continuing":
       return {
         action: "change_plan",
         plan,
@@ -271,13 +243,6 @@ function projectQuotedPlanChangeResult(input: {
         plan,
         status: "scheduled",
       };
-    case "billing_pending":
-      return {
-        action: "change_plan",
-        plan,
-        status: "pending",
-      };
-    case "payment_required":
     case "pending_payment":
       return {
         action: "change_plan",
@@ -285,75 +250,89 @@ function projectQuotedPlanChangeResult(input: {
         plan,
         status: "payment_required",
       };
-    case "payment_method_required":
-      throw new TypeError(
-        "Trial payment-method preflight must be projected by the trial transition owner.",
-      );
-    case "started":
-      return {
-        action: "change_plan",
-        plan,
-        status: "completed",
-      };
   }
 }
 
-function requireHostedTrialPaidTargetPlanCode(
-  planCode: HostedRuntimeDirectBillingPlanCode,
-): "launch_group_monthly" | "launch_monthly" {
-  if (
-    planCode === "launch_group_monthly"
-    || planCode === "launch_monthly"
-  ) {
-    return planCode;
-  }
-
-  throw buildHostedBillingPlanQuoteStaleError();
-}
-
-function buildHostedBillingPlanQuoteStaleError() {
-  return hostedOnboardingError({
-    code: "HOSTED_BILLING_PLAN_QUOTE_STALE",
-    httpStatus: 409,
-    message:
-      "That plan quote is no longer current. Review the latest plan terms before confirming again.",
+async function startHostedPlanCheckoutFromConversation(
+  input:
+    | {
+      action: "change_plan";
+      memberId: string;
+      targetPlanCode: HostedRuntimeDirectBillingPlanCode;
+    }
+    | {
+      action: "continue_pulse" | "start_pulse_now";
+      memberId: string;
+      targetPlanCode: "launch_monthly";
+    },
+): Promise<HostedRuntimeSubscriptionToolResponse> {
+  const prisma = getPrisma();
+  const member = await readHostedMemberCoreState({
+    memberId: input.memberId,
+    prisma,
   });
-}
+  if (!member) {
+    throw buildHostedBillingPlanQuoteStaleError();
+  }
+  const invite = await issueHostedInvite({
+    channel: "web",
+    memberId: input.memberId,
+    prisma,
+  });
+  const checkout = await createHostedBillingCheckout({
+    billingPlanCode: input.targetPlanCode,
+    inviteCode: invite.inviteCode,
+    member: {
+      id: member.id,
+      suspendedAt: member.suspendedAt,
+    },
+    prisma,
+  });
 
-function projectPulseResult(input: {
-  action: Extract<HostedRuntimeSubscriptionAction, "continue_pulse" | "start_pulse_now">;
-  planCode: "launch_monthly";
-  result: HostedPulseTrialContinueResult | HostedPulseTrialStartPaidResult;
-}): HostedRuntimeSubscriptionToolResponse {
-  const plan = projectHostedSubscriptionPlan(input.planCode);
-
-  switch (input.result.status) {
-    case "continuing":
+  if (input.action === "change_plan") {
+    const plan = projectHostedSubscriptionPlan(input.targetPlanCode);
+    if (checkout.alreadyActive) {
       return {
         action: input.action,
         plan,
         status: "no_action_required",
       };
-    case "started":
-      return {
-        action: input.action,
-        plan,
-        status: "completed",
-      };
-    case "billing_pending":
-      return {
-        action: input.action,
-        plan,
-        status: "pending",
-      };
-    case "payment_required":
-      return {
-        action: input.action,
-        paymentUrl: input.result.paymentUrl,
-        plan,
-        status: "payment_required",
-      };
+    }
+    if (!checkout.url) {
+      throw new TypeError(
+        "Hosted billing checkout did not return a payment URL.",
+      );
+    }
+    return {
+      action: input.action,
+      paymentUrl: checkout.url,
+      plan,
+      status: "payment_required",
+    };
   }
+
+  // These two action names are a rolling-deploy compatibility seam for an
+  // older runner schema. Both now mean ordinary Pulse checkout; they do not
+  // create, extend, or continue a timed trial.
+  const plan = projectHostedSubscriptionPlan("launch_monthly");
+  if (checkout.alreadyActive) {
+    return {
+      action: input.action,
+      plan,
+      status: "no_action_required",
+    };
+  }
+  if (!checkout.url) {
+    throw new TypeError(
+      "Hosted billing checkout did not return a payment URL.",
+    );
+  }
+  return {
+    action: input.action,
+    paymentUrl: checkout.url,
+    plan,
+    status: "payment_required",
+  };
 }
 
 function projectPlanUpgradeResult(input: {
