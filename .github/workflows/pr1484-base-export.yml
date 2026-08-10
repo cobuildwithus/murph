@@ -1,0 +1,34 @@
+name: PR 1484 base export
+
+on:
+  push:
+    branches:
+      - agent/pr1484-base-export
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact base
+        uses: actions/checkout@v4
+        with:
+          ref: 337a75888b8c8046b208a75195d3e787dec83834
+          fetch-depth: 1
+
+      - name: Package source
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=node_modules --exclude=.next -czf /tmp/pr1484-base.tar.gz .
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1484-base
+          path: /tmp/pr1484-base.tar.gz
+          retention-days: 1
+          if-no-files-found: error
