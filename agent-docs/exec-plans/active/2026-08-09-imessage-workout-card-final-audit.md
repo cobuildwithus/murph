@@ -50,7 +50,7 @@ Success criteria:
 - Accepted from final ReviewGPT round 2: persisted V4 cards establish a Worker-and-runner rollback floor after either the local outbox or hosted side-effect owner accepts them. The product spec now requires coordinated reader-first deployment, forward recovery or explicit quarantine restoration, and exact persisted-owner round-trip tests for both paths.
 - Accepted from final ReviewGPT round 2: workout cards duplicated progress in generic table rows and the structured workout payload. The runtime contract now has two closed variants; workout cards author only `workout.exercises`, and renderers derive all workout progress from that single presentation source.
 - Final ReviewGPT round 3 passed with no qualifying finding. Parent triage accepted its App Server evidence discrepancy and added one structured-workout call to the real boundary test; the compact authoring schema remains intentionally smaller than the authoritative strict runtime schema, and optional subtitle copy is not a second structured state projection.
-- Accepted from exact-head CI: Ubuntu's full assistant coverage lane measured the resident route layer at 57,050 characters while the focused local coverage lane measured 56,973. A same-head rerun reproduced the Ubuntu result. The existing live-workout route hint is shortened without changing its two-skill instruction; the 57,000 ratchet remains unchanged.
+- Accepted from exact-head CI: Ubuntu's full assistant coverage lane measured the resident route layer at 57,050 characters after applying current main's named-diet guidance, while the pre-merge focused lane measured 56,973. A same-head rerun reproduced the Ubuntu result. The existing live-workout route hint is shortened without changing its two-skill instruction; after merging current main the focused layer is 56,973 and the 57,000 ratchet remains unchanged.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. Neither coordinated PR is ready or merged.
 
@@ -77,7 +77,8 @@ Success criteria:
 - Local outbox save/list/read and hosted side-effect JSON round trips preserved the V4 workout payload; their focused suites passed 1 selected outbox test and 24 hosted side-effect tests.
 - The final four affected packages typechecked, and the workout skill suites passed 10 tests after removing duplicate model-authored table progress.
 - The real App Server boundary passed after submitting generic compact-table, structured-workout, and nutrition authoring calls.
-- The focused resident-prompt ratchet passed at 56,896 characters after the meaning-preserving route-hint deletion.
+- The focused resident-prompt ratchet passed at 56,896 characters before the current-main merge and 56,973 after it, under the unchanged 57,000 ratchet.
+- The current-main runner-budget conflict was resolved from a combined assembly: 9,994,210 total bytes, 8,019,079 static-closure bytes, and 1,659,616 entry bytes. The total and static baselines use those measurements; the entry baseline and every tolerance remain unchanged.
 
 ## Parent product-experience revalidation
 

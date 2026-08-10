@@ -170,9 +170,14 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // assembly measured a 9,969,877B total and 7,994,746B static boot closure; use
 // the larger cross-host measurements while keeping the entry baseline and all
 // tolerances unchanged.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_969_877 + 32_768;
+// Main's later reviewed biomarker, runtime-control, and named-diet changes
+// measured 9,933,847B total on Ubuntu. The combined merged tree measured a
+// 9,994,210B total and 8,019,079B static boot closure on macOS; retain those
+// larger cross-host measurements while keeping the entry baseline and every
+// tolerance unchanged.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_994_210 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_994_746;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
