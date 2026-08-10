@@ -85,13 +85,14 @@ export interface BrowserTrainingView {
 
 export function selectBrowserVaultTraining(
   client: BrowserVaultQueryClient,
+  options: { timeZone?: string } = {},
 ): BrowserTrainingView {
   const generatedAt = client.replica.generatedAt;
   const sessions = client.entities
     .list({ families: ["event"], kinds: ["activity_session"] })
     .flatMap(parseTrainingSession)
     .sort(compareSessionsLatestFirst);
-  const currentDate = resolveTrainingCurrentDate(sessions, generatedAt);
+  const currentDate = resolveTrainingCurrentDate(generatedAt, options.timeZone);
   const activeSession =
     sessions.find((session) => session.state === "in_progress") ?? null;
   const completedSessions = sessions.filter(
@@ -451,9 +452,7 @@ function compareTrainingSets(
     return leftLoad - rightLoad;
   }
 
-  return (left.reps ?? 0) - (right.reps ?? 0)
-    || (left.durationSeconds ?? 0) - (right.durationSeconds ?? 0)
-    || (left.distanceMeters ?? 0) - (right.distanceMeters ?? 0);
+  return (left.reps ?? 0) - (right.reps ?? 0);
 }
 
 function compareAssistance(
@@ -493,16 +492,10 @@ function hasComparableBestMeasurement(set: TrainingSetView): boolean {
     return false;
   }
 
-  if (set.durationSeconds !== null && set.distanceMeters !== null) {
-    return false;
-  }
-
   return set.weight !== null
     || set.addedWeightKg !== null
     || set.assistanceKg !== null
-    || set.reps !== null
-    || set.durationSeconds !== null
-    || set.distanceMeters !== null;
+    || set.reps !== null;
 }
 
 function isPoundUnit(value: string | null): boolean {
@@ -547,27 +540,29 @@ function isIsoDateWithinLookback(
 }
 
 function resolveTrainingCurrentDate(
-  sessions: readonly TrainingSessionView[],
   generatedAt: string,
+  timeZone?: string,
 ): string {
-  const generatedDate = generatedAt.slice(0, 10);
-  const parsedGeneratedDate = parseIsoDate(generatedDate);
-  if (!parsedGeneratedDate) {
-    return generatedDate;
+  const fallbackDate = generatedAt.slice(0, 10);
+  const generatedInstant = new Date(generatedAt);
+  if (Number.isNaN(generatedInstant.getTime())) {
+    return fallbackDate;
   }
 
-  const latestAllowedDate = addUtcDays(parsedGeneratedDate, 1)
-    .toISOString()
-    .slice(0, 10);
-  const latestSessionDate = sessions
-    .map((session) => session.date)
-    .filter((date) => parseIsoDate(date) !== null && date <= latestAllowedDate)
-    .sort()
-    .at(-1);
-
-  return latestSessionDate && latestSessionDate > generatedDate
-    ? latestSessionDate
-    : generatedDate;
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      day: "2-digit",
+      month: "2-digit",
+      timeZone,
+      year: "numeric",
+    }).formatToParts(generatedInstant);
+    const year = parts.find((part) => part.type === "year")?.value;
+    const month = parts.find((part) => part.type === "month")?.value;
+    const day = parts.find((part) => part.type === "day")?.value;
+    return year && month && day ? `${year}-${month}-${day}` : fallbackDate;
+  } catch {
+    return fallbackDate;
+  }
 }
 
 function deriveDurationMinutes(

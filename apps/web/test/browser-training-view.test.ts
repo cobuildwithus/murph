@@ -574,6 +574,115 @@ test("Training keeps multi-axis cardio results visible without inventing a Best"
   assert.equal(progress?.lastSet?.distanceMeters, 1_000);
 });
 
+test("Training reserves Best for strength-comparable sets across stable and fallback exercise keys", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T18:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-strength-only-best",
+    vault: createVaultReadModel({
+      entities: [
+        createWorkoutEntity(
+          "cardio_and_strength_older",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-07T18:00:00.000Z",
+              exercises: [
+                {
+                  name: "Bike",
+                  sets: [{ durationSeconds: 300, order: 1 }],
+                  sourceExerciseId: "EX_DURATION",
+                },
+                {
+                  name: "Sled push",
+                  sets: [{ distanceMeters: 100, order: 1 }],
+                  sourceExerciseId: "EX_DISTANCE",
+                },
+                {
+                  name: "Row",
+                  sets: [{ distanceMeters: 1_000, order: 1 }],
+                  sourceExerciseId: "EX_MIXED",
+                },
+                {
+                  name: "  Farmer   carry ",
+                  sets: [{ distanceMeters: 20, order: 1 }],
+                },
+                {
+                  name: "Bench press",
+                  sets: [{ order: 1, reps: 8, weight: 135, weightUnit: "lb" }],
+                  sourceExerciseId: "EX_STRENGTH",
+                },
+              ],
+              startedAt: "2026-08-07T17:00:00.000Z",
+            },
+          },
+          "2026-08-07T17:00:00.000Z",
+        ),
+        createWorkoutEntity(
+          "cardio_and_strength_latest",
+          {
+            activityType: "strength-training",
+            workout: {
+              endedAt: "2026-08-09T18:00:00.000Z",
+              exercises: [
+                {
+                  name: "Bike",
+                  sets: [{ durationSeconds: 360, order: 1 }],
+                  sourceExerciseId: "EX_DURATION",
+                },
+                {
+                  name: "Sled push",
+                  sets: [{ distanceMeters: 120, order: 1 }],
+                  sourceExerciseId: "EX_DISTANCE",
+                },
+                {
+                  name: "Row",
+                  sets: [{ durationSeconds: 300, order: 1 }],
+                  sourceExerciseId: "EX_MIXED",
+                },
+                {
+                  name: "Farmer carry",
+                  sets: [{ durationSeconds: 30, order: 1 }],
+                },
+                {
+                  name: "Bench press",
+                  sets: [{ order: 1, reps: 8, weight: 155, weightUnit: "lb" }],
+                  sourceExerciseId: "EX_STRENGTH",
+                },
+              ],
+              startedAt: "2026-08-09T17:00:00.000Z",
+            },
+          },
+          "2026-08-09T17:00:00.000Z",
+        ),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  const view = selectBrowserVaultTraining(
+    createBrowserVaultQueryClient(replica),
+  );
+  const progress = new Map(
+    view.exerciseProgress.map((entry) => [entry.id, entry]),
+  );
+
+  for (const id of [
+    "EX_DURATION",
+    "EX_DISTANCE",
+    "EX_MIXED",
+    "farmer-carry",
+  ]) {
+    assert.equal(progress.get(id)?.bestSet, null);
+    assert.equal(progress.get(id)?.sessionCount, 2);
+  }
+  assert.equal(progress.get("EX_DURATION")?.lastSet?.durationSeconds, 360);
+  assert.equal(progress.get("EX_DISTANCE")?.lastSet?.distanceMeters, 120);
+  assert.equal(progress.get("EX_MIXED")?.lastSet?.durationSeconds, 300);
+  assert.equal(progress.get("farmer-carry")?.lastSet?.durationSeconds, 30);
+  assert.equal(progress.get("EX_STRENGTH")?.bestSet?.weight, 155);
+});
+
 
 test("Training preserves a completed next-local-day workout before UTC midnight", async () => {
   const createReplica = (endedAt?: string) => createBrowserVaultReplica({
@@ -611,11 +720,13 @@ test("Training preserves a completed next-local-day workout before UTC midnight"
   });
   const activeView = selectBrowserVaultTraining(
     createBrowserVaultQueryClient(await createReplica()),
+    { timeZone: "Asia/Tokyo" },
   );
   const completedView = selectBrowserVaultTraining(
     createBrowserVaultQueryClient(
       await createReplica("2026-08-09T23:25:00.000Z"),
     ),
+    { timeZone: "Asia/Tokyo" },
   );
 
   assert.equal(activeView.activeSession?.id, "tokyo_monday_workout");
@@ -628,4 +739,30 @@ test("Training preserves a completed next-local-day workout before UTC midnight"
     completedView.exerciseProgress[0]?.lastPerformedDate,
     "2026-08-10",
   );
+});
+
+test("Training derives the current week from the browser time zone without a workout anchor", async () => {
+  const createEmptyClient = async (generatedAt: string) =>
+    createBrowserVaultQueryClient(await createBrowserVaultReplica({
+      generatedAt,
+      metricPoints: [],
+      sourceBundleHash: generatedAt,
+      vault: createVaultReadModel({
+        entities: [],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    }));
+
+  const tokyoView = selectBrowserVaultTraining(
+    await createEmptyClient("2026-08-09T23:30:00.000Z"),
+    { timeZone: "Asia/Tokyo" },
+  );
+  const losAngelesView = selectBrowserVaultTraining(
+    await createEmptyClient("2026-08-10T04:30:00.000Z"),
+    { timeZone: "America/Los_Angeles" },
+  );
+
+  assert.equal(tokyoView.weeks.at(-1)?.startDate, "2026-08-10");
+  assert.equal(losAngelesView.weeks.at(-1)?.startDate, "2026-08-03");
 });

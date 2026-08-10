@@ -2,7 +2,10 @@
 
 import type { ReactNode } from "react";
 
-import { TrainingPageView } from "@/app/(dashboard)/training/training-page-client";
+import {
+  TrainingPageView,
+  type TrainingHandoffRefreshState,
+} from "@/app/(dashboard)/training/training-page-client";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
   BrowserTrainingView,
@@ -303,6 +306,21 @@ export function TrainingDashboardStudy() {
         training={null}
       />
       <TrainingStudyPage
+        handoffRefreshState="checking"
+        id="handoff-checking"
+        refreshPending
+        status="ready"
+        title="Messages handoff · checking with retained data"
+        training={COMPLETED_TRAINING_STUDY_VIEW}
+      />
+      <TrainingStudyPage
+        handoffRefreshState="not_visible"
+        id="handoff-not-visible"
+        status="ready"
+        title="Messages handoff · update not visible yet"
+        training={COMPLETED_TRAINING_STUDY_VIEW}
+      />
+      <TrainingStudyPage
         id="empty"
         status="empty"
         title="Empty history"
@@ -337,6 +355,7 @@ export function TrainingDashboardStudy() {
 function TrainingStudyPage({
   authenticated = true,
   error = null,
+  handoffRefreshState = "idle",
   id,
   messagingConfigured = true,
   refreshPending = false,
@@ -346,6 +365,7 @@ function TrainingStudyPage({
 }: {
   authenticated?: boolean;
   error?: string | null;
+  handoffRefreshState?: TrainingHandoffRefreshState;
   id: string;
   messagingConfigured?: boolean;
   refreshPending?: boolean;
@@ -361,6 +381,8 @@ function TrainingStudyPage({
         authenticated={authenticated}
         continueContactOptions={contactOptions}
         error={error}
+        handoffRefreshState={handoffRefreshState}
+        onCheckUpdate={() => undefined}
         onRefresh={() => undefined}
         refreshPending={refreshPending}
         startContactOptions={contactOptions}

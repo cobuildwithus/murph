@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -36,6 +36,11 @@ const MESSAGE_EXAMPLES = [
   "Actually set two was 9",
 ] as const;
 
+export type TrainingHandoffRefreshState =
+  | "idle"
+  | "checking"
+  | "not_visible";
+
 export default function TrainingPageClient({
   authenticated,
   continueContactOptions,
@@ -45,20 +50,61 @@ export default function TrainingPageClient({
   continueContactOptions: readonly MurphContactOption[];
   startContactOptions: readonly MurphContactOption[];
 }) {
-  const { error, refresh, refreshPending, status } = useBrowserVault();
+  const {
+    error,
+    ref,
+    refresh,
+    refreshPending,
+    runtimeRefreshPending,
+    status,
+  } = useBrowserVault();
   const training = useBrowserVaultSelector(selectBrowserVaultTraining);
-  const refreshAfterContactRef = useRef(false);
+  const refreshAfterContactRef = useRef<{
+    sourceBundleHash: string | null;
+  } | null>(null);
+  const [handoffRefreshBaselineSourceHash, setHandoffRefreshBaselineSourceHash]
+    = useState<string | null | undefined>(undefined);
+  const [handoffRefreshRequestSettled, setHandoffRefreshRequestSettled] =
+    useState(false);
+  const requestHandoffRefresh = useCallback(
+    (sourceBundleHash: string | null) => {
+      setHandoffRefreshBaselineSourceHash(sourceBundleHash);
+      setHandoffRefreshRequestSettled(false);
+      void refresh({
+        background: true,
+        requestRuntimeRefreshFromSourceHash: sourceBundleHash,
+      }).finally(() => {
+        setHandoffRefreshRequestSettled(true);
+      });
+    },
+    [refresh],
+  );
+  const currentSourceHash = ref?.sourceBundleHash ?? null;
+  const replacementVisible = handoffRefreshBaselineSourceHash !== undefined
+    && currentSourceHash !== null
+    && currentSourceHash !== handoffRefreshBaselineSourceHash;
+  const handoffRefreshState: TrainingHandoffRefreshState =
+    handoffRefreshBaselineSourceHash === undefined
+      || replacementVisible
+      || status === "error"
+      ? "idle"
+      : handoffRefreshRequestSettled && !runtimeRefreshPending
+        ? "not_visible"
+        : "checking";
   const markContactHandoff = useCallback(() => {
-    refreshAfterContactRef.current = true;
-  }, []);
+    refreshAfterContactRef.current = {
+      sourceBundleHash: ref?.sourceBundleHash ?? null,
+    };
+  }, [ref?.sourceBundleHash]);
 
   useEffect(() => {
     const refreshAfterContact = () => {
-      if (!refreshAfterContactRef.current || document.visibilityState === "hidden") {
+      const refreshRequest = refreshAfterContactRef.current;
+      if (!refreshRequest || document.visibilityState === "hidden") {
         return;
       }
-      refreshAfterContactRef.current = false;
-      void refresh({ background: true, requestRuntimeRefresh: true });
+      refreshAfterContactRef.current = null;
+      requestHandoffRefresh(refreshRequest.sourceBundleHash);
     };
 
     window.addEventListener("focus", refreshAfterContact);
@@ -67,13 +113,17 @@ export default function TrainingPageClient({
       window.removeEventListener("focus", refreshAfterContact);
       document.removeEventListener("visibilitychange", refreshAfterContact);
     };
-  }, [refresh]);
+  }, [requestHandoffRefresh]);
 
   return (
     <TrainingPageView
       authenticated={authenticated}
       continueContactOptions={continueContactOptions}
       error={error}
+      handoffRefreshState={handoffRefreshState}
+      onCheckUpdate={() => {
+        requestHandoffRefresh(ref?.sourceBundleHash ?? null);
+      }}
       onContactAction={markContactHandoff}
       onRefresh={() => void refresh()}
       refreshPending={refreshPending}
@@ -88,6 +138,8 @@ export function TrainingPageView({
   authenticated,
   continueContactOptions,
   error,
+  handoffRefreshState = "idle",
+  onCheckUpdate,
   onContactAction,
   onRefresh,
   refreshPending,
@@ -98,6 +150,8 @@ export function TrainingPageView({
   authenticated: boolean;
   continueContactOptions: readonly MurphContactOption[];
   error: string | null;
+  handoffRefreshState?: TrainingHandoffRefreshState;
+  onCheckUpdate?: () => void;
   onContactAction?: () => void;
   onRefresh: () => void;
   refreshPending: boolean;
@@ -124,7 +178,8 @@ export function TrainingPageView({
   const awaitingRefresh = !preparing
     && status !== "error"
     && !hasTraining
-    && refreshPending;
+    && refreshPending
+    && handoffRefreshState === "idle";
 
   return (
     <div className="flex flex-col gap-8">
@@ -169,6 +224,36 @@ export function TrainingPageView({
         </Alert>
       ) : null}
 
+      {handoffRefreshState !== "idle" ? (
+        <Alert>
+          <AlertTitle>
+            {handoffRefreshState === "checking"
+              ? "Checking for your saved update"
+              : "Update not visible yet"}
+          </AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                {handoffRefreshState === "checking"
+                  ? "Your current training stays visible while Murph checks for the update from Messages."
+                  : "The saved update has not reached this view yet. Your current training is still available."}
+              </span>
+              {handoffRefreshState === "not_visible" && onCheckUpdate ? (
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={onCheckUpdate}
+                >
+                  <RefreshCw aria-hidden="true" />
+                  Check again
+                </Button>
+              ) : null}
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {awaitingRefresh ? (
         <Alert>
           <AlertTitle>Preparing your training view</AlertTitle>
@@ -196,7 +281,11 @@ export function TrainingPageView({
         <TrainingDashboard training={training} />
       ) : null}
 
-      {!preparing && !awaitingRefresh && status !== "error" && !hasTraining ? (
+      {!preparing
+        && !awaitingRefresh
+        && status !== "error"
+        && !hasTraining
+        && handoffRefreshState !== "checking" ? (
         <EmptyTraining
           authenticated={authenticated}
           contactOption={startContactOptions[0] ?? null}

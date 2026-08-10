@@ -250,7 +250,10 @@ function isWithinLookback(
     return false;
   }
   const currentDate = generatedAt.slice(0, 10);
-  const cutoff = addDays(currentDate, -(TRAINING_LOOKBACK_DAYS - 1));
+  // The replica does not know the browser's time zone. Retain one local-date
+  // boundary on either side of the UTC-derived window; the browser applies the
+  // exact member-local lookback after decrypting the replica.
+  const cutoff = addDays(currentDate, -TRAINING_LOOKBACK_DAYS);
   const latestDate = addDays(currentDate, 1);
   return localDate >= cutoff && localDate <= latestDate;
 }

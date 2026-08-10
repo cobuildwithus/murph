@@ -276,6 +276,50 @@ test("browser training projection preserves completed next-local-day sessions be
   assert.equal(requireRecord(completed.attributes.training).state, "completed");
 });
 
+test("browser training projection retains the preceding local-date lookback boundary", async () => {
+  const workoutEntity = (entityId: string, date: string) =>
+    createEntity("event", entityId, {
+      attributes: {
+        activityType: "strength-training",
+        workout: {
+          endedAt: `${date}T11:00:00.000Z`,
+          exercises: [
+            {
+              name: "Squat",
+              sets: [{ order: 1, reps: 5, weight: 185, weightUnit: "lb" }],
+            },
+          ],
+          startedAt: `${date}T10:00:00.000Z`,
+        },
+      },
+      date,
+      kind: "activity_session",
+      occurredAt: `${date}T10:00:00.000Z`,
+    });
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T04:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "training-negative-time-zone-boundary",
+    vault: createVaultReadModel({
+      entities: [
+        workoutEntity("preceding_local_boundary", "2026-02-07"),
+        workoutEntity("outside_local_boundary", "2026-02-06"),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  assert.ok(replica.entities.find(
+    (entity) => entity.id === "preceding_local_boundary",
+  )?.attributes.training);
+  assert.equal(
+    replica.entities.find((entity) => entity.id === "outside_local_boundary")
+      ?.attributes.training,
+    undefined,
+  );
+});
+
 test("browser training projection fails closed on impractically large sessions", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-08-09T12:00:00.000Z",

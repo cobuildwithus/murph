@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
     ref: null,
     refreshPending: false,
     refresh: vi.fn(async () => {}),
+    runtimeRefreshPending: false,
     status: "ready",
     workspaceVersion: null,
   })),
@@ -144,6 +145,7 @@ beforeEach(() => {
     ref: null,
     refreshPending: false,
     refresh: vi.fn(async () => {}),
+    runtimeRefreshPending: false,
     status: "ready",
     workspaceVersion: null,
   });
@@ -331,6 +333,7 @@ test("experiment start action becomes a quiet status chip for a running browser-
     ref: null,
     refreshPending: false,
     refresh: vi.fn(async () => {}),
+    runtimeRefreshPending: false,
     status: "ready",
     workspaceVersion: null,
   });

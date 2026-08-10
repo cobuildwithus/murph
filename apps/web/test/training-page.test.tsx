@@ -212,8 +212,12 @@ const continueContactOptions = [
 beforeEach(() => {
   mocks.useBrowserVault.mockReturnValue({
     error: null,
+    ref: {
+      sourceBundleHash: "a".repeat(64),
+    },
     refresh: async () => {},
     refreshPending: false,
+    runtimeRefreshPending: false,
     status: "ready",
   });
   mocks.useBrowserVaultSelector.mockReturnValue(trainingFixture);
@@ -258,8 +262,12 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
   const refresh = vi.fn(async () => {});
   mocks.useBrowserVault.mockReturnValue({
     error: null,
+    ref: {
+      sourceBundleHash: "a".repeat(64),
+    },
     refresh,
     refreshPending: false,
+    runtimeRefreshPending: false,
     status: "ready",
   });
   const rendered = await renderClientComponent(
@@ -286,7 +294,7 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
     await Promise.resolve();
     assert.deepEqual(refresh.mock.calls, [[{
       background: true,
-      requestRuntimeRefresh: true,
+      requestRuntimeRefreshFromSourceHash: "a".repeat(64),
     }]]);
 
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
@@ -396,6 +404,47 @@ test("Training keeps a delayed generation refresh actionable after background po
   } finally {
     await rendered.cleanup();
   }
+});
+
+test("Training keeps retained data visible while a Messages update is checked and recoverable", () => {
+  const checkingMarkup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions,
+      error: null,
+      handoffRefreshState: "checking",
+      onCheckUpdate: () => {},
+      onRefresh: () => {},
+      refreshPending: true,
+      startContactOptions,
+      status: "ready",
+      training: trainingFixture,
+    }),
+  );
+
+  assert.match(checkingMarkup, /Checking for your saved update/);
+  assert.match(checkingMarkup, /Recent workouts/);
+  assert.doesNotMatch(checkingMarkup, /Update not visible yet/);
+
+  const onCheckUpdate = vi.fn();
+  const recoveryMarkup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions,
+      error: null,
+      handoffRefreshState: "not_visible",
+      onCheckUpdate,
+      onRefresh: () => {},
+      refreshPending: false,
+      startContactOptions,
+      status: "ready",
+      training: trainingFixture,
+    }),
+  );
+
+  assert.match(recoveryMarkup, /Update not visible yet/);
+  assert.match(recoveryMarkup, /Check again/);
+  assert.match(recoveryMarkup, /Recent workouts/);
 });
 
 test("Training exposes workout actions only when vault state is known", () => {
@@ -614,6 +663,10 @@ test("Training design study renders the production dashboard with synthetic data
   assert.match(markup, /Loading your training log/);
   assert.match(markup, /data-training-study-state="refresh-pending"/);
   assert.match(markup, /Preparing your training view/);
+  assert.match(markup, /data-training-study-state="handoff-checking"/);
+  assert.match(markup, /Checking for your saved update/);
+  assert.match(markup, /data-training-study-state="handoff-not-visible"/);
+  assert.match(markup, /Update not visible yet/);
   assert.match(markup, /Check again/);
   assert.match(markup, /Could not refresh your training log/);
   assert.match(markup, /Log in to start training/);

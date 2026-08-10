@@ -1178,11 +1178,18 @@ test("browser-vault provider keeps admitted content visible during focus revalid
   await rendered.cleanup();
 });
 
-test("a runtime refresh request survives an in-flight focus read and adopts the replacement", async () => {
+test("a runtime refresh request survives an in-flight focus read and waits through a same-source replica", async () => {
   vi.useFakeTimers();
   const currentRef = createReplicaRef();
+  const sameSourceRef = createReplicaRef({
+    dataVersion: "e".repeat(64),
+    keyId: "browser-vault-replica:e",
+    objectKey: "users/browser-vault-replicas/opaque/same-source.json",
+  });
   const replacementRef = {
     ...currentRef,
+    dataVersion: "f".repeat(64),
+    keyId: "browser-vault-replica:f",
     objectKey: "users/browser-vault-replicas/opaque/replacement.json",
     sourceBundleHash: "b".repeat(64),
   };
@@ -1208,7 +1215,7 @@ test("a runtime refresh request survives an in-flight focus read and adopts the 
     }))
     .mockImplementation(() => {
       pendingPollCount += 1;
-      if (pendingPollCount <= 14) {
+      if (pendingPollCount <= 2) {
         return Promise.resolve(jsonResponse({
           encryptedReplica: null,
           memberId: "member_123",
@@ -1218,13 +1225,35 @@ test("a runtime refresh request survives an in-flight focus read and adopts the 
           state: "not_modified",
         }));
       }
+      if (pendingPollCount === 3) {
+        return Promise.resolve(jsonResponse({
+          encryptedReplica: createReplicaEnvelope("e"),
+          replicaAad: createReplicaAad("member_123", "e", {
+            objectKey: sameSourceRef.objectKey,
+            sourceBundleHash: sameSourceRef.sourceBundleHash,
+          }),
+          replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "e"),
+          replicaRef: sameSourceRef,
+          state: "ready",
+        }));
+      }
+      if (pendingPollCount <= 5) {
+        return Promise.resolve(jsonResponse({
+          encryptedReplica: null,
+          memberId: "member_123",
+          replicaAad: null,
+          replicaKeyEnvelope: null,
+          replicaRef: sameSourceRef,
+          state: "not_modified",
+        }));
+      }
       return Promise.resolve(jsonResponse({
-        encryptedReplica: createReplicaEnvelope(),
-        replicaAad: createReplicaAad("member_123", "d", {
+        encryptedReplica: createReplicaEnvelope("f"),
+        replicaAad: createReplicaAad("member_123", "f", {
           objectKey: replacementRef.objectKey,
           sourceBundleHash: replacementRef.sourceBundleHash,
         }),
-        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
         replicaRef: replacementRef,
         state: "ready",
       }));
@@ -1234,6 +1263,12 @@ test("a runtime refresh request survives an in-flight focus read and adopts the 
   mocks.decryptHostedStoragePayload
     .mockReset()
     .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica())))
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      source: {
+        dataVersion: sameSourceRef.dataVersion,
+        sourceBundleHash: sameSourceRef.sourceBundleHash,
+      },
+    }))))
     .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
       source: {
         dataVersion: replacementRef.dataVersion,
@@ -1249,7 +1284,10 @@ test("a runtime refresh request survives an in-flight focus read and adopts the 
     { requireButton: false },
   );
 
-  await waitForText(rendered.container, currentRef.sourceBundleHash);
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
   await act(async () => {
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
   });
@@ -1277,21 +1315,82 @@ test("a runtime refresh request survives an in-flight focus read and adopts the 
   assert.equal(refreshBody.requestRefresh, true);
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.advanceTimersByTimeAsync(5_000);
   });
-  assert.equal(
-    rendered.container.textContent,
-    `ready:${currentRef.sourceBundleHash}`,
+  await waitForText(
+    rendered.container,
+    `${sameSourceRef.sourceBundleHash}:${sameSourceRef.dataVersion}:pending`,
   );
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(5_000);
   });
-  await waitForText(rendered.container, replacementRef.sourceBundleHash);
+  await waitForText(
+    rendered.container,
+    `${replacementRef.sourceBundleHash}:${replacementRef.dataVersion}:ready`,
+  );
   for (const [, init] of fetchMock.mock.calls.slice(3)) {
     const pollBody = JSON.parse(String(init?.body));
     assert.equal(pollBody.requestRefresh, undefined);
   }
-  assert.equal(fetchMock.mock.calls.length, 18);
+  assert.equal(fetchMock.mock.calls.length, 9);
+
+  await rendered.cleanup();
+});
+
+test("a runtime refresh wait ends after its in-memory deadline", async () => {
+  vi.useFakeTimers();
+  const currentRef = createReplicaRef();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:pending`,
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_001);
+  });
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  const fetchCountAtDeadline = fetchMock.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAtDeadline);
 
   await rendered.cleanup();
 });
@@ -2160,10 +2259,11 @@ function BrowserVaultRuntimeRefreshProbe() {
     {
       onClick: () => void vault.refresh({
         background: true,
-        requestRuntimeRefresh: true,
+        requestRuntimeRefreshFromSourceHash:
+          vault.ref?.sourceBundleHash ?? null,
       }),
     },
-    `${vault.status}:${vault.ref?.sourceBundleHash ?? "none"}`,
+    `${vault.ref?.sourceBundleHash ?? "none"}:${vault.dataVersion ?? "none"}:${vault.runtimeRefreshPending ? "pending" : "ready"}`,
   );
 }
 
