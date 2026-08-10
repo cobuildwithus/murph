@@ -54,8 +54,9 @@ import {
 } from "./runtime";
 import { withHostedStripeActionFailureAlert } from "./stripe-error-log";
 import {
-  retireHostedLegacyPulseTrialForCheckout,
+  retireHostedLegacyPulseTrialToStarter,
 } from "./pulse-trial-subscription-cleanup";
+import { assertHostedBillingPlanSelectable } from "./billing-plan-eligibility";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
@@ -179,9 +180,12 @@ export async function createHostedBillingCheckout(
     });
 
     if (invite.member.billingRef?.stripeSubscriptionLookupKey) {
-      await retireHostedLegacyPulseTrialForCheckout({
+      const { priceId: legacyPulsePriceId } = requireHostedStripeCheckoutConfig({
+        billingPlanCode: "launch_monthly",
+      });
+      await retireHostedLegacyPulseTrialToStarter({
         memberId: invite.member.id,
-        priceId,
+        priceId: legacyPulsePriceId,
         prisma,
         stripe,
       });
@@ -365,6 +369,11 @@ async function prepareHostedBillingCheckoutAttempt(input: {
         "This hosted account cannot start a new checkout right now. Contact support to restore access.",
     });
   }
+  await assertHostedBillingPlanSelectable({
+    memberId: input.memberId,
+    prisma: input.tx,
+    targetPlanCode: input.billingPlanCode,
+  });
   const familyClaim = await readHostedMemberFamilyBillingClaim({
     memberId: input.memberId,
     prisma: input.tx,

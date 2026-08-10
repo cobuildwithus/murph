@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
   return {
     readActiveHostedFamilySponsorship: vi.fn(),
     readHostedMemberFamilyBillingClaim: vi.fn(),
+    retireHostedLegacyPulseTrialToStarter: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     requireHostedOnboardingPublicBaseUrl: vi.fn(),
     requireHostedStripeCheckoutConfig: vi.fn(),
@@ -61,6 +62,11 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async () => {
     readActiveHostedFamilySponsorship: mocks.readActiveHostedFamilySponsorship,
   };
 });
+
+vi.mock("@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup", () => ({
+  retireHostedLegacyPulseTrialToStarter:
+    mocks.retireHostedLegacyPulseTrialToStarter,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/invite-service", async () => {
   const actual = await vi.importActual<
@@ -139,6 +145,7 @@ describe("createHostedBillingCheckout", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     mocks.readActiveHostedFamilySponsorship.mockResolvedValue(false);
     mocks.readHostedMemberFamilyBillingClaim.mockResolvedValue(null);
+    mocks.retireHostedLegacyPulseTrialToStarter.mockResolvedValue(true);
     mocks.requireHostedOnboardingPublicBaseUrl.mockReturnValue("https://join.example.test");
     mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
       billingPlanCode: "launch_monthly",
@@ -476,6 +483,106 @@ describe("createHostedBillingCheckout", () => {
           /^hosted-billing-checkout:[^:]+:[a-f0-9]{32}$/,
         ),
       }),
+    );
+  });
+
+  it.each([
+    ["Pulse", "launch_monthly", "price_monthly_123"],
+    ["Edge", "launch_edge_monthly", "price_edge_monthly_123"],
+    ["Max", "launch_max_monthly", "price_max_monthly_123"],
+    ["Core", "launch_group_monthly", "price_group_monthly_123"],
+  ] as const)(
+    "converts the legacy Pulse source before %s checkout",
+    async (_label, billingPlanCode, destinationPriceId) => {
+      const prices = {
+        launch_edge_monthly: "price_edge_monthly_123",
+        launch_group_monthly: "price_group_monthly_123",
+        launch_max_monthly: "price_max_monthly_123",
+        launch_monthly: "price_monthly_123",
+      } as const;
+      mocks.requireHostedStripeCheckoutConfig.mockImplementation((input: {
+        billingPlanCode: keyof typeof prices;
+      }) => ({
+        billingPlanCode: input.billingPlanCode,
+        priceId: prices[input.billingPlanCode],
+        stripe: mocks.stripe,
+        stripeLiveMode: false,
+      }));
+      mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite({
+        member: {
+          billingRef: {
+            currentBillingPhase: "trial",
+            currentCheckoutOffer: "pulse_trial",
+            stripeSubscriptionLookupKey: "subscription_lookup_legacy_trial",
+          },
+          billingStatus: HostedBillingStatus.active,
+          id: "member_123",
+          identity: { phoneLookupKey: "hbidx:phone:v1:test" },
+          routing: null,
+          suspendedAt: null,
+        },
+      }));
+
+      await expect(createHostedBillingCheckout({
+        billingPlanCode,
+        inviteCode: "invite-code",
+        member: makeAuthenticatedMember(),
+        now: new Date("2026-03-27T12:00:00.000Z"),
+        prisma: makePrisma({ hasConfirmedGroupMembership: true }) as never,
+      })).resolves.toEqual({
+        alreadyActive: false,
+        url: "https://billing.example.test/session_123",
+      });
+
+      expect(mocks.retireHostedLegacyPulseTrialToStarter).toHaveBeenCalledWith({
+        memberId: "member_123",
+        priceId: "price_monthly_123",
+        prisma: expect.any(Object),
+        stripe: mocks.stripe,
+      });
+      expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          line_items: [{ price: destinationPriceId, quantity: 1 }],
+        }),
+        expect.any(Object),
+      );
+      expect(
+        mocks.retireHostedLegacyPulseTrialToStarter.mock.invocationCallOrder[0]
+          ?? Number.POSITIVE_INFINITY,
+      ).toBeLessThan(
+        mocks.stripe.checkout.sessions.create.mock.invocationCallOrder[0]
+          ?? Number.NEGATIVE_INFINITY,
+      );
+    },
+  );
+
+  it("rechecks Core eligibility after taking the billing lock", async () => {
+    mocks.requireHostedStripeCheckoutConfig.mockReturnValue({
+      billingPlanCode: "launch_group_monthly",
+      priceId: "price_group_monthly_123",
+      stripe: mocks.stripe,
+      stripeLiveMode: false,
+    });
+    mocks.requireHostedInviteForBillingCheckout.mockResolvedValue(makeInvite());
+
+    const prisma = makePrisma({ hasConfirmedGroupMembership: false });
+    await expect(createHostedBillingCheckout({
+      billingPlanCode: "launch_group_monthly",
+      inviteCode: "invite-code",
+      member: makeAuthenticatedMember(),
+      now: new Date("2026-03-27T12:00:00.000Z"),
+      prisma: prisma as never,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GROUP_PLAN_NOT_ELIGIBLE",
+      httpStatus: 409,
+    });
+
+    expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    expect(
+      prisma.$queryRaw.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      prisma.hostedGroupMember.findFirst.mock.invocationCallOrder[0]
+        ?? Number.NEGATIVE_INFINITY,
     );
   });
 
@@ -1174,6 +1281,7 @@ type BillingRefFixture = {
 
 function makePrisma(input: {
   billingRef?: BillingRefFixture | null;
+  hasConfirmedGroupMembership?: boolean;
   member?: {
     billingStatus: HostedBillingStatus;
     suspendedAt: Date | null;
@@ -1257,10 +1365,16 @@ function makePrisma(input: {
   } else {
     memberFindUnique.mockResolvedValue(defaultMember);
   }
+  const lockQuery = vi.fn().mockResolvedValue([]);
   const prismaTx = {
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    $queryRaw: lockQuery,
     hostedMember: {
       findUnique: memberFindUnique,
+    },
+    hostedGroupMember: {
+      findFirst: vi.fn().mockResolvedValue(
+        input.hasConfirmedGroupMembership ? { id: "group_member_123" } : null,
+      ),
     },
     hostedMemberBillingRef: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -1288,8 +1402,9 @@ function makePrisma(input: {
   );
 
   return {
-    $queryRaw: vi.fn().mockResolvedValue([]),
+    $queryRaw: lockQuery,
     $transaction: transaction,
+    hostedGroupMember: prismaTx.hostedGroupMember,
     hostedMemberBillingRef: {
       findUnique,
       updateMany,

@@ -45,44 +45,6 @@ export function isHostedLegacyPulseTrialRetirableStatus(
 }
 
 /**
- * Retires the obsolete no-card Stripe trial before a member starts an ordinary
- * paid Checkout. The member lock serializes provider cancellation, local
- * identity release, and any competing webhook or billing mutation. A provider
- * state that could represent paid service fails closed instead of risking a
- * duplicate subscription.
- */
-export function retireHostedLegacyPulseTrialForCheckout(input: {
-  memberId: string;
-  prisma: PrismaClient;
-  priceId: string;
-  stripe: Pick<Stripe, "subscriptions">;
-}): Promise<boolean> {
-  return retireHostedLegacyPulseTrial({
-    ...input,
-    billingStatusAfterClear: HostedBillingStatus.active,
-  });
-}
-
-export function retireHostedLegacyPulseTrial(input: {
-  billingStatusAfterClear: HostedBillingStatus;
-  memberId: string;
-  prisma: PrismaClient;
-  priceId: string;
-  stripe: Pick<Stripe, "subscriptions">;
-}): Promise<boolean> {
-  return retireHostedLegacyPulseTrialWithPolicy({
-    memberId: input.memberId,
-    policy: {
-      billingStatusAfterClear: input.billingStatusAfterClear,
-      kind: "clear",
-    },
-    priceId: input.priceId,
-    prisma: input.prisma,
-    stripe: input.stripe,
-  });
-}
-
-/**
  * Bounded rollout owner for trial rows created by an older deployment after
  * the one-time Starter migration. It revalidates the exact provider object,
  * preserves already-consumed trial usage in the canonical Starter ledger, and
@@ -90,29 +52,6 @@ export function retireHostedLegacyPulseTrial(input: {
  */
 export function retireHostedLegacyPulseTrialToStarter(input: {
   memberId: string;
-  prisma: PrismaClient;
-  priceId: string;
-  stripe: Pick<Stripe, "subscriptions">;
-}): Promise<boolean> {
-  return retireHostedLegacyPulseTrialWithPolicy({
-    memberId: input.memberId,
-    policy: { kind: "convert_to_starter" },
-    priceId: input.priceId,
-    prisma: input.prisma,
-    stripe: input.stripe,
-  });
-}
-
-type HostedLegacyPulseTrialRetirementPolicy =
-  | {
-      billingStatusAfterClear: HostedBillingStatus;
-      kind: "clear";
-    }
-  | { kind: "convert_to_starter" };
-
-async function retireHostedLegacyPulseTrialWithPolicy(input: {
-  memberId: string;
-  policy: HostedLegacyPulseTrialRetirementPolicy;
   prisma: PrismaClient;
   priceId: string;
   stripe: Pick<Stripe, "subscriptions">;
@@ -148,38 +87,33 @@ async function retireHostedLegacyPulseTrialWithPolicy(input: {
         throw buildHostedLegacyTrialRetirementBlockedError();
       }
 
-      let billingStatusAfterClear: HostedBillingStatus;
-      if (input.policy.kind === "convert_to_starter") {
-        const canGrantStarter = canGrantHostedStarterUsageForLegacyTrial(
-          member.core,
-        );
-        if (canGrantStarter) {
-          const initialConsumedUsdMicros =
-            await readHostedLegacyTrialConsumedUsageUsdMicrosTx({
-              memberId: input.memberId,
-              trialStartedAt:
-                billingRef.currentTrialStartedAt
-                ?? billingRef.pulseTrialRedeemedAt
-                ?? null,
-              tx,
-            });
-          await ensureHostedStarterUsageGrantTx({
-            effectiveAt:
-              billingRef.pulseTrialRedeemedAt
-              ?? billingRef.currentTrialStartedAt
-              ?? member.core.createdAt,
-            initialConsumedUsdMicros,
+      const canGrantStarter = canGrantHostedStarterUsageForLegacyTrial(
+        member.core,
+      );
+      if (canGrantStarter) {
+        const initialConsumedUsdMicros =
+          await readHostedLegacyTrialConsumedUsageUsdMicrosTx({
             memberId: input.memberId,
-            source: "legacy_trial_migration",
+            trialStartedAt:
+              billingRef.currentTrialStartedAt
+              ?? billingRef.pulseTrialRedeemedAt
+              ?? null,
             tx,
           });
-        }
-        billingStatusAfterClear = canGrantStarter
-          ? HostedBillingStatus.active
-          : member.core.billingStatus;
-      } else {
-        billingStatusAfterClear = input.policy.billingStatusAfterClear;
+        await ensureHostedStarterUsageGrantTx({
+          effectiveAt:
+            billingRef.pulseTrialRedeemedAt
+            ?? billingRef.currentTrialStartedAt
+            ?? member.core.createdAt,
+          initialConsumedUsdMicros,
+          memberId: input.memberId,
+          source: "legacy_trial_migration",
+          tx,
+        });
       }
+      const billingStatusAfterClear = canGrantStarter
+        ? HostedBillingStatus.active
+        : member.core.billingStatus;
 
       if (
         subscription

@@ -35,10 +35,16 @@ vi.mock("@/src/lib/hosted-execution/usage-credit-ledger", async () => {
   };
 });
 
-vi.mock("@/src/lib/legal/consent", () => ({
-  assertHostedLaunchRequiredConsentGranted:
-    mocks.assertHostedLaunchRequiredConsentGranted,
-}));
+vi.mock("@/src/lib/legal/consent", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/legal/consent")
+  >("@/src/lib/legal/consent");
+  return {
+    ...actual,
+    assertHostedLaunchRequiredConsentGranted:
+      mocks.assertHostedLaunchRequiredConsentGranted,
+  };
+});
 
 vi.mock("@/src/lib/hosted-onboarding/billing-start-preconditions", () => ({
   assertHostedMemberBillingStartMessagingReady:
@@ -214,6 +220,58 @@ describe("Starter usage enrollment owner", () => {
     });
   });
 
+  it("keeps active Family sponsorship outside Starter grant authority", async () => {
+    const prisma = buildPrisma(() => memberState, undefined, true);
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).resolves.toEqual({
+      redirectPath: "/home",
+      status: "already_active",
+    });
+
+    expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(prisma.hostedAccountGroupMembership.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        group: {
+          billingStatus: HostedBillingStatus.active,
+          suspendedAt: null,
+        },
+        memberId: memberState.id,
+        status: "active",
+      },
+    });
+    expect(
+      mocks.lockHostedUsageCreditBeneficiaryTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      prisma.hostedAccountGroupMembership.findFirst.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("preserves a preexisting Starter grant after Family sponsorship begins", async () => {
+    grantState = { effectiveAt: NOW };
+    const prisma = buildPrisma(() => memberState, undefined, true);
+
+    await expect(ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    })).resolves.toMatchObject({ status: "already_enrolled" });
+
+    expect(createdGrantCount).toBe(0);
+    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledOnce();
+    expect(prisma.hostedAccountGroupMembership.findFirst).not.toHaveBeenCalled();
+  });
+
   it("fails closed for suspended and invite-mismatched members", async () => {
     const prisma = buildPrisma(() => memberState);
     await expect(ensureHostedStarterUsageEnrollment({
@@ -320,6 +378,7 @@ function buildPrisma(
     inviteId: string;
     memberId: string;
   },
+  familySponsored = false,
 ) {
   let admission = admissionInput ?? null;
   const tx = {
@@ -354,6 +413,9 @@ function buildPrisma(
     },
     hostedMember: {
       findUnique: vi.fn(async () => readMember()),
+    },
+    hostedAccountGroupMembership: {
+      findFirst: vi.fn(async () => familySponsored ? { id: "family_123" } : null),
     },
   };
   return {

@@ -27,6 +27,7 @@ import {
 import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
+import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
@@ -257,11 +258,17 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       const hasPaidSubscription = hasHostedPaidBillingRefEvidence(
         member.billingRef,
       );
+      const hasFamilySponsorship = !existingGrant && !hasPaidSubscription
+        && await readActiveHostedFamilySponsorship({
+          memberId: invite.member.id,
+          prisma: tx,
+        });
 
       if (
         !existingGrant
         && member.billingStatus !== HostedBillingStatus.not_started
         && !hasPaidSubscription
+        && !hasFamilySponsorship
       ) {
         throw hostedOnboardingError({
           code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
@@ -281,7 +288,9 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           })
         : null;
 
-      if (!hasPaidSubscription) {
+      const shouldEnsureStarterGrant =
+        !hasPaidSubscription && !hasFamilySponsorship;
+      if (shouldEnsureStarterGrant) {
         await ensureHostedStarterUsageGrantTx({
           effectiveAt: now,
           existingGrant,
@@ -292,9 +301,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         });
       }
 
-      const activation = hasPaidSubscription
-        ? null
-        : await activateHostedMemberForPositiveSourceTx({
+      const activation = shouldEnsureStarterGrant
+        ? await activateHostedMemberForPositiveSourceTx({
             dispatchContext: {
               eventCreatedAt: existingGrant?.effectiveAt ?? now,
               occurredAt: (existingGrant?.effectiveAt ?? now).toISOString(),
@@ -306,7 +314,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
             prisma: tx,
             skipIfPreviouslyActivated: true,
             suppressSignupWelcome: policy.suppressSignupWelcome,
-          });
+          })
+        : null;
 
       if (instantStartInviteId && policy.instantStartAdmission) {
         await clearHostedLinqInstantStartAdmissionTx({
@@ -317,7 +326,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         });
       }
 
-      const status: HostedStarterUsageEnrollmentStatus = hasPaidSubscription
+      const status: HostedStarterUsageEnrollmentStatus =
+        hasPaidSubscription || hasFamilySponsorship
         ? "already_active"
         : existingGrant
           ? "already_enrolled"
