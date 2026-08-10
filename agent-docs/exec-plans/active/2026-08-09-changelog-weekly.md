@@ -213,7 +213,12 @@ Updated: 2026-08-10
   docs validation.
 - Passed after the round-4 correction: 41 focused changelog registry/page/route
   tests, Web typecheck, scoped lint, docs drift, skill validation, and diff
-  checks.
+  checks. Exact-head Playwright rendered 73 public cards at desktop and mobile
+  widths; both public and design-study routes returned 200 with zero page
+  errors or overflow, and the rejected scheduled-email, health-relay, and
+  referral-beneficiary phrases were absent. The refreshed scheduled-call card
+  captures were inspected and uploaded through the lossless design-proof
+  variant.
 - Pending: commit and push the round-4 correction, refresh exact-head visual
   and CI proof, complete final ReviewGPT round 5, confirm merge readiness, and
   close this plan.
