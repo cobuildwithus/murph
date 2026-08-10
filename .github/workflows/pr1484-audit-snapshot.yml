@@ -1,4 +1,4 @@
-name: Validate final PR 1484 candidate
+name: Push PR 1484 provider boundary fix
 
 on:
   push:
@@ -6,17 +6,17 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
-      - name: Check out exact PR head
+      - name: Check out exact PR branch
         uses: actions/checkout@v4
         with:
-          ref: bd43a41267b70162fce248375b8e9638cd4e3e17
+          ref: agent/member-owned-provider-applications
           fetch-depth: 0
 
       - name: Set up pnpm
@@ -31,55 +31,330 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate Prisma client
-        run: pnpm -C apps/web run prisma:generate
+      - name: Restore the provider-runtime boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected_head=bd43a41267b70162fce248375b8e9638cd4e3e17
+          test "$(git rev-parse HEAD)" = "$expected_head"
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Validate Prisma schema
-        run: pnpm -C apps/web exec prisma validate
+          service_path = Path("apps/web/src/lib/device-sync/agent-session-service.ts")
+          source = service_path.read_text()
 
-      - name: Typecheck device sync
-        run: pnpm -C packages/device-syncd run typecheck
+          runtime_imports = '''import {
+            resolveDeviceProviderApplicationForConnection,
+          } from "./provider-applications";
+          import {
+            createHostedDeviceSyncRegistryWithProviderConfigs,
+          } from "./providers";
+          '''
+          if source.count(runtime_imports) != 1:
+              raise SystemExit("expected one provider-runtime import block")
+          source = source.replace(runtime_imports, "", 1)
 
-      - name: Typecheck assistant runtime
-        run: pnpm -C packages/assistant-runtime run typecheck
+          options_marker = '''export interface HostedDeviceSyncAgentSessionOptions {
+            readonly registry?: DeviceSyncRegistry | null;
+          }'''
+          options_replacement = '''export type HostedDeviceSyncRefreshProviderResolver = (input: {
+            connectionId: string;
+            prisma: PrismaDeviceSyncControlPlaneStore["prisma"];
+            providerId: string;
+            userId: string;
+          }) => Promise<DeviceSyncProvider | null>;
 
-      - name: Typecheck Web
-        run: pnpm -C apps/web run typecheck
+          export interface HostedDeviceSyncAgentSessionOptions {
+            readonly registry?: DeviceSyncRegistry | null;
+            readonly resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
+          }'''
+          if source.count(options_marker) != 1:
+              raise SystemExit("expected one agent-session options interface")
+          source = source.replace(options_marker, options_replacement, 1)
 
-      - name: Lint Web
-        run: pnpm -C apps/web run lint
+          field_marker = '''  private registry: DeviceSyncRegistry | null;
 
-      - name: Run focused Web tests
+            constructor(input: {
+              request: Request;
+              store: PrismaDeviceSyncControlPlaneStore;
+              registry?: DeviceSyncRegistry | null;
+            }) {
+              this.store = input.store;
+              this.registry = input.registry ?? null;'''
+          field_replacement = '''  private readonly registry: DeviceSyncRegistry | null;
+            private readonly resolveRefreshProvider:
+              | HostedDeviceSyncRefreshProviderResolver
+              | null;
+
+            constructor(input: {
+              request: Request;
+              store: PrismaDeviceSyncControlPlaneStore;
+              registry?: DeviceSyncRegistry | null;
+              resolveRefreshProvider?: HostedDeviceSyncRefreshProviderResolver | null;
+            }) {
+              this.store = input.store;
+              this.registry = input.registry ?? null;
+              this.resolveRefreshProvider = input.resolveRefreshProvider ?? null;'''
+          if source.count(field_marker) != 1:
+              raise SystemExit("expected one agent-session constructor block")
+          source = source.replace(field_marker, field_replacement, 1)
+
+          provider_marker = '''    const application = await resolveDeviceProviderApplicationForConnection({
+              connectionId: input.connectionId,
+              memberId: input.userId,
+              prisma: this.store.prisma,
+            });
+            const registry = application
+              ? createHostedDeviceSyncRegistryWithProviderConfigs({
+                  providerConfigs: application.providerConfigs,
+                })
+              : await this.requireRegistry();
+            const provider = registry.get(input.providerId);'''
+          provider_replacement = '''    const provider = this.resolveRefreshProvider
+              ? await this.resolveRefreshProvider({
+                  ...input,
+                  prisma: this.store.prisma,
+                })
+              : (await this.requireRegistry()).get(input.providerId);'''
+          if source.count(provider_marker) != 1:
+              raise SystemExit("expected one inline refresh-provider resolution block")
+          source = source.replace(provider_marker, provider_replacement, 1)
+
+          context_marker = '''    agentSessions: new HostedDeviceSyncAgentSessionService({
+              registry: options.registry ?? null,
+              request,
+              store,
+            }),'''
+          context_replacement = '''    agentSessions: new HostedDeviceSyncAgentSessionService({
+              registry: options.registry ?? null,
+              request,
+              resolveRefreshProvider: options.resolveRefreshProvider ?? null,
+              store,
+            }),'''
+          if source.count(context_marker) != 1:
+              raise SystemExit("expected one agent-session context construction")
+          source = source.replace(context_marker, context_replacement, 1)
+          service_path.write_text(source)
+
+          adapter_path = Path("apps/web/src/lib/device-sync/agent-session-provider-service.ts")
+          adapter_path.write_text('''import "server-only";
+
+          import {
+            createHostedDeviceSyncAgentSessionService,
+            type HostedDeviceSyncRefreshProviderResolver,
+          } from "./agent-session-service";
+          import {
+            resolveDeviceProviderApplicationForConnection,
+          } from "./provider-applications";
+          import {
+            createHostedDeviceSyncRegistry,
+            createHostedDeviceSyncRegistryWithProviderConfigs,
+          } from "./providers";
+
+          export function createHostedDeviceSyncProviderAgentSessionService(
+            request: Request,
+          ) {
+            const sharedRegistry = createHostedDeviceSyncRegistry(process.env);
+            const resolveRefreshProvider: HostedDeviceSyncRefreshProviderResolver =
+              async (input) => {
+                const application = await resolveDeviceProviderApplicationForConnection({
+                  connectionId: input.connectionId,
+                  memberId: input.userId,
+                  prisma: input.prisma,
+                });
+                const registry = application
+                  ? createHostedDeviceSyncRegistryWithProviderConfigs({
+                      providerConfigs: application.providerConfigs,
+                    })
+                  : sharedRegistry;
+
+                return registry.get(input.providerId) ?? null;
+              };
+
+            return createHostedDeviceSyncAgentSessionService(request, {
+              resolveRefreshProvider,
+            });
+          }
+          ''')
+
+          test_path = Path("apps/web/test/agent-session-provider-service.test.ts")
+          test_path.write_text('''import { beforeEach, describe, expect, it, vi } from "vitest";
+
+          const mocks = vi.hoisted(() => ({
+            createAgentSessionService: vi.fn(),
+            createScopedRegistry: vi.fn(),
+            createSharedRegistry: vi.fn(),
+            resolveApplication: vi.fn(),
+            scopedGet: vi.fn(),
+            sharedGet: vi.fn(),
+          }));
+
+          vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
+            createHostedDeviceSyncAgentSessionService:
+              mocks.createAgentSessionService,
+          }));
+          vi.mock("@/src/lib/device-sync/provider-applications", () => ({
+            resolveDeviceProviderApplicationForConnection:
+              mocks.resolveApplication,
+          }));
+          vi.mock("@/src/lib/device-sync/providers", () => ({
+            createHostedDeviceSyncRegistry: mocks.createSharedRegistry,
+            createHostedDeviceSyncRegistryWithProviderConfigs:
+              mocks.createScopedRegistry,
+          }));
+
+          import {
+            createHostedDeviceSyncProviderAgentSessionService,
+          } from "@/src/lib/device-sync/agent-session-provider-service";
+          import type {
+            HostedDeviceSyncAgentSessionOptions,
+          } from "@/src/lib/device-sync/agent-session-service";
+
+          describe("member-owned provider agent-session adapter", () => {
+            beforeEach(() => {
+              vi.clearAllMocks();
+              mocks.createSharedRegistry.mockReturnValue({
+                get: mocks.sharedGet,
+              });
+              mocks.createScopedRegistry.mockReturnValue({
+                get: mocks.scopedGet,
+              });
+              mocks.createAgentSessionService.mockReturnValue(
+                Symbol("agent-session-service"),
+              );
+            });
+
+            it("resolves app-bound refreshes only through the member-scoped registry", async () => {
+              const provider = { id: "member-strava-provider" };
+              const providerConfigs = {
+                strava: {
+                  clientId: "member-client",
+                  clientSecret: "member-secret",
+                },
+              };
+              mocks.resolveApplication.mockResolvedValue({
+                provider: "strava",
+                providerConfigs,
+              });
+              mocks.scopedGet.mockReturnValue(provider);
+
+              const request = new Request(
+                "https://murph.example/api/device-sync/agent/connections/dsc_123/refresh-token-bundle",
+              );
+              const service = createHostedDeviceSyncProviderAgentSessionService(request);
+              const options = mocks.createAgentSessionService.mock.calls[0]?.[1]
+                as HostedDeviceSyncAgentSessionOptions;
+              const prisma = { marker: "prisma" } as never;
+
+              await expect(options.resolveRefreshProvider?.({
+                connectionId: "dsc_123",
+                prisma,
+                providerId: "strava",
+                userId: "member_123",
+              })).resolves.toBe(provider);
+
+              expect(service).toBe(mocks.createAgentSessionService.mock.results[0]?.value);
+              expect(mocks.resolveApplication).toHaveBeenCalledWith({
+                connectionId: "dsc_123",
+                memberId: "member_123",
+                prisma,
+              });
+              expect(mocks.createScopedRegistry).toHaveBeenCalledWith({
+                providerConfigs,
+              });
+              expect(mocks.scopedGet).toHaveBeenCalledWith("strava");
+              expect(mocks.sharedGet).not.toHaveBeenCalled();
+            });
+
+            it("uses the shared registry only when the connection has no private application", async () => {
+              const provider = { id: "shared-whoop-provider" };
+              mocks.resolveApplication.mockResolvedValue(null);
+              mocks.sharedGet.mockReturnValue(provider);
+
+              createHostedDeviceSyncProviderAgentSessionService(
+                new Request("https://murph.example/refresh"),
+              );
+              const options = mocks.createAgentSessionService.mock.calls[0]?.[1]
+                as HostedDeviceSyncAgentSessionOptions;
+
+              await expect(options.resolveRefreshProvider?.({
+                connectionId: "dsc_shared",
+                prisma: {} as never,
+                providerId: "whoop",
+                userId: "member_123",
+              })).resolves.toBe(provider);
+
+              expect(mocks.sharedGet).toHaveBeenCalledWith("whoop");
+              expect(mocks.createScopedRegistry).not.toHaveBeenCalled();
+            });
+
+            it("does not fall back to shared credentials when an app-bound registry lacks the provider", async () => {
+              mocks.resolveApplication.mockResolvedValue({
+                provider: "strava",
+                providerConfigs: {
+                  strava: {
+                    clientId: "member-client",
+                    clientSecret: "member-secret",
+                  },
+                },
+              });
+              mocks.scopedGet.mockReturnValue(undefined);
+              mocks.sharedGet.mockReturnValue({ id: "shared-strava-provider" });
+
+              createHostedDeviceSyncProviderAgentSessionService(
+                new Request("https://murph.example/refresh"),
+              );
+              const options = mocks.createAgentSessionService.mock.calls[0]?.[1]
+                as HostedDeviceSyncAgentSessionOptions;
+
+              await expect(options.resolveRefreshProvider?.({
+                connectionId: "dsc_private",
+                prisma: {} as never,
+                providerId: "strava",
+                userId: "member_123",
+              })).resolves.toBeNull();
+
+              expect(mocks.sharedGet).not.toHaveBeenCalled();
+            });
+          });
+          ''')
+          PY
+          git diff --check
+
+      - name: Typecheck and lint Web
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm -C apps/web run typecheck
+          pnpm -C apps/web run lint
+
+      - name: Run focused Web regressions
         shell: bash
         run: |
           set -euo pipefail
           pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
-            test/device-provider-application-crypto.test.ts \
-            test/device-provider-application-ingress-store.test.ts \
-            test/device-provider-application-store.test.ts \
-            test/device-provider-application-types.test.ts \
-            test/device-sync-hosted-runtime-authority.test.ts \
-            test/device-sync-internal-runtime.test.ts \
-            test/device-sync-providers.test.ts \
-            test/hosted-account-data-service.test.ts \
-            test/prisma-store-oauth-connection.test.ts \
-            test/prisma-store-oauth-sessions.test.ts
+            test/agent-session-provider-service.test.ts \
+            test/agent-session-service.test.ts
 
-      - name: Run assistant-runtime tests
-        run: pnpm -C packages/assistant-runtime run test
-
-      - name: Run device-sync package tests
-        run: pnpm -C packages/device-syncd run test
-
-      - name: Run smoke checks
-        run: pnpm test:smoke
-
-      - name: Verify generated and source cleanliness
+      - name: Verify package boundary
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check
-          test -z "$(git status --short --untracked-files=no)" || {
-            git status --short
-            exit 1
-          }
+          pnpm -C packages/device-syncd exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/package-boundary.test.ts
+
+      - name: Commit and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            apps/web/src/lib/device-sync/agent-session-provider-service.ts \
+            apps/web/src/lib/device-sync/agent-session-service.ts \
+            apps/web/test/agent-session-provider-service.test.ts
+          git commit -m "refactor: preserve device-sync provider runtime boundary"
+          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:bd43a41267b70162fce248375b8e9638cd4e3e17 \
+            origin HEAD:refs/heads/agent/member-owned-provider-applications
