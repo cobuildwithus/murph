@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/internal/hosted-growth/usage-referral/cron",
-      "schedule": "* * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/internal/hosted-onboarding/linq/contact-card/cron",
@@ -30,7 +30,7 @@
     },
     {
       "path": "/api/internal/hosted-execution/product-feedback/digest/cron",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/10 22,23 * * *"
     },
     {
       "path": "/api/internal/hosted-execution/retention/cron",

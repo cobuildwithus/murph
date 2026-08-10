@@ -818,7 +818,7 @@ Last verified: 2026-08-09
   pre-expiry provider evidence delivered later can still qualify; the first
   referrer-serialized expiry boundary after the grace is authoritative
   finality. The immediate ingress handoff and a bounded
-  Vercel-authenticated minute recovery pass both retry idempotent reward
+  Vercel-authenticated five-minute recovery pass both retry idempotent reward
   reconciliation. The source mailbox append and its completion fence commit
   atomically after reward commit. Group appends carry live thread authority;
   personal appends revalidate the frozen blinded source conversation and never

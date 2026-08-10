@@ -306,8 +306,12 @@ created, after invite expiry and a simulated ordinary-resume channel relabel.
 
 ## Recovery and completion notices
 
-The existing Vercel-authenticated referral recovery cron remains the only
-scheduler. Each bounded pass:
+The existing Vercel-authenticated five-minute referral recovery cron remains
+the only scheduler. It stays on its standalone route instead of sharing the
+billing-critical minute Stripe sweep: one pass may scan or re-signal up to 150
+durable candidates, so each owner's timeout and failure semantics remain
+independent. Keeping the route also preserves a code-compatible rollback to
+the prior cadence. Each bounded pass:
 
 1. scans up to 50 recent attributed `member.activated` events when signup-link
    rewards are enabled;
