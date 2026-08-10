@@ -1542,62 +1542,93 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         await appendAssistantTranscriptEntries(
           vaultRoot,
           'session_stale_group_sleep_evidence',
-          [{
-            createdAt: '2026-08-10T11:30:00.000Z',
-            kind: 'assistant',
-            text: 'Your shared Deep sleep is visible at 61 minutes.',
-          }],
+          [
+            {
+              createdAt: '2026-08-10T11:29:00.000Z',
+              kind: 'assistant',
+              text: 'Your shared Deep sleep is visible at 61 minutes.',
+            },
+            {
+              createdAt: '2026-08-10T11:30:00.000Z',
+              kind: 'assistant',
+              text: 'Run Club changed Saturday\'s meeting time to 9:30 AM.',
+            },
+          ],
         )
 
-        const result = await executeReadOnlyAssistantAsk({
-          codexCommand:
-            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
-            ?? undefined,
-          codexHome: config.codexHome,
-          env: config.env,
-          groupSharedReader: {
-            request: async (request) => {
-              sharedRequests.push(request)
-              return {
-                members: [{
-                  currentTurnHandles: [],
-                  displayName: null,
-                  memberId: 'member_sleep_consultation',
-                  participantId: 'membership_requester',
-                  projections: [{
-                    dataStatus: 'missing',
-                    grantStatus: 'granted',
-                    grantedAt: '2026-08-10T10:00:00.000Z',
-                    projectionScope: {
-                      projectionKind: 'deep-sleep-sources-days.v1',
-                    },
-                    projectionScopeKey: 'deep-sleep-sources-days.v1',
-                    records: [],
+        const executeConsultation = (question: string) =>
+          executeReadOnlyAssistantAsk({
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            env: config.env,
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  members: [{
+                    currentTurnHandles: [],
+                    displayName: null,
+                    memberId: 'member_sleep_consultation',
+                    participantId: 'membership_requester',
+                    projections: [{
+                      dataStatus: 'missing',
+                      grantStatus: 'granted',
+                      grantedAt: '2026-08-10T10:00:00.000Z',
+                      projectionScope: {
+                        projectionKind: 'deep-sleep-sources-days.v1',
+                      },
+                      projectionScopeKey: 'deep-sleep-sources-days.v1',
+                      records: [],
+                    }],
                   }],
-                }],
-                requestedProjectionScopeKeys: [
-                  'deep-sleep-sources-days.v1',
-                ],
-                status: 'ok',
-              }
+                  requestedProjectionScopeKeys: [
+                    'deep-sleep-sources-days.v1',
+                  ],
+                  status: 'ok',
+                }
+              },
             },
-          },
-          model: config.model,
-          modelProvider: config.modelProvider,
-          now,
-          question:
-            'Can Run Club see my Deep sleep yet after I reconnected?',
-          reasoningEffort: 'low',
-          requesterParticipantId: 'membership_requester',
-          workspaceRoot: vaultRoot,
-        })
+            model: config.model,
+            modelProvider: config.modelProvider,
+            now,
+            question,
+            reasoningEffort: 'low',
+            requesterParticipantId: 'membership_requester',
+            workspaceRoot: vaultRoot,
+          })
+        const visibilityResult = await executeConsultation(
+          'Can Run Club see my Deep sleep yet after I reconnected?',
+        )
 
         expect(sharedRequests).toEqual([{
           projectionScopes: [{
             projectionKind: 'deep-sleep-sources-days.v1',
           }],
         }])
-        expect(result).toEqual({ outcome: 'cannot_answer' })
+        expect(visibilityResult).toMatchObject({ outcome: 'answered' })
+        if (visibilityResult.outcome !== 'answered') {
+          throw new Error('Expected a literal current visibility answer.')
+        }
+        expect(visibilityResult.answer).toMatch(
+          /not (?:currently )?(?:visible|showing|available)|can(?:not|'t) (?:currently )?see/iu,
+        )
+        expect(visibilityResult.answer).not.toContain('61')
+        expect(visibilityResult.answer).not.toMatch(
+          /permission (?:was )?(?:denied|revoked)|sync (?:failed|error)|provider error|reconnect(?:ion)? (?:failed|didn'?t work)/iu,
+        )
+
+        sharedRequests.length = 0
+        const meetingResult = await executeConsultation(
+          'Has Run Club changed Saturday\'s meeting time yet?',
+        )
+        expect(sharedRequests).toEqual([])
+        expect(meetingResult).toMatchObject({ outcome: 'answered' })
+        if (meetingResult.outcome !== 'answered') {
+          throw new Error('Expected the authorized group-context answer.')
+        }
+        expect(meetingResult.answer).toMatch(/9:30\s*(?:AM|a\.m\.)/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -1605,7 +1636,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         ])
       }
     },
-    360_000,
+    600_000,
   )
 
   it(

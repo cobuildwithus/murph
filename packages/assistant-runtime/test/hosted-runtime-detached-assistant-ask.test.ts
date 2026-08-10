@@ -750,7 +750,10 @@ describe("hosted detached assistant ask controller", () => {
           projectionKind: "deep-sleep-sources-days.v1",
         }],
       });
-      return { outcome: "cannot_answer" as const };
+      return {
+        answer: "Deep sleep is not currently visible; the cause is unknown.",
+        outcome: "answered" as const,
+      };
     });
     const completionRequests: unknown[] = [];
 
@@ -800,7 +803,10 @@ describe("hosted detached assistant ask controller", () => {
       assert.deepEqual(completionRequests, [{
         action: "complete",
         requestId: "ask_event_authority",
-        result: { answer: null, outcome: "cannot_answer" },
+        result: {
+          answer: "Deep sleep is not currently visible; the cause is unknown.",
+          outcome: "answered",
+        },
       }]);
     } finally {
       await removeVaultRoot(vaultRoot);

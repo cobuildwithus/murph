@@ -84,3 +84,13 @@ Updated: 2026-08-10
   the freshness rule. The recorded continuation decision keeps one shared
   instruction at both group-authorized model boundaries, leaves the private
   root on `ask`, and replaces admission-only coverage with target-owner proof.
+- Round 3 found that the shared instruction's `now`/`yet` trigger was broader
+  than shared-metric visibility and that exact granted-plus-missing evidence
+  should produce a literal unavailable status rather than generic
+  `cannot_answer`. The recorded round-4 retrospective addendum narrows the
+  subject, excludes unrelated group questions, and keeps typed
+  `cannot_answer` for a failed read or absent matching evidence.
+- Corrected Assistant Engine suites: 109 passed with 48 real-model cases skipped
+  by default; the exact target-owner real-model run remains blocked by the
+  unavailable `OPENAI_API_KEY`. Corrected detached Assistant Ask lifecycle: 15
+  passed. Assistant Engine and Assistant Runtime typechecks passed.
