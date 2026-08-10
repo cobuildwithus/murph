@@ -171,12 +171,26 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
   const { GroupJoinAcceptForm } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
-  const permissions = Array.from({ length: 13 }, (_, index) => ({
-    description: `Shares choice ${index + 1}.`,
-    label: `Choice ${index + 1}`,
-    projectionScope: { projectionKind: "steps-days.v0" as const },
-    projectionScopeKey: `steps-days.v0:${index + 1}`,
-  }));
+  const macroKinds = [
+    "protein-days.v0",
+    "carbs-days.v0",
+    "fat-days.v0",
+    "fiber-days.v0",
+  ] as const;
+  const permissions = [
+    ...macroKinds.map((projectionKind) => ({
+      description: `Shares ${projectionKind}.`,
+      label: projectionKind,
+      projectionScope: { projectionKind },
+      projectionScopeKey: projectionKind,
+    })),
+    ...Array.from({ length: 12 }, (_, index) => ({
+      description: `Shares choice ${index + 1}.`,
+      label: `Choice ${index + 1}`,
+      projectionScope: { projectionKind: "steps-days.v0" as const },
+      projectionScopeKey: `steps-days.v0:${index + 1}`,
+    })),
+  ];
 
   const markup = renderToStaticMarkup(
     createElement(GroupJoinAcceptForm, {
@@ -192,6 +206,7 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
   );
 
   expect(markup).toContain("13 of 13 choices selected");
+  expect(markup).not.toContain("16 of 16 choices selected");
   expect(markup).toContain('aria-label="Sharing choices"');
   expect(markup).toContain('role="region"');
   expect(markup).toContain("max-h-[26rem]");

@@ -1,7 +1,6 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
-import { containsHttpUrlText } from "@murphai/contracts";
 import type {
   HostedExecutionAcceptedGroupMessageParticipant,
 } from "@murphai/hosted-execution/contracts";
@@ -1318,7 +1317,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
 
   const message = buildHostedGroupJoinOfferMessage({
     joinUrl,
-    messageTemplate: input.joinOffer?.messageTemplate,
     projectionScopes,
   });
   const providerSendStartedAt = new Date();
@@ -1542,15 +1540,9 @@ async function checkHostedRuntimeGroupLinqChatMutationAccess(input: {
 
 export function buildHostedGroupJoinOfferMessage(input: {
   joinUrl: string;
-  messageTemplate?: string | null;
   projectionScopes: readonly HostedVaultShareProjectionScope[];
 }): string {
-  const template = isValidHostedGroupJoinOfferMessageTemplate(
-    input.messageTemplate,
-  )
-    ? input.messageTemplate
-    : HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE;
-  return template
+  return HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE
     .replace(
       HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
       () => renderHostedGroupJoinOfferScopeSentence(input.projectionScopes),
@@ -1560,30 +1552,6 @@ export function buildHostedGroupJoinOfferMessage(input: {
 
 const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
-
-function isValidHostedGroupJoinOfferMessageTemplate(
-  value: string | null | undefined,
-): value is string {
-  if (!value) {
-    return false;
-  }
-  if (containsHttpUrlText(value)) {
-    return false;
-  }
-  const shareScopeCount = value.split(
-    HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER,
-  ).length - 1;
-  const joinUrlCount = value.split(
-    HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER,
-  ).length - 1;
-  const unknownPlaceholderCandidate = value
-    .replace(HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER, "")
-    .replace(HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER, "");
-  return shareScopeCount === 1
-    && joinUrlCount === 1
-    && !unknownPlaceholderCandidate.includes("{{")
-    && !unknownPlaceholderCandidate.includes("}}");
-}
 
 async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
   group: {

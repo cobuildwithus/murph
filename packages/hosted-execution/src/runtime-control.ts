@@ -1097,9 +1097,8 @@ export interface HostedRuntimeGroupCreateJoinLinkRequest {
 
 export interface HostedRuntimeGroupPostJoinOfferRequest {
   displayName?: string | null;
-  // Optional conversational frame. Web accepts only the two required
-  // placeholders and substitutes the frozen scope snapshot and first-party URL.
-  // Invalid templates fall back to the server-owned legacy template.
+  // Legacy wire compatibility only. Web owns the canonical consent sentence
+  // because an affirmative reaction grants the frozen server-side snapshot.
   messageTemplate?: string | null;
   // Compatibility for old fixed-kind callers. Selector-only projections must
   // use projectionScopes.

@@ -426,6 +426,19 @@ full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
 
+### Group Join Sharing Choices
+
+The group join consent checkpoint may request the complete selectable sharing
+catalog. Keep every requested choice selected for a new invitee until they
+explicitly uncheck it, state the selected count when the catalog is long, and
+place the checklist in one bounded, keyboard-scrollable region so the primary
+join action remains visible. Each row stays a full-width checkbox card with its
+plain-language scope description; do not compress a consequential permission
+into a dense table, hide choices behind categories, or imply that the defaults
+have already been granted. Existing members reopen the same surface with only
+their currently active shares selected, and the list includes both the current
+group request and every older share that member can still revoke.
+
 ### Group Usage Funding
 An authenticated group funding link opens its relevant funding control
 immediately: monthly sponsorship for an unsponsored chat, one-time contribution

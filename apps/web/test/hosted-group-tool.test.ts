@@ -424,37 +424,16 @@ describe("hosted group access-offer defaults", () => {
     expect(resolved.some((scope) => "selector" in scope)).toBe(true);
   });
 
-  it("keeps explicit scopes narrow and renders one natural consent sentence", () => {
+  it("keeps explicit scopes narrow and renders one server-owned consent sentence", () => {
     expect(resolveHostedGroupAccessOfferProjectionScopes([WORKOUTS_SCOPE]))
       .toEqual([WORKOUTS_SCOPE]);
     expect(resolveHostedGroupAccessOfferProjectionScopes([])).toEqual([]);
     expect(buildHostedGroupJoinOfferMessage({
       joinUrl: "https://www.withmurph.ai/groups/join/example",
-      messageTemplate:
-        "Okay—react to share {{share_scope}}, or adjust it at {{join_url}}.",
       projectionScopes: [WORKOUTS_SCOPE],
     })).toBe(
-      "Okay—react to share your Murph profile name and workout details, or adjust it at https://www.withmurph.ai/groups/join/example.",
-    );
-  });
-
-  it.each([
-    "React to share {{share_scope}}.",
-    "React now, or customize at {{join_url}}.",
-    "React to share {{share_scope}} twice: {{share_scope}}. Use {{join_url}}.",
-    "React to share {{share_scope}}. Use {{join_url}} or {{join_url}}.",
-    "React to share {{share_scope}}. Use {{join_url}} or {{external_url}}.",
-    "React to share {{share_scope}}. Read https://example.test first, then use {{join_url}}.",
-  ])("falls back when a consent template is incomplete or invalid", (messageTemplate) => {
-    const message = buildHostedGroupJoinOfferMessage({
-      joinUrl: "https://www.withmurph.ai/groups/join/example",
-      messageTemplate,
-      projectionScopes: [WORKOUTS_SCOPE],
-    });
-    expect(message).toBe(
       "Sounds good. Like or heart this message to share your Murph profile name and workout details with the group, or use https://www.withmurph.ai/groups/join/example to customize what you share.",
     );
-    expect(message).not.toContain("{{");
   });
 });
 
@@ -4040,7 +4019,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Joining shares your Murph profile name and email address. Customize: https://www.withmurph.ai/groups/join/abc123.",
+          "Sounds good. Like or heart this message to share your Murph profile name and email address with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -4070,7 +4049,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Scope: your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV. Customize: https://www.withmurph.ai/groups/join/abc123.",
+          "Sounds good. Like or heart this message to share your Murph profile name, sleep timing, activity minutes, workout summaries, resting heart rate, and HRV with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });
@@ -4138,7 +4117,7 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         message:
-          "Like this to join. It shares your Murph profile name and recent running distance and session count with the group. Join page: https://www.withmurph.ai/groups/join/abc123.",
+          "Sounds good. Like or heart this message to share your Murph profile name and recent running distance and session count with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.",
       }),
     );
   });

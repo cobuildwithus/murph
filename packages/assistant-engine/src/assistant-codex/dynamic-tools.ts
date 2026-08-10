@@ -20,7 +20,7 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
   HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
   HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
@@ -543,12 +543,6 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
         .min(1)
         .max(HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH)
         .optional(),
-      messageTemplate: z
-        .string()
-        .trim()
-        .min(1)
-        .max(HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH)
-        .optional(),
       projectionScopes: z
         .array(groupVaultShareProjectionScopeSchema)
         .max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length)
@@ -971,7 +965,6 @@ type MurphGroupToolRequest =
   | {
       action: 'offer_access'
       displayName?: string
-      messageTemplate?: string
       projectionScopes?: readonly HostedVaultShareSelectableProjectionScope[]
       standaloneLink?: boolean
     }
@@ -3653,9 +3646,7 @@ function buildGroupAccessOfferHostRequest(
       ...(request.displayName === undefined
         ? {}
         : { displayName: request.displayName }),
-      ...(request.messageTemplate === undefined
-        ? {}
-        : { messageTemplate: request.messageTemplate }),
+      messageTemplate: HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
       ...(request.projectionScopes === undefined
         ? {}
         : { projectionScopes: [...request.projectionScopes] }),

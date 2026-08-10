@@ -40,8 +40,8 @@ The newsletter is not a new scheduler, not a second email system, and not a new 
 | Access gating | **Free for every group.** No entitlement checks. |
 | Cadence | Weekly default (Sunday morning local), natural-language configurable, per-group jitter. |
 | Chat delivery | The same `group-health-newsletter` automation uses a system-owned delivery tag. Current-chat runs use one bounded `read_shared` for at most three configured scopes plus the ordinary conversation outbox and receive no newsletter email-send authority. The default scopes are steps, workout details, and sleep duration so same-week activity context is available when shared. |
-| Permission offers | In iMessage/Linq, Murph authors one natural consent message with `{{share_scope}}` and `{{join_url}}` exactly once each. Web rejects unknown, repeated, or missing placeholders and literal URLs to trusted fallback copy, substitutes only the frozen server-owned scope description and first-party URL, sends the rendered consent target as one reaction-bound provider message, and treats a freshly posted native offer as Murph's complete reply. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
-| Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and `{{share_scope}}` must render from that same projection list. |
+| Permission offers | In iMessage/Linq, Web renders one natural Murph consent message from the frozen server-owned scope description and first-party URL, sends that consent target as one reaction-bound provider message, and treats a freshly posted native offer as Murph's complete reply. Model-authored prose cannot redefine what an affirmative reaction means or add another link. In Telegram, return the existing Web-owned join URL in the ordinary chat reply because Telegram has no provider reaction-offer path. |
+| Consent invariant | The offer message and stored grant snapshot must match: `HostedGroupJoinOffer.projectionKindsJson` is the frozen server-side snapshot, and the Web-owned scope sentence renders from that same projection list. |
 | Health data toggles | The newsletter default scope includes the named health fields above. Members can narrow or widen it with the customize link. |
 | Projection retention | Each Web-owned encrypted health snapshot can carry **the 8 most recent records per projection kind** and replaces the prior snapshot on that exact active grant row. This retains the open local date plus the seven prior completed dates without exposing older history. The signed callback body ceiling is 19 KiB: above the maximum legal eight-record workout payload and below the equivalent nine-record payload. |
 
@@ -68,12 +68,16 @@ preserves that exact narrow request. A new consent checkpoint replaces the
 group's prior requested policy instead of unioning it, revokes stale unaccepted
 offers, and reuses an active native offer only when its frozen scopes match
 exactly. This replacement changes requested consent only; it does not revoke
-permissions that members already granted.
+permissions that members already granted. When an existing member reopens the
+join page, the editable list is the union of the current request and every
+permission that member still actively shares with the group, so a narrower
+future request cannot hide an older grant from the member's revoke controls.
+New invitees see only the current requested checkpoint.
 
-For native reaction offers, Web also rejects literal URLs in Murph's template,
-then injects the one first-party customization URL. The rendered prompt is sent
-as one reaction-bound provider text message even when the URL is terminal, so
-the stored consent target is the same bubble the member reads and reacts to.
+For native reaction offers, Web supplies the only URL and the fixed affirmative
+reaction meaning. The rendered prompt is sent as one reaction-bound provider
+text message, so the stored consent target is the same bubble the member reads
+and reacts to.
 
 ### Newsletter automation — the schedule + config
 

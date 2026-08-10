@@ -316,6 +316,7 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.assertHostedLaunchRequiredConsentGranted.mockResolvedValue(undefined);
     mocks.grantHostedVaultShareTx.mockResolvedValue(undefined);
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
     mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
   });
 
@@ -810,6 +811,45 @@ describe("acceptHostedGroupJoinCodeTx", () => {
       grantorMemberId: "member_grantor",
       now,
       projectionScopes: [SLEEP_SCOPE],
+      tx,
+    });
+  });
+
+  it("lets an existing member revoke an active grant outside the current request", async () => {
+    const tx = buildTx({
+      activeGroupGrantCount: 0,
+      existingMembershipId: "membership_existing",
+      requestedProjectionKinds: ["sleep-times.v0"],
+    });
+    const now = new Date("2026-07-01T00:00:00.000Z");
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValueOnce([
+      GROUP_EMAIL_SCOPE,
+      SLEEP_SCOPE,
+    ]);
+    mocks.revokeHostedVaultSharesTx.mockResolvedValue(1);
+
+    await expect(acceptHostedGroupJoinCodeTx({
+      expectedMembershipId: "membership_existing",
+      joinCode: "join_1",
+      memberId: "member_grantor",
+      now,
+      selectedVaultShareProjectionScopes: [SLEEP_SCOPE],
+      tx,
+    })).resolves.toMatchObject({
+      alreadyMember: true,
+      revokedVaultShareProjectionScopes: [GROUP_EMAIL_SCOPE],
+    });
+
+    expect(mocks.readActiveHostedVaultShareProjectionScopes).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      prisma: tx,
+    });
+    expect(mocks.revokeHostedVaultSharesTx).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_grantor",
+      now,
+      projectionScopes: [GROUP_EMAIL_SCOPE],
       tx,
     });
   });
@@ -2688,7 +2728,44 @@ describe("readHostedGroupJoinView leave affordance", () => {
       destinationMemberId: "member_group_runtime",
       grantorMemberId: "member_self",
       prisma,
-      projectionScopes: [LEGACY_DEEP_SLEEP_SCOPE, DEEP_SLEEP_SOURCES_SCOPE],
+    });
+  });
+
+  it("keeps active grants visible when the group's current request narrows", async () => {
+    mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValueOnce([
+      GROUP_EMAIL_SCOPE,
+      SLEEP_SCOPE,
+    ]);
+    const prisma = createPrismaStub({
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          _count: { members: 2 },
+          displayName: "Sunday Sleep Crew",
+          id: "group_1",
+          joinPolicyJson: JOIN_POLICY,
+          kind: "friends",
+          members: [{ id: "membership_1" }],
+          ownerMemberId: "member_owner",
+          runtimeMemberId: "member_group_runtime",
+        })),
+      },
+    });
+
+    await expect(readHostedGroupJoinView({
+      joinCode: "join_1",
+      memberId: "member_self",
+      prisma,
+    })).resolves.toMatchObject({
+      activeVaultShareProjectionScopes: [GROUP_EMAIL_SCOPE, SLEEP_SCOPE],
+      requestedVaultShareProjections: [
+        expect.objectContaining({ projectionScope: GROUP_EMAIL_SCOPE }),
+        expect.objectContaining({ projectionScope: SLEEP_SCOPE }),
+      ],
+    });
+    expect(mocks.readActiveHostedVaultShareProjectionScopes).toHaveBeenCalledWith({
+      destinationMemberId: "member_group_runtime",
+      grantorMemberId: "member_self",
+      prisma,
     });
   });
 

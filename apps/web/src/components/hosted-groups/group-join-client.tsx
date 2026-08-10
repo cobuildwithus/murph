@@ -209,6 +209,15 @@ export function GroupJoinAcceptForm(props: {
     [props.permissions, initialSelectedScopeKeys],
   );
   const usesScrollablePermissionReview = permissionGroups.length > 12;
+  const selectedPermissionGroupCount = permissionGroups.reduce(
+    (count, group) => (
+      group.scopeKeys.every((scopeKey) => selected.has(scopeKey))
+      || group.legacyScopeKeys.some((scopeKey) => selected.has(scopeKey))
+        ? count + 1
+        : count
+    ),
+    0,
+  );
   const secondaryLabel = props.postJoinDestination === "/join"
     ? GROUP_JOIN_SETUP_LABEL
     : props.alreadyActiveMember
@@ -309,7 +318,7 @@ export function GroupJoinAcceptForm(props: {
             </p>
             {usesScrollablePermissionReview ? (
               <p className="text-[12px] leading-5 text-muted-foreground">
-                {selectedVaultShareProjectionScopes.length} of {props.permissions.length} choices selected. Scroll to review every choice.
+                {selectedPermissionGroupCount} of {permissionGroups.length} choices selected. Scroll to review every choice.
               </p>
             ) : null}
           </div>

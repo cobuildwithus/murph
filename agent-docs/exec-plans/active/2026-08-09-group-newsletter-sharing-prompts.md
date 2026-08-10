@@ -10,8 +10,8 @@ Updated: 2026-08-09
   authorized data supports it, without inventing causes.
 - Request the complete selectable sharing set by default at the consent
   checkpoint while preserving explicit narrower requests and member opt-out.
-- Let Murph author one natural native consent message through a strictly
-  validated trusted-template boundary, and suppress only the redundant
+- Use one natural Web-owned native consent message whose affirmative reaction
+  meaning cannot be redefined by model prose, and suppress only the redundant
   companion reply after a fresh native offer succeeds.
 
 ## Success criteria
@@ -20,9 +20,11 @@ Updated: 2026-08-09
   unsupported causality, and include workout details in current-chat defaults.
 - Omitted access-offer scopes resolve to the complete selectable scope set for
   native offers and standalone links; explicit scopes remain unchanged.
-- `messageTemplate` accepts exactly one `{{share_scope}}` and one `{{join_url}}`,
-  rejects unknown or incomplete placeholders, and safely falls back to trusted
-  server copy.
+- The assistant surface exposes no consent-copy template; Web substitutes the
+  frozen scope description and first-party URL into its canonical affirmative
+  reaction sentence and ignores the legacy wire field.
+- Existing members can see and revoke the union of the current request and
+  their active selectable grants; new invitees see only the current request.
 - Only a freshly posted native offer returns the owned `kind: none` final action;
   reused, link, and failure paths remain reply-capable.
 - Focused Assistant Engine and Web tests, exact-head CI, preliminary specialist
@@ -40,7 +42,8 @@ Updated: 2026-08-09
 
 - Consent remains explicit and server-authoritative; defaults select requests,
   never grants.
-- The model cannot choose substituted scope text or URL.
+- The model cannot choose the affirmative reaction meaning, substituted scope
+  text, or URL.
 - No new state owner, dependency, service, queue, or persistence shape.
 - Preserve unrelated worktree changes and keep confidential screenshots and
   identifying details out of repository artifacts.
@@ -76,5 +79,25 @@ Updated: 2026-08-09
 - Desktop and 390px mobile design-catalog proof captured the comprehensive
   selected-permission checkpoint with its bounded review area and visible join
   action.
+- Corrected-head product-purpose revalidation: the irreducible purpose is one
+  truthful, controllable group-sharing decision plus one grounded weekly story.
+  The smallest complete journey is the single native offer/reaction or join
+  customization checkpoint, an exact requested-scope snapshot, no redundant
+  companion reply after a fresh offer, and same-period newsletter context drawn
+  only from authorized facts. The rendered comprehensive-default checkpoint
+  preserves review, opt-out, and the primary action without adding another
+  screen. No product-experience finding remains.
+- The separate Claude Code UI double-check was attempted with Fable after the
+  final rendered surface stabilized; the CLI reported explicit usage-credit
+  exhaustion, the workflow's documented non-blocking gap. No alternate Claude
+  request was made.
+- Final remediation focused proof: 89 Assistant Engine tests and 298 Web group
+  store/tool, join-client, and provider-boundary tests passed. Assistant Engine,
+  Hosted Execution, and Web typechecks passed.
+- ReviewGPT round 2 required the recorded anomaly retrospective after finding
+  that model prose could invert the reaction meaning and a narrower current
+  request could hide an existing member's older active grant. The remediation
+  deleted the model template surface, made Web own the canonical sentence, and
+  derives existing-member controls from current request plus active grants.
 - Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
   candidate.

@@ -169,7 +169,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
 // on 2026-08-09; startup entry and static closure are unchanged, so ratchet
 // only the total ceiling and keep both startup baselines and all tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_887_441 + 32_768;
+//
+// Adding the single-message group offer, exact reply ownership, and weekly
+// contextualization instructions grows only that lazy assistant output. Exact
+// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
+// baselines and established total tolerance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_933_709 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_885_509;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
