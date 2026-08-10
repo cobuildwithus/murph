@@ -125,11 +125,20 @@ describe.skipIf(!runPostgresProof)(
         expect(sanitized).toEqual({
           boot: { nodeStartupMs: 3 },
           orchestration: {
+            runtimeInvocationOrchestrationAttemptId:
+              "web-ingress-123e4567-e89b-42d3-a456-426614174000",
+            shellPrewarmFirstHintAtEpochMs: 1_775_908_800_001,
             shellPrewarmOutcome: "start_issued_warm",
+            shellPrewarmSource: "linq-typing-started",
             triggeredByWebDirect: true,
           },
           preProvider: { outboxScanPerformed: true },
           provider: { promptBuildMs: 9, sessionResolveMs: 10 },
+          schemaVersion: 1,
+        });
+        expect(requireJsonRecord(providerRows[1]?.phaseBreakdownJson)).toEqual({
+          preProvider: { outboxScanPerformed: true },
+          provider: { sessionResolveMs: 10 },
           schemaVersion: 1,
         });
         const providerNoOpMarker = new Date("2026-08-09T12:00:06.000Z");
@@ -360,8 +369,11 @@ async function createLatencySetWriteFixture(
             boot: { nodeStartupMs: 3, restoreWasCold: "wrong-type" },
             orchestration: {
               directEnsureOrchestrationAttemptId: "wrong-type",
+              runtimeInvocationOrchestrationAttemptId:
+                "web-ingress-123e4567-e89b-42d3-a456-426614174000",
+              shellPrewarmFirstHintAtEpochMs: 1_775_908_800_001,
               shellPrewarmOutcome: "start_issued_warm",
-              shellPrewarmSource: "wrong-type",
+              shellPrewarmSource: "linq-typing-started",
               triggeredByWebDirect: true,
             },
             provider: {
@@ -372,7 +384,12 @@ async function createLatencySetWriteFixture(
             schemaVersion: "wrong-type",
             unknownPhase: { unknownLeaf: "discard" },
           }
-        : undefined,
+        : index === 1
+          ? {
+              orchestration: { shellPrewarmOutcome: "wrong-type" },
+              schemaVersion: 1,
+            }
+          : undefined,
       runtimeAttemptId: index === 2
         ? input.rejectedRuntimeAttemptId
         : input.runtimeAttemptId,

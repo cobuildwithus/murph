@@ -3,10 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 
 import {
-  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
-  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
-  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
-  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -92,17 +89,7 @@ const HOSTED_INGRESS_LATENCY_TIMING_LOG_WINDOW_PADDING_MS = 5 * 60_000;
 const HOSTED_ASSISTANT_TURN_TIMING_SCHEMA = "murph.assistant-turn-timing.v1";
 const HOSTED_ASSISTANT_TURN_TIMING_TYPE = "assistant.turn.timing";
 const HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON = JSON.stringify(
-  Object.fromEntries(
-    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS.map((phase) => [
-      phase,
-      Object.fromEntries(
-        HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS[phase].map((leafKey) => [
-          leafKey,
-          readHostedIngressLatencyPhaseLeafRule(phase, leafKey),
-        ]),
-      ),
-    ]),
-  ),
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_RULES,
 );
 
 export interface HostedIngressLatencyWriteResult {
@@ -960,44 +947,6 @@ function buildHostedIngressLatencySanitizedJsonObjectSql(
     END
     FROM (SELECT ${normalizedObject} AS object) AS stored
   )`;
-}
-
-function readHostedIngressLatencyPhaseLeafRule(
-  phase: HostedRuntimeLatencyPhaseBreakdownPhase,
-  leafKey: string,
-): {
-  kind:
-    | "boolean"
-    | "enum_string"
-    | "lease_generation"
-    | "orchestration_attempt_id"
-    | "safe_integer";
-  values?: readonly string[];
-} {
-  if (
-    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.some(
-      (key) => key === `${phase}.${leafKey}`,
-    )
-  ) {
-    return { kind: "boolean" };
-  }
-  if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
-    return { kind: "lease_generation" };
-  }
-  if (
-    phase === "orchestration"
-    && (
-      leafKey === "directEnsureOrchestrationAttemptId"
-      || leafKey === "runtimeInvocationOrchestrationAttemptId"
-    )
-  ) {
-    return { kind: "orchestration_attempt_id" };
-  }
-  const stringValues =
-    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES[`${phase}.${leafKey}`];
-  return stringValues
-    ? { kind: "enum_string", values: stringValues }
-    : { kind: "safe_integer" };
 }
 
 function buildHostedIngressLatencySchemaPatchSql(object: Prisma.Sql): Prisma.Sql {
