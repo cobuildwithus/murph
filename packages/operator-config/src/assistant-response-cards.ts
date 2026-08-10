@@ -22,6 +22,8 @@ import {
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV1,
   type DailyNutritionResponseCardV2,
+  type NutritionCardGoalSnapshot,
+  type NutritionCardGoalStatus,
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
 } from '@murphai/contracts'
@@ -44,6 +46,16 @@ const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
   useGrouping: true,
 })
+const NUTRITION_CARD_GOAL_STATUS_LABELS = {
+  far_over_target: 'far over',
+  far_under_target: 'far under',
+  on_target: 'on target',
+  over_target: 'over',
+  under_target: 'under',
+} as const satisfies Record<Exclude<
+  NutritionCardGoalStatus,
+  'unavailable'
+>, string>
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
@@ -163,12 +175,18 @@ export function buildLinqIMessageAppLayout(
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const partialLabel = renderPartialNutritionLabel(parsed)
+  const goalStatusLabel = renderLinqNutritionGoalStatuses(parsed)
+  const detailLines = [partialLabel, goalStatusLabel].filter(
+    (line): line is string => line !== null,
+  )
   return {
     caption: `${formatNutritionCardDate(parsed.localDate)} · ${
       parsed.mealCount
     } ${mealLabel}`,
     image_url: buildLinqIMessageAppCardImageUrl(parsed),
-    ...(partialLabel === null ? {} : { subcaption: partialLabel }),
+    ...(detailLines.length === 0
+      ? {}
+      : { subcaption: detailLines.join('\n') }),
   }
 }
 
@@ -432,6 +450,32 @@ function renderNutritionMetric(
   return metric.total === null
     ? null
     : `${formatNutritionCardNumber(metric.total)}${unit}`
+}
+
+function renderLinqNutritionGoalStatuses(
+  card: DailyNutritionResponseCard,
+): string | null {
+  if (!isDailyNutritionResponseCardV2(card)) {
+    return null
+  }
+  const statuses = [
+    renderLinqNutritionGoalStatus('Calories', card.goals.calories),
+    renderLinqNutritionGoalStatus('Protein', card.goals.proteinGrams),
+    renderLinqNutritionGoalStatus('Carbs', card.goals.carbsGrams),
+    renderLinqNutritionGoalStatus('Fat', card.goals.fatGrams),
+    renderLinqNutritionGoalStatus('Fiber', card.goals.fiberGrams),
+  ].filter((status): status is string => status !== null)
+  return statuses.length === 0 ? null : `Goals: ${statuses.join(' · ')}`
+}
+
+function renderLinqNutritionGoalStatus(
+  label: string,
+  goal: NutritionCardGoalSnapshot | null,
+): string | null {
+  if (goal === null || goal.status === 'unavailable') {
+    return null
+  }
+  return `${label} ${NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]}`
 }
 
 function readRequiredCalorieTotal(card: DailyNutritionResponseCard): number {

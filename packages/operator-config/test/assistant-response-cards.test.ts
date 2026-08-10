@@ -513,6 +513,26 @@ describe('assistant response cards', () => {
         fiberGrams: null,
       },
     })
+    const completeNoGoalsLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        calories: null,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
+    const directionalGoalsLayout = buildLinqIMessageAppLayout({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        calories: { target: 3_000, status: 'far_under_target' },
+        proteinGrams: { target: 90, status: 'over_target' },
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    })
     expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
       'Ask Murph for this card in text',
     )
@@ -540,8 +560,14 @@ describe('assistant response cards', () => {
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
+      subcaption:
+        'Goals: Calories under · Protein on target · Fat on target · Fiber under',
     })
-    expect(proteinGoalLayout).not.toHaveProperty('subcaption')
+    expect(proteinGoalLayout.subcaption).toBe('Goals: Protein on target')
+    expect(completeNoGoalsLayout).not.toHaveProperty('subcaption')
+    expect(directionalGoalsLayout.subcaption).toBe(
+      'Goals: Calories far under · Protein over',
+    )
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
       schemaVersion: 2,
       card: {

@@ -250,7 +250,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
         details:
-          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals still get a short warning.",
+          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals and assessed goals keep only their short status labels.",
         relevanceTags: ["imessage", "cards", "nutrition", "design"],
         sourcePullRequests: [1567],
       },
