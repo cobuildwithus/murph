@@ -1106,11 +1106,11 @@ describe('assistant outbox runtime', () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
     const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
     for (const target of [
-      '2,100 calories (UNDER TARGET)',
-      '100g protein (ON TARGET)',
-      '220g carbs (ON TARGET)',
-      '40g fat (ON TARGET)',
-      '30g fiber (UNDER TARGET)',
+      '2,100 calories (under target)',
+      '100g protein (on target)',
+      '220g carbs (on target)',
+      '40g fat (on target)',
+      '30g fiber (under target)',
     ]) {
       expect(rendered).toContain(target)
     }

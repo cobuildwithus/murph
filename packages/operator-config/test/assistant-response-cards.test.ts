@@ -371,7 +371,7 @@ describe('assistant response cards', () => {
     )
 
     expect(renderAssistantResponseCardText(COMPLETE_CARD_V2)).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (UNDER TARGET) · 100g protein (ON TARGET) · 220g carbs (ON TARGET) · 40g fat (ON TARGET) · 30g fiber (UNDER TARGET).',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
     )
     expect(renderAssistantResponseCardText({
       ...COMPLETE_CARD_V2,
@@ -384,7 +384,7 @@ describe('assistant response cards', () => {
         fiberGrams: { target: 30, status: 'unavailable' },
       },
     })).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Targets: 2,100 calories (UNDER TARGET) · 100g protein (ON TARGET) · 220g carbs (ON TARGET) · 40g fat (ON TARGET) · 30g fiber (STATUS UNAVAILABLE). Some nutrition estimates were partial.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (status unavailable). Some nutrition estimates were partial.',
     )
 
     expect(renderAssistantResponseCardText({
@@ -503,7 +503,7 @@ describe('assistant response cards', () => {
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
-      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · Goals: calories goal 2,100 cal, under target; protein goal 100g, on target; carbs goal unavailable; fat goal 40g, on target; fiber goal 30g, under target',
+      subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · Goals: calories goal 2,100 cal, under target; protein goal 100g, on target; carbs goal 220g, on target; fat goal 40g, on target; fiber goal 30g, under target',
     })
     expect(proteinGoalLayout.subcaption).toContain(
       'protein goal 100g, on target',

@@ -446,11 +446,11 @@ describe('assistant channels runtime seam', () => {
     expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body))
       .toMatchObject({ chat_id: '123', text: NUTRITION_CARD_TEXT })
     for (const target of [
-      '2,100 calories (UNDER TARGET)',
-      '100g protein (ON TARGET)',
-      '220g carbs (ON TARGET)',
-      '40g fat (ON TARGET)',
-      '30g fiber (UNDER TARGET)',
+      '2,100 calories (under target)',
+      '100g protein (on target)',
+      '220g carbs (on target)',
+      '40g fat (on target)',
+      '30g fiber (under target)',
     ]) {
       expect(NUTRITION_CARD_TEXT).toContain(target)
     }
