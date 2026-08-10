@@ -2368,7 +2368,7 @@ describe('Codex assistant registry helpers', () => {
     )
   })
 
-  it('fails closed when public input wrappers receive voice memo delivery channels', async () => {
+  it('keeps local Telegram runtime while public Linq wrappers fail closed', async () => {
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValue({
       finalMessage: 'ok',
       precedingAgentMessageSegments: [],
@@ -2390,6 +2390,11 @@ describe('Codex assistant registry helpers', () => {
           dynamicTools: resolveMurphDynamicTools({
             progressUpdatesAvailable: false,
           }),
+          env: {
+            ELEVENLABS_API_KEY: 'local-elevenlabs-key',
+            MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+            MURPH_ELEVENLABS_VOICE_ID: 'voice_default',
+          },
           prompt: 'send a voice memo',
           voiceMemoDeliveryChannel: 'telegram',
           workingDirectory: '/tmp/provider-tests',
@@ -2400,7 +2405,15 @@ describe('Codex assistant registry helpers', () => {
     })
     const telegramTurnInput =
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
-    expect(telegramTurnInput?.voiceMemoRuntime).toBeNull()
+    expect(telegramTurnInput?.voiceMemoRuntime).toEqual({
+      elevenLabs: {
+        apiKeyAvailable: true,
+        defaultVoiceId: 'voice_default',
+        modelId: 'eleven_multilingual_v2',
+        voiceId: 'voice_default',
+      },
+      kind: 'telegram',
+    })
     expect(telegramTurnInput).not.toHaveProperty('voiceMemoDeliveryChannel')
 
     const attempt = await executeCodexAssistantTurnAttemptFromInput({

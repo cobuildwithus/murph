@@ -63,15 +63,35 @@ function createLinqRuntime(
 }
 
 describe('managed voice memo runtime boundary', () => {
-  it('fails closed in the public build without calling a provider', () => {
+  it('keeps local Telegram descriptor generation while Linq fails closed', () => {
     const fetchImpl = vi.fn<typeof fetch>()
+    const env = {
+      ELEVENLABS_API_KEY: 'local-elevenlabs-key',
+      LINQ_API_TOKEN: 'not-used',
+      MURPH_ELEVENLABS_MODEL_ID: 'eleven_multilingual_v2',
+      MURPH_ELEVENLABS_VOICE_ID: 'voice_default',
+    }
 
     expect(
       createVoiceMemoToolRuntimeFromEnv({
-        env: {
-          ELEVENLABS_API_KEY: 'not-used',
-          LINQ_API_TOKEN: 'not-used',
-        },
+        env,
+        fetchImpl,
+        preferredVoiceId: 'voice_preferred',
+        voiceMemoDeliveryChannel: 'telegram',
+      }),
+    ).toEqual({
+      elevenLabs: {
+        apiKeyAvailable: true,
+        defaultVoiceId: 'voice_default',
+        modelId: 'eleven_multilingual_v2',
+        voiceId: 'voice_preferred',
+      },
+      kind: 'telegram',
+    })
+
+    expect(
+      createVoiceMemoToolRuntimeFromEnv({
+        env,
         fetchImpl,
         voiceMemoDeliveryChannel: 'linq',
       }),
