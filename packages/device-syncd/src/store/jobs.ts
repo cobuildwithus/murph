@@ -25,6 +25,8 @@ export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
   accountId: string;
 }
 
+export type DeviceSyncJobClaimPredicate = (job: DeviceSyncJobRecord) => boolean;
+
 interface StoredJobRow {
   id: string;
   provider: string;
@@ -157,11 +159,12 @@ export function claimDueDeviceSyncJob(
   workerId: string,
   now: string,
   leaseMs: number,
+  canClaimJob?: DeviceSyncJobClaimPredicate,
 ): DeviceSyncJobRecord | null {
   return withImmediateTransaction(database, () => {
     deadLetterExpiredExhaustedDeviceSyncJobs(database, now);
 
-    const row = database.prepare(`
+    const rows = database.prepare(`
       select *
       from device_job as candidate
       where (
@@ -191,8 +194,14 @@ export function claimDueDeviceSyncJob(
           and blocking.lease_expires_at > ?
       )
       order by candidate.priority desc, candidate.available_at asc, candidate.created_at asc, candidate.id asc
-      limit 1
-    `).get(now, now, COMPANION_HRV_RMSSD_RESOURCE, now) as StoredJobRow | undefined;
+      ${canClaimJob ? "" : "limit 1"}
+    `).all(now, now, COMPANION_HRV_RMSSD_RESOURCE, now) as Array<StoredJobRow & Record<string, unknown>>;
+    const row = canClaimJob
+      ? rows.find((candidate) => {
+          const job = mapJobRow(candidate);
+          return job !== null && canClaimJob(job);
+        })
+      : rows[0];
 
     if (!row) {
       return null;
@@ -217,6 +226,34 @@ export function claimDueDeviceSyncJob(
 
     return getDeviceSyncJobById(database, row.id);
   });
+}
+
+export function readNextDeviceSyncJobWakeAtMatching(
+  database: DatabaseSync,
+  canRunJob: DeviceSyncJobClaimPredicate,
+): string | null {
+  const rows = database.prepare(`
+    select *,
+      case
+        when status = 'queued' then available_at
+        else lease_expires_at
+      end as wake_at
+    from device_job
+    where status = 'queued'
+      or (
+        status = 'running'
+        and lease_expires_at is not null
+      )
+    order by wake_at asc, priority desc, created_at asc, id asc
+  `).all() as Array<StoredJobRow & { wake_at: string } & Record<string, unknown>>;
+
+  for (const row of rows) {
+    const job = mapJobRow(row);
+    if (job && canRunJob(job)) {
+      return row.wake_at;
+    }
+  }
+  return null;
 }
 
 export function listDueDeviceSyncJobBatchCandidates(

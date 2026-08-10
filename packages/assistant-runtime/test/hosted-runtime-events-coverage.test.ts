@@ -229,6 +229,7 @@ describe("hosted runtime event coverage", () => {
     await expect(executeHostedMailboxEvent({
       wake: deviceSyncWake,
       executionContext,
+      restrictDeviceSyncExecution: true,
       runtime,
       runtimeEnv: {},
       suppressDeviceActivityAutomations: true,
@@ -239,7 +240,11 @@ describe("hosted runtime event coverage", () => {
       nextWakeReason: "device-sync.reconcile",
     });
 
-    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledTimes(1);
+    expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionPolicy: "credential_independent_imports",
+      }),
+    );
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
   });
 

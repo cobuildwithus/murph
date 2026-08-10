@@ -574,9 +574,15 @@ Last verified: 2026-08-09
   invocation preserves lane-contiguous import of older accepted system work,
   including its bounded import-time durability effects, before selecting and
   executing only `run-device-sync-wake`; it cannot execute unrelated pending
-  route actions, delivery, assistant/model work, or provider egress while
-  paused. The restricted device-sync execution also suppresses new
-  device-activity automation scheduling. Web serializes a dirty acknowledgement
+  route actions, delivery, or assistant/model work while paused. The restricted
+  device-sync pass requests the existing control-plane snapshot without
+  credential material, skips the provider scheduler, and lets the existing
+  worker claim only credential-independent canonical imports and deletion
+  imports. Credential-scoped Oura, WHOOP, Strava, and Junction fetch work stays
+  queued for an ordinary active/default pass, and its provider schedules and
+  token state do not advance. The restricted execution also skips dense-raw
+  retention and source-staleness maintenance and suppresses new device-activity
+  automation scheduling. Web serializes a dirty acknowledgement
   and its pending-work check through the same member-then-connection
   health-data admission lock used by companion ingress. If the acknowledgement
   reports remaining dirty work, the runtime clears the spent receipt record and
@@ -594,8 +600,9 @@ Last verified: 2026-08-09
   `idle_shutdown` snapshot then commits the post-receipt local queue, marker,
   and wake state; only an exact empty-queue reread at that final boundary clears
   an inherited paused marker and its paired device wake. Web projects
-  `platformAiUsageAllowed: false`, and the write-fence provider-egress guard
-  remains the final fail-closed boundary.
+  `platformAiUsageAllowed: false`. The runtime restriction is the direct-wearable
+  provider-egress boundary; the write-fence provider-egress guard remains an
+  additional fail-closed boundary for metered providers.
 - Automatic meal-photo enrollment, activation, and upload retain active paid
   access. Enrollment and activation translate the canonical inactive-access
   failure into the feature-scoped error only when the same member still

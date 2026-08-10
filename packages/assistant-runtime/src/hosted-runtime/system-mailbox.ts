@@ -343,6 +343,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       runtimeEnv: input.runtimeEnv,
       signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
+      restrictDeviceSyncExecution:
+        input.allowedRouteActions?.length === 1
+        && input.allowedRouteActions[0] === "run-device-sync-wake",
       suppressDeviceActivityAutomations:
         input.allowedRouteActions?.length === 1
         && input.allowedRouteActions[0] === "run-device-sync-wake",
@@ -617,6 +620,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
+  restrictDeviceSyncExecution?: boolean;
   suppressDeviceActivityAutomations?: boolean;
   vaultRoot: string;
 }): Promise<HostedMailboxExecutionMetrics> {
@@ -636,6 +640,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     runtime: input.runtime,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
+    restrictDeviceSyncExecution: input.restrictDeviceSyncExecution ?? false,
     suppressDeviceActivityAutomations:
       input.suppressDeviceActivityAutomations ?? false,
     ...(input.shouldYieldBackgroundMaintenance

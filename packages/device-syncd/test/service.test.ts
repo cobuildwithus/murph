@@ -1679,6 +1679,114 @@ test("device sync service keeps pending external-link setup out of manual, sched
   close();
 });
 
+test("credential-independent worker execution leaves credential-scoped provider jobs queued", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-credential-independent-worker");
+  const executedKinds: string[] = [];
+  const baseProvider = createFakeProvider({
+    async executeJob(_context, job) {
+      executedKinds.push(job.kind);
+      return {};
+    },
+  });
+  const provider: DeviceSyncProvider = {
+    ...baseProvider,
+    descriptor: {
+      ...baseProvider.descriptor,
+      provider: "whoop",
+    },
+    provider: "whoop",
+  };
+  const { service, store, close } = createServiceFixture({
+    clock: {
+      now: () => new Date("2026-08-10T12:00:00.000Z"),
+    },
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [provider],
+  });
+
+  try {
+    const codec = createSecretCodec("secret-for-tests");
+    const externalAccountId = "synthetic-restricted-worker";
+    const account = store.upsertAccount({
+      provider: "whoop",
+      externalAccountId,
+      displayName: "Synthetic wearable",
+      scopes: ["offline", "read:data"],
+      tokens: {
+        accessToken: "synthetic-access",
+        accessTokenEncrypted: codec.encrypt(
+          "synthetic-access",
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId,
+            provider: "whoop",
+            purpose: "device-sync-access-token",
+          }),
+        ),
+        refreshToken: "synthetic-refresh",
+        refreshTokenEncrypted: codec.encrypt(
+          "synthetic-refresh",
+          buildDeviceSyncTokenCipherOptions({
+            externalAccountId,
+            provider: "whoop",
+            purpose: "device-sync-refresh-token",
+          }),
+        ),
+      },
+      connectedAt: "2026-08-10T10:00:00.000Z",
+      nextReconcileAt: "2026-08-10T11:00:00.000Z",
+    });
+    const credentialScoped = store.enqueueJob({
+      accountId: account.id,
+      provider: "whoop",
+      kind: "reconcile",
+      payload: {
+        windowEnd: "2026-08-10T12:00:00.000Z",
+        windowStart: "2026-08-09T12:00:00.000Z",
+      },
+      priority: 100,
+      availableAt: "2026-08-10T11:30:00.000Z",
+    });
+    const credentialIndependent = store.enqueueJob({
+      accountId: account.id,
+      provider: "whoop",
+      kind: "delete",
+      payload: {
+        resourceId: "synthetic-resource",
+        resourceType: "sleep",
+      },
+      priority: 0,
+      availableAt: "2026-08-10T11:45:00.000Z",
+    });
+
+    assert.equal(
+      service.getNextWakeAt(undefined, "credential_independent_imports"),
+      credentialIndependent.availableAt,
+    );
+    assert.equal(
+      await service.drainWorker(10, "credential_independent_imports"),
+      1,
+    );
+    assert.deepEqual(executedKinds, ["delete"]);
+    assert.equal(store.getJobById(credentialIndependent.id)?.status, "succeeded");
+    assert.equal(store.getJobById(credentialScoped.id)?.status, "queued");
+    assert.equal(
+      service.getNextWakeAt(undefined, "credential_independent_imports"),
+      null,
+    );
+
+    assert.equal(await service.drainWorker(10), 1);
+    assert.deepEqual(executedKinds, ["delete", "reconcile"]);
+    assert.equal(store.getJobById(credentialScoped.id)?.status, "succeeded");
+  } finally {
+    close();
+  }
+});
+
 test("device sync service scheduler logs failures once and skips reentrant ticks", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-scheduler-error");
   const schedulerErrors: Array<{ context?: Record<string, unknown>; message: string }> = [];

@@ -12,9 +12,11 @@ import {
 } from "./junction-resources.ts";
 import { buildJunctionProviderSourceInstanceKey } from "./config/junction-connect-sources.ts";
 import {
+  isDeviceSyncCredentialIndependentImportJob,
   sanitizeHostedRuntimeDiagnosticText,
   sanitizeHostedRuntimeErrorText,
 } from "./hosted-runtime.ts";
+import { isJunctionCredentialIndependentInlineImportJob } from "./junction-inline-authority.ts";
 import { createDeviceSyncPublicIngress, DeviceSyncPublicIngress } from "./public-ingress.ts";
 import {
   isDeviceSyncConnectionSetupPending,
@@ -167,6 +169,10 @@ export interface DeviceSyncWorkerExecutor {
   drainWorker(limit: number): Promise<number>;
 }
 
+export type DeviceSyncWorkerExecutionPolicy =
+  | "all"
+  | "credential_independent_imports";
+
 export interface DeviceSyncService {
   readonly vaultRoot: string;
   readonly publicBaseUrl: string;
@@ -187,12 +193,15 @@ export interface DeviceSyncService {
   handleWebhook(providerName: string, headers: Headers, rawBody: Buffer): Promise<HandleWebhookResult>;
   queueManualReconcile(accountId: string): QueueManualReconcileResult;
   disconnectAccount(accountId: string, expectedConnectedAt: string): Promise<DisconnectAccountResult>;
-  getNextWakeAt(now?: string): string | null;
+  getNextWakeAt(now?: string, executionPolicy?: DeviceSyncWorkerExecutionPolicy): string | null;
   runSchedulerOnce(): Promise<void>;
   runWorkerOnce(): Promise<DeviceSyncJobRecord | null>;
   // Drains up to `limit` durable job rows. One worker pass starts from one
   // claimed seed job, but provider batching still counts every claimed row.
-  drainWorker(limit?: number): Promise<number>;
+  drainWorker(
+    limit?: number,
+    executionPolicy?: DeviceSyncWorkerExecutionPolicy,
+  ): Promise<number>;
 }
 
 const defaultDeviceSyncClock: DeviceSyncClock = Object.freeze({
@@ -655,10 +664,14 @@ class DeviceSyncServiceController {
     };
   }
 
-  getNextWakeAt(_now = this.nowIso()): string | null {
+  getNextWakeAt(
+    _now = this.nowIso(),
+    executionPolicy: DeviceSyncWorkerExecutionPolicy = "all",
+  ): string | null {
+    const canRunJob = createDeviceSyncJobExecutionPredicate(executionPolicy);
     const nextWakeAt = earliestIsoTimestamp(
-      this.store.readNextActiveReconcileAt(),
-      this.store.readNextJobWakeAt(),
+      executionPolicy === "all" ? this.store.readNextActiveReconcileAt() : null,
+      this.store.readNextJobWakeAt(canRunJob ?? undefined),
     );
 
     if (!nextWakeAt) {
@@ -708,12 +721,14 @@ class DeviceSyncServiceController {
 
   async runWorkerOnce(): Promise<DeviceSyncJobRecord | null> {
     const result = await this.runWorkerPassOnce({
+      executionPolicy: "all",
       maxJobRows: Number.POSITIVE_INFINITY,
     });
     return result?.job ?? null;
   }
 
   private async runWorkerPassOnce(input: {
+    executionPolicy: DeviceSyncWorkerExecutionPolicy;
     maxJobRows: number;
   }): Promise<{
     job: DeviceSyncJobRecord;
@@ -732,7 +747,13 @@ class DeviceSyncServiceController {
     }
 
     const now = this.nowIso();
-    const job = this.store.claimDueJob(this.workerId, now, this.workerLeaseMs);
+    const canRunJob = createDeviceSyncJobExecutionPredicate(input.executionPolicy);
+    const job = this.store.claimDueJob(
+      this.workerId,
+      now,
+      this.workerLeaseMs,
+      canRunJob ?? undefined,
+    );
     const currentNow = (): string => this.nowIso();
 
     if (!job) {
@@ -956,6 +977,7 @@ class DeviceSyncServiceController {
         ? [normalizedJob]
         : this.claimProviderJobBatch({
             accountId: storedAccount.id,
+            canRunJob,
             jobExecutor,
             maxJobRows,
             normalizedSeedJob: normalizedJob,
@@ -1248,12 +1270,16 @@ class DeviceSyncServiceController {
     }
   }
 
-  async drainWorker(limit = this.workerBatchSize): Promise<number> {
+  async drainWorker(
+    limit = this.workerBatchSize,
+    executionPolicy: DeviceSyncWorkerExecutionPolicy = "all",
+  ): Promise<number> {
     const maxJobRows = normalizeProviderJobBatchLimit(limit, this.workerBatchSize);
     let processedJobRows = 0;
 
     while (processedJobRows < maxJobRows) {
       const result = await this.runWorkerPassOnce({
+        executionPolicy,
         maxJobRows: maxJobRows - processedJobRows,
       });
 
@@ -1269,6 +1295,7 @@ class DeviceSyncServiceController {
 
   private claimProviderJobBatch(input: {
     accountId: string;
+    canRunJob: ((job: DeviceSyncJobRecord) => boolean) | null;
     jobExecutor: DeviceJobExecutor;
     maxJobRows: number;
     normalizedSeedJob: DeviceSyncJobRecord;
@@ -1324,6 +1351,9 @@ class DeviceSyncServiceController {
     for (const candidate of candidates) {
       if (selectedJobIds.length >= maxBatchSize - 1) {
         break;
+      }
+      if (input.canRunJob && !input.canRunJob(candidate)) {
+        continue;
       }
 
       let normalizedCandidate: DeviceSyncJobRecord;
@@ -1652,10 +1682,11 @@ export function createDeviceSyncService(input: CreateDeviceSyncServiceInput): De
     queueManualReconcile: (accountId) => controller.queueManualReconcile(accountId),
     disconnectAccount: (accountId, expectedConnectedAt) =>
       controller.disconnectAccount(accountId, expectedConnectedAt),
-    getNextWakeAt: (now) => controller.getNextWakeAt(now),
+    getNextWakeAt: (now, executionPolicy) =>
+      controller.getNextWakeAt(now, executionPolicy),
     runSchedulerOnce: () => controller.runSchedulerOnce(),
     runWorkerOnce: () => controller.runWorkerOnce(),
-    drainWorker: (limit) => controller.drainWorker(limit),
+    drainWorker: (limit, executionPolicy) => controller.drainWorker(limit, executionPolicy),
   } satisfies DeviceSyncService);
   return service;
 }
@@ -1668,6 +1699,19 @@ function earliestIsoTimestamp(...values: Array<string | null | undefined>): stri
 
 function resolveProviderJobExecutor(provider: DeviceSyncProvider): DeviceJobExecutor | undefined {
   return provider.jobExecutor;
+}
+
+function createDeviceSyncJobExecutionPredicate(
+  executionPolicy: DeviceSyncWorkerExecutionPolicy,
+): ((job: DeviceSyncJobRecord) => boolean) | null {
+  if (executionPolicy === "all") {
+    return null;
+  }
+
+  return (job) => isDeviceSyncCredentialIndependentImportJob(
+    job,
+    isJunctionCredentialIndependentInlineImportJob,
+  );
 }
 
 function isValidProviderJobBatchDescriptor(

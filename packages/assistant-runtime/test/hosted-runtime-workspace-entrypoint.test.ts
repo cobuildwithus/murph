@@ -39,8 +39,17 @@ import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
 } from "@murphai/hosted-execution/env";
 import {
+  COMPANION_HRV_RMSSD_METHOD_VERSION,
+  COMPANION_HRV_RMSSD_RESOURCE,
+  COMPANION_HRV_RMSSD_SCHEMA,
   VAULT_LAYOUT,
+  serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
+import {
+  buildDeviceSyncTokenCipherOptions,
+  createSecretCodec,
+} from "@murphai/device-syncd/local-secret-codec";
+import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
   appendAssistantTranscriptEntries,
   createAssistantOutboxIntent,
@@ -90,6 +99,7 @@ import {
   writePendingAssistantRuntimeIssueRecord,
   writeHostedBundleTextFile,
 } from "@murphai/runtime-state/node";
+import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -396,6 +406,7 @@ import {
 import {
   createHostedWorkspaceBridgeMailboxImporter,
 } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
+import { runHostedDeviceSyncPass } from "../src/hosted-runtime/device-sync-maintenance.ts";
 import {
   HostedRuntimeArtifactReadError,
   type HostedRuntimeDeviceSyncPort,
@@ -9337,6 +9348,7 @@ describe("hosted workspace runtime entrypoint", () => {
       );
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 1);
       assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.deepEqual(deviceSyncPort.snapshotCredentialMaterialRequests, [false]);
       assert.equal(result.redactedStatus?.hostedSystemMailboxRecorded, 0);
       assert.equal(result.redactedStatus?.hostedSystemMailboxPrepared, 1);
       assert.equal(
@@ -9356,6 +9368,440 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(checkpointRequests.length > 0);
       assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
     } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("paused system mailbox imports companion work without running credential-scoped wearable work", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const whoopConnectionId = "device_sync_connection_paused_restricted_whoop";
+    const whoopExternalAccountId = "synthetic-paused-restricted-wearable";
+    const junctionConnectionId = "device_sync_connection_paused_restricted_junction";
+    const junctionExternalAccountId = "synthetic-paused-restricted-companion";
+    const dueAt = "2026-04-26T23:00:00.000Z";
+    const accessTokenExpiresAt = "2099-01-01T00:00:00.000Z";
+    const snapshotCredentialMaterialRequests: Array<boolean | null> = [];
+    const providerFetch = vi.fn(async () => new Response(
+      JSON.stringify({ records: [] }),
+      {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      },
+    ));
+    const deviceSyncItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:paused-restricted-provider-work",
+      id: "mailbox_item_system_mailbox_paused_restricted_provider_work",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const restoredSnapshotRef = createWorkspaceSnapshotV2Ref(
+      "snapshot-paused-restricted-provider-work",
+    );
+    const secret = "synthetic-device-sync-secret";
+    const companionObservationJson = serializeCompanionHrvRmssdObservation({
+      acceptedWindowCount: 56,
+      completedWindowCount: 84,
+      methodVersion: COMPANION_HRV_RMSSD_METHOD_VERSION,
+      nightDate: "2026-04-26",
+      rmssdMs: 48.25,
+      schema: COMPANION_HRV_RMSSD_SCHEMA,
+    });
+    const companionAdmissionId = createHash("sha256")
+      .update(companionObservationJson)
+      .digest("hex");
+    const junctionPlatformEnv = {
+      JUNCTION_API_KEY: "sk_us_test_paused_restricted",
+      JUNCTION_CLIENT_USER_ID_SECRET: "synthetic-junction-client-user-id-secret",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    };
+    let credentialIndependentJobId = "";
+    let credentialScopedJobId = "";
+    const seedDeviceSyncJobs = (targetVaultRoot = vaultRoot) => {
+      const codec = createSecretCodec(secret);
+      const store = new SqliteDeviceSyncStore(
+        path.join(targetVaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
+      );
+      try {
+        const account = store.hydrateHostedAccount({
+          connection: {
+            connectedAt: "2026-04-01T00:00:00.000Z",
+            displayName: "Synthetic wearable",
+            externalAccountId: whoopExternalAccountId,
+            metadata: {},
+            provider: "whoop",
+            scopes: ["offline", "read:sleep"],
+            status: "active",
+            updatedAt: TEST_NOW,
+          },
+          hostedConnectionId: whoopConnectionId,
+          hostedObservedTokenVersion: 1,
+          hostedObservedUpdatedAt: TEST_NOW,
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: dueAt,
+          },
+          tokens: {
+            accessToken: "synthetic-access-token",
+            accessTokenEncrypted: codec.encrypt(
+              "synthetic-access-token",
+              buildDeviceSyncTokenCipherOptions({
+                externalAccountId: whoopExternalAccountId,
+                provider: "whoop",
+                purpose: "device-sync-access-token",
+              }),
+            ),
+            accessTokenExpiresAt,
+            refreshToken: "synthetic-refresh-token",
+            refreshTokenEncrypted: codec.encrypt(
+              "synthetic-refresh-token",
+              buildDeviceSyncTokenCipherOptions({
+                externalAccountId: whoopExternalAccountId,
+                provider: "whoop",
+                purpose: "device-sync-refresh-token",
+              }),
+            ),
+          },
+        });
+        assert.ok(account);
+        credentialScopedJobId = store.enqueueJob({
+          accountId: account.id,
+          availableAt: dueAt,
+          kind: "reconcile",
+          payload: {
+            windowEnd: TEST_NOW,
+            windowStart: "2026-04-26T00:00:00.000Z",
+          },
+          priority: 100,
+          provider: "whoop",
+        }).id;
+        const junctionAccount = store.hydrateHostedAccount({
+          connection: {
+            connectedAt: "2026-04-01T00:00:00.000Z",
+            displayName: "Synthetic companion source",
+            externalAccountId: junctionExternalAccountId,
+            metadata: {},
+            provider: "junction",
+            scopes: [],
+            status: "active",
+            updatedAt: TEST_NOW,
+          },
+          credential: {
+            credentialMetadata: {},
+            kind: "provider_config",
+            providerConfigKey: "junction",
+          },
+          hostedConnectionId: junctionConnectionId,
+          hostedObservedTokenVersion: null,
+          hostedObservedUpdatedAt: TEST_NOW,
+          localState: {
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            lastSyncCompletedAt: null,
+            lastSyncErrorAt: null,
+            lastSyncStartedAt: null,
+            lastWebhookAt: null,
+            nextReconcileAt: null,
+          },
+        });
+        assert.ok(junctionAccount);
+        store.upsertConnectionSource({
+          connectionId: junctionAccount.id,
+          displayName: "WHOOP",
+          firstSeenAt: "2026-04-01T00:00:00.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: TEST_NOW,
+          resourceAvailabilitySummary: {
+            [COMPANION_HRV_RMSSD_RESOURCE]: true,
+          },
+          sourceInstanceKey: "synthetic-paused-restricted-whoop-source",
+          sourceProviderSlug: "whoop_v2",
+          status: "connected",
+        });
+        credentialIndependentJobId = store.enqueueJob({
+          accountId: junctionAccount.id,
+          availableAt: dueAt,
+          kind: "resource",
+          payload: {
+            companionAdmissionId,
+            companionObservationJson,
+            resource: COMPANION_HRV_RMSSD_RESOURCE,
+            resourceCategory: "derived",
+            sourceProviderSlug: "whoop",
+          },
+          priority: 0,
+          provider: "junction",
+        }).id;
+      } finally {
+        store.close();
+      }
+    };
+
+    vi.stubGlobal("fetch", providerFetch);
+    try {
+
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        async ackDirtyStateProcessed() {
+          throw new Error("Paused restricted provider test has no dirty acknowledgement.");
+        },
+        async applyUpdates(request) {
+          return {
+            appliedAt: request.occurredAt ?? TEST_NOW,
+            updates: [],
+            userId: TEST_USER_ID,
+          };
+        },
+        async createConnectLink() {
+          throw new Error("Paused restricted provider test must not create a connect link.");
+        },
+        async fetchDirtyStates() {
+          return {
+            hasMore: false,
+            items: [],
+            nextWakeAt: null,
+            userId: TEST_USER_ID,
+          };
+        },
+        async fetchSnapshot(request) {
+          const includeCredentialMaterial = request?.includeCredentialMaterial ?? null;
+          snapshotCredentialMaterialRequests.push(includeCredentialMaterial);
+          return {
+            connections: [
+              {
+                connection: {
+                  accessTokenExpiresAt,
+                  connectedAt: "2026-04-01T00:00:00.000Z",
+                  createdAt: "2026-04-01T00:00:00.000Z",
+                  displayName: "Synthetic wearable",
+                  externalAccountId: whoopExternalAccountId,
+                  id: whoopConnectionId,
+                  metadata: {},
+                  provider: "whoop",
+                  scopes: ["offline", "read:sleep"],
+                  status: "active",
+                  updatedAt: TEST_NOW,
+                },
+                credential: includeCredentialMaterial === true
+                  ? {
+                      kind: "oauth_tokens" as const,
+                      tokenBundle: {
+                        accessToken: "synthetic-access-token",
+                        accessTokenExpiresAt,
+                        keyVersion: "synthetic-key-version",
+                        refreshToken: "synthetic-refresh-token",
+                        tokenVersion: 1,
+                      },
+                    }
+                  : {
+                      credentialMetadata: {},
+                      kind: "oauth_tokens_redacted" as const,
+                      tokenVersion: 1,
+                    },
+                localState: {
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSyncCompletedAt: null,
+                  lastSyncErrorAt: null,
+                  lastSyncStartedAt: null,
+                  lastWebhookAt: null,
+                  nextReconcileAt: dueAt,
+                },
+              },
+              {
+                connection: {
+                  accessTokenExpiresAt: null,
+                  connectedAt: "2026-04-01T00:00:00.000Z",
+                  createdAt: "2026-04-01T00:00:00.000Z",
+                  displayName: "Synthetic companion source",
+                  externalAccountId: junctionExternalAccountId,
+                  id: junctionConnectionId,
+                  metadata: {},
+                  provider: "junction",
+                  scopes: [],
+                  status: "active",
+                  updatedAt: TEST_NOW,
+                },
+                credential: {
+                  credentialMetadata: {},
+                  kind: "provider_config" as const,
+                  providerConfigKey: "junction",
+                },
+                localState: {
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSyncCompletedAt: null,
+                  lastSyncErrorAt: null,
+                  lastSyncStartedAt: null,
+                  lastWebhookAt: null,
+                  nextReconcileAt: null,
+                },
+                sources: [{
+                  displayName: "WHOOP",
+                  firstSeenAt: "2026-04-01T00:00:00.000Z",
+                  lastDataAt: null,
+                  lastErrorCode: null,
+                  lastErrorMessage: null,
+                  lastSeenAt: TEST_NOW,
+                  resourceAvailabilitySummary: {
+                    [COMPANION_HRV_RMSSD_RESOURCE]: true,
+                  },
+                  resourceCount: 1,
+                  sourceInstanceKey: "synthetic-paused-restricted-whoop-source",
+                  sourceProviderSlug: "whoop_v2",
+                  status: "connected",
+                }],
+              },
+            ],
+            generatedAt: TEST_NOW,
+            userId: TEST_USER_ID,
+          };
+        },
+      };
+      const platform = createPlatform({
+        deviceSyncPort,
+        mailboxPort: createMailboxPort({
+          events,
+          items: [deviceSyncItem],
+        }),
+        workspacePort: createWorkspacePort({
+          checkpointRequests,
+          events,
+          workspace: createWorkspaceState({
+            snapshotRef: restoredSnapshotRef,
+            version: "0",
+          }),
+        }),
+        workspaceSnapshotPort: {
+          async abortSnapshotSession() {
+            throw new Error("Paused restricted provider test should not abort snapshots.");
+          },
+          async completeSnapshotSession() {
+            throw new Error("Paused restricted provider test should not complete snapshots.");
+          },
+          async putSnapshotObjectDirect() {
+            throw new Error("Paused restricted provider test should not upload snapshots directly.");
+          },
+          async restoreWorkspaceSnapshot(input) {
+            await initializeVault({
+              createdAt: TEST_NOW,
+              vaultRoot: input.durableRoot,
+            });
+            seedDeviceSyncJobs(input.durableRoot);
+          },
+          async startSnapshotSession() {
+            throw new Error("Paused restricted provider test should not start snapshots.");
+          },
+        },
+      });
+      const bridgeImporter = createHostedWorkspaceBridgeMailboxImporter({
+        decodeMailboxPayload: {
+          async decode() {
+            return {
+              status: "decoded",
+              wake: buildHostedExecutionDeviceSyncWake({
+                eventId: deviceSyncItem.dedupeKey,
+                occurredAt: deviceSyncItem.occurredAt,
+                reason: "webhook_hint",
+                userId: TEST_USER_ID,
+              }),
+            };
+          },
+        },
+        runtime: normalizeHostedAssistantRuntimeConfig({}, platform),
+        vaultRoot,
+      });
+      const baseResolvedConfig = createDeviceSyncResolvedConfig();
+      assert.ok(baseResolvedConfig.deviceSync);
+      const resolvedConfig: HostedAssistantRuntimeResolvedConfig = {
+        ...baseResolvedConfig,
+        deviceSync: {
+          ...baseResolvedConfig.deviceSync,
+          providerConfigs: {
+            ...baseResolvedConfig.deviceSync.providerConfigs,
+            junction: {
+              environment: "sandbox",
+              region: "us",
+            },
+          },
+        },
+      };
+      const pausedResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          platformEnv: junctionPlatformEnv,
+          request: {
+            attemptId: "attempt_synthetic_paused_restricted_provider_work",
+            processingMode: "system_mailbox",
+          },
+          resolvedConfig,
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "7".repeat(64),
+                key: "users/bundles/member-synthetic/paused-restricted-provider.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          importItem: bridgeImporter,
+          platform,
+          vaultRoot,
+        },
+      );
+
+      const pausedStore = new SqliteDeviceSyncStore(
+        path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
+      );
+      try {
+        assert.equal(pausedStore.getJobById(credentialIndependentJobId)?.status, "succeeded");
+        assert.equal(pausedStore.getJobById(credentialScopedJobId)?.status, "queued");
+      } finally {
+        pausedStore.close();
+      }
+      assert.deepEqual(snapshotCredentialMaterialRequests, [false, false]);
+      assert.equal(providerFetch.mock.calls.length, 0);
+      assert.equal(pausedResult.status, "scheduled");
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+
+      const activeResult = await runHostedDeviceSyncPass(
+        {
+          eventId: "evt_active_provider_follow_up",
+          kind: "runtime.timer",
+          occurredAt: TEST_NOW,
+          triggerKind: "runtime_timer",
+          userId: TEST_USER_ID,
+        },
+        vaultRoot,
+        resolvedConfig.deviceSync,
+        deviceSyncPort,
+        45_000,
+        {
+          platformEnv: junctionPlatformEnv,
+        },
+      );
+      const activeStore = new SqliteDeviceSyncStore(
+        path.join(vaultRoot, DEVICE_SYNC_DB_RELATIVE_PATH),
+      );
+      try {
+        assert.equal(activeStore.getJobById(credentialScopedJobId)?.status, "succeeded");
+      } finally {
+        activeStore.close();
+      }
+      assert.deepEqual(snapshotCredentialMaterialRequests, [false, false, true]);
+      assert.ok(providerFetch.mock.calls.length > 0);
+      assert.ok(activeResult.processedJobs > 0);
+    } finally {
+      vi.unstubAllGlobals();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -31243,9 +31689,11 @@ function createSnapshotDeviceSyncPort(input: {
 function createEmptyDeviceSyncPort(): HostedRuntimeDeviceSyncPort & {
   readonly fetchDirtyStatesCalls: number;
   readonly fetchSnapshotCalls: number;
+  readonly snapshotCredentialMaterialRequests: readonly (boolean | null)[];
 } {
   let fetchDirtyStatesCalls = 0;
   let fetchSnapshotCalls = 0;
+  const snapshotCredentialMaterialRequests: Array<boolean | null> = [];
   return {
     async ackDirtyStateProcessed() {
       throw new Error("Device sync dirty ack should not run in this e2e.");
@@ -31270,8 +31718,11 @@ function createEmptyDeviceSyncPort(): HostedRuntimeDeviceSyncPort & {
         userId: TEST_USER_ID,
       };
     },
-    async fetchSnapshot() {
+    async fetchSnapshot(request) {
       fetchSnapshotCalls += 1;
+      snapshotCredentialMaterialRequests.push(
+        request?.includeCredentialMaterial ?? null,
+      );
       return {
         connections: [],
         generatedAt: TEST_NOW,
@@ -31283,6 +31734,9 @@ function createEmptyDeviceSyncPort(): HostedRuntimeDeviceSyncPort & {
     },
     get fetchSnapshotCalls() {
       return fetchSnapshotCalls;
+    },
+    get snapshotCredentialMaterialRequests() {
+      return snapshotCredentialMaterialRequests;
     },
   };
 }

@@ -215,7 +215,12 @@ accepted system work and its bounded import-owned durability effects, then
 executes only `run-device-sync-wake` and crosses the ordinary durable checkpoint
 and dirty-ack boundary. It does not execute unrelated pending route actions,
 conversation, delivery, assistant, or model work, and the restricted
-device-sync run suppresses new device-activity automation scheduling. Dirty
+device-sync run fetches the control-plane snapshot without credential material,
+skips provider scheduling plus unrelated retention/staleness maintenance, and
+claims only credential-independent canonical import/delete jobs from the
+existing worker queue. Credential-scoped Oura, WHOOP, Strava, and Junction
+provider work remains queued for ordinary active/default processing. The
+restricted run also suppresses new device-activity automation scheduling. Dirty
 acknowledgement and the following pending-dirty query run in the same health-data
 admission transaction used by companion ingress. If an acknowledgement remains
 dirty, the runtime clears the spent post-checkpoint record and requeues that same

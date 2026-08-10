@@ -108,6 +108,7 @@ type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required
 
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  includeCredentialMaterial?: boolean;
   secret: string;
   service: DeviceSyncService;
   signal?: AbortSignal | null;
@@ -122,8 +123,14 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     );
   }
 
-  const snapshot = input.signal
-    ? await client.fetchSnapshot({ signal: input.signal })
+  const snapshotRequest = {
+    ...(input.includeCredentialMaterial === undefined
+      ? {}
+      : { includeCredentialMaterial: input.includeCredentialMaterial }),
+    ...(input.signal ? { signal: input.signal } : {}),
+  };
+  const snapshot = Object.keys(snapshotRequest).length > 0
+    ? await client.fetchSnapshot(snapshotRequest)
     : await client.fetchSnapshot();
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(
     snapshot ? { ...snapshot, connections: [] } : null,

@@ -497,8 +497,13 @@ runtime retains the ordinary lane-contiguous import of older accepted system
 work and its bounded import-owned durability effects, then selects and executes
 only `run-device-sync-wake` through the existing checkpoint and dirty-ack path.
 It does not execute unrelated pending route actions, delivery, assistant
-admission, or provider work, and the restricted device-sync action suppresses
-new device-activity automation scheduling. Web records the dirty
+admission, or credential-scoped provider work. The restricted device-sync pass
+fetches the existing control-plane snapshot with credential material omitted,
+skips provider scheduling, source-staleness and dense-raw maintenance, and lets
+the existing worker claim only credential-independent canonical imports and
+deletion imports. Direct Oura, WHOOP, Strava, and credential-dependent Junction
+jobs remain queued for ordinary active/default processing. The same action
+suppresses new device-activity automation scheduling. Web records the dirty
 acknowledgement and reads pending dirty work in the same member-then-connection
 health-data admission transaction used by companion ingress, so either ingress
 commits first and the acknowledgement observes it, or the acknowledgement
@@ -520,7 +525,8 @@ authoritative across cold restore before the invocation result is returned.
 Only an exact empty-queue reread at that final boundary clears an inherited
 paused marker and its paired device wake.
 The bound fence continues to reject metered provider egress if an unexpected
-path reaches it.
+path reaches it; direct wearable HTTP egress is prevented by the restricted
+snapshot/scheduler/worker policy before provider execution.
 `parseHostedWorkspaceInvocationRequest` is the single wire parser for this
 request contract. Assistant-runtime and Cloudflare transport adapters must
 delegate to that parser instead of reconstructing a partial request, because
@@ -1778,8 +1784,10 @@ fresh write fence and narrows a default invocation to the existing
 executes only the model-free `run-device-sync-wake` route and exits before
 foreground assistant admission. It binds that effective processing mode into
 the same fence so controller priority, preemption, and the container job cannot
-diverge; the fence also rejects all metered provider egress if the runtime
-reaches one unexpectedly. Explicit media
+diverge. That route omits device credential material, skips the provider
+scheduler, and claims only credential-independent import/delete jobs; the fence
+also rejects all metered provider egress if the runtime reaches one
+unexpectedly. Explicit media
 retention remains model-free, and custom inference keeps its selected route.
 This keeps a racing payloadless direct wake from manufacturing `runtime_error`
 state or mutating restored assistant recovery while Web and Temporal remain the

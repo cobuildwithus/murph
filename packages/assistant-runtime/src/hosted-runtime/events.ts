@@ -52,6 +52,7 @@ export async function executeHostedMailboxEvent(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  restrictDeviceSyncExecution?: boolean;
   suppressDeviceActivityAutomations?: boolean;
   sourceMailboxItemId?: string | null;
   runtime: Pick<
@@ -111,6 +112,7 @@ export async function executeHostedMailboxEvent(input: {
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
+    restrictDeviceSyncExecution: input.restrictDeviceSyncExecution ?? false,
     suppressDeviceActivityAutomations:
       input.suppressDeviceActivityAutomations ?? false,
     sourceMailboxItemId: input.sourceMailboxItemId ?? null,
@@ -149,6 +151,7 @@ async function handleHostedMailboxEvent(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  restrictDeviceSyncExecution?: boolean;
   suppressDeviceActivityAutomations?: boolean;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
@@ -176,6 +179,7 @@ async function handleHostedMailboxEvent(input: {
     ...(input.shouldYieldDeviceSync
       ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
       : {}),
+    restrictDeviceSyncExecution: input.restrictDeviceSyncExecution ?? false,
     suppressDeviceActivityAutomations:
       input.suppressDeviceActivityAutomations ?? false,
     sourceMailboxItemId: input.sourceMailboxItemId,
@@ -199,6 +203,7 @@ async function executeHostedSystemWake(input: {
   shouldYieldAssistantAskCompletion?: (() => boolean) | null;
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
+  restrictDeviceSyncExecution?: boolean;
   suppressDeviceActivityAutomations?: boolean;
   sourceMailboxItemId: string | null;
   vaultRoot: string;
@@ -309,6 +314,9 @@ async function executeHostedSystemWake(input: {
       });
       const deviceSyncMetrics = await runHostedDeviceSyncWakeLane({
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
+        ...(input.restrictDeviceSyncExecution === true
+          ? { executionPolicy: "credential_independent_imports" as const }
+          : {}),
         platformEnv: input.runtime.platformEnv,
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,

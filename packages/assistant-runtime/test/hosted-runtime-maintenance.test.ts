@@ -1700,6 +1700,62 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("restricts paused companion passes to credential-independent device work", async () => {
+    const close = vi.fn();
+    const drainWorker = vi.fn(async () => 1);
+    const getNextWakeAt = vi.fn(() => null);
+    const runSchedulerOnce = vi.fn(async () => undefined);
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close,
+      drainWorker,
+      getNextWakeAt,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce,
+    });
+
+    const result = await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_paused_companion_restricted",
+        hint: null,
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "webhook_hint",
+        userId: "member_123",
+      },
+      FIXED_MAINTENANCE_VAULT_ROOT,
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        executionPolicy: "credential_independent_imports",
+      },
+    );
+
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        includeCredentialMaterial: false,
+      }),
+    );
+    expect(runSchedulerOnce).not.toHaveBeenCalled();
+    expect(drainWorker).toHaveBeenCalledWith(
+      100,
+      "credential_independent_imports",
+    );
+    expect(getNextWakeAt).toHaveBeenCalledWith(
+      undefined,
+      "credential_independent_imports",
+    );
+    expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
+    assert.deepEqual(result, {
+      nextWakeAt: null,
+      postCheckpointRecord: null,
+      processedJobs: 1,
+      skipped: false,
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
   it("stops a superseded connection wake after hydration without running device-sync work", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 0);

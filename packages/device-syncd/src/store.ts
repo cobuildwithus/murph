@@ -30,7 +30,10 @@ import {
 import type {
   HostedAccountHydrationInput,
 } from "./store/hosted-account-hydration.ts";
-import type { DeviceSyncEnqueueJobInput } from "./store/jobs.ts";
+import type {
+  DeviceSyncEnqueueJobInput,
+  DeviceSyncJobClaimPredicate,
+} from "./store/jobs.ts";
 import {
   claimDeviceSyncJobBatchCandidatesIfSeedOwned,
   claimDueDeviceSyncJob,
@@ -46,6 +49,7 @@ import {
   markPendingDeviceSyncJobsDeadForAccount,
   markPendingDeviceSyncJobsDeadForAccountIfCurrent,
   readNextDeviceSyncJobWakeAt,
+  readNextDeviceSyncJobWakeAtMatching,
   readNextDeviceSyncJobWakeAtForAccount,
   releaseDeviceSyncJobIfOwned,
 } from "./store/jobs.ts";
@@ -478,16 +482,23 @@ export class SqliteDeviceSyncStore {
     return readNextStoredActiveReconcileAt(this.database);
   }
 
-  readNextJobWakeAt(): string | null {
-    return readNextDeviceSyncJobWakeAt(this.database);
+  readNextJobWakeAt(canRunJob?: DeviceSyncJobClaimPredicate): string | null {
+    return canRunJob
+      ? readNextDeviceSyncJobWakeAtMatching(this.database, canRunJob)
+      : readNextDeviceSyncJobWakeAt(this.database);
   }
 
   readNextJobWakeAtForAccount(accountId: string): string | null {
     return readNextDeviceSyncJobWakeAtForAccount(this.database, accountId);
   }
 
-  claimDueJob(workerId: string, now: string, leaseMs: number): DeviceSyncJobRecord | null {
-    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs);
+  claimDueJob(
+    workerId: string,
+    now: string,
+    leaseMs: number,
+    canClaimJob?: DeviceSyncJobClaimPredicate,
+  ): DeviceSyncJobRecord | null {
+    return claimDueDeviceSyncJob(this.database, workerId, now, leaseMs, canClaimJob);
   }
 
   listDueJobBatchCandidates(input: {

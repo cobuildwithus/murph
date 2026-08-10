@@ -7,6 +7,7 @@ import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types
 import {
   resolveDeviceSyncStoreNextWakeAt,
   type DeviceSyncService,
+  type DeviceSyncWorkerExecutionPolicy,
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
 import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
@@ -73,6 +74,7 @@ export async function runHostedDeviceSyncPass(
   options: {
     platformEnv?: Readonly<Record<string, string>>;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
+    executionPolicy?: DeviceSyncWorkerExecutionPolicy;
     shouldYield?: (() => boolean) | null;
     skipDirtyPendingFetch?: boolean;
     signal?: AbortSignal | null;
@@ -86,6 +88,9 @@ export async function runHostedDeviceSyncPass(
   stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
 }> {
   const platformEnv = options.platformEnv ?? {};
+  const executionPolicy = options.executionPolicy ?? "all";
+  const isCredentialIndependentOnly =
+    executionPolicy === "credential_independent_imports";
   await writeHostedLegacyDeviceSyncPlatformEnvLog({
     deviceSyncConfig,
     platform: options.runtimeLogPlatform ?? null,
@@ -130,11 +135,13 @@ export async function runHostedDeviceSyncPass(
   let processedJobs = 0;
 
   try {
-    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
-      nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
-      userId: wake.userId,
-      vaultRoot,
-    });
+    if (!isCredentialIndependentOnly) {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+        userId: wake.userId,
+        vaultRoot,
+      });
+    }
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -148,6 +155,7 @@ export async function runHostedDeviceSyncPass(
     if (secret) {
       syncState = await syncHostedDeviceSyncControlPlaneState({
         deviceSyncPort,
+        includeCredentialMaterial: !isCredentialIndependentOnly,
         wake,
         secret,
         signal: options.signal ?? null,
@@ -161,7 +169,7 @@ export async function runHostedDeviceSyncPass(
     if (syncState.wakeSuperseded === true) {
       const stagedDirtyAcks = options.stagedDirtyAcks ?? [];
       return {
-        nextWakeAt: service.getNextWakeAt(),
+        nextWakeAt: resolveHostedDeviceSyncPassNextWakeAt(service, executionPolicy),
         postCheckpointRecord: null,
         processedJobs: 0,
         skipped: false,
@@ -180,7 +188,9 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
-    await service.runSchedulerOnce();
+    if (!isCredentialIndependentOnly) {
+      await service.runSchedulerOnce();
+    }
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -192,6 +202,7 @@ export async function runHostedDeviceSyncPass(
     }
 
     processedJobs = await drainHostedDeviceSyncWorker({
+      executionPolicy,
       service,
       shouldYield,
     });
@@ -206,10 +217,12 @@ export async function runHostedDeviceSyncPass(
       state: syncState,
       wake,
     });
-    await writeHostedDeviceSyncSourceStalledRuntimeLogs({
-      platform: options.runtimeLogPlatform ?? null,
-      service,
-    });
+    if (!isCredentialIndependentOnly) {
+      await writeHostedDeviceSyncSourceStalledRuntimeLogs({
+        platform: options.runtimeLogPlatform ?? null,
+        service,
+      });
+    }
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -240,13 +253,15 @@ export async function runHostedDeviceSyncPass(
       });
     }
 
-    const denseRawRetention = await runHostedDeviceSyncDenseRawRetention({
-      deadlineMs: remainingHostedDeviceSyncDeadlineMs(startedAtMs, timeoutMs),
-      platform: options.runtimeLogPlatform ?? null,
-      processedJobs,
-      shouldYield,
-      vaultRoot,
-    });
+    const denseRawRetention = isCredentialIndependentOnly
+      ? { hasMore: false }
+      : await runHostedDeviceSyncDenseRawRetention({
+          deadlineMs: remainingHostedDeviceSyncDeadlineMs(startedAtMs, timeoutMs),
+          platform: options.runtimeLogPlatform ?? null,
+          processedJobs,
+          shouldYield,
+          vaultRoot,
+        });
 
     if (shouldYieldHostedDeviceSync(shouldYield)) {
       return buildHostedDeviceSyncYieldedPassResult({
@@ -258,7 +273,7 @@ export async function runHostedDeviceSyncPass(
     }
 
     deferHostedPendingDirtyPayloadAcksUntil({
-      nextWakeAt: service.getNextWakeAt(),
+      nextWakeAt: resolveHostedDeviceSyncPassNextWakeAt(service, executionPolicy),
       state: syncState,
     });
     const postCheckpointRecord = resolveHostedDeviceSyncDirtyPostCheckpointRecord({
@@ -271,14 +286,19 @@ export async function runHostedDeviceSyncPass(
     const denseRawRetentionWakeAt = denseRawRetention.hasMore
       ? resolveHostedDeviceSyncYieldRetryAt()
       : null;
-    await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
-      nextWakeAt: denseRawRetentionWakeAt,
-      userId: wake.userId,
-      vaultRoot,
-    });
+    if (!isCredentialIndependentOnly) {
+      await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
+        nextWakeAt: denseRawRetentionWakeAt,
+        userId: wake.userId,
+        vaultRoot,
+      });
+    }
 
     return {
-      nextWakeAt: earliestHostedMaintenanceWakeAt(service.getNextWakeAt(), denseRawRetentionWakeAt),
+      nextWakeAt: earliestHostedMaintenanceWakeAt(
+        resolveHostedDeviceSyncPassNextWakeAt(service, executionPolicy),
+        denseRawRetentionWakeAt,
+      ),
       postCheckpointRecord,
       processedJobs,
       skipped: false,
@@ -442,12 +462,27 @@ function remainingHostedDeviceSyncDeadlineMs(
   return Math.max(0, timeoutMs - (Date.now() - startedAtMs));
 }
 
+function resolveHostedDeviceSyncPassNextWakeAt(
+  service: DeviceSyncService,
+  executionPolicy: DeviceSyncWorkerExecutionPolicy,
+): string | null {
+  return executionPolicy === "all"
+    ? service.getNextWakeAt()
+    : service.getNextWakeAt(undefined, executionPolicy);
+}
+
 async function drainHostedDeviceSyncWorker(input: {
+  executionPolicy: DeviceSyncWorkerExecutionPolicy;
   service: DeviceSyncService;
   shouldYield?: (() => boolean) | null;
 }): Promise<number> {
   if (!input.shouldYield) {
-    return await input.service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS);
+    return input.executionPolicy === "all"
+      ? await input.service.drainWorker(HOSTED_MAX_DEVICE_SYNC_JOBS)
+      : await input.service.drainWorker(
+          HOSTED_MAX_DEVICE_SYNC_JOBS,
+          input.executionPolicy,
+        );
   }
 
   let processedJobs = 0;
@@ -455,7 +490,9 @@ async function drainHostedDeviceSyncWorker(input: {
     if (input.shouldYield()) {
       break;
     }
-    const processed = await input.service.drainWorker(1);
+    const processed = input.executionPolicy === "all"
+      ? await input.service.drainWorker(1)
+      : await input.service.drainWorker(1, input.executionPolicy);
     if (processed <= 0) {
       break;
     }
@@ -661,6 +698,7 @@ function errorToString(error: unknown): string {
 
 export async function runHostedDeviceSyncWakeLane(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
+  executionPolicy?: DeviceSyncWorkerExecutionPolicy;
   platformEnv?: Readonly<Record<string, string>>;
   runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
@@ -682,6 +720,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
     input.timeoutMs,
     {
       platformEnv: input.platformEnv ?? {},
+      ...(input.executionPolicy
+        ? { executionPolicy: input.executionPolicy }
+        : {}),
       runtimeLogPlatform: input.runtimeLogPlatform ?? null,
       shouldYield: input.shouldYieldDeviceSync ?? null,
       signal: input.signal ?? null,

@@ -113,7 +113,11 @@ Updated: 2026-08-10
   through the existing durable checkpoint and acknowledgement flow. It does not
   execute unrelated pending route actions, assistant automation, conversation
   work, delivery, or model admission, and the restricted device-sync action
-  suppresses device-activity automation scheduling. A failed preparation or
+  requests a credential-free snapshot, skips provider scheduling and unrelated
+  retention/staleness maintenance, claims only credential-independent
+  canonical import/delete jobs, and suppresses device-activity automation
+  scheduling. Credential-scoped wearable jobs remain queued for ordinary
+  active/default execution. A failed preparation or
   post-checkpoint receipt, a successful receipt that reports `stillDirty`, or
   another exact local device item may persist one exact device-sync retry
   marker and `device-sync.reconcile` wake. A still-dirty receipt clears its
@@ -150,6 +154,12 @@ Updated: 2026-08-10
 - Passed after the round-4 corrections: hosted dirty-ack authority suite (1
   file, 48 tests), including shared-transaction pending queries and both
   serialized ingress/acknowledgement commit orders.
+- Passed after the fourth diagnostic round-5 correction: affected device-sync
+  runtime suites (4 files, 448 tests), including a cold-restored paused system
+  mailbox that imports a companion HRV observation from a credential-free
+  snapshot, leaves a higher-priority direct-provider reconcile queued, and
+  makes zero provider requests until an ordinary active pass runs it.
+- Passed: the full device-syncd suite (44 files, 884 tests).
 - Passed: `pnpm --dir apps/web typecheck:prepared`, assistant-runtime
   typecheck, and Cloudflare typecheck.
 - Passed: ESLint over every changed Web TypeScript file.
@@ -159,8 +169,8 @@ Updated: 2026-08-10
   recovery suite (1 file, 24 tests), including recovery of a zero-lag paused
   device continuation from an intermediate canonical commit.
 - Passed after the later round-5 correction: hosted runner bundle assembly and
-  parity probes; the latest exact macOS assembly measured a 7,981,634-byte
-  static closure and 9,954,679-byte total under the 9,987,447-byte ratcheted
+  parity probes; the latest exact macOS assembly measured a 7,982,116-byte
+  static closure and 9,958,141-byte total under the 9,990,909-byte ratcheted
   ceiling.
 - Authored: a production-path hosted local E2E that cold-restores a paused
   member, submits 17 distinct companion observations without waiting for each
@@ -220,5 +230,17 @@ Updated: 2026-08-10
   reread is empty. A cold-restore entrypoint regression imports the successor,
   proves zero-lag marker/wake retention with both local items intact, then
   drains the queue and proves the final clean boundary clears the pair.
+- A fourth same-number diagnostic capture again had inconclusive textual model
+  attestation and found that the restricted action still entered the full
+  device-sync lifecycle: it fetched credential material, ran the all-account
+  scheduler, and let the generic worker claim direct wearable-provider jobs.
+  The correction reuses the existing credential-free snapshot option and
+  credential-independent job classifier, skips provider scheduling and
+  unrelated device maintenance, and filters both seed and batch claims while
+  leaving credential-scoped jobs and their wake projection to the ordinary
+  active/default pass. Focused service, maintenance, event-bridge, and runtime
+  entrypoint regressions prove the restricted boundary, including a
+  production-path cold restore that completes credential-independent companion
+  import work while direct wearable-provider egress remains at zero.
 - Required after remediation: final ReviewGPT round-5 retry and exact-head
   GitHub Actions.
