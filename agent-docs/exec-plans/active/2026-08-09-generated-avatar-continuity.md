@@ -483,3 +483,18 @@ Updated: 2026-08-10
   a response artifact and does not advance the substantive review counter.
   Round 10 must be retried as a sensitive fresh full-snapshot audit on the next
   exact pushed head while exact-head CI runs concurrently.
+- `main` advanced through the managed-voice-runtime, sponsorship-metrics, and
+  iMessage nutrition-card changes. An ordinary merge retained this PR's
+  generated-image continuity and changelog item alongside those accepted
+  mainline changes. Post-merge focused proof passes 69 Assistant Engine and
+  Operator Config tests plus 44 changelog/archive tests.
+- Fresh full hosted-runner assembly on the merged tree passes with no ratchet
+  change: Vault CLI 8,689,343 bytes of 9,100,000; runner entry 1,596,214 bytes;
+  static boot closure 7,726,737 bytes; total 9,618,405 bytes of 10,073,587.
+  The 42-test runner bundle-policy file passes and the final bundle contains no
+  forbidden boot input.
+- Exact-head release CI then found one stale archive assertion introduced by
+  the required changelog correction: the changelog page still expected the
+  prior August 10 edition title. The test now expects the member-visible title
+  and the new stable item anchor. The three focused changelog/page/feedback
+  files pass 52 tests; production source is unchanged by this correction.
