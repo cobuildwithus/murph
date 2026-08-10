@@ -1,0 +1,104 @@
+# Bound usage-credit settlement database critical section
+
+Status: active
+Created: 2026-08-09
+Updated: 2026-08-09
+
+## Goal
+
+- Keep hosted usage accounting available during same-beneficiary bursts by
+  replacing the unbounded per-grant settlement loop with the smallest bounded,
+  database-only commit that preserves exact credit and billing semantics.
+
+## Success criteria
+
+- A usage debit no longer locks every positive historical grant and performs a
+  data-dependent application loop of projection and ledger writes.
+- The commit has a documented maximum row and statement count, or uses a
+  compact existing owner whose database work is constant-sized; a limit may
+  not strand, erase, or silently absorb valid credit.
+- Purchase and referral grants remain FIFO, immutable ledger evidence and
+  beneficiary sequence semantics remain correct, purchase projections remain
+  synchronized, and exact usage replay remains idempotent.
+- Purchased credit remains owned by its frozen beneficiary; referral credit is
+  final; Family, group sponsorship, refund, dispute, deletion, access, and
+  crossing-operation behavior are unchanged.
+- No provider, KMS, model, filesystem, callback, retry sleep, or unbounded read
+  runs while the usage-credit transaction owns a pooled connection.
+- Focused unit and real-PostgreSQL concurrency tests prove replay, FIFO mixed
+  grants, a maximum-fragmentation case, rollback, and bounded lock/statement
+  behavior with a two-connection pool.
+
+## Scope
+
+- In scope: the canonical usage-credit settlement owner, the minimum ledger or
+  schema support needed for a correct bounded commit, focused tests, and the
+  live architecture/reliability/testing docs if the durable contract changes.
+- Out of scope: changing offer amounts, allowance pricing, Stripe authority,
+  referral rewards or caps, Family/group entitlement, access gating, provider
+  reconciliation ownership, checkout/payment binding encryption under its
+  separate locks, or unrelated database-lock cleanup. The payment-binding
+  critical section remains an explicit follow-up and must not be hidden by a
+  broad claim that this settlement PR fixes every usage-credit transaction.
+
+## Constraints
+
+- Technical constraints: prefer one atomic CTE, conditional update, or upsert;
+  retain only brief internal PostgreSQL row locks required by the write; keep
+  one beneficiary serialization/sequence owner unless a simpler atomic write
+  proves it unnecessary; do not add a queue, repair service, or second ledger.
+- Product/process constraints: ReviewGPT authors the implementation patch;
+  local work only triages, applies, verifies, and reviews it. Use the PR lane,
+  run the preliminary coverage pass and final ReviewGPT gate on exact pushed
+  heads, and preserve product-critical billing and access behavior.
+
+## Risks and mitigations
+
+1. Risk: A superficial `LIMIT` makes fragmented valid credit permanently
+   unusable or incorrectly counts it as absorbed.
+   Mitigation: require an invariant-safe continuation/compaction design or no
+   patch; test credit spanning the boundary and unchanged total conservation.
+2. Risk: Removing beneficiary serialization creates duplicate debits, sequence
+   gaps, or projection drift under grant/reversal races.
+   Mitigation: retain one atomic owner, rely on unique semantic identities and
+   conditional writes, and prove concurrent replay and grant settlement in
+   real PostgreSQL.
+3. Risk: A broad accounting redesign adds another canonical state owner.
+   Mitigation: pressure-test for a set-based rewrite of the existing ledger and
+   projections first; reject new state without direct proof it is required.
+
+## Tasks
+
+1. Map settlement, grant, reversal, allowance, referral, sponsorship, deletion,
+   migration, and test call sites and record the current maximum-work gap.
+2. Send a guarded implementation request to ReviewGPT on an assigned managed
+   lane and require a scoped patch artifact, explicit invariant reasoning, and
+   exact verification commands.
+3. Inspect the full patch before applying it; reject unrelated scope, hidden
+   product changes, new state without proof, unsafe casts, or a cap that loses
+   usable credit.
+4. Apply the accepted patch, run focused unit/type/document checks and the
+   local real-PostgreSQL concurrency proof, then inspect the final diff.
+5. Commit, push, open the PR with the sensitive billing/concurrency intent
+   contract, start CI and both required ReviewGPT stages on the exact head, and
+   resolve accepted findings until the final head passes.
+
+## Decisions
+
+- The target is zero application-visible lock orchestration, not literally
+  zero PostgreSQL locks: correct atomic writes still take short internal locks.
+- A fixed row cap is not accepted by itself because current product policy does
+  not impose a lifetime bound on unused purchase or referral grants.
+- The current risk is structural: settlement selects every positive grant with
+  `FOR UPDATE` and no limit, then performs multiple awaited writes per row.
+
+## Verification
+
+- Commands to run: focused hosted usage-credit unit tests; focused typecheck;
+  migration constraint tests if schema changes; the guarded local
+  `hosted-usage-credit-postgres-concurrency` lane with a two-connection pool;
+  repository doc drift checks; exact-head GitHub Actions.
+- Expected outcomes: all checks pass; exact replay creates no second debit;
+  FIFO purchase/referral consumption and projection conservation hold; maximum
+  work is deterministic; no connection remains checked out for non-database
+  work; PR CI and both ReviewGPT gates pass on the final pushed head.
