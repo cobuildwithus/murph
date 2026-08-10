@@ -307,6 +307,17 @@ function chooseHostedLinqLineWriteLookupKey(
   return lookupKeyReadCandidates.find((candidate) => existingLookupKeys.has(candidate)) ?? null;
 }
 
+export async function acquireHostedLinqInventoryApplyLockTx(input: {
+  prisma: HostedLinqLineClient;
+}): Promise<void> {
+  await input.prisma.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtext('hosted_linq_phone_number_inventory'),
+      hashtext('snapshot')
+    )
+  `;
+}
+
 export async function syncHostedLinqConfiguredLinesTx(input: {
   /**
    * Additive-rollout compatibility for previous application builds only.
@@ -327,14 +338,16 @@ export async function syncHostedLinqConfiguredLinesTx(input: {
     return;
   }
 
-  const apply = (prisma: HostedLinqLineClient) =>
-    prisma.$queryRaw<Array<{ syncedCount: bigint }>>(
+  const apply = async (prisma: HostedLinqLineClient) => {
+    await acquireHostedLinqInventoryApplyLockTx({ prisma });
+    await prisma.$queryRaw<Array<{ syncedCount: bigint }>>(
       buildHostedLinqConfiguredLineSnapshotQuery({
         activeMemberLimit: input.activeMemberLimit,
         lines,
         observedAt,
       }),
     );
+  };
 
   if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
     const prisma = input.prisma;
@@ -939,13 +952,28 @@ export function buildHostedLinqInventoryFreshnessCutoff(observedAt: Date): Date 
 
 export async function readHostedLinqContactCardCandidacySnapshot(input: {
   limit?: number;
+  lockMode?: "skip" | "wait";
   observedAt?: Date;
   prisma: PrismaClient | Prisma.TransactionClient;
 }): Promise<{
   configuredLineCount: number;
   lines: HostedLinqContactCardLine[];
-}> {
+} | null> {
   const read = async (tx: HostedLinqLineClient) => {
+    if (input.lockMode === "skip") {
+      const acquired = await tx.$queryRaw<Array<{ locked: boolean }>>`
+        SELECT pg_try_advisory_xact_lock(
+          hashtext('hosted_linq_phone_number_inventory'),
+          hashtext('snapshot')
+        ) AS locked
+      `;
+      if (acquired[0]?.locked !== true) {
+        return null;
+      }
+    } else {
+      await acquireHostedLinqInventoryApplyLockTx({ prisma: tx });
+    }
+
     const configuredLineCount = await tx.hostedLinqLine.count({
       where: {
         configuredAt: { not: null },
@@ -962,10 +990,7 @@ export async function readHostedLinqContactCardCandidacySnapshot(input: {
 
   if ("$transaction" in input.prisma && typeof input.prisma.$transaction === "function") {
     const prisma = input.prisma;
-    return prisma.$transaction(
-      (tx) => read(tx),
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
-    );
+    return prisma.$transaction((tx) => read(tx));
   }
 
   return read(input.prisma);

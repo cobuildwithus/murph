@@ -1115,10 +1115,27 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledOnce();
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
+      lockMode: "skip",
       prisma,
     });
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("fails soft to null when the projection read skips an in-flight ownership update", async () => {
+    linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot.mockResolvedValue(null);
+
+    await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
+      excludePhoneNumber: "+15550000001",
+      prisma: {} as never,
+    })).resolves.toBeNull();
+
+    expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
+      limit: 50,
+      lockMode: "skip",
+      prisma: {},
+    });
+    expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
   });
 
   it("fails soft to null when the projection read is unavailable", async () => {

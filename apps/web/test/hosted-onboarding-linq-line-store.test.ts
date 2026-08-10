@@ -670,17 +670,21 @@ describe("hosted Linq proactive-conversation capacity", () => {
 });
 
 describe("syncHostedLinqConfiguredLinesTx", () => {
-  it("prepares every line before opening one transaction and issuing one bulk statement", async () => {
+  it("prepares every line before opening one transaction, locking publication, and issuing one bulk statement", async () => {
     restoreContactPrivacyKeyring = configureHostedContactPrivacyKeyringForTest({
       currentVersion: "v1",
       entries: TEST_KEYRING_ENTRIES,
     });
     const events: string[] = [];
+    const executeRaw = vi.fn().mockImplementation(() => {
+      events.push("publication-lock");
+      return Promise.resolve(1);
+    });
     const queryRaw = vi.fn().mockImplementation(() => {
       events.push("bulk-statement");
       return Promise.resolve([{ syncedCount: 2n }]);
     });
-    const transactionClient = { $queryRaw: queryRaw };
+    const transactionClient = { $executeRaw: executeRaw, $queryRaw: queryRaw };
     const transaction = vi.fn(async (
       callback: (tx: typeof transactionClient) => Promise<unknown>,
     ) => {
@@ -702,18 +706,21 @@ describe("syncHostedLinqConfiguredLinesTx", () => {
 
     expect(events).toEqual([
       "transaction:start",
+      "publication-lock",
       "bulk-statement",
       "transaction:commit",
     ]);
     expect(transaction).toHaveBeenCalledTimes(1);
+    expect(executeRaw).toHaveBeenCalledTimes(1);
     expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect((executeRaw.mock.calls[0]?.[0] as string[]).join(""))
+      .toContain("pg_advisory_xact_lock");
     const query = queryRaw.mock.calls[0]?.[0] as {
       sql: string;
       values: unknown[];
     };
     expect(query.sql).toContain("WITH input_line");
     expect(query.sql).toContain("ON CONFLICT (phone_number_lookup_key)");
-    expect(query.sql).not.toContain("pg_advisory_xact_lock");
     expect(query.values).toEqual(expect.arrayContaining([
       "*** 0001",
       "*** 0002",
