@@ -1117,6 +1117,13 @@ describe('murph.attach_response_card', () => {
     const waitingVault = await createChallengeVault({
       definition: waitingDefinition,
     })
+    const waitingRequest = await readCurrentChallengeCardToolRequest(waitingVault)
+    if (
+      !waitingRequest
+      || waitingRequest.kind !== 'attach-group-challenge-response-card'
+    ) {
+      throw new TypeError('Expected a waiting-participant group-card request.')
+    }
     const missingWaiting = await executeCardTool({
       groupChallengeResponseCardAllowed: true,
       groupSharedReadTurnState: {
@@ -1127,7 +1134,7 @@ describe('murph.attach_response_card', () => {
         ],
       },
       privateDirectResponseCardAllowed: false,
-      request: await readCurrentChallengeCardToolRequest(waitingVault),
+      request: waitingRequest,
       vaultRoot: waitingVault,
     })
     expect(missingWaiting).not.toHaveProperty('responseCardPatch')
