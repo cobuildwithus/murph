@@ -104,6 +104,40 @@ const purchaseGrantResynchronizationContractMigrationSql = readFileSync(
   ),
   "utf8",
 );
+const grantSlotReleaseMigrationSql = readFileSync(
+  new URL(
+    "../prisma/migrations/20260810150000_hosted_usage_credit_grant_slot_release/migration.sql",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const grantProjectionRuntimeMigrationStatements = [
+  extractRequiredMigrationStatement(
+    grantSlotReleaseMigrationSql,
+    /CREATE FUNCTION enforce_hosted_usage_credit_grant_identity\(\)[\s\S]*?\$\$;/u,
+    "grant identity function",
+  ),
+  extractRequiredMigrationStatement(
+    grantSlotReleaseMigrationSql,
+    /CREATE TRIGGER "hosted_usage_credit_grant_identity_insert"[\s\S]*?;/u,
+    "grant identity insert trigger",
+  ),
+  extractRequiredMigrationStatement(
+    grantSlotReleaseMigrationSql,
+    /CREATE TRIGGER "hosted_usage_credit_grant_identity_update"[\s\S]*?;/u,
+    "grant identity update trigger",
+  ),
+  extractRequiredMigrationStatement(
+    grantSlotReleaseMigrationSql,
+    /CREATE INDEX "hosted_usage_credit_grant_beneficiary_active_fifo_idx"[\s\S]*?;/u,
+    "active grant FIFO index",
+  ),
+  extractRequiredMigrationStatement(
+    grantSlotReleaseMigrationSql,
+    /CREATE INDEX "hosted_usage_credit_purchase_beneficiary_reserved_slot_idx"[\s\S]*?;/u,
+    "purchase reservation index",
+  ),
+];
 
 if (
   runPostgresConcurrencyProof &&
@@ -127,6 +161,21 @@ type UsageCreditFixture = {
   purchaseId: string;
   secondClient: PrismaClient;
   thirdClient: PrismaClient;
+};
+
+type PostgreSqlExplainPlanNode = {
+  "Actual Rows"?: number;
+  "Index Name"?: string;
+  "Node Type": string;
+  "Relation Name"?: string;
+  Plans?: PostgreSqlExplainPlanNode[];
+};
+
+type SeededBoundedUsageCreditHistory = {
+  firstActiveEntryId: string;
+  historyCount: number;
+  initialLedgerVersion: bigint;
+  secondActiveEntryId: string;
 };
 
 const transactionOptions = {
@@ -304,7 +353,9 @@ async function seedActivePurchaseGrantFragments(input: {
       })),
     });
     await tx.hostedUsageCreditGrant.createMany({
-      data: entryIds.map((entryId) => ({
+      data: entryIds.map((entryId, index) => ({
+        beneficiaryMemberId: input.fixture.beneficiaryMemberId,
+        beneficiarySequence: BigInt(index + 1),
         entryId,
         remainingUsdMicros: grantUsdMicros,
       })),
@@ -319,6 +370,346 @@ async function seedActivePurchaseGrantFragments(input: {
   }, transactionOptions);
 
   return { entryIds, purchaseIds, totalUsdMicros };
+}
+
+async function seedBoundedUsageCreditHistory(input: {
+  activeGrantCount: number;
+  fixture: UsageCreditFixture;
+  historyCount: number;
+}): Promise<SeededBoundedUsageCreditHistory> {
+  if (
+    !Number.isSafeInteger(input.historyCount)
+    || input.historyCount < 1_000
+    || !Number.isSafeInteger(input.activeGrantCount)
+    || input.activeGrantCount < 2
+    || input.activeGrantCount
+      > HOSTED_USAGE_CREDIT_MAX_OCCUPIED_GRANT_SLOTS
+  ) {
+    throw new TypeError("Bounded usage-credit history fixture is invalid.");
+  }
+
+  const fixtureKey = randomUUID().replaceAll("-", "");
+  const effectiveAt = new Date("2026-07-16T10:00:00.000Z");
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query({
+      text: `
+        WITH
+        consumed AS (
+          SELECT generated.series
+          FROM generate_series(1, $3::integer) AS generated(series)
+        ),
+        released AS (
+          SELECT generated.series
+          FROM generate_series(1, $3::integer) AS generated(series)
+        ),
+        active AS (
+          SELECT generated.series
+          FROM generate_series(1, $4::integer) AS generated(series)
+        ),
+        purchase_rows AS (
+          SELECT
+            'hucp_history_consumed_' || $2 || '_' || consumed.series AS id,
+            'history-consumed:' || $2 || ':' || consumed.series
+              AS "clientRequestKey",
+            'fulfilled'::"HostedUsageCreditPurchaseStatus" AS status,
+            0::bigint AS "remainingUsdMicros",
+            $5::timestamp(3) AS "paidAt",
+            $5::timestamp(3) AS "terminalAt",
+            NULL::timestamp(3) AS "grantSlotReleasedAt",
+            'consumed'::text AS category
+          FROM consumed
+
+          UNION ALL
+
+          SELECT
+            'hucp_history_released_' || $2 || '_' || released.series,
+            'history-released:' || $2 || ':' || released.series,
+            'expired'::"HostedUsageCreditPurchaseStatus",
+            0::bigint,
+            NULL::timestamp(3),
+            $5::timestamp(3),
+            $5::timestamp(3),
+            'released'::text
+          FROM released
+
+          UNION ALL
+
+          SELECT
+            'hucp_history_active_' || $2 || '_' || active.series,
+            'history-active:' || $2 || ':' || active.series,
+            'fulfilled'::"HostedUsageCreditPurchaseStatus",
+            1000000::bigint,
+            $5::timestamp(3),
+            $5::timestamp(3),
+            NULL::timestamp(3),
+            'active'::text
+          FROM active
+        )
+        INSERT INTO "hosted_usage_credit_purchase" (
+          "id",
+          "payer_member_id",
+          "beneficiary_member_id",
+          "offer_code",
+          "cash_currency",
+          "cash_amount_minor",
+          "grant_usd_micros",
+          "remaining_credit_usd_micros",
+          "client_request_key",
+          "checkout_request_policy_version",
+          "status",
+          "stripe_live_mode",
+          "stripe_price_lookup_key",
+          "stripe_price_id_encrypted",
+          "stripe_customer_lookup_key",
+          "stripe_customer_id_encrypted",
+          "checkout_success_url",
+          "checkout_cancel_url",
+          "checkout_expires_at",
+          "paid_at",
+          "terminal_at",
+          "grant_slot_released_at",
+          "last_reconciled_at",
+          "created_at",
+          "updated_at"
+        )
+        SELECT
+          purchase_rows.id,
+          $1,
+          $1,
+          'usage_history_fixture',
+          'usd',
+          100,
+          1000000,
+          purchase_rows."remainingUsdMicros",
+          purchase_rows."clientRequestKey",
+          'hosted-usage-credit-checkout-v1',
+          purchase_rows.status,
+          false,
+          'price:' || purchase_rows.category || ':' || purchase_rows.id,
+          'encrypted-price:' || purchase_rows.id,
+          'customer:' || purchase_rows.category || ':' || purchase_rows.id,
+          'encrypted-customer:' || purchase_rows.id,
+          'https://example.test/settings?usage=return',
+          'https://example.test/settings?usage=cancelled',
+          $5::timestamp(3) + INTERVAL '1 hour',
+          purchase_rows."paidAt",
+          purchase_rows."terminalAt",
+          purchase_rows."grantSlotReleasedAt",
+          purchase_rows."terminalAt",
+          $5::timestamp(3),
+          $5::timestamp(3)
+        FROM purchase_rows
+      `,
+      values: [
+        input.fixture.beneficiaryMemberId,
+        fixtureKey,
+        input.historyCount,
+        input.activeGrantCount,
+        effectiveAt,
+      ],
+    });
+    await client.query({
+      text: `
+        WITH
+        consumed AS (
+          SELECT generated.series
+          FROM generate_series(1, $3::integer) AS generated(series)
+        ),
+        active AS (
+          SELECT generated.series
+          FROM generate_series(1, $4::integer) AS generated(series)
+        ),
+        entry_rows AS (
+          SELECT
+            'huce_history_consumed_' || $2 || '_' || consumed.series AS id,
+            consumed.series::bigint AS "beneficiarySequence",
+            'purchase_grant'::"HostedUsageCreditEntryKind" AS kind,
+            1000000::bigint AS "amountUsdMicros",
+            'history:grant:consumed:' || $2 || ':' || consumed.series
+              AS "semanticSourceKey",
+            'hucp_history_consumed_' || $2 || '_' || consumed.series
+              AS "purchaseId",
+            NULL::text AS "parentGrantEntryId",
+            NULL::text AS "sourceUsageId"
+          FROM consumed
+
+          UNION ALL
+
+          SELECT
+            'huce_history_debit_' || $2 || '_' || consumed.series,
+            $3::bigint + consumed.series,
+            'usage_debit'::"HostedUsageCreditEntryKind",
+            -1000000::bigint,
+            'history:debit:consumed:' || $2 || ':' || consumed.series,
+            'hucp_history_consumed_' || $2 || '_' || consumed.series,
+            'huce_history_consumed_' || $2 || '_' || consumed.series,
+            'usage_history_consumed_' || $2 || '_' || consumed.series
+          FROM consumed
+
+          UNION ALL
+
+          SELECT
+            'huce_history_active_' || $2 || '_' || active.series,
+            ($3::bigint * 2) + active.series,
+            'purchase_grant'::"HostedUsageCreditEntryKind",
+            1000000::bigint,
+            'history:grant:active:' || $2 || ':' || active.series,
+            'hucp_history_active_' || $2 || '_' || active.series,
+            NULL::text,
+            NULL::text
+          FROM active
+        )
+        INSERT INTO "hosted_usage_credit_entry" (
+          "id",
+          "beneficiary_member_id",
+          "beneficiary_sequence",
+          "kind",
+          "amount_usd_micros",
+          "effective_at",
+          "semantic_source_key",
+          "purchase_id",
+          "parent_grant_entry_id",
+          "source_usage_id",
+          "created_at"
+        )
+        SELECT
+          entry_rows.id,
+          $1,
+          entry_rows."beneficiarySequence",
+          entry_rows.kind,
+          entry_rows."amountUsdMicros",
+          $5::timestamp(3),
+          entry_rows."semanticSourceKey",
+          entry_rows."purchaseId",
+          entry_rows."parentGrantEntryId",
+          entry_rows."sourceUsageId",
+          $5::timestamp(3)
+        FROM entry_rows
+      `,
+      values: [
+        input.fixture.beneficiaryMemberId,
+        fixtureKey,
+        input.historyCount,
+        input.activeGrantCount,
+        effectiveAt,
+      ],
+    });
+    await client.query({
+      text: `
+        WITH
+        consumed AS (
+          SELECT generated.series
+          FROM generate_series(1, $3::integer) AS generated(series)
+        ),
+        active AS (
+          SELECT generated.series
+          FROM generate_series(1, $4::integer) AS generated(series)
+        ),
+        grant_rows AS (
+          SELECT
+            'huce_history_consumed_' || $2 || '_' || consumed.series AS id,
+            consumed.series::bigint AS "beneficiarySequence",
+            0::bigint AS "remainingUsdMicros"
+          FROM consumed
+
+          UNION ALL
+
+          SELECT
+            'huce_history_active_' || $2 || '_' || active.series,
+            ($3::bigint * 2) + active.series,
+            1000000::bigint
+          FROM active
+        )
+        INSERT INTO "hosted_usage_credit_grant" (
+          "entry_id",
+          "beneficiary_member_id",
+          "beneficiary_sequence",
+          "remaining_usd_micros",
+          "created_at",
+          "updated_at"
+        )
+        SELECT
+          grant_rows.id,
+          $1,
+          grant_rows."beneficiarySequence",
+          grant_rows."remainingUsdMicros",
+          $5::timestamp(3),
+          $5::timestamp(3)
+        FROM grant_rows
+      `,
+      values: [
+        input.fixture.beneficiaryMemberId,
+        fixtureKey,
+        input.historyCount,
+        input.activeGrantCount,
+        effectiveAt,
+      ],
+    });
+    await client.query({
+      text: `
+        UPDATE "hosted_member"
+        SET
+          "usage_credit_balance_usd_micros" = $3::bigint * 1000000,
+          "usage_credit_ledger_version" = ($2::bigint * 2) + $3::bigint,
+          "updated_at" = $4::timestamp(3)
+        WHERE "id" = $1
+      `,
+      values: [
+        input.fixture.beneficiaryMemberId,
+        input.historyCount,
+        input.activeGrantCount,
+        effectiveAt,
+      ],
+    });
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    await client.end();
+  }
+
+  return {
+    firstActiveEntryId: `huce_history_active_${fixtureKey}_1`,
+    historyCount: input.historyCount,
+    initialLedgerVersion:
+      (BigInt(input.historyCount) * 2n) + BigInt(input.activeGrantCount),
+    secondActiveEntryId: `huce_history_active_${fixtureKey}_2`,
+  };
+}
+
+function findPostgreSqlPlanNode(
+  root: PostgreSqlExplainPlanNode,
+  predicate: (node: PostgreSqlExplainPlanNode) => boolean,
+): PostgreSqlExplainPlanNode | null {
+  if (predicate(root)) {
+    return root;
+  }
+  for (const child of root.Plans ?? []) {
+    const match = findPostgreSqlPlanNode(child, predicate);
+    if (match) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function readPostgreSqlExplainRoot(
+  rows: Array<{ "QUERY PLAN": unknown }>,
+): PostgreSqlExplainPlanNode {
+  const document = rows[0]?.["QUERY PLAN"];
+  if (
+    !Array.isArray(document)
+    || typeof document[0] !== "object"
+    || document[0] === null
+    || !("Plan" in document[0])
+  ) {
+    throw new Error("PostgreSQL EXPLAIN returned an invalid JSON document.");
+  }
+  return (document[0] as { Plan: PostgreSqlExplainPlanNode }).Plan;
 }
 
 async function createRewardedUsageReferralFixture(input: {
@@ -359,9 +750,7 @@ async function cleanupUsageCreditFixture(
 ): Promise<void> {
   try {
     await fixture.observer.hostedUsageCreditGrant.deleteMany({
-      where: {
-        entry: { beneficiaryMemberId: fixture.beneficiaryMemberId },
-      },
+      where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
     });
     await fixture.observer.hostedUsageCreditEntry.deleteMany({
       where: { beneficiaryMemberId: fixture.beneficiaryMemberId },
@@ -421,6 +810,37 @@ async function waitForBlockedBackend(input: {
   throw new Error("Expected the PostgreSQL transaction to wait on a held lock.");
 }
 
+function extractRequiredMigrationStatement(
+  migrationSql: string,
+  pattern: RegExp,
+  label: string,
+): string {
+  const statement = migrationSql.match(pattern)?.[0];
+  if (!statement) {
+    throw new Error(`Grant-slot migration is missing ${label}.`);
+  }
+  return statement;
+}
+
+async function applyGrantProjectionRuntimeMigration(
+  client: pg.Client,
+): Promise<void> {
+  await client.query(`
+    DROP TRIGGER IF EXISTS "hosted_usage_credit_grant_identity_insert"
+      ON "hosted_usage_credit_grant";
+    DROP TRIGGER IF EXISTS "hosted_usage_credit_grant_identity_update"
+      ON "hosted_usage_credit_grant";
+    DROP FUNCTION IF EXISTS enforce_hosted_usage_credit_grant_identity();
+    DROP INDEX IF EXISTS
+      "hosted_usage_credit_grant_beneficiary_active_fifo_idx";
+    DROP INDEX IF EXISTS
+      "hosted_usage_credit_purchase_beneficiary_reserved_slot_idx";
+  `);
+  for (const statement of grantProjectionRuntimeMigrationStatements) {
+    await client.query(statement);
+  }
+}
+
 async function applyPurchaseGrantResynchronizationContractMigration(
   client: pg.Client,
 ): Promise<void> {
@@ -464,6 +884,7 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       try {
         await client.query(detachedDirectProofMigrationSql);
         await client.query(referralCreditEntryConstraintMigrationSql);
+        await applyGrantProjectionRuntimeMigration(client);
         const armedPolicyIndex = await client.query<{ present: boolean }>(`
           SELECT EXISTS (
             SELECT 1
@@ -552,6 +973,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       const qualifiedAt = new Date(now.getTime() - 2 * 60_000);
       const rewardedAt = new Date(now.getTime() - 60_000);
       let referralGrantBefore: {
+        beneficiaryMemberId: string;
+        beneficiarySequence: bigint;
         createdAt: Date;
         remainingUsdMicros: bigint;
         updatedAt: Date;
@@ -665,10 +1088,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await observer.hostedUsageCreditGrant.createMany({
           data: [
             {
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 2n,
               entryId: staleEntryId,
               remainingUsdMicros: 1_000_000n,
             },
             {
+              beneficiaryMemberId: memberId,
+              beneficiarySequence: 3n,
               entryId: referralEntryId,
               remainingUsdMicros:
                 HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
@@ -678,6 +1105,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         referralGrantBefore =
           await observer.hostedUsageCreditGrant.findUniqueOrThrow({
             select: {
+              beneficiaryMemberId: true,
+              beneficiarySequence: true,
               createdAt: true,
               remainingUsdMicros: true,
               updatedAt: true,
@@ -690,6 +1119,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         try {
           await applyPurchaseGrantResynchronizationContractMigration(client);
           await applyPurchaseGrantResynchronizationContractMigration(client);
+          await expect(client.query({
+            text: `
+              UPDATE "hosted_usage_credit_grant"
+              SET "beneficiary_sequence" = "beneficiary_sequence" + 1
+              WHERE "entry_id" = $1
+            `,
+            values: [missingEntryId],
+          })).rejects.toThrow(
+            "Hosted usage-credit grant canonical identity is immutable.",
+          );
         } finally {
           await client.end();
         }
@@ -697,6 +1136,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(observer.hostedUsageCreditGrant.findMany({
           orderBy: { entryId: "asc" },
           select: {
+            beneficiaryMemberId: true,
+            beneficiarySequence: true,
             entryId: true,
             remainingUsdMicros: true,
           },
@@ -707,15 +1148,21 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           },
         })).resolves.toEqual([
           {
+            beneficiaryMemberId: memberId,
+            beneficiarySequence: 1n,
             entryId: missingEntryId,
             remainingUsdMicros: 4_000_000n,
           },
           {
+            beneficiaryMemberId: memberId,
+            beneficiarySequence: 3n,
             entryId: referralEntryId,
             remainingUsdMicros:
               HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
           },
           {
+            beneficiaryMemberId: memberId,
+            beneficiarySequence: 2n,
             entryId: staleEntryId,
             remainingUsdMicros: 3_000_000n,
           },
@@ -723,6 +1170,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         await expect(
           observer.hostedUsageCreditGrant.findUniqueOrThrow({
             select: {
+              beneficiaryMemberId: true,
+              beneficiarySequence: true,
               createdAt: true,
               remainingUsdMicros: true,
               updatedAt: true,
@@ -1302,6 +1751,286 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         });
       }
     });
+
+    it("keeps active scans index-bounded across large consumed and released history", async () => {
+      const fixture = await createUsageCreditFixture();
+      const sourceUsageId = `usage_bounded_history_${randomUUID()}`;
+      let referralId: string | null = null;
+
+      try {
+        const seeded = await seedBoundedUsageCreditHistory({
+          activeGrantCount: 31,
+          fixture,
+          historyCount: 4_096,
+        });
+        const createdReferralId = await createRewardedUsageReferralFixture({
+          beneficiaryMemberId: fixture.beneficiaryMemberId,
+          observer: fixture.observer,
+          rewardUsdMicros: 1_000_000n,
+        });
+        referralId = createdReferralId;
+
+        const planClient = new pg.Client({ connectionString: databaseUrl });
+        await planClient.connect();
+        let activePlan: PostgreSqlExplainPlanNode | null = null;
+        let reservationPlan: PostgreSqlExplainPlanNode | null = null;
+        try {
+          await planClient.query('ANALYZE "hosted_usage_credit_grant"');
+          await planClient.query('ANALYZE "hosted_usage_credit_entry"');
+          await planClient.query('ANALYZE "hosted_usage_credit_purchase"');
+          const activePlanResult = await planClient.query<{
+            "QUERY PLAN": unknown;
+          }>({
+            text: `
+              EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+              WITH
+              settlement_input AS MATERIALIZED (
+                SELECT $1::text AS "beneficiaryMemberId"
+              ),
+              bounded_active_grants AS MATERIALIZED (
+                SELECT
+                  grant_projection."entry_id" AS "entryId",
+                  grant_projection."beneficiary_member_id"
+                    AS "beneficiaryMemberId",
+                  grant_projection."beneficiary_sequence"
+                    AS "beneficiarySequence"
+                FROM "hosted_usage_credit_grant" AS grant_projection
+                CROSS JOIN settlement_input
+                WHERE grant_projection."beneficiary_member_id"
+                    = settlement_input."beneficiaryMemberId"
+                  AND grant_projection."remaining_usd_micros" > 0
+                ORDER BY grant_projection."beneficiary_sequence" ASC
+                LIMIT 33
+              )
+              SELECT
+                COUNT(*)::integer AS "activeGrantCount",
+                COUNT(*) FILTER (
+                  WHERE canonical_entry."id" IS NULL
+                    OR canonical_entry."beneficiary_member_id"
+                      IS DISTINCT FROM active_grant."beneficiaryMemberId"
+                    OR canonical_entry."beneficiary_sequence"
+                      IS DISTINCT FROM active_grant."beneficiarySequence"
+                )::integer AS "grantInvariantFailureCount"
+              FROM bounded_active_grants AS active_grant
+              LEFT JOIN "hosted_usage_credit_entry" AS canonical_entry
+                ON canonical_entry."id" = active_grant."entryId"
+            `,
+            values: [fixture.beneficiaryMemberId],
+          });
+          const reservationPlanResult = await planClient.query<{
+            "QUERY PLAN": unknown;
+          }>({
+            text: `
+              EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+              SELECT purchase_reservation."id"
+              FROM "hosted_usage_credit_purchase" AS purchase_reservation
+              WHERE purchase_reservation."beneficiary_member_id" = $1
+                AND purchase_reservation."status" <> 'fulfilled'
+                AND purchase_reservation."grant_slot_released_at" IS NULL
+              ORDER BY purchase_reservation."id" ASC
+              LIMIT 33
+            `,
+            values: [fixture.beneficiaryMemberId],
+          });
+          activePlan = readPostgreSqlExplainRoot(activePlanResult.rows);
+          reservationPlan = readPostgreSqlExplainRoot(
+            reservationPlanResult.rows,
+          );
+        } finally {
+          await planClient.end();
+        }
+        if (!activePlan || !reservationPlan) {
+          throw new Error("PostgreSQL bounded-scan plans were not captured.");
+        }
+
+        const activeIndexNode = findPostgreSqlPlanNode(
+          activePlan,
+          (node) => node["Index Name"]
+            === "hosted_usage_credit_grant_beneficiary_active_fifo_idx",
+        );
+        const activeLimitNode = findPostgreSqlPlanNode(
+          activePlan,
+          (node) => node["Node Type"] === "Limit",
+        );
+        const reservationIndexNode = findPostgreSqlPlanNode(
+          reservationPlan,
+          (node) => node["Index Name"]
+            === "hosted_usage_credit_purchase_beneficiary_reserved_slot_idx",
+        );
+        const reservationLimitNode = findPostgreSqlPlanNode(
+          reservationPlan,
+          (node) => node["Node Type"] === "Limit",
+        );
+
+        expect(activeIndexNode?.["Actual Rows"]).toBe(31);
+        expect(activeLimitNode?.["Actual Rows"]).toBeLessThanOrEqual(33);
+        expect(reservationIndexNode?.["Actual Rows"]).toBe(1);
+        expect(reservationLimitNode?.["Actual Rows"]).toBeLessThanOrEqual(33);
+        expect(findPostgreSqlPlanNode(
+          activePlan,
+          (node) => node["Node Type"] === "Seq Scan"
+            && [
+              "hosted_usage_credit_entry",
+              "hosted_usage_credit_grant",
+            ].includes(node["Relation Name"] ?? ""),
+        )).toBeNull();
+        expect(findPostgreSqlPlanNode(
+          reservationPlan,
+          (node) => node["Node Type"] === "Seq Scan"
+            && node["Relation Name"] === "hosted_usage_credit_purchase",
+        )).toBeNull();
+
+        const readCapacity = (client: PrismaClient) =>
+          client.$transaction(async (tx) => {
+            const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+              tx,
+            });
+            return readHostedUsageCreditGrantCapacityTx({
+              expectedPurchaseId: fixture.purchaseId,
+              lockedBeneficiary,
+              tx,
+            });
+          }, transactionOptions);
+
+        await expect(readCapacity(fixture.firstClient)).resolves.toEqual({
+          expectedPurchaseOwnsReservation: true,
+          state: "at_capacity",
+        });
+
+        await expect(fixture.secondClient.$transaction((tx) =>
+          settleHostedUsageCreditForUsageTx({
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            debitUsdMicros: 1_000_000n,
+            effectiveAt: new Date("2026-07-16T10:01:00.000Z"),
+            sourceUsageId,
+            tx,
+          }), transactionOptions
+        )).resolves.toEqual({
+          absorbedUsdMicros: 0n,
+          balanceUsdMicros: 30_000_000n,
+          debitedUsdMicros: 1_000_000n,
+          ledgerVersion: seeded.initialLedgerVersion + 1n,
+        });
+
+        await expect(Promise.all([
+          fixture.observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: {
+              beneficiaryMemberId: true,
+              beneficiarySequence: true,
+              remainingUsdMicros: true,
+            },
+            where: { entryId: seeded.firstActiveEntryId },
+          }),
+          fixture.observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: {
+              beneficiaryMemberId: true,
+              beneficiarySequence: true,
+              remainingUsdMicros: true,
+            },
+            where: { entryId: seeded.secondActiveEntryId },
+          }),
+          fixture.observer.hostedUsageCreditEntry.findMany({
+            select: {
+              amountUsdMicros: true,
+              parentGrantEntryId: true,
+            },
+            where: { kind: "usage_debit", sourceUsageId },
+          }),
+        ])).resolves.toEqual([
+          {
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            beneficiarySequence: BigInt(seeded.historyCount * 2 + 1),
+            remainingUsdMicros: 0n,
+          },
+          {
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            beneficiarySequence: BigInt(seeded.historyCount * 2 + 2),
+            remainingUsdMicros: 1_000_000n,
+          },
+          [{
+            amountUsdMicros: -1_000_000n,
+            parentGrantEntryId: seeded.firstActiveEntryId,
+          }],
+        ]);
+        await expect(readCapacity(fixture.firstClient)).resolves.toEqual({
+          expectedPurchaseOwnsReservation: true,
+          state: "available",
+        });
+
+        const appendedReferralGrant = await fixture.thirdClient.$transaction(
+          async (tx) => {
+            const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+              tx,
+            });
+            return appendHostedUsageCreditGrantTx({
+              effectiveAt: new Date("2026-07-16T10:02:00.000Z"),
+              grantUsdMicros: 1_000_000n,
+              lockedBeneficiary,
+              semanticSourceKey:
+                `hosted-usage-credit:referral:${createdReferralId}:grant:v1`,
+              source: { kind: "referral", referralId: createdReferralId },
+              tx,
+            });
+          },
+          transactionOptions,
+        );
+        expect(appendedReferralGrant).toMatchObject({
+          balanceUsdMicros: 31_000_000n,
+          granted: true,
+          ledgerVersion: seeded.initialLedgerVersion + 2n,
+        });
+        await expect(readCapacity(fixture.firstClient)).resolves.toEqual({
+          expectedPurchaseOwnsReservation: true,
+          state: "at_capacity",
+        });
+
+        await expect(Promise.all([
+          fixture.observer.hostedMember.findUniqueOrThrow({
+            select: {
+              usageCreditBalanceUsdMicros: true,
+              usageCreditLedgerVersion: true,
+            },
+            where: { id: fixture.beneficiaryMemberId },
+          }),
+          fixture.observer.hostedUsageCreditGrant.count({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+              remainingUsdMicros: { gt: 0n },
+            },
+          }),
+          fixture.observer.hostedUsageCreditPurchase.count({
+            where: {
+              beneficiaryMemberId: fixture.beneficiaryMemberId,
+              grantSlotReleasedAt: { not: null },
+            },
+          }),
+          fixture.observer.hostedUsageCreditGrant.findUniqueOrThrow({
+            select: {
+              beneficiaryMemberId: true,
+              beneficiarySequence: true,
+            },
+            where: { entryId: appendedReferralGrant.entryId },
+          }),
+        ])).resolves.toEqual([
+          {
+            usageCreditBalanceUsdMicros: 31_000_000n,
+            usageCreditLedgerVersion: seeded.initialLedgerVersion + 2n,
+          },
+          31,
+          seeded.historyCount,
+          {
+            beneficiaryMemberId: fixture.beneficiaryMemberId,
+            beneficiarySequence: seeded.initialLedgerVersion + 2n,
+          },
+        ]);
+      } finally {
+        await cleanupUsageCreditFixture(fixture, {
+          referralIds: referralId ? [referralId] : [],
+        });
+      }
+    }, 60_000);
 
     it("settles exactly 32 active grant fragments in one usage call", async () => {
       const fixture = await createUsageCreditFixture();

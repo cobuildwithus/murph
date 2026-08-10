@@ -140,6 +140,13 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
       "DROP CONSTRAINT",
     ]),
   ],
+  [
+    "20260810150000_hosted_usage_credit_grant_slot_release",
+    // The insert trigger derives the new immutable grant identity from the
+    // canonical entry before either NOT NULL check runs, so the prior writer
+    // remains valid throughout the Vercel deploy window.
+    new Set(["ALTER COLUMN SET NOT NULL"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

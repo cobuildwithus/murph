@@ -244,11 +244,23 @@ async function settleHostedUsageCreditAvailableGrantsTx(input: {
         ${input.locked.ledgerVersion}::bigint AS "lockedLedgerVersion",
         ${preparedEntryIdsJson}::jsonb AS "preparedEntryIds"
     ),
+    bounded_active_grants AS MATERIALIZED (
+      SELECT grant_projection."entry_id" AS "entryId"
+      FROM "hosted_usage_credit_grant" AS grant_projection
+      CROSS JOIN settlement_input
+      WHERE grant_projection."beneficiary_member_id"
+          = settlement_input."beneficiaryMemberId"
+        AND grant_projection."remaining_usd_micros" > 0
+      ORDER BY grant_projection."beneficiary_sequence" ASC
+      LIMIT ${ACTIVE_SPENDABLE_GRANT_INSPECTION_LIMIT}
+    ),
     locked_grants AS MATERIALIZED (
       SELECT
         entry."id" AS "entryId",
-        entry."beneficiary_member_id" AS "beneficiaryMemberId",
-        entry."beneficiary_sequence" AS "beneficiarySequence",
+        grant_projection."beneficiary_member_id" AS "beneficiaryMemberId",
+        grant_projection."beneficiary_sequence" AS "beneficiarySequence",
+        entry."beneficiary_member_id" AS "canonicalBeneficiaryMemberId",
+        entry."beneficiary_sequence" AS "canonicalBeneficiarySequence",
         entry."amount_usd_micros" AS "grantAmountUsdMicros",
         entry."kind"::text AS "entryKind",
         entry."purchase_id" AS "purchaseId",
@@ -258,17 +270,15 @@ async function settleHostedUsageCreditAvailableGrantsTx(input: {
         purchase_projection."grant_usd_micros" AS "purchaseGrantUsdMicros",
         purchase_projection."remaining_credit_usd_micros" AS "purchaseRemainingUsdMicros",
         purchase_projection."status"::text AS "purchaseStatus"
-      FROM "hosted_usage_credit_entry" AS entry
+      FROM bounded_active_grants AS active_grant
       INNER JOIN "hosted_usage_credit_grant" AS grant_projection
-        ON grant_projection."entry_id" = entry."id"
+        ON grant_projection."entry_id" = active_grant."entryId"
+      INNER JOIN "hosted_usage_credit_entry" AS entry
+        ON entry."id" = grant_projection."entry_id"
       LEFT JOIN "hosted_usage_credit_purchase" AS purchase_projection
         ON purchase_projection."id" = entry."purchase_id"
-      CROSS JOIN settlement_input
-      WHERE entry."beneficiary_member_id" = settlement_input."beneficiaryMemberId"
-        AND entry."kind" IN ('purchase_grant', 'referral_grant')
-        AND grant_projection."remaining_usd_micros" > 0
-      ORDER BY entry."beneficiary_sequence" ASC
-      LIMIT ${ACTIVE_SPENDABLE_GRANT_INSPECTION_LIMIT}
+      WHERE grant_projection."remaining_usd_micros" > 0
+      ORDER BY grant_projection."beneficiary_sequence" ASC
       FOR UPDATE OF entry, grant_projection
     ),
     grant_capacity AS MATERIALIZED (
@@ -292,6 +302,10 @@ async function settleHostedUsageCreditAvailableGrantsTx(input: {
                 AND "referralId" IS NOT NULL
               )
             )
+            OR "canonicalBeneficiaryMemberId"
+              IS DISTINCT FROM "beneficiaryMemberId"
+            OR "canonicalBeneficiarySequence"
+              IS DISTINCT FROM "beneficiarySequence"
             OR "grantAmountUsdMicros" <= 0
             OR "remainingUsdMicros" > "grantAmountUsdMicros"
         )::integer AS "grantInvariantFailureCount",

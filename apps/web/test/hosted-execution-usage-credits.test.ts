@@ -65,6 +65,7 @@ describe("hosted usage credits", () => {
       });
       return [{
         expectedPurchaseOwnsReservation: true,
+        grantInvariantFailureCount: 0,
         occupiedSlotCount: 32,
       }];
     });
@@ -92,6 +93,7 @@ describe("hosted usage credits", () => {
       });
       return [{
         expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 0,
         occupiedSlotCount: 31,
       }];
     });
@@ -110,6 +112,28 @@ describe("hosted usage credits", () => {
     });
   });
 
+  it("fails closed when bounded active projection identity diverges from its entry", async () => {
+    const queryRaw = createTaggedSqlMock(({ sql, values }) => {
+      expectCombinedUsageCreditCapacityQuery({ sql, values });
+      return [{
+        expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 1,
+        occupiedSlotCount: 1,
+      }];
+    });
+
+    await expect(readHostedUsageCreditGrantCapacityTx({
+      lockedBeneficiary: {
+        balanceUsdMicros: 1_000_000n,
+        beneficiaryMemberId: BENEFICIARY_ID,
+        ledgerVersion: 1n,
+      },
+      tx: { $queryRaw: queryRaw } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit active grant canonical identity diverged.",
+    );
+  });
+
   it("admits an unreserved grant when exactly 31 combined slots are occupied", async () => {
     const events: string[] = [];
     const entryCreate = vi.fn(async (input: unknown) => {
@@ -126,6 +150,7 @@ describe("hosted usage credits", () => {
         expectCombinedUsageCreditCapacityQuery({ sql, values });
         return [{
           expectedPurchaseOwnsReservation: false,
+          grantInvariantFailureCount: 0,
           occupiedSlotCount: 31,
         }];
       }
@@ -200,6 +225,8 @@ describe("hosted usage credits", () => {
     });
     expect(grantCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
+        beneficiaryMemberId: BENEFICIARY_ID,
+        beneficiarySequence: 32n,
         entryId: expect.stringMatching(/^huce_/u),
         remainingUsdMicros: 1_000_000n,
       }),
@@ -211,6 +238,7 @@ describe("hosted usage credits", () => {
       expectCombinedUsageCreditCapacityQuery({ sql, values });
       return [{
         expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 0,
         occupiedSlotCount: 32,
       }];
     });
@@ -255,6 +283,7 @@ describe("hosted usage credits", () => {
       expectCombinedUsageCreditCapacityQuery({ sql, values });
       return [{
         expectedPurchaseOwnsReservation: false,
+        grantInvariantFailureCount: 0,
         occupiedSlotCount: 33,
       }];
     });
@@ -303,6 +332,7 @@ describe("hosted usage credits", () => {
       });
       return [{
         expectedPurchaseOwnsReservation: true,
+        grantInvariantFailureCount: 0,
         occupiedSlotCount: 33,
       }];
     });
@@ -342,6 +372,7 @@ describe("hosted usage credits", () => {
   it("replays an unreserved grant at capacity without another query", async () => {
     const queryRaw = createTaggedSqlMock(() => [{
       expectedPurchaseOwnsReservation: false,
+      grantInvariantFailureCount: 0,
       occupiedSlotCount: 32,
     }]);
     const entryCreate = vi.fn();
@@ -350,8 +381,13 @@ describe("hosted usage credits", () => {
     const entryFindUnique = vi.fn().mockResolvedValue({
       amountUsdMicros: 1_000_000n,
       beneficiaryMemberId: BENEFICIARY_ID,
+      beneficiarySequence: 32n,
       effectiveAt: EFFECTIVE_AT,
-      grant: { remainingUsdMicros: 1_000_000n },
+      grant: {
+        beneficiaryMemberId: BENEFICIARY_ID,
+        beneficiarySequence: 32n,
+        remainingUsdMicros: 1_000_000n,
+      },
       id: "grant_replay",
       kind: "referral_grant",
       parentGrantEntryId: null,
@@ -427,6 +463,7 @@ describe("hosted usage credits", () => {
         });
         return [{
           expectedPurchaseOwnsReservation: true,
+          grantInvariantFailureCount: 0,
           occupiedSlotCount: 32,
         }];
       }
@@ -512,6 +549,8 @@ describe("hosted usage credits", () => {
     });
     expect(grantCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
+        beneficiaryMemberId: BENEFICIARY_ID,
+        beneficiarySequence: 1n,
         entryId: expect.stringMatching(/^huce_/u),
         remainingUsdMicros: 5_000_000n,
       }),
@@ -552,6 +591,7 @@ describe("hosted usage credits", () => {
         });
         return [{
           expectedPurchaseOwnsReservation: false,
+          grantInvariantFailureCount: 0,
           occupiedSlotCount: 31,
         }];
       }
@@ -710,8 +750,27 @@ describe("hosted usage credits", () => {
         const normalizedSql = sql.replace(/\s+/gu, " ");
 
         expect(normalizedSql).toContain(
-          'ORDER BY entry."beneficiary_sequence" ASC LIMIT ? '
+          'WHERE grant_projection."beneficiary_member_id" '
+            + '= settlement_input."beneficiaryMemberId" '
+            + 'AND grant_projection."remaining_usd_micros" > 0 '
+            + 'ORDER BY grant_projection."beneficiary_sequence" ASC LIMIT ?',
+        );
+        expect(normalizedSql).toContain(
+          'FROM bounded_active_grants AS active_grant INNER JOIN '
+            + '"hosted_usage_credit_grant" AS grant_projection ON '
+            + 'grant_projection."entry_id" = active_grant."entryId"',
+        );
+        expect(normalizedSql).toContain(
+          'ORDER BY grant_projection."beneficiary_sequence" ASC '
             + "FOR UPDATE OF entry, grant_projection",
+        );
+        expect(normalizedSql).toContain(
+          'entry."beneficiary_member_id" AS '
+            + '"canonicalBeneficiaryMemberId"',
+        );
+        expect(normalizedSql).toContain(
+          '"canonicalBeneficiarySequence" IS DISTINCT FROM '
+            + '"beneficiarySequence"',
         );
         expect(normalizedSql).toContain(
           '?::timestamp(3) AS "effectiveAt"',
@@ -1850,37 +1909,63 @@ function expectCombinedUsageCreditCapacityQuery(input: {
 }): void {
   const normalizedSql = input.sql.replace(/\s+/gu, " ");
   expect(normalizedSql).toContain(
-    "WITH bounded_occupied_slots AS MATERIALIZED (",
+    "WITH bounded_active_grants AS MATERIALIZED (",
   );
   expect(normalizedSql).toContain(
     'FROM "hosted_usage_credit_grant" AS grant_projection',
   );
   expect(normalizedSql).toContain(
-    'grant_projection."remaining_usd_micros" > 0',
+    'grant_projection."beneficiary_member_id" = ?',
   );
-  expect(normalizedSql).toContain("UNION ALL");
+  expect(normalizedSql).toContain(
+    'grant_projection."remaining_usd_micros" > 0 ORDER BY '
+      + 'grant_projection."beneficiary_sequence" ASC LIMIT ?',
+  );
+  expect(normalizedSql).toContain(
+    "validated_active_grants AS MATERIALIZED (",
+  );
+  expect(normalizedSql).toContain(
+    'LEFT JOIN "hosted_usage_credit_entry" AS canonical_entry '
+      + 'ON canonical_entry."id" = active_grant."entryId"',
+  );
+  expect(normalizedSql).toContain(
+    'canonical_entry."beneficiary_member_id" IS DISTINCT FROM '
+      + 'active_grant."beneficiaryMemberId"',
+  );
+  expect(normalizedSql).toContain(
+    "bounded_purchase_reservations AS MATERIALIZED (",
+  );
   expect(normalizedSql).toContain(
     'FROM "hosted_usage_credit_purchase" AS purchase_reservation',
   );
   expect(normalizedSql).toContain(
-    'purchase_reservation."status" <> \'fulfilled\'',
+    "purchase_reservation.\"status\" <> 'fulfilled'",
   );
   expect(normalizedSql).toContain(
-    'purchase_reservation."grant_slot_released_at" IS NULL',
+    'purchase_reservation."grant_slot_released_at" IS NULL ORDER BY '
+      + 'purchase_reservation."id" ASC LIMIT GREATEST(',
   );
-  expect(normalizedSql).not.toContain("ORDER BY");
-  expect(normalizedSql.match(/\bLIMIT \?/gu)).toHaveLength(1);
-  expect(normalizedSql.indexOf("UNION ALL")).toBeLessThan(
-    normalizedSql.indexOf("LIMIT ?"),
+  expect(normalizedSql).toContain(
+    '? - ( SELECT COUNT(*)::integer FROM bounded_active_grants ), 0 )',
   );
+  expect(normalizedSql).toContain(
+    "bounded_occupied_slots AS MATERIALIZED (",
+  );
+  expect(normalizedSql).toContain("UNION ALL");
   expect(normalizedSql).toContain(
     'COUNT(*)::integer AS "occupiedSlotCount"',
   );
   expect(normalizedSql).toContain(
+    'COUNT(*) FILTER ( WHERE bounded_occupied_slots."grantInvariantFailed" '
+      + ')::integer AS "grantInvariantFailureCount"',
+  );
+  expect(normalizedSql).toContain(
     'BOOL_OR( bounded_occupied_slots."reservedPurchaseId" = ? )',
   );
+  expect(normalizedSql.match(/\bLIMIT\b/gu)).toHaveLength(2);
   expect(input.values).toEqual([
     BENEFICIARY_ID,
+    33,
     BENEFICIARY_ID,
     33,
     input.expectedPurchaseId ?? null,

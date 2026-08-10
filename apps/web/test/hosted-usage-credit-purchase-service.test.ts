@@ -569,6 +569,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(fake.usageCreditCapacityQueryCalls).toHaveLength(1);
     expect(fake.usageCreditCapacityQueryCalls[0]?.values).toEqual([
       "hbm_familymember1",
+      33,
       "hbm_familymember1",
       33,
       null,
@@ -6558,6 +6559,7 @@ function createFakePrisma(input: {
               && expectedPurchase.status !== "fulfilled"
               && expectedPurchase.grantSlotReleasedAt === null,
           ),
+          grantInvariantFailureCount: 0,
           occupiedSlotCount:
             typeof input.occupiedUsageCreditSlotCount === "function"
               ? input.occupiedUsageCreditSlotCount()
