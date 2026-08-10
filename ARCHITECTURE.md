@@ -1638,15 +1638,45 @@ receipts retain retry authority, and alert configuration or delivery failure
 cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
-Established Linq direct messages and established external-thread group messages
-resolve only a narrow blind-index/member-id preflight target and unwrap the
-mailbox-payload ingress root before the planner transaction opens. The direct
-preflight requires current active access and a complete active domain-root set;
-the group preflight uses the already established route. Neither result grants
-authority: the planner repeats route, identity, activation, access, and
-participant checks in its transaction. New thread containers and members whose
-roots or active access are not yet established remain on the transaction-owned
-provisioning path.
+Hosted thread routing prepares thread-container domain envelopes, delivery-route
+ciphertext, and mailbox ingress roots before the planner transaction.
+Telegram sender authority and Linq pending-contact authority resolve
+contact-privacy rotation candidates through blind routing indexes to core
+member state only; they do not select or decrypt private routing fields.
+The Linq AT_RISK home-line and recovered-setup paths genuinely inspect private
+home-line state before `BEGIN`; those speculative reads retain a failed root
+unwrap only in the existing request-scoped cache so their authoritative
+transaction rechecks fail locally instead of repeating KMS under a connection
+or authority lock.
+Established Linq direct messages resolve only a narrow blind-index/member-id
+target and unwrap the mailbox-payload ingress root; established Linq and
+Telegram group routes also retain the exact observed delivery-route ciphertext,
+prewarm both the active control root used for replacement sealing and any
+decrypt-only control root named by that ciphertext, and prewarm the mailbox
+root. For an eligible unbound group, Web generates the
+synthetic member id, prepares all four domain-root envelopes, pre-seals the
+delivery route, and prewarms the prepared control and mailbox roots before
+`BEGIN`. These reads and crypto results grant no authority: the planner repeats
+route, identity, activation, access, line, pending-setup, and participant checks
+inside the transaction. A new route then commits the synthetic member,
+prepared root envelopes, container, unique external-thread route, and activation
+mailbox wake atomically using the prewarmed ingress root. A version-independent
+raw-thread advisory token serializes creation and refresh across privacy-key
+write versions; the versioned unique external-thread identity remains the
+same-version conflict backstop.
+After taking that token, refresh compares the locked row with the exact
+pre-transaction ciphertext before demotion, mailbox work, or route decryption.
+If the route changes after preparation, Web rolls back and performs at most one
+fresh prepare-before-transaction attempt. Matching valid ciphertext opens from
+the request-scoped root cache with local AES work; absent or structurally corrupt
+ciphertext keeps the existing owning-ingress repair path without speculative
+KMS. Thread-container creation therefore does not use the legacy all-domain
+provisioning bridge or perform domain-root provisioning, delivery-route sealing,
+or activation-mailbox root unwraps while holding its route transaction.
+Transaction-owned authority reads remain inside that boundary and may reuse
+request-scoped root prewarms when available. In particular, opening a
+pending-group setup transfer payload remains a pre-existing transaction-owned
+authority read; it is not thread-container crypto preparation.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The

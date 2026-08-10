@@ -16,6 +16,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 
 import {
+  decryptHostedWebNullableFields,
   decryptHostedWebNullableString,
   decryptHostedWebNullableStrings,
   encryptHostedWebNullableString,
@@ -928,6 +929,44 @@ test("batch private-field decrypt zeroizes successful roots when a bounded KMS c
   )).toBe(true);
 });
 
+test("Linq authority batch preflight retains failure for its authoritative repeat", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const [record] = (await createBatchPrivateFieldRecords({
+    memberIds: ["member-batch-retained-failure"],
+    tx,
+  })).identityRecords;
+  if (!record) {
+    throw new Error("Expected one private-field fixture.");
+  }
+  const envelopeFindMany = createBatchEnvelopeFindMany(tx);
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: { findMany: envelopeFindMany },
+  });
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const decrypt = () => decryptHostedWebNullableFields({
+    entries: [{
+      field: "hosted-member-identity.phone-number",
+      memberId: record.memberId,
+      value: record.phoneNumberEncrypted,
+    }],
+    prisma,
+    retainFailureInScopedCache: true,
+  });
+
+  resetLocalKmsDecryptMetrics(decryptMetrics, { failAtCall: 1 });
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await expect(decrypt()).rejects.toThrow("Test KMS decrypt failure.");
+    const callsBeforeAuthoritativeRepeat = decryptMetrics.calls.length;
+    await expect(decrypt()).rejects.toThrow("Test KMS decrypt failure.");
+    expect(decryptMetrics.calls).toHaveLength(callsBeforeAuthoritativeRepeat);
+  });
+
+  expect(envelopeFindMany).toHaveBeenCalledTimes(1);
+  expect(decryptMetrics.calls).toHaveLength(1);
+});
+
 test("batch private-field decrypt zeroizes invalid KMS plaintext and stops before the next chunk", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
   const memberIds = Array.from({ length: 5 }, (_, index) =>
@@ -1020,6 +1059,45 @@ test("domain root unwraps are memoized inside the scoped cache and wiped at scop
     userId: "member-test-memo",
   });
   assert.ok(outside.readCount() > outsideFirst);
+});
+
+test("a prepared domain root warms the scoped active key before its row exists", async () => {
+  const { decryptMetrics, tx } =
+    await createHostedWebCryptoTransactionFixture();
+  const {
+    prepareHostedCryptoDomainRootCandidates,
+    prewarmPreparedHostedCryptoDomainRootForWeb,
+    unwrapHostedDomainRootForWeb,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+  const userId = "member-test-prepared-prewarm";
+  const prepared = await prepareHostedCryptoDomainRootCandidates({
+    domains: ["control"],
+    prisma: tx.prisma,
+    userId,
+  });
+  const counting = createEnvelopeReadCountingClient(tx.prisma);
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    await prewarmPreparedHostedCryptoDomainRootForWeb({
+      domain: "control",
+      prepared,
+      userId,
+    });
+    const root = await unwrapHostedDomainRootForWeb({
+      domain: "control",
+      prisma: counting.client,
+      userId,
+    });
+    assert.ok(root.rootKey.some((byte) => byte !== 0));
+    root.rootKey.fill(0);
+  });
+
+  assert.equal(counting.readCount(), 0);
+  assert.equal(decryptMetrics.calls.length, 1);
+  assert.equal(tx.persistedEnvelopes.length, 0);
 });
 
 test("Stripe activation preflight keeps activation proof false and reuses KMS roots for private projection", async () => {

@@ -242,6 +242,7 @@ export async function readHostedMemberRoutingPrivateState(
     | "telegramUserIdEncrypted"
   >,
   prisma?: HostedWebEncryptionPrismaClient,
+  retainFailureInScopedCache?: boolean,
 ): Promise<HostedMemberRoutingPrivateState> {
   const [
     telegramPrivateValue,
@@ -277,6 +278,7 @@ export async function readHostedMemberRoutingPrivateState(
       value: routing.pendingLinqRecipientPhoneEncrypted,
     }],
     prisma,
+    retainFailureInScopedCache,
   });
   const telegramState = parseHostedMemberRoutingTelegramPrivateValue(
     telegramPrivateValue ?? null,

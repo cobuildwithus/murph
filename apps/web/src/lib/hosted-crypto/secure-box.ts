@@ -259,6 +259,7 @@ export async function openHostedUserSecureBoxStrings(input: {
   }>;
   lane: HostedCryptoLane;
   prisma?: HostedSecureBoxPrismaClient;
+  retainFailureInScopedCache?: boolean;
   signal?: AbortSignal;
 }): Promise<Array<string | null>> {
   if (!WEB_SEAL_LANES.has(input.lane)) {
@@ -304,6 +305,12 @@ export async function openHostedUserSecureBoxStrings(input: {
           }]
         : []
     ),
+    ...(input.retainFailureInScopedCache === undefined
+      ? {}
+      : {
+          retainFailureInScopedCache:
+            input.retainFailureInScopedCache,
+        }),
     signal: input.signal,
   });
   const rootsByKey = new Map(
