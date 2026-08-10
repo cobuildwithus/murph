@@ -63,12 +63,675 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-09",
+    publishedOn: "2026-08-09",
+    title: "Referrals, Max, and a more capable Murph",
+    summary:
+      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
+    items: [
+      {
+        id: "public-referral-home",
+        kind: "feature",
+        priority: 5,
+        title: "Referral rewards have a public home",
+        summary:
+          "The new Referral page explains the earning paths currently available, shows rewards in Murph usage days, and keeps your reusable link ready to copy when link rewards are on.",
+        details:
+          "The page separates personal signup rewards from group missions, states eligibility before you share, returns you after sign-in, and keeps another member's identity and private data out of reward confirmations.",
+        relevanceTags: ["referrals", "usage", "groups", "privacy"],
+        sourcePullRequests: [
+          1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
+        ],
+        tryIt: {
+          href: "/refer",
+          label: "Explore referrals",
+        },
+      },
+      {
+        id: "murph-max-plan",
+        kind: "feature",
+        priority: 5,
+        title: "Meet Murph Max",
+        summary:
+          "Max is a new $50 monthly personal plan with Murph's highest included AI usage for frequent deep research, analysis, and heavier ongoing use.",
+        details:
+          "Settings uses the existing plan-change confirmation and Stripe handoff. Upgrades activate after payment confirmation, scheduled downgrades stay visible, and an exhausted Max plan points to the existing add-usage or reset recovery.",
+        relevanceTags: ["plans", "billing", "usage", "settings"],
+        sourcePullRequests: [1440],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "Compare plans",
+        },
+      },
+      {
+        id: "generated-contact-card-avatar",
+        kind: "feature",
+        priority: 5,
+        title: "Give Murph a new contact photo",
+        summary:
+          "Ask Murph in a private iMessage conversation for a new contact photo and get one saveable contact card with the generated square image and your current Murph line.",
+        details:
+          "The request is one-shot and stays bound to the turn that asked for it. Murph refuses an ambiguous route before generation and never reports a card as delivered unless the send owner established that result.",
+        relevanceTags: ["contacts", "images", "imessage", "privacy"],
+        sourcePullRequests: [1458, 1488],
+        tryIt: {
+          label: "Ask for a contact photo",
+          prompt:
+            "Make a warm, outdoorsy contact photo for you and send me the updated contact card.",
+        },
+      },
+      {
+        id: "family-setup-from-group",
+        kind: "feature",
+        priority: 5,
+        title: "Start Family setup safely from a group",
+        summary:
+          "When someone asks about a Murph Family plan in a group, Murph now offers a private conversation or a stable browser handoff into that person's Family settings.",
+        details:
+          "The group never reads Family status or creates billing and invite links. Sign-in happens before the personal Settings handoff, and Family requests stay distinct from sponsoring or adding usage to the current room.",
+        relevanceTags: ["family", "groups", "billing", "privacy"],
+        sourcePullRequests: [1527],
+        tryIt: {
+          href: "/family/setup",
+          label: "Open Family setup",
+        },
+      },
+      {
+        id: "live-workout-logging",
+        kind: "feature",
+        priority: 5,
+        title: "Run a workout set by set",
+        summary:
+          "Murph can start a live structured workout, add exercises, log or correct one exact set, clear a mistake without shifting later sets, and finish with the elapsed duration.",
+        details:
+          "Saved routine targets remain plans, never completed work. Repeating an explicit set update changes the same canonical set, and repeated same-day workout tallies now count planned occurrences without inventing missing repetitions.",
+        relevanceTags: ["workouts", "tracking", "assistant", "health-data"],
+        sourcePullRequests: [1455, 1504],
+        tryIt: {
+          label: "Start a live workout",
+          prompt:
+            "Start a live workout called Upper Body and help me log each set as I go.",
+        },
+      },
+      {
+        id: "clearer-health-source-handoffs",
+        kind: "improvement",
+        priority: 5,
+        title: "Connections explain the route before you leave",
+        summary:
+          "Vital-backed connections now explain the handoff before authorization, Apple Health relay sources use recognizable provider marks, and unsupported sources get verified export guidance.",
+        details:
+          "Relay cards still make Apple Health ownership clear. Manual exports are described as snapshots rather than live sync, private files move to your private Murph, and Murph does not invent an export menu it cannot verify.",
+        relevanceTags: ["connections", "wearables", "imports", "privacy"],
+        sourcePullRequests: [1432, 1447, 1506],
+        tryIt: {
+          href: "/connect",
+          label: "Browse connections",
+        },
+      },
+      {
+        id: "body-composition-guidance",
+        kind: "improvement",
+        priority: 5,
+        title: "Body-composition guidance fits the actual goal",
+        summary:
+          "Murph now routes weight loss, weight gain, cutting, bulking, recomposition, and maintenance into one evidence-backed body-composition approach.",
+        details:
+          "The guidance keeps nutrition and training ownership clear, compares trends in consistent units, minimizes tracking burden, and uses separate safety handling when pregnancy, postpartum recovery, breastfeeding, or under-fueling changes the answer.",
+        relevanceTags: ["body-composition", "nutrition", "training", "safety"],
+        sourcePullRequests: [1512],
+        tryIt: {
+          label: "Talk through a goal",
+          prompt:
+            "Help me choose a realistic body-composition goal and the minimum useful way to track progress.",
+        },
+      },
+      {
+        id: "group-replies-respect-the-room",
+        kind: "improvement",
+        priority: 5,
+        title: "Group replies respect who has the floor",
+        summary:
+          "Murph now understands the native reply relationship between group messages and gives ordinary conversations a longer beat before answering.",
+        details:
+          "A reply edge never invents the target's words or identity. Human-owned beats can finish silently, urgent coordination skips avoidable delay, and a burst still produces at most one terminal action for the room's current moment.",
+        relevanceTags: ["groups", "imessage", "replies", "conversation"],
+        sourcePullRequests: [1443, 1514],
+      },
+      {
+        id: "sponsorship-creative-opt-in",
+        kind: "improvement",
+        priority: 5,
+        title: "Group sponsorship stays quiet by default",
+        summary:
+          "Funding a group no longer produces a song or other public creative response unless the payer opens the optional personalization and chooses one.",
+        details:
+          "Message, poem, and 15-second song are explicit formats. Usage credit is granted independently of creative success, and missing or older customization state never counts as song consent.",
+        relevanceTags: ["groups", "sponsorship", "music", "consent"],
+        sourcePullRequests: [1446, 1490],
+      },
+      {
+        id: "response-cards-survive-long-turns",
+        kind: "improvement",
+        priority: 4,
+        title: "Response cards survive long turns and newer messages",
+        summary:
+          "Private nutrition and compact-table cards now keep their full schema through Codex compaction, use Murph's public origin, and accept iMessage app-card fallback text when it is usable.",
+        details:
+          "The result still returns as one same-thread card with truthful static or text fallback. Missing content does not wake Murph, and malformed external payloads continue to fail closed.",
+        relevanceTags: ["imessage", "cards", "nutrition", "reliability"],
+        sourcePullRequests: [1473, 1489, 1501],
+      },
+      {
+        id: "typing-prewarms-private-chat",
+        kind: "improvement",
+        priority: 4,
+        title: "Typing can warm Murph before you send",
+        summary:
+          "For an established private chat, an authenticated typing hint can best-effort warm the existing runtime while you compose the message.",
+        details:
+          "Typing is never treated as a message, permission, or delivery claim. Unknown or ineligible hints quietly fall back to the normal path, and the later accepted message still owns the reply.",
+        relevanceTags: ["performance", "messaging", "privacy", "reliability"],
+        sourcePullRequests: [1476, 1482, 1503],
+      },
+      {
+        id: "automation-output-variety",
+        kind: "improvement",
+        priority: 4,
+        title: "Recurring automations repeat themselves less",
+        summary:
+          "Dynamic recurring automations can now use a small recent-output history to avoid substantially repeating the same quote, fact, prompt, suggestion, or recommendation.",
+        details:
+          "The history stays tied to the current automation revision. Exact-text reminders remain exact, and old output is treated as untrusted history rather than new instruction.",
+        relevanceTags: ["automations", "assistant", "personalization", "reliability"],
+        sourcePullRequests: [1494],
+      },
+      {
+        id: "ios-app-footer-link",
+        kind: "improvement",
+        priority: 4,
+        title: "The iOS app is one click from the website",
+        summary:
+          "Murph's public footer now includes a direct link to the canonical iOS App Store listing alongside the existing product links.",
+        details:
+          "The link opens in a new tab with the existing external-link safeguards and keeps the current footer hierarchy intact on desktop and mobile.",
+        relevanceTags: ["ios", "website", "navigation", "mobile"],
+        sourcePullRequests: [1530],
+      },
+      {
+        id: "runtime-replacement-continuity",
+        kind: "improvement",
+        priority: 4,
+        title: "Restarts keep the latest conversation work",
+        summary:
+          "When Murph restarts while saving its latest work, the new instance now waits for that exact handoff instead of restoring an older conversation.",
+        details:
+          "The handoff remains automatic and bounded. A shorter save preserves the same replay and fresh-input rules without adding routine startup delay.",
+        relevanceTags: ["assistant", "continuity", "reliability", "performance"],
+        sourcePullRequests: [1472, 1522],
+      },
+      {
+        id: "paused-member-retention-cleanup",
+        kind: "improvement",
+        priority: 4,
+        title: "Privacy cleanup continues while Murph is paused",
+        summary:
+          "Pausing Murph no longer blocks already-authorized cleanup of expired private inbox media.",
+        details:
+          "Ordinary assistant and model work stays disabled. Only the existing signed, retention-only path can restore the workspace, delete expired media, and checkpoint the result.",
+        relevanceTags: ["privacy", "retention", "media", "reliability"],
+        sourcePullRequests: [1493],
+      },
+      {
+        id: "background-results-use-less-shared-capacity",
+        kind: "improvement",
+        priority: 4,
+        title: "Background results leave more room for current replies",
+        summary:
+          "Proactive follow-ups and completed phone-call results now do less blocking background work, leaving current replies more room to run during busy moments.",
+        details:
+          "Reply ownership, card and call destinations, duplicate protection, and recovery stay unchanged.",
+        relevanceTags: ["performance", "calls", "messaging", "reliability"],
+        sourcePullRequests: [1475, 1510],
+      },
+      {
+        id: "feedback-reproduction-guidance",
+        kind: "improvement",
+        priority: 4,
+        title: "Feedback can carry safe reproduction steps",
+        summary:
+          "When a product problem has useful reproduction evidence, Murph can include concise steps and safe environment context in the existing feedback summary.",
+        details:
+          "The summary excludes raw conversation wording, health or personal details, identifiers, contact information, secrets, and provider payloads. Feature interest stays concise.",
+        relevanceTags: ["feedback", "privacy", "support", "reliability"],
+        sourcePullRequests: [1465],
+      },
+    ],
+  },
+  {
+    id: "2026-08-08",
+    publishedOn: "2026-08-08",
+    title: "Exact experiment links and steadier background work",
+    summary:
+      "Murph can point to the precise private experiment you asked for, while group funding, scheduled work, device sync, room memory, and shared-page previews recover more cleanly.",
+    items: [
+      {
+        id: "custom-experiment-deep-links",
+        kind: "feature",
+        priority: 5,
+        title: "Ask for the exact experiment page",
+        summary:
+          "When you explicitly ask to open or share a private custom experiment, Murph can return a signed link to that exact run instead of sending you to a generic list.",
+        details:
+          "Links are request-bound and private. Murph does not add experiment links to unrelated replies or treat the link as permission to disclose experiment data elsewhere.",
+        relevanceTags: ["experiments", "links", "assistant", "privacy"],
+        sourcePullRequests: [1448],
+        tryIt: {
+          label: "Ask for an experiment",
+          prompt: "Send me the page for my current custom experiment.",
+        },
+      },
+      {
+        id: "homepage-runtime-explainer",
+        kind: "feature",
+        priority: 4,
+        title: "See how Murph runs",
+        summary:
+          "The homepage now explains Murph's private runtime, how tools connect to the conversation, and why that architecture matters without requiring a technical detour.",
+        relevanceTags: ["homepage", "privacy", "assistant", "product"],
+        sourcePullRequests: [1451],
+        tryIt: {
+          href: "/#how",
+          label: "See how Murph works",
+        },
+      },
+      {
+        id: "group-funding-one-recovery-owner",
+        kind: "improvement",
+        priority: 5,
+        title: "Group funding has one clear recovery path",
+        summary:
+          "Monthly sponsorship and one-time contributions now return to the same group-funding owner when checkout needs to resume, reconcile, or explain what happened.",
+        details:
+          "A verified payment still owns the credit grant, an uncertain checkout stays recoverable without a second charge, and group usage can continue independently of optional public creative output.",
+        relevanceTags: ["groups", "billing", "usage", "reliability"],
+        sourcePullRequests: [1419],
+      },
+      {
+        id: "room-memory-status-recovers",
+        kind: "improvement",
+        priority: 4,
+        title: "Room context survives longer conversations",
+        summary:
+          "Group-room memory maintenance now preserves the latest trustworthy room context when a long conversation needs compaction or a background refresh fails.",
+        details:
+          "The room keeps one bounded source of truth. A maintenance failure does not replace known context with an empty or misleading status.",
+        relevanceTags: ["groups", "memory", "assistant", "reliability"],
+        sourcePullRequests: [1449],
+      },
+      {
+        id: "due-automations-drain-cleanly",
+        kind: "improvement",
+        priority: 4,
+        title: "A backlog of automations clears more cleanly",
+        summary:
+          "When several scheduled jobs become due together, Murph can admit and drain the bounded set in one coordinated pass instead of repeatedly waking around the same backlog.",
+        details:
+          "Each occurrence keeps its existing authority and delivery path. Capacity stays bounded, and one congested lane cannot silently create duplicate work.",
+        relevanceTags: ["automations", "performance", "reliability", "scheduling"],
+        sourcePullRequests: [1434],
+      },
+      {
+        id: "shared-pages-unfurl-again",
+        kind: "improvement",
+        priority: 4,
+        title: "Shared Murph pages unfurl again",
+        summary:
+          "Referral, experiment, biomarker, and other shareable pages now trace their social-preview assets correctly instead of losing the image during route rendering.",
+        relevanceTags: ["sharing", "links", "images", "web"],
+        sourcePullRequests: [1456],
+      },
+      {
+        id: "device-sync-webhook-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Device sync recovers from brief database contention",
+        summary:
+          "A device-sync wake now keeps its database lock short and returns a retryable response when a transaction expires, so a provider can safely try again.",
+        details:
+          "The retry preserves the existing sync owner and does not turn one webhook into a second import or duplicate health event.",
+        relevanceTags: ["wearables", "sync", "health-data", "reliability"],
+        sourcePullRequests: [1454],
+      },
+      {
+        id: "proactive-group-thread-routing",
+        kind: "improvement",
+        priority: 4,
+        title: "Proactive group messages return to the right room",
+        summary:
+          "A hosted group container can now prove its own durable Linq thread before a proactive message is sent, keeping the result tied to the intended room.",
+        details:
+          "The container cannot borrow another member's route or infer a room from private identity. Ambiguous thread authority still fails closed.",
+        relevanceTags: ["groups", "messaging", "routing", "reliability"],
+        sourcePullRequests: [1468],
+      },
+    ],
+  },
+  {
+    id: "2026-08-07",
+    publishedOn: "2026-08-07",
+    title: "A personal first read, richer automations, clearer trends",
+    summary:
+      "Murph can offer one useful personal read after onboarding, use normal tools in scheduled work, send an approved email, research a focused public question, and show repeated experiments and biomarker ranges more clearly.",
+    items: [
+      {
+        id: "first-personal-health-read",
+        kind: "feature",
+        priority: 5,
+        title: "A useful first read after onboarding",
+        summary:
+          "After completed onboarding, Murph can offer one specific interpretation grounded in your available health evidence and one optional low-burden next action.",
+        details:
+          "The read is private, bounded, and scheduled only once. It does not automatically create a plan, habit, experiment, or reminder, and it stays honest when the evidence is too thin for a useful interpretation.",
+        relevanceTags: ["onboarding", "insights", "health-data", "assistant"],
+        sourcePullRequests: [1390],
+      },
+      {
+        id: "reusable-referral-links",
+        kind: "feature",
+        priority: 5,
+        title: "Your referral link stays yours",
+        summary:
+          "Eligible members now have one reusable referral link instead of needing a fresh invitation for every person they want to share Murph with.",
+        details:
+          "The recipient follows ordinary signup, a reward settles only after genuine activation and eligibility checks, and the referrer never gets the recipient's identity or health information.",
+        relevanceTags: ["referrals", "signup", "usage", "privacy"],
+        sourcePullRequests: [1337],
+      },
+      {
+        id: "scheduled-turn-tool-parity",
+        kind: "feature",
+        priority: 5,
+        title: "Scheduled help can complete real tasks",
+        summary:
+          "A scheduled Murph turn can now use the same bounded composable tools as an ordinary private turn, including placing an approved call or sending an approved connected-app email.",
+        details:
+          "Each action keeps its own confirmation and audience rules. Group call previews were removed rather than exposing private call setup, and an uncertain email send is reconciled before Murph suggests another attempt.",
+        relevanceTags: ["automations", "calls", "email", "connected-apps"],
+        sourcePullRequests: [1336, 1367, 1386, 1392],
+      },
+      {
+        id: "focused-current-research",
+        kind: "feature",
+        priority: 5,
+        title: "Research one focused public question",
+        summary:
+          "When current evidence would materially improve an answer, Murph can run one bounded research lookup over a finite public health scope and map the answer back to usable sources.",
+        details:
+          "Names, private notes, arbitrary question prose, and account data never enter the provider request. If the scope cannot be represented or no source is usable, Murph says the live lookup did not run or found nothing usable.",
+        relevanceTags: ["research", "evidence", "assistant", "privacy"],
+        sourcePullRequests: [1393],
+      },
+      {
+        id: "repeated-experiment-cadence",
+        kind: "feature",
+        priority: 5,
+        title: "Repeated experiments show today's occurrence",
+        summary:
+          "Experiment progress can now distinguish the specific occurrence due today from the overall repeated cadence instead of collapsing the schedule into one generic day.",
+        relevanceTags: ["experiments", "tracking", "calendar", "health-data"],
+        sourcePullRequests: [1444],
+      },
+      {
+        id: "biomarker-reference-bands",
+        kind: "feature",
+        priority: 5,
+        title: "Biomarker charts show the reference band",
+        summary:
+          "Result charts now place the reported value against its available lower and upper reference bounds, making in-range and out-of-range context easier to scan.",
+        details:
+          "The band reflects the source result's own reference context. Missing or one-sided bounds stay visibly incomplete instead of being replaced with a universal range.",
+        relevanceTags: ["biomarkers", "charts", "health-data", "results"],
+        sourcePullRequests: [1445],
+      },
+      {
+        id: "interactive-imessage-cards-restored",
+        kind: "improvement",
+        priority: 5,
+        title: "Interactive iMessage cards are back",
+        summary:
+          "Private structured responses can once again arrive as interactive iMessage cards, with the existing static layout or deterministic text recovery when the extension is unavailable.",
+        relevanceTags: ["imessage", "cards", "messaging", "reliability"],
+        sourcePullRequests: [1394, 1426],
+      },
+      {
+        id: "group-room-context-grounding",
+        kind: "improvement",
+        priority: 5,
+        title: "Group answers use the room's own context",
+        summary:
+          "Murph now grounds a group reply in the room's learned norms and recent shared context without dropping that context when the prompt grows.",
+        details:
+          "Room memory remains separate from private member memory. It guides how Murph participates but never creates identity, permission, or health-data sharing authority.",
+        relevanceTags: ["groups", "memory", "assistant", "privacy"],
+        sourcePullRequests: [1427, 1433],
+      },
+      {
+        id: "billing-access-recovery",
+        kind: "improvement",
+        priority: 5,
+        title: "Billing recovery leads back to Murph",
+        summary:
+          "Paused, lapsed, or recently changed subscription states now resolve through one clearer access-recovery path instead of leaving Home or a browser return in a contradictory state.",
+        details:
+          "Stripe remains the billing authority. Settings and conversational recovery wait for that projection, preserve scheduled plan changes, and avoid creating a second checkout while the first result is still uncertain.",
+        relevanceTags: ["billing", "access", "settings", "reliability"],
+        sourcePullRequests: [1406, 1418, 1429],
+      },
+      {
+        id: "cancel-pending-file-delivery",
+        kind: "improvement",
+        priority: 4,
+        title: "Cancel a file that has not been delivered",
+        summary:
+          "Murph can now cancel a pending generated-file delivery before provider work begins, without deleting the underlying private file or affecting an already entered send.",
+        relevanceTags: ["files", "messaging", "privacy", "reliability"],
+        sourcePullRequests: [1387],
+      },
+      {
+        id: "meal-capture-toggle-ordering",
+        kind: "improvement",
+        priority: 4,
+        title: "Meal capture respects your latest choice",
+        summary:
+          "Rapidly enabling and disabling meal-photo capture now preserves the newest explicit choice even when an older setup or closeout operation finishes later.",
+        details:
+          "A delayed operation cannot silently re-enable capture, duplicate a daily closeout, or override a later opt-out.",
+        relevanceTags: ["meals", "photos", "consent", "reliability"],
+        sourcePullRequests: [1343],
+      },
+    ],
+  },
+  {
+    id: "2026-08-06",
+    publishedOn: "2026-08-06",
+    title: "Faster starts and better continuity",
+    summary:
+      "The companion can start before a device is connected, browser work reports progress in the current turn, health-data choices read more clearly, and late cards, images, support escalations, and first-contact messages stay attached to the right place.",
+    items: [
+      {
+        id: "companion-admission-before-device",
+        kind: "feature",
+        priority: 5,
+        title: "Open the companion before connecting a device",
+        summary:
+          "A signed-in member can now enter or resume the native companion without first choosing a wearable or health source.",
+        details:
+          "Device setup remains available when useful, but it is no longer the admission gate for the app or the member's existing account state.",
+        relevanceTags: ["companion", "onboarding", "mobile", "wearables"],
+        sourcePullRequests: [1341],
+      },
+      {
+        id: "turn-local-browser-progress",
+        kind: "feature",
+        priority: 5,
+        title: "Browser work shows progress in the current turn",
+        summary:
+          "When Murph uses the browser for noticeable work, progress now stays visible and belongs to the exact conversation turn that started it.",
+        details:
+          "A later turn cannot inherit an old browsing status, and a finished or abandoned browser task clears its own progress rather than leaving the conversation looking stuck.",
+        relevanceTags: ["browser", "assistant", "progress", "reliability"],
+        sourcePullRequests: [1359],
+      },
+      {
+        id: "recovery-readiness-insight",
+        kind: "feature",
+        priority: 4,
+        title: "Recovery insights require corroboration",
+        summary:
+          "A weekly insight can now notice a sustained recovery or readiness decline only after checking source freshness and finding an independent signal or relevant context.",
+        details:
+          "One proprietary score is never enough. When the evidence clears the bar, Murph offers at most one reversible low-burden adjustment with a guardrail and reassessment trigger.",
+        relevanceTags: ["recovery", "wearables", "insights", "safety"],
+        sourcePullRequests: [1353],
+      },
+      {
+        id: "health-consent-actions-clarified",
+        kind: "improvement",
+        priority: 5,
+        title: "Health-data choices are easier to distinguish",
+        summary:
+          "Settings now gives health-data consent actions a clearer hierarchy, and sleep sharing uses one understandable permission instead of separate stage-specific choices.",
+        details:
+          "Pausing processing remains distinct from export or account deletion. The app keeps the consequence visible before a change and does not hide the recovery action when processing is paused.",
+        relevanceTags: ["consent", "health-data", "settings", "sleep"],
+        sourcePullRequests: [1338, 1339, 1350],
+        tryIt: {
+          href: "/settings/data-privacy",
+          label: "Review health-data choices",
+        },
+      },
+      {
+        id: "first-contact-starts-faster",
+        kind: "improvement",
+        priority: 4,
+        title: "A first message gets moving sooner",
+        summary:
+          "First-contact admission now uses the faster welcome path and begins warming the hosted shell after enrollment, reducing avoidable startup work before Murph's first useful reply.",
+        details:
+          "Consent and activation still finish before the assistant can use member data. A failed prewarm quietly falls back to the ordinary durable message path.",
+        relevanceTags: ["onboarding", "performance", "messaging", "reliability"],
+        sourcePullRequests: [1333, 1345, 1347, 1436],
+      },
+      {
+        id: "late-media-origin-continuity",
+        kind: "improvement",
+        priority: 5,
+        title: "Late cards and images return where they started",
+        summary:
+          "A nutrition card or generated image that finishes late now resumes in its exact originating conversation and session instead of attaching to newer work.",
+        details:
+          "Attachment upload can retry only at the confirmed-safe byte-transfer step. Ambiguous provider entry never triggers a blind second reservation or duplicate media send.",
+        relevanceTags: ["images", "cards", "messaging", "reliability"],
+        sourcePullRequests: [1334, 1346, 1374, 1389],
+      },
+      {
+        id: "support-escalation-issue-summary",
+        kind: "improvement",
+        priority: 4,
+        title: "Support escalations carry the issue, not the conversation",
+        summary:
+          "After an explicit private support request, the escalation email can now include a short sanitized problem summary so the support team understands what needs attention.",
+        details:
+          "The route still requires a verified private conversation and explicit consent. It excludes raw transcripts, health details, credentials, and promises about response time or ticket status.",
+        relevanceTags: ["support", "privacy", "assistant", "recovery"],
+        sourcePullRequests: [1284, 1305],
+      },
+    ],
+  },
+  {
     id: "2026-08-05",
     publishedOn: "2026-08-05",
-    title: "Local alerts can shape health advice",
+    title: "More ways to connect, prepare, and finish",
     summary:
-      "Murph can now use official local heat, cold, and outdoor-air-quality alerts when they matter to your health, recovery, or activity plans.",
+      "Apple Health relay wearables, next-group preparation, compact response tables, more reliable nutrition cards, clearer public links, and several setup, delivery, and maintenance recoveries all shipped together.",
     items: [
+      {
+        id: "apple-health-relay-wearables",
+        kind: "feature",
+        priority: 5,
+        title: "Bring more wearables through Apple Health",
+        summary:
+          "Connections now includes guided Apple Health relay paths for Huawei Health, Xiaomi or Mi Fitness, Zepp or Amazfit, COROS, Suunto, and RingConn.",
+        details:
+          "Each card explains that Apple Health remains the sync source and opens the existing companion setup guide. Relay providers never pretend to be direct connections or expose a false disconnect state.",
+        relevanceTags: ["wearables", "apple-health", "connections", "companion"],
+        sourcePullRequests: [1316],
+        tryIt: {
+          href: "/connect",
+          label: "Find your wearable",
+        },
+      },
+      {
+        id: "prepare-next-group",
+        kind: "feature",
+        priority: 5,
+        title: "Prepare your next Murph group",
+        summary:
+          "A group owner can prepare one upcoming room for a short window, optionally choosing the room style and guidance before the new group starts.",
+        details:
+          "Preparation applies only to the next new room, expires after 30 minutes, and cannot modify an existing group or create ownership for someone else.",
+        relevanceTags: ["groups", "setup", "assistant", "privacy"],
+        sourcePullRequests: [1117],
+      },
+      {
+        id: "tracked-compact-table-cards",
+        kind: "feature",
+        priority: 5,
+        title: "Structured answers can arrive as compact tables",
+        summary:
+          "Murph can now return a bounded tracked or untracked table in a private iMessage card when rows and columns make the answer easier to scan.",
+        details:
+          "The card stays presentation-only unless the request has an explicit tracking contract. It keeps a deterministic text fallback and returns to the originating thread as one response.",
+        relevanceTags: ["imessage", "cards", "tracking", "assistant"],
+        sourcePullRequests: [1288, 1293, 1329],
+      },
+      {
+        id: "connected-app-authorization-preview",
+        kind: "feature",
+        priority: 5,
+        title: "See the connected-app handoff before leaving Murph",
+        summary:
+          "Before a Composio authorization opens, Murph now shows a short first-party preview that explains the external handoff and lets you continue manually.",
+        details:
+          "The countdown pauses when the page is hidden, authorization does not start before the handoff is visible, and closing the preview leaves the existing connection flow unchanged.",
+        relevanceTags: ["connected-apps", "authorization", "privacy", "web"],
+        sourcePullRequests: [1320],
+      },
+      {
+        id: "daily-nutrition-card-delivery",
+        kind: "improvement",
+        priority: 5,
+        title: "Daily nutrition cards render in the conversation",
+        summary:
+          "Daily nutrition cards now use the supported iMessage layout, so the compact totals appear directly in the private conversation.",
+        details:
+          "The card keeps the date, logged-meal count, every available total, one exact saved goal and status, and a visible partial-totals marker when meal support is incomplete. Text fallback remains available when the card route cannot be used.",
+        relevanceTags: ["nutrition", "imessage", "cards", "reliability"],
+        sourcePullRequests: [1312],
+      },
+      {
+        id: "mobile-one-time-contribution",
+        kind: "improvement",
+        priority: 5,
+        title: "One-time group contributions fit on a phone",
+        summary:
+          "On mobile, the one-time group contribution flow now opens as a focused bottom drawer with the amount and next action in reach; desktop keeps the dialog treatment.",
+        details:
+          "Monthly sponsorship remains primary, a one-time contribution stays explicitly separate, and no payment starts until the contributor chooses the amount and continues.",
+        relevanceTags: ["groups", "billing", "mobile", "accessibility"],
+        sourcePullRequests: [1311],
+      },
       {
         id: "official-local-alert-health-context",
         kind: "feature",
@@ -85,6 +748,88 @@ const RAW_CHANGELOG_EDITIONS = [
           prompt:
             "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",
         },
+      },
+      {
+        id: "scheduled-reminder-authority",
+        kind: "improvement",
+        priority: 5,
+        title: "Scheduled reminders keep their own approval",
+        summary:
+          "Editing or reviewing one scheduled reminder no longer borrows authority from another reminder or loses an independently approved occurrence.",
+        details:
+          "Each reminder keeps its own audience, schedule, and approval evidence. A review regression cannot silently send, suppress, or rewrite a different reminder.",
+        relevanceTags: ["reminders", "automations", "consent", "reliability"],
+        sourcePullRequests: [1317, 1323],
+      },
+      {
+        id: "onboarding-and-group-activation-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Setup recovery stops at the right point",
+        summary:
+          "Onboarding follow-up now expires after three days, and a group join can recover after activation without replaying setup that already finished.",
+        details:
+          "The companion sync status also exposes the server clock for a trustworthy freshness comparison. Recovery uses the existing activation and sync owners rather than inventing a second state.",
+        relevanceTags: ["onboarding", "groups", "companion", "reliability"],
+        sourcePullRequests: [1309, 1314, 1321],
+      },
+      {
+        id: "venice-usage-before-save",
+        kind: "improvement",
+        priority: 4,
+        title: "Venice explains the usage tradeoff before save",
+        summary:
+          "The model choice now states, in shorter language, that Venice can use included AI capacity faster before you commit the setting.",
+        details:
+          "The explanation applies to future usage and keeps the actual provider-rate accounting already introduced on the previous day.",
+        relevanceTags: ["models", "venice", "usage", "settings"],
+        sourcePullRequests: [1319, 1324],
+      },
+      {
+        id: "feedback-starts-with-the-problem",
+        kind: "improvement",
+        priority: 4,
+        title: "Product feedback starts with what went wrong",
+        summary:
+          "When you share product feedback, Murph now clarifies the underlying problem and impact before jumping to a proposed solution.",
+        details:
+          "The conversation stays user-facing and concise, and an escalation still requires the separate explicit support path.",
+        relevanceTags: ["feedback", "assistant", "support", "product"],
+        sourcePullRequests: [1290],
+      },
+      {
+        id: "environment-panel-full-width",
+        kind: "improvement",
+        priority: 4,
+        title: "Environment setup uses the full dashboard width",
+        summary:
+          "The empty Environment panel now lines up with the rest of the dashboard instead of sitting inside a second, narrower page cap.",
+        details:
+          "The existing voice walkthrough, chat alternative, report preview, desktop columns, and mobile stack keep their current behavior.",
+        relevanceTags: ["environment", "dashboard", "accessibility", "web"],
+        sourcePullRequests: [1330],
+      },
+      {
+        id: "public-status-footer-link",
+        kind: "improvement",
+        priority: 3,
+        title: "Murph's status page is easier to find",
+        summary:
+          "The public website footer now links directly to Murph's verified status page in a new tab.",
+        relevanceTags: ["website", "status", "navigation", "reliability"],
+        sourcePullRequests: [1328],
+      },
+      {
+        id: "maintenance-without-global-pause",
+        kind: "improvement",
+        priority: 4,
+        title: "Storage maintenance no longer needs a global pause",
+        summary:
+          "Murph can keep ordinary replies, checkpoints, attachments, and uploads available while hosted storage moves between its approved owners.",
+        details:
+          "The migration remains fail-closed when destination correctness is uncertain, while accepted conversation input stays durable for recovery.",
+        relevanceTags: ["reliability", "storage", "messaging", "maintenance"],
+        sourcePullRequests: [1318],
       },
     ],
   },

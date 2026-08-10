@@ -59,15 +59,23 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Local alerts can shape health advice");
+    expect(markup).toContain("Referrals, Max, and a more capable Murph");
+    expect(markup).toContain(
+      "Exact experiment links and steadier background work",
+    );
+    expect(markup).toContain(
+      "A personal first read, richer automations, clearer trends",
+    );
+    expect(markup).toContain("Faster starts and better continuity");
+    expect(markup).toContain("More ways to connect, prepare, and finish");
     expect(markup).toContain("More control over data, models, and connections");
     expect(markup).toContain(
       "Connected apps recover with a clearer next step",
     );
-    expect(markup).toContain("Recovery that stops at the right moment");
-    expect(markup).toContain("More ways to finish what you started");
-    expect(markup).toContain("A clearer view of home, stronger follow-through");
-    expect(markup).toContain("More ways through, less waiting around");
+    expect(markup).not.toContain("Recovery that stops at the right moment");
+    expect(markup).not.toContain("More ways to finish what you started");
+    expect(markup).not.toContain("A clearer view of home, stronger follow-through");
+    expect(markup).not.toContain("More ways through, less waiting around");
     expect(markup).not.toContain("Corrections that carry forward");
     expect(markup).not.toContain("A first text that goes somewhere");
     expect(markup).not.toContain(
@@ -89,18 +97,18 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-29"');
+    expect(markup).toContain('href="/changelog?edition=2026-08-02"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-09#public-referral-home"',
+    );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
     );
-    expect(markup).toContain(
+    expect(markup).not.toContain(
       "The physical-note delivery record does not store the postal address",
-    );
-    expect(markup).toContain(
-      "conversation history follows Murph&#x27;s existing retention rules",
     );
     expect(markup).not.toContain("plaintext conversation memory");
     expect(markup).toContain("Older");
@@ -118,9 +126,13 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('href="/settings/data-privacy"');
     expect(markup).toContain("Ask for today&#x27;s nutrition card");
     expect(markup).toContain("Manage connections");
-    expect(markup).toContain("Open Environment");
-    expect(markup).toContain('href="/environment"');
-    expect(markup).toContain("Open Connections");
+    expect(markup).not.toContain("Open Environment");
+    expect(markup).not.toContain('href="/environment"');
+    expect(markup).toContain("Explore referrals");
+    expect(markup).toContain('href="/refer"');
+    expect(markup).toContain("Compare plans");
+    expect(markup).toContain('href="/settings#subscription"');
+    expect(markup).toContain("Browse connections");
     expect(markup).toContain('href="/connect"');
     expect(
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
@@ -170,6 +182,15 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Private attachment");
     expect(markup.match(/>Usage credit</gu)).toHaveLength(7);
     expect(markup.toLowerCase()).not.toContain(RETIRED_USAGE_TERM);
+    expect(markup).toContain("Ways to earn Murph time");
+    expect(markup).toContain("Live workout");
+    expect(markup).toContain("Fasting glucose");
+    expect(markup).toContain("Current browser task");
+    expect(markup).toContain("Via Apple Health");
+    expect(markup).toContain("Conversation handoff");
+    expect(markup).toContain("Paused-member privacy cleanup");
+    expect(markup).toContain("Daily nutrition card");
+    expect(markup).toContain("Live storage maintenance");
   });
 
   it("renders the real archive section against synthetic design data", () => {
@@ -181,10 +202,14 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
+    expect(markup).toContain("Compact tables make dense changes scannable");
+    expect(markup).toContain("Reference context stays visible");
     expect(markup).toContain("Scheduled follow-up");
     expect(markup).toContain("Stay in the app");
     expect(markup).toContain("Verified line after setup");
     expect(markup).toContain("Private conversation");
+    expect(markup).toContain("Compact response");
+    expect(markup).toContain("70 mg/dL");
     expect(markup).toContain('href="#design-follow-up"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
