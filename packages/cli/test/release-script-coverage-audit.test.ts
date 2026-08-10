@@ -1701,6 +1701,8 @@ describe('monorepo release flow coverage audit', () => {
           '--wait',
           '--dry-run',
           '--no-zip',
+          '--browser-path',
+          process.execPath,
           '--prompt',
           'Validate response timeout precedence.',
           ...extraArgs,
