@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   assistantResponseCardSchema,
   challengeStandingsCardV1Bounds,
+  IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
   challengeStandingsResponseCardV1Schema,
   IMESSAGE_APP_CARD_URL_PREFIX,
   type ChallengeStandingsResponseCardV1,
@@ -228,7 +229,7 @@ describe("challenge standings response-card contract", () => {
     };
     const encodedLength = (card: ChallengeStandingsResponseCardV1) =>
       `${IMESSAGE_APP_CARD_URL_PREFIX}${Buffer.from(JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 5,
         card,
       }), "utf8").toString("base64url")}`.length;
 
@@ -238,7 +239,7 @@ describe("challenge standings response-card contract", () => {
     );
   });
 
-  it("uses the canonical Messages origin at the exact UTF-8 URL boundary", () => {
+  it("keeps inline and static image URLs within their UTF-8 boundaries", () => {
     const makeBoundaryCard = (
       multibyteCharacters: number,
     ): ChallengeStandingsResponseCardV1 => {
@@ -270,18 +271,26 @@ describe("challenge standings response-card contract", () => {
     };
     const encodedLength = (card: ChallengeStandingsResponseCardV1) =>
       `${IMESSAGE_APP_CARD_URL_PREFIX}${Buffer.from(JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 5,
         card,
       }), "utf8").toString("base64url")}`.length;
+    const encodedPayloadLength = (card: ChallengeStandingsResponseCardV1) =>
+      Buffer.from(JSON.stringify({ schemaVersion: 5, card }), "utf8")
+        .toString("base64url").length;
 
-    const acceptedCard = makeBoundaryCard(85);
-    expect(encodedLength(acceptedCard)).toBe(2_047);
+    const acceptedCard = makeBoundaryCard(78);
+    expect(encodedLength(acceptedCard)).toBe(2_037);
+    expect(encodedPayloadLength(acceptedCard)).toBe(2_000);
+    expect(encodedPayloadLength(acceptedCard)).toBeLessThanOrEqual(
+      IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
+    );
     expect(challengeStandingsResponseCardV1Schema.parse(acceptedCard)).toEqual(
       acceptedCard,
     );
 
-    const rejectedCard = makeBoundaryCard(86);
-    expect(encodedLength(rejectedCard)).toBe(2_048);
+    const rejectedCard = makeBoundaryCard(79);
+    expect(encodedLength(rejectedCard)).toBe(2_039);
+    expect(encodedPayloadLength(rejectedCard)).toBe(2_002);
     expect(challengeStandingsResponseCardV1Schema.safeParse(rejectedCard).success)
       .toBe(false);
   });

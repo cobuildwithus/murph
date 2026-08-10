@@ -1701,9 +1701,10 @@ Assertion-authenticated browser-to-agent bridge routes:
 
 Public provider-facing routes:
 
-- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V4
-  nutrition, generic-table, or workout presentation for Linq's static Messages
-  fallback. It accepts no query string, identity, canonical reference,
+- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V5
+  nutrition, generic-table, workout, or challenge-standings presentation for
+  Linq's static Messages fallback. It accepts no query string, identity,
+  canonical reference,
   credential, tracking reference, or authority; it performs no database or
   remote read and returns private no-store/no-index headers. Deploy the
   compatible native reader first, this route second, and its runtime producer

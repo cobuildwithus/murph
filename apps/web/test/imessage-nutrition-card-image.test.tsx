@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 
 import type {
+  ChallengeStandingsResponseCardV1,
   CompactTablePresentationCardV1,
   DailyNutritionResponseCardV1,
   DailyNutritionResponseCardV2,
@@ -155,6 +156,54 @@ const WORKOUT_CARD: Extract<
       },
     ],
   },
+};
+
+const STANDINGS_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "teams",
+  title: "Summer movement challenge",
+  subtitle: "Day 4 of 7",
+  objective: { kind: "target", targetPoints: 250 },
+  entries: [
+    {
+      label: "North team",
+      points: 210,
+      coverage: "complete",
+      detail: null,
+    },
+    {
+      label: "South team",
+      points: 180,
+      coverage: "partial",
+      detail: null,
+    },
+    {
+      label: "West team",
+      points: null,
+      coverage: "unscored",
+      detail: null,
+    },
+  ],
+  footer: null,
+};
+
+const COLLECTIVE_STANDINGS_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "collective",
+  title: "Move together",
+  subtitle: "Weekly progress",
+  objective: { kind: "target", targetPoints: 1_000 },
+  collectivePoints: 640,
+  coverage: "partial",
+  coverageCounts: {
+    completeParticipants: 1,
+    partialParticipants: 1,
+    totalParticipants: 3,
+    unscoredParticipants: 1,
+  },
+  footer: null,
 };
 
 beforeEach(() => {
@@ -335,6 +384,75 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
 });
 
+test("response-card image route renders the exact V5 standings snapshot", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({ schemaVersion: 5, card: STANDINGS_CARD });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  assert.equal(init.width, 1_200);
+  assert.equal(init.height, 614);
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /imessage-native-challenge-standings-card/u);
+  assert.match(serialized, /Summer movement challenge/u);
+  assert.match(serialized, /North team/u);
+  assert.match(serialized, /210/u);
+  assert.match(serialized, /OF 250 PTS/u);
+  assert.match(serialized, /data-entry-progress="0\.8400"/u);
+  assert.match(serialized, /Ranks appear when every score is complete\./u);
+  assert.doesNotMatch(
+    serialized,
+    /VERIFIED STANDINGS|TEAM STANDINGS|GROUP GOAL|LEADERBOARD|verified minimum|waiting for data/u,
+  );
+});
+
+test("standings image keeps collective progress collective", async () => {
+  const {
+    ChallengeStandingsCardImage,
+    getChallengeStandingsCardImageSize,
+  } = await import(
+    "@/src/components/imessage/challenge-standings-card-image"
+  );
+  const serialized = renderToStaticMarkup(
+    <ChallengeStandingsCardImage card={COLLECTIVE_STANDINGS_CARD} />,
+  );
+
+  assert.match(serialized, /640\+/u);
+  assert.match(serialized, /\/ 1,000 pts/u);
+  assert.match(serialized, /data-collective-progress="0\.6400"/u);
+  assert.match(serialized, /More progress may be pending/u);
+  assert.match(serialized, /2\/3 SCORED/u);
+  assert.doesNotMatch(serialized, /North team|South team|West team/u);
+
+  const unscoredCard: ChallengeStandingsResponseCardV1 = {
+    ...COLLECTIVE_STANDINGS_CARD,
+    collectivePoints: null,
+    coverage: "unscored",
+    coverageCounts: {
+      completeParticipants: 0,
+      partialParticipants: 0,
+      totalParticipants: 3,
+      unscoredParticipants: 3,
+    },
+  };
+  const unscoredSerialized = renderToStaticMarkup(
+    <ChallengeStandingsCardImage card={unscoredCard} />,
+  );
+  assert.match(unscoredSerialized, /Waiting for shared data/u);
+  assert.match(unscoredSerialized, /0\/3 SCORED/u);
+  assert.doesNotMatch(unscoredSerialized, /data-collective-progress/u);
+
+  expect(getChallengeStandingsCardImageSize({
+    ...COLLECTIVE_STANDINGS_CARD,
+    title: "T".repeat(60),
+    subtitle: "S".repeat(120),
+  })).toEqual({ width: 1_200, height: 654 });
+});
+
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const invalidPayloads = [
@@ -345,6 +463,10 @@ test("response-card image route rejects malformed, incomplete, and query-bearing
       card: { ...TABLE_CARD, tracking: null },
     }),
     encodePayload({ schemaVersion: 2, card: CARD, extra: true }),
+    encodePayload({
+      schemaVersion: 5,
+      card: { ...STANDINGS_CARD, format: "leaderboard" },
+    }),
     `${"a".repeat(IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH + 1)}.png`,
   ];
 

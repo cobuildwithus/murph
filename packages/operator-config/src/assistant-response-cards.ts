@@ -209,7 +209,10 @@ export function buildLinqIMessageAppLayout(
     }
   }
   if (parsed.kind === 'challenge_standings') {
-    return buildChallengeStandingsLinqLayout(parsed)
+    return {
+      ...buildChallengeStandingsLinqLayout(parsed),
+      image_url: buildLinqIMessageAppCardImageUrl(parsed),
+    }
   }
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
@@ -233,12 +236,11 @@ export function buildLinqIMessageAppCardImageUrl(
   card: AssistantResponseCard,
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
-  if (parsed.kind === 'challenge_standings') {
-    throw new TypeError('Challenge standings cards do not use image payloads.')
-  }
   const encoded = parsed.kind === 'daily_nutrition'
     ? encodeDailyNutritionAppCardPayload(parsed)
-    : encodeCompactTableAppCardPayload(parsed)
+    : parsed.kind === 'compact_table'
+      ? encodeCompactTableAppCardPayload(parsed)
+      : encodeChallengeStandingsAppCardPayload(parsed)
   if (encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
     throw new TypeError('The encoded app card image payload is too large.')
   }
@@ -326,11 +328,20 @@ export function encodeChallengeStandingsAppCardUrl(
   if (parsed.kind !== 'challenge_standings') {
     throw new TypeError('Expected a challenge standings response card.')
   }
+  return encodeAppCardEnvelopeUrl(
+    encodeChallengeStandingsAppCardPayload(parsed),
+  )
+}
+
+function encodeChallengeStandingsAppCardPayload(
+  card: ChallengeStandingsResponseCardV1,
+): string {
+  const parsed = challengeStandingsResponseCardV1Schema.parse(card)
   const envelope: AppCardEnvelopeV5 = {
     schemaVersion: 5,
     card: parsed,
   }
-  return encodeAppCardEnvelopeUrl(encodeAppCardEnvelopePayload(envelope))
+  return encodeAppCardEnvelopePayload(envelope)
 }
 
 function encodeWorkoutSessionAppCardPayload(

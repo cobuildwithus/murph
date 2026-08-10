@@ -9,6 +9,7 @@ import {
 
 import {
   challengeStandingsResponseCardJsonSchema,
+  buildLinqIMessageAppCardImageUrl,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
   encodeChallengeStandingsAppCardUrl,
@@ -176,6 +177,7 @@ describe('challenge standings response cards', () => {
       trailing_caption:
         'Coverage · 1 complete · 1 partial · 1 unscored · 3 total',
       trailing_subcaption: 'Verified lower-bound progress.',
+      image_url: buildLinqIMessageAppCardImageUrl(COLLECTIVE_CARD),
     })
   })
 
@@ -188,6 +190,7 @@ describe('challenge standings response cards', () => {
         'Scores marked + are verified lower bounds.',
         'Ranks are withheld until every score is complete.',
       ].join(' · '),
+      image_url: buildLinqIMessageAppCardImageUrl(INDIVIDUAL_CARD),
     })
   })
 
@@ -227,8 +230,14 @@ describe('challenge standings response cards', () => {
     const maximumUrl = encodeChallengeStandingsAppCardUrl(maximumRankedCard)
     expect(maximumUrl.startsWith(IMESSAGE_APP_CARD_URL_PREFIX)).toBe(true)
     expect(maximumUrl.length).toBe(1_945)
+    const maximumImageUrl = buildLinqIMessageAppCardImageUrl(maximumRankedCard)
+    expect(maximumImageUrl).toMatch(
+      /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+    )
+    expect(maximumImageUrl.length).toBe(1_954)
     const maximumLayout = buildLinqIMessageAppLayout(maximumRankedCard)
-    expect(Object.values(maximumLayout).every((value) => value.length <= 512))
+    const { image_url: _imageUrl, ...semanticLayout } = maximumLayout
+    expect(Object.values(semanticLayout).every((value) => value.length <= 512))
       .toBe(true)
     expect([
       maximumLayout.subcaption,
@@ -262,9 +271,12 @@ describe('challenge standings response cards', () => {
         footer: 'F'.repeat(120),
       }
     }
-    expect(encodeChallengeStandingsAppCardUrl(makeBoundaryCard(85)).length)
-      .toBe(2_047)
-    expect(() => encodeChallengeStandingsAppCardUrl(makeBoundaryCard(86)))
-      .toThrow('inline Messages card limit')
+    const acceptedBoundaryCard = makeBoundaryCard(78)
+    expect(encodeChallengeStandingsAppCardUrl(acceptedBoundaryCard).length)
+      .toBe(2_037)
+    expect(buildLinqIMessageAppCardImageUrl(acceptedBoundaryCard).length)
+      .toBe(2_046)
+    expect(() => encodeChallengeStandingsAppCardUrl(makeBoundaryCard(79)))
+      .toThrow('static image payload limit')
   })
 })

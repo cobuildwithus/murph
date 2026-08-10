@@ -1,6 +1,7 @@
 import * as z from "./zod-runtime.ts";
 
 import {
+  IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
   IMESSAGE_APP_CARD_URL_MAX_LENGTH,
   IMESSAGE_APP_CARD_URL_PREFIX,
 } from "./compact-table-card.ts";
@@ -235,7 +236,7 @@ export const challengeStandingsResponseCardV1Schema = z
   ])
   .superRefine((card, context) => {
     const envelope = JSON.stringify({
-      schemaVersion: 4,
+      schemaVersion: 5,
       card,
     });
     const payloadByteLength = new TextEncoder().encode(envelope).byteLength;
@@ -250,6 +251,14 @@ export const challengeStandingsResponseCardV1Schema = z
         code: "custom",
         message:
           "The challenge standings card exceeds the inline Messages card limit.",
+        path: [],
+      });
+    }
+    if (encodedLength > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "The challenge standings card exceeds the static image payload limit.",
         path: [],
       });
     }

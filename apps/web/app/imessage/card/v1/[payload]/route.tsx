@@ -6,7 +6,9 @@ import {
   IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX,
   dailyNutritionResponseCardV1Schema,
   dailyNutritionResponseCardV2Schema,
+  challengeStandingsResponseCardV1Schema,
   parseCompactTableAppCardEnvelope,
+  type ChallengeStandingsResponseCardV1,
   type CompactTablePresentationCardV1,
   type DailyNutritionResponseCard,
 } from "@murphai/contracts";
@@ -21,6 +23,10 @@ import {
   CompactTableCardImage,
   getCompactTableCardImageSize,
 } from "@/src/components/imessage/compact-table-card-image";
+import {
+  ChallengeStandingsCardImage,
+  getChallengeStandingsCardImageSize,
+} from "@/src/components/imessage/challenge-standings-card-image";
 
 export const dynamic = "force-dynamic";
 
@@ -54,12 +60,16 @@ export async function GET(
   const dmSans400 = await readFile(dmSans400FontPath).then(toArrayBuffer);
   const size = card.kind === "daily_nutrition"
     ? IMESSAGE_NUTRITION_CARD_IMAGE_SIZE
-    : getCompactTableCardImageSize(card);
+    : card.kind === "compact_table"
+      ? getCompactTableCardImageSize(card)
+      : getChallengeStandingsCardImageSize(card);
 
   return new ImageResponse(
     card.kind === "daily_nutrition"
       ? <NutritionCardImage card={card} />
-      : <CompactTableCardImage card={card} />,
+      : card.kind === "compact_table"
+        ? <CompactTableCardImage card={card} />
+        : <ChallengeStandingsCardImage card={card} />,
     {
       ...size,
       fonts: [
@@ -72,7 +82,11 @@ export async function GET(
 
 export function parseResponseCardPayload(
   segment: string,
-): DailyNutritionResponseCard | CompactTablePresentationCardV1 | null {
+):
+  | DailyNutritionResponseCard
+  | CompactTablePresentationCardV1
+  | ChallengeStandingsResponseCardV1
+  | null {
   if (!segment.endsWith(IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX)) {
     return null;
   }
@@ -107,6 +121,10 @@ export function parseResponseCardPayload(
   }
   if (parsed.schemaVersion === 2) {
     const result = dailyNutritionResponseCardV2Schema.safeParse(parsed.card);
+    return result.success ? result.data : null;
+  }
+  if (parsed.schemaVersion === 5) {
+    const result = challengeStandingsResponseCardV1Schema.safeParse(parsed.card);
     return result.success ? result.data : null;
   }
   return parseCompactTableAppCardEnvelope(parsed);

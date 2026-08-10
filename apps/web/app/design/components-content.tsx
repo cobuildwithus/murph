@@ -171,6 +171,7 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { DataExportControlStudy } from "./data-export-study";
@@ -1457,6 +1458,15 @@ export function ComponentsContent() {
           title="iMessage compact table card"
         >
           <ImessageCompactTableCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-challenge-standings-card"
+          title="iMessage challenge standings card"
+        >
+          <ImessageChallengeStandingsCardStudy />
         </Section>
 
         <Separator />
