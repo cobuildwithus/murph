@@ -100,18 +100,18 @@ Updated: 2026-08-09
   KMS operation begins after transaction open, one concurrent external thread
   route wins with no orphaned synthetic state, and all existing routing,
   activation, privacy-rotation, and mailbox assertions remain green.
-- Local proof on the remediated candidate: the Linq/Telegram routing slice
-  passed 177 tests; the isolated crypto-domain store passed 28 tests; the
-  PostgreSQL concurrency lane passed 8 tests; app-local typecheck and scoped
-  lint passed; the final route-snapshot follow-up passed the isolated Linq
-  mailbox-prewarm suite (13 tests) and Linq dispatch suite (171 tests), plus
-  app-local typecheck and scoped lint; `git diff --check` passed. A combined
-  crypto-domain/routing run caused two shared-fixture interference failures,
-  while the four routing files and the same crypto-domain file in its isolated
-  lane passed.
+- Local proof on the remediated candidate: the six affected crypto/Linq/
+  Telegram routing files passed 379 tests together; the PostgreSQL concurrency
+  lane passed 8 tests; app-local typecheck and scoped lint passed; and
+  `git diff --check` passed.
 - Review remediation: the preliminary specialist and final round 1 both found
   the pending-contact preparation gap; final round 1 also found failed KMS work
   being misclassified as a route race and an overbroad documentation claim.
   All were accepted and covered by the scoped resolver recheck, one-attempt
   error propagation tests for Linq and Telegram, and narrowed architecture/test
   wording. The preliminary pass supplied no patch artifact.
+- Initial exact-head CI exposed one stale Linq dispatch read-count assertion and
+  one real redundant route read. Crypto preparation now reuses the resolver's
+  first route snapshot while a conflict retry explicitly rereads the winner;
+  both exact CI regressions pass locally and the full affected slice covers the
+  corrected module boundary.
