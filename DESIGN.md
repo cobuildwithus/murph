@@ -211,7 +211,9 @@ shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
 cream field, large calorie value, calorie progress ring, and one-row protein,
 carbohydrates, fat, and fiber readings visually aligned with the Messages
 extension. The bitmap stays rectangular and badge-free because Messages owns
-the app icon and outer corner mask. Status color may tint nutrient values, but
+the outer corner mask. Installed extensions retain their native icon;
+app-absent static cards omit the optional square App Store artwork. Status
+color may tint nutrient values, but
 the ring draws quantitative progress only for a complete calorie total with an
 assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
 the neutral track. The static image does not expose the native card's
