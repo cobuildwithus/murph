@@ -7976,6 +7976,171 @@ describe("hosted workspace runtime entrypoint", () => {
     });
   }
 
+  test("runs an imported private completion before checkpoint despite a newer unrelated system prefix", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-entrypoint-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const completionDedupeKey = `aask_done_${"c".repeat(64)}`;
+    const completionItem = createMailboxItem({
+      dedupeKey: completionDedupeKey,
+      id: "mailbox_item_private_completion_imported",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const enqueueCompletion = async () => {
+        await enqueueHostedSystemMailboxItem({
+          item: {
+            item: completionItem,
+            payload: {
+              payloadCiphertext: "ciphertext",
+              payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+              requestId: "request_private_completion_imported",
+              source: "inline",
+              status: "resolved",
+            },
+            route: {
+              action: "dispatch-assistant-notification",
+              advanceProgress: true,
+              itemRef: {
+                id: completionItem.id,
+                kind: completionItem.kind,
+                lane: completionItem.lane,
+                laneSeq: completionItem.laneSeq,
+              },
+              state: "route",
+            },
+          },
+          vaultRoot,
+          wake: buildHostedExecutionAssistantNotificationRequestedWake({
+            eventId: completionDedupeKey,
+            memberId: TEST_USER_ID,
+            notification: {
+              deliveryDispatchMode: "queue-only",
+              deliveryDedupeToken: `assistant-ask-private:${completionDedupeKey}`,
+              deliveryIdempotencyKey:
+                `assistant-ask-private:${completionDedupeKey}`,
+              instructions: "Send the fixed completion text.",
+              privateAssistantAskCompletion: {
+                expiresAt: "2026-04-27T00:10:00.000Z",
+                requestId: `aask_req_${"d".repeat(64)}`,
+              },
+              responsePolicy: {
+                kind: "require_send_exact_text",
+                text: "Mission complete.",
+              },
+              route: {
+                actorId: null,
+                channel: "linq",
+                delivery: {
+                  kind: "thread",
+                  target: "+15555550123",
+                },
+                identityId: "linq_identity_private_completion_imported",
+                threadId: "+15555550123",
+                threadIsDirect: true,
+              },
+            },
+            occurredAt: TEST_NOW,
+          }),
+        });
+      };
+
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_private_completion_mixed_system_prefix",
+              idleCheckpointDelayMs: 50,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "c".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + "private-completion-mixed-system-prefix.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls === 1) {
+                await enqueueCompletion();
+                // The completion is already local when newer unrelated remote
+                // system work wakes the dirty pre-checkpoint pass.
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey:
+                      "assistant.notification.requested:generic:"
+                      + "private_completion_later_generic",
+                    id: "mailbox_item_private_completion_later_generic",
+                    kind: "assistant.notification.requested",
+                    lane: "system",
+                    laneSeq: "1",
+                  }));
+                  runtimeWakeSignal.notify();
+                }, 0);
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              if (assistantPhaseCalls === 2) {
+                assert.equal(input.foregroundCausalOnly, true);
+              }
+              return { progressed: false };
+            },
+            vaultRoot,
+          },
+        ),
+        3_000,
+        () => events.join(","),
+      );
+
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("runs a joined-group completion before the dirty idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(
       path.join(tmpdir(), "murph-workspace-entrypoint-"),

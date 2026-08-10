@@ -3403,7 +3403,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           );
         const shouldRunLocalPreCheckpointSystemWork =
           input.systemMailboxAdmission === "pre_checkpoint_safe"
-          && preCheckpointSystemPrefetch?.hasSystemWork === false
           && !hasForegroundConversationWork
           && await hasHostedPreCheckpointLocalExternalCompletion({
             now: baseRunnerInput.now?.() ?? new Date().toISOString(),
