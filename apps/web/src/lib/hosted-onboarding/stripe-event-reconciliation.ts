@@ -159,6 +159,8 @@ const STRIPE_EVENT_RETRY_DELAYS_MS = [
   15 * 60 * 1000,
   60 * 60 * 1000,
 ] as const;
+const HOSTED_STRIPE_RUNTIME_RECHECK_PENDING_CODE =
+  "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING";
 const STRIPE_EVENT_LOG_STRING_MAX_LENGTH = 500;
 const STRIPE_EVENT_SAFE_PRISMA_META_KEYS = new Set([
   "column",
@@ -202,7 +204,7 @@ class HostedStripeEventRetrieveRetryableError extends Error {
 }
 
 class HostedStripeRuntimeRecheckPendingError extends Error {
-  readonly code = "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING";
+  readonly code = HOSTED_STRIPE_RUNTIME_RECHECK_PENDING_CODE;
 
   constructor(cause: unknown) {
     super("Hosted runtime recheck remains pending.", { cause });
@@ -282,8 +284,10 @@ export async function reconcileDueHostedStripeEvents(input: {
   for (const candidate of candidates) {
     const claimed = await claimHostedStripeEvent({
       eventId: candidate.eventId,
+      lastErrorCode: candidate.lastErrorCode,
       now,
       prisma: input.prisma,
+      status: candidate.status,
       updatedAt: candidate.updatedAt,
     });
 
@@ -322,8 +326,10 @@ export async function reconcileHostedStripeEventById(input: {
 
   const claimed = await claimHostedStripeEvent({
     eventId: candidate.eventId,
+    lastErrorCode: candidate.lastErrorCode,
     now,
     prisma: input.prisma,
+    status: candidate.status,
     updatedAt: candidate.updatedAt,
   });
 
@@ -340,8 +346,10 @@ export async function reconcileHostedStripeEventById(input: {
 
 async function claimHostedStripeEvent(input: {
   eventId: string;
+  lastErrorCode: string | null;
   now: Date;
   prisma: PrismaClient;
+  status: HostedStripeEventStatus;
   updatedAt: Date;
 }) {
   const result = await input.prisma.hostedStripeEvent.updateMany({
@@ -362,11 +370,19 @@ async function claimHostedStripeEvent(input: {
     return null;
   }
 
-  return input.prisma.hostedStripeEvent.findUnique({
+  const claimed = await input.prisma.hostedStripeEvent.findUnique({
     where: {
       eventId: input.eventId,
     },
   });
+  return claimed
+    ? {
+        ...claimed,
+        retryDirectPaidRuntimeRecheck:
+          input.lastErrorCode === HOSTED_STRIPE_RUNTIME_RECHECK_PENDING_CODE
+          || input.status === HostedStripeEventStatus.processing,
+      }
+    : null;
 }
 
 async function processHostedStripeEventRecord(
@@ -931,6 +947,18 @@ async function processClaimedHostedStripeEvent(
     if (usageCreditReconciliation.handled && usageCreditReconciliation.wakeRequired) {
       runtimeRecheckMemberIds.add(usageCreditReconciliation.beneficiaryMemberId);
     }
+    if (
+      claimed.retryDirectPaidRuntimeRecheck
+      && !usageCreditReconciliation.handled
+      && processingMemberId
+      && isHostedDirectPaidRuntimeRecheckEvent(stripeEvent.type)
+      && await hasHostedMemberAcceptedDirectPaidPhase({
+        memberId: processingMemberId,
+        prisma,
+      })
+    ) {
+      runtimeRecheckMemberIds.add(processingMemberId);
+    }
     for (const memberId of runtimeRecheckMemberIds) {
       await signalHostedBillingRuntimeRecheckIgnoringInactive({
         prisma,
@@ -1117,6 +1145,32 @@ async function processClaimedHostedStripeEvent(
       status: "failed",
     };
   }
+}
+
+function isHostedDirectPaidRuntimeRecheckEvent(type: Stripe.Event.Type): boolean {
+  return type === "invoice.paid"
+    || type === "customer.subscription.created"
+    || type === "customer.subscription.updated"
+    || type === "customer.subscription.resumed";
+}
+
+async function hasHostedMemberAcceptedDirectPaidPhase(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<boolean> {
+  const member = await input.prisma.hostedMember.findUnique({
+    where: {
+      id: input.memberId,
+    },
+    select: {
+      billingRef: {
+        select: {
+          currentBillingPhase: true,
+        },
+      },
+    },
+  });
+  return member?.billingRef?.currentBillingPhase === "paid";
 }
 
 function isHostedStripeEventOperationallyRetryableError(

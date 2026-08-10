@@ -81,7 +81,11 @@ from no direct paid billing to direct paid billing reconciles the ordinary paid
 usage gate and enters the existing retry-owned runtime-recheck path. Either
 provider-event ordering therefore resumes already accepted work after Starter
 exhaustion; the second event and later replays observe paid state and do not
-repeat the transition.
+repeat the transition. If the post-commit signal fails, the existing Stripe
+receipt carries that retry obligation into its next claim and reissues the
+idempotent wake for the resolved member while the accepted direct paid phase
+remains current. An expired processing lease does the same conservatively, so
+a process loss after the paid commit cannot discard the wake.
 
 Legacy Stripe trial subscriptions may still emit delayed events after rollout.
 The retained compatibility code may identify, cancel, or reconcile those exact
@@ -174,6 +178,8 @@ After deploy, verify:
   resumes already accepted Starter-exhausted work without another inbound;
 - subscription-first and invoice-first paid-event orderings each produce one
   retry-owned runtime recheck, while replay produces none; and
+- a failed post-commit signal and an expired receipt lease both reissue the
+  already-committed paid wake before the receipt can complete; and
 - delayed legacy trial events cannot recreate or extend free access.
 
 Compatibility is removable only when all three conditions hold: old trial
