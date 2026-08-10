@@ -30,8 +30,12 @@ apps/web/next-env.d.ts
 !/.agents/skills/write-changelog/SKILL.md
 !/.agents/skills/write-changelog/agents/
 !/.agents/skills/write-changelog/agents/openai.yaml
+!/.agents/skills/frog/
+!/.agents/skills/frog/SKILL.md
 !/.agents/skills/crabbox/
 !/.agents/skills/crabbox/SKILL.md
+!/.agents/friction-log/
+!/.agents/friction-log/**
 !/.agents/skills/health-commons-research/
 !/.agents/skills/health-commons-research/SKILL.md
 !/.agents/skills/work-with-pro/

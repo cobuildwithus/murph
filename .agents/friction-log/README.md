@@ -14,7 +14,9 @@ scripts/frog log
 Run `list` before working around a papercut. Humans may use interactive `log`;
 repository agents use `.agents/skills/frog/SKILL.md` for the noninteractive
 entry format. The wrapper forces the repository file store and permits no local
-publishing; the GitHub workflow is the sole issue and reconciliation owner.
+publishing. It enters the repository root itself and rejects caller-supplied
+`--cwd` and `--mcp` modes; the GitHub workflow is the sole issue and
+reconciliation owner.
 
 ## Public-data boundary
 

@@ -62,7 +62,9 @@ solutions optional; record the problem even when the correct fix is not yet
 known. Read back the returned `friction.md` before committing it.
 
 The wrapper permits only file-backed `list` and `log`; it rejects direct
-publishing. The Action-only workflow is the sole issue and reconciliation owner.
+publishing, enters the repository root itself, and rejects caller-supplied
+`--cwd` and `--mcp` modes. The Action-only workflow is the sole issue and
+reconciliation owner.
 
 ## Public-data boundary
 

@@ -1,10 +1,15 @@
 import { spawnSync } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,6 +36,7 @@ describe("Frog workflow guards", () => {
     expect(frogScript).toContain(
       "unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA",
     );
+    expect(frogScript).toContain('cd "$repo_root"');
     expect(frogScript).toContain('exec pnpm dlx frog@1.1.0 "$@"');
 
     const publish = spawnSync(frogScriptPath, ["publish"], {
@@ -46,9 +52,89 @@ describe("Frog workflow guards", () => {
     expect(immediate.stderr).toContain(
       "Publishing is owned by .github/workflows/friction-log.yml.",
     );
+
+    for (const args of [
+      ["list", "--cwd", "."],
+      ["list", "--cwd=.."],
+      ["list", "--mcp"],
+      ["list", "--mcp=true"],
+    ]) {
+      const escaped = spawnSync(frogScriptPath, args, { encoding: "utf8" });
+      expect(escaped.status).toBe(2);
+      expect(escaped.stderr).toContain(
+        "scripts/frog owns the repository root; --cwd and --mcp are not allowed.",
+      );
+    }
+  });
+
+  it("enters the repository root and clears ambient database settings", () => {
+    const testRoot = mkdtempSync(path.join(tmpdir(), "frog-wrapper-"));
+    const fakeBin = path.join(testRoot, "bin");
+    const capturePath = path.join(testRoot, "capture.txt");
+    mkdirSync(fakeBin);
+    writeFileSync(
+      path.join(fakeBin, "pnpm"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "\${FROG_DATABASE_URL+x}" || -n "\${FROG_NAMESPACE+x}" || -n "\${FROG_SCHEMA+x}" ]]; then
+  printf 'ambient-variable-present\n' > "$FROG_TEST_CAPTURE"
+  exit 91
+fi
+
+if [[ "$PWD" != "$FROG_TEST_EXPECTED_CWD" ]]; then
+  printf 'cwd=unexpected\n' > "$FROG_TEST_CAPTURE"
+  exit 92
+fi
+
+{
+  printf 'cwd=repo\n'
+  for argument in "$@"; do
+    printf 'arg=%s\n' "$argument"
+  done
+} > "$FROG_TEST_CAPTURE"
+`,
+      { mode: 0o755 },
+    );
+
+    try {
+      const result = spawnSync(frogScriptPath, ["list"], {
+        cwd: testRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FROG_DATABASE_URL: "postgresql://example.invalid/frog",
+          FROG_NAMESPACE: "ambient",
+          FROG_SCHEMA: "ambient",
+          FROG_TEST_CAPTURE: capturePath,
+          FROG_TEST_EXPECTED_CWD: repoRoot,
+          PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(readFileSync(capturePath, "utf8")).toBe(
+        "cwd=repo\narg=dlx\narg=frog@1.1.0\narg=list\n",
+      );
+    } finally {
+      rmSync(testRoot, { force: true, recursive: true });
+    }
   });
 
   it("keeps reporting local, bounded, and public-safe", () => {
+    for (const repoRelativePath of [
+      ".agents/friction-log/example/friction.md",
+      ".agents/skills/frog/SKILL.md",
+    ]) {
+      expect(
+        spawnSync(
+          "git",
+          ["check-ignore", "--no-index", "--quiet", repoRelativePath],
+          { cwd: repoRoot },
+        ).status,
+      ).toBe(1);
+    }
+
     expect(
       JSON.parse(readRepoFile(".agents", "friction-log", "config.json")),
     ).toEqual({
@@ -86,6 +172,8 @@ describe("Frog workflow guards", () => {
     expect(skill).toContain("current request authorizes repository edits");
     expect(skill).toContain("review-only");
     expect(skill).toContain("scripts/frog list");
+    expect(skill).toContain("repository root");
+    expect(skill).toContain("`--cwd` and `--mcp`");
     expect(skill).toContain("cat <<'FROG' | scripts/frog log");
     expect(skill).toContain("Use synthetic reproduction data only.");
     expect(skill).toContain("raw logs or command output");

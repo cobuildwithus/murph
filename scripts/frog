@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
 case "${1:-}" in
   list|log) ;;
   *)
@@ -11,6 +13,10 @@ esac
 
 for argument in "$@"; do
   case "$argument" in
+    --cwd|--cwd=*|--mcp|--mcp=*)
+      echo "scripts/frog owns the repository root; --cwd and --mcp are not allowed." >&2
+      exit 2
+      ;;
     --publish|--publish=*)
       echo "Publishing is owned by .github/workflows/friction-log.yml." >&2
       exit 2
@@ -19,4 +25,5 @@ for argument in "$@"; do
 done
 
 unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA
+cd "$repo_root"
 exec pnpm dlx frog@1.1.0 "$@"
