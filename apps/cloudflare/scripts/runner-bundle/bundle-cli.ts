@@ -67,17 +67,12 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // June 2026 latency regression was exactly this: one static import dragged
 // the whole command surface onto the hot path with nothing watching).
 // Baselines measured from the real assembled bundle on 2026-06-11:
-// total 7,052,933 B across all chunks, entry bin.js 15,569 B. Budgets are
-// baseline + ~25-30% headroom. If a violation fires, investigate the listed
-// largest inputs first; only raise the budget deliberately for growth that
-// is understood and intended.
-//
-// Composing the managed voice-memo tool with 2026-08-10 main measured
-// 9,012,019 B total. The tool stays in the existing assistant-engine chunks;
-// no optional output or MCP dependency entered the graph. Ratchet to that
-// exact combined measurement with a 32 KiB allowance for small reviewed
-// additions.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_012_019 + 32_768;
+// total 7,052,933 B across all chunks, entry bin.js 15,569 B. The combined
+// 2026-08-10 main plus compact-table image contract measured 9,027,632 B after
+// the listed graph was inspected; the entry budget remains unchanged. If a
+// violation fires, investigate the listed largest inputs first; only raise the
+// budget deliberately for growth that is understood and intended.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_030_000;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live
