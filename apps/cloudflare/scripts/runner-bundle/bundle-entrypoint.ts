@@ -166,19 +166,16 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Adding the personalized generated contact card puts its request contract,
 // exact-shape parser, direct route resolution, and acknowledgement handling in
-// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
-// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
-// only the total ceiling and keep both startup baselines and all tolerances.
-//
-// Private-continuation no-route recovery extends the existing dynamic-tool
-// result projection without adding a forbidden startup input. Exact Linux CI
-// assembly measured 9,927,719B total on 2026-08-09. A clean macOS assembly of
-// the same candidate measured 9,974,661B total and a 7,997,170B static closure,
-// so ratchet to the higher cross-platform measurements while retaining the
-// established allowances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_974_661 + 32_768;
+// the runner's lazy output. The subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Private-continuation
+// recovery and recipient-ready answer guidance then produced the higher exact
+// current macOS measurement: 10,000,845B total and an 8,023,354B static closure.
+// The forbidden-input guard remains clean, so ratchet to those cross-platform
+// maxima while retaining the established allowances and entry baseline.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_000_845 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_997_170;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_023_354;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
