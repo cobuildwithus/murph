@@ -555,24 +555,22 @@ unimplemented.
 The non-expiring Starter contract is a strict Web/runtime schema hard cut. The
 new Web response uses `accessKind: starter`, `planName: Starter`, and
 `periodKind: lifetime`; the new runner no longer accepts the retired trial
-values. Neither direction is compatible across the cut. Pause affected hosted
-usage before applying the Starter migrations: the release operator suspends
-the existing Render `murph-temporal-worker` service, waits for both instances
-and their already-accepted Cloudflare runtime work to drain, and keeps that
-single execution-admission owner suspended through the cutover. Mailbox appends
-remain durable during the pause. Deploy Web and the Cloudflare Worker/runner
-bundle from the same commit while the path remains paused. The Cloudflare deploy
-must use `container_rollout=immediate`. Resume only after managed-container
-smoke reports that commit's exact runner-bundle fingerprint, a signed
-`murph.plan_usage` read proves an active or exhausted Starter response through
-the deployed adapter, and one exact eligible subscription quote succeeds.
-Before the Starter migration commits, the previous Web and Cloudflare pair is a
-valid rollback. After it commits, that pair is below the rollback floor because
-old Web double-counts legacy trial allowance with the Starter projection and
-cannot debit `starter_grant` entries. Keep execution paused and forward-fix or
-finish deploying the current pair; never resume on the old pair or roll back
-either plane independently. Do not add an application feature flag or a second
-pause owner.
+values. Neither direction is compatible across the cut. Use the existing
+operational pause: suspend the production Render `murph-temporal-worker`
+background-worker service and confirm both declared instances have stopped and
+no `ensureRuntimeProcessing` activity remains in flight. Apply the Starter
+migrations only after that drain, then deploy Web and the Cloudflare
+Worker/runner bundle from the same commit while the worker remains suspended.
+The Cloudflare deploy must use `container_rollout=immediate`. Resume the Render
+worker only after managed-container smoke reports that commit's exact
+runner-bundle fingerprint, a signed `murph.plan_usage` read proves active and
+exhausted Starter responses through the deployed adapter, and one exact
+eligible subscription quote succeeds.
+
+The complete prior Web/runner pair is a rollback target only before the Starter
+migration commits. Once it commits, keep the Render worker suspended and
+forward-fix or redeploy the exact current Web/runner pair; the prior Web or
+runner is not a resumable target against the migrated ledger.
 
 For the capacity-epoch change, deploy the assistant runtime that timestamps
 every provider operation at its own request start, then wait for work accepted

@@ -100,7 +100,15 @@ period, appends the canonical full grant plus the deterministic debit when
 needed, and clears the obsolete local Stripe identity. Provider states that may
 represent paid service (`active`, `past_due`, or `unpaid`) fail closed and stay
 on the ordinary invoice-backed reconciliation path. `invoice.paid` remains the
-only source that may turn legacy trial evidence into paid access.
+only source that may turn legacy trial evidence into paid access, and its line
+Price must overlap the exact subscription's current Price before Murph accepts
+that conversion.
+
+Family invite acceptance never treats a locally `paused` legacy row as safe to
+sponsor while its Stripe subscription remains bound. The provider-validated
+retirement owner clears that obsolete binding first; the ordinary Family guard
+then admits the Starter member while continuing to fail closed for every bound
+nonterminal direct subscription.
 
 ## Existing-member migration
 
@@ -141,23 +149,22 @@ required to drain already-created provider objects.
 
 Use this rollout order:
 
-1. before starting the main-branch Vercel deployment, the release operator
-   suspends the existing Render `murph-temporal-worker` service and keeps it
-   suspended through the cutover. Wait until both worker instances have stopped
-   polling and their accepted Cloudflare runtime work has drained; mailbox
-   appends remain durable while execution is paused;
-2. while that single execution-admission owner remains suspended, apply the
-   additive ledger-kind/check-constraint migration and Starter backfill, deploy
-   Web and the Cloudflare Worker/runner bundle from the same commit, and use
-   `container_rollout=immediate`. Do not resume after only one plane succeeds;
-3. after managed-container smoke reports that commit's exact runner-bundle
-   fingerprint, prove a signed `murph.plan_usage` Starter read and one eligible
-   subscription quote through the deployed adapter, then resume the Render
-   `murph-temporal-worker` service;
+1. suspend the production Render `murph-temporal-worker` background-worker
+   service, confirm both declared instances have stopped, and confirm no
+   `ensureRuntimeProcessing` activity remains in flight;
+2. while that worker remains suspended, apply the additive
+   ledger-kind/check-constraint migration and Starter backfill, then deploy Web
+   and the Cloudflare Worker/runner bundle from the same commit with
+   `container_rollout=immediate`;
+3. require the exact runner-bundle fingerprint, signed active and exhausted
+   Starter plan-usage reads, and one eligible subscription quote before
+   resuming the Render worker;
 4. confirm every old Web deployment capable of creating a Stripe trial is
    drained, then let delayed Stripe events and the runtime compatibility owner
    convert exact post-migration legacy objects through the canonical Starter
    grant path;
+   keep the configured legacy Pulse Price unchanged through this drain and the
+   delayed-event horizon so exact old objects remain verifiable;
 5. run `pnpm --dir apps/web stripe:retire-legacy-pulse-trials --stripe-mode=<test|live>`
    in dry-run mode and review the aggregate candidate and provider-status
    counts;
@@ -168,11 +175,13 @@ Use this rollout order:
 8. after the delayed-event horizon has passed, remove the legacy offer fields,
    wire actions, cleanup owner, and operator command together.
 
-The Render service suspension is the existing operator-owned traffic-pause
-control; do not add an application feature flag or a second pause owner for this
-cutover. The operator command requires an explicit Stripe mode and verifies that
-it matches the configured credential, defaults to dry-run, prevalidates every
-candidate before applying, and is safe to rerun.
+The complete prior Web/runner pair remains a rollback target only until the
+Starter migration commits. After commit, keep the Render worker suspended and
+forward-fix or redeploy the exact current Web/runner pair; neither prior plane
+may resume against the migrated ledger. The operator command requires an
+explicit Stripe mode and verifies that it matches the configured credential,
+defaults to dry-run, prevalidates every candidate before applying, and is safe
+to rerun.
 
 After deploy, verify:
 
@@ -187,19 +196,16 @@ After deploy, verify:
 - subscription-first and invoice-first paid-event orderings each produce one
   retry-owned runtime recheck, while replay produces none; and
 - a failed post-commit signal and an expired receipt lease both reissue the
-  already-committed paid wake before the receipt can complete; and
-- delayed legacy trial events cannot recreate or extend free access.
+  already-committed paid wake before the receipt can complete;
+- delayed legacy trial events cannot recreate or extend free access; and
+- a legacy trial retired to Starter can accept a Family invitation only after
+  its obsolete direct subscription binding is cleared.
 
 Compatibility is removable only when all three conditions hold: old trial
 creators are gone, the operator dry-run reports zero, and the maximum delayed
 Stripe event horizon has elapsed. Analytics-only cohort names and immutable
 historical records are not runtime compatibility and may remain.
 
-Before the Starter migration commits, the release operator may restore the
-previous Web and Cloudflare pair and resume the Render worker. After the
-migration commits, that pair is below the rollback floor: old Web adds the
-legacy trial allowance to the new Starter projection and cannot settle usage
-against `starter_grant` entries. Keep the Render worker suspended and
-forward-fix or finish deploying the current Web and Cloudflare pair. Never
-resume on the old pair, and never revert the additive migration or its
-accounting history.
+Do not revert the Starter migration: its ledger kind and historical entries are
+accounting history. Recovery after migration commit is forward-only under the
+same suspended-worker gate.

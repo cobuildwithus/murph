@@ -1315,23 +1315,22 @@ Worker replacement is checkpoint-safe at the runtime fence rather than through r
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
 The non-expiring Starter plan-usage schema is a bidirectional hard cut between
-Web and the runner bundle. Before the main-branch Vercel deployment starts, the
-release operator suspends the existing Render `murph-temporal-worker` service,
-waits for both worker instances and their already-accepted Cloudflare runtime
-work to drain, and keeps that single execution-admission owner suspended. Apply
-the Starter migrations and deploy Web plus Cloudflare from the same commit
-under that pause. Dispatch the protected production workflow with
-`container_rollout=immediate`; do not resume after only one plane succeeds.
-Managed-container smoke must report the exact new runner-bundle fingerprint,
-and a signed Starter plan-usage read plus an eligible subscription quote must
-succeed before normal processing resumes. Before the migration commits, the
-previous Web and Cloudflare pair remains a valid rollback. After it commits,
-old Web double-counts the legacy trial allowance with the new Starter
-projection and cannot debit `starter_grant` entries, so the old pair is below
-the rollback floor: keep the Render worker suspended and forward-fix or finish
-deploying the current pair. Never resume on the old pair, revert the additive
-accounting migration, or roll back either plane independently. Do not add an
-application feature flag or a second pause owner.
+Web and the runner bundle. Suspend the production Render
+`murph-temporal-worker` background-worker service, confirm both declared
+instances have stopped and no `ensureRuntimeProcessing` activity remains in
+flight, then apply the Starter migrations and deploy Web plus Cloudflare from
+the same commit while that worker stays suspended. Dispatch the protected
+production workflow with `container_rollout=immediate`; do not resume after
+only one plane succeeds. Managed-container smoke must report the exact new
+runner-bundle fingerprint, and signed active and exhausted Starter plan-usage
+reads plus an eligible subscription quote must succeed before the Render worker
+resumes.
+
+Before the Starter migration commits, the complete prior Web/runner pair
+remains a rollback target. After it commits, the migrated ledger establishes a
+forward-only floor: keep the Render worker suspended and forward-fix or
+redeploy the exact current Web/runner pair. Neither prior plane is a resumable
+target against the migrated database.
 
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence

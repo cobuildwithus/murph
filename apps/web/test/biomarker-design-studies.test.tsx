@@ -190,6 +190,18 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).not.toContain("$8.42");
   expect(sectionsMarkup).not.toContain("remaining usage credit");
   expect(sectionsMarkup).not.toContain("usage credit remaining");
+  const starterFamilyChoiceStart = sectionsMarkup.indexOf(
+    'data-design-state="starter-family-choice"',
+  );
+  const activeCoreUsageStart = sectionsMarkup.indexOf(
+    'data-design-state="active-core-usage"',
+    starterFamilyChoiceStart,
+  );
+  expect(starterFamilyChoiceStart).toBeGreaterThan(-1);
+  expect(activeCoreUsageStart).toBeGreaterThan(starterFamilyChoiceStart);
+  expect(
+    sectionsMarkup.slice(starterFamilyChoiceStart, activeCoreUsageStart),
+  ).toContain('inert=""');
   expect(sectionsMarkup).toContain("inert=\"\"");
   expect(sectionsMarkup).toContain("max-w-7xl");
 

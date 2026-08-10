@@ -25,9 +25,11 @@ Success means:
 ## Scope
 
 - In scope: hosted Web billing admission, projections, mutations, provider
-  calls, receipts, retries, cancellation, recovery, and their direct tests.
+  calls, receipts, retries, cancellation, recovery, their direct tests, and the
+  guarded post-merge legacy-trial retirement rollout explicitly approved by
+  the user.
 - Out of scope: pricing changes, new plan types, new payment providers, direct
-  production mutation, and speculative billing infrastructure.
+  unguarded production mutation, and speculative billing infrastructure.
 
 ## Invariants
 
@@ -59,6 +61,9 @@ Success means:
    guards, then exact-head CI and the required ReviewGPT lanes.
 6. Merge only after all accepted findings and required checks are green; verify
    the applicable main-only hosted Stripe workflow and retire the worktree.
+7. After the Starter cutover, run the exact guarded legacy-trial retirement
+   dry-run/apply sequence to zero before closing the superseded trial-recovery
+   PR.
 
 ## Verification
 
@@ -200,3 +205,15 @@ function-state matrix and verification ledger. The accepted defects are:
   skipped, 107 hosted-local harness tests, 64 hosted-execution parser tests, 28
   assistant Family tests, Web typecheck, full Web lint with zero errors, the
   provider-request guard, and the hosted billing CI contract.
+- The post-Starter architecture review superseded PR #1529's paused-trial
+  recovery state machine. The retained candidate now requires delayed legacy
+  invoice and current subscription Price overlap, proves that Family admission
+  follows provider-validated legacy binding retirement, keeps all bound
+  nonterminal direct states fail closed, and makes the Starter-to-Family design
+  study inert without adding billing state.
+- Final ReviewGPT round 10's rollback finding was reproduced against the prior
+  allowance and credit-settlement owners and accepted. The correction deletes
+  the unsafe post-migration rollback promise: the existing Render Temporal
+  worker suspension is the cutover gate, and migration commit establishes a
+  forward-only Web/runner floor without a compatibility parser or second ledger
+  owner.

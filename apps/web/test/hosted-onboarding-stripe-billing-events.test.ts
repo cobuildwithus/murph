@@ -1880,6 +1880,7 @@ describe("hosted onboarding stripe billing events", () => {
       makeStripeSubscription({
         currentPeriodEnd: 1_747_612_800,
         currentPeriodStart: 1_745_020_800,
+        items: ["price_pulse_base"],
         metadata: {
           checkoutOffer: "pulse_trial_7d",
         },
@@ -1902,6 +1903,51 @@ describe("hosted onboarding stripe billing events", () => {
         now: eventCreatedAt,
         tx: {},
       });
+  });
+
+  it("does not accept a legacy conversion invoice for an obsolete Price", async () => {
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(makeMemberSnapshot({
+      billingRef: {
+        currentBillingPhase: "trial",
+        currentBillingPlanCode: "launch_monthly",
+        currentCheckoutOffer: "pulse_trial_7d",
+        memberId: "member_123",
+        pulseTrialRedeemedAt: new Date("2026-04-12T00:00:00.000Z"),
+        stripeCustomerId: "cus_123",
+        stripeSubscriptionId: "sub_123",
+      },
+    }));
+
+    await expect(applyStripeInvoicePaid(
+      makeStripeInvoice({
+        billingReason: "subscription_cycle",
+        id: "in_obsolete_trial_price",
+        priceId: "price_pulse_obsolete",
+        subscription: "sub_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-19T00:00:00.000Z"),
+        occurredAt: "2026-04-19T00:00:00.000Z",
+        sourceEventId: "evt_obsolete_trial_price",
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+      makeStripeSubscription({
+        items: ["price_pulse_current"],
+        metadata: {
+          checkoutOffer: "pulse_trial_7d",
+        },
+        status: "active",
+      }),
+    )).resolves.toEqual({
+      activatedMemberId: null,
+      hostedExecutionEventId: null,
+      welcomeEmailMemberId: null,
+    });
+
+    expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -2027,6 +2073,7 @@ describe("hosted onboarding stripe billing events", () => {
       {} as never,
       HostedBillingStatus.active,
       makeStripeSubscription({
+        items: ["price_pulse_base"],
         metadata: {
           checkoutOffer: "pulse_trial_7d",
         },
@@ -2876,6 +2923,7 @@ function makeStripeInvoice(
     id: string;
     invoicePayments: Stripe.InvoicePayment[];
     paymentIntent: string | null;
+    priceId: string;
     subscription: string | null;
   }>,
 ): Stripe.Invoice {
@@ -2887,6 +2935,18 @@ function makeStripeInvoice(
     customer: overrides?.customer ?? "cus_123",
     customer_email: overrides?.customerEmail ?? null,
     id: overrides?.id ?? "in_123",
+    lines: {
+      data: [{
+        pricing: {
+          price_details: {
+            price: overrides?.priceId ?? "price_pulse_base",
+            product: "prod_hosted_trial",
+          },
+          type: "price_details",
+          unit_amount_decimal: "800",
+        },
+      }],
+    },
     payment_intent: overrides?.paymentIntent ?? "pi_123",
     payments: {
       data: overrides?.invoicePayments ?? [],

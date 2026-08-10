@@ -85,15 +85,17 @@ export function GroupMemberPlanStudy() {
         label="Starter member choosing paid Family billing"
         state="starter-family-choice"
       >
-        <HostedBillingSettings
-          authenticated
-          billingStatus="active"
-          canStartDirectPlan
-          canStartFamily
-          currentBillingPlanCode="launch_monthly"
-          familyState="none"
-          payerMemberId="design_starter_family_member"
-        />
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartDirectPlan
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyState="none"
+            payerMemberId="design_starter_family_member"
+          />
+        </div>
       </StudyState>
 
       <StudyState
