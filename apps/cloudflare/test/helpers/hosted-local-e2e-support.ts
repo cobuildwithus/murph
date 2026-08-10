@@ -1392,6 +1392,17 @@ export function buildStableNumericSuffix(value: string, length: number): string 
   return String(hash).padStart(length, "0").slice(-length);
 }
 
+export function didShellPrewarmArriveByIngressAcceptance(input: {
+  acceptedAt: string;
+  firstHintAtEpochMs: unknown;
+}): boolean {
+  const acceptedAtEpochMs = Date.parse(input.acceptedAt);
+  return Number.isFinite(acceptedAtEpochMs)
+    && typeof input.firstHintAtEpochMs === "number"
+    && Number.isFinite(input.firstHintAtEpochMs)
+    && input.firstHintAtEpochMs <= acceptedAtEpochMs;
+}
+
 export function mergeRequiredEnvProfile(
   existingProfiles: string | undefined,
   requiredProfile: string,

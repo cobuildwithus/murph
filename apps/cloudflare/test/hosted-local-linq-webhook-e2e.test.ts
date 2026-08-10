@@ -13,6 +13,7 @@ import {
 
 import {
   buildStableNumericSuffix,
+  didShellPrewarmArriveByIngressAcceptance,
 } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
@@ -306,6 +307,11 @@ describe("hosted local Linq webhook e2e", () => {
       ),
       shellPrewarmSource: "linq-typing-started",
     });
+    expect(didShellPrewarmArriveByIngressAcceptance({
+      acceptedAt: latencyTrace.acceptedAt,
+      firstHintAtEpochMs:
+        latencyTrace.phaseBreakdown?.orchestration?.shellPrewarmFirstHintAtEpochMs,
+    })).toBe(true);
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
