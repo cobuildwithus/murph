@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 8 accepted-delivery lifecycle candidate
+Status: active — round-7 hard-cap remediation pending explicit continuation
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -367,3 +367,7 @@ Updated: 2026-08-10
   assembly passes without a ratchet change at 8,999,924-byte vault CLI total,
   1,659,616-byte runner entry, 8,019,965-byte static closure, and 9,997,465-byte
   runner total.
+- The seven-round hard cap is now active. The remediation is pushed, focused
+  local proof and parent review are clean, and exact-head CI is running. No
+  eighth substantive ReviewGPT round may start until the explicit continuation
+  decision required by the review-loop contract is recorded.
