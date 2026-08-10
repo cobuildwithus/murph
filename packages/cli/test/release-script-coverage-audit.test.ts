@@ -1275,6 +1275,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain(
       'managed_browser_background_mode="${managed_browser_background_mode:-balanced}"',
     )
+    expect(reviewGptConfig).toContain(
+      'review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"',
+    )
+    expect(reviewGptConfig).toContain(
+      'browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"',
+    )
     expect(reviewGptConfig).toContain('codebase.zip')
     expect(reviewGptConfig).toContain('package_script="scripts/package-audit-context-full.sh"')
     expect(reviewGptConfig).not.toContain('snapshot_attachment_name=')
@@ -1486,7 +1492,11 @@ describe('monorepo release flow coverage audit', () => {
       'Both stages use the managed Eragon, Phlebas, Hercules, and Mountain browser',
     )
     expect(prReviewGptLoop).toContain('default randomized usable managed')
-    expect(prReviewGptLoop).toContain('`Hercules.app` on `9444`')
+    expect(prReviewGptLoop).toContain('Hercules on `9444`')
+    expect(prReviewGptLoop).toContain('current installed Brave binary')
+    expect(prReviewGptLoop).toContain(
+      "passes none of Chromium's background-timer, occluded-window, or renderer",
+    )
     expect(prReviewGptLoop).toContain(
       '`REVIEW_GPT_BROWSER_LANE=eragon|phlebas|hercules|mountain`',
     )
@@ -1755,14 +1765,23 @@ set -euo pipefail
 review_gpt_register_dir_preset() { :; }
 review_gpt_register_preset_group() { :; }
 source "$REPO_ROOT/scripts/review-gpt.config.sh"
-printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_count"
+printf '%s|%s|%s|%s\n' \
+  "$review_gpt_selected_browser_lane" \
+  "$review_gpt_browser_lane_count" \
+  "$browser_binary_path" \
+  "$managed_browser_background_mode"
 `
 
     try {
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'REVIEW_GPT_BROWSER_LANE_COUNT=1\n',
+        [
+          'REVIEW_GPT_BROWSER_LANE_COUNT=1',
+          'browser_binary_path="/tmp/custom-brave"',
+          'managed_browser_background_mode="unthrottled"',
+          '',
+        ].join('\n'),
       )
       const localResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
@@ -1775,7 +1794,7 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
         },
       })
       expect(localResult.status, localResult.stderr).toBe(0)
-      expect(localResult.stdout.trim()).toBe('main|1')
+      expect(localResult.stdout.trim()).toBe('main|1|/tmp/custom-brave|unthrottled')
 
       rmSync(path.join(localConfigRoot, 'murph', 'review-gpt.conf'))
       const defaultResult = spawnSync('bash', ['-c', configHarness], {
@@ -1789,7 +1808,9 @@ printf '%s|%s\n' "$review_gpt_selected_browser_lane" "$review_gpt_browser_lane_c
         },
       })
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
-      expect(defaultResult.stdout.trim()).toBe('main|4')
+      expect(defaultResult.stdout.trim()).toBe(
+        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced',
+      )
 
       const missingThreadResult = spawnSync('bash', ['-c', configHarness], {
         cwd: repoRoot,
