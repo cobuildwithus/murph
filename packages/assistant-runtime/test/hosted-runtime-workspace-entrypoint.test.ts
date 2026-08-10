@@ -8412,12 +8412,16 @@ describe("hosted workspace runtime entrypoint", () => {
       const codedFailure = Object.assign(new Error("hidden coded runtime failure"), {
         code: "existing_runtime_failure_code",
       });
+      expect(deriveHostedExecutionErrorCode(codedFailure)).toBe("runtime_error");
       await expect(runFailure(
         "attempt_synthetic_coded_phase_failure",
         codedFailure,
       )).rejects.toBe(codedFailure);
+      expect(codedFailure.code).toBe("existing_runtime_failure_code");
       expect(codedFailure).not.toHaveProperty("errorCode");
-      expect(readHostedRuntimeFailurePhaseCode(codedFailure)).toBeNull();
+      expect(readHostedRuntimeFailurePhaseCode(codedFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
 
       const nestedCodedFailure = Object.assign(
         new Error("hidden nested-coded runtime failure"),

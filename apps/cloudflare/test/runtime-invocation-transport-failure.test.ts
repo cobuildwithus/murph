@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  runHostedWorkspaceRuntimeJobInProcess,
+} from "@murphai/assistant-runtime";
+import {
   parseHostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_OWNER_RELEASED_PATH,
 } from "@murphai/hosted-execution/routes";
-import type {
-  HostedRuntimeWebStatusResponse,
+import {
+  readHostedRuntimeFailurePhaseCode,
+  type HostedRuntimeWebStatusResponse,
 } from "@murphai/hosted-execution/runtime-control";
 
 import {
@@ -16,10 +20,20 @@ import {
 import type {
   R2BucketLike,
 } from "../src/bundle-store.js";
-import type {
-  HostedExecutionContainerNamespaceLike,
-  HostedExecutionContainerStubLike,
+import {
+  RunnerContainer,
+  type HostedExecutionContainerNamespaceLike,
+  type HostedExecutionContainerStubLike,
 } from "../src/runner-container.js";
+import {
+  classifyRunnerJobError,
+} from "../src/container-entrypoint.js";
+import {
+  HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+} from "../src/hosted-runtime-architecture.js";
+import {
+  HostedRuntimeControlPlaneFetchError,
+} from "../src/runtime-platform/control-plane-fetch.js";
 import {
   buildHostedRunnerJobRuntimeConfig,
 } from "../src/runner-env.js";
@@ -71,6 +85,173 @@ describe("runtime invocation transport failure fence handling", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+  });
+
+  it("persists the runtime phase for a natural generic control-plane failure", async () => {
+    const hiddenCauseMessage = "private control-plane network detail";
+    const controlPlaneFailure = new HostedRuntimeControlPlaneFetchError({
+      cause: new TypeError(hiddenCauseMessage),
+      description: "Hosted workspace read",
+      signalState: {
+        callerSignalAborted: false,
+        requestSignalAborted: false,
+        timeoutMs: 5_000,
+        timeoutSignalAborted: false,
+      },
+    });
+    expect(controlPlaneFailure.code).toBe("type_error");
+
+    const runtimeFailure = await runHostedWorkspaceRuntimeJobInProcess({
+      request: {
+        attemptId: "attempt_control_plane_phase",
+        idleCheckpointDelayMs: 1,
+        leaseGeneration: "1",
+        userId: TEST_USER_ID,
+        workspaceVersion: "0",
+      },
+    }, {
+      async createCheckpointSnapshot() {
+        throw new Error("Checkpoint should not run after workspace read failure.");
+      },
+      async importItem() {
+        throw new Error("Mailbox import should not run after workspace read failure.");
+      },
+      platform: {
+        artifactStore: {
+          async get() {
+            return null;
+          },
+          async put() {},
+        },
+        effectsPort: {
+          async readRawEmailMessage() {
+            return null;
+          },
+          async sendEmail() {},
+        },
+        mailboxPort: {
+          async fetch() {
+            throw new Error("Mailbox fetch should not run after workspace read failure.");
+          },
+          async fetchPayload() {
+            throw new Error("Mailbox payload fetch should not run after workspace read failure.");
+          },
+        },
+        workspacePort: {
+          async checkpoint() {
+            throw new Error("Checkpoint should not run after workspace read failure.");
+          },
+          async read() {
+            throw controlPlaneFailure;
+          },
+        },
+      },
+      vaultRoot: "synthetic-control-plane-failure-vault",
+    }).catch((error: unknown) => error);
+
+    expect(runtimeFailure).toBe(controlPlaneFailure);
+    expect(readHostedRuntimeFailurePhaseCode(runtimeFailure)).toBe(
+      "runtime_phase:workspace.read",
+    );
+
+    const classified = classifyRunnerJobError(runtimeFailure);
+    expect(classified).toMatchObject({
+      payload: {
+        code: "runtime_error",
+        details: {
+          errorCodeDetail: "runtime_phase:workspace.read",
+        },
+      },
+      statusCode: 500,
+    });
+
+    const storage = createRunnerContainerStorageDouble();
+    let runnerStatus: "running" | "stopped" = "stopped";
+    const container = new RunnerContainer({ storage } as never, {} as never);
+    Object.assign(container, {
+      containerFetch: vi.fn(async (url: string) => {
+        if (String(url).endsWith("/health")) {
+          return new Response(JSON.stringify({
+            activeJobCount: 0,
+            conversationWarmActivityCompletedAtEpochMs: null,
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+          }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return new Response(JSON.stringify(classified.payload), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: classified.statusCode,
+        });
+      }),
+      async destroy() {
+        runnerStatus = "stopped";
+      },
+      async getState() {
+        return {
+          lastChange: Date.now(),
+          status: runnerStatus,
+        };
+      },
+      async start() {
+        runnerStatus = "running";
+      },
+      async startAndWaitForPorts() {
+        runnerStatus = "running";
+      },
+      storage,
+    });
+
+    const reconstructedFailure = await container.invoke({
+      job: {
+        kind: "workspace-invocation",
+        request: {
+          attemptId: "attempt_control_plane_phase",
+          leaseGeneration: "1",
+          userId: TEST_USER_ID,
+          workspaceVersion: "0",
+        },
+      },
+      timeoutMs: 10_000,
+      userId: TEST_USER_ID,
+    }).catch((error: unknown) => error);
+
+    expect(reconstructedFailure).toMatchObject({
+      code: "runtime_error",
+      details: {
+        errorCodeDetail: "runtime_phase:workspace.read",
+      },
+    });
+
+    const harness = await createTransportFailureHarness({
+      invocationError: reconstructedFailure as Error,
+      readActiveRuntimeUserFence: async (token) => ({
+        active: true,
+        attemptId: token.attemptId,
+        leaseGeneration: token.leaseGeneration,
+        userId: TEST_USER_ID,
+      }),
+    });
+
+    await expect(harness.invoke()).rejects.toBe(reconstructedFailure);
+    expect(harness.loggedFailureEntries()).toEqual([
+      expect.objectContaining({
+        errorCode: "runtime_error",
+        eventCode: "runner.accepted_attempt_failed",
+        redactedJson: expect.objectContaining({
+          errorCode: "runtime_error",
+          errorCodeDetail: "runtime_phase:workspace.read",
+        }),
+      }),
+    ]);
+    expect(JSON.stringify(harness.loggedFailureEntries())).not.toContain(hiddenCauseMessage);
   });
 
   it("keeps the write fence when the invocation is still active in the container", async () => {
@@ -733,6 +914,29 @@ describe("buildHostedRunnerRedactedErrorJson", () => {
     expect(JSON.stringify(redacted)).not.toContain("member_123456789");
   });
 });
+
+function createRunnerContainerStorageDouble() {
+  const values = new Map<string, unknown>();
+
+  return {
+    async delete(key: string): Promise<boolean> {
+      return values.delete(key);
+    },
+    async get<T>(key: string): Promise<T | undefined> {
+      return values.get(key) as T | undefined;
+    },
+    async list<T>(options?: { prefix?: string }): Promise<Map<string, T>> {
+      return new Map(
+        Array.from(values.entries())
+          .filter(([key]) => !options?.prefix || key.startsWith(options.prefix))
+          .map(([key, value]) => [key, value as T]),
+      );
+    },
+    async put<T>(key: string, value: T): Promise<void> {
+      values.set(key, value);
+    },
+  };
+}
 
 async function createTransportFailureHarness(input: {
   invocationError?: Error;

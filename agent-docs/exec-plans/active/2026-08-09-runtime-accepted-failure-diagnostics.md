@@ -47,11 +47,13 @@ Updated: 2026-08-09
    Mitigation: carry only normalized categorical fields through explicit
    allowlists and prove unsafe values are omitted.
 2. Risk: changing error construction alters retry classification.
-   Mitigation: preserve existing direct and nested codes, the current outer
-   code/status/message, and all scheduling/recovery behavior.
+   Mitigation: use the existing shared canonical classifier as the single
+   phase-eligibility authority, preserve its code/status/message, and leave all
+   scheduling/recovery behavior unchanged.
 3. Risk: warm old containers omit the phase tag during rollout.
-   Mitigation: reuse the existing optional `errorCodeDetail` bridge so legacy
-   generic failures remain valid and mixed-version behavior is unchanged.
+   Mitigation: publish the Worker first, then immediately roll the matching
+   runner bundle. The supported new-Worker/old-runner window remains generic;
+   do not leave an old Worker paired with the new phase-producing runner.
 4. Risk: preferring arbitrary nested code-shaped values could persist an
    identifier.
    Mitigation: the Worker accepts only exact shared `runtime_phase:<phase>`
@@ -64,8 +66,8 @@ Updated: 2026-08-09
 2. [x] Confirm whether the existing safe diagnostic bridge is live in production.
 3. [x] Tag otherwise-generic failures with the causal runtime phase and close
    handled phase state without adding routine success logs.
-4. [x] Add focused phase-tagging, existing/nested-code preservation,
-   exact-transport, and identifier-rejection tests.
+4. [x] Add focused canonical-code phase eligibility, typed-classification
+   preservation, exact-transport, and identifier-rejection tests.
 5. [x] Run focused Assistant Runtime and Cloudflare proof and typecheck, then
    review the complete diff.
 6. Push the candidate, open a draft PR, run preliminary specialists and final
@@ -84,9 +86,11 @@ Updated: 2026-08-09
   precedence during final redacted persistence. The narrow shared phase
   contract fixes that last hop without changing precedence for any other code.
 - The phase marker is a non-enumerable shared property separate from `.code`
-  and `.errorCode`. An exact `runtime_error` detail remains generic and may
-  receive a phase; every meaningful direct or nested code keeps its existing
-  transport and classification.
+  and `.errorCode`. The existing canonical classifier is the only eligibility
+  authority: canonical `runtime_error` receives a phase, while every actionable
+  non-generic canonical classification remains unchanged. Intermediate direct
+  or nested code strings do not suppress a phase when the final owner would
+  still persist only `runtime_error`.
 - The Worker never interpolates an allowlisted phase into the reconstructed
   error's `Code:` message fragment. This keeps checkpoint phase names from
   changing canonical message-derived classification while preserving the phase
@@ -113,6 +117,16 @@ Updated: 2026-08-09
   text. Focused Assistant Runtime tests (2 selected), focused cross-boundary
   Cloudflare tests (4 selected), all three owner typechecks, and the full
   Cloudflare container/transport slice (3 files, 265 tests) pass.
+- Final ReviewGPT round 2 proved the round-1 code-presence mechanism still lost
+  the phase for a normal control-plane `TypeError`: intermediate `type_error`
+  suppressed capture even though the accepted-attempt owner persisted generic
+  `runtime_error`. The required retrospective is recorded on the PR. The
+  correction deletes that heuristic and derives phase eligibility from the
+  existing canonical classifier. A single integration regression now begins
+  with a natural `HostedRuntimeControlPlaneFetchError`, passes through the real
+  runtime phase catch, container classification, RunnerContainer reconstruction,
+  and accepted-attempt persistence, and proves canonical code, phase, and
+  privacy together.
 - Passed `git diff --check` and parent scope/call-path review.
 - Production deployment proof confirmed the existing propagation bridge is
   already live at 100%; no rollout wait or duplicate transport work is needed.

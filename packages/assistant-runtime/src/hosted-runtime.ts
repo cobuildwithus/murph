@@ -37,6 +37,7 @@ import {
 } from "@murphai/hosted-execution/env";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
   summarizeHostedExecutionError,
@@ -4285,28 +4286,17 @@ function attachHostedRuntimeFailurePhase(
   error: unknown,
   phase: HostedRuntimePhaseName,
 ): unknown {
-  if (!(error instanceof Error) || hasMeaningfulHostedRuntimeDiagnosticCode(error)) {
+  if (
+    !(error instanceof Error)
+    || deriveHostedExecutionErrorCode(error) !== "runtime_error"
+  ) {
     return error;
   }
 
-  // Keep the phase separate from `.code` and `.errorCode`: those properties
-  // own canonical classification. The container explicitly reads the hidden
-  // phase marker only for otherwise-generic errors.
+  // The shared canonical classifier is the single authority: if it cannot
+  // produce an actionable classification, preserve the causal phase without
+  // changing `.code`, `.errorCode`, retry behavior, or durable failure state.
   return attachHostedRuntimeFailurePhaseCode(error, phase);
-}
-
-function hasMeaningfulHostedRuntimeDiagnosticCode(error: Error): boolean {
-  try {
-    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-    const detail = typeof diagnostics?.errorCodeDetail === "string"
-      ? diagnostics.errorCodeDetail.trim().toLowerCase()
-      : "";
-    return detail.length > 0 && detail !== "runtime_error";
-  } catch {
-    // A hostile getter or proxy must not let optional diagnostics replace the
-    // original runtime failure.
-    return true;
-  }
 }
 
 function emitHostedRuntimePhaseLog(
