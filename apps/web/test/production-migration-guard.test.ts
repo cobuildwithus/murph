@@ -1576,7 +1576,7 @@ describe("hosted web production migration guard", () => {
       ),
       {
         path: "/api/internal/hosted-growth/usage-referral/cron",
-        schedule: "*/5 * * * *",
+        schedule: "* * * * *",
       },
     );
     assert.deepEqual(

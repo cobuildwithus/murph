@@ -464,7 +464,7 @@ system prefix. Their server-generated event identities and idempotent delivery
 make that latency shortcut replay-safe; generic notifications still wait for
 the idle checkpoint. A referral celebration recomputes its current-model
 capacity label and receives only a server-resolved tone, Humor, and Unhinged
-band, never transcript history. The existing five-minute recovery pass
+band, never transcript history. The existing minute recovery pass
 re-signals the exact oldest unconsumed celebration mailbox items after a failed
 Temporal signal, so mailbox state remains the only durable wake owner.
 
@@ -933,7 +933,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   serialization boundary, bind only to that referrer's next newly created
   thread container, normalize Linq and Telegram evidence into one
   provider-neutral qualifier, freeze pre-expiry qualification in the ingress
-  transaction, and converge immediate plus bounded five-minute recovery on
+  transaction, and converge immediate plus bounded minute recovery on
   one fixed server-catalog grant and one source-mailbox celebration fence. A new
   grant clears the current block when capacity becomes positive and requests
   the normal runtime recheck through the durable event owner so pending
