@@ -68,6 +68,9 @@ export function PersonalPatternsStudy() {
           state="error"
         />
       </div>
+      <div data-design-state="unavailable">
+        <PersonalPatternsSection report={null} state="unavailable" />
+      </div>
     </div>
   );
 }

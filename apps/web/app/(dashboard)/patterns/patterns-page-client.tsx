@@ -12,10 +12,13 @@ export default function PatternsPageClient() {
     () => client ? selectBrowserVaultOverview(client).personalPatterns : null,
     [client],
   );
-  const isPreparing = status === "empty" && refreshPending;
+  const patternsAvailable = client?.replica.personalPatterns !== undefined;
+  const isPreparing = refreshPending && (status === "empty" || !patternsAvailable);
   const sectionState = status === "loading" || isPreparing
     ? "loading"
-    : status === "error" ? "error" : "ready";
+    : status === "error"
+      ? "error"
+      : client && !patternsAvailable ? "unavailable" : "ready";
 
   return (
     <div className="flex flex-col gap-8">

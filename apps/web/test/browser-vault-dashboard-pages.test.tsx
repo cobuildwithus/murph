@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, test, vi } from "vitest";
 
@@ -13,6 +13,7 @@ import {
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 
 const mocks = vi.hoisted(() => ({
+  refresh: vi.fn(async () => undefined),
   resolveHostedMurphContactOptions: vi.fn(),
   useBrowserVault: vi.fn(),
 }));
@@ -39,6 +40,7 @@ import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout
 import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client";
 import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout";
 import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-study";
+import { renderClientComponent } from "./render-client-component";
 
 type BrowserVaultEntity = Parameters<
   typeof createVaultReadModel
@@ -49,6 +51,7 @@ const experimentProtocols = listHealthCommonsExperimentBrowseProtocols();
 
 beforeEach(async () => {
   clientFixture = await createFixtureClient();
+  mocks.refresh.mockClear();
   mocks.resolveHostedMurphContactOptions.mockResolvedValue([
     {
       href: "sms:+15555550100?body=I%20want%20to%20update%20my%20environment.",
@@ -62,7 +65,7 @@ beforeEach(async () => {
     error: null,
     ref: null,
     refreshPending: false,
-    refresh: async () => {},
+    refresh: mocks.refresh,
     status: "ready",
   });
 });
@@ -169,6 +172,83 @@ test("Personal Patterns comparison controls name their factor and next-day outco
 
   assert.match(markup, /aria-label="Running, next-day HRV\./);
   assert.match(markup, /aria-label="Sauna, next-day Total sleep\./);
+});
+
+test("PatternsPage asks for a refresh when a legacy replica has no patterns projection", async () => {
+  const legacyReplica = { ...clientFixture.replica };
+  delete legacyReplica.personalPatterns;
+  const legacyClient = createBrowserVaultQueryClient(legacyReplica);
+  mocks.useBrowserVault.mockReturnValue({
+    client: legacyClient,
+    dataVersion: legacyClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+  const rendered = await renderClientComponent(createElement(PatternsPageClient));
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Patterns need a refresh/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /No clear comparison is ready/u);
+    const refreshButton = [...rendered.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Refresh now",
+    );
+    assert.ok(refreshButton);
+    await act(async () => {
+      refreshButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("PatternsPage keeps a legacy replica in the preparing state during refresh", () => {
+  const legacyReplica = { ...clientFixture.replica };
+  delete legacyReplica.personalPatterns;
+  const legacyClient = createBrowserVaultQueryClient(legacyReplica);
+  mocks.useBrowserVault.mockReturnValue({
+    client: legacyClient,
+    dataVersion: legacyClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: true,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+  const markup = renderToStaticMarkup(createElement(PatternsPageClient));
+
+  assert.match(markup, /Preparing your patterns/u);
+  assert.doesNotMatch(markup, /No clear comparison is ready/u);
+});
+
+test("PatternsPage exposes the existing retry action after a load failure", async () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: "The private replica could not be opened.",
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "error",
+  });
+  const rendered = await renderClientComponent(createElement(PatternsPageClient));
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Could not load your patterns/u);
+    const retryButton = [...rendered.container.querySelectorAll("button")].find(
+      (button) => button.textContent === "Retry",
+    );
+    assert.ok(retryButton);
+    await act(async () => {
+      retryButton.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+  } finally {
+    await rendered.cleanup();
+  }
 });
 
 test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {

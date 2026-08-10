@@ -45,7 +45,7 @@ export function PersonalPatternsSection({
   error?: string | null;
   onRetry?: () => void;
   report: PersonalPatternReport | null;
-  state?: "error" | "loading" | "ready";
+  state?: "error" | "loading" | "ready" | "unavailable";
 }) {
   if (state === "loading") {
     return (
@@ -71,6 +71,22 @@ export function PersonalPatternsSection({
           </div>
         </AlertDescription>
       </Alert>
+    );
+  }
+
+  if (state === "unavailable") {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Patterns need a refresh</CardTitle>
+          <CardDescription>
+            Murph needs to refresh your private health data before it can check your history.
+          </CardDescription>
+          <div className="pt-2">
+            <Button size="sm" variant="outline" onClick={onRetry}>Refresh now</Button>
+          </div>
+        </CardHeader>
+      </Card>
     );
   }
 
@@ -173,7 +189,7 @@ function LeadPattern({
 }
 
 function PatternMatrix({ report }: { report: PersonalPatternReport }) {
-  const columns = `minmax(11rem, 1.35fr) repeat(${report.outcomes.length}, minmax(8.5rem, 1fr))`;
+  const columns = `12.5rem repeat(${report.outcomes.length}, minmax(8.5rem, 1fr))`;
 
   return (
     <TooltipProvider delay={120}>
@@ -187,7 +203,7 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
               className="grid items-end bg-muted/20"
               style={{ gridTemplateColumns: columns }}
             >
-              <div className="px-6 py-4 sm:px-8">
+              <div className="sticky left-0 z-20 border-r border-border bg-[#fffcf6] px-6 py-4 dark:bg-card sm:px-8">
                 <span className="font-mono text-[10px] uppercase tracking-[0.11em] text-muted-foreground">
                   Action
                 </span>
@@ -207,7 +223,7 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
                 className="grid min-h-28 items-center border-t border-border"
                 style={{ gridTemplateColumns: columns }}
               >
-                <div className="flex items-center gap-3 px-6 py-4 sm:px-8">
+                <div className="sticky left-0 z-10 flex items-center gap-3 border-r border-border bg-[#fffcf6] px-6 py-4 dark:bg-card sm:px-8">
                   <Image
                     src={factorIcon(factor)}
                     alt=""
@@ -292,8 +308,8 @@ function PatternBubble({
               "flex shrink-0 items-center justify-center rounded-full font-mono text-xs font-semibold tabular-nums transition-transform focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:scale-105",
               isFlat && "border border-border bg-card text-muted-foreground",
               !isFlat && cell.stage === "new_clue" && "bg-[#c4a882] text-foreground",
-              !isFlat && cell.stage === "seen_again" && "bg-[#7a8c6e] text-white",
-              !isFlat && cell.stage === "worth_testing" && "bg-[#5a6e32] text-white",
+              !isFlat && cell.stage === "seen_again" && "bg-[#7a8c6e] text-[#211e1a]",
+              !isFlat && cell.stage === "worth_testing" && "bg-[#5a6e32] text-[#f4ede1]",
               cell.stage === "worth_testing" && "ring-2 ring-primary/25 ring-offset-2 ring-offset-card",
             )}
             style={{ height: size, width: size }}

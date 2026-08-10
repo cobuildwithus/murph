@@ -68,6 +68,23 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
   assert.deepEqual(parsed.personalPatterns, report);
 });
 
+test("Browser Vault parsing preserves a missing legacy Personal Patterns projection", async () => {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash: "l".repeat(64),
+    vault: createVaultReadModel({
+      entities: [],
+      vaultRoot: "test://legacy-personal-patterns",
+    }),
+  });
+  delete replica.personalPatterns;
+
+  const parsed = parseBrowserVaultReplica(replica);
+
+  assert.equal(parsed.personalPatterns, undefined);
+});
+
 test("Personal Patterns qualifies factors before applying the six-row display cap", () => {
   const start = "2026-01-05";
   const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
@@ -101,6 +118,93 @@ test("Personal Patterns qualifies factors before applying the six-row display ca
 
   assert.deepEqual(report.factors.map((factor) => factor.id), ["running"]);
   assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+});
+
+test("Personal Patterns uses the nearest unused same-weekday comparisons", () => {
+  const start = "2026-01-05";
+  const runningDates = [0, 14, 28, 42, 56].map((offset) => addDays(start, offset));
+  const comparisonDates = [7, 21, 35, 49, 63].map((offset) => addDays(start, offset));
+  const comparisonValues = [10, 50, 50, 50, 50];
+  const wrongWeekdayDates = [1, 15, 29, 43, 57].map((offset) => addDays(start, offset));
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      ...runningDates.map((date, index) => event(`run_match_${index}`, date, "activity_session", {
+        activityType: "running",
+      })),
+      ...runningDates.map((date, index) =>
+        observation(`hrv_exposed_${index}`, addDays(date, 1), "hrv", 70, "ms")
+      ),
+      ...comparisonDates.map((date, index) =>
+        observation(`hrv_control_${index}`, addDays(date, 1), "hrv", comparisonValues[index] ?? 50, "ms")
+      ),
+      ...wrongWeekdayDates.map((date, index) =>
+        observation(`hrv_wrong_weekday_${index}`, addDays(date, 1), "hrv", 95, "ms")
+      ),
+    ],
+    vaultRoot: "test://personal-pattern-matching",
+  }), {
+    asOf: addDays(start, 70),
+  });
+  const hrv = report.cells.find((cell) => cell.outcomeId === "hrv");
+
+  assert.ok(hrv);
+  assert.equal(hrv.comparisonDays, 5);
+  assert.equal(hrv.comparisonMean, 42);
+  assert.equal(hrv.exposedMean, 70);
+});
+
+test("Personal Patterns rejects controls on the wrong weekday or beyond 35 days", () => {
+  const start = "2026-03-02";
+  const runningDates = [0, 7, 14, 21, 28].map((offset) => addDays(start, offset));
+  const remoteDates = [-70, -63, -56, -49, -42].map((offset) => addDays(start, offset));
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      ...runningDates.map((date, index) => event(`run_guard_${index}`, date, "activity_session", {
+        activityType: "running",
+      })),
+      ...runningDates.map((date, index) =>
+        observation(`hrv_guard_exposed_${index}`, addDays(date, 1), "hrv", 70, "ms")
+      ),
+      ...runningDates.map((date, index) =>
+        observation(`hrv_guard_wrong_${index}`, addDays(date, 2), "hrv", 40, "ms")
+      ),
+      ...remoteDates.map((date, index) =>
+        observation(`hrv_guard_remote_${index}`, addDays(date, 1), "hrv", 50, "ms")
+      ),
+    ],
+    vaultRoot: "test://personal-pattern-control-guards",
+  }), {
+    asOf: addDays(start, 35),
+    windowDays: 120,
+  });
+
+  assert.deepEqual(report.factors, []);
+  assert.deepEqual(report.cells, []);
+});
+
+test("Personal Patterns keeps the evidence-stage boundaries and repeated-direction guard", () => {
+  const cases = [
+    { count: 5, expected: "new_clue", exposed: () => 70, name: "five over 21 days", span: 21 },
+    { count: 5, expected: undefined, exposed: () => 70, name: "five under 21 days", span: 20 },
+    { count: 8, expected: "seen_again", exposed: () => 70, name: "eight over 42 days", span: 42 },
+    { count: 8, expected: "new_clue", exposed: () => 70, name: "eight under 42 days", span: 41 },
+    { count: 12, expected: "worth_testing", exposed: () => 53.75, name: "twelve over 56 days at 1.5x", span: 56 },
+    { count: 12, expected: "seen_again", exposed: () => 53.74, name: "twelve over 56 days under 1.5x", span: 56 },
+    { count: 12, expected: "seen_again", exposed: () => 53.75, name: "twelve under 56 days", span: 55 },
+    {
+      count: 8,
+      expected: "no_clear_pattern",
+      exposed: (index: number) => index < 4 ? 80 : 45,
+      name: "conflicting historical halves",
+      span: 42,
+    },
+  ] as const;
+
+  for (const entry of cases) {
+    const report = buildHrvStageFixture(entry.count, entry.span, entry.exposed);
+    const stage = report.cells.find((cell) => cell.outcomeId === "hrv")?.stage;
+    assert.equal(stage, entry.expected, entry.name);
+  }
 });
 
 test("Personal Patterns anchors sleep outcomes to the localized sleep-end date in direct and runtime reads", async () => {
@@ -465,4 +569,46 @@ function addDays(value: string, days: number): string {
   const date = new Date(`${value}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function buildHrvStageFixture(
+  count: number,
+  spanDays: number,
+  exposedValue: (index: number) => number,
+) {
+  const start = "2026-01-05";
+  const offsets = Array.from({ length: count }, (_, index) =>
+    Math.round(index * spanDays / (count - 1))
+  );
+  const factorIndexByDate = new Map(
+    offsets.map((offset, index) => [addDays(start, offset), index] as const),
+  );
+  const asOfOffset = spanDays + 14;
+  const entities: CanonicalEntity[] = [
+    ...offsets.map((offset, index) => {
+      const date = addDays(start, offset);
+      return event(`run_stage_${count}_${spanDays}_${index}`, date, "activity_session", {
+        activityType: "running",
+      });
+    }),
+    ...Array.from({ length: asOfOffset + 1 }, (_, offset) => {
+      const date = addDays(start, offset);
+      const factorIndex = factorIndexByDate.get(addDays(date, -1));
+      return observation(
+        `hrv_stage_${count}_${spanDays}_${offset}`,
+        date,
+        "hrv",
+        factorIndex === undefined ? 50 : exposedValue(factorIndex),
+        "ms",
+      );
+    }),
+  ];
+
+  return buildPersonalPatternReport(createVaultReadModel({
+    entities,
+    vaultRoot: `test://personal-pattern-stage-${count}-${spanDays}`,
+  }), {
+    asOf: addDays(start, asOfOffset),
+    windowDays: Math.max(28, asOfOffset + 1),
+  });
 }

@@ -23,7 +23,6 @@ import {
 } from "./shared.ts";
 import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
 import {
-  emptyPersonalPatternReport,
   type PersonalPatternCell,
   type PersonalPatternFactor,
   type PersonalPatternOutcome,
@@ -57,9 +56,14 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     metricGoalProgressRows: requireArray(record.metricGoalProgressRows, `${label}.metricGoalProgressRows`).map((entry, index) => parseMetricGoalProgressRow(entry, `${label}.metricGoalProgressRows[${index}]`)),
     metricRows: requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) => parseMetricRow(entry, `${label}.metricRows[${index}]`)),
     metricSelectionRows: requireArray(record.metricSelectionRows, `${label}.metricSelectionRows`).map((entry, index) => parseMetricSelectionRow(entry, `${label}.metricSelectionRows[${index}]`)),
-    personalPatterns: record.personalPatterns === undefined
-      ? emptyPersonalPatternReport(generatedAt.slice(0, 10))
-      : parsePersonalPatternReport(record.personalPatterns, `${label}.personalPatterns`),
+    ...(record.personalPatterns === undefined
+      ? {}
+      : {
+          personalPatterns: parsePersonalPatternReport(
+            record.personalPatterns,
+            `${label}.personalPatterns`,
+          ),
+        }),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: requireArray(record.searchRows, `${label}.searchRows`).map((entry, index) => parseSearchRow(entry, `${label}.searchRows[${index}]`)),
