@@ -746,7 +746,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
       prisma: expect.any(Object),
     });
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith("member_typing");
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+      source: "linq-typing-started",
+      userId: "member_typing",
+    });
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
@@ -5659,7 +5662,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(shellPrewarmIndex).toBeGreaterThanOrEqual(0);
     expect(shellPrewarmIndex).toBeLessThan(enrollmentIndex);
     expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(memberId);
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+      source: "linq-instant-start",
+      userId: memberId,
+    });
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
       chatId: "chat_123",
@@ -5817,7 +5823,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
 
     expect(prewarmRuntimeShell).toHaveBeenCalledOnce();
-    expect(prewarmRuntimeShell).toHaveBeenCalledWith(memberId);
+    expect(prewarmRuntimeShell).toHaveBeenCalledWith({
+      source: "linq-instant-start",
+      userId: memberId,
+    });
     expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledTimes(1);
     await vi.waitFor(() => {

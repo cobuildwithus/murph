@@ -7,6 +7,9 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -290,8 +293,21 @@ export class HostedUserRunner {
     });
   }
 
-  async prewarmRuntimeShellForUser(userId: string): Promise<void> {
+  async prewarmRuntimeShellForUser(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void> {
     if (this.runtimeConsentMutationLock) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_consent_busy",
+          shellPrewarmSource: source ?? "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
       return;
     }
     await this.withRuntimeConsentMutationLock(async () => {
@@ -302,12 +318,33 @@ export class HostedUserRunner {
           { timeoutMs: HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS },
         );
       } catch {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+            shellPrewarmSource: source ?? "unknown",
+          },
+          level: "warn",
+          message: "Hosted runner shell prewarm admission decided.",
+          phase: "scheduled",
+          userId,
+        });
         return;
       }
       if (!admission.processingAllowed) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+            shellPrewarmSource: source ?? "unknown",
+          },
+          message: "Hosted runner shell prewarm admission decided.",
+          phase: "scheduled",
+          userId,
+        });
         return;
       }
-      await this.runtimeProcessing.beginShellPrewarmForUser(userId);
+      await this.runtimeProcessing.beginShellPrewarmForUser(userId, source);
     });
   }
 

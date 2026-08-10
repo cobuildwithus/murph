@@ -1546,6 +1546,12 @@ describe("hosted runtime control contracts", () => {
         freshStartContainerReadyAtEpochMs: 1_777_000_000_090,
         freshStartInvocationPreparedAtEpochMs: 1_777_000_000_100,
         freshStartInvocationAcceptedAtEpochMs: 1_777_000_000_110,
+        shellPrewarmFirstHintAtEpochMs: 1_777_000_000_061,
+        shellPrewarmFinishedAtEpochMs: 1_777_000_000_063,
+        shellPrewarmOperationElapsedMs: 2,
+        shellPrewarmHintCount: 2,
+        shellPrewarmOutcome: "cold_start_observed",
+        shellPrewarmSource: "linq-typing-started",
         workspaceReadElapsedMs: 30,
         runtimeStoreEnsureElapsedMs: 40,
         runtimeInvocationPreparationElapsedMs: 60,
@@ -1780,6 +1786,10 @@ describe("hosted runtime control contracts", () => {
       { activeWakeFoundNoActiveChild: "true" }, // boolean leaf must stay boolean
       { activeWakeElapsedMs: 1.5 }, // duration must be an integer
       { freshStartRequestedAtEpochMs: "1777000000070" }, // string leaf
+      { shellPrewarmHintCount: -1 }, // counts must be non-negative
+      { shellPrewarmFirstHintAtEpochMs: "1777000000061" }, // timestamps stay numeric
+      { shellPrewarmOutcome: "started" }, // outcomes stay in the bounded enum
+      { shellPrewarmSource: "linq" }, // sources stay in the bounded enum
       { runtimeStoreEnsureElapsedMs: -1 }, // duration must be non-negative
     ]) {
       const parsed = parseHostedRuntimeLatencyTraceRequest({

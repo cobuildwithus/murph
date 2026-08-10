@@ -2120,6 +2120,19 @@ export interface HostedRuntimeLatencyPhaseBreakdown {
     freshStartContainerReadyAtEpochMs?: number;
     freshStartInvocationPreparedAtEpochMs?: number;
     freshStartInvocationAcceptedAtEpochMs?: number;
+    shellPrewarmFirstHintAtEpochMs?: number;
+    shellPrewarmFinishedAtEpochMs?: number;
+    shellPrewarmOperationElapsedMs?: number;
+    shellPrewarmHintCount?: number;
+    shellPrewarmOutcome?:
+      | "cold_start_observed"
+      | "failed"
+      | "start_issued_warm"
+      | "superseded";
+    shellPrewarmSource?:
+      | "linq-instant-start"
+      | "linq-typing-started"
+      | "unknown";
     workspaceReadElapsedMs?: number;
     runtimeStoreEnsureElapsedMs?: number;
     runtimeInvocationPreparationElapsedMs?: number;
@@ -2409,6 +2422,12 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS: Record<
     "freshStartContainerReadyAtEpochMs",
     "freshStartInvocationPreparedAtEpochMs",
     "freshStartInvocationAcceptedAtEpochMs",
+    "shellPrewarmFirstHintAtEpochMs",
+    "shellPrewarmFinishedAtEpochMs",
+    "shellPrewarmOperationElapsedMs",
+    "shellPrewarmHintCount",
+    "shellPrewarmOutcome",
+    "shellPrewarmSource",
     "workspaceReadElapsedMs",
     "runtimeStoreEnsureElapsedMs",
     "runtimeInvocationPreparationElapsedMs",
@@ -2771,6 +2790,17 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
     )
   ) {
     return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
+  }
+  if (phase === "orchestration" && leafKey === "shellPrewarmOutcome") {
+    return value === "cold_start_observed"
+      || value === "failed"
+      || value === "start_issued_warm"
+      || value === "superseded";
+  }
+  if (phase === "orchestration" && leafKey === "shellPrewarmSource") {
+    return value === "linq-instant-start"
+      || value === "linq-typing-started"
+      || value === "unknown";
   }
   if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
     return typeof value === "string"

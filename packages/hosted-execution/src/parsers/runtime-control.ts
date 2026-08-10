@@ -5703,6 +5703,54 @@ function requireOptionalBoolean(
   return { [key]: requireBoolean(record[key], `${label}.${key}`) };
 }
 
+function requireOptionalShellPrewarmOutcome(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  shellPrewarmOutcome?:
+    | "cold_start_observed"
+    | "failed"
+    | "start_issued_warm"
+    | "superseded";
+} {
+  const value = record.shellPrewarmOutcome;
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    value !== "cold_start_observed"
+    && value !== "failed"
+    && value !== "start_issued_warm"
+    && value !== "superseded"
+  ) {
+    throw new TypeError(`${label}.shellPrewarmOutcome is invalid.`);
+  }
+  return { shellPrewarmOutcome: value };
+}
+
+function requireOptionalShellPrewarmSource(
+  record: Record<string, unknown>,
+  label: string,
+): {
+  shellPrewarmSource?:
+    | "linq-instant-start"
+    | "linq-typing-started"
+    | "unknown";
+} {
+  const value = record.shellPrewarmSource;
+  if (value === undefined) {
+    return {};
+  }
+  if (
+    value !== "linq-instant-start"
+    && value !== "linq-typing-started"
+    && value !== "unknown"
+  ) {
+    throw new TypeError(`${label}.shellPrewarmSource is invalid.`);
+  }
+  return { shellPrewarmSource: value };
+}
+
 // phaseBreakdown is best-effort diagnostic telemetry, not a core milestone. Parse
 // it leniently: if it is malformed (unknown key, non-number/boolean leaf, or an
 // older/newer shape during web/runtime deploy skew) drop only the breakdown rather
@@ -5793,6 +5841,12 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartContainerReadyAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationPreparedAtEpochMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "freshStartInvocationAcceptedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmFirstHintAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmFinishedAtEpochMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmOperationElapsedMs", orchestrationLabel),
+      ...requireOptionalNonNegativeInteger(orchestration, "shellPrewarmHintCount", orchestrationLabel),
+      ...requireOptionalShellPrewarmOutcome(orchestration, orchestrationLabel),
+      ...requireOptionalShellPrewarmSource(orchestration, orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "workspaceReadElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeStoreEnsureElapsedMs", orchestrationLabel),
       ...requireOptionalNonNegativeInteger(orchestration, "runtimeInvocationPreparationElapsedMs", orchestrationLabel),

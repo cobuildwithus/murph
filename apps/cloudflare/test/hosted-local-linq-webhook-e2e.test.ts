@@ -3,6 +3,11 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  readHostedIngressLatencyTraceForTest,
+  readHostedMailboxItemForTest,
+} from "#hosted-web-testing";
+
+import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
@@ -261,6 +266,7 @@ describe("hosted local Linq webhook e2e", () => {
     );
 
     const messageText = "Does the normal reply still arrive after typing?";
+    const messageEventId = `evt_after_typing_prewarm_${userId}`;
     requireScenario().queueAssistantResponses([
       hostedLinqTypingPrewarmAssistantReplyText,
     ], {
@@ -268,7 +274,7 @@ describe("hosted local Linq webhook e2e", () => {
     });
     const messageResponse = await postSignedLinqWebhook(
       buildHostedLinqInboundEvent(userId, chatId, {
-        eventId: `evt_after_typing_prewarm_${userId}`,
+        eventId: messageEventId,
         messageId: `msg_after_typing_prewarm_${userId}`,
         text: messageText,
       }),
@@ -296,6 +302,18 @@ describe("hosted local Linq webhook e2e", () => {
     expect(requireScenario().assistantProviderRequests).toHaveLength(
       providerCountBeforeTyping + 1,
     );
+    const latencyTrace = await waitForTypingPrewarmLatencyTrace({
+      mailboxDedupeKey: messageEventId,
+      userId,
+    });
+    expect(latencyTrace.phaseBreakdown?.orchestration).toMatchObject({
+      shellPrewarmFirstHintAtEpochMs: expect.any(Number),
+      shellPrewarmHintCount: expect.any(Number),
+      shellPrewarmOutcome: expect.stringMatching(
+        /^(?:cold_start_observed|start_issued_warm)$/u,
+      ),
+      shellPrewarmSource: "linq-typing-started",
+    });
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
@@ -933,6 +951,41 @@ async function waitForHostedRuntimeShellPrewarmAccepted(
   throw new Error(await requireScenario().buildFailureMessage(userId, [
     "Timed out waiting for the typing-start shell prewarm acceptance.",
   ]));
+}
+
+async function waitForTypingPrewarmLatencyTrace(input: {
+  mailboxDedupeKey: string;
+  userId: string;
+}) {
+  const startedAt = Date.now();
+  let lastError: unknown = null;
+  while (Date.now() - startedAt < 30_000) {
+    try {
+      const mailboxItem = await readHostedMailboxItemForTest({
+        dedupeKey: input.mailboxDedupeKey,
+        environment: requireScenario().runtimeEnv,
+        userId: input.userId,
+      });
+      const trace = await readHostedIngressLatencyTraceForTest({
+        environment: requireScenario().runtimeEnv,
+        mailboxItemId: mailboxItem.id,
+        userId: input.userId,
+      });
+      if (
+        trace.phaseBreakdown?.orchestration?.shellPrewarmOutcome
+        && trace.phaseBreakdown.orchestration.shellPrewarmSource
+      ) {
+        return trace;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(100);
+  }
+
+  throw new Error(
+    `Timed out waiting for the typing-prewarm latency trace: ${String(lastError)}`,
+  );
 }
 
 function countTextOccurrences(value: string, needle: string): number {
