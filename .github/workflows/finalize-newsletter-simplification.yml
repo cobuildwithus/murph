@@ -1,0 +1,112 @@
+name: Finalize newsletter simplification
+
+on:
+  push:
+    branches:
+      - agent/simplify-newsletter-automation-final
+    paths:
+      - .github/workflows/finalize-newsletter-simplification.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: contains(github.event.head_commit.message, '[finalize-newsletter-simplification]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: agent/simplify-newsletter-automation-final
+
+      - name: Apply final documentation and regression updates
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              target = Path(path)
+              text = target.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}")
+              target.write_text(text.replace(old, new, 1))
+
+          test_path = "packages/assistant-engine/test/assistant-hosted-domain-tools.test.ts"
+          replace_once(
+              test_path,
+              """  GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,\n  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,\n} from '../src/assistant/group-newsletter-automation.js'\n""",
+              """  GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,\n  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,\n  GROUP_NEWSLETTER_ORDINARY_EXECUTION_MARKER,\n} from '../src/assistant/group-newsletter-automation.js'\n""",
+          )
+          replace_once(
+              test_path,
+              """          GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,\n          'These are configuration values. The runtime appends the current execution contract on every scheduled run.',\n          'Newsletter name: \"Family weekly health newsletter\"',\n""",
+              """          GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,\n          GROUP_NEWSLETTER_ORDINARY_EXECUTION_MARKER,\n          'Read the group-newsletter skill before every execution. The saved values below define the requested edition.',\n          'Current-chat delivery uses the ordinary scheduled group-read and conversation-outbox path. Group-email delivery receives a separate trusted one-shot email contract from the runtime.',\n          'Newsletter name: \"Family weekly health newsletter\"',\n""",
+          )
+
+          spec_path = "agent-docs/product-specs/group-health-newsletter.md"
+          replace_once(
+              spec_path,
+              """Last verified: 2026-07-29\nStatus: Implemented\n\n## Current State\n""",
+              """Last verified: 2026-08-10\nStatus: Implemented\n\n## Simplified ownership (2026-08-10)\n\nThe newsletter is one ordinary group automation plus existing group primitives.\nThe structured `save_newsletter` action remains a small trusted compiler because\nit is the narrowest safe owner for the stable slug, reserved delivery tag, and\nvalidated configuration; it does not create a second scheduler, queue, state\nstore, or delivery system.\n\nNew current-chat saves carry a self-contained instruction recipe that loads the\n`group-newsletter` skill, reads the exact shared scopes, and returns through the\nnormal conversation outbox. They therefore need no newsletter-specific runtime\nbranch. Group email keeps only the irreducible trusted effect boundary: live\nrecipient and grant resolution, same-occurrence preparation, revocation\nrevalidation, durable fanout, and idempotent outbox settlement. Previously saved\ncurrent-chat records receive a bounded compatibility prompt until they are\nresaved with the new recipe. The public skill remains a fail-closed fallback;\nthe hosted managed skill owns editorial behavior.\n\n## Current State\n""",
+          )
+          replace_once(
+              spec_path,
+              """Newsletter cron turns keep the normal group conversation thread, native resume\nbehavior, and shell/tool access. The runtime appends the current execution\ncontract to the saved configuration on every run, so legacy records receive the\ncurrent workflow without mutating their persisted instructions. Email runs use\nonly the filtered `prepare.result.members` facts; current-chat runs use one\nbounded `read_shared` for the exact saved scopes. This is an assistant\ninstruction, not a provenance guarantee: conversation or tool context can still\nbe visible to the model. The hard boundary is the late authorization proof,\nwhich constrains current preparation and recipients but does not prove that\nevery model-authored sentence came only from the latest preparation.\n""",
+              """Newsletter cron turns keep the normal group conversation thread, native resume\nbehavior, and shell/tool access. New current-chat records carry the complete\nskill-owned execution recipe in their saved instructions and run as ordinary\nscheduled group turns. The runtime appends a trusted contract only for the\nconsented email effect and for bounded compatibility with previously saved\ncurrent-chat records. Email runs use only the filtered\n`prepare.result.members` facts; current-chat runs use one bounded `read_shared`\nfor the exact saved scopes. This is an assistant instruction, not a provenance\nguarantee: conversation or tool context can still be visible to the model. The\nhard boundary is the late authorization proof, which constrains current\npreparation and recipients but does not prove that every model-authored sentence\ncame only from the latest preparation.\n""",
+          )
+          replace_once(
+              spec_path,
+              """The dedicated `group-newsletter` assistant skill owns the editorial story,\nhuman-readable units, comparison rules, email subject, tone, calibrated\nexamples, and final edition. The `group-chat` skill owns the room-level setup\nquestions, group-chosen name and schedule, email-share offer,\nannounce-before-first-send behavior, and opt-out handling. The structured setup\naction writes configuration only; the runtime appends the current execution\ncontract on each scheduled turn. Skills carry no durable state; state lives in\nthe automation and grants.\n""",
+              """The dedicated `group-newsletter` assistant skill owns the editorial story,\nhuman-readable units, comparison rules, email subject, tone, calibrated\nexamples, and final edition. The `group-chat` skill owns the room-level setup\nquestions, group-chosen name and schedule, email-share offer,\nannounce-before-first-send behavior, and opt-out handling. The structured setup\naction compiles validated choices into one ordinary automation record. New\ncurrent-chat records execute that saved skill-owned recipe directly; the runtime\nadds only the trusted email-effect contract and the bounded legacy-chat\ncompatibility contract. Skills carry no durable state; state lives in the\nautomation and grants.\n""",
+          )
+
+          cleanup_paths = [
+              Path('.github/workflows/one-shot-group-newsletter-patch.yml'),
+              Path('.github/workflows/one-shot-group-newsletter-refine.yml'),
+              Path('.github/workflows/finalize-newsletter-simplification.yml'),
+          ]
+          for cleanup_path in cleanup_paths:
+              if not cleanup_path.exists():
+                  raise SystemExit(f"missing expected temporary workflow: {cleanup_path}")
+              cleanup_path.unlink()
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run focused newsletter regressions
+        run: >-
+          pnpm --filter @murphai/assistant-engine test --
+          group-newsletter-automation.test.ts
+          assistant-hosted-domain-tools.test.ts
+          assistant-managed-group-skill-fallbacks.test.ts
+
+      - name: Typecheck assistant engine
+        run: pnpm --filter @murphai/assistant-engine typecheck
+
+      - name: Check and publish final patch
+        run: |
+          git diff --check
+          test ! -e .github/workflows/one-shot-group-newsletter-patch.yml
+          test ! -e .github/workflows/one-shot-group-newsletter-refine.yml
+          test ! -e .github/workflows/finalize-newsletter-simplification.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            agent-docs/product-specs/group-health-newsletter.md \
+            packages/assistant-engine/test/assistant-hosted-domain-tools.test.ts \
+            .github/workflows/one-shot-group-newsletter-patch.yml \
+            .github/workflows/one-shot-group-newsletter-refine.yml \
+            .github/workflows/finalize-newsletter-simplification.yml
+          git commit -m "test: finalize newsletter simplification"
+          git push origin HEAD:agent/simplify-newsletter-automation-final
