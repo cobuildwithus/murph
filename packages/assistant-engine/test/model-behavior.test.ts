@@ -2902,9 +2902,9 @@ describe('assistant conversation scope', () => {
       'Never describe the group funding link as a personal billing or account-management page.',
     )
 
-    // This is a private, explicitly per-person enrollment reminder owned by
-    // the group newsletter workflow, not a room-settings destination.
-    expect(prompt).toContain(
+    // Missing-email recovery belongs to the private newsletter skill's
+    // aggregate no-recipient branch, not every hosted group system prompt.
+    expect(prompt).not.toContain(
       `${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true`,
     )
     expect(prompt).not.toContain('`/settings?addEmail=true`')
