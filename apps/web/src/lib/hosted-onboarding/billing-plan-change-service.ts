@@ -11,12 +11,11 @@ import {
 import {
   canUpgradeHostedBillingPlan,
   isHostedBillingPlanImmediateUpgrade,
-  isHostedPulseTrialBillingState,
   parseHostedBillingPlanCode,
   readHostedBillingPlanChangePortalConfigurationId,
   type HostedBillingPlanCode,
 } from "./billing-plans";
-import { assertHostedMemberOwnActiveBillingAllowed } from "./entitlement";
+import { assertHostedMemberOwnPaidBillingAllowed } from "./entitlement";
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
@@ -242,11 +241,13 @@ async function readHostedBillingPlanUpgradeOwner(input: {
           message: "Finish signup from your latest Murph link before continuing.",
         });
       }
-      assertHostedMemberOwnActiveBillingAllowed(member);
-
       const billingRef = await readHostedMemberStripeBillingRef({
         memberId: input.memberId,
         prisma: tx,
+      });
+      assertHostedMemberOwnPaidBillingAllowed({
+        ...member,
+        billingRef,
       });
       return buildHostedBillingPlanUpgradeOwnerSnapshot({
         billingRef,
@@ -364,16 +365,6 @@ function assertHostedBillingPlanUpgradeSourceState(input: {
     targetPlanCode: input.targetPlanCode,
   })) {
     return;
-  }
-  if (isHostedPulseTrialBillingState({
-    currentBillingPhase: input.billingRef?.currentBillingPhase,
-    currentCheckoutOffer: input.billingRef?.currentCheckoutOffer,
-  })) {
-    throw hostedOnboardingError({
-      code: "HOSTED_BILLING_PLAN_UPGRADE_TRIAL_UNSUPPORTED",
-      httpStatus: 409,
-      message: "Finish your Pulse trial before changing to this plan.",
-    });
   }
   throw hostedOnboardingError({
     code: "HOSTED_BILLING_PLAN_UPGRADE_SOURCE_INVALID",
