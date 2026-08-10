@@ -57,6 +57,7 @@ const ownerSnapshot = {
   members: [],
   plans: {
     edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+    max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
     pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
   },
   seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
@@ -251,7 +252,7 @@ test("adds one paid seat and retries when the plan is full", async () => {
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
-    targetCapacities: { edge: 0, pulse: 3 },
+    targetCapacities: { edge: 0, max: 0, pulse: 3 },
   });
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
 });
@@ -314,6 +315,7 @@ test("uses a seat freed before the purchase instead of buying another", async ()
     groupId: "hbag_family",
     plans: {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
     },
     seats: { active: 1, billed: 2, invited: 0, max: 6, min: 2, remaining: 1, used: 1 },
@@ -404,10 +406,10 @@ test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off"
   expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
 });
 
-test("changes an active Family member tier", async () => {
+test("changes an active Family member tier to Max", async () => {
   const response = await memberRemoveRoute.PATCH(
     new Request("https://join.example.test/api/settings/billing/family/members/member_child", {
-      body: JSON.stringify({ planCode: "edge" }),
+      body: JSON.stringify({ planCode: "max" }),
       headers: { "content-type": "application/json", origin: "https://join.example.test" },
       method: "PATCH",
     }),
@@ -423,7 +425,7 @@ test("changes an active Family member tier", async () => {
     groupId: "hbag_family",
     memberId: "member_child",
     ownerMemberId: "member_owner",
-    planCode: "edge",
+    planCode: "max",
     prisma: expect.any(Object),
   });
 });

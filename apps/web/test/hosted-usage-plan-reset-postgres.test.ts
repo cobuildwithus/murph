@@ -793,7 +793,7 @@ async function applyOldWebDirectPlanTransition(input: {
 async function applyOldWebFamilyPlanTransition(input: {
   at: Date;
   membershipId: string;
-  planCode: "edge" | "pulse";
+  planCode: "edge" | "max" | "pulse";
   prisma: PrismaClient;
 }): Promise<void> {
   await input.prisma.$executeRaw`

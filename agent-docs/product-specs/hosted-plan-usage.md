@@ -108,7 +108,8 @@ but subsequent usage-bearing work blocks and accepted conversation input
 remains pending.
 
 An automatic same-period increase in included allowance, including trial to
-paid Pulse, Group to Pulse or Edge, Pulse to Edge, and Family Pulse to Edge,
+paid Pulse, Group to Pulse or Edge, direct Pulse or Edge to Max, and lower
+Family tiers to Edge or Max,
 starts a new capacity epoch at zero included spend. The canonical period stores
 that cutover and the highest plan tier already granted during the period.
 Consequently a downgrade followed by a re-upgrade cannot mint the same reset
@@ -127,10 +128,10 @@ than waiting for the former period end.
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
 Group, Pulse, and Edge therefore include $2.80, $6.40, and $16.00 from their
-$3.50, $8, and $20 prices. Family-sponsored Pulse and Edge members separately
-receive $5.60 and $15.20 from their $7 and $19 seat prices. Discounts, taxes,
-prorations, trials, and usage credit do not redefine this catalog-owned
-allowance.
+$3.50, $8, and $20 prices; direct Max includes $40.00 from its $50 price.
+Family-sponsored Pulse, Edge, and Max members separately receive $5.60, $15.20,
+and $39.20 from their $7, $19, and $49 seat prices. Discounts, taxes, prorations,
+trials, and usage credit do not redefine this catalog-owned allowance.
 An authoritative paid billing period that is already open keeps the higher
 included limit granted before this policy change. The price-derived allowance
 starts on its next paid period; an actual plan, Family tier, or
@@ -440,10 +441,11 @@ inventing a billing menu:
   handoff, while Edge is discussed as a recurring Pulse alternative only after
   the member asks and a current quote exists;
 - a Family-sponsored member is never offered a personal top-up; a Family Pulse
-  seat may be moved to Edge by the plan owner, but the assistant verifies
+  or Edge seat may be moved to a higher Family tier by the plan owner, but the
+  assistant verifies
   `owner: true` through the Family status read before offering that owner a
   private Settings handoff; a sponsored non-owner is told that the Family
-  owner must make the change, while Family Edge has no higher current tier; and
+  owner must make the change, while Family Max has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
   low-usage turn the assistant calls `murph.group action="read_usage"` once.
   `fundingNeeded` is the only assistant-facing urgency signal. It is false when
