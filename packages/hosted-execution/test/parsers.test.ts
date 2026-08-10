@@ -3749,26 +3749,11 @@ describe("parseHostedRuntimeNewsletterTool", () => {
 });
 
 describe("parseHostedRuntimeFamilyPlanTool", () => {
-  it("parses checkout and create-invite requests and rejects missing invite routes", () => {
+  it("keeps checkout invitation-free and validates create-invite routes", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "start_checkout",
     })).toEqual({
       action: "start_checkout",
-    });
-    expect(parseHostedRuntimeFamilyPlanToolRequest({
-      action: "start_checkout",
-      invite: {
-        targetLabel: "dad",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "dad_username",
-      },
-    })).toEqual({
-      action: "start_checkout",
-      invite: {
-        targetLabel: "dad",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "dad_username",
-      },
     });
 
     expect(parseHostedRuntimeFamilyPlanToolRequest({
@@ -3798,7 +3783,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
           targetLabel: "dad",
         },
       })
-    ).toThrow(/phone number, Telegram username, or email/u);
+    ).toThrow(/start_checkout request\.invite is not allowed/u);
 
     expect(() =>
       parseHostedRuntimeFamilyPlanToolRequest({
@@ -3933,15 +3918,6 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         billingStatus: "not_started",
         checkoutUrl: "https://checkout.stripe.test/family",
         owner: true,
-        preparedInvite: {
-          acceptUrl: null,
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
         seats: {
           active: 1,
           billed: 2,
@@ -3984,16 +3960,6 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
             used: 1,
           },
         },
-        preparedInvite: {
-          acceptUrl: null,
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          planCode: "pulse",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
         seats: {
           active: 1,
           billed: 2,
@@ -4034,6 +4000,19 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         unavailableReason: "already_sponsored",
       },
     });
+
+    expect(() => parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        preparedInvite: {},
+      },
+    })).toThrow(/preparedInvite must be null/u);
+    expect(() => parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        preparedInviteReplyText: "prepared",
+      },
+    })).toThrow(/preparedInviteReplyText must be null/u);
   });
 });
 

@@ -2,7 +2,6 @@ import "server-only";
 
 import type {
   HostedFamilyPlanCode,
-  HostedRuntimeFamilyPlanCreateInviteRequest,
   HostedRuntimeFamilyPlanToolInvite,
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
@@ -13,7 +12,6 @@ import type {
 
 import {
   createHostedFamilyBillingCheckout,
-  type HostedFamilyChatInviteResult,
   ensureHostedAccountGroupForOwnerTx,
   readHostedFamilyAccessForMember,
   issueHostedFamilyInviteFromOwnerTx,
@@ -51,10 +49,7 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
   if (input.request.action === "start_checkout") {
     return {
       action: "start_checkout",
-      result: await startHostedRuntimeFamilyPlanCheckout(
-        input.memberId,
-        input.request.invite ?? null,
-      ),
+      result: await startHostedRuntimeFamilyPlanCheckout(input.memberId),
     };
   }
   const request = input.request;
@@ -97,7 +92,6 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
 
 async function startHostedRuntimeFamilyPlanCheckout(
   memberId: string,
-  inviteRequest: HostedRuntimeFamilyPlanCreateInviteRequest | null,
 ): Promise<HostedRuntimeFamilyPlanToolStartCheckoutResponse> {
   const prisma = getPrisma();
   const ownerSnapshot = await readHostedFamilyOwnerSnapshotForMember({
@@ -105,48 +99,12 @@ async function startHostedRuntimeFamilyPlanCheckout(
     prisma,
   });
   if (ownerSnapshot?.billingActive) {
-    if (inviteRequest) {
-      const prepared = await prisma.$transaction(async (tx) => {
-        return await issueHostedFamilyInviteFromOwnerTx({
-          ownerMemberId: memberId,
-          planCode: inviteRequest.planCode ?? "pulse",
-          targetEmail: inviteRequest.targetEmail ?? null,
-          targetLabel: inviteRequest.targetLabel ?? null,
-          targetPhoneNumber: inviteRequest.targetPhoneNumber ?? null,
-          targetTelegramUsername: inviteRequest.targetTelegramUsername ?? null,
-          tx,
-        });
-      }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-      const refreshedSnapshot = await readHostedFamilyOwnerSnapshotForMember({
-        memberId,
-        prisma,
-      });
-
-      return {
-        alreadyActive: true,
-        billingActive: true,
-        billingStatus: refreshedSnapshot?.billingStatus ?? ownerSnapshot.billingStatus,
-        checkoutUrl: null,
-        owner: true,
-        preparedInvite: projectPreparedHostedRuntimeFamilyPlanToolInvite(
-          prepared,
-          refreshedSnapshot,
-        ),
-        preparedInviteReplyText: prepared.replyText,
-        plans: refreshedSnapshot?.plans ?? ownerSnapshot.plans,
-        seats: refreshedSnapshot?.seats ?? ownerSnapshot.seats,
-        unavailableReason: null,
-      };
-    }
-
     return {
       alreadyActive: true,
       billingActive: true,
       billingStatus: ownerSnapshot.billingStatus,
       checkoutUrl: null,
       owner: true,
-      preparedInvite: null,
-      preparedInviteReplyText: null,
       plans: ownerSnapshot.plans,
       seats: ownerSnapshot.seats,
       unavailableReason: null,
@@ -163,8 +121,6 @@ async function startHostedRuntimeFamilyPlanCheckout(
       billingStatus: ownerSnapshot?.billingStatus ?? "none",
       checkoutUrl: null,
       owner: false,
-      preparedInvite: null,
-      preparedInviteReplyText: null,
       plans: emptyHostedRuntimeFamilyPlanPlans(),
       seats: emptyHostedRuntimeFamilyPlanSeatStatus(),
       unavailableReason: "already_sponsored",
@@ -193,8 +149,6 @@ async function startHostedRuntimeFamilyPlanCheckout(
     billingStatus: snapshot?.billingStatus ?? group.billingStatus,
     checkoutUrl: checkout.url,
     owner: true,
-    preparedInvite: null,
-    preparedInviteReplyText: null,
     plans: snapshot?.plans ?? emptyHostedRuntimeFamilyPlanPlans(),
     seats: snapshot?.seats ?? emptyHostedRuntimeFamilyPlanSeatStatus(),
     unavailableReason: null,
@@ -254,33 +208,6 @@ function projectHostedRuntimeFamilyPlanToolInvite(input: {
     targetPhoneHint: input.targetPhoneHint,
     telegramInviteUrl: input.telegramInviteUrl,
   };
-}
-
-function projectPreparedHostedRuntimeFamilyPlanToolInvite(
-  prepared: HostedFamilyChatInviteResult,
-  snapshot: { invites: Array<{
-    acceptUrl: string | null;
-    expiresAt: Date;
-    id: string;
-    planCode: HostedFamilyPlanCode;
-    status: string;
-    targetLabel: string | null;
-    targetPhoneHint: string | null;
-    telegramInviteUrl: string | null;
-  }> } | null | undefined,
-): HostedRuntimeFamilyPlanToolInvite {
-  const snapshotInvite = snapshot?.invites.find(
-    (row) => row.id === prepared.invite.id,
-  );
-  return projectHostedRuntimeFamilyPlanToolInvite(snapshotInvite ?? {
-    acceptUrl: null,
-    expiresAt: prepared.invite.expiresAt,
-    planCode: prepared.invite.planCode,
-    status: prepared.invite.status,
-    targetLabel: prepared.invite.targetLabel,
-    targetPhoneHint: prepared.invite.targetPhoneHint,
-    telegramInviteUrl: null,
-  });
 }
 
 function emptyHostedRuntimeFamilyPlanPlans() {

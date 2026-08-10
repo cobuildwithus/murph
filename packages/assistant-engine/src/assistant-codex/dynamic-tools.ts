@@ -659,13 +659,6 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
-      invite: z.object({
-        planCode: z.enum(HOSTED_FAMILY_PLAN_CODES).optional(),
-        targetEmail: z.string().trim().email().max(320).nullable().default(null),
-        targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
-        targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
-        targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
-      }).strict().nullable().default(null),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
@@ -679,11 +672,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
   ])
   .superRefine((value, context) => {
-    const invite = value.action === 'create_invite'
-      ? value.invite
-      : value.action === 'start_checkout'
-        ? value.invite
-        : null
+    const invite = value.action === 'create_invite' ? value.invite : null
     if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername && !invite.targetEmail) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -5396,24 +5385,9 @@ function parseFamilyPlanArguments(
   if (parsed.data.action === 'start_checkout') {
     return {
       ok: true,
-      request: parsed.data.invite
-        ? {
-            action: 'start_checkout',
-            invite: {
-              ...(parsed.data.invite.planCode
-                ? { planCode: parsed.data.invite.planCode }
-                : {}),
-              ...(parsed.data.invite.targetEmail
-                ? { targetEmail: parsed.data.invite.targetEmail }
-                : {}),
-              targetLabel: parsed.data.invite.targetLabel,
-              targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
-              targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
-            },
-          }
-        : {
-            action: 'start_checkout',
-          },
+      request: {
+        action: 'start_checkout',
+      },
     }
   }
 

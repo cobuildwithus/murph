@@ -34,15 +34,16 @@ dates, launch terms, seat state, or unsupported admin controls.
 ## Start or convert Family access
 
 For an explicit request to start or convert to Family, use
-`action: "start_checkout"` and pass an invite target when provided. Return a
-checkout URL plainly.
+`action: "start_checkout"` only to establish Family billing. Never pass invite
+context to `start_checkout`; checkout cannot create or prepare an invite. Return
+a checkout URL plainly.
 
-- If the result has inactive billing and a checkout URL without
-  `preparedInvite`, ask the user to activate through the link and return if they
-  want Murph to create the invite.
-- If billing is already active and `preparedInvite` exists, do not make the user
-  return merely to create the invite. Promise an invite only when that field
-  exists.
+- If the same request also asks to invite someone, call `read_status` first. If
+  billing is active, skip checkout and follow the invite flow below. Otherwise,
+  start checkout without invite context, ask the user to activate through the
+  returned link, and ask them to return after activation for the invite.
+- If checkout reports billing is already active, follow the invite flow below
+  only when the current request explicitly included an invitation.
 - If the result has no URL because Stripe is syncing the existing subscription,
   say it is syncing and ask the user to check shortly. Do not invent a failure
   or link.
@@ -50,9 +51,10 @@ checkout URL plainly.
   has sponsored Family access and must leave that Family before starting their
   own.
 
-Do not use `start_checkout` for active-plan tier/capacity changes, member
-removal, or invite cancellation. Route those through the private management
-handoff owned by `murph.plan_usage`.
+Do not use `start_checkout` for active-plan invitations, tier/capacity changes,
+member removal, or invite cancellation. Route management actions through the
+private handoff owned by `murph.plan_usage`; active-plan invitations use only
+the status-gated flow below.
 
 ## Create an invite
 

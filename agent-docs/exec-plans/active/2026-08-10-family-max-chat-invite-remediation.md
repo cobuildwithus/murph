@@ -18,6 +18,8 @@ Updated: 2026-08-10
   capacity.
 - Zero-capacity requests create no invite from chat and direct the owner to the
   existing Family Settings purchase-and-invite flow without claiming success.
+- `start_checkout` establishes inactive Family billing only; it cannot accept,
+  create, prepare, or report an invitation.
 - A post-preflight error or ambiguous transport result is described as
   unconfirmed and does not encourage a blind duplicate.
 - Focused Assistant Engine tests and typecheck pass, followed by exact-head
@@ -80,6 +82,13 @@ Updated: 2026-08-10
   catch now branches on the request action: reads state that no change was
   attempted and permit a safe status retry, while potentially mutating actions
   retain the unconfirmed/Settings recovery.
+- A later round-5 full-patch result exposed the remaining duplicate invitation
+  path: `start_checkout` could still carry invite context and mutate an invite
+  for an already-active owner, bypassing the status-first experience.
+- Delete that duplicate path. `create_invite` is the sole invitation mutation;
+  `start_checkout` now owns only billing establishment. The runner parser keeps
+  one bounded rollout allowance for the old Web build's two null response keys,
+  rejects non-null legacy invite results, and exposes neither field.
 
 ## Verification
 
@@ -92,5 +101,10 @@ Updated: 2026-08-10
 - Round-5 correction rerun: 11 focused Family tool and skill-policy tests
   passed; Assistant Engine typecheck, `git diff --check`, and the private-
   identifier diff scan passed.
-- Pending: push the correction, exact pushed-head final ReviewGPT, and required
-  GitHub Actions.
+- Duplicate-path correction: 15 Assistant Engine schema/execution/skill tests,
+  64 hosted-execution parser tests, and 6 Web Family tool tests passed.
+- Assistant Engine, Hosted Execution, and Web typechecks passed.
+- Exact head `3049a143ea8d670cc114f51adb374a0c99213120` passed every required
+  GitHub Action before the round-5 corrections.
+- Pending: commit and push the corrections, exact pushed-head final ReviewGPT,
+  and required GitHub Actions.

@@ -4501,23 +4501,12 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
   if (action === "start_checkout") {
     assertAllowedObjectKeys(
       record,
-      new Set(["action", "invite"]),
+      new Set(["action"]),
       "Hosted runtime family plan tool start_checkout request",
     );
-    const invite = record.invite === undefined || record.invite === null
-      ? null
-      : parseHostedRuntimeFamilyPlanInviteRequest(
-          record.invite,
-          "Hosted runtime family plan tool start_checkout request invite",
-        );
-    return invite
-      ? {
-          action,
-          invite,
-        }
-      : {
-          action,
-        };
+    return {
+      action,
+    };
   }
   if (action !== "create_invite") {
     throw new TypeError("Hosted runtime family plan tool action is not supported.");
@@ -5346,6 +5335,22 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     ]),
     "Hosted runtime family plan tool start_checkout response result",
   );
+  // The Max-aware runner deploys before Web. The old Web build emits these
+  // inert null keys when checkout carries no invite; accept only that legacy
+  // shape until the old build has drained.
+  if (record.preparedInvite !== undefined && record.preparedInvite !== null) {
+    throw new TypeError(
+      "Hosted runtime family plan start_checkout preparedInvite must be null.",
+    );
+  }
+  if (
+    record.preparedInviteReplyText !== undefined
+    && record.preparedInviteReplyText !== null
+  ) {
+    throw new TypeError(
+      "Hosted runtime family plan start_checkout preparedInviteReplyText must be null.",
+    );
+  }
   const unavailableReason = readOptionalNullableString(
     record.unavailableReason,
     "Hosted runtime family plan start_checkout unavailableReason",
@@ -5377,13 +5382,6 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     owner: requireBoolean(
       record.owner,
       "Hosted runtime family plan start_checkout owner",
-    ),
-    preparedInvite: record.preparedInvite === null || record.preparedInvite === undefined
-      ? null
-      : parseHostedRuntimeFamilyPlanInvite(record.preparedInvite),
-    preparedInviteReplyText: readNullableString(
-      record.preparedInviteReplyText,
-      "Hosted runtime family plan start_checkout preparedInviteReplyText",
     ),
     plans: parseHostedRuntimeFamilyPlanPlans(record.plans, seats),
     seats,

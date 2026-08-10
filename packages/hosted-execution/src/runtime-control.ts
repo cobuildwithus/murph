@@ -1830,7 +1830,6 @@ export type HostedRuntimeFamilyPlanToolRequest =
     }
   | {
       action: "start_checkout";
-      invite?: HostedRuntimeFamilyPlanCreateInviteRequest | null;
     };
 
 export interface HostedRuntimeFamilyPlanToolSeatStatus {
@@ -1897,8 +1896,6 @@ export interface HostedRuntimeFamilyPlanToolStartCheckoutResponse {
   billingStatus: string;
   checkoutUrl: string | null;
   owner: boolean;
-  preparedInvite: HostedRuntimeFamilyPlanToolInvite | null;
-  preparedInviteReplyText: string | null;
   plans: HostedRuntimeFamilyPlanToolPlans;
   seats: HostedRuntimeFamilyPlanToolSeatStatus;
   unavailableReason: "already_sponsored" | null;

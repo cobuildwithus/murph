@@ -193,6 +193,13 @@ management UI must not receive traffic until the webhook build that understands
 `pendingPlanCode` is live. The post-deploy contract lane adds assignment
 constraints only after the prior web-function window drains.
 
+The Max-aware runner removes invitation context from `start_checkout`. During
+the runner-first window, the old Web build still emits the checkout response's
+legacy `preparedInvite` and `preparedInviteReplyText` keys as null because the
+new runner cannot send invite context. The new parser accepts only that inert
+null shape and does not expose either field; a non-null legacy value fails
+closed. The new Web build omits both keys after the old Web window drains.
+
 Configure all three Family Stripe price ids before exposing Max capacity.
 Deploy the Max-aware hosted-execution parser and runner bundle before Web, then
 apply the Web migration and deploy Web. Do not attach Max items while an old Web
@@ -201,16 +208,18 @@ one Pulse-only subscription and one mixed Pulse/Edge/Max subscription, then
 verify settings quantities, member allowances, model eligibility, and Family
 MRR match the Stripe items.
 
-The first Max Stripe item or durable Max membership, invite, or capacity row
-establishes a hard rollback floor for both Web and hosted execution. A pre-Max
-Web build can reject the subscription projection and revoke the whole Family's
-sponsored access; a pre-Max runtime bundle rejects Family responses containing
-Max. Incident recovery after exposure must therefore roll both artifacts
-forward to Max-aware versions. A pre-Max rollback is safe only before exposure,
-or after current artifacts have moved every Max assignment and Stripe item back
-to Pulse or Edge, webhook reconciliation has completed, and operators have
-verified that no Max Stripe item or durable Max row remains. Do not add a
-compatibility state machine for this boundary.
+The first Max Stripe item or durable Max capacity row establishes the Web
+rollback floor: a pre-Max Web build can reject the subscription projection and
+revoke the whole Family's sponsored access. The pre-Max runtime parser ignores
+the extra `plans.max` aggregate, so capacity alone is not its rollback floor;
+its floor begins when a member or pending invite is projected with
+`planCode: "max"`. After the applicable floor is crossed, incident recovery
+must roll that surface forward to a Max-aware version, with both surfaces rolled
+forward once Max assignments or invitations may exist. A pre-Max rollback is
+safe only before exposure, or after current artifacts have moved every Max
+assignment and Stripe item back to Pulse or Edge, removed Max capacity rows,
+completed webhook reconciliation, and verified that no Max member or pending
+invite remains. Do not add a compatibility state machine for this boundary.
 
 ## Data Ownership
 

@@ -168,17 +168,12 @@ describe("assistant family plan tool", () => {
     });
   });
 
-  it("parses and executes Family checkout requests with optional next invite context", async () => {
+  it("parses and executes Family checkout without invitation context", async () => {
     const request = readMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
         arguments: {
           action: "start_checkout",
-          invite: {
-            targetLabel: "Adam",
-            targetPhoneNumber: null,
-            targetTelegramUsername: "adam_username",
-          },
         },
         namespace: "murph",
         tool: "family_plan",
@@ -189,11 +184,6 @@ describe("assistant family plan tool", () => {
       kind: "family-plan",
       request: {
         action: "start_checkout",
-        invite: {
-          targetLabel: "Adam",
-          targetPhoneNumber: null,
-          targetTelegramUsername: "adam_username",
-        },
       },
     });
     if (!request) {
@@ -209,16 +199,6 @@ describe("assistant family plan tool", () => {
           billingStatus: "not_started",
           checkoutUrl: "https://checkout.stripe.test/family",
           owner: true,
-          preparedInvite: {
-            acceptUrl: null,
-            expiresAt: "2026-06-25T00:00:00.000Z",
-            planCode: "pulse" as const,
-            status: "pending",
-            targetLabel: "Adam",
-            targetPhoneHint: null,
-            telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-          },
-          preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
           plans: {
             edge: {
               active: 0,
@@ -279,14 +259,26 @@ describe("assistant family plan tool", () => {
 
     expect(familyPlanTool.request).toHaveBeenCalledWith({
       action: "start_checkout",
-      invite: {
-        targetLabel: "Adam",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "adam_username",
-      },
     });
     expect(result.rpcResult.success).toBe(true);
     expect(result.rpcResult.contentItems[0]?.text).toContain("checkout.stripe.test/family");
+  });
+
+  it("rejects invitation context on Family checkout", () => {
+    expect(readMurphDynamicToolRequest({
+      method: "item/tool/call",
+      params: {
+        arguments: {
+          action: "start_checkout",
+          invite: {
+            planCode: "max",
+            targetEmail: "dad@example.com",
+          },
+        },
+        namespace: "murph",
+        tool: "family_plan",
+      },
+    })?.kind).toBe("invalid-family-plan-arguments");
   });
 
   it("rejects invite requests without a phone number, Telegram username, or email", () => {
