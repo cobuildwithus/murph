@@ -454,9 +454,11 @@ export async function ensureHostedThreadContainerRouteTx(input: {
       "Hosted thread container id does not match its prepared creation.",
     );
   }
-  const requestedContainerMemberId = explicitContainerMemberId
-    ?? input.preparedCreation?.containerMemberId
-    ?? null;
+  // A prepared creation is speculative until the unique external-thread
+  // identity is inserted. If another creator wins between preparation and
+  // BEGIN, its container is authoritative; only an explicitly requested
+  // container id may reject that existing binding.
+  const requestedContainerMemberId = explicitContainerMemberId;
   const accountLookupKeys = normalizeHostedThreadAccountLookupKeys([
     ...(input.accountLookupKeys ?? []),
     input.accountLookupKey,

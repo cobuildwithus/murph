@@ -89,6 +89,10 @@ Updated: 2026-08-09
 - Reuse the resolver's route snapshot for the initial crypto preparation so the
   admission path performs one authority read before `BEGIN`; require every
   conflict retry to reread the route before preparing for the winning container.
+- Treat a prepared creation's container id as speculative, not binding
+  authority. If the unique external-thread row appears after preparation but
+  before `BEGIN`, reuse its winning container unless the caller separately
+  supplied an explicit container id.
 
 ## Verification
 
@@ -101,7 +105,7 @@ Updated: 2026-08-09
   route wins with no orphaned synthetic state, and all existing routing,
   activation, privacy-rotation, and mailbox assertions remain green.
 - Local proof on the remediated candidate: the six affected crypto/Linq/
-  Telegram routing files passed 379 tests together; the PostgreSQL concurrency
+  Telegram routing files passed 380 tests together; the PostgreSQL concurrency
   lane passed 8 tests; app-local typecheck and scoped lint passed; and
   `git diff --check` passed.
 - Review remediation: the preliminary specialist and final round 1 both found
@@ -115,3 +119,7 @@ Updated: 2026-08-09
   first route snapshot while a conflict retry explicitly rereads the winner;
   both exact CI regressions pass locally and the full affected slice covers the
   corrected module boundary.
+- Parent review found that a stale speculative container id could reject a
+  route committed between preparation and `BEGIN`. The unique route row now
+  remains authoritative in that window, with a focused regression proving the
+  winner is reused without creating loser state.

@@ -2970,6 +2970,74 @@ describe("Linq explicit external-thread routing", () => {
     )).toBe("encrypted pending reaction context");
   });
 
+  it("reuses a route that wins after speculative container preparation", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    const accountLookupKey = requireTestPhoneLookupKey("+15550000000");
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey,
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "linq",
+      threadId: "chat_group_123",
+    });
+    if (!threadLookupKey || !threadIdentityLookupKey) {
+      throw new Error("Expected route lookup keys.");
+    }
+    const winningDeliveryRoute = await prepareThreadDeliveryRouteForTest({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_winner",
+      prisma: prisma as unknown as Prisma.TransactionClient,
+      threadId: "chat_group_123",
+    });
+    prisma.seedThreadRoute({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_winner",
+      deliveryRouteEncrypted: winningDeliveryRoute.deliveryRouteEncrypted,
+      ownerMemberId: "member_owner_123",
+      threadIdentityLookupKey,
+      threadLookupKey,
+    });
+    vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-06-24T00:00:00.000Z"),
+      id: "member_owner_123",
+      suspendedAt: null,
+      updatedAt: new Date("2026-06-24T00:00:00.000Z"),
+    });
+    const stalePreparedCreation = await prepareThreadContainerCreationForTest({
+      accountLookupKey,
+      channel: "linq",
+      containerMemberId: "member_thread_container_loser",
+      prisma: prisma as unknown as Prisma.TransactionClient,
+      threadId: "chat_group_123",
+    });
+
+    await expect(
+      ensureHostedThreadContainerRouteTx({
+        accountLookupKey,
+        channel: "linq",
+        occurredAt: new Date("2026-06-24T00:00:00.000Z"),
+        ownerMemberId: "member_owner_123",
+        preparedCreation: stalePreparedCreation,
+        prisma: prisma as unknown as Prisma.TransactionClient,
+        threadId: "chat_group_123",
+      }),
+    ).resolves.toMatchObject({
+      activationMailboxItemId: null,
+      containerMemberId: "member_thread_container_winner",
+      created: false,
+    });
+
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+
   it("creates and reuses a route container before routing Linq ingress", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     const owner = {
