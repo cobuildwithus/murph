@@ -134,9 +134,10 @@ Success criteria:
   also corrected its retained boundary fixture to prove the tighter static-image
   URL and native-fragment limits together.
 - Follow-up remediation passed the touched Web, contracts, operator-config, and
-  assistant-engine typechecks; 12 Web route/render tests, 23 contract tests, 27
-  operator tests, 10 assistant card/skill tests, and 73 assistant model-behavior
-  tests; focused Web lint; documentation drift; and diff hygiene. The exact
+  assistant-engine typechecks; 12 Web route/render tests, 23 contract tests, the
+  complete 293-test operator-config suite, and 83 assistant card, skill, and
+  model-behavior tests; focused Web lint; documentation drift; and diff hygiene.
+  The exact
   route rendered a 1200×580 targetless-next workout card and a 1200×1442 dense
   eight-row, four-column boundary card with measured wrapping and no visible
   overlap or clipping. These direct rasters do not replace the open hosted
