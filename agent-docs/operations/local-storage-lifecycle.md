@@ -94,21 +94,16 @@ Registered-worktree authorization is checkout-scoped at commit time. The
 branch-independent hook supplies the committing checkout, so a raw worktree
 fails its own commit without blocking an authorized sibling. Sanctioned
 creation may also continue while a raw sibling exists because every registered
-worktree still consumes the global numeric and disk budget. During a
-mixed-version rollout, only the guard executing from the primary checkout may
-publish compatibility authorization. Once that primary is current, it adds a
-current isolation marker and a legacy authorization marker to a raw worktree,
-in that order. A task-local current guard may classify the raw sibling for its
-scoped check but cannot mutate shared authority. Any partial or malformed
-isolation-marker state remains fail-closed. The legacy marker lets an
-already-authorized historical checkout keep using its branch-local installer,
-committer, and creation helper; the current shared hook and primary guard honor
-the isolation marker and continue rejecting the raw checkout. The shared hook
-and installer pass the current checkout through an environment hint while
-retaining the preceding guard's no-argument command surface, so either the
-primary or task checkout may advance first. Until an older primary advances,
-no newer task-local guard can publish state that weakens its global fail-closed
-behavior. Running the primary
+worktree still consumes the global numeric and disk budget. No guard publishes
+legacy authorization for a raw checkout. The shared hook and installer pass
+the current checkout through an environment hint while retaining the preceding
+guard's no-argument command surface, so either the primary or task checkout may
+advance first without an argument outage. An authorized historical checkout
+can still install hooks and commit after the primary advances, but its
+preceding-version creator remains globally fail-closed while a raw sibling
+exists. Current-version sanctioned creation remains scoped. Because no durable
+compatibility authority is written, a later primary downgrade also leaves both
+the old global audit and old shared hook fail-closed. Running the primary
 checkout's `scripts/worktree-storage-guard` without a scoped checkout remains
 the explicit global audit and reports every isolated registered worktree.
 
