@@ -3107,7 +3107,7 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).toContain(
-      'Main Personality, Supporting Personality, Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
+      "This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged",
     )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
@@ -3122,7 +3122,7 @@ describe('assistant Codex turn planning', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(plan.developerInstructions).toContain(
-      'never read or change any participant\'s private Murph settings',
+      'never read or change a participant\'s private Murph settings',
     )
     expect(plan.developerInstructions).toContain(
       'select Luna, Terra, or Sol for the room',

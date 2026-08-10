@@ -559,11 +559,11 @@ function buildAssistantStyleSettingsGuidanceText(input: {
   return [
     "Assistant style settings:",
     groupConversation
-      ? "- Main Personality, Supporting Personality, Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime. They never read or change any participant's private Murph settings."
-      : "- Main Personality, Supporting Personality, Humor, Push, Detail, and Unhinged are member-private conversation state available only in this private direct conversation.",
+      ? "- This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged. They never read or change a participant's private Murph settings."
+      : "- Personality, Humor, Push, Detail, and Unhinged are member-private state available only in this direct conversation.",
     groupConversation
-      ? "- Read or save this room's explicit main personality, optional supporting personality, tone, and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved personality, tone (formal/casual), and voice begin on a later group turn and do not change the reply already running."
-      : "- Private hosted conversations: read or save explicit main personality, optional supporting personality, tone, and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved personality, tone (formal/casual), and voice do not change the reply already running.",
+      ? "- Use `murph.personalization` to read or save the room's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes start on a later group turn, not this reply."
+      : "- Use `murph.personalization` to read or save this member's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes do not affect this reply.",
     groupConversation
       ? "- For an explicit current-room request, use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room; a saved model starts on the next turn. Provider and reasoning controls remain unavailable in a group. Never switch the room model automatically."
       : "- Use `murph.assistant_configuration` for explicit user-requested model, core-reply provider, or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",

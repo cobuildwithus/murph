@@ -838,7 +838,7 @@ describe('assistant execution prompt contract', () => {
       '/settings?voice=true',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'Saved personality, tone (formal/casual), and voice',
+      'Changes do not affect this reply',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'Use `murph.assistant_style` for dials',
@@ -934,10 +934,10 @@ describe('assistant execution prompt contract', () => {
       'privacy/auth/billing/consent/irreversible actions',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'member-private conversation state',
+      'member-private state',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'available only in this private direct conversation',
+      'available only in this direct conversation',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       '`murph.personalization`',
@@ -958,7 +958,7 @@ describe('assistant execution prompt contract', () => {
       'Use `/settings` for personality, tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'read or save explicit main personality, optional supporting personality, tone, and voice fields',
+      "read or save this member's main/supporting personality, tone, and voice",
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'never use a same-turn voice demo as activation proof',
@@ -2929,16 +2929,16 @@ describe('assistant conversation scope', () => {
     }))
 
     expect(prompt).toContain(
-      "Main Personality, Supporting Personality, Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime",
+      "This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged",
     )
     expect(prompt).toContain(
-      "Read or save this room's explicit main personality, optional supporting personality, tone, and voice fields",
+      "read or save the room's main/supporting personality, tone, and voice",
     )
     expect(prompt).toContain(
       'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
     )
     expect(prompt).toContain(
-      "They never read or change any participant's private Murph settings",
+      "They never read or change a participant's private Murph settings",
     )
     // Unhinged is room-owned with no per-participant authorization, so the
     // group prompt carries the shared-dial buy-in rule that the private
