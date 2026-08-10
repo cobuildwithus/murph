@@ -32,6 +32,11 @@ import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
 
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
+
 function selectRewards(
   ids: readonly (typeof HOSTED_PUBLIC_REFERRAL_REWARDS)[number]["id"][],
 ) {
@@ -78,7 +83,8 @@ test("ReferralPageContent explains qualification, rewards, and privacy", () => {
   assert.doesNotMatch(markup, /the reward is added automatically/);
   assert.match(markup, /Rewards add usage capacity, not cash or extra calendar time\./);
   assert.match(markup, /does not extend a trial or subscription period/);
-  assert.doesNotMatch(markup, /\$|cost-weighted|usage credit/i);
+  assert.doesNotMatch(markup, /\$|usage credit/i);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
   assert.match(markup, /Health is hard\./);
   assert.match(markup, /Bring someone with you\./);
   assert.equal(
@@ -158,5 +164,5 @@ test("ReferralPageContent shows one unavailability state when every reward path 
   assert.doesNotMatch(markup, /does not earn usage/);
   assert.doesNotMatch(markup, /Referral action/);
   assert.doesNotMatch(markup, /Choose a referral path\./);
-  assert.doesNotMatch(markup, /cost-weighted usage credit/);
+  assert.doesNotMatch(markup, RETIRED_USAGE_TERM_PATTERN);
 });

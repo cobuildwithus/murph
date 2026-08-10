@@ -65,14 +65,14 @@ describe('assistant manual provider export guidance', () => {
       'Read `$MURPH_ASSISTANT_SKILLS_ROOT/connected-apps/SKILL.md`.',
     )
     expect(skill).toContain('references/provider-data-exports.md')
-    expect(skill).toContain(
+    const normalizedSkill = skill.replace(/\s+/gu, ' ')
+    expect(normalizedSkill).toContain(
       'manual export or one-time import rather than a live sync',
     )
-    expect(skill).toContain(
+    expect(normalizedSkill).toContain(
       'does not make that service a connected-app provider',
     )
 
-    const normalizedSkill = skill.replace(/\s+/gu, ' ')
     const normalizedReference = reference.replace(/\s+/gu, ' ')
 
     expect(normalizedSkill).toContain(
