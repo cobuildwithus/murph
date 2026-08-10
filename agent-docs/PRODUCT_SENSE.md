@@ -228,3 +228,11 @@ missing testing sound reassuring. Keep supplement and branded-food search
 useful without implying that separately ranked corpora are directly
 comparable. Generic foods, inferred test linkage, and formula-revision claims
 remain outside the surface until their product meaning is explicitly defined.
+
+The public blog is an educational and editorial surface, not a traction proof
+surface. Guides and field notes may explain shipped product facts, decision
+frameworks, and clearly labeled product direction. A customer case study may
+publish only when its result has been verified, the subject has granted
+permission, and the account preserves material limitations. Search Console
+opportunities propose questions worth answering; they never authorize an
+unsupported health claim, a customer claim, or automatic publication.

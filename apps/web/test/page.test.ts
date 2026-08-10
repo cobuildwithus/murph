@@ -181,9 +181,10 @@ test("HomePage renders the canonical landing page at the root route", async () =
   );
   assert.match(markup, /aria-label="Open menu"/);
   assert.equal((markup.match(/href="\/knowledge"/g) ?? []).length, 1);
+  assert.equal((markup.match(/href="\/blog"/g) ?? []).length, 2);
   assert.match(
     markup,
-    /href="\/knowledge"[^>]*>Knowledge<\/a>.*href="\/security"[^>]*>Security<\/a>/s,
+    /href="\/knowledge"[^>]*>Knowledge<\/a>.*href="\/blog"[^>]*>Blog<\/a>.*href="\/security"[^>]*>Security<\/a>/s,
   );
   assert.match(markup, /data-root-landing-auth-actions-context="nav"/);
   assert.match(markup, /data-root-landing-auth-actions-context="hero"/);

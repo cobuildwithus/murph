@@ -366,6 +366,11 @@ test("VercelTelemetry canonicalizes allowlisted paths and strips URL state", () 
 test("VercelTelemetry aggregates public dynamic routes without sending identifiers", () => {
   const routes = [
     {
+      expected: "/blog/[article]",
+      pathname: "/blog/how-to-run-a-useful-health-experiment",
+      route: "/blog/[slug]",
+    },
+    {
       expected: "/biomarkers/[biomarker]",
       pathname: "/biomarkers/resting-heart-rate",
       route: "/biomarkers/[biomarkerId]",

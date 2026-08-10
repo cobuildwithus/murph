@@ -492,6 +492,7 @@ describe("changelog registry", () => {
         id: "2026-08-10",
         itemIds: [
           "personal-patterns",
+          "public-health-guides-and-field-notes",
           "reminders-keep-requested-timezone",
         ],
       },

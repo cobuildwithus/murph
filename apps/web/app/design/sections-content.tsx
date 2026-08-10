@@ -37,6 +37,7 @@ import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
 import { ChangelogArchiveStudy } from "./changelog-archive-study";
+import { BlogArchiveStudy, BlogArticleStudy } from "./blog-study";
 import { ClinicalRecordsConnectLauncherStudy } from "./clinical-records-connect-launcher-study";
 import { ClubsPageStudy } from "./clubs-page-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
@@ -471,6 +472,30 @@ export function SectionsContent() {
       <StudySection title="Changelog archive with explanatory visuals">
         <div data-design-section="changelog-archive">
           <ChangelogArchiveStudy />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Blog archive">
+        <div
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          data-design-section="blog-archive"
+          id="blog-archive"
+        >
+          <BlogArchiveStudy />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Blog article">
+        <div
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          data-design-section="blog-article"
+          id="blog-article"
+        >
+          <BlogArticleStudy />
         </div>
       </StudySection>
 
