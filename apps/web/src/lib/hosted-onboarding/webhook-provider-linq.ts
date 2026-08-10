@@ -378,10 +378,10 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
       }))?.core.id ?? null;
   const candidateSenderMemberId = senderMemberId ?? pendingSenderMemberId;
   const activeSenderMemberId = candidateSenderMemberId
-    && await readActiveHostedMemberAccess({
+    && (await readHostedRuntimeAiAccessDecision({
       memberId: candidateSenderMemberId,
       prisma: input.prisma,
-    })
+    })).allowed
     ? candidateSenderMemberId
     : null;
   if (lineState.kind === "at_risk") {

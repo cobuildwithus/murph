@@ -5689,6 +5689,30 @@ describe("Linq group chat auto-provision", () => {
     })).resolves.toBe(false);
   });
 
+  it("does not prepare new-container crypto for a sender who withdrew health-data consent", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: senderCore.id },
+    ]);
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      consentGrants: [{
+        scope: "launch.health-data",
+        status: "revoked",
+      }],
+      suspendedAt: null,
+      threadContainer: null,
+    });
+
+    await expect(shouldPrepareHostedLinqThreadContainerCrypto({
+      event: buildLinqMessageReceivedEvent({}),
+      participantMemberIds: [],
+      prisma: prisma as never,
+    })).resolves.toBe(false);
+  });
+
   it("does not prepare new-container crypto while group roster authority is unavailable", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
@@ -7183,6 +7207,91 @@ describe("Linq group chat auto-provision", () => {
     expect(
       memberRoutingStore.lookupHostedMemberRoutingByPendingLinqParticipantContact,
     ).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips container crypto for a withdrawn sender through the webhook entry point", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
+    mockSenderLookup(senderCore);
+    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: senderCore.id },
+    ]);
+    prisma.hostedMember.findUnique.mockResolvedValue({
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.active,
+      consentGrants: [{
+        scope: "launch.health-data",
+        status: "revoked",
+      }],
+      suspendedAt: null,
+      threadContainer: null,
+    });
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551112222", isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    expect(
+      domainRootStore.prepareHostedCryptoDomainRootCandidates,
+    ).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("skips container crypto for a degraded line through the webhook entry point", async () => {
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000", {
+      healthStatus: "degraded",
+      providerReputationStatus: "HEALTHY",
+    });
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
+    mockSenderLookup(senderCore);
+    prisma.hostedMemberIdentity.findMany.mockResolvedValue([
+      { memberId: senderCore.id },
+    ]);
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551112222", isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-chat-line-unavailable",
+    });
+    expect(
+      domainRootStore.prepareHostedCryptoDomainRootCandidates,
+    ).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("reconciles a new group roster after the provisioning transaction commits", async () => {
