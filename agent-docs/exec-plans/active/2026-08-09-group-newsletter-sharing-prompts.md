@@ -112,5 +112,13 @@ Updated: 2026-08-09
   day records. The recorded retrospective keeps the correction in that reducer
   and the existing weekly-stat shape, with a full email-prepare regression and
   no raw-event payload or new owner.
+- ReviewGPT round 5 found that a fresh native offer's unconditional final-action
+  patch also erased unrelated output from a compound request. The recorded
+  retrospective deletes that group-specific owner and reuses the existing
+  explicit `finish_without_reply` choice only when the offer completes the
+  whole request; mixed-intent turns retain their remaining answer.
+- Round-5 remediation proof: 96/96 focused Assistant Engine group/newsletter
+  tests passed, the two production-runtime finalization regressions passed, and
+  Assistant Engine typecheck passed.
 - Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
   candidate.

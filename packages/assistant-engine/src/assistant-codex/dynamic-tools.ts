@@ -227,6 +227,7 @@ import {
   asRecord,
   ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -872,7 +873,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'group-access-offer' | 'vault-file'
+      owner?: 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -3579,6 +3580,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
         ? {
             offeredAt: response.result.offeredAt,
             recencyEvidence: 'eligible' as const,
+            responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
           }
         : { recencyEvidence: 'unavailable' as const }),
       presentation: 'native' as const,
@@ -4079,7 +4081,6 @@ async function executeGroupTool(input: {
     let modelResult:
       | ReturnType<typeof groupAccessOfferModelResult>
       | ReturnType<typeof groupToolModelResult>
-    let nativeAccessOfferOwnsReply = false
     if (input.request.action === 'offer_access') {
       if (
         result.action !== 'create_join_link'
@@ -4088,10 +4089,6 @@ async function executeGroupTool(input: {
         return toolTextResult(false, 'group tool request failed')
       }
       modelResult = groupAccessOfferModelResult(result)
-      nativeAccessOfferOwnsReply =
-        modelResult.result.status === 'ok'
-        && modelResult.result.presentation === 'native'
-        && modelResult.result.recencyEvidence === 'eligible'
     } else {
       modelResult = groupToolModelResult(result)
     }
@@ -4100,14 +4097,6 @@ async function executeGroupTool(input: {
       : modelResult
     return {
       ...toolTextResult(true, safeToolPayloadText(payload)),
-      ...(nativeAccessOfferOwnsReply
-        ? {
-            finalActionPatch: {
-              kind: 'none' as const,
-              owner: 'group-access-offer' as const,
-            },
-          }
-        : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {

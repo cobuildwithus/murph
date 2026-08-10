@@ -48,6 +48,7 @@ import type {
 } from "../src/assistant/message-target-selection.ts";
 import {
   executeMurphDynamicToolRequest,
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   MURPH_DYNAMIC_TOOLS,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
@@ -3139,6 +3140,7 @@ describe("murph.group dynamic tool", () => {
         offeredAt: "2026-07-31T12:01:00.000Z",
         presentation: "native",
         recencyEvidence: "eligible",
+        responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
         status: "ok",
       },
     });
@@ -3149,10 +3151,7 @@ describe("murph.group dynamic tool", () => {
       "native-hidden",
     );
     expect(standaloneResult.finalActionPatch).toBeUndefined();
-    expect(nativeResult.finalActionPatch).toEqual({
-      kind: "none",
-      owner: "group-access-offer",
-    });
+    expect(nativeResult.finalActionPatch).toBeUndefined();
   });
 
   it("shows a fresh exact link for a reused native offer and fails closed without recency evidence", async () => {
