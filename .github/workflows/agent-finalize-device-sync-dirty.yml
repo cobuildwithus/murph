@@ -1,0 +1,82 @@
+name: Finalize device-sync dirty payload classification
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-classification
+    paths:
+      - .github/workflows/agent-finalize-device-sync-dirty.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-device-sync-dirty-classification
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t chunks < <(find .agent -maxdepth 1 -type f -name 'device-sync-dirty.patch.b64.*' -print | sort)
+          test "${#chunks[@]}" -ge 2
+          cat "${chunks[@]}" | base64 --decode > /tmp/device-sync-dirty.patch
+          test -s /tmp/device-sync-dirty.patch
+          git apply --numstat /tmp/device-sync-dirty.patch
+
+      - name: Apply to current main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout --detach origin/main
+          git apply --3way --index /tmp/device-sync-dirty.patch
+          git diff --cached --check
+          git status --short
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Verify focused device-sync boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/prisma-store-dirty-connections.test.ts \
+            apps/web/test/prisma-store-oauth-connection.test.ts
+          pnpm --dir apps/web typecheck
+          git diff --cached --check
+
+      - name: Publish clean implementation branch
+        shell: bash
+        env:
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+          STAGING_HEAD: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+          git commit -m "fix(device-sync): persist dirty payload credential authority"
+          git push \
+            --force-with-lease="refs/heads/${TARGET_BRANCH}:${STAGING_HEAD}" \
+            origin "HEAD:refs/heads/${TARGET_BRANCH}"
