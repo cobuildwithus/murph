@@ -73,6 +73,13 @@ describe("hosted runtime operational report contracts", () => {
     expect(coldStartReportSql).toContain(
       "GREATEST(fresh_start_container_ready_ms, fresh_start_invocation_prepared_ms)",
     );
+    expect(coldStartReportSql).toContain("shellPrewarmSource}' = 'linq-typing-started'");
+    expect(coldStartReportSql).toContain(
+      "trace.reply_runtime_attempt_id = trace.runtime_attempt_id",
+    );
+    expect(coldStartReportSql).toContain("causal_candidate_count = 1");
+    expect(coldStartReportSql).toContain("Causal typing hint -> ingress accepted");
+    expect(coldStartReportSql).not.toContain("shellPrewarmLastHintAtEpochMs");
   });
 });
 
@@ -114,6 +121,54 @@ describe.skipIf(!runPostgresProof)(
         expect(stdout).toContain(
           "Accepted -> runner job,2,6000.0,6900.0,7000.0",
         );
+      } finally {
+        await runPsql(connection, [
+          "--quiet",
+          "--command",
+          `DROP SCHEMA IF EXISTS "${schemaName}" CASCADE`,
+        ]);
+      }
+    });
+
+    it("attributes typing prewarm metrics to one causal trace and excludes ambiguous sources", async () => {
+      const connection = readLocalPostgresConnection(databaseUrl);
+      if (!connection) {
+        throw new Error("Expected a validated local PostgreSQL connection.");
+      }
+      const schemaName = `typing_prewarm_report_${randomUUID().replaceAll("-", "")}`;
+
+      try {
+        const { stdout } = await runPsql(connection, [
+          "--quiet",
+          "--command",
+          createShellPrewarmFixtureSql(schemaName),
+          "--command",
+          `SET search_path TO "${schemaName}"`,
+          "--csv",
+          "--set",
+          "window_hours=24",
+          "--file",
+          coldStartReportPath,
+        ]);
+
+        expect(stdout).toContain(
+          "prewarm_cold_start_observed,Causal typing hint -> ingress accepted,1,500.0,500.0,500.0",
+        );
+        expect(stdout).toContain(
+          "prewarm_cold_start_observed,Ingress accepted -> runner job,1,1000.0,1000.0,1000.0",
+        );
+        expect(stdout).toContain(
+          "prewarm_cold_start_observed,Ingress accepted -> provider start,1,2000.0,2000.0,2000.0",
+        );
+        expect(stdout).toContain(
+          "prewarm_cold_start_observed,Ingress accepted -> reply accepted,1,3000.0,3000.0,3000.0",
+        );
+        expect(stdout).toContain(
+          "no_observed_prewarm,Ingress accepted -> reply accepted,1,4000.0,4000.0,4000.0",
+        );
+        expect(stdout).not.toContain("prewarm_failed,");
+        expect(stdout).not.toContain("prewarm_start_issued_warm,");
+        expect(stdout).not.toContain("prewarm_superseded,");
       } finally {
         await runPsql(connection, [
           "--quiet",
@@ -188,6 +243,255 @@ async function runPsql(
   );
 }
 
+function createShellPrewarmFixtureSql(schemaName: string): string {
+  return `
+    CREATE SCHEMA "${schemaName}";
+    SET search_path TO "${schemaName}";
+    CREATE TABLE hosted_ingress_latency_trace (
+      id TEXT PRIMARY KEY,
+      accepted_at TIMESTAMP(3) NOT NULL,
+      runner_job_accepted_at TIMESTAMP(3),
+      provider_start_at TIMESTAMP(3),
+      runtime_attempt_id TEXT,
+      reply_runtime_attempt_id TEXT,
+      linq_delivery_id TEXT,
+      source TEXT NOT NULL,
+      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      phase_breakdown_json JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+    CREATE TABLE hosted_linq_delivery (
+      id TEXT PRIMARY KEY,
+      accepted_at TIMESTAMP(3)
+    );
+    WITH clock AS (
+      SELECT date_trunc(
+        'milliseconds',
+        (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '10 minutes'
+      ) AS t0
+    )
+    INSERT INTO hosted_linq_delivery (id, accepted_at)
+    SELECT 'delivery-backlog', t0 + INTERVAL '11 seconds' FROM clock
+    UNION ALL SELECT 'delivery-cold', t0 + INTERVAL '4 seconds' FROM clock
+    UNION ALL SELECT 'delivery-baseline', t0 + INTERVAL '14 seconds' FROM clock
+    UNION ALL SELECT 'delivery-ambiguous-a', t0 + INTERVAL '24 seconds' FROM clock
+    UNION ALL SELECT 'delivery-ambiguous-b', t0 + INTERVAL '25 seconds' FROM clock
+    UNION ALL SELECT 'delivery-handoff', t0 + INTERVAL '34 seconds' FROM clock
+    UNION ALL SELECT 'delivery-instant', t0 + INTERVAL '44 seconds' FROM clock
+    UNION ALL SELECT 'delivery-unknown', t0 + INTERVAL '54 seconds' FROM clock
+    UNION ALL SELECT 'delivery-negative', t0 + INTERVAL '64 seconds' FROM clock;
+    WITH clock AS (
+      SELECT
+        date_trunc(
+          'milliseconds',
+          (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') - INTERVAL '10 minutes'
+        ) AS t0
+    ), fixture AS (
+      SELECT
+        t0,
+        EXTRACT(EPOCH FROM (t0 - TIMESTAMP '1970-01-01')) * 1000 AS base_ms
+      FROM clock
+    )
+    INSERT INTO hosted_ingress_latency_trace (
+      id,
+      accepted_at,
+      runner_job_accepted_at,
+      provider_start_at,
+      runtime_attempt_id,
+      reply_runtime_attempt_id,
+      linq_delivery_id,
+      source,
+      phase_breakdown_json
+    )
+    SELECT
+      'typing-backlog',
+      t0,
+      t0 + INTERVAL '9 seconds',
+      t0 + INTERVAL '10 seconds',
+      'attempt-cold',
+      'attempt-cold',
+      'delivery-backlog',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'freshStartRequestedAtEpochMs', base_ms + 100
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'typing-cold-causal',
+      t0 + INTERVAL '1 second',
+      t0 + INTERVAL '2 seconds',
+      t0 + INTERVAL '3 seconds',
+      'attempt-cold',
+      'attempt-cold',
+      'delivery-cold',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 1100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 1200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-cold',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-cold',
+        'freshStartRequestedAtEpochMs', base_ms + 1300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 500,
+        'shellPrewarmHintCount', 3,
+        'shellPrewarmOutcome', 'cold_start_observed',
+        'shellPrewarmSource', 'linq-typing-started'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'no-prewarm-causal',
+      t0 + INTERVAL '10 seconds',
+      t0 + INTERVAL '12 seconds',
+      t0 + INTERVAL '13 seconds',
+      'attempt-baseline',
+      'attempt-baseline',
+      'delivery-baseline',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 10100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 10200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-baseline',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-baseline',
+        'freshStartRequestedAtEpochMs', base_ms + 10300
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'typing-ambiguous-a',
+      t0 + INTERVAL '20 seconds',
+      t0 + INTERVAL '22 seconds',
+      t0 + INTERVAL '23 seconds',
+      'attempt-ambiguous',
+      'attempt-ambiguous',
+      'delivery-ambiguous-a',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 20100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 20200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-ambiguous',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-ambiguous',
+        'freshStartRequestedAtEpochMs', base_ms + 20300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 19500,
+        'shellPrewarmOutcome', 'failed',
+        'shellPrewarmSource', 'linq-typing-started'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'typing-ambiguous-b',
+      t0 + INTERVAL '21 seconds',
+      t0 + INTERVAL '23 seconds',
+      t0 + INTERVAL '24 seconds',
+      'attempt-ambiguous',
+      'attempt-ambiguous',
+      'delivery-ambiguous-b',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 21100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 21200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-ambiguous',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-ambiguous',
+        'freshStartRequestedAtEpochMs', base_ms + 21300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 19500,
+        'shellPrewarmOutcome', 'failed',
+        'shellPrewarmSource', 'linq-typing-started'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'typing-handoff',
+      t0 + INTERVAL '30 seconds',
+      t0 + INTERVAL '32 seconds',
+      t0 + INTERVAL '33 seconds',
+      'attempt-handoff-origin',
+      'attempt-handoff-reply',
+      'delivery-handoff',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 30100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 30200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-handoff',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-handoff',
+        'freshStartRequestedAtEpochMs', base_ms + 30300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 29500,
+        'shellPrewarmOutcome', 'superseded',
+        'shellPrewarmSource', 'linq-typing-started'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'instant-start',
+      t0 + INTERVAL '40 seconds',
+      t0 + INTERVAL '42 seconds',
+      t0 + INTERVAL '43 seconds',
+      'attempt-instant',
+      'attempt-instant',
+      'delivery-instant',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 40100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 40200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-instant',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-instant',
+        'freshStartRequestedAtEpochMs', base_ms + 40300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 39500,
+        'shellPrewarmOutcome', 'start_issued_warm',
+        'shellPrewarmSource', 'linq-instant-start'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'legacy-unknown-source',
+      t0 + INTERVAL '50 seconds',
+      t0 + INTERVAL '52 seconds',
+      t0 + INTERVAL '53 seconds',
+      'attempt-unknown',
+      'attempt-unknown',
+      'delivery-unknown',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 50100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 50200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-unknown',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-unknown',
+        'freshStartRequestedAtEpochMs', base_ms + 50300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 49500,
+        'shellPrewarmOutcome', 'start_issued_warm',
+        'shellPrewarmSource', 'unknown'
+      ))
+    FROM fixture
+    UNION ALL
+    SELECT
+      'typing-negative-chronology',
+      t0 + INTERVAL '60 seconds',
+      t0 + INTERVAL '62 seconds',
+      t0 + INTERVAL '63 seconds',
+      'attempt-negative',
+      'attempt-negative',
+      'delivery-negative',
+      'linq',
+      jsonb_build_object('orchestration', jsonb_build_object(
+        'triggeredByWebDirect', true,
+        'directEnsureRequestStartedAtEpochMs', base_ms + 60100,
+        'directEnsureResponseReceivedAtEpochMs', base_ms + 60200,
+        'directEnsureOrchestrationAttemptId', 'web-ingress-negative',
+        'runtimeInvocationOrchestrationAttemptId', 'web-ingress-negative',
+        'freshStartRequestedAtEpochMs', base_ms + 60300,
+        'shellPrewarmFirstHintAtEpochMs', base_ms + 60500,
+        'shellPrewarmOutcome', 'cold_start_observed',
+        'shellPrewarmSource', 'linq-typing-started'
+      ))
+    FROM fixture;
+  `;
+}
+
 function createFixtureSql(schemaName: string): string {
   return `
     CREATE SCHEMA "${schemaName}";
@@ -196,8 +500,17 @@ function createFixtureSql(schemaName: string): string {
       id TEXT PRIMARY KEY,
       accepted_at TIMESTAMP(3) NOT NULL,
       runner_job_accepted_at TIMESTAMP(3),
+      provider_start_at TIMESTAMP(3),
       runtime_attempt_id TEXT,
+      reply_runtime_attempt_id TEXT,
+      linq_delivery_id TEXT,
+      source TEXT NOT NULL DEFAULT 'fixture',
+      created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       phase_breakdown_json JSONB NOT NULL DEFAULT '{}'::jsonb
+    );
+    CREATE TABLE hosted_linq_delivery (
+      id TEXT PRIMARY KEY,
+      accepted_at TIMESTAMP(3)
     );
     WITH clock AS (
       SELECT

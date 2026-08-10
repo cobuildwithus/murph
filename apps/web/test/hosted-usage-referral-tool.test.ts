@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const ORDINARY_POLICY_VERSION = "hosted-usage-referral-2026-07-v1";
+
 const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
   readActiveHostedMemberAccess: vi.fn(),
@@ -61,6 +63,7 @@ type ReferralState = {
   expiresAt: Date;
   id: string;
   policyCode: "active_group_v1" | "new_person_activation_v1";
+  policyVersion: string;
   referrerMemberId: string;
   rewardUsdMicros: bigint;
   sourceConversationJson?: {
@@ -187,14 +190,14 @@ describe("hosted usage referral tool", () => {
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
-                "$2.00 of cost-weighted usage credit for your Murph",
+                "about 10 more days of Murph usage for your Murph",
             },
             {
               code: "active_group_v1",
               requirementsLabel:
                 "Start a fresh group and make it genuinely active, with multiple people actually talking.",
               rewardLabel:
-                "$3.50 of cost-weighted usage credit for your Murph",
+                "about 14 more days of Murph usage for your Murph",
             },
           ],
         },
@@ -203,7 +206,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("frames personal referral rewards as cost-weighted credit", async () => {
+  it("frames personal referral rewards as days of Murph usage", async () => {
     const { prisma } = buildPrisma();
 
     await expect(handleHostedUsageReferralGroupTool({
@@ -223,12 +226,12 @@ describe("hosted usage referral tool", () => {
               requirementsLabel:
                 "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
               rewardLabel:
-                "$2.00 of cost-weighted usage credit for your Murph",
+                "about 10 more days of Murph usage for your Murph",
             },
             {
               code: "active_group_v1",
               rewardLabel:
-                "$3.50 of cost-weighted usage credit for your Murph",
+                "about 14 more days of Murph usage for your Murph",
             },
           ],
         },
@@ -236,7 +239,7 @@ describe("hosted usage referral tool", () => {
     });
   });
 
-  it("frames group referral rewards as cost-weighted credit", async () => {
+  it("frames group referral rewards as days of Murph usage", async () => {
     const { prisma } = buildPrisma({
       containerMemberId: "member_group",
     });
@@ -256,7 +259,7 @@ describe("hosted usage referral tool", () => {
           availablePolicies: [{
             code: "active_group_v1",
             rewardLabel:
-              "$3.50 of cost-weighted usage credit for this room",
+              "about 14 more days of Murph usage for this room",
           }],
         },
         status: "ok",
@@ -278,6 +281,7 @@ describe("hosted usage referral tool", () => {
       expiresAt: new Date("2030-08-05T12:00:00.000Z"),
       id: "hur_frozen_reward",
       policyCode: "active_group_v1",
+      policyVersion: ORDINARY_POLICY_VERSION,
       referrerMemberId: "member_personal",
       rewardUsdMicros: 2_750_000n,
       sourceConversationJson: PERSONAL_SOURCE,
@@ -299,12 +303,12 @@ describe("hosted usage referral tool", () => {
           activeMissions: [{
             policyCode: "active_group_v1",
             rewardLabel:
-              "$2.75 of cost-weighted usage credit for your Murph",
+              "about 12 more days of Murph usage for your Murph",
           }],
           availablePolicies: [{
             code: "new_person_activation_v1",
             rewardLabel:
-              "$2.00 of cost-weighted usage credit for your Murph",
+              "about 10 more days of Murph usage for your Murph",
           }],
         },
         status: "ok",
@@ -607,6 +611,7 @@ describe("hosted usage referral tool", () => {
       expiresAt: new Date("2030-08-05T12:00:00.000Z"),
       id: "hur_other_destination",
       policyCode: "active_group_v1",
+      policyVersion: ORDINARY_POLICY_VERSION,
       referrerMemberId: "member_personal",
       rewardUsdMicros: 3_500_000n,
       sourceConversationJson: null,
@@ -1075,6 +1080,7 @@ function buildPrisma(input: {
         select?: {
           expiresAt?: boolean;
           policyCode?: boolean;
+          policyVersion?: boolean;
           rewardUsdMicros?: boolean;
           status?: boolean;
         };
@@ -1091,6 +1097,9 @@ function buildPrisma(input: {
                   : {}),
                 ...(input.select.policyCode
                   ? { policyCode: referral.policyCode }
+                  : {}),
+                ...(input.select.policyVersion
+                  ? { policyVersion: referral.policyVersion }
                   : {}),
                 ...(input.select.rewardUsdMicros
                   ? { rewardUsdMicros: referral.rewardUsdMicros }

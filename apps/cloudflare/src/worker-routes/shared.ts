@@ -7,6 +7,9 @@ import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
 
@@ -49,7 +52,10 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
       userId: string;
     },
   ): Promise<HostedRuntimeEnsureProcessingResponse>;
-  prewarmRuntimeShellForUser?(userId: string): Promise<void>;
+  prewarmRuntimeShellForUser?(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void>;
   validateRuntimeWriteFence?(input: {
     attemptId: string;
     generation: string;
@@ -58,6 +64,18 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  heartbeatHostedWorkspaceSnapshotUploadSession?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
+  completeHostedWorkspaceSnapshotUploadSession?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
   rememberHostedWorkspaceSnapshotReplacedRef?(input: {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;

@@ -78,12 +78,12 @@ async function captureStudy({
 }
 
 test("capture signed-in invite recovery design proof", async ({ browser }) => {
+  test.skip(
+    !process.env.DESIGN_PROOF_OUTPUT_DIR,
+    "Run only in the dedicated design-proof capture workflow",
+  );
   test.setTimeout(300_000);
   const outputDir = process.env.DESIGN_PROOF_OUTPUT_DIR;
-  test.skip(
-    !outputDir,
-    "capture runs only in the dedicated design-proof workflow",
-  );
   if (!outputDir) {
     return;
   }

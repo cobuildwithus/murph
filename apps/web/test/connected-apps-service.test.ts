@@ -1200,7 +1200,13 @@ describe("connected-app service", () => {
         }
         if (parsed.pathname === "/api/v3.1/tools/execute/GOOGLECALENDAR_CREATE_EVENT") {
           if (directResponse === "http-502") {
-            return jsonResponse({ error: "upstream unavailable" }, 502);
+            return jsonResponse({
+              error: {
+                code: 2502,
+                message: "upstream unavailable",
+                slug: "UPSTREAM_UNAVAILABLE",
+              },
+            }, 502);
           }
           if (directResponse === "throw") {
             throw new Error("socket closed after provider accepted request");
@@ -1238,7 +1244,7 @@ describe("connected-app service", () => {
         statusCode: 502,
         type: "composio_http_error",
       },
-      "failed with status 502",
+      "failed with status 502. Provider error: code=2502, slug=UPSTREAM_UNAVAILABLE",
     );
   });
 

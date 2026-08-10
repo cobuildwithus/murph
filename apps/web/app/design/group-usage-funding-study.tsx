@@ -98,7 +98,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       id: "design-mission-active-group",
       requirementsLabel:
         "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-      rewardLabel: "$3.50",
+      rewardLabel: "About 14 more days of Murph usage",
       selectedLabel: "Jul 27, 2026",
       status: "in_progress",
       statusLabel: "In progress",
@@ -110,7 +110,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       id: "design-mission-checking-final-activity",
       requirementsLabel:
         "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-      rewardLabel: "$3.50",
+      rewardLabel: "About 14 more days of Murph usage",
       selectedLabel: "Jul 20, 2026",
       status: "checking_final_activity",
       statusLabel: "Checking final activity",
@@ -122,7 +122,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       id: "design-mission-reward-pending",
       requirementsLabel:
         "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-      rewardLabel: "$3.50",
+      rewardLabel: "About 14 more days of Murph usage",
       selectedLabel: "Jul 18, 2026",
       status: "reward_pending",
       statusLabel: "Reward pending",
@@ -134,7 +134,7 @@ const DESIGN_AI_USAGE_ACTIVITY: HostedAiUsageActivitySnapshot = {
       id: "design-mission-new-person",
       requirementsLabel:
         "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-      rewardLabel: "$2.00",
+      rewardLabel: "About 10 more days of Murph usage",
       selectedLabel: "Jul 10, 2026",
       status: "completed",
       statusLabel: "Completed",
@@ -153,7 +153,7 @@ const DESIGN_AI_USAGE_WAITING_ACTIVITY: HostedAiUsageActivitySnapshot = {
       id: "design-mission-waiting-group",
       requirementsLabel:
         "Start a fresh group and make it genuinely active, with multiple people actually talking.",
-      rewardLabel: "$3.50",
+      rewardLabel: "About 14 more days of Murph usage",
       selectedLabel: "Jul 29, 2026",
       status: "waiting_for_group",
       statusLabel: "Waiting for a new group",
@@ -185,7 +185,7 @@ const DESIGN_AI_USAGE_DISABLED_HISTORY: HostedAiUsageActivitySnapshot = {
       id: "design-mission-disabled-history",
       requirementsLabel:
         "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
-      rewardLabel: "$2.00",
+      rewardLabel: "About 10 more days of Murph usage",
       selectedLabel: "Jul 10, 2026",
       status: "completed",
       statusLabel: "Completed",
