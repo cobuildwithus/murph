@@ -60,7 +60,10 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Patterns, reliable reminders, and managed OpenAI web search",
+      "Patterns, reliable reminders, wearable recovery, and web search",
+    );
+    expect(markup).toContain(
+      "Wearable sync can recover without waking the assistant",
     );
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).not.toContain("Ask Murph to search");

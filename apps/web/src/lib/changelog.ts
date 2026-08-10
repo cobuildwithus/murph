@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns, reliable reminders, and managed OpenAI web search",
+    title: "Patterns, reliable reminders, wearable recovery, and web search",
     summary:
-      "Patterns compares repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, and managed OpenAI web search can reach current information again.",
+      "Patterns compares repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, wearable sync can recover safely, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "personal-patterns",
@@ -106,6 +106,18 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
+      },
+      {
+        id: "wearable-sync-recovers-model-free",
+        kind: "improvement",
+        priority: 5,
+        title: "Wearable sync can recover without waking the assistant",
+        summary:
+          "Pending wearable updates can now finish their sync work even while scheduled assistant automations are paused.",
+        details:
+          "Fresh messages still take priority. Murph checkpoints recovered health-data changes before marking them handled, retries safely when a source remains pending, and does not start an AI response just to finish the sync.",
+        relevanceTags: ["wearables", "connections", "health-data", "reliability"],
+        sourcePullRequests: [1597],
       },
       {
         id: "web-search-restored",
