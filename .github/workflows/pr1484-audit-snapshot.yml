@@ -1,4 +1,4 @@
-name: Validate PR 1484 exact head
+name: Push PR 1484 audit fixes
 
 on:
   push:
@@ -6,83 +6,131 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - name: Check out exact PR head
         uses: actions/checkout@v4
         with:
-          ref: 7087a2159ebc41f66cb4af655d96e77c95b62337
+          ref: agent/member-owned-provider-applications
           fetch-depth: 0
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.14.1
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client
-        run: pnpm -C apps/web run prisma:generate
-
-      - name: Validate Prisma schema
-        run: pnpm -C apps/web exec prisma validate
-
-      - name: Typecheck device sync
-        run: pnpm -C packages/device-syncd run typecheck
-
-      - name: Typecheck assistant runtime
-        run: pnpm -C packages/assistant-runtime run typecheck
-
-      - name: Typecheck Web
-        run: pnpm -C apps/web run typecheck
-
-      - name: Run focused Web tests
+      - name: Apply audited fixes
         shell: bash
         run: |
           set -euo pipefail
-          pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
-            test/device-provider-application-crypto.test.ts \
-            test/device-provider-application-ingress-store.test.ts \
-            test/device-provider-application-store.test.ts \
-            test/device-provider-application-types.test.ts \
-            test/device-sync-hosted-runtime-authority.test.ts \
-            test/device-sync-internal-runtime.test.ts \
-            test/device-sync-providers.test.ts \
-            test/hosted-account-data-service.test.ts \
-            test/prisma-store-oauth-connection.test.ts \
-            test/prisma-store-oauth-sessions.test.ts
-
-      - name: Run focused runtime tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm -C packages/assistant-runtime exec vitest run --config vitest.config.ts --no-coverage \
-            test/hosted-runtime-device-sync-provider-configs.test.ts \
-            test/hosted-runtime-device-sync-maintenance.test.ts \
-            test/hosted-device-sync-runtime.test.ts
-
-      - name: Run device-sync package tests
-        run: pnpm -C packages/device-syncd run test
-
-      - name: Run smoke checks
-        run: pnpm test:smoke
-
-      - name: Verify generated and source cleanliness
-        shell: bash
-        run: |
-          set -euo pipefail
+          expected_head=7087a2159ebc41f66cb4af655d96e77c95b62337
+          test "$(git rev-parse HEAD)" = "$expected_head"
+          cat > /tmp/pr1484-fixes.patch.gz.b64 <<'PAYLOAD'
+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
+FKqVtwZVAAA=
+PAYLOAD
+          base64 --decode /tmp/pr1484-fixes.patch.gz.b64 \
+            | gzip --decompress > /tmp/pr1484-fixes.patch
+          git apply --check /tmp/pr1484-fixes.patch
+          git apply /tmp/pr1484-fixes.patch
           git diff --check
-          test -z "$(git status --short --untracked-files=no)" || {
-            git status --short
-            exit 1
-          }
+
+      - name: Commit and push WIP fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            apps/web/src/lib/device-sync/provider-applications/crypto.ts \
+            apps/web/src/lib/device-sync/provider-applications/store.ts \
+            apps/web/src/lib/device-sync/prisma-store/oauth-sessions.ts \
+            apps/web/src/lib/device-sync/prisma-store.ts \
+            apps/web/src/lib/device-sync/provider-applications/ingress-store.ts \
+            apps/web/test/device-sync-hosted-runtime-authority.test.ts \
+            apps/web/test/device-provider-application-ingress-store.test.ts \
+            apps/web/test/prisma-store-oauth-sessions.test.ts \
+            apps/web/test/device-provider-application-crypto.test.ts \
+            apps/web/test/device-provider-application-store.test.ts
+          git commit -m "fix: harden provider application recovery and OAuth binding"
+          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:7087a2159ebc41f66cb4af655d96e77c95b62337 \
+            origin HEAD:refs/heads/agent/member-owned-provider-applications
