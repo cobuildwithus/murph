@@ -132,8 +132,13 @@ export interface HostedMemberRoutingLookup {
 export async function projectHostedMemberRoutingState(
   routing: HostedMemberRoutingRecord,
   prisma?: HostedOnboardingReadClient,
+  retainFailureInScopedCache?: boolean,
 ): Promise<HostedMemberRoutingStateSnapshot> {
-  const privateState = await readHostedMemberRoutingPrivateState(routing, prisma);
+  const privateState = await readHostedMemberRoutingPrivateState(
+    routing,
+    prisma,
+    retainFailureInScopedCache,
+  );
 
   return {
     hasPendingLinqRouteState: [

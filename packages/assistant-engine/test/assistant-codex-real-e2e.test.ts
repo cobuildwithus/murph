@@ -2155,7 +2155,304 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
   )
 })
 
+describeRealCodex('real Codex Health Commons knowledge e2e', () => {
+  it(
+    'keeps the full broad health question in one knowledge search',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'What does the evidence say about Finnish dry sauna?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/what does the evidence say/iu)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/health|benefit|cardiovascular|mortality/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'uses one bounded evidence and safety packet without starting an experiment',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'Does Finnish dry sauna improve immunity, and is it safe after I fainted recently?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/immun/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/faint/iu)
+      expect(
+        result.actions.some((action) =>
+          action.kind === 'command'
+          && action.command.includes('vault-cli experiment')
+        ),
+        'no experiment command',
+      ).toBe(false)
+      expect(result.finalMessage).toMatch(/immun/iu)
+      expect(result.finalMessage).toMatch(/faint|medical|clinician|doctor/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'keeps a simple safety question on one knowledge search',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'Is it safe to use Finnish dry sauna while I am wearing a fentanyl patch?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/fentanyl/iu)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/life-threatening|overdose|poison/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'answers an ordinary red-light question from one Health Commons lookup',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'What is red light therapy, and what limits how broadly its evidence applies?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/red light therapy/iu)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/photobiomodulation|red light/iu)
+      expect(result.finalMessage).toMatch(/wavelength|dose|device|body site|outcome/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'uses Health Commons dose constraints without inventing a device specification',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'For red light therapy, how long is 12 J/cm2 at 109 mW/cm2, and what must match before that calculation is valid?',
+      )
+      const knowledgeCommands = result.actions.flatMap((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+          ? [action.command]
+          : []
+      )
+
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage).toMatch(/110 seconds|1\.8 minutes|about 2 minutes/iu)
+      expect(result.finalMessage).toMatch(/distance|contact|geometry|wavelength|body site/iu)
+      expect(result.finalMessage).not.toMatch(/Bestqool|BQ60|Pro200/iu)
+    },
+    360_000,
+  )
+
+  it(
+    'skips Health Commons for a trivial non-health turn',
+    async () => {
+      const result = await runHealthCommonsKnowledgeProbe(
+        'Thanks, that was helpful. Tell me a short joke about databases.',
+      )
+
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli commons knowledge search')
+      )).toBe(false)
+      expect(result.actions.some((action) =>
+        action.kind === 'command'
+        && action.command.includes('vault-cli experiment')
+      )).toBe(false)
+      expect(result.finalMessage.trim().length).toBeGreaterThan(0)
+    },
+    360_000,
+  )
+})
+
 describeRealCodex('real Codex hosted usage behavior e2e', () => {
+  it.each([
+    { channel: 'linq', filesystemAccess: true, result: 64 },
+    { channel: 'linq', filesystemAccess: true, result: 100 },
+    { channel: 'linq', filesystemAccess: true, result: 'unavailable' },
+    { channel: 'email', filesystemAccess: false, result: 64 },
+    { channel: 'email', filesystemAccess: false, result: 100 },
+    { channel: 'email', filesystemAccess: false, result: 'unavailable' },
+  ] as const)(
+    'answers explicit hosted-group usage progress on $channel with $result',
+    async ({ channel, filesystemAccess, result: usageResult }) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), `murph-group-usage-progress-${channel}-e2e-`),
+      )
+      const groupActions: string[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await mkdir(skillsRoot, { recursive: true })
+        if (filesystemAccess) {
+          await materializeAssistantSkill({
+            skillsRoot,
+            slug: 'hosted-low-usage',
+          })
+        }
+
+        const response = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          configOverrides: filesystemAccess
+            ? undefined
+            : [
+                'features.shell_tool=false',
+                'features.multi_agent=false',
+                'features.multi_agent_v2=false',
+                'features.tool_suggest=false',
+              ],
+          developerInstructions:
+            buildHostedUsageProgressDeveloperInstructions(channel),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupActions.push(request.action)
+                if (request.action !== 'read_usage') {
+                  throw new Error(
+                    `Unexpected group usage-progress action: ${request.action}`,
+                  )
+                }
+                if (usageResult === 'unavailable') {
+                  return {
+                    action: 'read_usage',
+                    result: {
+                      status: 'unavailable',
+                      unavailableReason: 'group_usage_unavailable',
+                      usage: null,
+                    },
+                  }
+                }
+                return {
+                  action: 'read_usage',
+                  result: {
+                    status: 'ok',
+                    usage: {
+                      fundingNeeded: false,
+                      fundingUrl: null,
+                      includedUsageUsedPercent: usageResult,
+                    },
+                  },
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'What percent of this room\'s included AI usage have we used in the current period?',
+          reasoningEffort: 'low',
+          sandbox: filesystemAccess ? 'workspace-write' : 'read-only',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(response.jsonEvents)
+        const skillReads = actions.filter((action) =>
+          action.kind === 'command'
+          && action.command.includes('hosted-low-usage/SKILL.md')
+          && action.output.includes('# Hosted low usage')
+        )
+        const usageReads = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(skillReads).toHaveLength(filesystemAccess ? 1 : 0)
+        if (!filesystemAccess) {
+          expect(actions.some((action) => action.kind === 'command')).toBe(false)
+        }
+        expect(usageReads).toHaveLength(1)
+        expect(usageReads[0]).toMatchObject({
+          argumentsValue: { action: 'read_usage' },
+        })
+        expect(groupActions).toEqual(['read_usage'])
+
+        if (usageResult === 64) {
+          expect(response.finalMessage.trim()).toBe(
+            "About 64% of this room's included usage for the current period has been used.",
+          )
+        } else if (usageResult === 100) {
+          expect(response.finalMessage.trim()).toBe(
+            "At least all of this room's included usage for the current period has been used.",
+          )
+        } else {
+          expect(response.finalMessage).toMatch(
+            /authoritative included-usage progress figure.*unavailable right now/iu,
+          )
+        }
+        expect(response.finalMessage).not.toMatch(
+          /messages? left|remaining percent|\b0% left\b|\bexhausted\b|\bout of usage\b/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
   it.each([
     {
       confirmationPrompt: [
@@ -2937,6 +3234,8 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         expect(second.finalMessage.toLowerCase()).not.toContain(
           RETIRED_USAGE_TERM,
         )
+        expect(second.finalMessage).not.toMatch(/\bmissions?\b/iu)
+        expect(second.finalMessage).not.toMatch(/\b(?:arm|armed|arming)\b/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -5616,6 +5915,74 @@ async function runNameFirstExperimentStartProbe(input: {
   }
 }
 
+async function runHealthCommonsKnowledgeProbe(prompt: string): Promise<{
+  actions: CapabilityRoutingAction[]
+  finalMessage: string
+}> {
+  const config = await resolveRealCodexE2eConfig()
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-health-commons-knowledge-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingDirectory, 'bin')
+    await materializeHealthCommonsKnowledgeVaultCli({ binDirectory })
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand:
+        normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: config.codexHome,
+      developerInstructions: buildDirectConversationDeveloperInstructions(),
+      env: {
+        ...config.env,
+        HEALTH_COMMONS_E2E_CLI_ENTRYPOINT:
+          HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+        HEALTH_COMMONS_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
+        PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+      },
+      excludeResumeTurns: true,
+      model: config.model,
+      modelProvider: config.modelProvider,
+      prompt,
+      reasoningEffort: 'low',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+
+    return {
+      actions: readCapabilityRoutingActions(result.jsonEvents),
+      finalMessage: result.finalMessage,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([
+      workingDirectory,
+      ...config.temporaryPaths,
+    ])
+  }
+}
+
+async function materializeHealthCommonsKnowledgeVaultCli(input: {
+  binDirectory: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'if [ -z "$HEALTH_COMMONS_E2E_CLI_ENTRYPOINT" ] || [ -z "$HEALTH_COMMONS_E2E_TSX_BIN" ]; then',
+      '  exit 70',
+      'fi',
+      'exec "$HEALTH_COMMONS_E2E_TSX_BIN" "$HEALTH_COMMONS_E2E_CLI_ENTRYPOINT" "$@"',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 async function materializeExperimentStartVaultCli(input: {
   binDirectory: string
   dryRunRevisionMismatch: boolean
@@ -5843,6 +6210,30 @@ function buildHostedUsageOptionsDeveloperInstructions(
     },
     conversationScope,
     currentLocalDate: '2026-07-29',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+function buildHostedUsageProgressDeveloperInstructions(
+  channel: 'email' | 'linq',
+): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel,
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'group',
+    currentLocalDate: '2026-08-09',
     currentTimeZone: 'America/New_York',
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',

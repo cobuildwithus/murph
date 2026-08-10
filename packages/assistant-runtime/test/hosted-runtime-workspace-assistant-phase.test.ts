@@ -4436,12 +4436,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "post_join_offer" as const,
       joinOffer: { projectionKinds: ["steps-days.v0" as const] },
     };
-    const runOffer = async (ids: readonly string[]) =>
+    const runOffer = async (
+      ids: readonly string[],
+      request: Extract<HostedRuntimeGroupToolRequest, {
+        action: "post_join_offer";
+      }> = offer,
+    ) =>
       await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: ids,
         operation: async (executionContext) =>
-          await executionContext.hosted?.groupTool?.request(offer),
+          await executionContext.hosted?.groupTool?.request(request),
         turnEnvironment: null,
       });
 
@@ -4463,6 +4468,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "ok",
       },
     });
+    const emptyOffer = {
+      action: "post_join_offer" as const,
+      joinOffer: { projectionScopes: [] },
+    };
+    await expect(runOffer([inputIds.sms], emptyOffer)).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
+    await expect(runOffer([inputIds.telegram], emptyOffer)).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
     await expect(runOffer([inputIds.mixedSms, inputIds.mixedRcs]))
       .resolves.toMatchObject({
         action: "post_join_offer",
@@ -4481,6 +4498,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         action: "create_join_link",
         joinLink: { requestedVaultShareProjectionKinds: ["steps-days.v0"] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [] },
       },
       offer,
     ]);

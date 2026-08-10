@@ -59,6 +59,7 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("Murph can understand media in X posts");
     expect(markup).toContain("Local alerts can shape health advice");
     expect(markup).toContain("More control over data, models, and connections");
     expect(markup).toContain(
@@ -67,7 +68,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Recovery that stops at the right moment");
     expect(markup).toContain("More ways to finish what you started");
     expect(markup).toContain("A clearer view of home, stronger follow-through");
-    expect(markup).toContain("More ways through, less waiting around");
+    expect(markup).not.toContain("More ways through, less waiting around");
     expect(markup).not.toContain("Corrections that carry forward");
     expect(markup).not.toContain("A first text that goes somewhere");
     expect(markup).not.toContain(
@@ -89,7 +90,10 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-29"');
+    expect(markup).toContain('href="/changelog?edition=2026-07-30"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-06#x-post-media-understanding"',
+    );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
     );
@@ -126,6 +130,12 @@ describe("ChangelogPage", () => {
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
       expect.arrayContaining([
+        {
+          message: {
+            body: "Look at the images or video in this X post and tell me what they show: [paste X post URL]",
+            subject: "Try it: Ask about images and video on X",
+          },
+        },
         {
           message: {
             body: "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",

@@ -1,5 +1,6 @@
 import {
   addDaysToIsoDate,
+  normalizeActivityKindToken,
   toLocalDayKey,
 } from "@murphai/contracts";
 
@@ -25,6 +26,16 @@ interface SharedGroupWorkoutDayData {
   date: string;
   workoutCount: number;
   workoutMinutes: number;
+}
+
+interface SharedGroupWorkoutsDayData {
+  calendarClosedThroughDate: string;
+  date: string;
+  timeSemantics: "canonical-event-zone-or-vault-zone.v0";
+  workouts: readonly {
+    kind: string;
+    minutes: number;
+  }[];
 }
 
 interface SharedGroupActivityMinutesDayData {
@@ -198,6 +209,13 @@ function appendDailySampleSummaries(input: {
     );
     return;
   }
+  if (
+    input.projectionScopeKey === "workouts.v0"
+    && isWorkoutsDayData(data)
+  ) {
+    appendWorkoutKindDailySummaries(data, input.summaries);
+    return;
+  }
   if (isActivityMinutesDayData(data)) {
     input.summaries.push(dailySummary({
       date: data.date,
@@ -241,6 +259,38 @@ function appendDailySampleSummaries(input: {
         }));
       }
     }
+  }
+}
+
+function appendWorkoutKindDailySummaries(
+  data: SharedGroupWorkoutsDayData,
+  summaries: OverviewWeeklySampleSummary[],
+): void {
+  if (data.date > data.calendarClosedThroughDate) {
+    return;
+  }
+  const byKind = new Map<string, { count: number; minutes: number }>();
+  for (const workout of data.workouts) {
+    const existing = byKind.get(workout.kind) ?? { count: 0, minutes: 0 };
+    existing.count += 1;
+    existing.minutes += workout.minutes;
+    byKind.set(workout.kind, existing);
+  }
+  for (const [kind, totals] of byKind) {
+    summaries.push(
+      dailySummary({
+        date: data.date,
+        stream: `workout-kind-${kind}-count`,
+        sumValue: totals.count,
+        unit: "count",
+      }),
+      dailySummary({
+        date: data.date,
+        stream: `workout-kind-${kind}-minutes`,
+        sumValue: totals.minutes,
+        unit: "minutes",
+      }),
+    );
   }
 }
 
@@ -291,6 +341,32 @@ function isWorkoutDayData(
     && typeof data.workoutCount === "number"
     && "workoutMinutes" in data
     && typeof data.workoutMinutes === "number";
+}
+
+function isWorkoutsDayData(
+  data: object,
+): data is SharedGroupWorkoutsDayData {
+  return "calendarClosedThroughDate" in data
+    && typeof data.calendarClosedThroughDate === "string"
+    && "date" in data
+    && typeof data.date === "string"
+    && "timeSemantics" in data
+    && data.timeSemantics === "canonical-event-zone-or-vault-zone.v0"
+    && "workouts" in data
+    && Array.isArray(data.workouts)
+    && data.workouts.every((workout) => (
+      typeof workout === "object"
+      && workout !== null
+      && "kind" in workout
+      && typeof workout.kind === "string"
+      && workout.kind.length <= 80
+      && normalizeActivityKindToken(workout.kind) === workout.kind
+      && "minutes" in workout
+      && typeof workout.minutes === "number"
+      && Number.isFinite(workout.minutes)
+      && workout.minutes > 0
+      && workout.minutes <= 24 * 60
+    ));
 }
 
 function isActivityMinutesDayData(
