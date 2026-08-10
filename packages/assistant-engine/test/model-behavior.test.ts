@@ -3053,6 +3053,12 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
     )
     expect(prompt).toContain(
+      'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
+    )
+    expect(prompt).toContain(
+      'confirm timing only from a result with `timingVerified: true`',
+    )
+    expect(prompt).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
     )
     expect(prompt).toContain('Ordinary patches preserve its stored route.')

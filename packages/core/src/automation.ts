@@ -16,6 +16,7 @@ import {
   buildAutomationSupportSeriesTag,
   compareDeviceActivityCoverageKeys,
   isValidAutomationCronExpression,
+  normalizeIanaTimeZone,
   parseAutomationSupportSeriesTag,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationAssistantTargetOverride,
@@ -74,13 +75,22 @@ class AutomationSupportSeriesReconciliationYieldError extends Error {
   }
 }
 
-function rejectRecurringScheduleTimeZone(object: Record<string, unknown>): void {
-  if (Object.hasOwn(object, "timeZone")) {
+function normalizeRecurringScheduleTimeZone(
+  object: Record<string, unknown>,
+): string | undefined {
+  if (!Object.hasOwn(object, "timeZone") || object.timeZone === undefined) {
+    return undefined;
+  }
+
+  const requested = requireString(object.timeZone, "schedule.timeZone", 128);
+  const normalized = normalizeIanaTimeZone(requested);
+  if (!normalized) {
     throw new VaultError(
       "VAULT_INVALID_INPUT",
-      "schedule.timeZone is not supported for canonical automation schedules.",
+      "schedule.timeZone must be a valid IANA timezone.",
     );
   }
+  return normalized;
 }
 
 export type {
@@ -406,7 +416,7 @@ function normalizeAutomationSchedule(
         everyMs: object.everyMs,
       };
     case "cron": {
-      rejectRecurringScheduleTimeZone(object);
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
       const expression = requireString(object.expression, "schedule.expression", 400);
       if (!isValidAutomationCronExpression(expression)) {
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.expression must be a valid five-field cron expression.");
@@ -415,6 +425,7 @@ function normalizeAutomationSchedule(
       return {
         kind,
         expression,
+        ...(timeZone ? { timeZone } : {}),
       };
     }
     case "dailyLocal": {
@@ -423,11 +434,12 @@ function normalizeAutomationSchedule(
         throw new VaultError("VAULT_INVALID_INPUT", "schedule.localTime must use HH:MM format.");
       }
 
-      rejectRecurringScheduleTimeZone(object);
+      const timeZone = normalizeRecurringScheduleTimeZone(object);
 
       return {
         kind,
         localTime,
+        ...(timeZone ? { timeZone } : {}),
       };
     }
     case "deviceActivity": {
@@ -683,11 +695,13 @@ function buildAutomationScheduleFrontmatter(schedule: AutomationSchedule): Front
       return {
         kind: schedule.kind,
         expression: schedule.expression,
+        ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
       };
     case "dailyLocal":
       return {
         kind: schedule.kind,
         localTime: schedule.localTime,
+        ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
       };
     case "deviceActivity":
       return {

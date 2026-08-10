@@ -71,7 +71,7 @@ avoiding a blanket request for every selectable projection.
 
 A cron automation persisted in the **group runtime's** vault (`bank/automations/<id>.md`), modeled on the existing `weekly-health-digest` managed automation (`packages/assistant-engine/src/assistant/managed-automations.ts`). Schema in `packages/contracts/src/automation.ts`.
 
-- `schedule: { kind: 'cron', expression: '0 9 * * 0' }` (Sunday 09:00 default; timezone = vault timezone). Weekly uses `cron`, never `every` (which drifts across DST/missed wakes).
+- `schedule: { kind: 'cron', expression: '0 9 * * 0' }` (Sunday 09:00 default; an omitted `timeZone` follows the vault timezone, while an explicitly chosen IANA timezone stays pinned). Weekly uses `cron`, never `every` (which drifts across DST/missed wakes).
 - `continuityPolicy: 'fresh'` (a standalone digest).
 - Setup uses the structured `murph.automation action="save_newsletter"` action. It writes canonical configuration text plus exactly one system-owned delivery tag: `system:group-newsletter:current-chat` or `system:group-newsletter:email`. The model does not author operational instructions, the slug, or reserved tags.
 - Newsletter configuration or route changes repeat that structured save from the destination group; generic patch is status-only.

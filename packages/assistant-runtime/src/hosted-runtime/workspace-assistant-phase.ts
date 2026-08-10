@@ -36,6 +36,7 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   applyMurphManagedAutomations,
+  getAssistantCronJob,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
@@ -45,6 +46,7 @@ import {
   readAssistantInputEvent,
   readAssistantOutboxIntent,
   refreshReminderAvailability,
+  resolveAssistantCronDefaultTimeZone,
   refreshAssistantContextSnapshotBestEffort,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
@@ -1546,10 +1548,11 @@ function createHostedAssistantAutomationTool(input: {
           title: request.title,
           vaultRoot: input.vaultRoot,
         });
-        return buildHostedAutomationToolResponse({
+        return await buildHostedAutomationToolResponse({
           action: "save",
           result,
           routeBinding: "current_conversation",
+          vaultRoot: input.vaultRoot,
         });
       }
 
@@ -1615,12 +1618,13 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.title === undefined ? {} : { title: request.title }),
         vaultRoot: input.vaultRoot,
       });
-      return buildHostedAutomationToolResponse({
+      return await buildHostedAutomationToolResponse({
         action: "patch",
         result,
         routeBinding: request.retargetToCurrentConversation === true
           ? "current_conversation"
           : "preserved",
+        vaultRoot: input.vaultRoot,
       });
     },
   };
@@ -1782,18 +1786,56 @@ function assertActiveHostedAutomationRoute(input: {
   }
 }
 
-function buildHostedAutomationToolResponse(input: {
+async function buildHostedAutomationToolResponse(input: {
   action: "patch" | "save";
   result: Awaited<ReturnType<typeof upsertAutomation>>;
   routeBinding: "current_conversation" | "preserved";
-}): Awaited<ReturnType<HostedAssistantAutomationTool["request"]>> {
+  vaultRoot: string;
+}): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
+  const schedule = input.result.record.schedule;
+  let effectiveTimeZone =
+    schedule.kind === "cron" || schedule.kind === "dailyLocal"
+      ? schedule.timeZone ?? null
+      : null;
+  let nextRunAt: string | null = null;
+  let timingVerified = true;
+  if (
+    (schedule.kind === "cron" || schedule.kind === "dailyLocal")
+    && effectiveTimeZone === null
+  ) {
+    try {
+      effectiveTimeZone = await resolveAssistantCronDefaultTimeZone(
+        input.vaultRoot,
+      );
+    } catch {
+      timingVerified = false;
+    }
+  }
+  if (
+    input.result.record.status !== "archived"
+    && schedule.kind !== "deviceActivity"
+  ) {
+    try {
+      const job = await getAssistantCronJob(
+        input.vaultRoot,
+        input.result.record.automationId,
+      );
+      nextRunAt = job.state.nextRunAt;
+    } catch {
+      timingVerified = false;
+    }
+  }
   return {
     action: input.action,
     automationId: input.result.record.automationId,
     created: input.result.created,
+    effectiveTimeZone,
     lookupId: input.result.record.slug,
+    nextRunAt,
     routeBinding: input.routeBinding,
+    schedule,
     status: input.result.record.status,
+    timingVerified,
   };
 }
 

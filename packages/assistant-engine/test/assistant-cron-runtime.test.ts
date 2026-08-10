@@ -782,6 +782,55 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
   })
 
+  it('keeps an explicit recurring timezone instead of reinterpreting its wall clock in the vault timezone', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-explicit-automation-timezone-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const job = await upsertAssistantCronAutomation({
+      activeUntil: '2026-08-16T04:59:59.000Z',
+      instructions: 'Send the daily group update.',
+      now: new Date('2026-08-09T23:27:19.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'cron',
+        expression: '0 21 * * *',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'daily-group-update',
+      title: 'Daily group update',
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected explicit-timezone automation to be saved.')
+    }
+
+    expect(job.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 21 * * *',
+      timeZone: 'America/Chicago',
+    })
+    expect(job.state.nextRunAt).toBe('2026-08-10T02:00:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'daily-group-update')?.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 21 * * *',
+      timeZone: 'America/Chicago',
+    })
+  })
+
   it('materializes a finite latest-slot occurrence with execution budget and preserves it on reseed', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-upsert-one-shot-automation-',

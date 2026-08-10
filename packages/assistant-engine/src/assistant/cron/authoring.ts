@@ -501,10 +501,11 @@ function resolveFirstOccurrenceActiveUntil(input: {
     | ({ kind: 'cron'; expression: string; timeZone: string })
     | ({ kind: 'dailyLocal'; localTime: string; timeZone: string })
 }): string {
-  if (
-    input.resolvedSchedule.kind !== 'dailyLocal' ||
-    !('timeZone' in input.resolvedSchedule)
-  ) {
+  const timeZone =
+    input.resolvedSchedule.kind === 'dailyLocal'
+      ? input.resolvedSchedule.timeZone
+      : undefined
+  if (timeZone === undefined) {
     throw new VaultCliError(
       'ASSISTANT_CRON_INVALID_SCHEDULE',
       'A finite local cutoff requires a daily-local occurrence.',
@@ -529,7 +530,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
   const cutoffSchedule = {
     kind: 'dailyLocal' as const,
     localTime: input.activeUntilLocalTime,
-    timeZone: input.resolvedSchedule.timeZone,
+    timeZone,
   }
   let activeUntilAnchor = firstOccurrenceAt
   let activeUntil: string | null = null
@@ -555,7 +556,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
 
   const occurrenceDay = formatTimeZoneDateTimeParts(
     firstOccurrenceAt,
-    input.resolvedSchedule.timeZone,
+    timeZone,
   ).dayKey
   const firstCutoff = computeAssistantCronNextRunAt(
     cutoffSchedule,
@@ -564,7 +565,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
   const firstCutoffDay = firstCutoff
     ? formatTimeZoneDateTimeParts(
         firstCutoff,
-        input.resolvedSchedule.timeZone,
+        timeZone,
       ).dayKey
     : null
   if (firstCutoffDay !== occurrenceDay) {
@@ -575,7 +576,7 @@ function resolveFirstOccurrenceActiveUntil(input: {
   }
   const activeUntilDay = formatTimeZoneDateTimeParts(
     activeUntil,
-    input.resolvedSchedule.timeZone,
+    timeZone,
   ).dayKey
   if (activeUntilDay < occurrenceDay) {
     throw new VaultCliError(

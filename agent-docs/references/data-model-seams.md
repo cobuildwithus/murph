@@ -481,14 +481,14 @@ This patch:
 
 - reuses `automationScheduleKindValues`, `automationSchedule*Schema`, `automationScheduleSchema`, `AutomationSchedule`, `automationRouteSchema`, and `AutomationRoute` from `packages/contracts/src/automation.ts`
 - makes `assistantSelfDeliveryTargetSchema` a direct alias of the canonical automation route, while `assistantCronTargetSchema` now composes the shared route fields and keeps only the local deltas it actually needs (`channel` may be null for route-less local jobs, plus `alias` and `sessionId`)
-- keeps the local assistant input seam aligned with the canonical schedule owner instead of restating a second persisted recurring-timezone contract
+- keeps the local assistant input seam aligned with the canonical schedule owner instead of restating a second persisted recurring-timezone contract; recurring schedules may carry one explicit IANA timezone, while omission continues to follow the vault timezone
 - adds `packages/operator-config/test/assistant-cli-contracts.test.ts` to lock the seam so future route/schedule changes flow from the canonical owner into local assistant state without a second schema edit pass
 
 **Why this is simpler:** vault automations and local assistant state now share one owner for the real persisted schedule meaning and for saved outbound routes.
 The local cron layer keeps only the selector fields and the one route-less case it actually needs for local-only jobs.
 
 **Main refactor risk:** keep the canonical stored schedule shape and the local assistant runtime shape distinct.
-Canonical recurring vault automations are vault-local schedules now, while local assistant state should continue to carry only the extra execution selectors it actually owns.
+Canonical recurring vault automations follow the vault timezone when their schedule omits `timeZone`; an explicitly named schedule timezone remains pinned to that recurrence. Local assistant state should continue to carry only the extra execution selectors it actually owns.
 
 #### C. Keep the canonical preferences document owned by contracts/core with thin workflow adapters
 

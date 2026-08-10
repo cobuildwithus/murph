@@ -2320,6 +2320,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       await initializeVault({
         createdAt: "2026-04-27T00:00:00.000Z",
+        timezone: "America/New_York",
         vaultRoot,
       });
       await writeHostedPhaseExperimentSource(vaultRoot);
@@ -4975,7 +4976,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "save",
             activeUntil: "2099-08-01T00:00:00.000Z",
             instructions: "Ask for one lightweight group check-in.",
-            schedule: { kind: "dailyLocal", localTime: "08:30" },
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "21:00",
+              timeZone: "America/Chicago",
+            },
             slug: "group-check-in",
             supportKind: "check_in",
             supportSeriesId: "habit:group-check-in",
@@ -5093,9 +5098,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(linqResult).toEqual(expect.objectContaining({
         action: "save",
         created: true,
+        effectiveTimeZone: "America/Chicago",
         lookupId: "group-check-in",
+        nextRunAt: expect.any(String),
         routeBinding: "current_conversation",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
         status: "active",
+        timingVerified: true,
       }));
       const telegramResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
@@ -5164,6 +5177,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           threadIsDirect: false,
         }),
         supportKind: "check_in",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
         tags: expect.arrayContaining([
           "system:support-series:habit:group-check-in",
         ]),
