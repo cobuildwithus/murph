@@ -100,7 +100,35 @@ describe("production-watch snapshot contract", () => {
     raw.sources[0]!.counters = raw.sources[0]!.counters.filter(
       (counter) => counter.metric !== "provider_request_count",
     );
-    expect(() => parseProviderEvidence(raw)).toThrow("provider_ok_collection_unproven");
+    expect(() => parseProviderEvidence(raw)).toThrow("provider_ok_rate_facts_incomplete");
+
+    const missingTimeout = JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as { sources: Array<{ counters: Array<{ metric: string; current: number }> }> };
+    missingTimeout.sources[0]!.counters = missingTimeout.sources[0]!.counters.filter(
+      (counter) => counter.metric !== "provider_timeout_count",
+    );
+    expect(() => parseProviderEvidence(missingTimeout)).toThrow("provider_ok_rate_facts_incomplete");
+
+    const mismatchedDimensions = JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as {
+      sources: Array<{
+        counters: Array<{ metric: string; dimensions: { source: string; surface: string } }>;
+      }>;
+    };
+    mismatchedDimensions.sources[0]!.counters.find(
+      (counter) => counter.metric === "provider_timeout_count",
+    )!.dimensions.surface = "different_surface";
+    expect(() => parseProviderEvidence(mismatchedDimensions))
+      .toThrow("provider_ok_rate_facts_incomplete");
+
+    const duplicateDenominator = JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as { sources: Array<{ counters: Array<{ metric: string; sampleCount?: number }> }> };
+    duplicateDenominator.sources[0]!.counters[0]!.sampleCount = 240;
+    expect(() => parseProviderEvidence(duplicateDenominator))
+      .toThrow("provider_counter_denominator_duplicate");
 
     const zeroAggregate = JSON.parse(
       readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
@@ -109,6 +137,11 @@ describe("production-watch snapshot contract", () => {
       (counter) => counter.metric === "provider_request_count",
     );
     requestCount!.current = 0;
+    for (const numerator of zeroAggregate.sources[0]!.counters.filter(
+      (counter) => counter.metric === "provider_error_count" || counter.metric === "provider_timeout_count",
+    )) {
+      numerator.current = 0;
+    }
     expect(() => parseProviderEvidence(zeroAggregate)).not.toThrow();
   });
 
@@ -121,7 +154,15 @@ describe("production-watch snapshot contract", () => {
       provider.sources.find((source) => source.source === "vercel")!,
     ) as AdapterEvidence;
     unproven.auth = "unknown";
-    unproven.counters = [];
+    unproven.counters = [{
+      metric: "provider_error_count",
+      dimensions: { source: "vercel", surface: "hosted_web" },
+      unit: "count",
+      current: 20,
+      previous: 1,
+      sampleCount: 240,
+      previousSampleCount: 230,
+    }];
     const snapshot = buildSnapshot({
       now,
       runId: "test-unproven-provider",
@@ -149,6 +190,7 @@ describe("production-watch snapshot contract", () => {
     expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
     expect(snapshot.sourceHealth.find((source) => source.source === "vercel"))
       .toMatchObject({ status: "ok", auth: "unknown", coverage: "partial" });
+    expect(snapshot.anomalyCandidates.some((candidate) => candidate.source === "vercel")).toBe(false);
   });
 
   it("retains every bounded mandatory fingerprint and anomaly under capacity pressure", () => {
@@ -210,8 +252,6 @@ describe("production-watch snapshot contract", () => {
     expect(stripeError).toBeDefined();
     stripeError!.current = 10;
     stripeError!.previous = 0;
-    stripeError!.sampleCount = 80;
-    stripeError!.previousSampleCount = 78;
 
     const snapshot = buildSnapshot({
       now,
@@ -1045,6 +1085,86 @@ describe("production-watch locking and dry-run behavior", () => {
     )).toContain(incidentId);
   });
 
+  it("scores one authoritative provider rate fact and stops provider drill-down before lease mutation", () => {
+    const runtimeRoot = makeTempRoot();
+    const provider = JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as {
+      sources: Array<{
+        source: string;
+        counters: Array<{ metric: string; current: number; previous?: number }>;
+      }>;
+    };
+    const vercel = provider.sources.find((source) => source.source === "vercel")!;
+    const errors = vercel.counters.find((counter) => counter.metric === "provider_error_count")!;
+    errors.current = 20;
+    errors.previous = 1;
+    const providerPath = path.join(runtimeRoot, "provider.json");
+    writeFileSync(providerPath, JSON.stringify(provider), { mode: 0o600 });
+
+    const providerRun = [
+      "run",
+      "--fixture",
+      "healthy",
+      "--provider-evidence",
+      providerPath,
+    ];
+    expect(runProdWatch(providerRun, runtimeRoot).status).toBe(0);
+    expect(runProdWatch(providerRun, runtimeRoot).status).toBe(0);
+
+    const listing = runProdWatch(["incident", "list"], runtimeRoot);
+    expect(listing.status).toBe(0);
+    expect(listing.stdout).toContain("| vercel |");
+    const incidentId = listing.stdout.match(/\| (pw_[A-Za-z0-9]+) \|/u)?.[1];
+    expect(incidentId).toBeDefined();
+
+    expect(runProdWatch([
+      "incident", "claim", incidentId!, "--session-id", "provider-session",
+    ], runtimeRoot).status).toBe(0);
+    const statePath = path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json");
+    const stateBefore = JSON.parse(readFileSync(statePath, "utf8")) as {
+      incidents: Array<{ id: string; state: string; owner?: { heartbeatAt: string; expiresAt: string } }>;
+    };
+    const ownerBefore = stateBefore.incidents.find((incident) => incident.id === incidentId)!.owner;
+
+    const rejectedDrillDown = runProdWatch([
+      "drill-down", incidentId!, "--session-id", "provider-session", "--fixture", "healthy",
+    ], runtimeRoot);
+    expect(rejectedDrillDown.status).toBe(1);
+    expect(rejectedDrillDown.stderr).toContain("provider_incident_drill_down_unavailable_phase_1");
+    const stateAfter = JSON.parse(readFileSync(statePath, "utf8")) as typeof stateBefore;
+    expect(stateAfter.incidents.find((incident) => incident.id === incidentId)!.owner).toEqual(ownerBefore);
+
+    const rejectedHiddenEvidence = runProdWatch([
+      "drill-down",
+      incidentId!,
+      "--session-id",
+      "provider-session",
+      "--fixture",
+      "healthy",
+      "--provider-evidence",
+      providerPath,
+    ], runtimeRoot);
+    expect(rejectedHiddenEvidence.status).toBe(1);
+    expect(rejectedHiddenEvidence.stderr).toContain("drill_down_provider_evidence_forbidden_phase_1");
+    const stateAfterHiddenEvidence = JSON.parse(readFileSync(statePath, "utf8")) as typeof stateBefore;
+    expect(stateAfterHiddenEvidence.incidents.find((incident) => incident.id === incidentId)!.owner)
+      .toEqual(ownerBefore);
+
+    expect(runProdWatch([
+      "incident", "transition", incidentId!, "--session-id", "provider-session", "--state", "confirmed",
+    ], runtimeRoot).status).toBe(0);
+    expect(runProdWatch(providerRun, runtimeRoot).status).toBe(0);
+    const rejectedResolution = runProdWatch([
+      "incident", "transition", incidentId!, "--session-id", "provider-session", "--state", "resolved",
+    ], runtimeRoot);
+    expect(rejectedResolution.status).toBe(1);
+    expect(rejectedResolution.stderr).toContain("incident_resolution_requires_later_clean_evidence");
+    expect(runProdWatch([
+      "incident", "transition", incidentId!, "--session-id", "provider-session", "--state", "escalated",
+    ], runtimeRoot).status).toBe(0);
+  });
+
   it("keeps the Phase 1 remediation command disabled at the CLI boundary", () => {
     const runtimeRoot = makeTempRoot();
     const result = runProdWatch(["remediate"], runtimeRoot);
@@ -1109,6 +1229,14 @@ describe("production-watch locking and dry-run behavior", () => {
 describe("production-watch static safety contracts", () => {
   it("keeps the database query read-only and excludes private event fields", () => {
     const sql = readFileSync(path.join(repoRoot, "scripts", "prod-watch", "collect-v1.sql"), "utf8");
+    const runtimeIssueDomain = readFileSync(
+      path.join(repoRoot, "packages", "runtime-state", "src", "assistant-runtime-issues.ts"),
+      "utf8",
+    );
+    const runtimeIssueImporter = readFileSync(
+      path.join(repoRoot, "apps", "web", "src", "lib", "hosted-execution", "runtime-issues.ts"),
+      "utf8",
+    );
     expect(sql).toContain("BEGIN TRANSACTION READ ONLY");
     expect(sql).toContain("SET LOCAL statement_timeout");
     expect(sql).toContain("::timestamptz AT TIME ZONE 'UTC' AS previous_start");
@@ -1117,8 +1245,14 @@ describe("production-watch static safety contracts", () => {
     expect(sql).toContain("~* '(auth|billing|canonical|clinical|consent|corrupt|credential|");
     expect(sql.indexOf("~* '(auth|billing")).toBeLessThan(sql.indexOf("LIMIT 13"));
     expect(sql).toContain("issue.severity IN ('info', 'warning', 'error')");
+    expect(runtimeIssueDomain).toContain('AssistantRuntimeIssueEnvironment = "hosted" | "local"');
+    expect(runtimeIssueImporter).toContain("environment: record.environment");
+    expect(sql).toContain("issue.environment = 'hosted'");
+    expect(sql).not.toContain("issue.environment = 'production'");
+    expect(sql).not.toContain("release_rows");
+    expect(sql).not.toContain("'releaseSha'");
+    expect(sql).toContain("'releaseContext', '[]'::jsonb");
     expect(sql).toContain("trace.source IN ('linq', 'telegram')");
-    expect(sql).toContain("'current', false");
     expect(sql).not.toContain("hosted_runtime_log");
     for (const forbidden of [
       "user_id",

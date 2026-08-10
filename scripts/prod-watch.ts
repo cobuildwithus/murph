@@ -69,7 +69,7 @@ const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
 const USAGE = `Usage:
   pnpm --silent prod-watch collect [--lookback-minutes 15] [--fixture healthy|suspicious] [--provider-evidence <file>] [--output -|<file>]
   pnpm --silent prod-watch run [--scheduled] [--dry-run] [--fixture healthy|suspicious] [--provider-evidence <file>]
-  pnpm --silent prod-watch drill-down <incident-id-or-fingerprint> --session-id <id> [--lookback-minutes 60] [--fixture healthy|suspicious]
+  pnpm --silent prod-watch drill-down <database-incident-id-or-fingerprint> --session-id <id> [--lookback-minutes 60] [--fixture healthy|suspicious]
   pnpm --silent prod-watch incident list
   pnpm --silent prod-watch incident claim <incident-id-or-fingerprint> --session-id <id>
   pnpm --silent prod-watch incident heartbeat <incident-id-or-fingerprint> --session-id <id>
@@ -232,9 +232,15 @@ async function runDrillDownCommand(argv: string[]): Promise<void> {
   if (parsed.lookbackMinutes > 120) {
     throw new Error("drill_down_lookback_too_large");
   }
+  if (parsed.providerEvidencePath !== undefined) {
+    throw new Error("drill_down_provider_evidence_forbidden_phase_1");
+  }
   const incident = await withStateLock(randomUUID(), async () => {
     const state = await readState(statePath, parsed.configuredSources, new Date());
     const record = findIncident(state, target);
+    if (record.source !== "database") {
+      throw new Error("provider_incident_drill_down_unavailable_phase_1");
+    }
     const next = heartbeatIncident(state, record.fingerprint, sessionId, new Date(), 15);
     await writeStateAndProjections(next);
     return structuredClone(record) as IncidentRecord;

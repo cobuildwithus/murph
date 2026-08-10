@@ -163,12 +163,6 @@
         },
         "previous": {
           "$ref": "#/$defs/number"
-        },
-        "sampleCount": {
-          "$ref": "#/$defs/number"
-        },
-        "previousSampleCount": {
-          "$ref": "#/$defs/number"
         }
       }
     },
@@ -302,18 +296,50 @@
               },
               "counters": {
                 "type": "array",
-                "contains": {
-                  "type": "object",
-                  "properties": {
-                    "metric": {
-                      "const": "provider_request_count"
-                    }
+                "allOf": [
+                  {
+                    "contains": {
+                      "type": "object",
+                      "properties": {
+                        "metric": {
+                          "const": "provider_request_count"
+                        }
+                      },
+                      "required": [
+                        "metric"
+                      ]
+                    },
+                    "minContains": 1
                   },
-                  "required": [
-                    "metric"
-                  ]
-                },
-                "minContains": 1
+                  {
+                    "contains": {
+                      "type": "object",
+                      "properties": {
+                        "metric": {
+                          "const": "provider_error_count"
+                        }
+                      },
+                      "required": [
+                        "metric"
+                      ]
+                    },
+                    "minContains": 1
+                  },
+                  {
+                    "contains": {
+                      "type": "object",
+                      "properties": {
+                        "metric": {
+                          "const": "provider_timeout_count"
+                        }
+                      },
+                      "required": [
+                        "metric"
+                      ]
+                    },
+                    "minContains": 1
+                  }
+                ]
               }
             }
           }

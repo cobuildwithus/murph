@@ -12,7 +12,7 @@ The target lifecycle is hybrid:
 2. The supervisor acquires a non-waiting run lock and gathers the deterministic database/repository snapshot.
 3. Once noninteractive MCP behavior is proven in shadow mode, the supervisor starts a new ephemeral, read-only Codex process to gather provider aggregates into `prod-watch.provider-evidence.v1`.
 4. Local code validates, merges, scores, deduplicates, and persists the result. Codex does not own thresholds, leases, state transitions, or file formats.
-5. Only a promoted incident gets a separate fresh triage session and incident-scoped drill-down.
+5. Only a promoted incident gets a separate fresh triage session. Database incidents support incident-scoped drill-down; Phase 1 provider incidents are claim-and-escalate only.
 
 Phase 1 intentionally implements only step 1, step 2, and local scoring/state. It never labels missing MCP coverage healthy: Vercel, Cloudflare, and Stripe appear as `not_collected`, and the run status is `partial`. This is safer than wiring an unmeasured autonomous agent into a five-minute loop.
 
@@ -84,11 +84,14 @@ pnpm --silent prod-watch scheduler uninstall
 pnpm --silent prod-watch incident list
 pnpm --silent prod-watch incident claim "$INCIDENT" --session-id "$CODEX_THREAD_ID"
 pnpm --silent prod-watch incident heartbeat "$INCIDENT" --session-id "$CODEX_THREAD_ID"
+# Database incidents only:
 pnpm --silent prod-watch drill-down "$INCIDENT" --session-id "$CODEX_THREAD_ID" --lookback-minutes 60
 pnpm --silent prod-watch incident transition "$INCIDENT" \
   --session-id "$CODEX_THREAD_ID" \
   --state escalated
 ```
+
+The incident projections show each incident's source. Database incidents support the full list → claim → drill-down → transition journey. Phase 1 provider incidents support list → claim → transition to `escalated`; provider drill-down is not advertised because the temporary provider envelope has already been removed. The CLI rejects a provider incident before heartbeating or persisting its lease, and it rejects an undisclosed provider-envelope input on the drill-down command.
 
 The target MCP command shape is intentionally external to Phase 1:
 
@@ -125,7 +128,7 @@ This command fails with `automation_disabled_phase_1`. Code modification, worktr
 | `collectorFailures` | Source, failure class, redacted code, retryability. |
 | `redaction` | Policy version and assertions that raw text/direct identifiers are absent. |
 
-Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. The production source universe is always database, Vercel, Cloudflare, and Stripe; callers cannot narrow it. A provider may claim complete `ok` coverage only with `auth: ok` and an explicit `provider_request_count` aggregate, whose measured value may be zero. A source failure never becomes a zero counter.
+Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. The production source universe is always database, Vercel, Cloudflare, and Stripe; callers cannot narrow it. For every exact provider dimension set, complete `ok` coverage requires `auth: ok` and explicit request, error, and timeout counters. Measured zero numerators are valid, but missing numerators are unknown. Provider producers cannot supply `sampleCount` fields: the matching request counter is the only rate denominator and the local scorer owns that relation. A source failure never becomes a zero counter.
 
 The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eight from each provider. Sensitive and critical fingerprints are ranked before ordinary volume at collection time and are retained before presentation capacity is filled. The anomaly bound is the derived worst-case 245 candidates across failures, source health, counters, latency, and fingerprints, so mandatory sensitive, critical, and alert-only candidates cannot be removed by a display limit.
 
@@ -141,7 +144,7 @@ The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eig
 
 MCP calls are isolated by provider. One failure is represented for that source and does not erase successful evidence from other sources. Provider rate-limit and auth failures are monitor incidents, not production-zero evidence.
 
-The first database query deliberately omits full workspace/checkpoint scans: the relevant workspace fields are not indexed for a five-minute fleet-wide query in the inspected schema. Its issue and ingress scans are constrained to the repository's finite severity/source domains so the existing `(severity, occurred_at)` and `(source, accepted_at)` indexes are usable. Add a purpose-built indexed aggregate or existing operational summary before monitoring workspace/checkpoint fields at this cadence.
+The first database query deliberately omits full workspace/checkpoint scans: the relevant workspace fields are not indexed for a five-minute fleet-wide query in the inspected schema. Its assistant-issue scan uses the canonical `hosted` environment persisted by the current writer/importer and intentionally emits no database release context because that writer owns neither runtime name nor release SHA. Its issue and ingress scans are constrained to the repository's finite severity/source domains so the existing `(severity, occurred_at)` and `(source, accepted_at)` indexes are usable. Add a purpose-built indexed aggregate or existing operational summary before monitoring workspace/checkpoint fields at this cadence.
 
 ## Machine state and projections
 
@@ -160,7 +163,7 @@ The first database query deliberately omits full workspace/checkpoint scans: the
     state.lock/
 ```
 
-`state.v1.json` is durable machine-local coordination state. It stores monitor health, anomaly streaks, cumulative-counter baselines, the Phase 1 incident lifecycle, triage lease metadata, and handling sessions. It contains no raw snapshots, production bodies, remediation lifecycle, or pull-request state. Active and history projections expose the short incident ID accepted by claim, heartbeat, drill-down, and transition commands; the fingerprint prefix is diagnostic only.
+`state.v1.json` is durable machine-local coordination state. It stores monitor health, anomaly streaks, cumulative-counter baselines, the Phase 1 incident lifecycle, triage lease metadata, and handling sessions. It contains no raw snapshots, production bodies, remediation lifecycle, or pull-request state. Active and history projections expose the source and short incident ID accepted by claim, heartbeat, and transition commands; database incidents also accept it for drill-down. The fingerprint prefix is diagnostic only.
 
 The Markdown files are rebuildable atomic projections. They are ignored by Git and must never be edited as inputs. `ACTIVE_INCIDENTS.md` shows nonterminal incidents and current lease ownership. `INCIDENT_HISTORY.md` shows terminal and active history without private production data. `MONITOR_STATUS.md` shows scheduler/coverage health.
 

@@ -24,7 +24,7 @@ Use this skill only for Murph production-watch runs and incidents.
    ```
 
 2. When provider coverage is part of this session, query only aggregate health, release, count/rate, and latency surfaces from the configured Vercel, Cloudflare Observability, and Stripe MCPs. Do not retrieve individual events, requests, customers, charges, prompts, or payload bodies.
-3. Emit one JSON object conforming to `scripts/prod-watch/schemas/provider-evidence.v1.schema.json` into a current-user-owned `0600` file inside a `0700` temporary directory. Use only the allowed dimensions and metric names. An `ok` source requires `auth: ok` plus an explicit `provider_request_count` aggregate; a measured zero is valid, but an absent query is not. A provider auth, rate-limit, timeout, schema, or availability problem belongs in `failures`; do not invent zero counts.
+3. Emit one JSON object conforming to `scripts/prod-watch/schemas/provider-evidence.v1.schema.json` into a current-user-owned `0600` file inside a `0700` temporary directory. Use only the allowed dimensions and metric names. For every exact provider dimension set, an `ok` source requires `auth: ok` plus explicit `provider_request_count`, `provider_error_count`, and `provider_timeout_count` counters. Zero error/timeout counters are required; absence is unknown, not zero. Do not emit `sampleCount` or `previousSampleCount`: the request counter is the sole rate denominator. A provider auth, rate-limit, timeout, schema, or availability problem belongs in `failures`; do not invent zero counts.
 4. Merge and evaluate the evidence with:
 
    ```sh
@@ -36,7 +36,7 @@ Use this skill only for Murph production-watch runs and incidents.
 ## Incident triage
 
 - List active incidents with `pnpm --silent prod-watch incident list` and use the displayed Incident ID for every subsequent command.
-- Claim before drill-down:
+- Claim every incident before handling it:
 
   ```sh
   pnpm --silent prod-watch incident claim "$INCIDENT" --session-id "$CODEX_THREAD_ID"
@@ -48,12 +48,13 @@ Use this skill only for Murph production-watch runs and incidents.
   pnpm --silent prod-watch incident heartbeat "$INCIDENT" --session-id "$CODEX_THREAD_ID"
   ```
 
-- Request the narrowest bounded drill-down:
+- Database incidents support the narrowest bounded drill-down:
 
   ```sh
   pnpm --silent prod-watch drill-down "$INCIDENT" --session-id "$CODEX_THREAD_ID" --lookback-minutes 60
   ```
 
+- Phase 1 provider incidents are list, claim, and escalate only. Do not pass a provider envelope to `drill-down`; the command rejects provider incidents before extending their claim lease.
 - Corroborate the causal chain using aggregate provider evidence, release timestamps, and relevant repository source/tests. Never broaden into raw production records.
 - Record one evidence-backed state transition. Valid Phase 1 outcomes are `investigating`, `confirmed`, `monitor_incomplete`, `false_positive`, `escalated`, or `resolved`. Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`. Use `escalated` for sensitive domains; they remain escalation-only even if an external fix is later observed.
 

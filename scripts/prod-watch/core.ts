@@ -166,6 +166,10 @@ const PROVIDER_COUNTER_METRICS = new Set([
   "provider_request_count",
   "provider_timeout_count",
 ]);
+const REQUIRED_PROVIDER_RATE_NUMERATORS = [
+  "provider_error_count",
+  "provider_timeout_count",
+] as const;
 const PROVIDER_LATENCY_METRICS = new Set([
   "edge_request_duration_ms",
   "provider_duration_ms",
@@ -521,17 +525,19 @@ export function parseProviderEvidence(value: unknown): ProviderEvidenceEnvelope 
     if (evidence.counters.some((counter) => !PROVIDER_COUNTER_METRICS.has(counter.metric))) {
       throw new Error("provider_counter_metric_forbidden");
     }
+    if (evidence.counters.some((counter) => (
+      counter.sampleCount !== undefined || counter.previousSampleCount !== undefined
+    ))) {
+      throw new Error("provider_counter_denominator_duplicate");
+    }
     if (evidence.latency.some((summary) => !PROVIDER_LATENCY_METRICS.has(summary.metric))) {
       throw new Error("provider_latency_metric_forbidden");
     }
     if (evidence.status === "ok" && evidence.auth !== "ok") {
       throw new Error("provider_ok_auth_unproven");
     }
-    if (
-      evidence.status === "ok"
-      && !evidence.counters.some((counter) => counter.metric === "provider_request_count")
-    ) {
-      throw new Error("provider_ok_collection_unproven");
+    if (evidence.status === "ok" && !providerRateEvidenceComplete(evidence)) {
+      throw new Error("provider_ok_rate_facts_incomplete");
     }
   }
   const sourceNames = sources.map((source) => source.source);
@@ -593,11 +599,7 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
         ...(failure === undefined ? {} : { errorCode: failure.code }),
       };
     }
-    const providerCollectionProven = source === "database"
-      || (
-        evidence.auth === "ok"
-        && evidence.counters.some((counter) => counter.metric === "provider_request_count")
-      );
+    const providerCollectionProven = source === "database" || providerRateEvidenceComplete(evidence);
     return {
       source,
       status: evidence.status,
@@ -854,7 +856,7 @@ export function evaluateAnomalies(input: {
 
   for (const counter of input.counters) {
     if (["provider_error_count", "deployment_error_count"].includes(counter.metric)) {
-      const candidate = evaluateRateCounter(counter, {
+      const candidate = evaluateRateCounter(withProviderRateDenominator(counter, input.counters), {
         ruleId: "error_rate_regression",
         titleCode: "error_rate_regression",
         minimumCount: 10,
@@ -870,7 +872,7 @@ export function evaluateAnomalies(input: {
     }
 
     if (["provider_timeout_count", "ingress_incomplete_count"].includes(counter.metric)) {
-      const candidate = evaluateRateCounter(counter, {
+      const candidate = evaluateRateCounter(withProviderRateDenominator(counter, input.counters), {
         ruleId: "timeout_rate_regression",
         titleCode: "timeout_rate_regression",
         minimumCount: 5,
@@ -1462,12 +1464,13 @@ export function renderActiveIncidents(state: ProductionWatchState): string {
     return lines.join("\n");
   }
   lines.push(
-    "| Incident ID | Severity | State | Fingerprint | Signal | First seen | Last seen | Session | Lease expiry |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Incident ID | Source | Severity | State | Fingerprint | Signal | First seen | Last seen | Session | Lease expiry |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   );
   for (const incident of active) {
     lines.push([
       incident.id,
+      incident.source,
       incident.severity,
       incident.state,
       incident.fingerprint.slice(0, 16),
@@ -1491,12 +1494,13 @@ export function renderIncidentHistory(state: ProductionWatchState): string {
     "",
     `Generated: ${state.updatedAt}`,
     "",
-    "| Incident ID | Fingerprint | Severity | State | Discovered | Last seen | Sessions | Resolved |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    "| Incident ID | Source | Fingerprint | Severity | State | Discovered | Last seen | Sessions | Resolved |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
   ];
   for (const incident of incidents) {
     lines.push([
       incident.id,
+      incident.source,
       incident.fingerprint.slice(0, 16),
       incident.severity,
       incident.state,
@@ -2039,6 +2043,81 @@ function dimensionsKey(dimensions: Record<string, string>): string {
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => `${key}=${value}`)
     .join("\u001f");
+}
+
+function providerRateEvidenceComplete(evidence: AdapterEvidence): boolean {
+  if (evidence.status !== "ok" || evidence.auth !== "ok") {
+    return false;
+  }
+  if (evidence.counters.some((counter) => (
+    counter.sampleCount !== undefined || counter.previousSampleCount !== undefined
+  ))) {
+    return false;
+  }
+  const requests = evidence.counters.filter((counter) => counter.metric === "provider_request_count");
+  if (requests.length === 0) {
+    return false;
+  }
+  const requestsByDimensions = new Map(
+    requests.map((counter) => [dimensionsKey(counter.dimensions), counter]),
+  );
+  const numerators = evidence.counters.filter((counter) => (
+    counter.metric === "deployment_error_count"
+    || counter.metric === "provider_error_count"
+    || counter.metric === "provider_timeout_count"
+  ));
+  for (const request of requests) {
+    const key = dimensionsKey(request.dimensions);
+    if (REQUIRED_PROVIDER_RATE_NUMERATORS.some((metric) => (
+      !numerators.some((counter) => counter.metric === metric && dimensionsKey(counter.dimensions) === key)
+    ))) {
+      return false;
+    }
+  }
+  return numerators.every((counter) => {
+    const request = requestsByDimensions.get(dimensionsKey(counter.dimensions));
+    if (request === undefined || counter.current > request.current) {
+      return false;
+    }
+    if ((counter.previous === undefined) !== (request.previous === undefined)) {
+      return false;
+    }
+    return counter.previous === undefined
+      || request.previous === undefined
+      || counter.previous <= request.previous;
+  });
+}
+
+function withProviderRateDenominator(
+  counter: CounterSummary,
+  counters: CounterSummary[],
+): CounterSummary {
+  if (![
+    "deployment_error_count",
+    "provider_error_count",
+    "provider_timeout_count",
+  ].includes(counter.metric)) {
+    return counter;
+  }
+  const {
+    sampleCount: _ignoredSampleCount,
+    previousSampleCount: _ignoredPreviousSampleCount,
+    ...counterWithoutProducerDenominator
+  } = counter;
+  const request = counters.find((candidate) => (
+    candidate.metric === "provider_request_count"
+    && dimensionsKey(candidate.dimensions) === dimensionsKey(counter.dimensions)
+  ));
+  if (request === undefined) {
+    return counterWithoutProducerDenominator;
+  }
+  return {
+    ...counterWithoutProducerDenominator,
+    sampleCount: request.current,
+    ...(counter.previous === undefined || request.previous === undefined
+      ? {}
+      : { previousSampleCount: request.previous }),
+  };
 }
 
 function incidentFromCandidate(candidate: AnomalyCandidate, at: string): IncidentRecord {

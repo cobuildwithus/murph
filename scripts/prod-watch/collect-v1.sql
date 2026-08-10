@@ -19,7 +19,7 @@ issue_totals AS (
   CROSS JOIN params
   WHERE issue.occurred_at >= params.previous_start
     AND issue.occurred_at < params.window_end
-    AND issue.environment = 'production'
+    AND issue.environment = 'hosted'
     AND issue.severity IN ('info', 'warning', 'error')
 ),
 issue_fingerprints AS (
@@ -30,7 +30,6 @@ issue_fingerprints AS (
     issue.severity,
     issue.issue_kind,
     coalesce(issue.error_code, 'none') AS error_code,
-    issue.release_sha,
     count(*) FILTER (WHERE issue.occurred_at >= params.current_start)::integer AS current_count,
     count(*) FILTER (WHERE issue.occurred_at < params.current_start)::integer AS previous_count,
     min(issue.occurred_at) FILTER (WHERE issue.occurred_at >= params.current_start) AS first_seen_at,
@@ -39,7 +38,7 @@ issue_fingerprints AS (
   CROSS JOIN params
   WHERE issue.occurred_at >= params.previous_start
     AND issue.occurred_at < params.window_end
-    AND issue.environment = 'production'
+    AND issue.environment = 'hosted'
     AND issue.severity IN ('info', 'warning', 'error')
   GROUP BY
     issue.fingerprint,
@@ -47,8 +46,7 @@ issue_fingerprints AS (
     issue.phase,
     issue.severity,
     issue.issue_kind,
-    coalesce(issue.error_code, 'none'),
-    issue.release_sha
+    coalesce(issue.error_code, 'none')
   ORDER BY
     (
       concat_ws(' ', issue.component, issue.phase, issue.issue_kind, coalesce(issue.error_code, 'none'))
@@ -188,23 +186,6 @@ blocked_stats AS (
     AND holding.pid <> waiting.pid
   WHERE NOT waiting.granted
     AND holding.granted
-),
-release_rows AS (
-  SELECT
-    coalesce(issue.runtime_name, 'assistant_runtime') AS runtime_name,
-    issue.release_sha,
-    max(issue.occurred_at) AS observed_at,
-    count(*) AS issue_count
-  FROM hosted_assistant_runtime_issue AS issue
-  CROSS JOIN params
-  WHERE issue.environment = 'production'
-    AND issue.release_sha IS NOT NULL
-    AND issue.severity IN ('info', 'warning', 'error')
-    AND issue.occurred_at >= params.window_end - interval '24 hours'
-    AND issue.occurred_at < params.window_end
-  GROUP BY coalesce(issue.runtime_name, 'assistant_runtime'), issue.release_sha
-  ORDER BY observed_at DESC, issue_count DESC
-  LIMIT 8
 ),
 counter_rows AS (
   SELECT jsonb_build_object(
@@ -354,7 +335,6 @@ fingerprint_rows AS (
     END,
     'issueKind', issue_kind,
     'errorCode', error_code,
-    'releaseSha', release_sha,
     'count', current_count,
     'previousCount', previous_count,
     'firstSeenAt', coalesce(first_seen_at, params.current_start) AT TIME ZONE 'UTC',
@@ -370,16 +350,7 @@ SELECT jsonb_build_object(
   'status', 'ok',
   'auth', 'not_required',
   'freshnessSeconds', 0,
-  'releaseContext', coalesce((
-    SELECT jsonb_agg(jsonb_build_object(
-      'source', 'database',
-      'runtime', runtime_name,
-      'sha', release_sha,
-      'observedAt', observed_at AT TIME ZONE 'UTC',
-      'current', false
-    ) ORDER BY observed_at DESC)
-    FROM release_rows AS ranked_releases
-  ), '[]'::jsonb),
+  'releaseContext', '[]'::jsonb,
   'counters', coalesce((SELECT jsonb_agg(value) FROM counter_rows), '[]'::jsonb),
   'latency', coalesce((
     SELECT jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
