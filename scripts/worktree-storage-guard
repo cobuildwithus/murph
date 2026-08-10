@@ -71,6 +71,23 @@ if [[ -n "${MURPH_WORKTREE_MAX_LIVE+x}" && -z "${MURPH_WORKTREE_GUARD_STATE_DIR+
 fi
 mkdir -p "$state_dir"
 
+# Historical installers invoke the primary checkout's guard without arguments
+# while their working directory remains the authorized historical checkout.
+# Preserve that rollout path without weakening a no-argument audit run from the
+# primary checkout itself or treating a different repository as a sibling.
+if (( original_arg_count == 0 )) && [[ -z "$current_worktree_path" ]]; then
+  invoking_worktree="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
+  invoking_common_dir="$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$invoking_worktree" && -n "$invoking_common_dir" ]]; then
+    invoking_worktree="$(cd "$invoking_worktree" 2>/dev/null && pwd -P)" || invoking_worktree=''
+    invoking_common_dir="$(cd "$invoking_common_dir" 2>/dev/null && pwd -P)" || invoking_common_dir=''
+  fi
+  if [[ -n "$invoking_worktree" && "$invoking_worktree" != "$repo_root" \
+    && "$invoking_common_dir" == "$common_dir" ]]; then
+    current_worktree_path="$invoking_worktree"
+  fi
+fi
+
 if [[ -n "$current_worktree_path" ]]; then
   [[ -d "$current_worktree_path" ]] || {
     printf 'worktree storage guard: current worktree could not be resolved\n' >&2
@@ -136,10 +153,19 @@ count_record() {
     "$common_dir"/worktrees/*)
       admin_dirs+=("$admin_dir")
       disk_paths+=("$record_path")
-      if [[ -f "$authorization_initialized" && ! -f "$admin_dir/murph-storage-guard-authorized" ]]; then
-        unauthorized_count=$((unauthorized_count + 1))
-        if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
-          current_worktree_unauthorized=1
+      if [[ -f "$authorization_initialized" ]]; then
+        if [[ ! -f "$admin_dir/murph-storage-guard-authorized" ]]; then
+          # Legacy guards only understand the authorization marker. Backfill it
+          # while retaining the current guard's isolation marker so historical
+          # sanctioned entrypoints can keep enforcing count and disk budgets.
+          : >"$admin_dir/murph-storage-guard-authorized"
+          : >"$admin_dir/murph-storage-guard-isolated"
+        fi
+        if [[ -f "$admin_dir/murph-storage-guard-isolated" ]]; then
+          unauthorized_count=$((unauthorized_count + 1))
+          if [[ -n "$current_worktree_path" && "$canonical_record_path" == "$current_worktree_path" ]]; then
+            current_worktree_unauthorized=1
+          fi
         fi
       fi
       ;;

@@ -18,8 +18,10 @@ Updated: 2026-08-10
 - The unauthorized sibling cannot commit.
 - `scripts/create-worktree` can create and mark a sanctioned checkout while an
   unauthorized sibling remains counted by the global resource guard.
+- An already-authorized checkout on the preceding guard implementation can use
+  its installer, committer wrapper, and creation helper during rollout.
 - The explicit no-argument guard continues to fail when any unauthorized
-  registered worktree exists.
+  registered worktree exists when run from the primary checkout.
 
 ## Scope
 
@@ -40,10 +42,16 @@ Updated: 2026-08-10
 
 - Shell syntax passed for the guard, creation helper, hook installer, and
   pre-commit hook.
-- Focused worktree-guard coverage passed: 24 tests.
-- Scoped `pnpm test:diff` passed, including all 516 repo-tools tests, repo-tools
-  typechecking, dependency policy, and source guards.
+- Focused worktree-guard coverage passed: 26 tests, including historical
+  entrypoint compatibility and scoped resource-budget coverage.
+- Scoped `pnpm test:diff` passed with serialized Vitest workers, including all
+  519 repo-tools tests, repo-tools typechecking, dependency policy, and source
+  guards. Two preceding parallel attempts hit unrelated timing-only tests;
+  both affected files passed directly before the serialized full rerun.
 - With the live unrelated raw review checkout still registered, the repaired
   guard passed for this authorized checkout while its no-argument global audit
   continued to fail as designed.
+- The preliminary ReviewGPT pass identified historical-entrypoint and scoped
+  resource-budget coverage gaps. Both were remediated and await exact-head
+  reruns.
 - Pending: exact-head ReviewGPT and GitHub Actions.

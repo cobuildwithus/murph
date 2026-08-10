@@ -50,7 +50,12 @@ function createHarness(): Harness {
   mkdirSync(path.join(primary, '.githooks'), { recursive: true })
   mkdirSync(fakeBin, { recursive: true })
   mkdirSync(tempRoot)
-  for (const name of ['worktree-storage-guard', 'create-worktree', 'install-git-hooks']) {
+  for (const name of [
+    'worktree-storage-guard',
+    'create-worktree',
+    'install-git-hooks',
+    'committer',
+  ]) {
     executable(
       path.join(primary, 'scripts', name),
       readFileSync(path.join(sourceRoot, 'scripts', name), 'utf8'),
@@ -59,6 +64,17 @@ function createHarness(): Harness {
   executable(
     path.join(primary, '.githooks', 'pre-commit'),
     readFileSync(path.join(sourceRoot, '.githooks', 'pre-commit'), 'utf8'),
+  )
+  writeFileSync(
+    path.join(primary, 'scripts', 'repo-tools.config.sh'),
+    `cobuild_repo_tool_bin() {
+  printf '%s\\n' "\${MURPH_TEST_COMMITTER_BIN:?}"
+}
+`,
+  )
+  executable(
+    path.join(fakeBin, 'cobuild-committer'),
+    '#!/usr/bin/env bash\nset -euo pipefail\nexec git commit "$@"\n',
   )
   writeFileSync(path.join(primary, 'tracked.txt'), 'baseline\n')
   executable(
@@ -93,7 +109,7 @@ function guardEnvironment(
 
 function runScript(
   harness: Harness,
-  script: 'worktree-storage-guard' | 'create-worktree' | 'install-git-hooks',
+  script: 'worktree-storage-guard' | 'create-worktree' | 'install-git-hooks' | 'committer',
   args: string[] = [],
   overrides: NodeJS.ProcessEnv = {},
 ) {
@@ -102,6 +118,53 @@ function runScript(
     encoding: 'utf8',
     env: guardEnvironment(harness, overrides),
   })
+}
+
+function installLegacyWorktreeEntrypoints(primary: string): void {
+  const currentInstall = readFileSync(path.join(sourceRoot, 'scripts', 'install-git-hooks'), 'utf8')
+  const currentCreate = readFileSync(path.join(sourceRoot, 'scripts', 'create-worktree'), 'utf8')
+  executable(
+    path.join(primary, 'scripts', 'install-git-hooks'),
+    currentInstall.replace(' --current-worktree "$repo_root"', ''),
+  )
+  executable(
+    path.join(primary, 'scripts', 'create-worktree'),
+    currentCreate.replaceAll('--creating-worktree ', ''),
+  )
+  executable(
+    path.join(primary, 'scripts', 'worktree-storage-guard'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+repo_root="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+common_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)"
+state_dir="\${MURPH_WORKTREE_GUARD_STATE_DIR:-$common_dir/murph-worktree-storage-guard}"
+authorization_initialized="$state_dir/authorization-initialized"
+mkdir -p "$state_dir"
+admin_dirs=()
+unauthorized_count=0
+while IFS= read -r candidate; do
+  [[ -n "$candidate" && -f "$candidate/.git" ]] || continue
+  admin_dir="$(git -C "$candidate" rev-parse --path-format=absolute --git-dir)"
+  admin_dirs+=("$admin_dir")
+  if [[ -f "$authorization_initialized" && ! -f "$admin_dir/murph-storage-guard-authorized" ]]; then
+    unauthorized_count=$((unauthorized_count + 1))
+  fi
+done < <(git -C "$repo_root" worktree list --porcelain | awk '$1 == "worktree" { print substr($0, 10) }')
+if (( unauthorized_count > 0 )); then
+  printf 'worktree storage guard: %d worktree(s) bypassed scripts/create-worktree\\n' "$unauthorized_count" >&2
+  exit 1
+fi
+if [[ ! -f "$authorization_initialized" ]]; then
+  if (( \${#admin_dirs[@]} > 0 )); then
+    for admin_dir in "\${admin_dirs[@]}"; do
+      : >"$admin_dir/murph-storage-guard-authorized"
+    done
+  fi
+  : >"$authorization_initialized"
+fi
+`,
+  )
+  executable(path.join(primary, '.githooks', 'pre-commit'), '#!/bin/sh\nexit 0\n')
 }
 
 afterEach(() => {
@@ -573,6 +636,209 @@ done
     })
     expect(rawCommit.status).toBe(1)
     expect(rawCommit.stderr).toContain('current worktree bypassed scripts/create-worktree')
+  })
+
+  it('keeps historical authorized entrypoints usable after the primary checkout upgrades', () => {
+    const harness = createHarness()
+    installLegacyWorktreeEntrypoints(harness.primary)
+    runGit(harness.primary, ['add', '.githooks/pre-commit', 'scripts'])
+    runGit(harness.primary, ['commit', '-m', 'legacy worktree entrypoints'])
+
+    const historical = path.join(harness.root, 'historical-sibling')
+    const historicalCreation = runScript(
+      harness,
+      'create-worktree',
+      ['-b', 'historical-sibling', historical],
+      { MURPH_WORKTREE_MAX_LIVE: '4' },
+    )
+    expect(historicalCreation.status, historicalCreation.stderr).toBe(0)
+
+    for (const name of ['worktree-storage-guard', 'create-worktree', 'install-git-hooks']) {
+      executable(
+        path.join(harness.primary, 'scripts', name),
+        readFileSync(path.join(sourceRoot, 'scripts', name), 'utf8'),
+      )
+    }
+    executable(
+      path.join(harness.primary, '.githooks', 'pre-commit'),
+      readFileSync(path.join(sourceRoot, '.githooks', 'pre-commit'), 'utf8'),
+    )
+    runGit(harness.primary, ['add', '.githooks/pre-commit', 'scripts'])
+    runGit(harness.primary, ['-c', 'core.hooksPath=/dev/null', 'commit', '-m', 'primary upgrade'])
+
+    const installPrimary = runScript(harness, 'install-git-hooks', [], {
+      MURPH_WORKTREE_MAX_LIVE: '4',
+    })
+    expect(installPrimary.status, installPrimary.stderr).toBe(0)
+
+    const raw = path.join(harness.root, 'raw-sibling-after-upgrade')
+    runGit(harness.primary, ['worktree', 'add', '-b', 'raw-sibling-after-upgrade', raw])
+    const primaryAudit = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '4',
+    })
+    expect(primaryAudit.status).toBe(1)
+    expect(primaryAudit.stderr).toContain('bypassed scripts/create-worktree')
+
+    const historicalEnvironment = guardEnvironment(harness, {
+      MURPH_TEST_COMMITTER_BIN: path.join(harness.fakeBin, 'cobuild-committer'),
+      MURPH_WORKTREE_MAX_LIVE: '4',
+    })
+    const historicalInstall = spawnSync('bash', ['scripts/install-git-hooks'], {
+      cwd: historical,
+      encoding: 'utf8',
+      env: historicalEnvironment,
+    })
+    expect(historicalInstall.status, historicalInstall.stderr).toBe(0)
+
+    writeFileSync(path.join(historical, 'tracked.txt'), 'historical commit\n')
+    runGit(historical, ['add', 'tracked.txt'])
+    const historicalCommit = spawnSync('bash', ['scripts/committer', '-m', 'historical commit'], {
+      cwd: historical,
+      encoding: 'utf8',
+      env: historicalEnvironment,
+    })
+    expect(historicalCommit.status, historicalCommit.stderr).toBe(0)
+
+    const successor = path.join(harness.root, 'historical-successor')
+    const successorCreation = spawnSync(
+      'bash',
+      ['scripts/create-worktree', '-b', 'historical-successor', successor],
+      { cwd: historical, encoding: 'utf8', env: historicalEnvironment },
+    )
+    expect(successorCreation.status, successorCreation.stderr).toBe(0)
+
+    const successorCheck = spawnSync(
+      'bash',
+      [
+        path.join(harness.primary, 'scripts', 'worktree-storage-guard'),
+        '--current-worktree',
+        successor,
+      ],
+      { cwd: successor, encoding: 'utf8', env: historicalEnvironment },
+    )
+    expect(successorCheck.status, successorCheck.stderr).toBe(0)
+
+    writeFileSync(path.join(raw, 'tracked.txt'), 'raw commit\n')
+    runGit(raw, ['add', 'tracked.txt'])
+    const rawCommit = spawnSync('git', ['commit', '-m', 'raw commit'], {
+      cwd: raw,
+      encoding: 'utf8',
+      env: historicalEnvironment,
+    })
+    expect(rawCommit.status).toBe(1)
+    expect(rawCommit.stderr).toContain('current worktree bypassed scripts/create-worktree')
+
+    const finalPrimaryAudit = runScript(harness, 'worktree-storage-guard', [], {
+      MURPH_WORKTREE_MAX_LIVE: '4',
+    })
+    expect(finalPrimaryAudit.status).toBe(1)
+    expect(finalPrimaryAudit.stderr).toContain('bypassed scripts/create-worktree')
+  })
+
+  it('keeps raw siblings inside scoped count, reservation, and disk budgets', () => {
+    const reservationHarness = createHarness()
+    expect(
+      runScript(reservationHarness, 'worktree-storage-guard', [], {
+        MURPH_WORKTREE_MAX_LIVE: '2',
+      }).status,
+    ).toBe(0)
+    const sanctioned = path.join(reservationHarness.root, 'sanctioned')
+    expect(
+      runScript(
+        reservationHarness,
+        'create-worktree',
+        ['-b', 'reservation-sanctioned', sanctioned],
+        { MURPH_WORKTREE_MAX_LIVE: '2' },
+      ).status,
+    ).toBe(0)
+    runGit(reservationHarness.primary, [
+      'worktree',
+      'add',
+      '-b',
+      'reservation-raw',
+      path.join(reservationHarness.root, 'raw'),
+    ])
+    const reservation = runScript(
+      reservationHarness,
+      'worktree-storage-guard',
+      [
+        '--creating-worktree',
+        '--reserve-worktree',
+        '--target-path',
+        path.join(reservationHarness.root, 'next'),
+      ],
+      { MURPH_WORKTREE_MAX_LIVE: '2' },
+    )
+    expect(reservation.status).toBe(1)
+    expect(reservation.stderr).toContain('new worktree would exceed the ratcheted ceiling of 2')
+
+    const ceilingHarness = createHarness()
+    expect(
+      runScript(ceilingHarness, 'worktree-storage-guard', [], {
+        MURPH_WORKTREE_MAX_LIVE: '1',
+      }).status,
+    ).toBe(0)
+    const ceilingSanctioned = path.join(ceilingHarness.root, 'sanctioned')
+    expect(
+      runScript(
+        ceilingHarness,
+        'create-worktree',
+        ['-b', 'ceiling-sanctioned', ceilingSanctioned],
+        { MURPH_WORKTREE_MAX_LIVE: '1' },
+      ).status,
+    ).toBe(0)
+    runGit(ceilingHarness.primary, [
+      'worktree',
+      'add',
+      '-b',
+      'ceiling-raw',
+      path.join(ceilingHarness.root, 'raw'),
+    ])
+    const ceiling = runScript(
+      ceilingHarness,
+      'worktree-storage-guard',
+      ['--current-worktree', ceilingSanctioned],
+      { MURPH_WORKTREE_MAX_LIVE: '1' },
+    )
+    expect(ceiling.status).toBe(1)
+    expect(ceiling.stderr).toContain('exceeds the ratcheted ceiling of 1')
+
+    const diskHarness = createHarness()
+    expect(
+      runScript(diskHarness, 'worktree-storage-guard', [], {
+        MURPH_WORKTREE_MAX_LIVE: '2',
+      }).status,
+    ).toBe(0)
+    runGit(diskHarness.primary, [
+      'worktree',
+      'add',
+      '-b',
+      'disk-raw',
+      path.join(diskHarness.root, 'raw'),
+    ])
+    executable(
+      path.join(diskHarness.fakeBin, 'df'),
+      `#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\\n'
+printf '%s\\n' 'testfs 50000000 1 10000000 80% /'
+`,
+    )
+    const scopedDisk = runScript(
+      diskHarness,
+      'worktree-storage-guard',
+      ['--current-worktree', diskHarness.primary],
+      { MURPH_WORKTREE_MAX_LIVE: '2', MURPH_WORKTREE_MIN_FREE_GIB: '20' },
+    )
+    expect(scopedDisk.status).toBe(1)
+    expect(scopedDisk.stderr).toContain('only 9 GiB free')
+    const creatingDisk = runScript(
+      diskHarness,
+      'worktree-storage-guard',
+      ['--creating-worktree', '--target-path', path.join(diskHarness.root, 'next')],
+      { MURPH_WORKTREE_MAX_LIVE: '2', MURPH_WORKTREE_MIN_FREE_GIB: '20' },
+    )
+    expect(creatingDisk.status).toBe(1)
+    expect(creatingDisk.stderr).toContain('only 9 GiB free')
   })
 
   it('rejects raw worktrees whose Git administrative paths are relative', () => {
