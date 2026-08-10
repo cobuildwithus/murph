@@ -432,7 +432,10 @@ The group join consent checkpoint may request the complete selectable sharing
 catalog. Keep every requested choice selected for a new invitee until they
 explicitly uncheck it, state the selected count when the catalog is long, and
 place the checklist in one bounded, keyboard-scrollable region so the primary
-join action remains visible. Each row stays a full-width checkbox card with its
+join action remains visible. Beside a long-catalog count, include one quiet
+button that clears all optional sharing so joining without health or email
+sharing is a single action; members can then re-enable exact choices below.
+Each row stays a full-width checkbox card with its
 plain-language scope description; do not compress a consequential permission
 into a dense table, hide choices behind categories, or imply that the defaults
 have already been granted. Existing members reopen the same surface with only

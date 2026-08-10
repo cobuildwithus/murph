@@ -2,7 +2,12 @@ import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { HostedVaultShareFixedProjectionKind } from "@murphai/hosted-execution/vault-share";
+import {
+  buildHostedVaultShareProjectionScopeKey,
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+  type HostedVaultShareFixedProjectionKind,
+} from "@murphai/hosted-execution/vault-share";
+import { groupJoinPermissionsForDisplay } from "@/src/components/hosted-groups/group-join-permission-groups";
 import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
 import { renderClientComponent } from "./render-client-component";
 
@@ -93,6 +98,23 @@ vi.mock("@/src/components/legal/hosted-legal-consent-card", () => ({
 
 let cleanupRender: (() => Promise<void>) | null = null;
 
+const comprehensiveGroupJoinPermissions =
+  HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.map((projectionScope) => {
+    const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(projectionScope);
+    return {
+      description: `Shares ${projectionScopeKey}.`,
+      label: projectionScopeKey,
+      projectionScope,
+      projectionScopeKey,
+    };
+  });
+const comprehensivePermissionGroupCount = groupJoinPermissionsForDisplay(
+  comprehensiveGroupJoinPermissions,
+  new Set(
+    comprehensiveGroupJoinPermissions.map((permission) => permission.projectionScopeKey),
+  ),
+).length;
+
 afterEach(async () => {
   if (cleanupRender) {
     await cleanupRender();
@@ -171,26 +193,6 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
   const { GroupJoinAcceptForm } = await import(
     "@/src/components/hosted-groups/group-join-client"
   );
-  const macroKinds = [
-    "protein-days.v0",
-    "carbs-days.v0",
-    "fat-days.v0",
-    "fiber-days.v0",
-  ] as const;
-  const permissions = [
-    ...macroKinds.map((projectionKind) => ({
-      description: `Shares ${projectionKind}.`,
-      label: projectionKind,
-      projectionScope: { projectionKind },
-      projectionScopeKey: projectionKind,
-    })),
-    ...Array.from({ length: 12 }, (_, index) => ({
-      description: `Shares choice ${index + 1}.`,
-      label: `Choice ${index + 1}`,
-      projectionScope: { projectionKind: "steps-days.v0" as const },
-      projectionScopeKey: `steps-days.v0:${index + 1}`,
-    })),
-  ];
 
   const markup = renderToStaticMarkup(
     createElement(GroupJoinAcceptForm, {
@@ -199,20 +201,172 @@ test("keeps a comprehensive default checklist bounded and keyboard-scrollable", 
       expectedMembershipId: null,
       groupName: "Sunday Sleep Crew",
       joinCode: "JOIN123",
-      permissions,
+      permissions: comprehensiveGroupJoinPermissions,
       postJoinContactOption: null,
       postJoinDestination: "/home",
     }),
   );
 
-  expect(markup).toContain("13 of 13 choices selected");
-  expect(markup).not.toContain("16 of 16 choices selected");
+  expect(markup).toContain(
+    `${comprehensivePermissionGroupCount} of ${comprehensivePermissionGroupCount} choices selected`,
+  );
+  expect(markup).toContain("Clear optional sharing");
+  expect(markup).toContain("min-h-10");
+  expect(markup).toContain("focus-visible:ring-3");
+  expect(markup).toContain("tabular-nums");
   expect(markup).toContain('aria-label="Sharing choices"');
   expect(markup).toContain('role="region"');
   expect(markup).toContain("max-h-[26rem]");
   expect(markup).toContain('tabindex="0"');
   expect(markup).toContain("shrink-0 overflow-hidden");
   expect(markup).toContain("Join group");
+});
+
+test("clears, retries, and selectively restores comprehensive optional sharing", async () => {
+  mocks.requestHostedOnboardingJson
+    .mockRejectedValueOnce(new Error("Temporary group join failure."))
+    .mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const initialScopeKeys = new Set(
+    comprehensiveGroupJoinPermissions.map((permission) => permission.projectionScopeKey),
+  );
+  const firstPermissionGroup = groupJoinPermissionsForDisplay(
+    comprehensiveGroupJoinPermissions,
+    initialScopeKeys,
+  )[0];
+  if (!firstPermissionGroup) throw new Error("Expected a permission group.");
+  const restoredScopes = comprehensiveGroupJoinPermissions
+    .filter((permission) => firstPermissionGroup.scopeKeys.includes(
+      permission.projectionScopeKey,
+    ))
+    .map((permission) => permission.projectionScope);
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes: [],
+      alreadyActiveMember: false,
+      expectedMembershipId: null,
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: comprehensiveGroupJoinPermissions,
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const clearButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Clear optional sharing",
+  );
+  const joinButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Join group",
+  );
+  if (!clearButton || !joinButton) throw new Error("Expected sharing actions.");
+  expect(clearButton.getAttribute("type")).toBe("button");
+
+  await act(async () => {
+    clearButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(container.textContent).toContain(
+    `0 of ${comprehensivePermissionGroupCount} choices selected`,
+  );
+  expect(Array.from(container.querySelectorAll<HTMLInputElement>(
+    'input[type="checkbox"]',
+  )).every((checkbox) => !checkbox.checked)).toBe(true);
+
+  await act(async () => {
+    joinButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(1);
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(1, {
+    method: "POST",
+    payload: {
+      expectedMembershipId: null,
+      selectedVaultShareProjectionScopes: [],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
+  expect(container.textContent).toContain(
+    `0 of ${comprehensivePermissionGroupCount} choices selected`,
+  );
+
+  const firstCheckbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+  if (!firstCheckbox) throw new Error("Expected a sharing checkbox.");
+  await act(async () => {
+    firstCheckbox.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(container.textContent).toContain(
+    `1 of ${comprehensivePermissionGroupCount} choices selected`,
+  );
+
+  await act(async () => {
+    joinButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await vi.waitFor(() => {
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledTimes(2);
+  });
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(2, {
+    method: "POST",
+    payload: {
+      expectedMembershipId: null,
+      selectedVaultShareProjectionScopes: restoredScopes,
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
+});
+
+test("clears every visible optional grant for an existing member", async () => {
+  mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ ok: true });
+  const { GroupJoinAcceptForm } = await import(
+    "@/src/components/hosted-groups/group-join-client"
+  );
+  const { cleanup, container, window } = await renderClientComponent(
+    createElement(GroupJoinAcceptForm, {
+      activeVaultShareProjectionScopes:
+        HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
+      alreadyActiveMember: true,
+      expectedMembershipId: "membership_existing",
+      groupName: "Sunday Sleep Crew",
+      joinCode: "JOIN123",
+      permissions: comprehensiveGroupJoinPermissions,
+      postJoinContactOption: null,
+      postJoinDestination: "/home",
+    }),
+  );
+  cleanupRender = cleanup;
+
+  const clearButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Clear optional sharing",
+  );
+  const saveButton = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent === "Save changes",
+  );
+  if (!clearButton || !saveButton) throw new Error("Expected sharing actions.");
+
+  await act(async () => {
+    clearButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+  expect(container.textContent).toContain(
+    `0 of ${comprehensivePermissionGroupCount} choices selected`,
+  );
+  await act(async () => {
+    saveButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+    method: "POST",
+    payload: {
+      expectedMembershipId: "membership_existing",
+      selectedVaultShareProjectionScopes: [],
+    },
+    url: "/api/groups/join/JOIN123/accept",
+  });
 });
 
 test("discloses and submits source-aware sleep metadata on the link-only join page", async () => {

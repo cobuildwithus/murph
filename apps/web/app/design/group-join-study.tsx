@@ -194,7 +194,7 @@ export function GroupJoinStudy({
       </GroupJoinVariant>
 
       <GroupJoinVariant
-        caption="A new member sees every available sharing choice selected, can scroll through the complete list, and keeps the join action in view. Nothing is shared until they join."
+        caption="A new member sees every available sharing choice selected, can clear optional sharing in one action, and can still re-enable exact choices before joining. Nothing is shared until they join."
         title="New invitee · comprehensive default"
       >
         <GroupJoinPageMock

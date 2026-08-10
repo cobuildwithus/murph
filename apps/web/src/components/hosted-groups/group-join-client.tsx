@@ -317,9 +317,24 @@ export function GroupJoinAcceptForm(props: {
               Uncheck anything you don&apos;t want to share. Join either way. Change anytime.
             </p>
             {usesScrollablePermissionReview ? (
-              <p className="text-[12px] leading-5 text-muted-foreground">
-                {selectedPermissionGroupCount} of {permissionGroups.length} choices selected. Scroll to review every choice.
-              </p>
+              <div className="flex min-h-10 items-center justify-between gap-3">
+                <p
+                  aria-live="polite"
+                  className="text-[12px] leading-5 text-muted-foreground tabular-nums"
+                >
+                  {selectedPermissionGroupCount} of {permissionGroups.length} choices selected. Scroll to review every choice.
+                </p>
+                <Button
+                  className="min-h-10 shrink-0 px-2 text-xs text-muted-foreground"
+                  disabled={status === "submitting" || selectedPermissionGroupCount === 0}
+                  onClick={() => setSelected(() => new Set())}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Clear optional sharing
+                </Button>
+              </div>
             ) : null}
           </div>
           <div

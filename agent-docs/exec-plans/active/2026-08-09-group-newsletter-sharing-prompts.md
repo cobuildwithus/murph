@@ -120,5 +120,13 @@ Updated: 2026-08-09
 - Round-5 remediation proof: 96/96 focused Assistant Engine group/newsletter
   tests passed, the two production-runtime finalization regressions passed, and
   Assistant Engine typecheck passed.
+- ReviewGPT round 6 found that the comprehensive join-without-sharing path still
+  required 96 checkbox mutations. The recorded retrospective keeps the fix in
+  the existing component-owned selected set: one clear action, exact individual
+  re-enable controls, the unchanged submit boundary, and no new policy or owner.
+- Round-6 remediation proof: 305/305 Web group store/tool, join-client, and Linq
+  provider tests passed; Web typecheck and scoped frontend lint passed. The real
+  join component proves clear, failed-submit retention, exact one-choice
+  restoration, and existing-member revoke-all submission.
 - Exact-head CI and corrected ReviewGPT rounds remain pending on the remediation
   candidate.

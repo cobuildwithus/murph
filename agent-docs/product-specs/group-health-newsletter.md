@@ -63,7 +63,10 @@ scopes. This includes workout summaries and workout details so a later weekly
 update can explain a movement number with observed same-period training context
 when available. Nothing is silently granted: the reaction or join page remains
 the consent gate, and each member can deselect any requested permission before
-granting it. When Murph supplies an explicit narrower scope list, the server
+granting it. A comprehensive checkpoint provides one clear-all action so joining
+without optional health or email sharing does not require dozens of individual
+mutations; members can re-enable exact choices before submitting. When Murph
+supplies an explicit narrower scope list, the server
 preserves that exact narrow request. A new consent checkpoint replaces the
 group's prior requested policy instead of unioning it, revokes stale unaccepted
 offers, and reuses an active native offer only when its frozen scopes match
