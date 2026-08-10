@@ -442,6 +442,140 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
   });
 
+  it("rejects a second active connection for the same member-owned provider", async () => {
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => ({ id: "dsc_existing" })),
+        create: vi.fn(),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => ({
+          id: "dpa_123",
+          memberId: "user-123",
+          provider: "strava",
+          revision: 4,
+        })),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnectionWithProviderApplication({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-new",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+    });
+    expect(tx.deviceConnection.create).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the exact application binding after a uniqueness race", async () => {
+    const existing = createConnection({
+      id: "dsc_existing",
+      provider: "strava",
+      providerApplicationId: "dpa_old",
+      providerApplicationRevision: 3,
+      status: "active",
+      userId: "user-123",
+    });
+    const application = {
+      id: "dpa_123",
+      memberId: "user-123",
+      provider: "strava",
+      revision: 4,
+    };
+    const create = vi.fn(async () => {
+      throw Object.assign(new Error("unique connection"), { code: "P2002" });
+    });
+    const createTx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => null),
+        create,
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => application),
+      },
+    };
+    const retryTx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        findFirst: vi.fn(async () => null),
+        update: vi.fn(),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => application),
+      },
+    };
+    const prisma = {
+      $transaction: vi
+        .fn()
+        .mockImplementationOnce(async (callback: (tx: typeof createTx) => unknown) =>
+          callback(createTx))
+        .mockImplementationOnce(async (callback: (tx: typeof retryTx) => unknown) =>
+          callback(retryTx)),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: prisma as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+    await expect(store.upsertConnectionWithProviderApplication({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-123",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: null,
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(retryTx.deviceProviderApplication.findFirst).toHaveBeenCalledTimes(1);
+    expect(retryTx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
   it("keeps hosted device connection persistence provider-generic", async () => {
     const createdArtifacts: {
       connection: MutableConnectionRecord | null;

@@ -1706,6 +1706,71 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("builds a member-only provider runtime from one credential-bearing snapshot", async () => {
+    const memberProviderConfigs = {
+      strava: {
+        clientId: "member-client",
+        clientSecret: "member-secret",
+      },
+    };
+    const snapshot = {
+      connections: [{ connection: { id: "dsc_strava", status: "active" } }],
+      providerConfigs: memberProviderConfigs,
+      userId: "member_123",
+    };
+    const port = createMaintenanceDeviceSyncPortStub();
+    port.fetchSnapshot.mockResolvedValue(snapshot);
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["strava"]);
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => ["strava"],
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_member_provider_config",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      {
+        providerConfigs: {},
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+      port,
+      45_000,
+    );
+
+    expect(port.fetchSnapshot).toHaveBeenCalledTimes(1);
+    expect(port.fetchSnapshot).toHaveBeenCalledWith({
+      includeCredentialMaterial: true,
+      signal: null,
+    });
+    expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith(
+      memberProviderConfigs,
+    );
+    expect(mocks.createHostedRuntimeDeviceSyncService).toHaveBeenCalledTimes(1);
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot,
+      }),
+    );
+    expect(
+      mocks.syncHostedDeviceSyncControlPlaneState.mock.calls[0]?.[0]?.snapshot,
+    ).toBe(snapshot);
+  });
+
   it("stops a superseded connection wake after hydration without running device-sync work", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 0);

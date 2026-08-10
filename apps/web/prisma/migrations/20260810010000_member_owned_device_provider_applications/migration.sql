@@ -52,7 +52,7 @@ ALTER TABLE "device_connection"
     ("provider_application_id" IS NULL AND "provider_application_revision" IS NULL)
     OR
     ("provider_application_id" IS NOT NULL AND "provider_application_revision" IS NOT NULL AND "provider_application_revision" > 0)
-  );
+  ) NOT VALID;
 
 ALTER TABLE "device_oauth_session"
   ADD CONSTRAINT "device_oauth_session_provider_application_revision_pair_check"
@@ -60,6 +60,6 @@ ALTER TABLE "device_oauth_session"
     ("provider_application_id" IS NULL AND "provider_application_revision" IS NULL)
     OR
     ("provider_application_id" IS NOT NULL AND "provider_application_revision" IS NOT NULL AND "provider_application_revision" > 0)
-  );
+  ) NOT VALID;
 
 COMMIT;

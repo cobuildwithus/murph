@@ -240,6 +240,98 @@ describe("member-owned device provider application store", () => {
         revision: 5,
       }),
     }));
+    expect(tx.deviceConnection.updateMany).toHaveBeenCalledWith({
+      data: {
+        providerApplicationId: null,
+        providerApplicationRevision: null,
+      },
+      where: {
+        providerApplicationId: "dpa_123",
+        status: "disconnected",
+      },
+    });
+    expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
+      where: { providerApplicationId: "dpa_123" },
+    });
+    expect(
+      tx.deviceConnection.updateMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      tx.deviceOauthSession.deleteMany.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+    expect(
+      tx.deviceOauthSession.deleteMany.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      deviceProviderApplication.update.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
+  it("rejects a concurrent application change after credentials are prepared", async () => {
+    const initial = {
+      configEncrypted: "sealed-initial",
+      createdAt: new Date("2026-08-10T00:00:00.000Z"),
+      id: "dpa_123",
+      memberId: "member_123",
+      provider: "strava",
+      revision: 4,
+      updatedAt: new Date("2026-08-10T00:00:00.000Z"),
+    };
+    const concurrent = {
+      ...initial,
+      configEncrypted: "sealed-concurrent",
+      revision: 5,
+      updatedAt: new Date("2026-08-10T00:00:30.000Z"),
+    };
+    const hostedMember = {
+      findUnique: vi.fn(async () => ({
+        hostedGroupRuntime: null,
+        id: "member_123",
+        threadContainer: null,
+      })),
+    };
+    const update = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn(async () => []),
+      deviceConnection: {
+        findFirst: vi.fn(),
+        updateMany: vi.fn(),
+      },
+      deviceOauthSession: {
+        deleteMany: vi.fn(),
+      },
+      deviceProviderApplication: {
+        findUnique: vi.fn(async () => concurrent),
+        update,
+      },
+      hostedMember,
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) =>
+        callback(tx)),
+      deviceProviderApplication: {
+        findUnique: vi.fn(async () => initial),
+      },
+      hostedMember,
+    };
+
+    await expect(saveDeviceProviderApplication({
+      clientId: "replacement-client",
+      clientSecret: "replacement-secret",
+      expectedRevision: 4,
+      memberId: "member_123",
+      prisma: prisma as never,
+      provider: "strava",
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_APPLICATION_CONFLICT",
+    });
+    expect(mocks.encrypt).toHaveBeenCalledWith(expect.objectContaining({
+      revision: 5,
+    }));
+    expect(tx.deviceConnection.findFirst).not.toHaveBeenCalled();
+    expect(tx.deviceConnection.updateMany).not.toHaveBeenCalled();
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("does not replace invalid ciphertext while a live connection still depends on it", async () => {

@@ -278,7 +278,11 @@ export class HostedDeviceSyncPublicIngressService {
       ensureWebhookAdmin: false,
       registry,
       store: new DeviceProviderApplicationIngressStore(
-        application,
+        {
+          applicationId: application.applicationId,
+          provider: application.provider,
+          revision: application.revision,
+        },
         this.context.store,
       ),
     });
@@ -595,7 +599,11 @@ export class HostedDeviceSyncPublicIngressService {
       ensureWebhookAdmin: false,
       registry,
       store: new DeviceProviderApplicationIngressStore(
-        application,
+        {
+          applicationId: application.applicationId,
+          provider: application.provider,
+          revision: application.revision,
+        },
         this.context.store,
       ),
     });
