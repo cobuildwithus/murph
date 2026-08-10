@@ -850,6 +850,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
         : await tx.deviceConnection.findMany({
             orderBy: [
               { userId: "asc" },
+              { connectedAt: "asc" },
               { createdAt: "asc" },
               { id: "asc" },
             ],
@@ -860,9 +861,10 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: {
               setupPhase: true,
               sources: {
                 orderBy: [
-                  { sourceProviderSlug: "asc" },
+                  { lastSeenAt: "asc" },
                   { createdAt: "asc" },
                   { id: "asc" },
+                  { sourceProviderSlug: "asc" },
                 ],
                 select: {
                   sourceProviderSlug: true,

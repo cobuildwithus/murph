@@ -1463,9 +1463,27 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     const staleObservedAt = new Date(Date.now() - 10 * 60_000);
     const currentObservedAt = new Date(Date.now() - 60_000);
     const currentSyncCompletedAt = new Date(Date.now() - 2 * 60_000);
-    const { prisma } = createPrisma({
-      connections: [
+    const staleConnectedAt = new Date(Date.now() - 14 * 24 * 60 * 60_000);
+    const currentConnectedAt = new Date(Date.now() - 24 * 60 * 60_000);
+    const { deviceConnectionFindMany, prisma } = createPrisma({
+      shares: [
+        shareRow({ id: "share_device_a", memberId: "member_a", projectionScope: DEVICE_SCOPE }),
+      ],
+    });
+    deviceConnectionFindMany.mockImplementation(async (args) => {
+      expect(args).toMatchObject({
+        orderBy: [
+          { userId: "asc" },
+          { connectedAt: "asc" },
+          { createdAt: "asc" },
+          { id: "asc" },
+        ],
+      });
+      return [
         {
+          connectedAt: staleConnectedAt,
+          createdAt: currentConnectedAt,
+          id: "connection_created_later_but_connected_earlier",
           lastSyncCompletedAt: new Date(Date.now() - 60 * 60_000),
           lastSyncErrorAt: null,
           provider: "junction",
@@ -1480,6 +1498,9 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           userId: "member_a",
         },
         {
+          connectedAt: currentConnectedAt,
+          createdAt: staleConnectedAt,
+          id: "connection_created_earlier_but_reconnected_later",
           lastSyncCompletedAt: currentSyncCompletedAt,
           lastSyncErrorAt: null,
           provider: "junction",
@@ -1493,10 +1514,7 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
           updatedAt: currentObservedAt,
           userId: "member_a",
         },
-      ],
-      shares: [
-        shareRow({ id: "share_device_a", memberId: "member_a", projectionScope: DEVICE_SCOPE }),
-      ],
+      ];
     });
 
     const result = await readHostedGroupSharedDataByRuntimeMemberId({
@@ -1513,6 +1531,74 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
         label: "Apple Health",
         status: "connected",
         statusObservedAt: currentObservedAt.toISOString(),
+      }],
+    });
+  });
+
+  it("keeps the newest same-label source alias as one complete observation", async () => {
+    installCiphertexts({});
+    const olderObservedAt = new Date(Date.now() - 10 * 60_000);
+    const newerObservedAt = new Date(Date.now() - 60_000);
+    const olderLastSeenAt = new Date(Date.now() - 24 * 60 * 60_000);
+    const newerLastSeenAt = new Date(Date.now() - 30 * 60_000);
+    const syncCompletedAt = new Date(Date.now() - 2 * 60_000);
+    const { deviceConnectionFindMany, prisma } = createPrisma({
+      shares: [
+        shareRow({ id: "share_device_a", memberId: "member_a", projectionScope: DEVICE_SCOPE }),
+      ],
+    });
+    deviceConnectionFindMany.mockImplementation(async (args) => {
+      expect(args).toMatchObject({
+        select: {
+          sources: {
+            orderBy: [
+              { lastSeenAt: "asc" },
+              { createdAt: "asc" },
+              { id: "asc" },
+              { sourceProviderSlug: "asc" },
+            ],
+          },
+        },
+      });
+      return [{
+        lastSyncCompletedAt: syncCompletedAt,
+        lastSyncErrorAt: null,
+        provider: "junction",
+        setupPhase: null,
+        sources: [
+          {
+            lastSeenAt: olderLastSeenAt,
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+            updatedAt: olderObservedAt,
+          },
+          {
+            lastSeenAt: newerLastSeenAt,
+            sourceProviderSlug: "apple_health",
+            status: "reauthorization_required",
+            updatedAt: newerObservedAt,
+          },
+        ],
+        status: "active",
+        updatedAt: olderObservedAt,
+        userId: "member_a",
+      }];
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [DEVICE_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members[0]?.projections[0]?.records[0]?.data).toMatchObject({
+      sources: [{
+        connectionSyncJobCompletedAt: syncCompletedAt.toISOString(),
+        label: "Apple Health",
+        status: "needs-reconnect",
+        statusObservedAt: newerObservedAt.toISOString(),
       }],
     });
   });

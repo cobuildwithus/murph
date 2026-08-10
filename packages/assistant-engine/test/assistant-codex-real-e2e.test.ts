@@ -25,6 +25,7 @@ import {
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
@@ -1347,6 +1348,265 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         expect(result.finalMessage).toMatch(
           /no (?:hosted )?group|not (?:yet )?set up|doesn'?t exist/iu,
         )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'reads fresh shared data before answering a visibility check',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-sleep-freshness-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  members: [{
+                    currentTurnHandles: [],
+                    displayName: null,
+                    memberId: 'member_sleep_freshness',
+                    participantId: 'participant_sleep_freshness',
+                    projections: [{
+                      dataStatus: 'missing',
+                      grantStatus: 'granted',
+                      grantedAt: '2026-08-10T12:00:00.000Z',
+                      projectionScope: {
+                        projectionKind: 'deep-sleep-sources-days.v1',
+                      },
+                      projectionScopeKey: 'deep-sleep-sources-days.v1',
+                      records: [],
+                    }],
+                  }],
+                  requestedProjectionScopeKeys: [
+                    'deep-sleep-sources-days.v1',
+                  ],
+                  status: 'ok',
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Earlier group context:',
+            'Murph said today\'s shared Deep sleep was visible at 61 minutes.',
+            'Current member message:',
+            '"I reconnected. Can you see my Deep sleep yet?"',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const sharedReads = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name
+        )
+        const finalAnswerEventIndex = result.jsonEvents.findIndex((event) => {
+          const record = readRecord(event)
+          if (readString(record?.method, record?.type) !== 'item/completed') {
+            return false
+          }
+          const item = readRecord(readRecord(record?.params)?.item)
+          return readString(item?.type) === 'agentMessage'
+            && readString(item?.text)?.trim() === result.finalMessage.trim()
+        })
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: [{
+              projectionKind: 'deep-sleep-sources-days.v1',
+            }],
+          },
+        })
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{
+            projectionKind: 'deep-sleep-sources-days.v1',
+          }],
+        }])
+        expect(finalAnswerEventIndex).toBeGreaterThan(
+          sharedReads[0]?.eventIndex ?? Number.MAX_SAFE_INTEGER,
+        )
+        expect(result.finalMessage).toMatch(/deep/iu)
+        expect(result.finalMessage).toMatch(
+          /can(?:not|'t) (?:currently )?see|do not see|is not (?:currently )?(?:visible|available)|not showing|no (?:current )?(?:shared )?deep/iu,
+        )
+        expect(result.finalMessage).not.toContain('61')
+        expect(result.finalMessage).not.toMatch(
+          /permission (?:was )?(?:denied|revoked)|sync (?:failed|error)|provider error|reconnect(?:ion)? (?:failed|didn'?t work)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'keeps a private sleep visibility check on the group ask path',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-private-group-sleep-freshness-e2e-'),
+      )
+      const groupRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildDirectConversationDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => ({
+              conversationId: 'conversation_private_sleep_freshness',
+              recipientKey: 'recipient_private_sleep_freshness',
+              returnContactKind: 'text',
+            }),
+            currentHostedMailboxItemIds: () => [
+              'mailbox_private_sleep_freshness',
+            ],
+            currentUserActionScope: () => ({
+              acceptedInputIds: ['input_private_sleep_freshness'],
+              conversationId: 'conversation_private_sleep_freshness',
+              conversationScope: 'direct',
+              inboundMailboxItemIds: ['mailbox_private_sleep_freshness'],
+              originSessionId: 'session_private_sleep_freshness',
+              recipientKey: 'recipient_private_sleep_freshness',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                if (request.action === 'list_memberships') {
+                  return {
+                    action: 'list_memberships',
+                    result: {
+                      disclosureGrants: [],
+                      memberships: [{
+                        displayName: 'Run Club',
+                        grantedVaultShareProjectionScopes: [],
+                        kind: 'friends',
+                        memberCount: 4,
+                        membershipId: 'membership_run_club',
+                        permissionsUrl: 'https://example.test/groups/run-club',
+                        requestedVaultShareProjectionScopes: [{
+                          projectionKind: 'deep-sleep-sources-days.v1',
+                        }],
+                        role: 'member',
+                        sponsorshipUrl: null,
+                      }],
+                      status: 'ok',
+                      truncated: false,
+                    },
+                  }
+                }
+                if (request.action === 'ask') {
+                  return {
+                    action: 'ask',
+                    result: {
+                      status: 'accepted',
+                      targetLabel: 'Run Club',
+                    },
+                  }
+                }
+                throw new Error(`Unexpected group action: ${request.action}`)
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt:
+            'Can you ask Run Club whether they can see my Deep sleep yet after I reconnected?',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const askAction = actions.find((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+          && readRecord(action.argumentsValue)?.action === 'ask'
+        )
+
+        expect(askAction).toBeDefined()
+        expect(readRecord(groupRequests.at(-1))).toMatchObject({
+          action: 'ask',
+          groupLabel: 'Run Club',
+        })
+        expect(readString(readRecord(groupRequests.at(-1))?.question))
+          .toMatch(/deep sleep/iu)
+        expect(actions).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'dynamic',
+            tool: MURPH_GROUP_SHARED_READ_TOOL.name,
+          }),
+        ]))
+        expect(result.finalMessage).toMatch(/asked|sent|run club/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

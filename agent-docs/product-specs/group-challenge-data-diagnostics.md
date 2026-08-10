@@ -307,9 +307,9 @@ The derivation rules are:
   Health or WHOOP, each at most 80 characters. It does not expose an internal
   provider key.
 - When historical and current connections resolve to the same public label,
-  Web keeps the complete observation from the latest ordered connection/source
-  generation. It never combines status or timestamps from different
-  connection generations.
+  Web keeps the complete observation from the latest connection `connectedAt`
+  and source `lastSeenAt` generation. It never combines status or timestamps
+  from different connection or source generations.
 - `status` is one of `connected`, `needs-attention`, `needs-reconnect`,
   `disconnected`, or `setting-up`.
 - `statusObservedAt` says when the owner observed the projected coarse status.
