@@ -325,6 +325,9 @@ describe("hosted usage credits", () => {
       }
       if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
         events.push("purchase-lock");
+        expect(sql).toContain(
+          '"grant_slot_released_at" AS "grantSlotReleasedAt"',
+        );
         return [buildLockedPurchase()];
       }
       if (sql.includes('UPDATE "hosted_member"')) {
@@ -418,6 +421,52 @@ describe("hosted usage credits", () => {
         remainingCreditUsdMicros: 0n,
       },
     });
+  });
+
+  it("fails closed before granting a provider-final released purchase", async () => {
+    const entryFindFirst = vi.fn();
+    const entryCreate = vi.fn();
+    const purchaseUpdateMany = vi.fn();
+    const queryRaw = createTaggedSqlMock(({ sql }) => {
+      if (sql.includes('FROM "hosted_member"')) {
+        return [{
+          balanceUsdMicros: 0n,
+          beneficiaryMemberId: BENEFICIARY_ID,
+          ledgerVersion: 0n,
+        }];
+      }
+      if (sql.includes('FROM "hosted_usage_credit_purchase"')) {
+        return [buildLockedPurchase({
+          grantSlotReleasedAt: new Date("2026-07-16T14:58:00.000Z"),
+          status: "expired",
+        })];
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    });
+
+    await expect(grantHostedUsageCreditForPurchaseTx({
+      paidAt: PAID_AT,
+      purchaseId: "purchase_1",
+      tx: {
+        $queryRaw: queryRaw,
+        hostedUsageCreditEntry: {
+          create: entryCreate,
+          findFirst: entryFindFirst,
+        },
+        hostedUsageCreditPurchase: {
+          findUnique: vi.fn().mockResolvedValue({
+            beneficiaryMemberId: BENEFICIARY_ID,
+          }),
+          updateMany: purchaseUpdateMany,
+        },
+      } as never,
+    })).rejects.toThrow(
+      "Hosted usage-credit purchase has provider-final no-payment release.",
+    );
+
+    expect(entryFindFirst).not.toHaveBeenCalled();
+    expect(entryCreate).not.toHaveBeenCalled();
+    expect(purchaseUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns an existing purchase grant without mutating the ledger", async () => {
@@ -1541,6 +1590,7 @@ function buildUsageSettlementMutationRow(
 function buildLockedPurchase(
   overrides: Partial<{
     beneficiaryMemberId: string;
+    grantSlotReleasedAt: Date | null;
     grantUsdMicros: bigint;
     id: string;
     paidAt: Date | null;
@@ -1550,6 +1600,7 @@ function buildLockedPurchase(
 ) {
   return {
     beneficiaryMemberId: BENEFICIARY_ID,
+    grantSlotReleasedAt: null,
     grantUsdMicros: 5_000_000n,
     id: "purchase_1",
     paidAt: null,

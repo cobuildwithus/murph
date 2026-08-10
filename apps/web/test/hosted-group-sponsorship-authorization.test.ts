@@ -657,7 +657,10 @@ describe("hosted capped group sponsorship authorization", () => {
   });
 
   it("keeps payer cleanup purchase-only and lazily cancels the activation under the beneficiary owner", async () => {
-    const purchaseUpdate = vi.fn(async () => ({ count: 1 }));
+    const purchaseUpdate = vi.fn(async (_input: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => ({ count: 1 }));
     const payerCleanupTx = {
       hostedUsageCreditPurchase: { updateMany: purchaseUpdate },
     };
@@ -681,6 +684,9 @@ describe("hosted capped group sponsorship authorization", () => {
         status: HostedUsageCreditPurchaseStatus.created,
       },
     });
+    expect(purchaseUpdate.mock.calls[0]?.[0]?.data).not.toHaveProperty(
+      "grantSlotReleasedAt",
+    );
     expect(payerCleanupTx).not.toHaveProperty(
       "hostedGroupSponsorshipAuthorization",
     );

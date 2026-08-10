@@ -517,6 +517,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
       );
       expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
       expect(harness.purchase).toEqual(expect.objectContaining({
+        grantSlotReleasedAt: null,
         status: HostedUsageCreditPurchaseStatus.payment_pending,
         terminalAt: null,
       }));
@@ -555,14 +556,17 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     );
   });
 
-  it("keeps completed but unpaid Checkout pending without granting credit", async () => {
-    const harness = createUsageCreditStripePrismaHarness();
-    mocks.stripe.checkout.sessions.retrieve.mockResolvedValue(
-      makeCheckoutSession({ paymentStatus: "unpaid" }),
-    );
-    mocks.stripe.paymentIntents.retrieve.mockResolvedValue(
-      makePaymentIntent({ status: "processing" }),
-    );
+  it("restores a locally expired delayed Checkout reservation and later grants async success", async () => {
+    const harness = createUsageCreditStripePrismaHarness({
+      status: HostedUsageCreditPurchaseStatus.expired,
+      terminalAt: new Date("2026-07-16T04:50:01.000Z"),
+    });
+    mocks.stripe.checkout.sessions.retrieve
+      .mockResolvedValueOnce(makeCheckoutSession({ paymentStatus: "unpaid" }))
+      .mockResolvedValueOnce(makeCheckoutSession());
+    mocks.stripe.paymentIntents.retrieve
+      .mockResolvedValueOnce(makePaymentIntent({ status: "processing" }))
+      .mockResolvedValueOnce(makePaymentIntent());
 
     await expect(reconcileHostedUsageCreditStripeEvent({
       event: makeCheckoutEvent("checkout.session.completed"),
@@ -574,9 +578,20 @@ describe("hosted usage-credit Stripe reconciliation", () => {
 
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
+      grantSlotReleasedAt: null,
       status: HostedUsageCreditPurchaseStatus.payment_pending,
       terminalAt: null,
     }));
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.async_payment_succeeded"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: true,
+      handled: true,
+    });
+
+    expect(mocks.grantUsageCredit).toHaveBeenCalledOnce();
   });
 
   it("fulfills a delayed payment from asynchronous success", async () => {
@@ -636,6 +651,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
 
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
+      grantSlotReleasedAt: null,
       status: HostedUsageCreditPurchaseStatus.payment_failed,
       terminalAt: new Date("2026-07-16T03:20:00.000Z"),
     }));
@@ -671,7 +687,7 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
   });
 
-  it("closes an expired unpaid Session without granting credit", async () => {
+  it("releases a slot only from a live provider-expired unpaid Session and preserves it on replay", async () => {
     const harness = createUsageCreditStripePrismaHarness();
     mocks.stripe.checkout.sessions.retrieve.mockResolvedValue(
       makeCheckoutSession({ paymentIntentId: null, paymentStatus: "unpaid", status: "expired" }),
@@ -688,8 +704,47 @@ describe("hosted usage-credit Stripe reconciliation", () => {
     expect(mocks.stripe.paymentIntents.retrieve).not.toHaveBeenCalled();
     expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
     expect(harness.purchase).toEqual(expect.objectContaining({
+      grantSlotReleasedAt: expect.any(Date),
       status: HostedUsageCreditPurchaseStatus.expired,
     }));
+
+    const releasedAt = harness.purchase.grantSlotReleasedAt;
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.expired"),
+      prisma: harness.client,
+    })).resolves.toMatchObject({
+      granted: false,
+      handled: true,
+    });
+
+    expect(harness.purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    const updateMany = vi.mocked(
+      harness.client.hostedUsageCreditPurchase.updateMany,
+    );
+    expect(updateMany).toHaveBeenCalledTimes(2);
+    expect(updateMany.mock.calls[1]?.[0]?.data).not.toHaveProperty(
+      "grantSlotReleasedAt",
+    );
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when live paid Checkout contradicts provider-final release", async () => {
+    const releasedAt = new Date("2026-07-16T04:55:00.000Z");
+    const harness = createUsageCreditStripePrismaHarness({
+      grantSlotReleasedAt: releasedAt,
+      status: HostedUsageCreditPurchaseStatus.expired,
+      terminalAt: new Date("2026-07-16T03:20:00.000Z"),
+    });
+
+    await expect(reconcileHostedUsageCreditStripeEvent({
+      event: makeCheckoutEvent("checkout.session.completed"),
+      prisma: harness.client,
+    })).rejects.toThrow(
+      "Provider-final usage-credit Checkout release contradicted live Stripe state.",
+    );
+
+    expect(harness.purchase.grantSlotReleasedAt).toEqual(releasedAt);
+    expect(mocks.grantUsageCredit).not.toHaveBeenCalled();
   });
 
   it("acknowledges an unknown safely expired Checkout after purchase deletion", async () => {
@@ -1725,6 +1780,7 @@ function makeUsageCreditPurchase(
     checkoutCancelUrl: string;
     checkoutRequestPolicyVersion: string;
     checkoutSuccessUrl: string;
+    grantSlotReleasedAt: Date | null;
     payerMemberId: string | null;
     status: HostedUsageCreditPurchaseStatus;
     stripeChargeLookupKey: string | null;
@@ -1753,6 +1809,7 @@ function makeUsageCreditPurchase(
       ? "https://murph.example/groups/fund/group_join_code_1234?usageCredit=success"
       : "https://murph.example/settings?usageCredit=success"),
     createdAt: new Date("2026-07-16T03:20:00.000Z"),
+    grantSlotReleasedAt: overrides?.grantSlotReleasedAt ?? null,
     grantUsdMicros: 5_000_000n,
     id: "hucp_purchase_123",
     lastReconciledAt: null as Date | null,
