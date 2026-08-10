@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — ReviewGPT round 4 remediation awaiting exact-head review
+Status: active — ReviewGPT round 5 rollback-floor remediation
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -226,3 +226,18 @@ Updated: 2026-08-10
   so their returned effect correctly carries the new true-only media fact; only
   the expected shapes changed. The complete 23-test file and Assistant Runtime
   typecheck pass.
+- Final ReviewGPT round 5 accepted the forward physical-owner behavior but found
+  a review-induced rollback defect: the previous strict provider-effect reader
+  quarantines a marked sent intent, and idle snapshot maintenance then excludes
+  that quarantine from portable continuity. The required retrospective was
+  recorded on PR #1533 before remediation.
+- The correction uses the existing `RunnerStateStore` construction gate rather
+  than a compatibility service. Hosted runner schema version 16 is written
+  before any invocation or workspace access; a version-15 Worker rejects it
+  before it can wake an old runner or quarantine a marked outbox record.
+  Production immediate rollout, exact runner-fingerprint admission, durable
+  architecture/deploy contracts, and focused floor proof make version 16 the
+  enforced forward-fix rollback floor.
+- The two focused Cloudflare files pass 98 tests, the Cloudflare package
+  typecheck passes, docs drift passes, and the workspace diff has no whitespace
+  errors.

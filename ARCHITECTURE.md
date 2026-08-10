@@ -2613,6 +2613,14 @@ support or a contract fingerprint prevents resume, planning restores that marker
 provenance-only history. A native reply is bound to it only after the sent outbox
 delivery matches the same turn, ref, hash, media type, and byte size; neither the
 marker nor the reply relationship grants mutation authority.
+Multi-message provider deliveries persist one true-only fact on the exact
+physical effect that carried the intent media. That additive fact lives below a
+strict outbox schema boundary, so the first writer also establishes hosted
+runner state schema version 16 before any runner invocation. A version-15
+Worker rejects that Durable Object state during construction and cannot start a
+runner that would quarantine the newer outbox record. Version 16 is therefore a
+hard Cloudflare/runner rollback floor after deployment; recovery uses a forward
+fix on version 16 or newer.
 Ephemeral progress updates remain unavailable because queue-only background turns
 have no waiting audience and cannot durably order a progress send before the final
 reply. No scheduler-specific service, persisted authority row, queue, or second

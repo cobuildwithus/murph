@@ -1,8 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import type { SQLInputValue } from "node:sqlite";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import {
+  assertRunnerStateSchemaVersionSupported,
+  RUNNER_STATE_SCHEMA_VERSION,
+} from "../src/user-runner/runner-state-schema.js";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.js";
 import type {
   DurableObjectSqlCursorLike,
@@ -236,6 +240,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
   it("creates the current write-fence schema without retired scheduler or invocation columns", async () => {
     const { db, store } = createRunnerStateStoreHarness();
 
+    expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION);
     await store.bindUser("user-current");
 
     const columns = readRunnerMetaColumns(db);
@@ -261,7 +266,6 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
     expect(columns).not.toContain("backoff_until");
     expect(columns).not.toContain("active_expires_at");
     expect(columns).not.toContain(retiredBrowserVaultRefreshColumn);
-    expect(readRunnerStateSchemaVersion(db)).toBe(15);
     const state = await store.readState();
     expect(state).toEqual({
       failureCount: 0,
@@ -273,6 +277,21 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
       writeFence: null,
     });
     expect(state).not.toHaveProperty(retiredBrowserVaultRefreshProjection);
+  });
+
+  it("blocks the previous runner before it can read a version-16 workspace", () => {
+    const readWorkspace = vi.fn();
+    expect(RUNNER_STATE_SCHEMA_VERSION).toBe(16);
+    expect(() => {
+      assertRunnerStateSchemaVersionSupported({
+        observedVersion: RUNNER_STATE_SCHEMA_VERSION,
+        supportedVersion: 15,
+      });
+      readWorkspace();
+    }).toThrow(
+      "Hosted runner Durable Object schema version 16 is newer than supported version 15.",
+    );
+    expect(readWorkspace).not.toHaveBeenCalled();
   });
 
   it("migrates dormant active invocation identity into the write fence", async () => {
@@ -334,7 +353,7 @@ function runnerBundleSlotsTableExists(db: DatabaseSync): boolean {
     const { db, store } = createRunnerStateStoreHarness(setupLegacyRunnerSchema);
 
     expect(readRunnerMetaColumns(db)).toEqual(expect.arrayContaining(CURRENT_RUNNER_META_COLUMNS));
-    expect(readRunnerStateSchemaVersion(db)).toBe(15);
+    expect(readRunnerStateSchemaVersion(db)).toBe(RUNNER_STATE_SCHEMA_VERSION);
     expect(readRunnerMetaActiveState(db)).toMatchObject({
       active_attempt_id: "workspace-invocation-1",
     });

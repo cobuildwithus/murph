@@ -28,6 +28,31 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Provider Media-Effect Rollout
+
+The first runner that writes the true-only physical media-owner fact inside a
+persisted provider-message effect must deploy with
+`container_rollout=immediate`. Require managed-container smoke to report the
+exact new runner-bundle fingerprint before admitting image or voice delivery.
+There is no Web deployment dependency.
+
+`HostedUserRunner` constructs its state store before creating any invocation,
+workspace snapshot, or container service. This release advances that Durable
+Object state to runner schema version 16 at construction. A version-15 Worker
+rejects version 16 before it can wake a runner or read an encrypted workspace,
+so it cannot send a marked record through the legacy strict outbox parser and
+quarantine it during idle snapshot maintenance.
+
+Runner schema version 16 is a hard Cloudflare/runner rollback floor after the
+deploy reaches a member's Durable Object. Do not roll Worker or runner below
+that floor; use a forward fix on version 16 or newer. Production preflight keeps
+the immediate-container requirement fail closed, and the existing bundle
+fingerprint admission prevents a stale warm runner from becoming the first
+writer. After deployment, prove the managed runner fingerprint, send one
+image-plus-link and one text-plus-voice response, checkpoint both workspaces,
+and confirm Workers Observability contains no outbox quarantine or runner schema
+version failures.
+
 ## Health-Data Consent Stop-Target Rollout
 
 Deploy the Cloudflare Worker that retains an exact user-control stop target
