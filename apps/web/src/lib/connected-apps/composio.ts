@@ -6,6 +6,8 @@ import {
 } from "./config";
 
 const COMPOSIO_REQUEST_TIMEOUT_MS = 30_000;
+const COMPOSIO_ERROR_RESPONSE_TIMEOUT_MS = 1_000;
+const COMPOSIO_ERROR_RESPONSE_LIMIT_BYTES = 64 * 1024;
 // Memory ceiling for the raw provider body only. A mailbox read carrying full
 // HTML bodies routinely exceeds a few hundred kilobytes before compaction, so
 // this sits well above the assistant result budget the route enforces after
@@ -347,8 +349,15 @@ async function requestJson(input: {
   }
 
   if (!response.ok) {
+    const payload = await readBoundedJsonResponse(response, {
+      limitBytes: COMPOSIO_ERROR_RESPONSE_LIMIT_BYTES,
+      signal: AbortSignal.timeout(COMPOSIO_ERROR_RESPONSE_TIMEOUT_MS),
+    }).catch(() => null);
     throw new ComposioConnectedAppsRequestError(
-      `Composio request failed with status ${response.status}.`,
+      withComposioProviderDiagnostic(
+        `Composio request failed with status ${response.status}.`,
+        payload,
+      ),
       response.status,
       { type: "composio_http_error" },
     );
@@ -371,9 +380,16 @@ async function requestJson(input: {
   }
 }
 
-async function readBoundedJsonResponse(response: Response): Promise<unknown> {
+async function readBoundedJsonResponse(
+  response: Response,
+  options: {
+    limitBytes?: number;
+    signal?: AbortSignal;
+  } = {},
+): Promise<unknown> {
+  const limitBytes = options.limitBytes ?? COMPOSIO_RESPONSE_LIMIT_BYTES;
   const contentLength = parseContentLength(response.headers.get("content-length"));
-  if (contentLength !== null && contentLength > COMPOSIO_RESPONSE_LIMIT_BYTES) {
+  if (contentLength !== null && contentLength > limitBytes) {
     throw new ComposioConnectedAppsRequestError(
       "Composio response was too large.",
       response.status,
@@ -381,15 +397,27 @@ async function readBoundedJsonResponse(response: Response): Promise<unknown> {
     );
   }
 
-  const text = await readBoundedResponseText(response);
+  const text = await readBoundedResponseText(response, {
+    limitBytes,
+    signal: options.signal,
+  });
   return JSON.parse(text);
 }
 
-async function readBoundedResponseText(response: Response): Promise<string> {
+async function readBoundedResponseText(
+  response: Response,
+  options: {
+    limitBytes: number;
+    signal?: AbortSignal;
+  },
+): Promise<string> {
+  if (options.signal?.aborted) {
+    throw options.signal.reason;
+  }
   const body = response.body;
   if (!body) {
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > COMPOSIO_RESPONSE_LIMIT_BYTES) {
+    if (new TextEncoder().encode(text).byteLength > options.limitBytes) {
       throw new ComposioConnectedAppsRequestError(
         "Composio response was too large.",
         response.status,
@@ -402,9 +430,19 @@ async function readBoundedResponseText(response: Response): Promise<string> {
   const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  const abortRead = () => {
+    void reader.cancel(options.signal?.reason).catch(() => undefined);
+  };
+  options.signal?.addEventListener("abort", abortRead, { once: true });
+  if (options.signal?.aborted) {
+    abortRead();
+  }
   try {
     while (true) {
       const { done, value } = await reader.read();
+      if (options.signal?.aborted) {
+        throw options.signal.reason;
+      }
       if (done) {
         break;
       }
@@ -412,7 +450,7 @@ async function readBoundedResponseText(response: Response): Promise<string> {
         continue;
       }
       totalBytes += value.byteLength;
-      if (totalBytes > COMPOSIO_RESPONSE_LIMIT_BYTES) {
+      if (totalBytes > options.limitBytes) {
         await reader.cancel().catch(() => undefined);
         throw new ComposioConnectedAppsRequestError(
           "Composio response was too large.",
@@ -423,6 +461,7 @@ async function readBoundedResponseText(response: Response): Promise<string> {
       chunks.push(value);
     }
   } finally {
+    options.signal?.removeEventListener("abort", abortRead);
     reader.releaseLock();
   }
 
@@ -459,6 +498,23 @@ function readString(
 ): string | null {
   const value = record?.[field];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function withComposioProviderDiagnostic(message: string, payload: unknown): string {
+  const error = asRecord(asRecord(payload)?.error);
+  const code = error?.code;
+  const slug = error?.slug;
+  const fields = [
+    ...(typeof code === "number" && Number.isSafeInteger(code) && code >= 0
+      ? [`code=${code}`]
+      : []),
+    ...(typeof slug === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/u.test(slug)
+      ? [`slug=${slug}`]
+      : []),
+  ];
+  return fields.length > 0
+    ? `${message} Provider error: ${fields.join(", ")}.`
+    : message;
 }
 
 function readNullableString(
