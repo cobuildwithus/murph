@@ -544,9 +544,11 @@ the current user explicitly asks for it.
 
 ## Base-Update-Only Exception
 
-If a round has already reached zero accepted findings and the PR later needs to
-be updated only because the base branch moved, do not start another ReviewGPT
-round just for that base update.
+If a round has already reached zero accepted findings, do not update the PR
+branch merely to chase a moving base before handoff. Keep the reviewed head,
+require its normal CI, and prove current-base mergeability with
+`git merge-tree --write-tree`. A clean merge-tree plus green required CI on the
+PR-authored head is sufficient preparation.
 
 This exception applies when the post-review change is only a normal merge or
 rebase of the PR base branch, including bounded manual conflict resolution that
@@ -558,9 +560,12 @@ contract, fix a review finding, or include feature work or unrelated
 behavior/test/config/doc edits. Conflict count is orientation only and does not
 decide eligibility.
 
-Record the conflict paths and the preservation reason in the PR handoff, run
-focused verification for the affected surfaces, and require PR CI green on the
-new head. Do not rerun ReviewGPT solely for that update. If any resolution
+When an authorized merge is blocked by strict up-to-date checks, use the merge
+queue when available or perform one normal base update at the merge boundary.
+Record any conflict paths and preservation reasons, run focused verification
+for affected surfaces, and let required PR CI gate the new head. Merge promptly
+when it clears instead of starting a repeated pre-merge refresh loop. Do not
+rerun ReviewGPT solely for that update. If any resolution
 authors behavior not already represented by the reviewed PR or current base,
 materially changes the implemented contract, includes another branch-authored
 change, or cannot be confidently classified as mechanical, use the ordinary
