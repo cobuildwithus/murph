@@ -2056,6 +2056,7 @@ export function createJunctionDeviceSyncProvider(
         ...(input.result.scheduledJobs ?? []),
         buildExtendedTimeseriesBackfillJob({
           availableAt: addMilliseconds(input.context.now, retryDelayMs),
+          dedupeKey: input.job.dedupeKey,
           emptyBackfillAttempts,
           historicalRecordsSeen: recordsSeen,
           historicalWindowStart,
@@ -2247,6 +2248,9 @@ export function createJunctionDeviceSyncProvider(
       sourceProviderSlug,
     });
     const jobs = buildJunctionWebhookJobs({
+      extendedBloodPressureBackfillEnabled:
+        extendedBackfillTimeseriesResources.includes("blood_pressure"),
+      extendedTimeseriesBackfillDays,
       eventType,
       objectId,
       occurredAt,
@@ -2777,8 +2781,8 @@ export function createJunctionDeviceSyncProvider(
       kind: "resource",
       payload,
       priority: input.job.priority,
-      dedupeKey:
-        buildJunctionExtendedTimeseriesBackfillDedupeKey(payload)
+      dedupeKey: input.job.dedupeKey
+        ?? buildJunctionExtendedTimeseriesBackfillDedupeKey(payload)
         ?? sha256Text(JSON.stringify([
           "junction",
           "yield-follow-up",
@@ -2794,48 +2798,6 @@ export function createJunctionDeviceSyncProvider(
     };
   }
 
-  function buildExtendedTimeseriesBackfillJob(input: {
-    availableAt: string;
-    emptyBackfillAttempts?: number;
-    historicalRecordsSeen?: boolean;
-    historicalWindowStart: string;
-    resource: string;
-    sourceProviderSlug: string | null;
-    windowEnd: string;
-    windowStart: string;
-  }): DeviceSyncJobInput {
-    const payload = {
-      ...(input.emptyBackfillAttempts && input.emptyBackfillAttempts > 0
-        ? { emptyBackfillAttempts: input.emptyBackfillAttempts }
-        : {}),
-      historicalBackfill: true,
-      ...(input.historicalRecordsSeen
-        ? { historicalRecordsSeen: true }
-        : {}),
-      historicalWindowStart: input.historicalWindowStart,
-      resource: input.resource,
-      resourceCategory: "timeseries",
-      ...(input.sourceProviderSlug
-        ? { sourceProviderSlug: input.sourceProviderSlug }
-        : {}),
-      windowEnd: input.windowEnd,
-      windowStart: input.windowStart,
-    } satisfies JunctionDeviceSyncJobPayloads["resource"];
-    const dedupeKey =
-      buildJunctionExtendedTimeseriesBackfillDedupeKey(payload);
-    if (!dedupeKey) {
-      throw new TypeError("Junction extended timeseries backfill identity was invalid.");
-    }
-
-    return {
-      kind: "resource",
-      payload,
-      availableAt: input.availableAt,
-      priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
-      dedupeKey,
-    };
-  }
-
   function buildExtendedTimeseriesBackfillWindow(
     anchorAt: string,
   ): { windowEnd: string; windowStart: string } {
@@ -2846,36 +2808,6 @@ export function createJunctionDeviceSyncProvider(
         subtractDays(windowEnd, extendedTimeseriesBackfillDays),
       ),
     };
-  }
-
-  function buildJunctionExtendedTimeseriesBackfillDedupeKey(
-    payload: Record<string, unknown>,
-  ): string | null {
-    if (payload.historicalBackfill !== true) {
-      return null;
-    }
-
-    const historicalWindowStart =
-      toIsoTimestampIfValid(normalizeString(payload.historicalWindowStart));
-    const resource = normalizeJunctionResourceName(payload.resource);
-    const windowEnd = toIsoTimestampIfValid(normalizeString(payload.windowEnd));
-    if (
-      !historicalWindowStart
-      || !resource
-      || !windowEnd
-      || !JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource)
-    ) {
-      return null;
-    }
-
-    return sha256Text(JSON.stringify([
-      "junction",
-      "extended-timeseries-backfill",
-      normalizeProviderSlug(payload.sourceProviderSlug),
-      resource,
-      historicalWindowStart,
-      windowEnd,
-    ]));
   }
 
   function resolveJunctionExtendedTimeseriesBackfillPolicy(
@@ -5541,7 +5473,82 @@ function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
   };
 }
 
+function buildJunctionExtendedTimeseriesBackfillDedupeKey(
+  payload: Record<string, unknown>,
+): string | null {
+  if (payload.historicalBackfill !== true) {
+    return null;
+  }
+
+  const historicalWindowStart =
+    toIsoTimestampIfValid(normalizeString(payload.historicalWindowStart));
+  const resource = normalizeJunctionResourceName(payload.resource);
+  const windowEnd = toIsoTimestampIfValid(normalizeString(payload.windowEnd));
+  if (
+    !historicalWindowStart
+    || !resource
+    || !windowEnd
+    || !JUNCTION_EXTENDED_TIMESERIES_BACKFILL_RESOURCE_SET.has(resource)
+  ) {
+    return null;
+  }
+
+  return sha256Text(JSON.stringify([
+    "junction",
+    "extended-timeseries-backfill",
+    normalizeProviderSlug(payload.sourceProviderSlug),
+    resource,
+    historicalWindowStart,
+    windowEnd,
+  ]));
+}
+
+function buildExtendedTimeseriesBackfillJob(input: {
+  availableAt: string;
+  dedupeKey?: string | null;
+  emptyBackfillAttempts?: number;
+  historicalRecordsSeen?: boolean;
+  historicalWindowStart: string;
+  resource: string;
+  sourceProviderSlug: string | null;
+  windowEnd: string;
+  windowStart: string;
+}): DeviceSyncJobInput {
+  const payload = {
+    ...(input.emptyBackfillAttempts && input.emptyBackfillAttempts > 0
+      ? { emptyBackfillAttempts: input.emptyBackfillAttempts }
+      : {}),
+    historicalBackfill: true,
+    ...(input.historicalRecordsSeen
+      ? { historicalRecordsSeen: true }
+      : {}),
+    historicalWindowStart: input.historicalWindowStart,
+    resource: input.resource,
+    resourceCategory: "timeseries",
+    ...(input.sourceProviderSlug
+      ? { sourceProviderSlug: input.sourceProviderSlug }
+      : {}),
+    windowEnd: input.windowEnd,
+    windowStart: input.windowStart,
+  } satisfies JunctionDeviceSyncJobPayloads["resource"];
+  const dedupeKey = input.dedupeKey
+    ?? buildJunctionExtendedTimeseriesBackfillDedupeKey(payload);
+  if (!dedupeKey) {
+    throw new TypeError("Junction extended timeseries backfill identity was invalid.");
+  }
+
+  return {
+    kind: "resource",
+    payload,
+    availableAt: input.availableAt,
+    priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
+    dedupeKey,
+  };
+}
+
 function buildJunctionWebhookJobs(input: {
+  extendedBloodPressureBackfillEnabled: boolean;
+  extendedTimeseriesBackfillDays: number;
   eventType: string;
   objectId: string | null;
   occurredAt: string;
@@ -5553,6 +5560,20 @@ function buildJunctionWebhookJobs(input: {
 }): DeviceSyncJobInput[] {
   if (isJunctionProviderConnectionEvent(input.eventType)) {
     const backfillWindowStart = subtractDays(input.window.windowEnd, input.summaryBackfillDays);
+    const sourceHistoricalWindowStart = floorUtcDayTimestamp(
+      subtractDays(input.occurredAt, input.extendedTimeseriesBackfillDays),
+    );
+    const sourceHistoricalBloodPressureJob =
+      input.extendedBloodPressureBackfillEnabled && input.sourceProviderSlug
+        ? buildExtendedTimeseriesBackfillJob({
+            availableAt: input.occurredAt,
+            historicalWindowStart: sourceHistoricalWindowStart,
+            resource: "blood_pressure",
+            sourceProviderSlug: input.sourceProviderSlug,
+            windowEnd: floorUtcDayTimestamp(input.occurredAt),
+            windowStart: sourceHistoricalWindowStart,
+          })
+        : null;
 
     return [
       buildExactWindowJob({
@@ -5561,6 +5582,9 @@ function buildJunctionWebhookJobs(input: {
         windowEnd: input.window.windowEnd,
         priority: 35,
       }),
+      ...(sourceHistoricalBloodPressureJob
+        ? [sourceHistoricalBloodPressureJob]
+        : []),
       {
         kind: "reconcile",
         payload: {

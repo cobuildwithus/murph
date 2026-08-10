@@ -2632,13 +2632,16 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ]);
   });
 
-  it("parses Junction backfill job hints with a timeseries cursor", () => {
+  it("parses Junction historical backfill job hints", () => {
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {
           kind: "backfill",
           payload: {
             emptyBackfillAttempts: 2,
+            historicalBackfill: true,
+            historicalRecordsSeen: true,
+            historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
             windowEnd: "2026-04-03T00:00:00Z",
             windowStart: "2026-04-01T00:00:00Z",
@@ -2649,6 +2652,9 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
+      historicalBackfill: true,
+      historicalRecordsSeen: true,
+      historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-01T00:00:00.000Z",

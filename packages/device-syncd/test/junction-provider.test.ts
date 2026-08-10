@@ -4425,6 +4425,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     throw new Error(`Unexpected request: ${readUrl(input)}`);
   }, {
     providerFilter: ["garmin"],
+    timeseriesResources: ["blood_pressure"],
     webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
   });
   const parseWebhook = async (input: {
@@ -4492,6 +4493,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       event_type: "provider.connection.created",
       user_id: "junction-user-1",
       data: {
+        created_at: "2026-03-20T14:30:00.000Z",
         provider: "garmin",
       },
     },
@@ -4500,7 +4502,22 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
 
   assert.equal(lifecycle.dataSourceProviderSlug, null);
   assert.equal(lifecycle.sourceProviderSlug, "garmin");
-  assert.equal(lifecycle.occurredAt, "2026-04-03T00:00:00.000Z");
+  assert.equal(lifecycle.occurredAt, "2026-03-20T14:30:00.000Z");
+  const sourceBloodPressureHistory = requireValue(
+    lifecycle.jobs.find((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "blood_pressure"
+    ),
+  );
+  assert.deepEqual(sourceBloodPressureHistory.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-03-18T00:00:00.000Z",
+    resource: "blood_pressure",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-03-20T00:00:00.000Z",
+    windowStart: "2026-03-18T00:00:00.000Z",
+  });
 });
 
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
