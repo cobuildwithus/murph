@@ -9,7 +9,9 @@ import {
   requireHostedLinqParticipantChangedEvent,
   requireHostedLinqTypingIndicatorStartedEvent,
   requireHostedLinqMessageReceivedEvent,
+  inspectHostedLinqMessageReceivedParts,
   sendHostedLinqReadReceipt,
+  type HostedLinqMessageReceivedPartsInspection,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import {
@@ -55,6 +57,7 @@ import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
+  logHostedOnboardingWarning,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -182,6 +185,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   });
   let eventId: string | null = null;
   let eventType: string | null = null;
+  let eventWebhookVersion: string | null = null;
+  let messagePartsInspection: HostedLinqMessageReceivedPartsInspection | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
   let pendingInstantStartActivationWake: {
@@ -212,6 +217,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     eventId = event.event_id;
     eventType = event.event_type;
+    eventWebhookVersion = event.webhook_version ?? null;
+    messagePartsInspection = inspectHostedLinqMessageReceivedParts(event);
     let affirmativeReaction = false;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -244,6 +251,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       event,
       rawBody: input.rawBody,
     });
+    if (messagePartsInspection?.compatibilityFallback) {
+      logHostedLinqMessageReceivedPartsWarning({
+        eventId,
+        inspection: messagePartsInspection,
+        outcome: "compatibility-accepted",
+        webhookVersion: event.webhook_version,
+      });
+    }
     if (
       providerEvent
       && (event.event_type === "reaction.added" || event.event_type === "reaction.removed")
@@ -863,6 +878,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     return plan.response;
   } catch (error) {
+    if (
+      messagePartsInspection
+      && isHostedOnboardingError(error)
+      && error.code === "LINQ_PAYLOAD_INVALID"
+    ) {
+      logHostedLinqMessageReceivedPartsWarning({
+        errorCode: error.code,
+        eventId,
+        inspection: messagePartsInspection,
+        outcome: "rejected",
+        webhookVersion: eventWebhookVersion,
+      });
+    }
     // Activation is already durable even if replanning, delivery, or the
     // conversation wake failed. Fall back to its original best-effort signal
     // before propagating the error and asking the provider to retry.
@@ -883,6 +911,44 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+function logHostedLinqMessageReceivedPartsWarning(input: {
+  errorCode?: string;
+  eventId: string | null;
+  inspection: HostedLinqMessageReceivedPartsInspection;
+  outcome: "compatibility-accepted" | "rejected";
+  webhookVersion?: string | null;
+}): void {
+  logHostedOnboardingWarning(
+    "hosted-onboarding.webhook.linq.message-parts",
+    {
+      compatibilityFallback: input.inspection.compatibilityFallback,
+      dataKind: input.inspection.dataKind,
+      errorCode: input.errorCode,
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      messageKind: input.inspection.messageKind,
+      nestedActionPresent: input.inspection.nestedActionPresent,
+      outcome: input.outcome,
+      partCount: input.inspection.partCount,
+      partKinds: input.inspection.partKinds,
+      partsKind: input.inspection.partsKind,
+      partsLocation: input.inspection.partsLocation,
+      payloadShape: input.inspection.payloadShape,
+      topLevelActionPresent: input.inspection.topLevelActionPresent,
+      unsupportedPartCount: input.inspection.unsupportedPartCount,
+      webhookVersion: classifyHostedLinqWebhookVersion(input.webhookVersion),
+    },
+  );
+}
+
+function classifyHostedLinqWebhookVersion(
+  value: string | null | undefined,
+): "2025-01-01" | "2026-02-03" | "missing" | "other" {
+  if (value === "2025-01-01" || value === "2026-02-03") {
+    return value;
+  }
+  return value ? "other" : "missing";
 }
 
 function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {

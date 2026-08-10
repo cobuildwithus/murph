@@ -340,11 +340,15 @@ describe('assistant hosted low-usage skill', () => {
       'Canceling one policy never cancels or replaces another',
     )
     expect(normalizedSkill).toContain(
-      'Treat returned reward labels as exact cost-weighted usage-credit labels',
+      'Use each returned `rewardLabel` exactly',
     )
     expect(normalizedSkill).toContain(
-      'Do not calculate or translate them into messages or days',
+      'preserve its "about" estimate language',
     )
+    expect(normalizedSkill).toContain(
+      'Never derive message counts, current balance, or calendar/trial duration from it',
+    )
+    expect(normalizedSkill).not.toContain('exact cost-weighted usage-credit labels')
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
@@ -417,7 +421,7 @@ describe('assistant hosted low-usage skill', () => {
             expiresAt: '2026-08-03T18:00:00.000Z',
             policyCode: 'active_group_v1',
             rewardLabel:
-              '$3.50 of cost-weighted usage credit for your Murph',
+              'about 14 more days of Murph usage for your Murph',
             state: 'armed',
           }],
         },
@@ -433,8 +437,9 @@ describe('assistant hosted low-usage skill', () => {
 
     expect(assembledContext).toContain('2026-08-03T18:00:00.000Z')
     expect(assembledContext).toContain(
-      '$3.50 of cost-weighted usage credit for your Murph',
+      'about 14 more days of Murph usage for your Murph',
     )
+    expect(assembledContext).not.toMatch(/\$|cost-weighted usage credit/iu)
     expect(JSON.stringify(armedToolResult)).not.toContain('humanMessageCount')
     expect(JSON.stringify(armedToolResult)).not.toContain(
       'nonReferrerMessageCount',
@@ -494,7 +499,7 @@ describe('assistant hosted low-usage skill', () => {
                   expiresAt: '2026-08-03T18:00:00.000Z',
                   policyCode: 'new_person_activation_v1',
                   rewardLabel:
-                    '$2.00 of cost-weighted usage credit for your Murph',
+                    'about 10 more days of Murph usage for your Murph',
                   state: 'armed',
                 },
                 {
@@ -502,7 +507,7 @@ describe('assistant hosted low-usage skill', () => {
                   expiresAt: '2026-08-04T18:00:00.000Z',
                   policyCode: 'active_group_v1',
                   rewardLabel:
-                    '$3.50 of cost-weighted usage credit for your Murph',
+                    'about 14 more days of Murph usage for your Murph',
                   state: 'armed',
                 },
               ],
@@ -536,7 +541,7 @@ describe('assistant hosted low-usage skill', () => {
                 expiresAt: '2026-08-05T18:00:00.000Z',
                 policyCode: 'new_person_activation_v1',
                 rewardLabel:
-                  '$2.00 of cost-weighted usage credit for your Murph',
+                  'about 10 more days of Murph usage for your Murph',
                 state: 'armed',
               }],
               availablePolicies: [],
@@ -568,6 +573,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedContext).toContain(
       'that recovery read is authoritative for current state',
     )
+    expect(normalizedContext).not.toMatch(/\$|cost-weighted usage credit/iu)
     expect(normalizedContext).toContain('or claim that commit failed')
   })
 

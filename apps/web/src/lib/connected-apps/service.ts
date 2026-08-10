@@ -265,9 +265,9 @@ async function runHostedConnectedAppsRequest(input: {
           }).catch((error: unknown) => {
             if (error instanceof ComposioConnectedAppsRequestError) {
               throw new ComposioConnectedAppsRequestError(
-                emailWrite
+                `${emailWrite
                   ? "Composio email sending returned an ambiguous result."
-                  : "Composio calendar event creation returned an ambiguous result.",
+                  : "Composio calendar event creation returned an ambiguous result."} ${error.message}`,
                 error.status,
                 {
                   cause: error,
