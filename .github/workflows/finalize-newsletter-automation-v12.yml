@@ -1,0 +1,165 @@
+name: Finalize newsletter automation refactor v12
+
+on:
+  push:
+    branches:
+      - codex/simplify-newsletter-automation
+    paths:
+      - .github/workflows/finalize-newsletter-automation-v12.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: contains(github.event.head_commit.message, '[finalize-newsletter-v12]')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          ref: codex/simplify-newsletter-automation
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Rebase onto current main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git rebase origin/main
+
+      - name: Apply reviewed patch with line-safe structural matching
+        shell: python
+        run: |
+          from pathlib import Path
+          import runpy
+
+          def extract_step_script(path: str, step_name: str) -> str:
+              lines = Path(path).read_text().splitlines()
+              step_index = next(
+                  index for index, line in enumerate(lines)
+                  if line.strip() == f'- name: {step_name}'
+              )
+              run_index = next(
+                  index for index in range(step_index + 1, len(lines))
+                  if lines[index].strip() == 'run: |'
+              )
+              output: list[str] = []
+              for line in lines[run_index + 1:]:
+                  if line.startswith('      - name:') or line.startswith('      - uses:'):
+                      break
+                  if line.startswith('          '):
+                      output.append(line[10:])
+                  elif not line.strip():
+                      output.append('')
+                  else:
+                      raise SystemExit(f'unexpected workflow indentation: {line!r}')
+              return '\n'.join(output) + '\n'
+
+          script = extract_step_script(
+              '.github/workflows/finalize-newsletter-automation-v9.yml',
+              'Apply reviewed patch with owner-scoped policy edits',
+          )
+
+          unsafe_whitespace = (
+              "r'\\\\s+' if part.isspace() else re.escape(part)"
+          )
+          line_safe_whitespace = '''(
+                  r'[ \\t]+'
+                  if '\\n' not in part and '\\r' not in part
+                  else r'\\s+'
+              ) if part.isspace() else re.escape(part)'''
+          unsafe_count = script.count(unsafe_whitespace)
+          if unsafe_count != 2:
+              raise SystemExit(
+                  'expected two whitespace-pattern builders, found '
+                  f'{unsafe_count}'
+              )
+          script = script.replace(
+              unsafe_whitespace,
+              line_safe_whitespace,
+          )
+
+          old_guard = '''if ambiguous_segment.count("status === 'active'") != 2:
+              raise SystemExit(
+                  'expected exactly two owner-scoped validation edits, found '
+                  f'{ambiguous_segment.count("status === \\'active\\'")}'
+              )
+          '''
+          new_guard = '''old_gate_marker = (
+              "status === 'active'\\n"
+              "  && (input.request.delivery !== undefined || existingGroupEmail)"
+          )
+          if ambiguous_segment.count(old_gate_marker) != 2:
+              raise SystemExit(
+                  'expected exactly two old validation gates, found '
+                  f'{ambiguous_segment.count(old_gate_marker)}'
+              )
+          '''
+          if script.count(old_guard) != 1:
+              raise SystemExit(
+                  f'expected one old validation guard, found {script.count(old_guard)}'
+              )
+          script = script.replace(old_guard, new_guard, 1)
+
+          patch_script = Path('/tmp/finalize-newsletter-automation-v12.py')
+          patch_script.write_text(script)
+          runpy.run_path(str(patch_script), run_name='__main__')
+
+          for path in [
+              '.github/workflows/finalize-newsletter-automation-v10.yml',
+              '.github/workflows/finalize-newsletter-automation-v11.yml',
+              '.github/workflows/finalize-newsletter-automation-v12.yml',
+          ]:
+              candidate = Path(path)
+              if candidate.exists():
+                  candidate.unlink()
+
+      - name: Install workspace dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Focused assistant-engine proof
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/automation-delivery.test.ts
+          test/assistant-managed-group-skill-fallbacks.test.ts
+          test/assistant-hosted-domain-tools.test.ts
+          test/assistant-skill-assets.test.ts
+
+      - name: Focused assistant-runtime proof
+        run: >-
+          pnpm --dir packages/assistant-runtime exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/automation-tool-policy.test.ts
+
+      - name: Typecheck touched owners
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-runtime typecheck
+
+      - name: Repository validation
+        run: |
+          pnpm docs:drift
+          pnpm test:diff:local
+          git diff --check
+          for workflow in finalize-newsletter-automation{,-v2,-v3,-v4,-v5,-v6,-v7,-v8,-v9,-v10,-v11,-v12}.yml; do
+            test ! -e ".github/workflows/$workflow"
+          done
+          test ! -e agent-docs/exec-plans/active/2026-08-09-newsletter-as-automation.md
+          test -e agent-docs/exec-plans/completed/2026-08-09-newsletter-as-automation.md
+          grep -q 'system:automation-delivery:group-email' packages/assistant-engine/src/assistant/automation-delivery.ts
+          grep -q 'resolveHostedAutomationSavePolicy' packages/assistant-runtime/src/hosted-runtime/workspace-assistant-phase.ts
+          grep -q 'resolveAutomationGroupEmailConfigurationIssue' packages/assistant-engine/src/assistant/cron/execution.ts
+          grep -q 'Read the `group-newsletter` skill' packages/assistant-engine/src/assistant/group-newsletter-automation.ts
+
+      - name: Commit and push reviewed fixes
+        run: |
+          git add -A
+          git commit -m "refactor(automation): finalize ordinary group newsletters"
+          git push --force-with-lease origin HEAD:codex/simplify-newsletter-automation
