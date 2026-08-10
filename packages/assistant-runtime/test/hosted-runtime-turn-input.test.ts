@@ -927,10 +927,13 @@ describe("selectHostedAssistantInputIds", () => {
       now: new Date("2026-04-23T00:00:05.000Z"),
       vault: vaultRoot,
     });
+    const pendingStatePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(pendingStatePath), { recursive: true });
+    await writeFile(pendingStatePath, "{not-json", "utf8");
+    await expect(readHostedPendingAssistantInputIds({ vaultRoot })).rejects.toThrow();
 
     const selection = await selectHostedAssistantInputIds({
       freshAssistantInputIds: [completion.inputId, fresh.inputId],
-      hostedImageCompletionInputIds: [completion.inputId],
       mode: "foreground",
       vaultRoot,
     });
@@ -1223,7 +1226,6 @@ describe("selectHostedAssistantInputIds", () => {
 
     const selection = await selectHostedAssistantInputIds({
       freshAssistantInputIds: [completion.inputId, differentRoute.inputId],
-      hostedImageCompletionInputIds: [completion.inputId],
       mode: "foreground",
       vaultRoot,
     });

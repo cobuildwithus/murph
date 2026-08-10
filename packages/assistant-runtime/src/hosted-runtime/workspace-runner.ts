@@ -255,7 +255,6 @@ export interface HostedWorkspaceRunnerAssistantInputBatch {
   assistantInputIds: readonly string[];
   assistantInputRecords?: readonly HostedMailboxAssistantInputRecord[];
   emailDeliveryContexts: readonly HostedAssistantEmailDeliveryContext[];
-  hostedImageCompletionInputIds?: readonly string[];
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
 }
 
@@ -833,8 +832,6 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   const selectedInitialAssistantInputIds = acceptedInitialAssistantInputBatch
       ? (await selectHostedAssistantInputIds({
           freshAssistantInputIds: acceptedInitialAssistantInputBatch.assistantInputIds,
-          hostedImageCompletionInputIds:
-            acceptedInitialAssistantInputBatch.hostedImageCompletionInputIds ?? [],
           mode: "foreground",
           vaultRoot: input.vaultRoot,
         })).inputIds
@@ -1840,7 +1837,7 @@ function accumulateHostedWorkspaceRunnerAssistantInputBatch(input: {
   return buildHostedWorkspaceRunnerAssistantInputBatch([
     ...readHostedWorkspaceRunnerAssistantInputBatchRecords(input.current),
     ...acceptedRecords,
-  ], input.current.hostedImageCompletionInputIds);
+  ]);
 }
 
 function includeHostedWorkspaceRunnerAssistantInputBatch(
@@ -1851,7 +1848,6 @@ function includeHostedWorkspaceRunnerAssistantInputBatch(
     readHostedWorkspaceRunnerAssistantInputBatchRecords(batch).filter((record) =>
       includedInputIds.has(record.assistantInputId)
     ),
-    batch.hostedImageCompletionInputIds,
   );
 }
 
@@ -1868,7 +1864,6 @@ function filterHostedWorkspaceRunnerAssistantInputBatch(
       seenInputIds.add(record.assistantInputId);
       return !excludedInputIds.has(record.assistantInputId);
     }),
-    batch.hostedImageCompletionInputIds,
   );
 }
 
@@ -1990,29 +1985,17 @@ function readHostedWorkspaceRunnerAssistantInputBatchRecords(
 
 function buildHostedWorkspaceRunnerAssistantInputBatch(
   records: readonly HostedMailboxAssistantInputRecord[],
-  hostedImageCompletionInputIds: readonly string[] = [],
 ): HostedWorkspaceRunnerAssistantInputBatch | null {
   if (records.length === 0) {
     return null;
   }
   const assistantInputIds = records.map((record) => record.assistantInputId);
-  const assistantInputIdSet = new Set(assistantInputIds);
-  const retainedHostedImageCompletionInputIds =
-    hostedImageCompletionInputIds.filter((inputId) =>
-      assistantInputIdSet.has(inputId)
-    );
   return {
     assistantInputIds,
     assistantInputRecords: records,
     emailDeliveryContexts: records.flatMap((record) =>
       record.emailDeliveryContext ? [record.emailDeliveryContext] : []
     ),
-    ...(retainedHostedImageCompletionInputIds.length === 0
-      ? {}
-      : {
-          hostedImageCompletionInputIds:
-            retainedHostedImageCompletionInputIds,
-        }),
     linqDeliveryContexts: records.flatMap((record) =>
       record.linqDeliveryContext ? [record.linqDeliveryContext] : []
     ),

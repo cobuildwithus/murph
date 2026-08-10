@@ -150,7 +150,6 @@ export async function runHostedAssistantAutomationLane(input: {
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig"
   >;
   freshAssistantInputIds?: readonly string[] | null;
-  hostedImageCompletionInputIds?: readonly string[] | null;
   idleCheckpointDelayMs?: number | null;
   now?: Date | null;
   operatorHomeRoot?: string | null;
@@ -222,8 +221,6 @@ export async function runHostedAssistantAutomationLane(input: {
           latencyTracePort: input.runtime.platform.latencyTracePort ?? null,
           commitTimeoutMs: input.runtime.commitTimeoutMs,
           idleCheckpointDelayMs: input.idleCheckpointDelayMs ?? null,
-          hostedImageCompletionInputIds:
-            input.hostedImageCompletionInputIds ?? [],
           now: input.now ?? null,
           preProviderPhase: input.preProviderPhase ?? null,
           ...(providerStartCriticalPath ? { providerStartCriticalPath } : {}),
@@ -299,7 +296,6 @@ export async function runHostedAssistantAutomation(
     buildBackgroundDynamicContextPrompt?: HostedBackgroundDynamicContextPromptBuilder;
     commitTimeoutMs?: number | null;
     idleCheckpointDelayMs?: number | null;
-    hostedImageCompletionInputIds?: readonly string[] | null;
     latencyTracePort?: HostedRuntimePlatform["latencyTracePort"] | null;
     now?: Date | null;
     preProviderPhase?: HostedRuntimeLatencyPhaseBreakdown["preProvider"] | null;
@@ -348,8 +344,6 @@ export async function runHostedAssistantAutomation(
     freshAssistantInputIdCount > 0
         ? {
             freshAssistantInputIds,
-            hostedImageCompletionInputIds:
-              options?.hostedImageCompletionInputIds ?? [],
             mode: "foreground",
           vaultRoot,
         }

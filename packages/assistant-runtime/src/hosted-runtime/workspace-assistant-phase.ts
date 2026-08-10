@@ -2302,9 +2302,6 @@ export async function runHostedWorkspaceAssistantPhase(
               : {}),
             executionContext,
             freshAssistantInputIds,
-            hostedImageCompletionInputIds:
-              input.initialAssistantInputBatch
-                ?.hostedImageCompletionInputIds ?? [],
             idleCheckpointDelayMs: input.request.idleCheckpointDelayMs,
             now: new Date(resolveHostedAssistantPhaseNowMs(input)),
             operationScope: automationOperationScope,

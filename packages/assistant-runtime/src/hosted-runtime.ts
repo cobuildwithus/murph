@@ -2801,11 +2801,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               ...stagedInputIds,
             ],
             emailDeliveryContexts: [],
-            hostedImageCompletionInputIds: [
-              ...(readyImageCompletionInputBatch
-                ?.hostedImageCompletionInputIds ?? []),
-              ...stagedInputIds,
-            ],
             linqDeliveryContexts: [],
           };
         }
@@ -2848,9 +2843,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             !completionInputIdSet.has(record.assistantInputId)
           ),
         ];
-        const combinedInputIdSet = new Set(
-          combinedRecords.map((record) => record.assistantInputId),
-        );
         return {
           assistantInputIds: combinedRecords.map((record) =>
             record.assistantInputId
@@ -2859,10 +2851,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           emailDeliveryContexts: combinedRecords.flatMap((record) =>
             record.emailDeliveryContext ? [record.emailDeliveryContext] : []
           ),
-          hostedImageCompletionInputIds: [...new Set([
-            ...(completionBatch.hostedImageCompletionInputIds ?? []),
-            ...(batch.hostedImageCompletionInputIds ?? []),
-          ])].filter((inputId) => combinedInputIdSet.has(inputId)),
           linqDeliveryContexts: combinedRecords.flatMap((record) =>
             record.linqDeliveryContext ? [record.linqDeliveryContext] : []
           ),
@@ -2887,7 +2875,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           : {
               ...readyBatch,
               assistantInputIds: retainedInputIds,
-              hostedImageCompletionInputIds: retainedInputIds,
             };
       };
       const absorbForegroundPassResult = (
