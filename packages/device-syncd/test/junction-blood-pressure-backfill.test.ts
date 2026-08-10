@@ -272,7 +272,13 @@ async function importWithRealJunctionNormalizer(
 }
 
 function createProvider(input: {
+  additionalProviders?: readonly {
+    resourceAvailability?: Record<string, unknown>;
+    slug: string;
+    status?: string;
+  }[];
   bloodPressureFailureRequest?: number;
+  bloodPressureGroups?: Readonly<Record<string, readonly Record<string, unknown>[]>>;
   bloodPressureRecords?: readonly Record<string, unknown>[];
   bloodPressureRequestFailure?: {
     active: boolean;
@@ -333,7 +339,15 @@ function createProvider(input: {
                 name: "Omron",
                 status: providerState.status,
                 resource_availability: providerState.resourceAvailability,
-              }],
+              }, ...(input.additionalProviders ?? []).map((provider) => ({
+                id: `provider-${provider.slug}-1`,
+                slug: provider.slug,
+                name: provider.slug,
+                status: provider.status ?? "connected",
+                resource_availability: provider.resourceAvailability ?? {
+                  blood_pressure: true,
+                },
+              }))],
         });
       }
       if (url.pathname === "/v2/summary/activity/junction-user-1") {
@@ -367,12 +381,22 @@ function createProvider(input: {
             return createJsonResponse({ error: "unsupported_resource" }, 422);
           }
         }
+        const bloodPressureGroups = input.bloodPressureGroups ?? {
+          omron: input.bloodPressureRecords ?? [],
+        };
         const records = resource === "blood_pressure"
-          ? [...(input.bloodPressureRecords ?? [])]
+          ? Object.values(bloodPressureGroups).flat()
           : [];
         return createJsonResponse(
           records.length > 0
-            ? { groups: { omron: [{ data: records }] } }
+            ? {
+                groups: Object.fromEntries(
+                  Object.entries(bloodPressureGroups).map(([source, sourceRecords]) => [
+                    source,
+                    [{ data: [...sourceRecords] }],
+                  ]),
+                ),
+              }
             : { groups: {} },
         );
       }
@@ -1763,6 +1787,85 @@ test("mixed canonical and malformed history stays unresolved until a complete re
 
   assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
   assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("mixed source admission preserves rejected exact identity until authorized replay", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    additionalProviders: [{ slug: "fitbit" }],
+    bloodPressureGroups: {
+      fitbit: [{
+        id: "bp-fitbit-awaiting-admission",
+        timestamp: "2026-05-20T09:00:00.000Z",
+        systolic: 119,
+        diastolic: 77,
+      }],
+      omron: [{
+        id: "bp-omron-admitted",
+        timestamp: "2026-05-20T08:00:00.000Z",
+        systolic: 121,
+        diastolic: 79,
+      }],
+    },
+    requests,
+  });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 63);
+  exhausted.dedupeKey = `hosted-device-sync:${"b".repeat(64)}`;
+  const omronSource = createSourceSummary("omron");
+  const fitbitSource = createSourceSummary("fitbit", NOW, "disconnected");
+  const listConnectionSources = async () => [omronSource, fitbitSource];
+
+  const { result: first } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      account: createAccount({ sources: [omronSource, fitbitSource] }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: importWithRealJunctionNormalizer,
+      listConnectionSources,
+    }),
+    job: exhausted,
+    provider,
+    startingIndex: 6_300,
+  });
+  const continuation = findBloodPressureJob(first.scheduledJobs ?? []);
+  const unresolvedIdentitiesJson =
+    continuation.payload?.historicalUnresolvedProviderRecordIdentitiesJson;
+  assert.equal(typeof unresolvedIdentitiesJson, "string");
+  if (typeof unresolvedIdentitiesJson !== "string") {
+    throw new Error("Expected exact mixed-source unresolved identity evidence.");
+  }
+  const unresolvedEvidence = JSON.parse(unresolvedIdentitiesJson);
+  assert.equal(unresolvedEvidence.i.length, 1);
+  assert.equal(unresolvedEvidence.u, undefined);
+  assert.equal(
+    continuation.payload?.historicalUnresolvedProviderRecordCount,
+    1,
+  );
+
+  fitbitSource.status = "connected";
+  const { result: admittedReplay } = await executeImmediateBloodPressureContinuations({
+    context: createJobContext({
+      account: createAccount({ sources: [omronSource, fitbitSource] }),
+      connectionSourceAdmissionMode: "listed_only",
+      importSnapshot: importWithRealJunctionNormalizer,
+      listConnectionSources,
+      now: "2026-06-12T12:00:00.000Z",
+    }),
+    job: toJobRecord(continuation, 64),
+    provider,
+  });
+
+  assert.equal(admittedReplay.scheduledJobs?.length ?? 0, 0);
+  assert.equal(
+    admittedReplay.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
+    "v1|omron",
+  );
 });
 
 test("an unrelated canonical reading cannot clear a malformed provider row", async () => {

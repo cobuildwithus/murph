@@ -2727,14 +2727,6 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
         );
         if (hasJunctionSnapshotRecords(preparedImport.snapshots)) {
-          const providerRecordIdentityEvidence =
-            identifyJunctionBloodPressureProviderRecords({
-              connections: preparedImport.connections,
-              importedAt: executionWindowEnd,
-              timeseries: preparedImport.snapshots,
-              windowStart: executionWindowStart,
-              windowEnd: executionWindowEnd,
-            });
           const receipt = await context.importSnapshot({
             provider: "junction",
             accountId: buildJunctionImportAccountId(context.account.externalAccountId),
@@ -2753,7 +2745,7 @@ export function createJunctionDeviceSyncProvider(
               canonicalEventExternalRefResourceIds:
                 readProviderSnapshotCanonicalEventExternalRefResourceIds(receipt),
               providerRecordCount,
-              providerRecordIdentityEvidence,
+              providerRecordIdentityEvidence: fetchedProviderRecordIdentityEvidence,
             });
           canonicalProviderRecordIdentities =
             resolutionEvidence.canonicalProviderRecordIdentities;
