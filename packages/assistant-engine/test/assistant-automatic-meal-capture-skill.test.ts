@@ -147,10 +147,13 @@ describe('assistant automatic meal capture skill', () => {
       'on a scheduled occurrence, ask no question and use ordinary closeout text.',
     )
     expect(compactSkill).toContain(
-      'Resolve target applicability against the selected occurrence local date from step 1, not wall-clock today.',
+      'Keep the occurrence local date from step 1 only as the work and retry boundary.',
     )
     expect(compactSkill).toContain(
-      "A target qualifies only when that date is on or after the containing Goal's `window.startAt`, on or before its optional `window.targetAt`, and inside the target's optional inclusive `startAt`/`targetAt` interval.",
+      'Resolve target applicability against the single selected card `localDate`: the capture date whose totals and card are being closed out, including a historical catch-up date.',
+    )
+    expect(compactSkill).toContain(
+      "A target qualifies only when that card date is on or after the containing Goal's `window.startAt`, on or before its optional `window.targetAt`, and inside the target's optional inclusive `startAt`/`targetAt` interval.",
     )
     expect(compactSkill).toContain(
       'Ignore an out-of-window target for current authority and conflict resolution; never copy, expose, derive from, or mutate a Goal because of it.',
@@ -396,6 +399,36 @@ describe('assistant automatic meal capture skill', () => {
       targetStartAt: '2026-08-10',
       targetTargetAt: '2026-08-10',
     })).toBe(true)
+
+    const datedGoals = [
+      {
+        name: 'catch-up-date goal',
+        calories: 1_100,
+        goalStartAt: '2026-01-01',
+        goalTargetAt: '2026-08-09',
+      },
+      {
+        name: 'occurrence-date goal',
+        calories: 1_800,
+        goalStartAt: '2026-08-10',
+      },
+    ] as const
+    const applicableGoals = (cardDate: string) => datedGoals.filter((goal) =>
+      appliesToCardDate({
+        cardDate,
+        goalStartAt: goal.goalStartAt,
+        goalTargetAt: 'goalTargetAt' in goal
+          ? goal.goalTargetAt
+          : undefined,
+      })
+    )
+
+    const catchUpGoals = applicableGoals('2026-08-09')
+    expect(catchUpGoals.map(({ name }) => name)).toEqual(['catch-up-date goal'])
+    expect(catchUpGoals[0]?.calories).toBeLessThan(1_200)
+    expect(applicableGoals('2026-08-10').map(({ name }) => name)).toEqual([
+      'occurrence-date goal',
+    ])
   })
 
   it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {

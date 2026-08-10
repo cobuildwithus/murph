@@ -182,9 +182,11 @@ On a scheduled run:
    create or change a paused proposal, or surface a numeric target proposal.
    If numeric presentation is suppressed, or the active target bundle is
    incomplete, ambiguous, or unit-incompatible, retain the ordinary compact
-   closeout and do not attach a card. Resolve target applicability against the
-   selected occurrence local date from step 1, not wall-clock today. A target
-   qualifies only when that date is on or after the containing Goal's
+   closeout and do not attach a card. Keep the occurrence local date from step
+   1 only as the work and retry boundary. Resolve target applicability against
+   the single selected card `localDate`: the capture date whose totals and card
+   are being closed out, including a historical catch-up date. A target
+   qualifies only when that card date is on or after the containing Goal's
    `window.startAt`, on or before its optional `window.targetAt`, and inside the
    target's optional inclusive `startAt`/`targetAt` interval. Ignore an
    out-of-window target for current authority and conflict resolution; never

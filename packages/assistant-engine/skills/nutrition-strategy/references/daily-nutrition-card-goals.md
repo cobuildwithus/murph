@@ -42,9 +42,10 @@ remain required before the proposal can affect a card.
   and let a scheduled closeout use ordinary text without a question or card.
   Apply this rule before any low-energy check or derivation.
 - Effective dates are also part of target authority. Resolve them against the
-  exact card `localDate`: the scheduled occurrence local date or the explicitly
-  requested date, including a historical or catch-up date, never wall-clock
-  today. The containing Goal applies only when
+  exact card `localDate`: the selected capture date for a scheduled closeout,
+  which may be a historical catch-up date rather than the occurrence date, or
+  the explicitly requested date. Never use wall-clock today as a substitute.
+  The containing Goal applies only when
   `window.startAt <= localDate` and its optional `window.targetAt` is absent or
   `localDate <= window.targetAt`. A target inside it also applies only when its
   optional `startAt` is absent or `startAt <= localDate`, and its optional
