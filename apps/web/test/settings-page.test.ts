@@ -687,6 +687,27 @@ test("SettingsPage keeps a signed-out Core payment return recoverable", async ()
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
+test("SettingsPage keeps a signed-out usage-credit return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "success",
+      usagePurchase: "hucp_abcdefghijklmnop",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
 test.each([
   "launch_edge_monthly",
   "launch_monthly",

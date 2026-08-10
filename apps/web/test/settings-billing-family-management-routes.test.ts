@@ -362,6 +362,31 @@ test("does not buy a seat when a full-plan invite is reused (no seat-limit error
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
 });
 
+test("does not buy an orphaned seat when a reused invite needs a tier rebalance", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED",
+      httpStatus: 409,
+      message: "Change the Family plan mix before moving this invite.",
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      addSeatIfNeeded: true,
+      planCode: "edge",
+      targetEmail: "relative@example.test",
+      targetLabel: "Relative",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED" },
+  });
+  expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+});
+
 test("does not auto-add a seat for a label-only invite (no dedup key)", async () => {
   mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
     hostedOnboardingError({

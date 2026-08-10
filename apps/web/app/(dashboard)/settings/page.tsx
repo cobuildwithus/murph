@@ -160,6 +160,7 @@ export default async function SettingsPage({
       pulseTrialPaymentReturn === null
       && !groupPaymentMethodSaved
       && planChangeReturn === null
+      && usageTopUpPurchaseReturn === null
     ) {
       redirect("/");
     }

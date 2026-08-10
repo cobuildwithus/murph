@@ -6,7 +6,7 @@ import {
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
-import { afterEach, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
@@ -192,6 +192,35 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       confirmed: true,
       monthlyCapMinor: 2_000,
     });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("offers only cancellation when billing changes are unavailable", async () => {
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      cancelOnly: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: baseManagement,
+    },
+  ));
+
+  try {
+    const labels = [...rendered.container.querySelectorAll("button")]
+      .map((button) => button.textContent);
+    expect(labels).toContain("Cancel sponsorship");
+    expect(labels).not.toContain("Pause automatic refills");
+    expect(labels).not.toContain("Resume automatic refills");
+    expect(labels).not.toContain("Review payment");
+    expect(labels).not.toContain("Choose $20");
+    expect(rendered.container.textContent).toContain(
+      "you can still stop future automatic refills",
+    );
   } finally {
     await rendered.cleanup();
   }

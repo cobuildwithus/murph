@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   HostedBillingStatus,
+  type Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import type Stripe from "stripe";
@@ -368,6 +369,16 @@ async function transitionHostedPulseTrialPaidPlan<
       message: "Your subscription is not ready for billing changes yet.",
     });
   }
+  const mutationAuthority: HostedPulseTrialStartPaidMutationAuthority = {
+    currentBillingPhase: billingRef?.currentBillingPhase ?? null,
+    currentBillingPlanCode: billingRef?.currentBillingPlanCode ?? null,
+    currentCheckoutOffer: billingRef?.currentCheckoutOffer ?? null,
+    scheduledBillingPlanCode: billingRef?.scheduledBillingPlanCode ?? null,
+    stripeCustomerId,
+    stripeSubscriptionId,
+    stripeSubscriptionScheduleId:
+      billingRef?.stripeSubscriptionScheduleId ?? null,
+  };
 
   const sourceConfig = requireHostedStripeBillingPlanConfig({
     billingPlanCode: START_PAID_PULSE_PLAN,
@@ -451,6 +462,7 @@ async function transitionHostedPulseTrialPaidPlan<
         timing: input.timing,
       });
       const pausedStartResult = await resumeHostedPulseTrialStartPaidPausedSubscription({
+        authority: mutationAuthority,
         memberId: input.memberId,
         now,
         paymentMethodContinuation,
@@ -517,6 +529,7 @@ async function transitionHostedPulseTrialPaidPlan<
     }
 
     const trialStartResult = await updateHostedPulseTrialStartPaidSubscription({
+      authority: mutationAuthority,
       memberId: input.memberId,
       now,
       priceId: targetConfig.priceId,
@@ -992,9 +1005,54 @@ async function maybeResolveHostedPulseTrialStartPaidPostMutationInvoiceResult<
   return maybeResolveHostedPulseTrialStartPaidInvoiceResult(input);
 }
 
+interface HostedPulseTrialStartPaidMutationAuthority {
+  currentBillingPhase: string | null;
+  currentBillingPlanCode: string | null;
+  currentCheckoutOffer: string | null;
+  scheduledBillingPlanCode: string | null;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  stripeSubscriptionScheduleId: string | null;
+}
+
+async function assertHostedPulseTrialStartPaidMutationAuthorityTx(input: {
+  authority: HostedPulseTrialStartPaidMutationAuthority;
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const [member, billingRef] = await Promise.all([
+    readHostedMemberCoreState({ memberId: input.memberId, prisma: input.tx }),
+    readHostedMemberStripeBillingRef({ memberId: input.memberId, prisma: input.tx }),
+  ]);
+  if (
+    !member
+    || member.suspendedAt
+    || (billingRef?.currentBillingPhase ?? null)
+      !== input.authority.currentBillingPhase
+    || (billingRef?.currentBillingPlanCode ?? null)
+      !== input.authority.currentBillingPlanCode
+    || (billingRef?.currentCheckoutOffer ?? null)
+      !== input.authority.currentCheckoutOffer
+    || (billingRef?.scheduledBillingPlanCode ?? null)
+      !== input.authority.scheduledBillingPlanCode
+    || billingRef?.stripeCustomerId !== input.authority.stripeCustomerId
+    || billingRef?.stripeSubscriptionId !== input.authority.stripeSubscriptionId
+    || (billingRef?.stripeSubscriptionScheduleId ?? null)
+      !== input.authority.stripeSubscriptionScheduleId
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_AUTHORITY_CHANGED",
+      httpStatus: 409,
+      message: "Billing changed before the trial could start paid service. Refresh and try again.",
+      retryable: true,
+    });
+  }
+}
+
 async function updateHostedPulseTrialStartPaidSubscription<
   TPlanCode extends HostedTrialPaidPlanCode,
 >(input: {
+  authority: HostedPulseTrialStartPaidMutationAuthority;
   memberId: string;
   now: Date;
   priceId: string;
@@ -1013,6 +1071,11 @@ async function updateHostedPulseTrialStartPaidSubscription<
       memberId: input.memberId,
       prisma: input.prisma,
       run: async (tx) => {
+        await assertHostedPulseTrialStartPaidMutationAuthorityTx({
+          authority: input.authority,
+          memberId: input.memberId,
+          tx,
+        });
         await assertHostedBillingPlanSelectable({
           memberId: input.memberId,
           prisma: tx,
@@ -1131,6 +1194,7 @@ async function reconcileHostedPulseTrialStartPaidSubscriptionAfterStripeFailure<
 async function resumeHostedPulseTrialStartPaidPausedSubscription<
   TPlanCode extends HostedTrialPaidPlanCode,
 >(input: {
+  authority: HostedPulseTrialStartPaidMutationAuthority;
   memberId: string;
   now: Date;
   paymentMethodContinuation: HostedPulseTrialPaymentMethodPortalContinuation | null;
@@ -1177,6 +1241,11 @@ async function resumeHostedPulseTrialStartPaidPausedSubscription<
       memberId: input.memberId,
       prisma: input.prisma,
       run: async (tx) => {
+        await assertHostedPulseTrialStartPaidMutationAuthorityTx({
+          authority: input.authority,
+          memberId: input.memberId,
+          tx,
+        });
         await assertHostedBillingPlanSelectable({
           memberId: input.memberId,
           prisma: tx,

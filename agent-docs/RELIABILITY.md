@@ -371,6 +371,15 @@ Last verified: 2026-08-09
   Pulse Trial loser cleanup validates exact provider targets before one short
   member-owner revalidation transaction and cancels them only after that
   transaction releases; no Stripe request is made while that lock is held.
+  Direct paid and direct Trial conversion to Family updates the exact existing
+  Subscription in place under the owner lock, clears Trial-only metadata, and
+  ends a Trial immediately instead of creating a competing Subscription. A
+  stale local owner or changed Stripe source fails before that update. If an
+  older competing Checkout nevertheless pays after Family wins, the ordinary
+  invoice reconciliation owner cancels it and attempts only the exact full
+  one-invoice/one-payment refund; partial refunds, balance credit, credit notes,
+  pagination, or multiple allocations remain support-required rather than
+  guessed.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a
@@ -389,6 +398,9 @@ Last verified: 2026-08-09
   Stripe webhooks remain the retry and local-reconciliation owner after the
   customer confirms the change; the unsigned return query is display/polling
   context only and never entitlement authority.
+  Renewal scheduling also rejects `cancel_at`, paused collection, manual
+  collection, and any existing schedule before it creates a new Stripe
+  schedule, because those states do not have one unambiguous renewal owner.
 - Stripe failure email reuses the shared operational Resend transport as a
   best-effort projection, never a retry or billing owner. Only an action owner
   schedules a metadata-only operation alert when a Stripe rejection actually
@@ -748,11 +760,19 @@ Last verified: 2026-08-09
   credit, never clears recovery, and applies a deferred cap decrease only at
   the next anchored boundary. Activation owns the sole public sponsorship
   moment; refill fulfillment is silent and private notices are period-deduped.
+  Payment authority rechecks the current payer suspension fence immediately
+  before a bound automatic refill can be confirmed. Payer-owned cancellation
+  remains available even when the beneficiary is inactive or the live funding
+  projection is otherwise unavailable; the page exposes no retry, cap, or new
+  payment capability in that management-only state.
 - The Vercel predeploy migration replaces the detached-payer checks before the
   saved-card producer can serve traffic. That replacement is backward
   compatible with the old application, retains the PaymentIntent/Charge and
   ciphertext-clearing invariants, and removes only the impossible
-  Checkout-Session requirement for fulfilled direct payments. The superseded
+  Checkout-Session requirement for fulfilled direct payments plus the payer
+  requirement for a terminal, unbound automatic-refill failure whose exact
+  sponsorship authorization and positive charge ordinal remain durable. The
+  superseded
   postdeploy constraint installer stays out of the contract-migration run so a
   later workflow cannot re-tighten the schema after promotion.
 - The payer-owned cancel endpoint also owns a sessionless direct

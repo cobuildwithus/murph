@@ -271,6 +271,11 @@ Last verified: 2026-08-09
   delete only explicitly marked metered companion Items next to exactly one
   known licensed monthly direct-plan Item, must dry-run before apply, and may
   emit aggregate counts only.
+- Subscription management remains an authenticated billing-owner capability
+  after Murph access is suspended. Suspension may block new entitlement or
+  payment effects, but it must not block the exact Customer Portal owner from
+  canceling or repairing the subscription. Portal return state remains
+  display-only and never restores access.
 - Usage-credit Checkout is an authenticated payment boundary, not an assistant
   or browser-selected billing primitive. Settings routes must enforce the
   normal app-session and same-origin/CSRF protections. Personal checkout binds
@@ -303,6 +308,12 @@ Last verified: 2026-08-09
   payable URL or retry permission only for an exact server-approved target.
   Former Family beneficiaries are always status/cancel-only; historical labels
   and contact hints are display data, not payment authority.
+- A Family invitation binds a normalized contact only through its keyed blind
+  index. Before reserving or buying a seat, issue-time admission must reject an
+  exact active owner or member match; acceptance repeats the same-group
+  membership check under the group transaction as a concurrency backstop.
+  Contact hints, names, stale invitations, and a browser-supplied member id are
+  never membership or payment authority.
 - Group sponsorship separates funding authority from permission to speak into
   the room. A valid current funding locator may identify only the frozen group
   beneficiary. Alias, note, or running-bit content is accepted only from the
@@ -359,7 +370,8 @@ Last verified: 2026-08-09
   authenticated payer action. Automatic refill
   authority is rechecked under the beneficiary lock against the exact
   authorization, anchored period, ordinal, payer, pending-plus-fulfilled cap
-  headroom, and still-unbound purchase before provider confirmation. Only one
+  headroom, still-unsuspended payer, and still-unbound purchase before provider
+  confirmation. Only one
   live authorization per beneficiary is database-enforced. Recovery, cap, payer,
   and charge details route only to the payer's direct notification destination;
   the room may learn only that Murph is sponsored. The server
@@ -402,7 +414,8 @@ Last verified: 2026-08-09
   explicit **Add usage**, one-time contribution, or monthly sponsor action
   authorizes only the exact server-projected purchase or cap change. Current-policy Checkout fallback saves the entered card for
   later explicit top-ups. No raw card data enters Murph.
-- Direct-purchase cancellation requires only authenticated payer ownership of
+- Direct-purchase and group-sponsorship cancellation require only authenticated
+  payer ownership of
   the opaque purchase ID. Beneficiary, group-locator, or current target
   authority may gate retry but must not gate cancellation. Payer deletion may
   detach a fulfilled sessionless purchase only after clearing payer-encrypted
@@ -410,7 +423,9 @@ Last verified: 2026-08-09
   later refund or dispute reconciliation. PostgreSQL enforces that proof
   directly: a detached fulfilled row must remain paid, terminal, reconciled,
   and carry both lookup keys, while the separate ciphertext constraint rejects
-  any retained payer-encrypted Stripe value.
+  any retained payer-encrypted Stripe value. A canceled, inactive, or departed
+  group beneficiary therefore degrades the payer surface to cancellation-only
+  management rather than trapping the recurring authorization.
 - Stripe proves payment; it does not own Murph usage capacity. A browser return
   or client-reported Session or PaymentIntent state must never grant credit.
   The verified Stripe receipt owner must re-fetch and bind the live one-time

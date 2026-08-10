@@ -467,6 +467,26 @@ function GroupUsageFundingStudy() {
         </DesignSponsorshipState>
 
         <DesignSponsorshipState
+          label="Cancellation-only recovery"
+          state="monthly-cancel-only"
+        >
+          <GroupSponsorshipManagementCard
+            cancelOnly
+            endpoint={endpoint}
+            inert
+            management={{
+              authorizationId: "hgsa_design_cancel_only",
+              chargedThisPeriodMinor: 500,
+              monthlyCapMinor: 1_000,
+              pendingMonthlyCapMinor: null,
+              pendingThisPeriodMinor: 0,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "active",
+            }}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
           label="Sponsored-chat one-time purchase recovery"
           state="sponsored-one-time-recovery"
         >

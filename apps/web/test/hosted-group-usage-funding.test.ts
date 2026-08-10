@@ -35,6 +35,7 @@ import {
   normalizeHostedGroupUsageFundingLocator,
   normalizeHostedGroupUsageJoinCode,
   readHostedGroupFundingRecoveryStatus,
+  readHostedGroupUsageFundingManagementTargetByLocator,
   readHostedGroupUsageFundingLocatorRuntimeMemberId,
   readHostedGroupUsageFundingTargetByJoinCode,
   readHostedGroupUsageFundingTargetByLocator,
@@ -84,6 +85,31 @@ describe("hosted group usage funding", () => {
       "member_group_runtime",
       { prisma },
     );
+  });
+
+  it("resolves an inactive group only for payer-bound sponsorship management", async () => {
+    const prisma = {
+      hostedGroup: {
+        findUnique: vi.fn(async () => ({
+          displayName: "Sunday sleep crew",
+          joinCode: "group_join_code_1234",
+          kind: "friends",
+          runtimeMemberId: "member_group_runtime",
+        })),
+      },
+    };
+
+    await expect(readHostedGroupUsageFundingManagementTargetByLocator({
+      locator: "group_join_code_1234",
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      displayName: "Sunday sleep crew",
+      fundingPath: "/groups/fund/group_join_code_1234",
+      joinCode: "group_join_code_1234",
+      kind: "friends",
+      runtimeMemberId: "member_group_runtime",
+    });
+    expect(mocks.hasHostedRuntimeActiveAccess).not.toHaveBeenCalled();
   });
 
   it("keeps the funding page's private sponsor state in a separate projection", async () => {

@@ -27,6 +27,7 @@ import {
 } from "@/src/components/ui/card";
 import {
   readHostedGroupUsageFundingTargetByJoinCode,
+  readHostedGroupUsageFundingManagementTargetByLocator,
   readHostedGroupUsageStatus,
 } from "@/src/lib/hosted-groups/group-usage-funding";
 import {
@@ -87,16 +88,23 @@ export default async function GroupFundingPage({
     searchParams ?? Promise.resolve<GroupFundingSearchParams>({}),
   ]);
   const prisma = getPrisma();
-  const [auth, target] = await Promise.all([
+  const [auth, publicTarget] = await Promise.all([
     getHostedPageAuthSnapshot(),
     readHostedGroupUsageFundingTargetByJoinCode({ joinCode, prisma }),
   ]);
+  const member = auth.authenticatedMember;
+  const managementTarget = !publicTarget && member
+    ? await readHostedGroupUsageFundingManagementTargetByLocator({
+        locator: joinCode,
+        prisma,
+      })
+    : null;
+  const target = publicTarget ?? managementTarget;
   if (!target) {
     return <GroupFundingUnavailable />;
   }
 
-  const groupName = target.displayName?.trim() || describeGroupKind(target.kind);
-  const member = auth.authenticatedMember;
+  const managementOnly = publicTarget === null;
   const requestedPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
   );
@@ -108,11 +116,13 @@ export default async function GroupFundingPage({
     sponsorshipManagement,
   ] =
     await Promise.all([
-      readHostedGroupUsageStatus({
-        prisma,
-        runtimeMemberId: target.runtimeMemberId,
-      }),
-      member
+      managementOnly
+        ? Promise.resolve({ sponsorshipStatus: "sponsored" } as const)
+        : readHostedGroupUsageStatus({
+            prisma,
+            runtimeMemberId: target.runtimeMemberId,
+          }),
+      member && !managementOnly && !member.suspendedAt
         ? readHostedActiveUsageCreditPurchaseForPayer({
             serverApprovedPayableTargets: [{
               beneficiaryMemberId: target.runtimeMemberId,
@@ -123,7 +133,7 @@ export default async function GroupFundingPage({
             prisma,
           }).catch(() => null)
         : Promise.resolve(null),
-      member && requestedPurchaseReturn
+      member && !managementOnly && !member.suspendedAt && requestedPurchaseReturn
         ? readHostedUsageCreditPurchaseStatus({
             beneficiaryMemberId: target.runtimeMemberId,
             payerMemberId: member.id,
@@ -131,7 +141,7 @@ export default async function GroupFundingPage({
             purchaseId: requestedPurchaseReturn.purchaseId,
           }).then(() => true).catch(() => false)
         : Promise.resolve(false),
-      member && !member.suspendedAt
+      member && !managementOnly && !member.suspendedAt
         ? hasHostedGroupSponsorshipCustomizationAuthority({
             containerMemberId: target.runtimeMemberId,
             now: new Date(),
@@ -139,7 +149,7 @@ export default async function GroupFundingPage({
             prisma,
           })
         : Promise.resolve(false),
-      member && !member.suspendedAt
+      member
         ? readHostedGroupSponsorshipManagementProjection({
             beneficiaryMemberId: target.runtimeMemberId,
             payerMemberId: member.id,
@@ -147,9 +157,10 @@ export default async function GroupFundingPage({
           })
         : Promise.resolve(null),
     ]);
-  if (!usageStatus) {
+  if (!usageStatus || (managementOnly && !sponsorshipManagement)) {
     return <GroupFundingUnavailable />;
   }
+  const groupName = target.displayName?.trim() || describeGroupKind(target.kind);
   const activePurchaseMatchesTarget =
     activePurchase?.target.kind === "group" &&
     activePurchase.target.beneficiaryMemberId === target.runtimeMemberId;
@@ -171,7 +182,7 @@ export default async function GroupFundingPage({
           url: undefined,
         }
     : null;
-  const oneTimeOffers = member && !member.suspendedAt && !activePurchase
+  const oneTimeOffers = member && !managementOnly && !member.suspendedAt && !activePurchase
     ? projectHostedUsageTopUpOffers(
         readHostedConfiguredGroupSponsorshipOfferCodes({
           configuredOfferCodes: readHostedConfiguredUsageCreditOfferCodes(),
@@ -238,6 +249,7 @@ export default async function GroupFundingPage({
             ) : sponsorshipManagement ? (
               <div className="space-y-4">
                 <GroupSponsorshipManagementCard
+                  cancelOnly={managementOnly || Boolean(member.suspendedAt)}
                   endpoint={`/api/groups/fund/${encodeURIComponent(target.joinCode)}/sponsorship`}
                   management={sponsorshipManagement}
                 />

@@ -221,3 +221,55 @@ export async function readHostedGroupUsageFundingTargetByLocator(input: {
     runtimeMemberId,
   };
 }
+
+// Resolves only the identifier needed to manage an existing sponsorship. It
+// deliberately does not grant funding authority: callers must bind the target
+// to the authenticated payer's exact sponsorship authorization before showing
+// data or accepting a mutation. Keeping this resolver independent of runtime
+// access lets a payer cancel after the beneficiary becomes inactive.
+export async function readHostedGroupUsageFundingManagementTargetByLocator(input: {
+  locator: string;
+  prisma?: PrismaClient;
+}): Promise<HostedGroupUsageFundingTarget | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const joinCode = normalizeHostedGroupUsageJoinCode(input.locator);
+  if (joinCode) {
+    const group = await prisma.hostedGroup.findUnique({
+      select: {
+        displayName: true,
+        joinCode: true,
+        kind: true,
+        runtimeMemberId: true,
+      },
+      where: { joinCode },
+    });
+    if (!group?.joinCode || !group.runtimeMemberId) {
+      return null;
+    }
+    return {
+      displayName: normalizeNullableString(group.displayName),
+      fundingPath: buildHostedGroupUsageFundingPath(group.joinCode),
+      joinCode: group.joinCode,
+      kind: group.kind,
+      runtimeMemberId: group.runtimeMemberId,
+    };
+  }
+
+  const runtimeMemberId = readHostedGroupUsageFundingLocatorRuntimeMemberId(
+    input.locator,
+  );
+  if (!runtimeMemberId) {
+    return null;
+  }
+  const group = await prisma.hostedGroup.findUnique({
+    select: { displayName: true, kind: true },
+    where: { runtimeMemberId },
+  });
+  return {
+    displayName: normalizeNullableString(group?.displayName ?? null),
+    fundingPath: buildHostedGroupUsageFundingPath(input.locator),
+    joinCode: input.locator,
+    kind: group?.kind ?? "custom",
+    runtimeMemberId,
+  };
+}
