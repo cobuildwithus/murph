@@ -1,9 +1,12 @@
+import { Buffer } from "node:buffer";
+
 import { describe, expect, it } from "vitest";
 
 import {
   assistantResponseCardSchema,
   compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
+  IMESSAGE_APP_CARD_URL_PREFIX,
   type CompactTableResponseCardV1,
   type CompactTableTrackingSourceV1,
 } from "../src/index.ts";
@@ -231,5 +234,43 @@ describe("compact table response-card contract", () => {
     expect(compactTableResponseCardV1Schema.parse(maximumShapeCard)).toEqual(
       maximumShapeCard,
     );
+  });
+
+  it("rejects the exact boundary introduced by the canonical origin", () => {
+    const makeBoundaryCard = (lastCellLength: number) => ({
+      ...TRACKED_WORKOUT_CARD,
+      title: "Eight-exercise workout",
+      subtitle: "Verified canonical workout snapshot for today",
+      columns: ["Set 1", "Set 2", "Set 3", "Set 4"],
+      rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+        label: `Exercise ${rowIndex + 1} movement pattern`,
+        values: Array.from({ length: 4 }, (_, columnIndex) => {
+          const cellLength = rowIndex === 7 && columnIndex === 3
+            ? lastCellLength
+            : 22;
+          return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, "x");
+        }),
+      })),
+      footer: "Assists and spotted reps remain on the exact set note.",
+      tracking: null,
+    });
+    const encodeLength = (card: ReturnType<typeof makeBoundaryCard>) => {
+      const { tracking: _tracking, ...presentationCard } = card;
+      return `${IMESSAGE_APP_CARD_URL_PREFIX}${Buffer.from(JSON.stringify({
+        schemaVersion: 3,
+        card: presentationCard,
+      }), "utf8").toString("base64url")}`.length;
+    };
+
+    const acceptedCard = makeBoundaryCard(24);
+    expect(encodeLength(acceptedCard)).toBe(2_047);
+    expect(compactTableResponseCardV1Schema.parse(acceptedCard)).toEqual(
+      acceptedCard,
+    );
+
+    const rejectedCard = makeBoundaryCard(25);
+    expect(encodeLength(rejectedCard)).toBe(2_048);
+    expect(compactTableResponseCardV1Schema.safeParse(rejectedCard).success)
+      .toBe(false);
   });
 });

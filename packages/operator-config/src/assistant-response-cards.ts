@@ -1,6 +1,9 @@
 import { Buffer } from 'node:buffer'
 
 import {
+  IMESSAGE_APP_CARD_URL_MAX_LENGTH,
+  IMESSAGE_APP_CARD_URL_PREFIX,
+  MURPH_PRODUCT_ORIGIN,
   assistantResponseCardSchema,
   compactTableResponseCardV1Schema,
   dailyNutritionResponseCardV2Schema,
@@ -44,10 +47,7 @@ const NUTRITION_CARD_GOAL_STATUS_LABELS = {
 
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
-export const LINQ_IMESSAGE_APP_CARD_ORIGIN = 'https://murph.ai'
-const APP_CARD_URL_PREFIX =
-  `${LINQ_IMESSAGE_APP_CARD_ORIGIN}/#murph-card=`
-const LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH = 2_048
+export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
 
 export type AppCardEnvelopeV1 = {
   schemaVersion: 1
@@ -222,8 +222,8 @@ function encodeAppCardEnvelope(
 ): string {
   const encoded = Buffer.from(JSON.stringify(envelope), 'utf8')
     .toString('base64url')
-  const url = `${APP_CARD_URL_PREFIX}${encoded}`
-  if (url.length >= LINQ_IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
+  const url = `${IMESSAGE_APP_CARD_URL_PREFIX}${encoded}`
+  if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
     throw new TypeError('The encoded app card exceeds the inline size limit.')
   }
   return url

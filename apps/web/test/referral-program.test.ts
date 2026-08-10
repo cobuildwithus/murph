@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatHostedPublicReferralRewardDays,
+  formatHostedPublicReferralRewardValue,
   getAvailableHostedPublicReferralRewards,
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -76,12 +76,16 @@ describe("public referral program projection", () => {
 
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: newPersonGroup.policyCode,
+      policyVersion: newPersonGroup.policyVersion,
       rewardUsdMicros: newPersonGroup.rewardUsdMicros,
-    })).toBe("$2.00 in usage credit for your Murph");
+    })).toBe("about 10 more days of Murph usage for your Murph");
     expect(buildHostedUsageReferralRewardLabel({
       destinationKind: "personal",
+      policyCode: activeGroup.policyCode,
+      policyVersion: activeGroup.policyVersion,
       rewardUsdMicros: activeGroup.rewardUsdMicros,
-    })).toBe("$3.50 in usage credit for your Murph");
+    })).toBe("about 14 more days of Murph usage for your Murph");
     expect(signup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
@@ -94,18 +98,19 @@ describe("public referral program projection", () => {
     expect(signup.description).not.toContain(
       "the reward is added automatically",
     );
+    expect(signup.description).not.toMatch(/\$|usage credit/iu);
     expect(newPersonGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     );
     expect(activeGroup.rewardUsdMicros).toBe(
       HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
     );
-    expect(formatHostedPublicReferralRewardDays(
-      signup.estimatedUsageDays,
-    )).toBe("10 days of Murph");
-    expect(formatHostedPublicReferralRewardDays(
-      activeGroup.estimatedUsageDays,
-    )).toBe("14 days of Murph");
+    expect(formatHostedPublicReferralRewardValue(signup)).toBe(
+      "About 10 more days of Murph usage",
+    );
+    expect(formatHostedPublicReferralRewardValue(activeGroup)).toBe(
+      "About 14 more days of Murph usage",
+    );
   });
 
   it("keeps the active-group public requirements exact", () => {

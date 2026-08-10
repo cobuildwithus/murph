@@ -1,4 +1,4 @@
-# Remove cost-weighted referral copy
+# Remove retired referral billing copy
 
 Status: active
 Created: 2026-08-09
@@ -6,16 +6,16 @@ Updated: 2026-08-09
 
 ## Goal
 
-- Replace the internal “cost-weighted” phrase across live product surfaces and
-  owner documentation, while presenting public referral rewards as days of
-  Murph and preserving exact server-owned usage-credit receipts.
+- Replace the retired internal billing phrase across live product surfaces and
+  owner documentation, while presenting referral rewards as days of Murph and
+  preserving server-owned receipt authority.
 
 ## Success criteria
 
 - Referral page reward cards and receipt previews show 10 or 14 days of Murph
   without dollar-denominated public reward copy.
-- Assistant reward confirmations keep the exact server-provided usage-credit
-  label without calculating days or messages.
+- Assistant reward confirmations keep the exact server-provided day-estimate
+  label without calculating days, messages, or calendar duration.
 - Live tracked sources and docs contain no remaining form of the retired term;
   immutable completed-plan snapshots remain unchanged.
 - Production referral states are represented in the design catalog and have
@@ -67,8 +67,10 @@ Updated: 2026-08-09
 
 ## Decisions
 
-- Public referral surfaces use days of Murph; assistant receipts use the exact
-  usage-credit label supplied by the server.
+- Public referral surfaces use days of Murph; assistant receipts repeat the
+  exact day-estimate label supplied by the server.
+- The branch now reuses `main`'s persisted-policy day formatter so historical
+  receipts remain stable when current offer values change.
 - Shared visual props, rather than new wrapper components, keep the production
   changelog render and evidence harness aligned without publishing historical
   wording into the current component catalog.

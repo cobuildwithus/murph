@@ -520,7 +520,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Reusable signup referral link and recipient claim states">
+      <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
         <SignupReferralFlowStudy />
       </StudySection>
 

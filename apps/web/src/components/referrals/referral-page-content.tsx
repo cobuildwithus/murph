@@ -13,7 +13,7 @@ import {
 } from "@/src/components/homepage/murph-headshot-avatar";
 import { ReferralShareAction } from "@/src/components/referrals/referral-share-action";
 import {
-  formatHostedPublicReferralRewardDays,
+  formatHostedPublicReferralRewardValue,
   type HostedPublicReferralReward,
   type HostedPublicReferralRewardId,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -86,10 +86,10 @@ function buildFaqs(input: {
   signupAvailable: boolean;
 }) {
   const ownerDescription = input.signupAvailable && input.groupAvailable
-    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster."
+    ? "Signup rewards go to your Murph. Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster."
     : input.signupAvailable
     ? "Signup rewards go to your personal Murph."
-    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the same credit faster.";
+    : "Mission rewards go to the personal or group Murph the mission was accepted for, where a busy room can use the rewarded Murph time faster.";
   const tellMurphAnswer = input.signupAvailable && input.groupAvailable
     ? "Your personal referral link works without asking Murph first. Group missions need one extra step: tell Murph which mission you want, and wait for the confirmation before creating the fresh group."
     : input.signupAvailable
@@ -98,7 +98,7 @@ function buildFaqs(input: {
   const faqs = [
     {
       answer:
-        `Each option above shows how many days of Murph it adds. How long the reward lasts varies with the model, tools, media, task complexity, and response length. ${ownerDescription}`,
+        `Each option above estimates days of Murph usage. Actual capacity varies with the model, tools, media, task complexity, and response length. The reward adds usage capacity; it does not extend a trial or subscription period. ${ownerDescription}`,
       question: "How much usage do I earn?",
     },
     {
@@ -227,8 +227,9 @@ export function ReferralPageContent({
               <ArrowDown aria-hidden="true" className="size-4" />
             </a>
             <p className="mt-6 max-w-[56ch] text-xs leading-[1.7] text-[#f5f0e8]/55">
-              Rewards add Murph time, not cash. How long that time lasts varies
-              with the model, tools, media, and task complexity.
+              Rewards add usage capacity, not cash or extra calendar time. Day
+              estimates reflect typical Murph use; actual capacity varies with
+              the model, tools, media, and task complexity.
             </p>
           </div>
 
@@ -501,7 +502,7 @@ export function ReferralRewardCards({
                 index === 0 ? "text-[#d4b87a]" : "text-[#736a58]"
               }`}
             >
-              {formatHostedPublicReferralRewardDays(reward.estimatedUsageDays)}
+              {formatHostedPublicReferralRewardValue(reward)}
             </p>
             <h3 className="mt-3 text-balance font-serif text-[1.8rem] font-semibold leading-[1.02] tracking-[-0.04em]">
               {reward.title}
@@ -525,12 +526,13 @@ export function ReferralRewardReceiptPreview({
 }: {
   reward: HostedPublicReferralReward;
 }) {
-  const rewardDays = formatHostedPublicReferralRewardDays(
-    reward.estimatedUsageDays,
-  );
   const rewardMessage = reward.id === "signup-link"
-    ? `Your referral came through. ${rewardDays} were added to your Murph.`
-    : `Your group mission is complete. ${rewardDays} were added where the mission was accepted.`;
+    ? `Your referral came through. ${formatHostedPublicReferralRewardValue(
+      reward,
+    )} — already added to your Murph.`
+    : `Your group mission is complete. ${formatHostedPublicReferralRewardValue(
+      reward,
+    )} — already added to the Murph it was accepted for.`;
   const privacyMessage = reward.id === "signup-link"
     ? "No claim needed. Who joined and what they share privately with Murph stays private."
     : "No claim needed. Private chats and health data stay private. Shared-group messages remain visible to that group.";

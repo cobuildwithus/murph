@@ -850,8 +850,9 @@ Hosted AI usage metering:
   referrer's next new group, and freeze pre-expiry qualification in the
   provider-ingress transaction. Bound commitments remain reserved for a
   25-hour late-evidence grace before referrer-serialized expiry becomes final.
-  The assistant-facing reward label is exact and server-owned; it is never
-  translated into an approximate number of messages or days. Exact
+  The assistant-facing reward label is a server-owned estimate of additional
+  Murph usage days derived from the persisted grant and policy basis. It is
+  never translated into a message count or calendar/trial duration. Exact
   qualification counters remain server-only.
   Immediate post-commit reconciliation and the bounded minute recovery cron
   converge on one final referral grant and one atomic source-mailbox
