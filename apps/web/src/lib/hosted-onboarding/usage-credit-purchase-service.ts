@@ -13,6 +13,10 @@ import {
   createHostedStripePriceLookupKey,
 } from "./contact-privacy";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+} from "./usage-credit-capacity-conflict";
 import { hasHostedMemberOwnActiveBilling } from "./entitlement";
 import { ensureHostedMemberStripeCustomer } from "./hosted-member-stripe-customer";
 import { readHostedMemberStripeBillingRef } from "./hosted-member-billing-store";
@@ -161,6 +165,13 @@ const HOSTED_USAGE_CREDIT_NONTERMINAL_PURCHASE_STATUSES = [
   HostedUsageCreditPurchaseStatus.checkout_open,
   HostedUsageCreditPurchaseStatus.payment_pending,
 ] as const;
+
+class HostedGroupUsageCreditCustomerRequiredError extends Error {
+  constructor() {
+    super("Hosted group usage-credit checkout requires a Stripe Customer.");
+    this.name = "HostedGroupUsageCreditCustomerRequiredError";
+  }
+}
 
 function canContinueHostedUsageCreditPurchase(
   status: HostedUsageCreditPurchaseStatus,
@@ -398,30 +409,44 @@ export async function createHostedGroupUsageCreditCheckout(
   if (!fundingTarget) {
     throw buildHostedUsageCreditNotEligibleError("group");
   }
-  try {
-    const stripeCustomerId = input.recoveryOnly
-      ? null
-      : await ensureHostedMemberStripeCustomer({
-          memberId: input.payerMemberId,
-          prisma,
-        });
+  const target = {
+    beneficiaryMemberId: fundingTarget.runtimeMemberId,
+    joinCode: fundingTarget.joinCode,
+    kind: "group" as const,
+    payerMemberId: input.payerMemberId,
+  };
+  const checkoutInput = {
+    clientRequestKey: input.clientRequestKey,
+    groupSponsorship: input.sponsorship ?? null,
+    groupSponsorshipKind: input.sponsorshipKind ?? "one_time",
+    groupSponsorshipMonthlyCapMinor: input.monthlyCapMinor ?? null,
+    now: input.now,
+    offerCode: input.offerCode,
+    prisma,
+    ...(input.recoveryOnly ? { recoveryOnly: true as const } : {}),
+    target,
+  };
 
-    return await createHostedUsageCreditCheckoutForTarget({
-      clientRequestKey: input.clientRequestKey,
-      ...(stripeCustomerId ? { groupStripeCustomerId: stripeCustomerId } : {}),
-      groupSponsorship: input.sponsorship ?? null,
-      groupSponsorshipKind: input.sponsorshipKind ?? "one_time",
-      groupSponsorshipMonthlyCapMinor: input.monthlyCapMinor ?? null,
-      now: input.now,
-      offerCode: input.offerCode,
+  try {
+    // Resolve exact or active purchases and reject hard capacity before
+    // customer preparation can create provider state.
+    try {
+      return await createHostedUsageCreditCheckoutForTarget(checkoutInput);
+    } catch (error) {
+      if (!(error instanceof HostedGroupUsageCreditCustomerRequiredError)) {
+        throw error;
+      }
+    }
+
+    const stripeCustomerId = await ensureHostedMemberStripeCustomer({
+      memberId: input.payerMemberId,
       prisma,
-      ...(input.recoveryOnly ? { recoveryOnly: true } : {}),
-      target: {
-        beneficiaryMemberId: fundingTarget.runtimeMemberId,
-        joinCode: fundingTarget.joinCode,
-        kind: "group",
-        payerMemberId: input.payerMemberId,
-      },
+    });
+    // Re-run the locked admission after preparation because capacity may
+    // have changed while no beneficiary lock was held.
+    return await createHostedUsageCreditCheckoutForTarget({
+      ...checkoutInput,
+      groupStripeCustomerId: stripeCustomerId,
     });
   } catch (error) {
     if (!input.recoveryOnly && isHostedStripeProviderError(error)) {
@@ -729,7 +754,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
     }
 
     let authorizedOfferCodes: HostedUsageCreditOfferCode[];
-    let stripeCustomerId: string;
+    let stripeCustomerId: string | null;
     if (target.kind === "personal") {
       authorizedOfferCodes = await readHostedPersonalUsageCreditOfferCodes({
         memberId: target.payerMemberId,
@@ -776,7 +801,6 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
           target.beneficiaryMemberId,
           { prisma: tx },
         ))
-        || !input.groupStripeCustomerId
       ) {
         throw buildHostedUsageCreditNotEligibleError("group");
       }
@@ -793,7 +817,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       ) {
         throw buildHostedUsageCreditNotEligibleError("group");
       }
-      stripeCustomerId = input.groupStripeCustomerId;
+      stripeCustomerId = input.groupStripeCustomerId ?? null;
     } else {
       if (!familyTarget || target.groupId !== familyTarget.groupId) {
         throw buildHostedUsageCreditInvariantError("family_target_missing");
@@ -812,7 +836,13 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       tx,
     });
     if (capacity.state !== "available") {
-      throw buildHostedUsageCreditNotEligibleError(target.kind, 409);
+      throw buildHostedUsageCreditCapacityConflictError();
+    }
+    if (stripeCustomerId === null) {
+      if (target.kind === "group") {
+        throw new HostedGroupUsageCreditCustomerRequiredError();
+      }
+      throw buildHostedUsageCreditInvariantError("stripe_customer_missing");
     }
 
     const checkoutConfig = requireHostedStripeUsageCreditCheckoutConfig({
@@ -1737,13 +1767,20 @@ function hostedUsageCreditTargetMatches(input: {
   }
 }
 
+function buildHostedUsageCreditCapacityConflictError() {
+  return hostedOnboardingError({
+    code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+    httpStatus: 409,
+    message: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+  });
+}
+
 function buildHostedUsageCreditNotEligibleError(
   kind: HostedUsageCreditCheckoutTarget["kind"] = "personal",
-  httpStatus: 403 | 409 = 403,
 ) {
   return hostedOnboardingError({
     code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
-    httpStatus,
+    httpStatus: 403,
     message: kind === "group"
       ? "Usage credit is not available for this group."
       : kind === "family"

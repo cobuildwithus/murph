@@ -204,6 +204,10 @@ import {
 import {
   hostedUsageCreditPolicySupportsSavedCardTarget,
 } from "@/src/lib/hosted-onboarding/usage-credit-offers";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 
 const NOW = new Date("2026-07-16T17:00:00.000Z");
 const LAST_STRIPE_EVENT_AT = new Date("2026-07-16T16:59:00.000Z");
@@ -645,7 +649,7 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledTimes(2);
   });
 
-  it("rejects a new personal checkout at 32 combined slots before creating a purchase", async () => {
+  it("returns a distinct capacity conflict at 32 combined slots before any purchase or Stripe side effect", async () => {
     const usageCreditEvents: string[] = [];
     const fake = createFakePrisma({
       occupiedUsageCreditSlotCount: 32,
@@ -659,8 +663,9 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       prisma: fake.prisma as never,
     })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+      code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
       httpStatus: 409,
+      message: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
     });
 
     expect(usageCreditEvents).toEqual([
@@ -671,9 +676,48 @@ describe("createHostedUsageCreditCheckout", () => {
     expect(mocks.lockHostedMemberRow).not.toHaveBeenCalled();
     expect(fake.prisma.hostedUsageCreditPurchase.create).not.toHaveBeenCalled();
     expect(fake.purchases.size).toBe(0);
-    expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+    expectNoStripeProviderIo();
+    expect(mocks.ensureHostedMemberStripeCustomer).not.toHaveBeenCalled();
     expect(mocks.encryptHostedWebNullableString).not.toHaveBeenCalled();
   });
+
+  it.each(["family", "group"] as const)(
+    "uses the same distinct capacity conflict for a %s checkout",
+    async (targetKind) => {
+      const fake = createFakePrisma({ occupiedUsageCreditSlotCount: 32 });
+      const checkout = targetKind === "family"
+        ? createHostedFamilyMemberUsageCreditCheckout({
+            beneficiaryMemberId: "hbm_familymember1",
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            payerMemberId: MEMBER_ID,
+            prisma: fake.prisma as never,
+          })
+        : createHostedGroupUsageCreditCheckout({
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            joinCode: "group_join_code_1234",
+            now: NOW,
+            offerCode: "usage_10_usd",
+            payerMemberId: MEMBER_ID,
+            prisma: fake.prisma as never,
+          });
+
+      await expect(checkout).rejects.toMatchObject({
+        code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+        httpStatus: 409,
+        message: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+      });
+      expect(
+        fake.prisma.hostedUsageCreditPurchase.create,
+      ).not.toHaveBeenCalled();
+      expect(fake.purchases.size).toBe(0);
+      expect(fake.usageCreditCapacityQueryCalls).toHaveLength(1);
+      expectNoStripeProviderIo();
+      expect(mocks.ensureHostedMemberStripeCustomer).not.toHaveBeenCalled();
+      expect(mocks.encryptHostedWebNullableString).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps a locally expired purchase reserved at the 32-slot boundary", async () => {
     const fake = createFakePrisma({
@@ -718,14 +762,15 @@ describe("createHostedUsageCreditCheckout", () => {
       offerCode: "usage_10_usd",
       prisma: fake.prisma as never,
     })).rejects.toMatchObject({
-      code: "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE",
+      code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
       httpStatus: 409,
+      message: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
     });
     expect(fake.purchases.size).toBe(1);
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
   });
 
-  it("returns a matching active purchase at capacity without reserving another slot", async () => {
+  it("preserves exact request-key and matching active-purchase replay at capacity", async () => {
     let occupiedUsageCreditSlotCount = 31;
     const fake = createFakePrisma({
       occupiedUsageCreditSlotCount: () => occupiedUsageCreditSlotCount,
@@ -742,22 +787,78 @@ describe("createHostedUsageCreditCheckout", () => {
       prisma: fake.prisma as never,
     });
     occupiedUsageCreditSlotCount = 32;
-    const replay = await createHostedUsageCreditCheckout({
-      clientRequestKey: "matching_active_key_1234",
+    const exactReplay = await createHostedUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
       memberId: MEMBER_ID,
       now: new Date(NOW.getTime() + 1_000),
       offerCode: "usage_10_usd",
       prisma: fake.prisma as never,
     });
+    const matchingReplay = await createHostedUsageCreditCheckout({
+      clientRequestKey: "matching_active_key_1234",
+      memberId: MEMBER_ID,
+      now: new Date(NOW.getTime() + 2_000),
+      offerCode: "usage_10_usd",
+      prisma: fake.prisma as never,
+    });
 
-    expect(replay).toMatchObject({
+    expect(exactReplay).toMatchObject({
+      purchaseId: initial.purchaseId,
+      requestKeyMatched: true,
+      status: "checkout_open",
+    });
+    expect(exactReplay).not.toHaveProperty("recovered");
+    expect(matchingReplay).toMatchObject({
       purchaseId: initial.purchaseId,
       recovered: true,
       status: "checkout_open",
     });
+    expect(matchingReplay).not.toHaveProperty("requestKeyMatched");
     expect(fake.usageCreditCapacityQueryCalls).toHaveLength(1);
     expect(fake.prisma.hostedUsageCreditPurchase.create).toHaveBeenCalledOnce();
     expect(fake.purchases.size).toBe(1);
+    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
+  });
+
+  it("resumes an exact active group purchase at capacity before customer preparation", async () => {
+    let occupiedUsageCreditSlotCount = 31;
+    const fake = createFakePrisma({
+      occupiedUsageCreditSlotCount: () => occupiedUsageCreditSlotCount,
+    });
+    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+      buildStripeSession(request)
+    );
+
+    const initial = await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: NOW,
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+    expect(fake.usageCreditCapacityQueryCalls).toHaveLength(2);
+    mocks.ensureHostedMemberStripeCustomer.mockClear();
+    occupiedUsageCreditSlotCount = 32;
+
+    const replay = await createHostedGroupUsageCreditCheckout({
+      clientRequestKey: CLIENT_REQUEST_KEY,
+      joinCode: "group_join_code_1234",
+      now: new Date(NOW.getTime() + 1_000),
+      offerCode: "usage_10_usd",
+      payerMemberId: MEMBER_ID,
+      prisma: fake.prisma as never,
+    });
+
+    expect(replay).toMatchObject({
+      purchaseId: initial.purchaseId,
+      requestKeyMatched: true,
+      status: "checkout_open",
+    });
+    expect(fake.usageCreditCapacityQueryCalls).toHaveLength(2);
+    expect(fake.prisma.hostedUsageCreditPurchase.create).toHaveBeenCalledOnce();
+    expect(fake.purchases.size).toBe(1);
+    expect(mocks.ensureHostedMemberStripeCustomer).not.toHaveBeenCalled();
     expect(mocks.stripeCheckoutCreate).toHaveBeenCalledOnce();
   });
 
@@ -956,7 +1057,7 @@ describe("createHostedUsageCreditCheckout", () => {
       groupSponsorshipChargeOrdinal: 0,
       offerCode: "usage_5_usd",
     });
-    expect(fake.usageCreditCapacityQueryCalls).toHaveLength(1);
+    expect(fake.usageCreditCapacityQueryCalls).toHaveLength(2);
   });
 
   it("charges the Family customer and freezes the selected member as beneficiary", async () => {
