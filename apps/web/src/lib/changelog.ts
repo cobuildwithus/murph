@@ -63,6 +63,53 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-10",
+    publishedOn: "2026-08-10",
+    title: "Patterns and reminders that keep their local time",
+    summary:
+      "Patterns can now compare repeated actions with next-day sleep and recovery, while recurring reminders keep the local time and timezone you asked for.",
+    items: [
+      {
+        id: "personal-patterns",
+        kind: "feature",
+        priority: 5,
+        title: "See what tends to change after repeated actions",
+        summary:
+          "Patterns compares days with and without a repeated activity or logged experiment action, then shows how next-day sleep and recovery differed.",
+        details:
+          "It uses your existing history when enough comparable days are available, requires the direction to repeat across the observation window, and shows association rather than cause. Murph's weekly health insight checks the same evidence and stays quiet when nothing clears the bar.",
+        relevanceTags: [
+          "patterns",
+          "wearables",
+          "sleep",
+          "recovery",
+          "experiments",
+        ],
+        sourcePullRequests: [1563],
+        tryIt: {
+          href: "/patterns",
+          label: "View your patterns",
+        },
+      },
+      {
+        id: "reminders-keep-requested-timezone",
+        kind: "improvement",
+        priority: 4,
+        title: "Reminders keep the time you asked for",
+        summary:
+          "When you schedule a recurring reminder in a named timezone, Murph now preserves that local time through saving and later edits.",
+        details:
+          "The confirmation comes from the saved schedule and scheduler's next deliverable occurrence. If timing cannot be verified, or an old one-time reminder can no longer fire, Murph says so and offers a bounded recovery instead of inventing a time.",
+        relevanceTags: ["reminders", "automations", "timezones", "reliability"],
+        sourcePullRequests: [1546],
+        tryIt: {
+          label: "Schedule a local-time reminder",
+          prompt: "Remind me every day at 9 PM Central to wind down.",
+        },
+      },
+    ],
+  },
+  {
     id: "2026-08-09",
     publishedOn: "2026-08-09",
     title: "Referrals, Max, and a more capable Murph",

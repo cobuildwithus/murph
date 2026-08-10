@@ -67,6 +67,7 @@ import {
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
+import { PersonalPatternsStudy } from "./personal-patterns-study";
 
 function StudySection({
   children,
@@ -251,6 +252,12 @@ export function SectionsContent() {
 
       <StudySection title="Private Environment print report">
         <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Patterns page">
+        <PersonalPatternsStudy />
       </StudySection>
 
       <Separator />

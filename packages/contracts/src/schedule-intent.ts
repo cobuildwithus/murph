@@ -11,7 +11,7 @@ export const experimentRunCronExpressionPattern =
   "^(?:[0-5]?\\d)\\s+(?:[01]?\\d|2[0-3])\\s+\\*\\s+\\*\\s+[0-7](?:,[0-7])*$";
 const experimentRunCronExpressionRegex = new RegExp(experimentRunCronExpressionPattern, "u");
 
-const timeZoneSchema = z
+export const scheduleIntentTimeZoneSchema = z
   .string()
   .min(1)
   .max(128)
@@ -140,13 +140,13 @@ export const experimentRunScheduleIntentCronSchema = z.object({
       experimentRunCronExpressionRegex,
       "Expected simple cron: concrete minute/hour, * day/month, numeric weekday list.",
     ),
-  timeZone: timeZoneSchema,
+  timeZone: scheduleIntentTimeZoneSchema,
 }).strict();
 
 export const experimentRunScheduleIntentDailyLocalSchema = z.object({
   kind: z.literal("dailyLocal"),
   localTime: z.string().regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time."),
-  timeZone: timeZoneSchema,
+  timeZone: scheduleIntentTimeZoneSchema,
 }).strict();
 
 export const experimentRunScheduleIntentSchema = z.discriminatedUnion("kind", [
