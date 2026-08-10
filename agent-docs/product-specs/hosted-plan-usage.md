@@ -93,7 +93,7 @@ Every newly created Linq or Telegram group thread starts with a persisted $7.50
 included-usage limit. This is prospective: existing group-thread rows keep
 their stored limit.
 
-Usage is cost-weighted capacity across models and modalities. It is not a token
+Usage is normalized capacity across models and modalities. It is not a token
 count or cash balance. Used and remaining percentages are bounded integers that
 sum to 100. The display window starts at the current allowance period or, when
 later, the beneficiary's latest fulfilled purchase grant in that period. Its
@@ -144,10 +144,10 @@ spend, and future periods remain untouched.
 
 A forecast requires at least 24 hours of counted usage in the current display
 window. It uses the same overall effective capacity as the percentage and is
-shown only when that window's observed pace projects exhaustion before the
-current period ends. The forecast is conservative and optional; the product
-must not invent one when the
-projection omits it.
+available only when that window's observed pace projects exhaustion before the
+current period ends. The forecast is conservative and optional. It may inform
+`recommendedAction`, but Settings does not display an estimated number of days
+remaining.
 
 ## Actions
 

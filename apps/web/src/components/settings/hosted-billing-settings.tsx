@@ -648,9 +648,6 @@ function PlanUsageBand(props: {
     ? `Trial ends ${periodEndLabel}`
     : `Resets ${periodEndLabel}`;
   const action = status.recommendedAction;
-  const forecast = status.forecast
-    ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
-    : null;
   const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
@@ -716,8 +713,6 @@ function PlanUsageBand(props: {
               ? "You've used all available usage. Add usage to continue."
               : "You've used all available usage. Murph pauses new usage until more capacity is available."}
         </p>
-      ) : forecast ? (
-        <p className="mt-3 text-sm text-pretty text-muted-foreground">{forecast}</p>
       ) : null}
       {props.usageTopUpOffers.length === 0 &&
       !props.usageTopUpActivePurchase &&

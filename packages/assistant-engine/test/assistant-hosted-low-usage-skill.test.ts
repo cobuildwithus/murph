@@ -9,6 +9,8 @@ import {
   resolveAssistantSkillsRoot,
 } from '../src/assistant-skill-assets.js'
 
+const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
+
 async function readLowUsageSkill(): Promise<string> {
   return readFile(
     path.join(resolveAssistantSkillsRoot(), 'hosted-low-usage', 'SKILL.md'),
@@ -351,7 +353,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       'Never derive message counts, current balance, or calendar/trial duration from it',
     )
-    expect(normalizedSkill).not.toContain('exact cost-weighted usage-credit labels')
+    expect(normalizedSkill.toLowerCase()).not.toContain(RETIRED_USAGE_TERM)
     expect(normalizedSkill).toContain('Never reveal qualification counters')
     expect(normalizedSkill).toContain(
       'state the returned `expiresAt` as the mission\'s public occurrence deadline',
@@ -442,7 +444,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(assembledContext).toContain(
       'about 14 more days of Murph usage for your Murph',
     )
-    expect(assembledContext).not.toMatch(/\$|cost-weighted usage credit/iu)
+    expect(assembledContext).not.toMatch(/\$|weighted usage credit/iu)
     expect(JSON.stringify(armedToolResult)).not.toContain('humanMessageCount')
     expect(JSON.stringify(armedToolResult)).not.toContain(
       'nonReferrerMessageCount',
@@ -576,7 +578,7 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedContext).toContain(
       'that recovery read is authoritative for current state',
     )
-    expect(normalizedContext).not.toMatch(/\$|cost-weighted usage credit/iu)
+    expect(normalizedContext).not.toMatch(/\$|weighted usage credit/iu)
     expect(normalizedContext).toContain('or claim that commit failed')
   })
 
