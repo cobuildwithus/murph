@@ -392,6 +392,54 @@ describe('assistant context snapshot', () => {
     }
   })
 
+  it('retains a dirty canonical snapshot when a finite continuation budget is exhausted', async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
+    const vaultRoot = path.join(parentRoot, 'vault')
+    const eventLedgerRoot = path.join(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory)
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-01T00:00:00.000Z',
+        vaultRoot,
+      })
+      await mkdir(eventLedgerRoot, { recursive: true })
+      await Promise.all(Array.from({ length: 80 }, async (_, index) => {
+        await writeFile(
+          path.join(eventLedgerRoot, `bounded-${index.toString().padStart(3, '0')}.jsonl`),
+          '',
+          'utf8',
+        )
+      }))
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests'],
+        vaultRoot,
+      })
+      let continuationChecks = 0
+
+      await expect(refreshAssistantContextSnapshotBestEffort({
+        shouldYield: () => {
+          continuationChecks += 1
+          return continuationChecks > 64
+        },
+        vaultRoot,
+      })).resolves.toEqual({
+        pendingDirtyDomains: ['blood_tests'],
+        refreshed: false,
+        skipped: false,
+      })
+      expect(continuationChecks).toBeGreaterThanOrEqual(65)
+      await expect(readAssistantContextSnapshotState(vaultRoot))
+        .resolves.toMatchObject({
+          pendingDirtyDomains: ['blood_tests'],
+        })
+    } finally {
+      await rm(parentRoot, {
+        force: true,
+        recursive: true,
+      })
+    }
+  })
+
   it('uses the newest live canonical blood test across ledger shards', async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), 'assistant-context-snapshot-'))
     const vaultRoot = path.join(parentRoot, 'vault')
@@ -655,6 +703,11 @@ describe('assistant context snapshot', () => {
       expect(stalePrompt).toContain('`vault-cli regimen list --status active`')
       expect(stalePrompt).toContain('`vault-cli goal list --status active`')
       expect(stalePrompt).toContain('`vault-cli condition show <id>`')
+      expect(stalePrompt).toContain('Do not infer that history is absent')
+      expect(stalePrompt).toContain('`vault-cli blood-test list`')
+      expect(stalePrompt).not.toContain(
+        'Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable',
+      )
       expect(stalePrompt).not.toContain('Pregabalin')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
@@ -689,6 +742,40 @@ describe('assistant context snapshot', () => {
       expect(prompt).toContain('Do not infer that history is absent')
       expect(prompt).toContain('`vault-cli blood-test list`')
       expect(prompt).toContain('`vault-cli measurement list`')
+      expect(prompt).toContain('`vault-cli measurement show <event-id>`')
+      expect(prompt).toContain('Before any safety-relevant guidance')
+      expect(prompt).toContain('`vault-cli regimen list --status active`')
+      expect(prompt).not.toContain(
+        'Active safety-critical health context is currently unavailable',
+      )
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('composes both degraded navigation contracts when health and history are pending', async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-context-snapshot-'))
+
+    try {
+      await initializeVault({
+        createdAt: '2026-06-26T00:00:00.000Z',
+        vaultRoot,
+      })
+      await markAssistantContextSnapshotDirty({
+        domains: ['blood_tests', 'health_context'],
+        vaultRoot,
+      })
+
+      const prompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
+      expect(prompt).toContain(
+        'Active safety-critical health context is currently unavailable',
+      )
+      expect(prompt).toContain(
+        'Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable',
+      )
+      expect(prompt).toContain('Before any safety-relevant guidance')
+      expect(prompt).toContain('Do not infer that history is absent')
+      expect(prompt).toContain('`vault-cli regimen list --status active`')
       expect(prompt).toContain('`vault-cli measurement show <event-id>`')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })

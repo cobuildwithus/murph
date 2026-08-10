@@ -44,16 +44,21 @@ export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 6
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
-const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
-  'Assistant context snapshot for navigation only:',
-  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).',
-  '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.',
-].join('\n')
+const ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER =
+  'Assistant context snapshot for navigation only:'
+const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_UNAVAILABLE_LINE =
+  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).'
+const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_LOOKUP_LINE =
+  '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.'
+const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_UNAVAILABLE_LINE =
+  '- Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).'
+const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_LOOKUP_LINE =
+  '- Do not infer that history is absent. If it matters for the current request, inspect canonical records with the existing `vault-cli blood-test list` or exact-day `vault-cli measurement list` then `vault-cli measurement show <event-id>` path.'
 
-const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_STALE_PROMPT = [
-  'Assistant context snapshot for navigation only:',
-  '- Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).',
-  '- Do not infer that history is absent. If it matters for the current request, inspect canonical records with the existing `vault-cli blood-test list` or exact-day `vault-cli measurement list` then `vault-cli measurement show <event-id>` path.',
+const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
+  ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER,
+  ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_UNAVAILABLE_LINE,
+  ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_LOOKUP_LINE,
 ].join('\n')
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
@@ -135,16 +140,40 @@ export async function readAssistantContextSnapshotPrompt(input: {
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,
   })
-  if (state?.pendingDirtyDomains.includes('health_context')) {
-    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
-  }
-  if (state?.pendingDirtyDomains.includes('blood_tests')) {
-    return ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_STALE_PROMPT
+  const healthContextPending =
+    state?.pendingDirtyDomains.includes('health_context') === true
+  const canonicalHistoryPending =
+    state?.pendingDirtyDomains.includes('blood_tests') === true
+  if (healthContextPending || canonicalHistoryPending) {
+    return buildAssistantContextSnapshotDegradedPrompt({
+      canonicalHistoryUnavailable: canonicalHistoryPending,
+      healthContextUnavailable: healthContextPending,
+    })
   }
   if (state === null || state.lastCompleted === null) {
-    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
+    return buildAssistantContextSnapshotDegradedPrompt({
+      canonicalHistoryUnavailable: true,
+      healthContextUnavailable: true,
+    })
   }
   return normalizeNullableString(state.lastCompleted.promptBlock)
+}
+
+function buildAssistantContextSnapshotDegradedPrompt(input: {
+  canonicalHistoryUnavailable: boolean
+  healthContextUnavailable: boolean
+}): string {
+  return [
+    ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER,
+    input.healthContextUnavailable
+      ? ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_UNAVAILABLE_LINE
+      : null,
+    input.canonicalHistoryUnavailable
+      ? ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_UNAVAILABLE_LINE
+      : null,
+    ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_LOOKUP_LINE,
+    ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_LOOKUP_LINE,
+  ].filter((line): line is string => line !== null).join('\n')
 }
 
 export async function isAssistantContextSnapshotRefreshPending(input: {
