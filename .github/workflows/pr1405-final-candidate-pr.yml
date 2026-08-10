@@ -1,0 +1,253 @@
+name: Validate PR 1405 final candidate
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Assemble clean implementation
+        env:
+          BASE_SHA: 5f1669983dcd3850cc171877f04945aa43cc2176
+          SOURCE_SHA: 878dbf3e424bac4bf43fa148d033a29760d87486
+        run: |
+          set -euo pipefail
+          git fetch origin codex/pr1405-simple-knowledge-bridge
+          git checkout --detach "$BASE_SHA"
+          git checkout "$SOURCE_SHA" -- \
+            ARCHITECTURE.md \
+            agent-docs/exec-plans/active/2026-08-07-health-commons-agent-knowledge.md \
+            packages/assistant-engine/src/assistant/system-prompt.ts \
+            packages/assistant-engine/test/assistant-codex-real-e2e.test.ts \
+            packages/assistant-engine/test/model-behavior.test.ts \
+            packages/cli/src/commands/commons.ts \
+            packages/cli/src/incur.generated.ts \
+            packages/cli/src/vault-cli-skill-hash.generated.ts \
+            packages/cli/test/commons-command-coverage.test.ts \
+            packages/health-commons/content/families/sauna.md \
+            packages/health-commons/src/knowledge-index.ts \
+            packages/health-commons/src/runtime.ts \
+            packages/health-commons/test/knowledge-index-full-catalog.test.ts \
+            packages/health-commons/test/knowledge-index.test.ts
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+          import shutil
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding='utf-8')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected one match, found {count}: {old[:100]!r}')
+              write(path, text.replace(old, new, 1))
+
+          def sub_once(path: str, pattern: str, replacement: str) -> None:
+              text = read(path)
+              updated, count = re.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise RuntimeError(f'{path}: expected one regex match, found {count}: {pattern[:100]!r}')
+              write(path, updated)
+
+          replace_once(
+              'packages/health-commons/content/families/sauna.md',
+              '''title: Sauna / Passive Heat
+          summary: The broad passive-heat intervention family. User-facing families such as dry sauna and infrared sauna stay separate beneath this parent.
+          status: field-testing
+          quality: usable
+          aliases:
+            - sauna
+            - passive heat
+            - heat exposure''',
+              '''title: Sauna
+          summary: The broad passive-heat intervention family. User-facing families such as dry sauna and infrared sauna stay separate beneath this parent.
+          status: field-testing
+          quality: usable
+          aliases:
+            - Sauna / Passive Heat
+            - passive heat
+            - heat exposure''',
+          )
+
+          replace_once(
+              'packages/assistant-engine/src/assistant-skill-assets.ts',
+              '''  {
+              slug: 'red-light-therapy',
+              name: 'red-light-therapy',
+              triggerHint:
+                'Use for red light therapy or photobiomodulation questions, including dosing, session duration, treatment distance, wavelengths, device irradiance, Bestqool lamps, safety boundaries, and whether to set up a bounded Health Commons PBM experiment.',
+            },
+          ''',
+              '',
+          )
+          replace_once(
+              'packages/assistant-engine/src/assistant-skill-assets.ts',
+              '''      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs. Use red-light-therapy for red/NIR photobiomodulation dose, duration, distance, wavelengths, device irradiance, or Bestqool questions.',
+          ''',
+              '''      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs.',
+          ''',
+          )
+
+          replace_once(
+              'packages/assistant-engine/skills/recovery-modalities/SKILL.md',
+              '''- Use red-light-therapy for red/NIR photobiomodulation dose, duration, distance, wavelengths, device irradiance, Bestqool lamps, or PBM experiment setup.
+          - This skill does not own PBM device-dose math.
+          ''',
+              '''- Red/NIR photobiomodulation uses the same Health Commons evidence lookup as every other substantive health topic. Use experiment-onboarding only when the user asks to try or track it.
+          ''',
+          )
+
+          test_path = 'packages/assistant-engine/test/assistant-skill-assets.test.ts'
+          replace_once(
+              test_path,
+              '''
+              expect(registeredSkillSlugs.has('red-light-therapy')).toBe(true)
+              expect(buildAssistantSkillFileRef('red-light-therapy')).toBe(
+                '$MURPH_ASSISTANT_SKILLS_ROOT/red-light-therapy/SKILL.md',
+              )
+          ''',
+              '''
+              expect(registeredSkillSlugs.has('red-light-therapy')).toBe(false)
+          ''',
+          )
+          sub_once(
+              test_path,
+              r'''  it\('routes red light dose ownership to the dedicated red-light skill'.*?\n  \}\)\n\n  it\('keeps red light therapy registered with device seed data'.*?\n  \}\)\n''',
+              '''  it('keeps red-light research in Health Commons instead of a topic skill', async () => {
+              expect(
+                ASSISTANT_SKILLS.some((skill) => skill.slug === 'red-light-therapy'),
+              ).toBe(false)
+
+              const recoverySkill = ASSISTANT_SKILLS.find(
+                (skill) => skill.slug === 'recovery-modalities',
+              )
+              expect(recoverySkill).toBeTruthy()
+              if (!recoverySkill) return
+
+              expect(recoverySkill.triggerHint).not.toContain('red-light-therapy')
+              const recoveryText = await readSkillFile(recoverySkill)
+              expect(recoveryText).toContain('Health Commons evidence lookup')
+              expect(recoveryText).not.toContain('device-seeds.json')
+            })
+          ''',
+          )
+
+          for path in [
+              'packages/assistant-engine/src/assistant/system-prompt.ts',
+              'packages/assistant-engine/test/model-behavior.test.ts',
+          ]:
+              text = read(path)
+              text = text.replace(
+                  'recovery-modalities, red-light-therapy.',
+                  'recovery-modalities.',
+              )
+              write(path, text)
+
+          skill_dir = Path('packages/assistant-engine/skills/red-light-therapy')
+          if not skill_dir.is_dir():
+              raise RuntimeError('Expected the red-light-therapy skill directory')
+          shutil.rmtree(skill_dir)
+
+          spec_path = 'agent-docs/product-specs/health-commons.md'
+          text = read(spec_path)
+          pattern = re.compile(
+              r'''The\n          generated `knowledge\.sqlite` FTS projection.*?three-item plus one-safety ceiling\.\n''',
+              re.S,
+          )
+          replacement = '''The generated `knowledge.sqlite` FTS projection gives the assistant a
+          bounded claim-level read path for ordinary health questions. Authored Markdown
+          and JSONL remain authoritative. The SQLite file is read-only build output,
+          contains no user data, and returns a small packet instead of loading the catalog
+          or source files into a turn. The assistant passes one natural-language question
+          to `vault-cli commons knowledge search`; exact titles, aliases, question focus,
+          ranking, result limits, and safety selection remain internal to the Health
+          Commons reader. The reader resolves the most specific authored title or alias
+          contained in the question and fails closed when the best phrase has multiple
+          owners. A canonical family title may include its typed descendants, while family
+          aliases stay family-scoped. Source findings use one unambiguous authored target:
+          `related_protocol`, then `parent_family`, then `measures`; multi-target and
+          untargeted findings stay out until ownership is authored more precisely. The
+          packet contains at most three distinct sourced evidence items and one relevant
+          safety item, with at most four direct source locators per item. Safety comes only
+          from directly sourced safety claims or typed source findings. Unsourced overview
+          text, page-wide safety arrays, and editorial evidence-appraisal bookkeeping do
+          not enter the assistant projection. Evidence and safety are returned in the same
+          lookup, and retrieval never starts or suggests an experiment unless the member
+          asks to try or track the intervention.
+          '''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise RuntimeError(f'{spec_path}: could not replace the old knowledge lookup contract')
+          write(spec_path, text)
+          PY
+
+          test ! -e packages/assistant-engine/skills/red-light-therapy
+          ! rg -n "red-light-therapy" packages/assistant-engine
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate derived artifacts
+        run: |
+          pnpm --dir packages/health-commons generate
+          pnpm --dir packages/cli gen:config-schema
+
+      - name: Verify Health Commons
+        run: pnpm --dir packages/health-commons verify
+
+      - name: Verify CLI
+        run: |
+          pnpm --dir packages/cli typecheck
+          pnpm --dir . exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/commons-command-coverage.test.ts
+
+      - name: Verify assistant routing and skills
+        run: |
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir . exec vitest run --config packages/assistant-engine/vitest.config.ts --no-coverage packages/assistant-engine/test/model-behavior.test.ts packages/assistant-engine/test/assistant-skill-assets.test.ts packages/assistant-engine/test/assistant-codex-real-e2e.test.ts
+
+      - name: Verify hosted packaging
+        run: |
+          pnpm --dir apps/cloudflare typecheck
+          pnpm --dir . exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage apps/cloudflare/test/deploy-artifacts.test.ts apps/cloudflare/test/runner-bundle-workspace-artifacts.test.ts
+
+      - name: Verify simplified contract
+        run: |
+          ! rg -n "overall evidence|same catalogHash|<exact title or alias>|\"<focus>\"" packages/assistant-engine/src/assistant/system-prompt.ts
+          ! rg -n "red-light-therapy" packages/assistant-engine
+          git diff --check
+
+      - name: Publish one clean commit
+        run: |
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "refactor(health-commons): simplify agent knowledge search"
+          git push --force origin HEAD:agent/pr1405-final-candidate
