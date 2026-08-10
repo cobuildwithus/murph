@@ -1,0 +1,175 @@
+name: Device-sync dirty payload final review
+
+on:
+  push:
+    branches:
+      - agent/device-sync-dirty-final-review
+    paths:
+      - .github/workflows/agent-device-sync-dirty-final-review.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: device-sync-dirty-final-review
+  cancel-in-progress: false
+
+jobs:
+  review-and-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build clean candidate from reviewed source
+        id: candidate
+        shell: bash
+        env:
+          FINALIZER_HEAD: ${{ github.sha }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          git fetch origin main "$TARGET_BRANCH"
+          expected_target="$(git rev-parse "origin/$TARGET_BRANCH")"
+          echo "expected_target=$expected_target" >> "$GITHUB_OUTPUT"
+
+          mapfile -t chunks < <(find .agent -maxdepth 1 -type f -name 'device-sync-dirty.patch.b64.*' -print 2>/dev/null | sort)
+          git config user.name "Codex"
+          git config user.email "codex@users.noreply.github.com"
+
+          if (( ${#chunks[@]} > 0 )); then
+            cat "${chunks[@]}" | base64 --decode > /tmp/device-sync-dirty.patch
+            test -s /tmp/device-sync-dirty.patch
+            git apply --numstat /tmp/device-sync-dirty.patch
+            git checkout --detach origin/main
+            git apply --3way --index /tmp/device-sync-dirty.patch
+            git diff --cached --check
+            git commit -m "fix(device-sync): persist dirty payload credential authority"
+          else
+            git checkout --detach "${FINALIZER_HEAD}^"
+            git rebase origin/main
+          fi
+
+          git diff --check origin/main...HEAD
+          test -z "$(git status --porcelain)"
+          echo "candidate_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Changed files:"
+          git diff --name-status origin/main...HEAD
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install exact workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Focused correctness and mixed-version proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec vitest run \
+            --config apps/web/vitest.workspace.ts \
+            --no-coverage \
+            apps/web/test/prisma-store-dirty-connections.test.ts \
+            apps/web/test/prisma-store-oauth-connection.test.ts
+          pnpm --dir apps/web typecheck
+
+      - name: Repository affected-owner verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm test:diff
+
+      - name: Final architecture and hygiene assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check origin/main...HEAD
+          test -z "$(git status --porcelain)"
+          ! git diff origin/main...HEAD -- . ':!*.test.ts' ':!*.test.tsx' | grep -E 'console\.(log|debug)|TODO\(|FIXME\(' >/dev/null
+          ! git diff --name-only origin/main...HEAD | grep -E '^\.agent/|^\.github/workflows/agent-' >/dev/null
+          git merge-tree --write-tree HEAD origin/main >/dev/null
+
+      - name: Publish exact reviewed head
+        shell: bash
+        env:
+          EXPECTED_TARGET: ${{ steps.candidate.outputs.expected_target }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          git push \
+            --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_TARGET}" \
+            origin "HEAD:refs/heads/${TARGET_BRANCH}"
+
+      - name: Open or refresh pull request
+        id: pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_BRANCH: agent/device-sync-dirty-classification
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$TARGET_BRANCH" --base main --state open --json number --jq '.[0].number // empty')"
+          cat > /tmp/pr-body.md <<'EOF'
+          ## Why
+
+          Reconnect cleanup previously decrypted and dynamically classified retained dirty payloads while holding the dirty-marker row lock. That made KMS and provider-module latency part of a database critical section and left mixed-version reconnect behavior implicit.
+
+          ## User-visible behavior
+
+          Device reconnects keep the same semantics: exact durable import work survives when it is independent of the replaced credential, while credential-scoped work is discarded. Ordinary webhook ingestion, runtime wakes, imports, and account deletion are unchanged.
+
+          ## What changed
+
+          - Persist a server-derived `credentialIndependent` authority bit with every new encrypted dirty payload.
+          - Prepare classification, compression, and encryption before opening the dirty-state admission transaction.
+          - Classify nullable rows from older writers outside reconnect's marker-lock transaction, in bounded batches, and fail closed until no nullable row remains.
+          - Keep reconnect cleanup database-only: lock the existing dirty marker, advance the connection epoch, and delete only rows explicitly classified as credential-scoped.
+          - Bound unique-conflict recovery rather than recursively retrying without a ceiling.
+          - Preserve exact payload durability and the existing marker/payload atomic commit.
+
+          ## Architecture and reuse
+
+          The existing dirty marker and encrypted payload table remain the only durable owners. The change adds one nullable mixed-deployment column and focused helpers around the existing store. It adds no queue, service, state machine, compatibility table, provider-specific persistence path, or second cleanup lifecycle.
+
+          Classification is performed by Web before the reconnect transaction. The transaction trusts only persisted server-derived authority and performs database reads/writes only. Nullable values are rollout compatibility state, not a second source of truth.
+
+          ## Verification
+
+          Before publication, the final-review lane ran the focused dirty-connection and OAuth/reconnect suites, the hosted Web typecheck, the repository affected-owner `test:diff` gate, whitespace/hygiene checks, and a clean merge-tree check against current `main`. Normal exact-head PR CI runs again on the published head.
+
+          Do not merge as part of this task.
+          EOF
+
+          if [[ -n "$existing" ]]; then
+            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" \
+              --title "Persist device-sync dirty payload credential authority" \
+              --body-file /tmp/pr-body.md
+            pr_number="$existing"
+          else
+            url="$(gh pr create --repo "$GITHUB_REPOSITORY" \
+              --base main \
+              --head "$TARGET_BRANCH" \
+              --title "Persist device-sync dirty payload credential authority" \
+              --body-file /tmp/pr-body.md)"
+            pr_number="${url##*/}"
+          fi
+          echo "number=$pr_number" >> "$GITHUB_OUTPUT"
+
+      - name: Record final-review evidence on the PR
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          CANDIDATE_HEAD: ${{ steps.candidate.outputs.candidate_head }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Final review published \`$CANDIDATE_HEAD\` after focused reconnect/dirty-payload tests, Web typecheck, \`pnpm test:diff\`, diff hygiene, and clean merge-tree verification. No merge was performed."
