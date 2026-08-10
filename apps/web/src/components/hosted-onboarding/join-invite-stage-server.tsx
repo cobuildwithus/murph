@@ -16,6 +16,7 @@ import { PlanVisual } from "@/src/components/ui/plan-visual";
 import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-card";
 import { MurphAddToContactsButton } from "@/src/components/murph/murph-contact-card-picker";
 import { HostedFamilyStartButton } from "@/src/components/settings/hosted-family-start-button";
+import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
@@ -108,6 +109,12 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
         <JoinInviteFamilyBillingSyncPanel />
       ) : null}
 
+      {!model.launchConsent.gateActive
+      && status.stage === "checkout"
+      && model.familyBillingRecovery === "manage" ? (
+        <JoinInviteFamilyBillingManagementPanel />
+      ) : null}
+
       {!model.launchConsent.gateActive && status.stage === "checkout" && starterUsageReady ? (
         <JoinInviteStarterUsageIsland inviteCode={model.inviteCode} />
       ) : null}
@@ -115,6 +122,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       {!model.launchConsent.gateActive
       && status.stage === "checkout"
       && model.familyBillingRecovery !== "checkout"
+      && model.familyBillingRecovery !== "manage"
       && model.familyBillingRecovery !== "syncing"
       && !starterUsageReady
       && status.messagingSetupRequired ? (
@@ -129,6 +137,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       {!model.launchConsent.gateActive
       && status.stage === "checkout"
       && model.familyBillingRecovery !== "checkout"
+      && model.familyBillingRecovery !== "manage"
       && model.familyBillingRecovery !== "syncing"
       && !starterUsageReady
       && !status.messagingSetupRequired ? (
@@ -424,6 +433,36 @@ export function JoinInviteFamilyBillingSyncPanel() {
             Stripe is confirming the plan. This page checks automatically and
             will continue when Family access is ready.
           </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function JoinInviteFamilyBillingManagementPanel() {
+  return (
+    <div className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8">
+      <div className="flex items-start gap-4">
+        <PlanVisual tier="pulse" />
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Family billing
+          </p>
+          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Open Family billing
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Stripe has an issue with this subscription. Open Family billing to
+            update payment details, review invoices, or cancel the plan.
+          </p>
+          <div className="mt-5">
+            <BillingPortalButton
+              billingScope="family"
+              block
+              label="Open Family billing"
+              variant="secondary"
+            />
+          </div>
         </div>
       </div>
     </div>

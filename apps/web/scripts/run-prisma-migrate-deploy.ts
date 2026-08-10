@@ -109,6 +109,12 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
   [
+    "20260810050000_relax_detached_automatic_refill_failure",
+    // This replacement only admits the terminal, reference-free automatic
+    // refill failure already accepted by the account-deletion owner.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20260728030000_hosted_usage_referral_credit_entry_constraints",
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],

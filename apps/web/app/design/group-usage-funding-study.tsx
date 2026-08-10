@@ -11,11 +11,17 @@ import type {
 } from "@murphai/hosted-execution/plan-usage";
 
 import {
+  GroupFundingSignInRequired,
+} from "@/src/components/hosted-groups/group-funding-sign-in-button";
+import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
 import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
-import { GroupSponsorshipManagementCard } from "@/src/components/hosted-groups/group-sponsorship-management-card";
+import {
+  GroupSponsorshipCanceledReceipt,
+  GroupSponsorshipManagementCard,
+} from "@/src/components/hosted-groups/group-sponsorship-management-card";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-settings";
 import { Button } from "@/src/components/ui/button";
@@ -480,6 +486,39 @@ function GroupUsageFundingStudy() {
               status: "recovery_required",
             }}
           />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Cancellation-only recovery"
+          state="monthly-cancel-only"
+        >
+          <GroupSponsorshipManagementCard
+            cancelOnly
+            endpoint="/api/groups/fund/design/sponsorship"
+            management={{
+              authorizationId: "hgsa_design_cancel_only",
+              chargedThisPeriodMinor: 500,
+              monthlyCapMinor: 1_000,
+              pendingMonthlyCapMinor: null,
+              pendingThisPeriodMinor: 0,
+              periodEnd: "2026-08-30T16:00:00.000Z",
+              status: "active",
+            }}
+          />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Signed-out sponsorship management handoff"
+          state="monthly-management-sign-in"
+        >
+          <GroupFundingSignInRequired initiallyOpen={false} />
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
+          label="Cancellation completion receipt"
+          state="monthly-canceled"
+        >
+          <GroupSponsorshipCanceledReceipt />
         </DesignSponsorshipState>
 
         <DesignSponsorshipState

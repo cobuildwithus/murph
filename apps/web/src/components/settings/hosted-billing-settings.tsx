@@ -65,6 +65,7 @@ export function HostedBillingSettings(props: {
   currentBillingPhase?: unknown;
   currentBillingPlanCode?: unknown;
   currentPeriodEnd?: Date | null;
+  familyBillingOwner?: boolean;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
@@ -104,9 +105,13 @@ export function HostedBillingSettings(props: {
 
   const familyState = props.familyState ?? "none";
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
-  const familyOwner = familyState === "owner";
+  const activeFamilyOwner = familyState === "owner";
+  const familyBillingOwner = props.familyBillingOwner === true || activeFamilyOwner;
   const sponsoredMember = familyState === "sponsored";
-  const ownAccessActive = props.billingStatus === "active" && !familyCurrent;
+  const ownAccessActive =
+    props.billingStatus === "active"
+    && !familyCurrent
+    && !familyBillingOwner;
   const ownPaidBillingActive = ownAccessActive && currentPhase === "paid";
   const starterAccessActive = ownAccessActive && !ownPaidBillingActive;
   const groupCurrent =
@@ -147,8 +152,11 @@ export function HostedBillingSettings(props: {
     : null;
 
   const pulseAction: ReactNode = (() => {
-    if (familyOwner) {
+    if (activeFamilyOwner) {
       return <FamilyBillingChangeButton block targetPlanName="Pulse" />;
+    }
+    if (familyBillingOwner) {
+      return null;
     }
     if (sponsoredMember) {
       return null;
@@ -203,8 +211,11 @@ export function HostedBillingSettings(props: {
   })();
 
   const edgeAction: ReactNode = (() => {
-    if (familyOwner) {
+    if (activeFamilyOwner) {
       return <FamilyBillingChangeButton block targetPlanName="Edge" />;
+    }
+    if (familyBillingOwner) {
+      return null;
     }
     if (sponsoredMember) {
       return null;
@@ -253,7 +264,7 @@ export function HostedBillingSettings(props: {
   })();
 
   const maxAction: ReactNode = (() => {
-    if (familyCurrent) {
+    if (familyBillingOwner) {
       return null;
     }
     if (maxCurrent) {
@@ -295,7 +306,9 @@ export function HostedBillingSettings(props: {
     ...(props.showGroupPlan === true && !familyCurrent
       ? [
           {
-            action: groupCurrent
+            action: familyBillingOwner
+              ? null
+              : groupCurrent
               ? <CurrentPlanButton />
               : hasPendingGroupSwitch
                 ? null
@@ -342,7 +355,7 @@ export function HostedBillingSettings(props: {
       features: SETTINGS_PULSE_FEATURES,
       key: "launch_monthly",
       name: "Pulse",
-      note: familyOwner
+      note: activeFamilyOwner
         ? "If you switch away from Family, your family members lose their included access when the Family plan ends."
         : pulseCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
           ? (
@@ -376,7 +389,7 @@ export function HostedBillingSettings(props: {
       features: SETTINGS_EDGE_FEATURES,
       key: "launch_edge_monthly",
       name: "Edge",
-      note: familyOwner
+      note: activeFamilyOwner
         ? "End or change the Family plan first, then switch to an individual plan."
         : !edgeCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
           ? `Scheduled to start ${pendingEdgeSwitchDate}`
@@ -458,10 +471,14 @@ export function HostedBillingSettings(props: {
     {
       action: sponsoredMember
         ? null
-        : familyOwner
+        : activeFamilyOwner
           ? <CurrentPlanButton />
+          : familyBillingOwner
+            ? null
           : props.canStartFamily === true
-            ? <HostedFamilyStartButton block label="Choose Family" />
+            ? (
+                <HostedFamilyStartButton block label="Choose Family" />
+              )
             : null,
       current: familyCurrent,
       currentLabel: familyState === "sponsored" ? "Sponsored" : "Current plan",
@@ -485,11 +502,15 @@ export function HostedBillingSettings(props: {
   const retainedPlan = currentPlanCode
     ? getHostedBillingPlanDefinition(currentPlanCode)
     : null;
-  const noPlanText = starterAccessActive
-    ? "Your non-expiring starter usage is active. Choose a monthly plan whenever you want recurring included usage."
+  const noPlanText = familyBillingOwner && !activeFamilyOwner
+    ? "Your Family plan needs billing attention. Use Manage Family billing to repair or cancel it."
+    : starterAccessActive
+      ? "Your non-expiring starter usage is active. Choose a monthly plan whenever you want recurring included usage."
     : retainedPlan
-      ? `${retainedPlan.displayName} is not active. Choose a plan below or manage billing.`
-      : "Choose a plan below when you want recurring included usage.";
+      ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
+    : props.billingStatus === "active"
+        ? "Your billing status is still syncing. Use Manage billing if it does not resolve."
+        : "Choose a plan below when you want recurring included usage.";
 
   return (
     <div className="flex flex-col gap-4">
@@ -545,7 +566,7 @@ export function HostedBillingSettings(props: {
           <p className="text-sm text-muted-foreground">
             Billing is managed by your Family plan owner.
           </p>
-        ) : familyOwner ? (
+        ) : familyBillingOwner ? (
           <BillingPortalButton
             billingScope="family"
             label="Manage Family billing"
@@ -604,7 +625,8 @@ function PlanUsageBand(props: {
     ? "Does not expire"
     : `Resets ${formatHostedBillingDate(new Date(status.periodEnd))}`;
   const action = status.recommendedAction;
-  const eligibleUsageTopUpOffers = status.accessKind === "paid"
+  const eligibleUsageTopUpOffers =
+    status.accessKind === "paid" || status.accessKind === "family_sponsored"
     ? props.usageTopUpOffers
     : [];
   const usageTopUpDialog = payerMemberId ? (
@@ -655,17 +677,7 @@ function PlanUsageBand(props: {
                     {action.label}
                   </UpgradeToEdgeButton>
                 )
-              : !props.planChangePending && action?.kind === "change_plan"
-                ? (
-                    <HostedPlanChangeButton
-                      expectedCurrentPlanCode={status.planCode}
-                      mode="upgrade"
-                      targetPlanCode={action.targetPlanCode}
-                    >
-                      {action.label}
-                    </HostedPlanChangeButton>
-                  )
-                : null}
+              : null}
       </div>
 
       <div className="mt-4 flex items-center gap-3">

@@ -6,13 +6,24 @@ import {
   type ButtonHTMLAttributes,
   type ReactNode,
 } from "react";
-import { afterEach, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 
 import { renderClientComponent } from "./render-client-component";
 
 vi.mock("@/src/components/ui/button", () => ({
   Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) =>
     createElement("button", props, children),
+}));
+
+vi.mock("@/src/components/ui/alert", () => ({
+  Alert: ({ children, ...props }: {
+    children?: ReactNode;
+    role?: string;
+  }) => createElement("section", props, children),
+  AlertDescription: ({ children }: { children?: ReactNode }) =>
+    createElement("p", null, children),
+  AlertTitle: ({ children }: { children?: ReactNode }) =>
+    createElement("h2", null, children),
 }));
 
 vi.mock("@/src/components/ui/card", () => ({
@@ -192,6 +203,82 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       confirmed: true,
       monthlyCapMinor: 2_000,
     });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("offers only cancellation when billing changes are unavailable", async () => {
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      cancelOnly: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: baseManagement,
+    },
+  ));
+
+  try {
+    const labels = [...rendered.container.querySelectorAll("button")]
+      .map((button) => button.textContent);
+    expect(labels).toContain("Cancel sponsorship");
+    expect(labels).not.toContain("Pause automatic refills");
+    expect(labels).not.toContain("Resume automatic refills");
+    expect(labels).not.toContain("Review payment");
+    expect(labels).not.toContain("Choose $20");
+    expect(rendered.container.textContent).toContain(
+      "you can still stop future automatic refills",
+    );
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps a terminal receipt visible after cancellation succeeds", async () => {
+  const fetchMock = vi.fn(async () => ({
+    json: async () => ({ management: null }),
+    ok: true,
+  }));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const { GroupSponsorshipManagementCard } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-management-card"
+  );
+  const rendered = await renderClientComponent(createElement(
+    GroupSponsorshipManagementCard,
+    {
+      cancelOnly: true,
+      endpoint: "/api/groups/fund/example/sponsorship",
+      management: baseManagement,
+    },
+  ));
+  Object.defineProperty(rendered.window, "confirm", {
+    configurable: true,
+    value: vi.fn(() => true),
+  });
+
+  try {
+    const cancelButton = [...rendered.container.querySelectorAll("button")]
+      .find((candidate) => candidate.textContent === "Cancel sponsorship");
+    assert.ok(cancelButton);
+    await act(async () => {
+      cancelButton.click();
+    });
+
+    expect(rendered.reload).not.toHaveBeenCalled();
+    expect(rendered.container.textContent).toContain(
+      "Monthly sponsorship canceled",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Future automatic refills are stopped",
+    );
+    expect(
+      [...rendered.container.querySelectorAll("button")]
+        .map((button) => button.textContent),
+    ).not.toContain("Cancel sponsorship");
   } finally {
     await rendered.cleanup();
   }

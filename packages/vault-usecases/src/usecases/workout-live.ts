@@ -230,6 +230,12 @@ async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
 
   const setIndex = exercise.sets.findIndex((set) => set.order === setOrder)
   const currentSet = setIndex >= 0 ? exercise.sets[setIndex] : undefined
+  if (currentSet === undefined && input.requireExistingSet) {
+    throw new VaultCliError(
+      'not_found',
+      `No set ${setOrder} exists for ${exercise.name}.`,
+    )
+  }
   if (
     currentSet === undefined &&
     exercise.sets.length >= MAX_LIVE_WORKOUT_SETS_PER_EXERCISE

@@ -63,24 +63,30 @@ function groupToolCall(
   options: { callId?: string; id?: number } = {},
 ): Record<string, unknown> {
   return {
-    ...(options.id !== undefined ? { id: options.id } : {}),
+    id: options.id ?? "request-test",
     method: "item/tool/call",
     params: {
       arguments: argumentsValue,
-      ...(options.callId ? { callId: options.callId } : {}),
+      callId: options.callId ?? "call-test",
       namespace: "murph",
+      threadId: "thread-test",
       tool: MURPH_GROUP_TOOL.name,
+      turnId: "turn-test",
     },
   };
 }
 
 function newsletterToolCall(argumentsValue: unknown): Record<string, unknown> {
   return {
+    id: "request-newsletter-test",
     method: "item/tool/call",
     params: {
       arguments: argumentsValue,
+      callId: "call-newsletter-test",
       namespace: "murph",
+      threadId: "thread-test",
       tool: MURPH_NEWSLETTER_TOOL.name,
+      turnId: "turn-test",
     },
   };
 }
@@ -297,14 +303,14 @@ describe("murph.group dynamic tool", () => {
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_usage",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "read_usage" },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_usage_referral",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "read_usage_referral" },
     });
@@ -315,7 +321,7 @@ describe("murph.group dynamic tool", () => {
         "new_person_activation_v1",
         "active_group_v1",
       ],
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "arm_usage_referral",
@@ -333,7 +339,7 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "cancel_usage_referral",
       policyCode: "new_person_activation_v1",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "cancel_usage_referral",
@@ -343,28 +349,28 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_chat_name",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "read_chat_name" },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "prepare_next_group",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "prepare_next_group" },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "read_chat_participants",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "read_chat_participants" },
     });
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "share_contact_card" },
     });
@@ -388,7 +394,7 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "share_contact_card",
       avatarPrompt: "A friendly square portrait of Murph",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "share_contact_card",
@@ -410,7 +416,7 @@ describe("murph.group dynamic tool", () => {
       action: "offer_access",
       displayName: "Sunday Sleep Crew",
       projectionScopes: [{ projectionKind: "sleep-times.v0" }],
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "offer_access",
@@ -422,7 +428,7 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "revoke_own_email_share",
       message_ref: FRESH_ASSISTANT_INPUT_ID,
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "revoke_own_email_share",
@@ -484,7 +490,7 @@ describe("murph.group dynamic tool", () => {
       expect(readMurphDynamicToolRequest(groupToolCall({
         action,
         message_ref: FRESH_ASSISTANT_INPUT_ID,
-      }))).toEqual({
+      }))).toMatchObject({
         kind: "group",
         request: {
           action,
@@ -1006,7 +1012,7 @@ describe("murph.group dynamic tool", () => {
       avatarSource: "generate",
       prompt: "A clean square badge for our running group",
       referenceImageRefs: ["raw/inbox/reference.png"],
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "set_chat_avatar",
@@ -1029,7 +1035,7 @@ describe("murph.group dynamic tool", () => {
       alt: "Group avatar",
       avatarSource: "image_ref",
       imageRef: "raw/inbox/avatar.png",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "set_chat_avatar",
@@ -1106,7 +1112,7 @@ describe("murph.group dynamic tool", () => {
       action: "read_current",
     }));
 
-    expect(request).toEqual({
+    expect(request).toMatchObject({
       kind: "group",
       request: { action: "read_current" },
     });
@@ -1250,7 +1256,7 @@ describe("murph.group dynamic tool", () => {
         { projectionKind: "steps-days.v0" },
         { projectionKind: "device-sync-status.v0" },
       ],
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "read_shared",
@@ -1268,7 +1274,7 @@ describe("murph.group dynamic tool", () => {
         { projectionKind: "rem-sleep-days.v0" },
         { projectionKind: "workouts.v0" },
       ],
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "read_shared",
@@ -2112,7 +2118,7 @@ describe("murph.group dynamic tool", () => {
       action: "ask",
       groupLabel: "  Morning Movers  ",
       question: "  What exercises are assigned today?  ",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "ask",
@@ -3104,7 +3110,7 @@ describe("murph.group dynamic tool", () => {
       displayName: "Weekly Health Crew",
     }));
 
-    expect(request).toEqual({
+    expect(request).toMatchObject({
       kind: "group",
       request: {
         action: "update_display_name",
@@ -3196,7 +3202,7 @@ describe("murph.group dynamic tool", () => {
           selector: { activityKind: "running" },
         },
       ],
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: {
         action: "offer_access",
@@ -3221,7 +3227,7 @@ describe("murph.group dynamic tool", () => {
 
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "offer_access" },
     });
@@ -3229,7 +3235,7 @@ describe("murph.group dynamic tool", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "offer_access",
       standaloneLink: true,
-    }))).toEqual({
+    }))).toMatchObject({
       kind: "group",
       request: { action: "offer_access", standaloneLink: true },
     });

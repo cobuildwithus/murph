@@ -137,7 +137,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'tracked-table',
     name: 'tracked-table',
     triggerHint:
-      'Use when a private member asks for a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
+      'Use when a private member asks to start or resume a live workout, requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
   },
   {
     slug: 'strength-training',

@@ -1996,20 +1996,35 @@ describe("hosted Stripe event reconciliation", () => {
     }));
     mocks.stripe.invoicePayments.list.mockResolvedValue({
       data: [{
-        payment: { charge: null, payment_intent: "pi_exact" },
+        amount_paid: 2_000,
+        amount_requested: 2_000,
+        payment: {
+          payment_intent: {
+            amount_received: 2_000,
+            id: "pi_exact",
+            status: "succeeded",
+          },
+          type: "payment_intent",
+        },
         status: "paid",
       }],
+      has_more: false,
     });
     mocks.stripe.refunds.list
       .mockResolvedValueOnce({ data: [] })
       .mockResolvedValueOnce({
         data: [{
+          amount: 2_000,
           id: "re_legacy",
           metadata: { hosted_family_legacy_invoice_id: "in_123" },
           status: "succeeded",
         }],
+        has_more: false,
       });
-    mocks.stripe.refunds.create.mockResolvedValue({ status: "pending" });
+    mocks.stripe.refunds.create.mockResolvedValue({
+      amount: 2_000,
+      status: "pending",
+    });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
     prisma.rows[0]!.attemptCount = 5;
@@ -2035,15 +2050,17 @@ describe("hosted Stripe event reconciliation", () => {
     }));
     expect(mocks.stripe.refunds.create).toHaveBeenCalledOnce();
     expect(mocks.stripe.refunds.create).toHaveBeenCalledWith({
+      amount: 2_000,
       metadata: { hosted_family_legacy_invoice_id: "in_123" },
       payment_intent: "pi_exact",
+      reason: "duplicate",
     }, {
       idempotencyKey: "hosted-family-legacy-refund:in_123",
     });
     errorSpy.mockRestore();
   });
 
-  it("poisons a terminal legacy Family refund without issuing another refund", async () => {
+  it("requires support instead of guessing after a partial legacy Family refund", async () => {
     const prisma = createStripeEventPrismaHarness();
     const event = makeInvoicePaidEvent();
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -2053,12 +2070,30 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(makeCanonicalSubscription({
       status: "canceled",
     }));
+    mocks.stripe.invoicePayments.list.mockResolvedValue({
+      data: [{
+        amount_paid: 2_000,
+        amount_requested: 2_000,
+        payment: {
+          payment_intent: {
+            amount_received: 2_000,
+            id: "pi_exact",
+            status: "succeeded",
+          },
+          type: "payment_intent",
+        },
+        status: "paid",
+      }],
+      has_more: false,
+    });
     mocks.stripe.refunds.list.mockResolvedValue({
       data: [{
-        id: "re_failed",
+        amount: 1_000,
+        id: "re_partial",
         metadata: { hosted_family_legacy_invoice_id: "in_123" },
-        status: "failed",
+        status: "succeeded",
       }],
+      has_more: false,
     });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
@@ -2070,14 +2105,15 @@ describe("hosted Stripe event reconciliation", () => {
 
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       attemptCount: 6,
-      lastErrorCode: "Error",
+      lastErrorCode: "HOSTED_BILLING_CHECKOUT_CLEANUP_REQUIRES_SUPPORT",
       lastErrorMessage: "[redacted]",
       status: HostedStripeEventStatus.poisoned,
     }));
     expect(errorSpy).toHaveBeenCalledWith(
       "Hosted Stripe event reconciliation failed.",
       expect.objectContaining({
-        errorMessage: "Legacy Family refund previously failed.",
+        errorMessage:
+          "A superseded Stripe subscription was canceled, but its payment allocation requires support review before refunding.",
         poisoned: true,
       }),
     );
@@ -2301,7 +2337,6 @@ describe("hosted Stripe event reconciliation", () => {
       checkoutSessionId: "cs_trial_123",
       memberId: "member_123",
       prisma: prisma.client,
-      refundCheckoutPayment: true,
       sourceEventId: `${event.id}:family-sponsored-checkout-cleanup`,
       subscriptionId: "sub_checkout_123",
     });
@@ -4010,12 +4045,18 @@ function makeInvoicePaidEvent(overrides?: {
     created: 1774708800,
     data: {
       object: {
+        amount_due: 2000,
         amount_paid: 2000,
+        amount_remaining: 0,
         charge: "ch_123",
         currency: "usd",
         customer: "cus_123",
         id: overrides?.invoiceId ?? "in_123",
         payment_intent: "pi_123",
+        post_payment_credit_notes_amount: 0,
+        pre_payment_credit_notes_amount: 0,
+        starting_balance: 0,
+        status: "paid",
         subscription: "sub_123",
       },
     },

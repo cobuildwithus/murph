@@ -352,6 +352,36 @@ test("JoinInvitePageView persists Family syncing and withholds individual checko
   });
 });
 
+test("JoinInvitePageView offers Stripe management for inactive Family billing", () => {
+  const model = createModel({
+    familyBillingRecovery: "manage",
+    launchConsent: {
+      gateActive: false,
+      initialStatus: createConsentStatus({ launchGranted: true }),
+      status: "granted",
+    },
+    status: createStatus({
+      session: {
+        authenticated: true,
+        expiresAt: null,
+        matchesInvite: true,
+      },
+      stage: "checkout",
+    }),
+  });
+  const markup = renderToStaticMarkup(
+    createElement(JoinInvitePageView, { model }),
+  );
+
+  assert.match(markup, /Resolve Family billing/);
+  assert.match(markup, /Open Family billing/);
+  assert.match(markup, /Stripe/);
+  assert.doesNotMatch(markup, /Restart Family/);
+  assert.doesNotMatch(markup, /Get Pulse/);
+  assert.doesNotMatch(markup, /Get Edge/);
+  assert.doesNotMatch(markup, /data-starter-usage-island="true"/);
+});
+
 test("JoinInvitePageView keeps messaging setup before Starter activation when messaging is required", () => {
   const markup = renderToStaticMarkup(
     createElement(JoinInvitePageView, {
@@ -370,7 +400,7 @@ test("JoinInvitePageView keeps messaging setup before Starter activation when me
   );
 
   assert.doesNotMatch(markup, /data-starter-usage-island="true"/);
-    assert.match(markup, /data-messaging-setup-island="true"/);
+  assert.match(markup, /data-messaging-setup-island="true"/);
   expect(mocks.starterUsageProps).toBeNull();
   expect(mocks.messagingSetupProps).toMatchObject({
     authenticated: true,

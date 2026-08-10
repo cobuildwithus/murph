@@ -14,7 +14,9 @@ Updated: 2026-08-09
 
 ## Scope
 
-- A bounded Vercel `ImageResponse` route for daily nutrition V1 and V2 only.
+- The nutrition rollout lane of the bounded Vercel `ImageResponse` route for
+  daily nutrition V1 and V2; the shared route may also accept later strict
+  compact-table presentation versions without changing this rollout gate.
 - The Linq static layout's `image_url` plus one-column semantic captions beneath
   the image for totals, partial state, and V2 goals.
 - A reusable nutrition image component and synthetic design-catalog study.
@@ -26,7 +28,7 @@ Updated: 2026-08-09
 - The route receives the same bounded Base64URL presentation envelope already
   sent to Linq. Encoding is not encryption, so the payload must contain no
   member identity, canonical record reference, credential, or authority.
-- The route is GET-only, rejects query parameters and non-nutrition envelopes,
+- The route is GET-only, rejects query parameters and non-card envelopes,
   reads no database or remote service, emits no application log, and returns
   `private, no-store` plus `noindex` headers.
 - Add no database, object store, cleanup lifecycle, dependency, queue, retry

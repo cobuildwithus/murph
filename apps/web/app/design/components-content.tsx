@@ -169,6 +169,7 @@ import {
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
+import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -1412,6 +1413,15 @@ export function ComponentsContent() {
           title="iMessage nutrition card"
         >
           <ImessageNutritionCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-compact-table-card"
+          title="iMessage compact table card"
+        >
+          <ImessageCompactTableCardStudy />
         </Section>
 
         <Separator />

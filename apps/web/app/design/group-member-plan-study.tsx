@@ -82,6 +82,21 @@ export function GroupMemberPlanStudy() {
       </StudyState>
 
       <StudyState
+        label="Starter member choosing paid Family billing"
+        state="starter-family-choice"
+      >
+        <HostedBillingSettings
+          authenticated
+          billingStatus="active"
+          canStartDirectPlan
+          canStartFamily
+          currentBillingPlanCode="launch_monthly"
+          familyState="none"
+          payerMemberId="design_starter_family_member"
+        />
+      </StudyState>
+
+      <StudyState
         label="Group member on the $3.50 Core plan"
         state="active-core-usage"
       >
@@ -148,6 +163,21 @@ export function GroupMemberPlanStudy() {
             currentBillingPhase="paid"
             currentBillingPlanCode="launch_monthly"
             showGroupPlan
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Inactive Family billing owner can repair or cancel from Settings"
+        state="family-billing-recovery"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="not_started"
+            canStartFamily
+            familyBillingOwner
+            familyState="none"
           />
         </div>
       </StudyState>
