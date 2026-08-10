@@ -319,6 +319,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -444,6 +445,10 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
 
   it("routes a linked active member's Telegram group message through the thread container", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const privateRootUnwrap = vi.spyOn(
+      await import("@/src/lib/hosted-crypto/domain-root-store"),
+      "unwrapHostedDomainRootsForWebByRootKeyIds",
+    ).mockRejectedValue(new Error("private routing KMS unavailable"));
     mocks.ensureHostedThreadContainerRouteTx.mockResolvedValue({
       activationEventId: null,
       activationMailboxItemId: null,
@@ -451,17 +456,19 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       created: true,
       demotedMailboxConsumedAt: null,
     });
+    const hostedMemberRoutingFindMany = vi.fn().mockResolvedValue([{
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        id: "member_telegram_owner",
+        suspendedAt: null,
+      },
+      memberId: "member_telegram_owner",
+      telegramUserIdEncrypted: "production-private-routing-ciphertext",
+    }]);
     const hostedMemberRoutingUpsert = vi.fn().mockResolvedValue({});
     const prisma = withPrismaTransaction({
       hostedMemberRouting: {
-        findUnique: vi.fn().mockResolvedValue({
-          member: {
-            billingStatus: HostedBillingStatus.active,
-            id: "member_telegram_owner",
-            suspendedAt: null,
-          },
-          memberId: "member_telegram_owner",
-        }),
+        findMany: hostedMemberRoutingFindMany,
         upsert: hostedMemberRoutingUpsert,
       },
     });
@@ -510,6 +517,28 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         prisma,
         threadId: "-100123",
       });
+    expect(hostedMemberRoutingFindMany).toHaveBeenCalledWith({
+      select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+        memberId: true,
+      },
+      where: {
+        telegramUserLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:telegram-user:v1:/u),
+          ]),
+        },
+      },
+    });
+    expect(privateRootUnwrap).not.toHaveBeenCalled();
     expect(mocks.bindArmedHostedUsageReferralToNewContainerTx)
       .toHaveBeenCalledExactlyOnceWith({
         occurredAt: new Date("2026-03-26T10:56:40.000Z"),
@@ -2083,13 +2112,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       });
       expect(hostedMemberRoutingFindMany).toHaveBeenCalledWith({
         select: {
-          linqChatIdEncrypted: true,
-          linqChatLookupKey: true,
-          linqHomeLineAssignedAt: true,
-          linqParticipantContactKind: true,
-          linqParticipantContactLookupKey: true,
-          linqRecipientPhoneEncrypted: true,
-          linqRecipientPhoneLookupKey: true,
           member: {
             select: {
               billingStatus: true,
@@ -2100,17 +2122,6 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             },
           },
           memberId: true,
-          pendingLinqChatIdEncrypted: true,
-          pendingLinqChatLookupKey: true,
-          pendingLinqParticipantContactEncrypted: true,
-          pendingLinqParticipantContactKind: true,
-          pendingLinqParticipantContactLookupKey: true,
-          pendingLinqParticipantContactObservedAt: true,
-          pendingLinqRecipientPhoneEncrypted: true,
-          pendingLinqRecipientPhoneLookupKey: true,
-          replyAliasLookupKey: true,
-          telegramUserIdEncrypted: true,
-          telegramUserLookupKey: true,
         },
         where: {
           telegramUserLookupKey: {

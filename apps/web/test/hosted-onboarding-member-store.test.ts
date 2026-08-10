@@ -55,6 +55,7 @@ import {
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberIdByReplyAliasLookupKey,
   readHostedMemberRoutingState,
+  resolveHostedMemberCoreByTelegramUserId,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
   upsertHostedMemberPendingLinqBindingTx,
@@ -784,6 +785,59 @@ describe("hosted-member-store", () => {
         replyAliasLookupKey: true,
         telegramUserLookupKey: true,
         telegramUserIdEncrypted: true,
+      },
+    });
+  });
+
+  it("resolves Telegram sender core without selecting encrypted routing state", async () => {
+    const createdAt = new Date("2026-08-10T00:00:00.000Z");
+    const updatedAt = new Date("2026-08-10T01:00:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([{
+      member: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt,
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt,
+      },
+      memberId: "member_123",
+    }]);
+
+    await expect(resolveHostedMemberCoreByTelegramUserId({
+      prisma: {
+        hostedMemberRouting: { findMany },
+      } as never,
+      telegramUserId: "456",
+    })).resolves.toEqual({
+      core: {
+        billingStatus: HostedBillingStatus.active,
+        createdAt,
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt,
+      },
+      status: "found",
+    });
+
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      select: {
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
+        memberId: true,
+      },
+      where: {
+        telegramUserLookupKey: {
+          in: expect.arrayContaining([
+            expect.stringMatching(/^hbidx:telegram-user:v1:/u),
+          ]),
+        },
       },
     });
   });

@@ -58,6 +58,33 @@ export type HostedMemberRoutingByTelegramUserIdResolution =
       status: "missing";
     };
 
+export type HostedMemberCoreByTelegramUserIdResolution =
+  | {
+      core: HostedMemberRoutingLookup["core"];
+      status: "found";
+    }
+  | {
+      memberIds: string[];
+      status: "ambiguous";
+    }
+  | {
+      status: "missing";
+    };
+
+const hostedMemberTelegramCoreLookupSelect =
+  Prisma.validator<Prisma.HostedMemberRoutingSelect>()({
+    memberId: true,
+    member: {
+      select: {
+        billingStatus: true,
+        createdAt: true,
+        id: true,
+        suspendedAt: true,
+        updatedAt: true,
+      },
+    },
+  });
+
 export async function readHostedMemberIdByReplyAliasLookupKey(input: {
   prisma: HostedOnboardingReadClient;
   replyAliasLookupKey: string | null | undefined;
@@ -289,6 +316,52 @@ export async function resolveHostedMemberRoutingByTelegramUserId(input: {
       "telegramUserId",
       input.prisma,
     ),
+    status: "found",
+  };
+}
+
+/**
+ * Resolves Telegram sender authority without projecting encrypted routing
+ * state. Webhook admission consumes only member core fields and must not turn a
+ * blind-index lookup into private-field KMS work before or during planning.
+ */
+export async function resolveHostedMemberCoreByTelegramUserId(input: {
+  prisma: HostedOnboardingReadClient;
+  telegramUserId: string;
+}): Promise<HostedMemberCoreByTelegramUserIdResolution> {
+  const telegramUserLookupKeys = createHostedTelegramUserLookupKeyReadCandidates(
+    input.telegramUserId,
+  );
+  if (telegramUserLookupKeys.length === 0) {
+    return { status: "missing" };
+  }
+
+  const records = await input.prisma.hostedMemberRouting.findMany({
+    where: {
+      telegramUserLookupKey: {
+        in: telegramUserLookupKeys,
+      },
+    },
+    select: hostedMemberTelegramCoreLookupSelect,
+  });
+  const coreByMemberId = new Map<string, HostedMemberRoutingLookup["core"]>();
+  for (const record of records) {
+    if (!coreByMemberId.has(record.memberId)) {
+      coreByMemberId.set(record.memberId, record.member);
+    }
+  }
+  if (coreByMemberId.size === 0) {
+    return { status: "missing" };
+  }
+  if (coreByMemberId.size !== 1) {
+    return {
+      memberIds: [...coreByMemberId.keys()].sort(),
+      status: "ambiguous",
+    };
+  }
+
+  return {
+    core: [...coreByMemberId.values()][0]!,
     status: "found",
   };
 }

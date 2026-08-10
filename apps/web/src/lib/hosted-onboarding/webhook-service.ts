@@ -130,7 +130,7 @@ import {
   createHostedPhoneLookupKey,
 } from "./contact-privacy";
 import {
-  resolveHostedMemberRoutingByTelegramUserId,
+  resolveHostedMemberCoreByTelegramUserId,
 } from "./hosted-member-routing-store";
 import {
   isHostedMemberSuspended,
@@ -2012,7 +2012,7 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
   ) {
     return {};
   }
-  const memberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const memberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
   });
@@ -2021,12 +2021,12 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
   ) {
     return {};
   }
-  const preparedSenderMemberId = memberLookup.lookup.core.id;
-  if (isHostedMemberSuspended(memberLookup.lookup.core.suspendedAt)) {
+  const preparedSenderMemberId = memberLookup.core.id;
+  if (isHostedMemberSuspended(memberLookup.core.suspendedAt)) {
     return { preparedSenderMemberId };
   }
   const access = await readHostedRuntimeAiAccessDecision({
-    memberId: memberLookup.lookup.core.id,
+    memberId: memberLookup.core.id,
     now: new Date(),
     prisma: input.prisma,
   });

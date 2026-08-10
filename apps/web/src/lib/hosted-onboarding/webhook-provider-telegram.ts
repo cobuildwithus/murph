@@ -44,7 +44,7 @@ import {
   summarizeHostedTelegramWebhook,
 } from "./telegram";
 import {
-  resolveHostedMemberRoutingByTelegramUserId,
+  resolveHostedMemberCoreByTelegramUserId,
   upsertHostedMemberTelegramRoutingBindingTx,
 } from "./hosted-member-routing-store";
 import {
@@ -166,7 +166,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     }
   }
 
-  const existingMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const existingMemberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
   });
@@ -176,7 +176,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   let existingMember = existingMemberLookup.status === "found"
-    ? existingMemberLookup.lookup.core
+    ? existingMemberLookup.core
     : null;
 
   if (!existingMember) {
@@ -224,13 +224,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
   }
 
   await lockHostedMemberRow(input.prisma, existingMember.id);
-  const lockedMemberLookup = await resolveHostedMemberRoutingByTelegramUserId({
+  const lockedMemberLookup = await resolveHostedMemberCoreByTelegramUserId({
     prisma: input.prisma,
     telegramUserId: summary.senderTelegramUserId,
   });
   if (
     lockedMemberLookup.status !== "found"
-    || lockedMemberLookup.lookup.core.id !== existingMember.id
+    || lockedMemberLookup.core.id !== existingMember.id
   ) {
     return buildIgnoredTelegramWebhookPlan(
       lockedMemberLookup.status === "ambiguous"
@@ -238,7 +238,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         : "telegram-binding-changed",
     );
   }
-  existingMember = lockedMemberLookup.lookup.core;
+  existingMember = lockedMemberLookup.core;
 
   if (isHostedMemberSuspended(existingMember.suspendedAt)) {
     return buildIgnoredTelegramWebhookPlan("suspended-member");
