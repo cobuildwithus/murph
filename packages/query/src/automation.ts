@@ -68,6 +68,7 @@ export interface AutomationQueryRecord {
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
+  scheduleAnchorAt?: string;
   updatedAt: string;
   instructions: string;
   relativePath: string;
@@ -494,6 +495,7 @@ function parseAutomationRecord(
   ) {
     throw new Error("activeUntil must be after schedule.at for a one-shot automation.");
   }
+  const createdAt = requireStringValue(attributes.createdAt, "createdAt");
 
   return {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
@@ -512,7 +514,11 @@ function parseAutomationRecord(
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeTags(attributes.tags),
-    createdAt: requireStringValue(attributes.createdAt, "createdAt"),
+    createdAt,
+    scheduleAnchorAt: requireStringValue(
+      attributes.scheduleAnchorAt ?? createdAt,
+      "scheduleAnchorAt",
+    ),
     updatedAt: requireStringValue(attributes.updatedAt, "updatedAt"),
     instructions: normalizeInstructions(parsed.body),
     relativePath,

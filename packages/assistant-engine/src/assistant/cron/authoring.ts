@@ -164,6 +164,7 @@ export async function addAssistantCronJob(
     const created = await upsertAutomation(
       buildCanonicalAutomationUpsertInput({
         vault: resolvedCreation.vault,
+        now: resolvedCreation.now,
         automationId: existingAutomation?.automationId,
         automation: existingAutomation,
         title: resolvedCreation.name,
@@ -316,6 +317,7 @@ export async function upsertAssistantCronAutomation(
       buildCanonicalAutomationUpsertInput({
         activeUntil,
         vault: resolvedCreation.vault,
+        now: resolvedCreation.now,
         automationId: existingAutomation?.automationId,
         automation: existingAutomation,
         title: resolvedCreation.name,
@@ -369,6 +371,7 @@ export async function upsertAssistantCronAutomation(
         buildCanonicalAutomationUpsertInput({
           activeUntil,
           vault: resolvedCreation.vault,
+          now: resolvedCreation.now,
           automationId: source.automationId,
           automation: created.record,
           title: resolvedCreation.name,

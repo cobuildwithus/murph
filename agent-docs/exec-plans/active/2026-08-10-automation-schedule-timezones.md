@@ -13,11 +13,12 @@ Constraints/Assumptions:
 Key decisions:
 - Add an optional IANA `timeZone` only to recurring `cron` and `dailyLocal` canonical schedules. Omission continues to derive the vault timezone at projection time.
 - Persist the explicit timezone with the canonical automation schedule so DST and later vault-timezone changes cannot alter an explicitly named timezone.
+- Persist one `scheduleAnchorAt` timing-transition marker with the canonical automation. Core advances it only for schedule changes and reactivation; general edits must not reset cadence.
 - Extend the hosted automation result with the stored schedule, effective timezone, and projected next occurrence instead of relying on model-authored confirmation text.
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round-one findings are remediated locally; focused proof passes and the corrected exact head is being prepared for round two and CI.
+- ReviewGPT round two exposed and reproduced a review-induced cadence reset. The retrospective is recorded on PR #1546, the explicit timing-transition redesign is implemented locally, and final verification is in progress before round three.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -31,19 +32,22 @@ Done:
 - Rebased the candidate onto current `origin/main` and captured complete first provider-visible input at base `f71addfd9db4` and head `f66c55a20393` with the pinned real Codex App Server, hermetic Responses stub, `gpt-5.6-terra`, low reasoning, production code mode, synthetic ordinary direct/group scheduling turns, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. The canonical capture included `include`, `input`, `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and `tools`, normalized temporary paths, and excluded model selection, reasoning, storage, streaming, service-tier, account, cache, and transport metadata identically.
 - Direct initial input changed from 23,701 tokens / 109,497 bytes to 23,816 / 110,027 (+115, +0.4852%, +530 bytes); group changed from 20,173 / 93,946 to 20,288 / 94,476 (+115, +0.5701%, +530 bytes). The complete initial-request delta is the assembled automation timing guidance. The deferred automation description/schema payload itself grows from 4,027 tokens / 12,987 bytes to 4,451 / 14,990 (+424 / +2,003) when loaded, but that deferred payload is not present in the first request.
 - Opened PR #1546 at first-reviewed head `3e34b3de6dc0e00af0c2d50fc44cdf76d24521de` and ran the preliminary completion-specialist pass concurrently with final ReviewGPT round one and CI.
-- Accepted ReviewGPT's stale-state finding. Canonical recurring projection now reanchors to a newer source revision, and reactivation uses the latest consumed-success/failure/activation anchor rather than letting an old successful run override a new activation.
+- Accepted ReviewGPT's round-one stale-state requirement. Reactivation uses the latest consumed-success/failure/activation anchor rather than letting an old successful run override a new activation; round two then replaced the provisional broad source-revision heuristic with the explicit timing-transition marker recorded below.
 - Accepted ReviewGPT's response-semantics finding. The hosted result now exposes `nextOccurrenceAt`, a deliverable occurrence, instead of the scheduler's internal `nextRunAt`, which can represent a retry or finite-window archival wake. Pending, retrying, delivering, or running state is explicitly unverified; a verified null means there is no later deliverable occurrence.
 - Bounded hosted read-after-write proof to the exact persisted automation path plus the canonical runtime-state store. It does not scan local cron jobs, unrelated automations, or scheduled logs, and any post-write projection failure preserves the successful write while returning `timingVerified: false`.
 - Added fake-clock scheduler and hosted regressions for reactivation, exact source revisions, retries, finite cutoffs, missing vault-timezone provenance, and equality between hosted confirmation and scheduler projection. Added an opt-in actual-model journey for a foreign 9 PM wall clock and the unverified-success recovery language; its local execution is blocked only by the absent opt-in provider key.
 - Accepted ReviewGPT's generated-surface finding. Regenerated the canonical automation JSON schema and CLI skill hash, and added CLI acceptance/rejection coverage for valid and invalid timezone values.
 - Ratcheted the hosted runner bundle budget to the measured current bundle: 1,661,348-byte entry, 8,015,234-byte static payload, and 9,990,365-byte total, with bounded tolerances. Bundle assembly, CLI package shape, generated-schema checks, focused runtime suites, and package/workspace typechecks pass.
 - Updated the complete initial provider-input measurement from the immutable first-reviewed capture by deterministically replacing only the reviewed timing-confirmation fragment in the same serialized requests. The remediation adds 59 `o200k_harmony` tokens and 294 UTF-8 bytes to both initial runtimes: direct is now 23,875 tokens / 110,321 bytes versus base 23,701 / 109,497 (+174, +0.7341%, +824 bytes); group is 20,347 / 94,770 versus base 20,173 / 93,946 (+174, +0.8625%, +824 bytes). Prompt content is now 14,736 tokens / 72,233 bytes direct and 11,308 / 56,813 group. The current deferred automation tool serialization is 4,470 tokens / 15,097 bytes when loaded.
+- ReviewGPT round two proved the round-one source-revision heuristic was too broad: the 23-hour availability refresh advanced general `updatedAt`, so an `every` reminder longer than 23 hours could be postponed indefinitely. A production-shaped failing regression moved a 48-hour occurrence from `2026-07-31T12:00:00.000Z` to `2026-08-01T00:00:00.000Z` after an instructions-only refresh.
+- Recorded the mandatory same-mechanism retrospective on PR #1546 and rejected both deletion-only runtime anchoring and a duplicated runtime schedule fingerprint. The narrow redesign stores `scheduleAnchorAt` atomically with the existing automation source, falls back to `createdAt` for legacy documents, deletes general-`updatedAt` timing authority, preserves due/pending work across non-timing edits, and reanchors only schedule changes or reactivation.
+- Added core persistence, legacy query fallback, real availability-maintenance, due-before-claim, schedule-revision, and reactivation coverage. Focused core/query/contract/CLI tests, the 219-test assistant cron/availability set, and affected package typechecks pass.
 
 Now:
-- Run final local verification and parent diff review, then commit and push the ReviewGPT remediation head.
+- Run the complete affected suites, workspace typecheck, generated/package/bundle checks, and parent diff review; then commit and push the retrospective remediation head.
 
 Next:
-- Update PR #1546's intent/evidence contract, run sensitive full-snapshot ReviewGPT round two against the exact pushed head concurrently with CI, and resolve any remaining accepted finding until the latest substantive round passes.
+- Update PR #1546's intent/evidence contract, run sensitive full-snapshot ReviewGPT round three against the exact pushed head concurrently with CI, and resolve any remaining accepted finding until the latest substantive round passes.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.

@@ -382,6 +382,7 @@ export const automationFrontmatterSchema = withContractMetadata(
       continuityPolicy: z.enum(automationContinuityPolicyValues),
       tags: z.array(z.string().min(1)).optional(),
       createdAt: isoTimestampSchema(),
+      scheduleAnchorAt: isoTimestampSchema().optional(),
       updatedAt: isoTimestampSchema(),
     })
     .strict()

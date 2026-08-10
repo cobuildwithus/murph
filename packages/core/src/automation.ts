@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   AUTOMATION_DOC_TYPE,
   AUTOMATION_SCHEMA_VERSION,
@@ -118,6 +120,7 @@ export interface AutomationRecord {
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
+  scheduleAnchorAt?: string;
   updatedAt: string;
   instructions: string;
   relativePath: string;
@@ -754,6 +757,7 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
+    scheduleAnchorAt: record.scheduleAnchorAt ?? record.createdAt,
     updatedAt: record.updatedAt,
   };
 }
@@ -779,6 +783,8 @@ function parseAutomationRecord(
   const activeUntil = normalizeAutomationActiveUntil(attributes.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
 
+  const createdAt = requireString(attributes.createdAt, "createdAt", 64);
+
   return {
     schemaVersion: AUTOMATION_SCHEMA_VERSION,
     docType: AUTOMATION_DOC_TYPE,
@@ -796,7 +802,11 @@ function parseAutomationRecord(
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
-    createdAt: requireString(attributes.createdAt, "createdAt", 64),
+    createdAt,
+    scheduleAnchorAt: normalizeAutomationIsoTimestamp(
+      attributes.scheduleAnchorAt ?? createdAt,
+      "scheduleAnchorAt",
+    ),
     updatedAt: requireString(attributes.updatedAt, "updatedAt", 64),
     instructions: normalizeAutomationInstructions(parsedDocument.body),
     relativePath,
@@ -1579,6 +1589,13 @@ async function upsertAutomationWithLatestRegistry(
     : normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
+  const timingChanged =
+    existingRecord === null ||
+    !isDeepStrictEqual(existingRecord.schedule, schedule) ||
+    (existingRecord.status !== "active" && status === "active");
+  const scheduleAnchorAt = timingChanged
+    ? now
+    : existingRecord.scheduleAnchorAt ?? existingRecord.createdAt;
   const requestedTags = input.tags === undefined
     ? existingRecord?.tags ?? []
     : normalizeAutomationTags(input.tags);
@@ -1627,6 +1644,7 @@ async function upsertAutomationWithLatestRegistry(
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
     tags,
     createdAt,
+    scheduleAnchorAt,
     updatedAt,
     instructions: normalizeAutomationAvailabilityForSchedule({
       instructions: normalizeAutomationInstructions(input.instructions),
@@ -1675,6 +1693,7 @@ export function buildAutomationMarkdownPreview(
   input: AutomationScaffoldPayload,
 ): string {
   const slug = input.slug ?? normalizeSlug(undefined, "slug", input.title);
+  const now = new Date().toISOString();
   const schedule = normalizeAutomationSchedule(input.schedule);
   const activeUntil = normalizeAutomationActiveUntil(input.activeUntil);
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
@@ -1695,8 +1714,9 @@ export function buildAutomationMarkdownPreview(
     supportKind: normalizeAutomationSupportKind(input.supportKind),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: now,
+    scheduleAnchorAt: now,
+    updatedAt: now,
     instructions: normalizeAutomationAvailabilityForSchedule({
       instructions: normalizeAutomationInstructions(input.instructions),
       scheduleKind: schedule.kind,

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type {
@@ -48,6 +49,7 @@ type MockAutomationRecord = {
   } | null
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
+  scheduleAnchorAt?: string
   instructions: string
   route: AutomationRoute
   schedule: AutomationSchedule
@@ -481,6 +483,7 @@ beforeEach(() => {
       assistantTargetOverride?: MockAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
       instructions: string
+      now?: Date
       route: MockAutomationRecord['route']
       schedule: AutomationSchedule
       slug?: string
@@ -491,13 +494,18 @@ beforeEach(() => {
       vaultRoot: string
     }) => {
       const records = getVaultAutomationStore(input.vaultRoot)
-      const now = new Date().toISOString()
+      const now = (input.now ?? new Date()).toISOString()
       const existingIndex = input.automationId
         ? records.findIndex((record) => record.automationId === input.automationId)
         : -1
 
       if (existingIndex >= 0) {
         const existing = records[existingIndex] as MockAutomationRecord
+        const scheduleAnchorAt =
+          !isDeepStrictEqual(existing.schedule, input.schedule) ||
+            (existing.status !== 'active' && input.status === 'active')
+            ? now
+            : existing.scheduleAnchorAt ?? existing.createdAt
         const updated: MockAutomationRecord = {
           ...existing,
           activeUntil:
@@ -512,6 +520,7 @@ beforeEach(() => {
           instructions: input.instructions,
           route: { ...input.route },
           schedule: input.schedule,
+          scheduleAnchorAt,
           slug: input.slug,
           status: input.status,
           summary: input.summary,
@@ -532,6 +541,7 @@ beforeEach(() => {
         assistantTargetOverride: input.assistantTargetOverride ?? null,
         continuityPolicy: input.continuityPolicy ?? 'preserve',
         createdAt: now,
+        scheduleAnchorAt: now,
         instructions: input.instructions,
         relativePath: `bank/automations/${input.slug ?? automationId}.md`,
         route: { ...input.route },
@@ -901,6 +911,7 @@ describe('assistant cron runtime orchestration', () => {
       localTime: '22:00',
       timeZone: 'America/Chicago',
     }
+    source.scheduleAnchorAt = '2026-08-10T00:28:19.000Z'
     source.updatedAt = '2026-08-10T00:28:19.000Z'
 
     const revised = await getAssistantCronJob(vaultRoot, created.jobId)
@@ -916,6 +927,73 @@ describe('assistant cron runtime orchestration', () => {
     expect(claimed.runtimeState.state.pendingOccurrenceAt).toBe(
       '2026-08-10T03:00:00.000Z',
     )
+  })
+
+  it('preserves due work across non-timing edits and replaces it on schedule edits', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-timing-transition-pending-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const created = await upsertAssistantCronAutomation({
+      instructions: 'Send the scheduled summary.',
+      now: new Date('2026-08-01T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'timing-transition-pending',
+      title: 'Timing transition pending',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected timing-transition automation to be saved.')
+    }
+
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-10T02:00:01.000Z',
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-08-10T02:00:00.000Z',
+      },
+    }))
+    const source = findCanonicalAutomation(vaultRoot, created.jobId)
+    if (!source) {
+      throw new Error('Expected timing-transition automation source.')
+    }
+
+    source.instructions = 'Send the refreshed scheduled summary.'
+    source.updatedAt = '2026-08-10T02:05:00.000Z'
+    await expect(getAssistantCronJob(vaultRoot, created.jobId)).resolves
+      .toMatchObject({
+        state: { nextRunAt: '2026-08-10T02:00:00.000Z' },
+      })
+
+    source.schedule = {
+      kind: 'dailyLocal',
+      localTime: '22:00',
+      timeZone: 'America/Chicago',
+    }
+    source.scheduleAnchorAt = '2026-08-10T02:06:00.000Z'
+    source.updatedAt = '2026-08-10T02:06:00.000Z'
+    await expect(getAssistantCronJob(vaultRoot, created.jobId)).resolves
+      .toMatchObject({
+        state: { nextRunAt: '2026-08-10T03:00:00.000Z' },
+      })
   })
 
   it('separates deliverable occurrences from finite cutoffs and retry wakes', async () => {

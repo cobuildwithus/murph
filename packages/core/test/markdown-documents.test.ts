@@ -273,6 +273,62 @@ describe("markdown document primitives", () => {
     expect(updated.record.tags).toEqual(["sleep", "recovery"]);
   });
 
+  it("advances the schedule anchor only for timing transitions", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const createdAt = "2026-07-29T12:00:00.000Z";
+    const created = await upsertAutomation({
+      vaultRoot,
+      now: new Date(createdAt),
+      ...createAutomationPayload({
+        schedule: { everyMs: 48 * 60 * 60 * 1_000, kind: "every" },
+      }),
+    });
+    expect(created.record.scheduleAnchorAt).toBe(createdAt);
+
+    const wordingEdit = await patchAutomation({
+      vaultRoot,
+      instructions: "Use refreshed availability without changing cadence.",
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T00:00:00.000Z"),
+    });
+    expect(wordingEdit.record.scheduleAnchorAt).toBe(createdAt);
+    expect(wordingEdit.record.updatedAt).toBe("2026-07-30T00:00:00.000Z");
+
+    const scheduleEdit = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T01:00:00.000Z"),
+      schedule: { everyMs: 72 * 60 * 60 * 1_000, kind: "every" },
+    });
+    expect(scheduleEdit.record.scheduleAnchorAt).toBe(
+      "2026-07-30T01:00:00.000Z",
+    );
+
+    const paused = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T02:00:00.000Z"),
+      status: "paused",
+    });
+    expect(paused.record.scheduleAnchorAt).toBe(
+      "2026-07-30T01:00:00.000Z",
+    );
+
+    const reactivated = await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2026-07-30T03:00:00.000Z"),
+      status: "active",
+    });
+    expect(reactivated.record.scheduleAnchorAt).toBe(
+      "2026-07-30T03:00:00.000Z",
+    );
+    expect(parseFrontmatterDocument(reactivated.record.markdown).attributes)
+      .toMatchObject({
+        scheduleAnchorAt: "2026-07-30T03:00:00.000Z",
+      });
+  });
+
   it("round-trips activeUntil and archives only the current elapsed definition", async () => {
     const vaultRoot = await makeVaultRoot();
     const created = await upsertAutomation({

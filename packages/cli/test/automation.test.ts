@@ -193,6 +193,7 @@ const recurringTimeZoneAutomationRecord = {
   continuityPolicy: "preserve",
   tags: ["assistant", "scheduled"],
   createdAt: "2026-04-06T00:00:00.000Z",
+  scheduleAnchorAt: "2026-04-06T00:00:00.000Z",
   updatedAt: "2026-04-06T00:00:00.000Z",
   instructions: "Write the scheduled assistant instructions here.",
   relativePath: "bank/automations/timezone-weekly-check-in.md",
@@ -207,6 +208,7 @@ test("automation record schema accepts recurring schedules with a valid timeZone
     expression: "0 9 * * 1",
     timeZone: "Australia/Sydney",
   });
+  assert.equal(parsed.scheduleAnchorAt, "2026-04-06T00:00:00.000Z");
 });
 
 test("automation record schema rejects recurring schedules with an invalid timeZone", () => {
