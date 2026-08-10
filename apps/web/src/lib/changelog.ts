@@ -114,11 +114,6 @@ const RAW_CHANGELOG_EDITIONS = [
           "The request is one-shot and stays bound to the turn that asked for it. Murph refuses an ambiguous route before generation and never reports a card as delivered unless the sending service confirms it.",
         relevanceTags: ["contacts", "images", "imessage", "privacy"],
         sourcePullRequests: [1458, 1488],
-        tryIt: {
-          label: "Ask for a contact photo",
-          prompt:
-            "Make a warm, outdoorsy contact photo for you and send me the updated contact card.",
-        },
       },
       {
         id: "family-setup-from-group",
@@ -321,9 +316,9 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 5,
         title: "Ask for the exact experiment page",
         summary:
-          "When you explicitly ask to open or share a private custom experiment, Murph can return a signed link to that exact run instead of sending you to a generic list.",
+          "When you explicitly ask to open or share a private custom experiment, Murph can return a direct authenticated link to that exact run instead of sending you to a generic list.",
         details:
-          "Links are request-bound and private. Murph does not add experiment links to unrelated replies or treat the link as permission to disclose experiment data elsewhere.",
+          "Normal sign-in and account access still apply. Murph does not add experiment links to unrelated replies or treat the link as permission to disclose experiment data elsewhere.",
         relevanceTags: ["experiments", "links", "assistant", "privacy"],
         sourcePullRequests: [1448],
         tryIt: {

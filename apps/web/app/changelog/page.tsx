@@ -230,7 +230,7 @@ const VISUALS: Record<string, ReactNode> = {
     <DialogMock
       label="Private experiment"
       title="Morning light experiment"
-      body="Open the exact run you asked for. This link is bound to your private access."
+      body="Open the exact run you asked for. Normal sign-in and account access still apply."
       primary="Open experiment"
       secondary="Stay in chat"
     />

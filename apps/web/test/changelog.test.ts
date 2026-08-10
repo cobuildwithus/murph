@@ -293,6 +293,7 @@ describe("changelog registry", () => {
       sourcePullRequests: [1458, 1488],
       details: expect.stringContaining("bound to the turn that asked for it"),
     });
+    expect(items.get("generated-contact-card-avatar")?.tryIt).toBeUndefined();
     expect(items.get("family-setup-from-group")).toMatchObject({
       sourcePullRequests: [1527],
       details: expect.stringContaining(
@@ -335,6 +336,18 @@ describe("changelog registry", () => {
       sourcePullRequests: [1465],
       details: expect.stringContaining("excludes raw conversation wording"),
     });
+
+    const experimentLinks = items.get("custom-experiment-deep-links");
+    expect(experimentLinks).toMatchObject({
+      sourcePullRequests: [1448],
+      summary: expect.stringContaining("direct authenticated link"),
+      details: expect.stringContaining(
+        "Normal sign-in and account access still apply",
+      ),
+    });
+    expect(`${experimentLinks?.summary} ${experimentLinks?.details}`).not.toMatch(
+      /request-bound|signed link/iu,
+    );
   });
 
   it("keeps the August 5 through August 9 copy outcome-oriented", () => {
