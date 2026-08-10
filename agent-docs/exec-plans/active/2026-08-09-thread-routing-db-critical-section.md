@@ -161,6 +161,12 @@ Updated: 2026-08-09
   AT_RISK iMessage home line; a roster-only candidate must match a live pending
   setup or its existing recovery association. The authoritative transaction
   repeats every decision.
+- Parent review tightened the sender gate to the same runtime-access decision
+  used by the authoritative planner. Active billing therefore cannot trigger
+  speculative domain-envelope preparation after explicit health-data consent
+  withdrawal. Real webhook-entry regressions cover both that denial and a
+  degraded recipient line, while the eligible pending-contact case still
+  prepares once before `BEGIN`.
 - The round-4 documentation finding was accepted. Architecture and PR wording
   now name the moved thread-container cryptography precisely and disclose that
   pending-group setup transfer-payload opening remains inside the planner
@@ -170,6 +176,10 @@ Updated: 2026-08-09
   137 tests; the six affected crypto/Linq/Telegram routing files passed 390
   tests together; the PostgreSQL concurrency lane passed 9 tests; app-local
   typecheck and scoped lint passed; and `git diff --check` passed.
+- Follow-up parent proof after aligning runtime access: the Linq route and
+  mailbox-prewarm files passed 155 tests together; all six affected
+  non-PostgreSQL files passed 400 tests; app-local typecheck, scoped lint, and
+  `git diff --check` passed.
 
 ## Round 4 anomaly retrospective
 
