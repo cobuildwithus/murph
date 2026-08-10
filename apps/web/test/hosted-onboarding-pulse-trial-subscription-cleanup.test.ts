@@ -1,7 +1,9 @@
+import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import type Stripe from "stripe";
 
 import {
+  classifyHostedPulseTrialCandidateDisposition,
   retrieveHostedPulseTrialCleanupTarget,
 } from "@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup";
 
@@ -61,6 +63,47 @@ describe("retrieveHostedPulseTrialCleanupTarget", () => {
     })).resolves.toBe(subscription);
 
     expect(retrieve).toHaveBeenCalledWith(SUBSCRIPTION_ID);
+  });
+});
+
+
+
+describe("classifyHostedPulseTrialCandidateDisposition", () => {
+  it("keeps the exact current identity authoritative", () => {
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.incomplete,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: SUBSCRIPTION_ID,
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("current");
+  });
+
+  it("never lets a delayed second trial replace an existing identity", () => {
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.incomplete,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: "sub_existing",
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("loser");
+  });
+
+  it("allows only a clean pre-activation row to adopt the exact legacy event", () => {
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.incomplete,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: null,
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("eligible");
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: null,
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("loser");
   });
 });
 
