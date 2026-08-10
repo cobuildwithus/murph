@@ -9,7 +9,10 @@ import {
   buildHostedExecutionMemberActivatedWake,
   type HostedExecutionMemberChannels,
 } from "@murphai/hosted-execution";
-import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
+import {
+  getHostedCryptoDomainForLane,
+  parseSerializedHostedSecureBoxEnvelope,
+} from "@murphai/runtime-state";
 
 import {
   prepareHostedCryptoDomainRootCandidates,
@@ -17,6 +20,7 @@ import {
   provisionPreparedHostedCryptoDomainRootsTx,
   type PreparedHostedCryptoDomainRootCandidates,
   unwrapHostedDomainRootForWeb,
+  unwrapHostedDomainRootForWebByRootKeyId,
 } from "../hosted-crypto/domain-root-store";
 import {
   appendHostedMailboxEnvelopeTx,
@@ -81,6 +85,11 @@ export interface PreparedHostedThreadContainerDeliveryRoute {
   containerMemberId: string;
   deliveryRoute: HostedThreadDeliveryRouteV1;
   deliveryRouteEncrypted: string;
+  /**
+   * Exact ciphertext observed before `BEGIN`. Existing-route refresh requires
+   * this field; new-container preparation has no stored ciphertext to observe.
+   */
+  observedDeliveryRouteEncrypted: string | null;
 }
 
 export interface PreparedHostedThreadContainerCreation
@@ -113,6 +122,7 @@ export async function prepareHostedThreadContainerCreation(input: {
       accountLookupKey: input.accountLookupKey,
       channel: input.channel,
       containerMemberId,
+      observedDeliveryRouteEncrypted: null,
       preparedCryptoDomainRoots: cryptoDomainRoots,
       prisma: input.prisma,
       threadId: input.threadId,
@@ -137,6 +147,7 @@ export async function prepareHostedThreadContainerDeliveryRoute(input: {
   accountLookupKey: string | null | undefined;
   channel: HostedThreadDeliveryRouteChannel;
   containerMemberId: string;
+  observedDeliveryRouteEncrypted: string | null;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
   prisma: PrismaClient;
   threadId: string | number;
@@ -150,12 +161,15 @@ export async function prepareHostedThreadContainerDeliveryRoute(input: {
   const controlDomain = getHostedCryptoDomainForLane(
     "hosted-member-private-field",
   );
+  let activeRootKeyId: string | null;
   if (input.preparedCryptoDomainRoots) {
     await prewarmPreparedHostedCryptoDomainRootForWeb({
       domain: controlDomain,
       prepared: input.preparedCryptoDomainRoots,
       userId: containerMemberId,
     });
+    activeRootKeyId = input.preparedCryptoDomainRoots.get(controlDomain)
+      ?.rootKeyId ?? null;
   } else {
     const root = await unwrapHostedDomainRootForWeb({
       domain: controlDomain,
@@ -163,8 +177,15 @@ export async function prepareHostedThreadContainerDeliveryRoute(input: {
       retainFailureInScopedCache: true,
       userId: containerMemberId,
     });
+    activeRootKeyId = root.envelope.rootKeyId;
     root.rootKey.fill(0);
   }
+  await prewarmHostedThreadDeliveryRouteDecryptRoot({
+    activeRootKeyId,
+    containerMemberId,
+    deliveryRouteEncrypted: input.observedDeliveryRouteEncrypted,
+    prisma: input.prisma,
+  });
   const deliveryRoute = buildHostedThreadDeliveryRoute(input);
   const deliveryRouteEncrypted = await sealHostedThreadDeliveryRoute({
     containerMemberId,
@@ -175,6 +196,7 @@ export async function prepareHostedThreadContainerDeliveryRoute(input: {
     containerMemberId,
     deliveryRoute,
     deliveryRouteEncrypted,
+    observedDeliveryRouteEncrypted: input.observedDeliveryRouteEncrypted,
   };
 }
 
@@ -272,6 +294,18 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
       httpStatus: 409,
       message: "This external thread is already routed to another container.",
       retryable: false,
+    });
+  }
+
+  if (
+    row.deliveryRouteEncrypted
+      !== input.preparedDeliveryRoute.observedDeliveryRouteEncrypted
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      httpStatus: 503,
+      message: "Hosted thread delivery-route preparation is required.",
+      retryable: true,
     });
   }
 
@@ -743,6 +777,49 @@ async function tryOpenHostedThreadContainerDeliveryRoute(input: {
     }).includes(input.threadLookupKey);
 
   return matchesStoredAuthority ? deliveryRoute : null;
+}
+
+async function prewarmHostedThreadDeliveryRouteDecryptRoot(input: {
+  activeRootKeyId: string | null;
+  containerMemberId: string;
+  deliveryRouteEncrypted: string | null;
+  prisma: PrismaClient;
+}): Promise<void> {
+  const rootKeyId = readHostedThreadDeliveryRouteRootKeyId(
+    input.deliveryRouteEncrypted,
+  );
+  if (!rootKeyId || rootKeyId === input.activeRootKeyId) {
+    return;
+  }
+  const root = await unwrapHostedDomainRootForWebByRootKeyId({
+    domain: getHostedCryptoDomainForLane("hosted-member-private-field"),
+    prisma: input.prisma,
+    rootKeyId,
+    userId: input.containerMemberId,
+  });
+  root.rootKey.fill(0);
+}
+
+function readHostedThreadDeliveryRouteRootKeyId(
+  deliveryRouteEncrypted: string | null,
+): string | null {
+  if (!deliveryRouteEncrypted?.trim()) {
+    return null;
+  }
+  try {
+    const envelope = parseSerializedHostedSecureBoxEnvelope(
+      deliveryRouteEncrypted,
+    );
+    return envelope.domain === getHostedCryptoDomainForLane(
+        "hosted-member-private-field",
+      )
+      ? envelope.rootKeyId
+      : null;
+  } catch {
+    // Owning ingress repairs structurally corrupt ciphertext. Preserve that
+    // path without turning a parse failure into speculative KMS work.
+    return null;
+  }
 }
 
 async function createHostedThreadRouteRowTx(input: {

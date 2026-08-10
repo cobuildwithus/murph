@@ -126,6 +126,7 @@ async function buildPreparedThreadContainerCreation(input: {
       prisma: input.prisma,
       route: deliveryRoute,
     }),
+    observedDeliveryRouteEncrypted: null,
   };
 }
 
@@ -1591,6 +1592,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
         if (!currentThreadIdentityLookupKey || !currentThreadLookupKey) {
           throw new Error("Expected current Linq thread lookup keys.");
         }
+        const observedRoute = await activeFixture.observer.hostedThreadRoute
+          .findUniqueOrThrow({
+            select: { deliveryRouteEncrypted: true },
+            where: {
+              channel_threadIdentityLookupKey: {
+                channel: "linq",
+                threadIdentityLookupKey: activeFixture.threadIdentityLookupKey,
+              },
+            },
+          });
         const preparedRoute = buildHostedThreadDeliveryRoute({
           accountLookupKey: currentAccountLookupKey,
           channel: "linq",
@@ -1604,6 +1615,8 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             prisma: activeFixture.participantClient,
             route: preparedRoute,
           }),
+          observedDeliveryRouteEncrypted:
+            observedRoute.deliveryRouteEncrypted,
         };
 
         rekeyTransaction = activeFixture.participantClient.$transaction(async (tx) => {

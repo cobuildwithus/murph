@@ -381,6 +381,7 @@ vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn().mockResolvedValue(undefined),
   provisionPreparedHostedCryptoDomainRootsTx: vi.fn(async () => undefined),
   unwrapHostedDomainRootForWeb: vi.fn(async () => ({
+    envelope: { rootKeyId: "root-control-active" },
     rootKey: new Uint8Array(32),
   })),
 }));

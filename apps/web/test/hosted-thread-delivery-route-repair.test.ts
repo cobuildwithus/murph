@@ -8,6 +8,7 @@ import {
   resolveHostedAssistantNotificationDestination,
 } from "../src/lib/hosted-routing/assistant-notification-destination";
 import {
+  prepareHostedThreadContainerDeliveryRoute,
   refreshHostedThreadContainerDeliveryRouteTx,
 } from "../src/lib/hosted-routing/thread-container-service";
 import {
@@ -19,11 +20,29 @@ import {
   type HostedThreadDeliveryRouteChannel,
   type HostedThreadDeliveryRouteV1,
 } from "../src/lib/hosted-routing/thread-delivery-route";
+import {
+  setHostedSecureBoxStringTestCodecForTests,
+} from "../src/lib/hosted-crypto/secure-box";
 
 const repairMocks = vi.hoisted(() => ({
   assertHostedThreadRouteEgressAuthority: vi.fn(),
   demoteHostedMemberLinqGroupChatBindingsTx: vi.fn(),
 }));
+const rootMocks = vi.hoisted(() => ({
+  unwrapActive: vi.fn(),
+  unwrapByRootKeyId: vi.fn(),
+}));
+
+vi.mock("../src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/lib/hosted-crypto/domain-root-store")
+  >();
+  return {
+    ...actual,
+    unwrapHostedDomainRootForWeb: rootMocks.unwrapActive,
+    unwrapHostedDomainRootForWebByRootKeyId: rootMocks.unwrapByRootKeyId,
+  };
+});
 
 vi.mock("../src/lib/hosted-routing/thread-route-store", async (importOriginal) => {
   const actual = await importOriginal<
@@ -74,6 +93,8 @@ describe("hosted thread delivery-route repair", () => {
     repairMocks.demoteHostedMemberLinqGroupChatBindingsTx.mockResolvedValue({
       mailboxConsumedAt: null,
     });
+    rootMocks.unwrapActive.mockReset();
+    rootMocks.unwrapByRootKeyId.mockReset();
   });
 
   it.each(CORRUPT_ROUTE_FIXTURES)(
@@ -91,6 +112,7 @@ describe("hosted thread delivery-route repair", () => {
       });
       const preparedDeliveryRoute = await prepareDeliveryRoute({
         containerMemberId: fixture.containerMemberId,
+        observedDeliveryRouteEncrypted: harness.readRow().deliveryRouteEncrypted,
         prisma: harness.prisma,
         route: expectedRoute,
       });
@@ -150,6 +172,7 @@ describe("hosted thread delivery-route repair", () => {
     });
     const preparedDeliveryRoute = await prepareDeliveryRoute({
       containerMemberId: "linq-container",
+      observedDeliveryRouteEncrypted: harness.readRow().deliveryRouteEncrypted,
       prisma: harness.prisma,
       route: expectedRoute,
     });
@@ -173,10 +196,190 @@ describe("hosted thread delivery-route repair", () => {
       harness,
     });
   });
+
+  it.each(CORRUPT_ROUTE_FIXTURES)(
+    "prewarms a decrypt-only $channel route root before the route lock",
+    async (fixture) => {
+      const rootKeys = new Map([
+        ["root-control-c1", new Uint8Array(32).fill(1)],
+        ["root-control-c2", new Uint8Array(32).fill(2)],
+      ]);
+      const warmedRootKeyIds = new Set<string>();
+      const kmsMisses: Array<{ rootKeyId: string; transactionOpen: boolean }> = [];
+      let activeRootKeyId = "root-control-c1";
+      let transactionOpen = false;
+      const unwrap = (rootKeyId: string) => {
+        const rootKey = rootKeys.get(rootKeyId);
+        if (!rootKey) {
+          throw new Error("Expected a configured test control root.");
+        }
+        if (!warmedRootKeyIds.has(rootKeyId)) {
+          warmedRootKeyIds.add(rootKeyId);
+          kmsMisses.push({ rootKeyId, transactionOpen });
+        }
+        return {
+          envelope: { rootKeyId },
+          rootKey: rootKey.slice(),
+        };
+      };
+      rootMocks.unwrapActive.mockImplementation(async () =>
+        unwrap(activeRootKeyId)
+      );
+      rootMocks.unwrapByRootKeyId.mockImplementation(async ({ rootKeyId }) =>
+        unwrap(rootKeyId)
+      );
+      setHostedSecureBoxStringTestCodecForTests(null);
+      try {
+        const route = buildHostedThreadDeliveryRoute(fixture);
+        const storedCiphertext = await sealHostedThreadDeliveryRoute({
+          containerMemberId: fixture.containerMemberId,
+          route,
+        });
+        activeRootKeyId = "root-control-c2";
+        warmedRootKeyIds.clear();
+        kmsMisses.length = 0;
+
+        const harness = createRepairHarness({
+          accountLookupKey: fixture.accountLookupKey,
+          channel: fixture.channel,
+          containerMemberId: fixture.containerMemberId,
+          deliveryRouteEncrypted: storedCiphertext,
+          pendingGroupReactionContextEncrypted: null,
+          ...requireRouteLookupKeys(fixture),
+        });
+        harness.prisma.$executeRaw.mockImplementation(async () => {
+          transactionOpen = true;
+          return 0;
+        });
+        const preparedDeliveryRoute =
+          await prepareHostedThreadContainerDeliveryRoute({
+            accountLookupKey: fixture.accountLookupKey,
+            channel: fixture.channel,
+            containerMemberId: fixture.containerMemberId,
+            observedDeliveryRouteEncrypted: storedCiphertext,
+            prisma: harness.prisma as never,
+            threadId: fixture.threadId,
+          });
+        await expect(refreshHostedThreadContainerDeliveryRouteTx({
+          accountLookupKey: fixture.accountLookupKey,
+          ...(fixture.channel === "linq"
+            ? { accountLookupKeys: [fixture.accountLookupKey] }
+            : {}),
+          preparedDeliveryRoute,
+          prisma: harness.prisma as never,
+          route: buildRouteSnapshot(harness.readRow()) as never,
+          threadId: fixture.threadId,
+        })).resolves.toMatchObject({ deliveryRoute: route });
+
+        expect(kmsMisses).toEqual([
+          { rootKeyId: "root-control-c2", transactionOpen: false },
+          { rootKeyId: "root-control-c1", transactionOpen: false },
+        ]);
+        expect(rootMocks.unwrapByRootKeyId).toHaveBeenCalledWith(
+          expect.objectContaining({ rootKeyId: "root-control-c1" }),
+        );
+      } finally {
+        restoreHostedSecureBoxTestCodec();
+      }
+    },
+  );
+
+  it("does not request a second root prewarm when stored material uses the active root", async () => {
+    const fixture = CORRUPT_ROUTE_FIXTURES[0];
+    const rootKeyMaterial = new Uint8Array(32).fill(3);
+    rootMocks.unwrapActive.mockImplementation(async () => ({
+      envelope: { rootKeyId: "root-control-active" },
+      rootKey: rootKeyMaterial.slice(),
+    }));
+    rootMocks.unwrapByRootKeyId.mockImplementation(async () => ({
+      envelope: { rootKeyId: "root-control-active" },
+      rootKey: rootKeyMaterial.slice(),
+    }));
+    setHostedSecureBoxStringTestCodecForTests(null);
+    try {
+      const storedCiphertext = await sealHostedThreadDeliveryRoute({
+        containerMemberId: fixture.containerMemberId,
+        route: buildHostedThreadDeliveryRoute(fixture),
+      });
+      vi.clearAllMocks();
+      rootMocks.unwrapActive.mockImplementation(async () => ({
+        envelope: { rootKeyId: "root-control-active" },
+        rootKey: rootKeyMaterial.slice(),
+      }));
+
+      await expect(prepareHostedThreadContainerDeliveryRoute({
+        accountLookupKey: fixture.accountLookupKey,
+        channel: fixture.channel,
+        containerMemberId: fixture.containerMemberId,
+        observedDeliveryRouteEncrypted: storedCiphertext,
+        prisma: createRepairHarness({
+          accountLookupKey: fixture.accountLookupKey,
+          channel: fixture.channel,
+          containerMemberId: fixture.containerMemberId,
+          deliveryRouteEncrypted: storedCiphertext,
+          pendingGroupReactionContextEncrypted: null,
+          ...requireRouteLookupKeys(fixture),
+        }).prisma as never,
+        threadId: fixture.threadId,
+      })).resolves.toMatchObject({ observedDeliveryRouteEncrypted: storedCiphertext });
+
+      // This focused unit has no request-scoped root cache, so sealing calls
+      // the active-root helper again. The important branch proof is that
+      // preparation does not separately request that same id as historical.
+      expect(rootMocks.unwrapActive).toHaveBeenCalledTimes(2);
+      expect(rootMocks.unwrapByRootKeyId).not.toHaveBeenCalled();
+    } finally {
+      restoreHostedSecureBoxTestCodec();
+    }
+  });
+
+  it("requests fresh preparation before demotion when ciphertext changes under the lock", async () => {
+    const fixture = CORRUPT_ROUTE_FIXTURES[0];
+    const observedCiphertext = "observed-route-ciphertext";
+    const harness = createRepairHarness({
+      accountLookupKey: fixture.accountLookupKey,
+      channel: fixture.channel,
+      containerMemberId: fixture.containerMemberId,
+      deliveryRouteEncrypted: observedCiphertext,
+      pendingGroupReactionContextEncrypted: "pending-reaction",
+      ...requireRouteLookupKeys(fixture),
+    });
+    harness.prisma.$executeRaw.mockImplementation(async () => {
+      harness.setDeliveryRouteEncrypted("winning-route-ciphertext");
+      return 0;
+    });
+    const preparedDeliveryRoute = await prepareDeliveryRoute({
+      containerMemberId: fixture.containerMemberId,
+      observedDeliveryRouteEncrypted: observedCiphertext,
+      prisma: harness.prisma,
+      route: buildHostedThreadDeliveryRoute(fixture),
+    });
+
+    await expect(refreshHostedThreadContainerDeliveryRouteTx({
+      accountLookupKey: fixture.accountLookupKey,
+      accountLookupKeys: [fixture.accountLookupKey],
+      preparedDeliveryRoute,
+      prisma: harness.prisma as never,
+      route: buildRouteSnapshot({
+        ...harness.readRow(),
+        deliveryRouteEncrypted: observedCiphertext,
+      }) as never,
+      threadId: fixture.threadId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+      retryable: true,
+    });
+
+    expect(
+      repairMocks.demoteHostedMemberLinqGroupChatBindingsTx,
+    ).not.toHaveBeenCalled();
+    expect(harness.update).not.toHaveBeenCalled();
+  });
 });
 
 async function prepareDeliveryRoute(input: {
   containerMemberId: string;
+  observedDeliveryRouteEncrypted: string | null;
   prisma: ReturnType<typeof createRepairHarness>["prisma"];
   route: HostedThreadDeliveryRouteV1;
 }) {
@@ -188,6 +391,7 @@ async function prepareDeliveryRoute(input: {
       prisma: input.prisma as never,
       route: input.route,
     }),
+    observedDeliveryRouteEncrypted: input.observedDeliveryRouteEncrypted,
   };
 }
 
@@ -247,6 +451,9 @@ function createRepairHarness(input: MutableHostedThreadRouteRow) {
   return {
     prisma,
     readRow: () => row,
+    setDeliveryRouteEncrypted(value: string | null) {
+      row.deliveryRouteEncrypted = value;
+    },
     update,
   };
 }
@@ -256,6 +463,7 @@ function buildRouteSnapshot(row: MutableHostedThreadRouteRow) {
     channel: row.channel,
     containerMemberId: row.containerMemberId,
     deliveryRouteState: {
+      deliveryRouteEncrypted: row.deliveryRouteEncrypted,
       deliveryRouteEncryptedPresent:
         typeof row.deliveryRouteEncrypted === "string"
         && row.deliveryRouteEncrypted.length > 0,
@@ -328,6 +536,41 @@ async function expectRepairedRoute(input: {
         target: input.expectedRoute.threadId,
       },
       threadIsDirect: false,
+    },
+  });
+}
+
+function restoreHostedSecureBoxTestCodec(): void {
+  setHostedSecureBoxStringTestCodecForTests({
+    decrypt(input) {
+      const decoded = JSON.parse(
+        Buffer.from(
+          input.value.replace(/^hsb-test:/u, ""),
+          "base64url",
+        ).toString("utf8"),
+      ) as {
+        lane?: string;
+        scope?: string;
+        userId?: string;
+        value?: string;
+      };
+      if (
+        decoded.lane !== input.lane
+        || decoded.scope !== input.scope
+        || decoded.userId !== input.userId
+        || typeof decoded.value !== "string"
+      ) {
+        throw new Error("Hosted secure-box test codec metadata mismatch.");
+      }
+      return decoded.value;
+    },
+    encrypt(input) {
+      return `hsb-test:${Buffer.from(JSON.stringify({
+        lane: input.lane,
+        scope: input.scope,
+        userId: input.userId,
+        value: input.value,
+      }), "utf8").toString("base64url")}`;
     },
   });
 }

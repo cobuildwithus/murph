@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
       accountLookupKey: string;
       channel: "telegram";
       containerMemberId: string;
+      observedDeliveryRouteEncrypted: string | null;
       threadId: string;
     }) => ({
       containerMemberId: input.containerMemberId,
@@ -65,6 +66,7 @@ const mocks = vi.hoisted(() => {
         threadId: input.threadId,
       },
       deliveryRouteEncrypted: "prepared-telegram-delivery-route",
+      observedDeliveryRouteEncrypted: input.observedDeliveryRouteEncrypted,
     })),
     refreshHostedThreadContainerDeliveryRouteTx:
       vi.fn<HostedThreadDeliveryRouteRefresher>(async () => ({
@@ -583,6 +585,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       channel: "telegram" as const,
       containerMemberId: "member_telegram_group_winner",
       deliveryRouteState: {
+        deliveryRouteEncrypted: "winner-delivery-route",
         deliveryRouteEncryptedPresent: true,
         threadIdentityLookupKey,
         threadLookupKey,
@@ -645,6 +648,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         accountLookupKey: "telegram:bot",
         channel: "telegram",
         containerMemberId: winnerRoute.containerMemberId,
+        observedDeliveryRouteEncrypted: "winner-delivery-route",
         prisma,
         threadId: "-100123",
       });
@@ -1258,6 +1262,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         prisma: prisma as never,
         route: preparedRoute,
       }),
+      observedDeliveryRouteEncrypted: routeRow.deliveryRouteEncrypted,
     });
 
     await expect(handleHostedOnboardingTelegramWebhook({

@@ -1947,6 +1947,8 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
         accountLookupKey,
         channel: "linq",
         containerMemberId: threadRoute.containerMemberId,
+        observedDeliveryRouteEncrypted:
+          threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
         prisma: input.prisma,
         threadId: context.summary.chatId,
       }),
@@ -2054,6 +2056,8 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
       accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
       channel: "telegram",
       containerMemberId: threadRoute.containerMemberId,
+      observedDeliveryRouteEncrypted:
+        threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
       prisma: input.prisma,
       threadId: message.threadId,
     }),

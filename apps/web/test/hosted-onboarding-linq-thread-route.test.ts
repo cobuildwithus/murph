@@ -190,6 +190,7 @@ vi.mock("../src/lib/hosted-crypto/domain-root-store", async (importOriginal) => 
     provisionPreparedHostedCryptoDomainRootsTx: vi.fn(async () => undefined),
     provisionHostedCryptoDomainRootsForUserTx: vi.fn(),
     unwrapHostedDomainRootForWeb: vi.fn(async () => ({
+      envelope: { rootKeyId: "root-control-active" },
       rootKey: new Uint8Array(32),
     })),
   };
@@ -1644,10 +1645,18 @@ async function prepareThreadDeliveryRouteForTest(input: {
   accountLookupKey: string;
   channel: "linq" | "telegram";
   containerMemberId: string;
+  observedDeliveryRouteEncrypted?: string | null;
   prisma: Prisma.TransactionClient;
   threadId: string;
 }) {
   const deliveryRoute = buildHostedThreadDeliveryRoute(input);
+  const observedDeliveryRouteEncrypted =
+    input.observedDeliveryRouteEncrypted !== undefined
+      ? input.observedDeliveryRouteEncrypted
+      : readFixtureDeliveryRouteEncrypted({
+          containerMemberId: input.containerMemberId,
+          prisma: input.prisma,
+        });
   return {
     containerMemberId: input.containerMemberId,
     deliveryRoute,
@@ -1655,7 +1664,24 @@ async function prepareThreadDeliveryRouteForTest(input: {
       containerMemberId: input.containerMemberId,
       deliveryRoute,
     }),
+    observedDeliveryRouteEncrypted,
   };
+}
+
+function readFixtureDeliveryRouteEncrypted(input: {
+  containerMemberId: string;
+  prisma: Prisma.TransactionClient;
+}): string | null {
+  if (
+    "readDeliveryRouteEncrypted" in input.prisma
+    && typeof input.prisma.readDeliveryRouteEncrypted === "function"
+  ) {
+    const value = input.prisma.readDeliveryRouteEncrypted(
+      input.containerMemberId,
+    );
+    return typeof value === "string" ? value : null;
+  }
+  return null;
 }
 
 async function prepareThreadContainerCreationForTest(input: {
