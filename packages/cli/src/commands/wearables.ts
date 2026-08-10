@@ -41,6 +41,15 @@ const wearableSleepPatternWindowDaysOptionSchema = z
   .describe(
     'Calendar-day sleep-pattern window. Defaults to 28 days and may be at most 366.',
   )
+const personalPatternWindowDaysOptionSchema = z
+  .number()
+  .int()
+  .min(28)
+  .max(366)
+  .default(120)
+  .describe(
+    'Calendar-day window for matched personal patterns. Defaults to 120 days.',
+  )
 const repeatableProviderOptionSchema = z
   .array(z.string().min(1))
   .optional()
@@ -336,6 +345,57 @@ export const wearablesSleepPatternResultSchema = z.object({
   summary: wearableSleepPatternSummarySchema,
 })
 
+const personalPatternStageSchema = z.enum([
+  'insufficient',
+  'no_clear_pattern',
+  'new_clue',
+  'seen_again',
+  'worth_testing',
+])
+
+const personalPatternReportSchema = z.object({
+  asOfDate: localDateSchema,
+  cells: z.array(z.object({
+    comparisonDays: z.number().int().nonnegative(),
+    comparisonMean: z.number().nullable(),
+    delta: z.number().nullable(),
+    deltaPercent: z.number().nullable(),
+    direction: z.enum(['higher', 'lower', 'flat']),
+    exposedDays: z.number().int().nonnegative(),
+    exposedMean: z.number().nullable(),
+    factorId: z.string().min(1),
+    firstExposedDate: localDateSchema.nullable(),
+    lastExposedDate: localDateSchema.nullable(),
+    outcomeId: z.string().min(1),
+    repeatedDirection: z.boolean(),
+    stage: personalPatternStageSchema,
+  })),
+  factors: z.array(z.object({
+    id: z.string().min(1),
+    kind: z.enum(['activity', 'intervention', 'mixed']),
+    label: z.string().min(1),
+    observedDays: z.number().int().nonnegative(),
+  })),
+  lagDays: z.literal(1),
+  notes: z.array(z.string()),
+  outcomes: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    unit: z.string(),
+  })),
+  repeatableCellCount: z.number().int().nonnegative(),
+  testedCellCount: z.number().int().nonnegative(),
+  windowDays: z.number().int().min(28).max(366),
+})
+
+export const wearablesPersonalPatternsResultSchema = z.object({
+  filters: z.object({
+    date: localDateSchema.nullable(),
+    windowDays: z.number().int().min(28).max(366),
+  }),
+  report: personalPatternReportSchema,
+})
+
 const wearableMetricSummaryKindSchema = z.enum([
   'activity',
   'bodyState',
@@ -444,6 +504,7 @@ type WearablesMetricLatestResult = z.infer<typeof wearablesMetricLatestResultSch
 type WearablesMetricTrendResult = z.infer<typeof wearablesMetricTrendResultSchema>
 type WearablesDriftResult = z.infer<typeof wearablesDriftResultSchema>
 type WearablesSleepPatternResult = z.infer<typeof wearablesSleepPatternResultSchema>
+type WearablesPersonalPatternsResult = z.infer<typeof wearablesPersonalPatternsResultSchema>
 
 interface WearablesLatestInput {
   requestId: string | null
@@ -465,6 +526,13 @@ interface WearablesDriftInput extends WearablesLatestInput {
 
 interface WearablesSleepPatternInput extends WearablesLatestInput {
   timeZone?: string
+  windowDays?: number
+}
+
+interface WearablesPersonalPatternsInput {
+  requestId: string | null
+  vault: string
+  date?: string
   windowDays?: number
 }
 
@@ -547,6 +615,15 @@ function withWearableSleepPatternOptions() {
       .optional()
       .describe('Optional IANA fallback for nights whose provider did not report a canonical time zone. The vault time zone is used when omitted.'),
     windowDays: wearableSleepPatternWindowDaysOptionSchema,
+  })
+}
+
+function withPersonalPatternOptions() {
+  return withBaseOptions({
+    date: localDateSchema
+      .optional()
+      .describe('Optional last action date in YYYY-MM-DD form. Defaults to today.'),
+    windowDays: personalPatternWindowDaysOptionSchema,
   })
 }
 
@@ -926,6 +1003,40 @@ export function registerWearablesCommands(
       })
 
       return wearablesDriftResultSchema.parse(withoutWearableVaultPath(result))
+    },
+  })
+
+  wearables.command('patterns', {
+    description:
+      'Compare repeated activity and intervention days with next-day sleep and recovery outcomes.',
+    args: emptyArgsSchema,
+    options: withPersonalPatternOptions(),
+    examples: [
+      {
+        description: 'Inspect matched personal patterns from the last 120 days.',
+        options: {
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Treat these links as clues, not proof. A stage shows how often the same direction appeared and whether it is worth a small test.',
+    output: wearablesPersonalPatternsResultSchema,
+    async run({ options }) {
+      const showPersonalPatterns = requireAdditiveWearablesQueryMethod<
+        WearablesPersonalPatternsResult,
+        WearablesPersonalPatternsInput
+      >(services.query, 'showPersonalPatterns')
+      const result = await showPersonalPatterns({
+        vault: options.vault,
+        requestId: requestIdFromOptions(options),
+        date: options.date,
+        windowDays: options.windowDays,
+      })
+
+      return wearablesPersonalPatternsResultSchema.parse(
+        withoutWearableVaultPath(result),
+      )
     },
   })
 
