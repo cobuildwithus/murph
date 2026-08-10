@@ -470,25 +470,23 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(
       /`read_current` can return `status="none"`[\s\S]*not that\s+someone must link an external workspace[\s\S]*call `offer_access`[\s\S]*trusted host creates the\s+hosted group record/u,
     )
-    expect(raw).toContain('ordinary `murph.automation action="save"` flow')
-    expect(raw).toMatch(
-      /`delivery` \(`current_chat` or `group_email`\)/u,
-    )
+    expect(raw).toContain('with its ordinary `murph.automation` flow')
+    expect(raw).toContain('strict JSON object with the chosen delivery')
     expect(raw).toMatch(/Chat delivery must not require or solicit email\s+sharing\./u)
     expect(raw).toContain('do not include `group-email.v0`')
-    expect(raw).toContain('The slug is a lookup key, not authority')
-    expect(raw).toMatch(/use ordinary automation show\/patch or save/u)
-    expect(raw).toContain('Preserve the current route and paused status')
+    expect(raw).toMatch(/The slug is a\s+lookup key, not authority/u)
+    expect(raw).toMatch(/Save only when no recipe exists;\s+patch every existing recipe/u)
+    expect(raw).toContain('Preserve its route, paused status, schedule, and explicit')
     expect(raw).toMatch(
-      /chosen schedule becomes the cron expression; `0 9 \* \* 0` is the Sunday 9am\s+default/u,
+      /chosen schedule becomes the ordinary cron schedule object with the cron\s+expression and exact validated IANA `timeZone`; `0 9 \* \* 0` is the Sunday 9am\s+default/u,
     )
     expect(raw).toMatch(
       /until\s+`murph\.automation` returns success[\s\S]*never\s+turn a failed action into a confirmation/u,
     )
     expect(raw).toContain('next natural cron occurrence')
     expect(raw).toContain('Never create an')
-    expect(raw).toContain('Never create an immediate `at` automation')
-    expect(raw).toContain('never call `murph.group action="send_email"` right after setup')
+    expect(raw).toMatch(/Never create an\s+immediate `at` automation/u)
+    expect(raw).toMatch(/never call `murph.group action="send_email"`\s+right after setup/u)
     expect(raw).toMatch(
       /For current-chat delivery, confirm the shared scopes and destination\s+without asking for email access/u,
     )
@@ -618,25 +616,25 @@ describe('assistant skill assets', () => {
       'every scheduled group-health-newsletter run',
     )
     const raw = await readSkillFile(newsletterSkill)
-    expect(raw).toContain('`murph.automation` tool with `action="save"`')
-    expect(raw).toContain('(`current_chat` or `group_email`)')
+    expect(raw).toContain('Use `action="save"` only when no')
+    expect(raw).toContain('- delivery: `current_chat` or `group_email`;')
     expect(raw).toContain('## Compose each edition')
-    expect(raw).toContain('Usually include 6–12 useful stats')
+    expect(raw).toContain('Usually use 6–12 useful numbers')
     expect(raw).toContain('Cross-person comparisons are welcome')
     expect(raw).toMatch(/currently eligible email\s+recipients/u)
     expect(raw).toContain('Use only the returned eligible `members`')
     expect(raw).toContain('Never run another group')
     expect(raw).toContain('Never expose dashboard language')
-    expect(raw).toMatch(/never as a\s+daily or weekly exercise total/u)
-    expect(raw).toContain('seven local calendar days before today')
-    expect(raw).toMatch(/Exclude today and\s+anything older than that rolling window/u)
-    expect(raw).toMatch(/only when every compared\s+date set is identical/u)
+    expect(raw).toMatch(/never\s+as a daily or weekly exercise total/u)
+    expect(raw).toContain('seven local calendar days before the authoritative reference date')
+    expect(raw).toMatch(/Exclude\s+the open current day and older records/u)
+    expect(raw).toMatch(/only when every\s+compared date set is identical/u)
     expect(raw).toMatch(
-      /When coverage differs, report scoped values or an\s+unranked pattern\./u,
+      /When coverage differs, report scoped values or\s+an unranked pattern\./u,
     )
     expect(raw).toContain('`group-chat`\'s **Shared fact limits**')
     expect(raw).toMatch(/about 30 minutes of movement a\s+day/u)
-    expect(raw).toContain('Keep them separate')
+    expect(raw).toContain('Keep broad movement and workout duration separate')
     expect(raw).toContain('Do not use `workout-count` to claim a weekly workout total')
     expect(raw).toContain('Do not claim a prior-week change')
     expect(raw).toContain('{"kind":"skip","privateSummary":"..."}')
@@ -646,16 +644,15 @@ describe('assistant skill assets', () => {
     expect(raw).toMatch(/do not compose or (?:send|call\s+`send_email`)/u)
     expect(raw).toContain('For `current_chat`, do not use the `group_email` audience')
     expect(raw).toContain('`murph.group action="read_shared"` once')
-    expect(raw).toContain('After any `send_email` result')
-    expect(raw).toContain('do not retry `send_email` in the same turn')
+    expect(raw).toMatch(/After any `send_email` result, do not retry in the same turn/u)
     expect(raw).toContain('trusted host revalidates membership, consent, grants')
     expect(raw).toMatch(/Do not invent sync, permission, or device explanations/u)
     expect(raw).not.toContain('direct tool evidence')
     expect(raw).toContain('https://www.withmurph.ai/settings?addEmail=true')
     expect(raw).not.toContain('`/settings?addEmail=true`')
-    expect(raw).toContain('### Example 1: close race')
-    expect(raw).toContain('### Example 2: opted-in roast')
-    expect(raw).not.toContain('### Example 3:')
+    expect(raw).toMatch(/#{3,4} Example 1: close race/u)
+    expect(raw).toMatch(/#{3,4} Example 2: opted-in roast/u)
+    expect(raw).not.toMatch(/#{3,4} Example 3:/u)
     expect(raw).toContain('<Exact Newsletter Name> — <specific hook>')
     expect(raw).not.toContain('286 active minutes')
     expect(raw).not.toContain('17 workouts')
