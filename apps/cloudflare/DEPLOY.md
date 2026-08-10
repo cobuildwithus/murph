@@ -1314,6 +1314,37 @@ The gradual container rollout keeps the production `RunnerContainer` `rollout_ac
 Worker replacement is checkpoint-safe at the runtime fence rather than through rollout timing alone. The snapshot-session handshake has one six-second total deadline; the runtime starts its first exact durable upload-session heartbeat immediately after that response, then keeps serialized attempts on a two-second start-to-start cadence throughout publication. `UserRunner` retains the fence and retries after one second only for that exact attempt and lease generation while its heartbeat is less than 10 seconds old and completion is absent. Successful foreground preemption bypasses this preservation and stops heartbeat liveness before detached cleanup. After Web accepts the checkpoint, the runtime stops heartbeating and best-effort marks completion; marker failure falls back to stale-heartbeat expiry. Other starts remain immediate; live snapshots have no artificial publication deadline, while a dead runtime can defer replacement for the 10-second liveness window plus at most one additional retry interval (one second) after its final heartbeat.
 During gradual rollout, Worker code and runner container state may disagree for the rollout window. A newly deployed Worker version can handle provider egress or internal-host traffic from an already-running warm runner process whose bundle, process env, or provider-credential shape was created before the deploy. Treat this as expected rollout behavior, not proof that traffic is reaching an old Worker version. Any PR that changes a Worker/container contract, runner env shape, hosted provider credential, internal host route, parser/toolchain path, or bundle-owned runtime assumption must document the compatibility window in its PR description and final `DEPLOYMENT CONCERNS:` handoff: whether old containers can safely talk to new Worker code, whether new containers can safely talk to old web/control-plane code, whether `container_rollout=immediate` is required, and which deploy-smoke or Workers Observability checks prove the fleet has converged.
 
+The non-expiring Starter plan-usage schema is a bidirectional hard cut between
+Web and the runner bundle. Suspend the production Render
+`murph-temporal-worker` background-worker service and confirm both declared
+instances have stopped. That does not block Web's direct latency path. Also
+remove `HOSTED_EXECUTION_CONTROL_URL` from Vercel Production and redeploy the
+exact commit behind the current production alias. Prove the alias SHA and that
+the deployment omits the variable; mailbox acceptance and Temporal signaling
+remain durable, while the existing optional control client starts no direct
+`ensure-processing` request. Wait the full ten-minute runtime request lifetime
+plus deployment drain margin, and require zero new Cloudflare
+`runtime-ensure-processing` accepts plus zero runtime-log rows with a non-null
+attempt id after the boundary.
+
+Only after that two-plane drain may the Starter migrations commit. Deploy Web
+plus Cloudflare from the same commit while the control URL remains absent and
+the Render worker stays suspended. Dispatch the protected production workflow
+with `container_rollout=immediate`; do not reopen after only one plane succeeds.
+Managed-container smoke must report the exact new runner-bundle fingerprint,
+and signed active and exhausted Starter plan-usage reads plus an eligible
+subscription quote must succeed. Restore the canonical production control URL,
+redeploy that exact Web commit, prove the production alias SHA, and only then
+resume the Render worker. Verify one already-accepted canary mailbox item
+processes exactly once.
+
+Before the Starter migration commits, the complete prior Web/runner pair
+remains a rollback target after the canonical control URL is restored. After it
+commits, the migrated ledger establishes a forward-only floor: leave the Web
+control URL absent, keep the Render worker suspended, and forward-fix or
+redeploy the exact current Web/runner pair. Neither prior plane is a resumable
+target against the migrated database.
+
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence
 and the legacy mailbox / self-opt-out fallbacks before deploying the Worker and

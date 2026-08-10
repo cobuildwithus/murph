@@ -11,9 +11,7 @@ import {
   buildHostedExecutionMemberActivatedWake,
 } from "@murphai/hosted-execution";
 
-import {
-  buildStableNumericSuffix,
-} from "./helpers/hosted-local-e2e-support.js";
+import { buildStableNumericSuffix } from "./helpers/hosted-local-e2e-support.js";
 import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
@@ -222,10 +220,6 @@ describe("hosted local Linq webhook e2e", () => {
     const outboundCountBeforeTyping = requireLinqStub()
       .countObservedSends(replyChatPath);
     const providerCountBeforeTyping = requireScenario().assistantProviderRequests.length;
-    const acceptedLogCountBeforeTyping = countTextOccurrences(
-      requireScenario().harness.stdoutTail(),
-      "Hosted runtime shell prewarm accepted.",
-    );
 
     const typingResponse = await postSignedLinqWebhook({
       api_version: "v3",
@@ -243,10 +237,6 @@ describe("hosted local Linq webhook e2e", () => {
       reason: "typing-ignored",
     });
 
-    await waitForHostedRuntimeShellPrewarmAccepted(
-      acceptedLogCountBeforeTyping,
-      userId,
-    );
     const stateAfterTyping = await requireScenario()
       .readHostedLinqWorkspaceIsolationState({ chatId, memberId: userId });
     const statusAfterTyping = await requireScenario().harness.readUserStatus(userId);
@@ -314,6 +304,12 @@ describe("hosted local Linq webhook e2e", () => {
       ),
       shellPrewarmSource: "linq-typing-started",
     });
+    const acceptedAtEpochMs = Date.parse(latencyTrace.acceptedAt);
+    const firstHintAtEpochMs =
+      latencyTrace.phaseBreakdown?.orchestration?.shellPrewarmFirstHintAtEpochMs;
+    expect(acceptedAtEpochMs).not.toBeNaN();
+    expect(firstHintAtEpochMs).toEqual(expect.any(Number));
+    expect(firstHintAtEpochMs).toBeLessThanOrEqual(acceptedAtEpochMs);
   }, 300_000);
 
   it("keeps Linq context when two signed webhooks arrive before hosted completion catches up", async () => {
@@ -932,27 +928,6 @@ function signLinqWebhook(secret: string, payload: string, timestamp: string): st
   return `sha256=${signature}`;
 }
 
-async function waitForHostedRuntimeShellPrewarmAccepted(
-  baselineCount: number,
-  userId: string,
-): Promise<void> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < 60_000) {
-    const acceptedCount = countTextOccurrences(
-      requireScenario().harness.stdoutTail(),
-      "Hosted runtime shell prewarm accepted.",
-    );
-    if (acceptedCount > baselineCount) {
-      return;
-    }
-    await sleep(100);
-  }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Timed out waiting for the typing-start shell prewarm acceptance.",
-  ]));
-}
-
 async function waitForTypingPrewarmLatencyTrace(input: {
   mailboxDedupeKey: string;
   userId: string;
@@ -986,13 +961,6 @@ async function waitForTypingPrewarmLatencyTrace(input: {
   throw new Error(
     `Timed out waiting for the typing-prewarm latency trace: ${String(lastError)}`,
   );
-}
-
-function countTextOccurrences(value: string, needle: string): number {
-  if (!needle) {
-    return 0;
-  }
-  return value.split(needle).length - 1;
 }
 
 function parseAssistantProviderRequestBody(body: string | undefined): Record<string, unknown> {
@@ -1345,6 +1313,7 @@ function buildLinqWebhookScenarioEnv(linq: HostedLocalLinqStub): NodeJS.ProcessE
 function buildLinqWebhookLocalInboundAllowlist(): string {
   const memberPhones = [
     "reply",
+    "app-card",
     "typing-prewarm",
     "rapid",
     "group-isolation",

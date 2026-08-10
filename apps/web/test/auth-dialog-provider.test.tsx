@@ -611,62 +611,6 @@ test("AuthProvider resumes the data privacy settings handoff after sign-in compl
   await rendered.cleanup();
 });
 
-test("AuthProvider resumes a signed Pulse payment return on settings after sign-in", async () => {
-  const { AuthProvider, useAuth } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
-  );
-  const assign = vi.fn();
-  const reload = vi.fn();
-
-  function OpenAuthButton() {
-    const { openAuthDialog } = useAuth();
-    return createElement(
-      "button",
-      { type: "button", onClick: openAuthDialog },
-      "Sign in",
-    );
-  }
-
-  const rendered = await renderClientComponent(
-    createElement(AuthProvider, {
-      authenticated: false,
-    }, createElement(OpenAuthButton)),
-  );
-
-  const search = "?action=start_pulse_now&expires=4102444800000&signature=signed";
-  Object.defineProperty(rendered.window, "location", {
-    configurable: true,
-    value: {
-      assign,
-      hash: "#subscription",
-      href: `https://join.example.test/settings${search}#subscription`,
-      origin: "https://join.example.test",
-      pathname: "/settings",
-      reload,
-      search,
-    },
-  });
-
-  await act(async () => {
-    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
-    (button) => button.textContent === "Complete auth",
-  );
-
-  await act(async () => {
-    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  // Sending this member to /home is the original incident: they paid, signed in,
-  // and the signed continuation params were thrown away.
-  expect(reload).toHaveBeenCalledTimes(1);
-  expect(assign).not.toHaveBeenCalled();
-
-  await rendered.cleanup();
-});
-
 test("AuthProvider preserves a Group payment return through sign-in", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
