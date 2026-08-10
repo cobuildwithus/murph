@@ -12,8 +12,6 @@ hosted Murph group:
 - included personal AI usage: $2.80/month, derived by the standard 80% rule;
 - runtime capability: the existing Pulse tier;
 - access: available only to a confirmed current group owner or joined member;
-- trial path: an active direct Pulse trial may continue into Core at its
-  natural end;
 - public visibility: omitted from public signup and invite checkout.
 
 Core is a personal subscription. It does not fund the group, pool usage,
@@ -58,7 +56,7 @@ usage band may expose usage top-ups and legacy bounded actions, but it must not
 duplicate `change_plan` controls from the usage projection.
 The supported transitions are:
 
-- active Pulse trial to Core at trial end;
+- Starter to Core through ordinary paid-plan checkout;
 - paid Core to Pulse or Edge immediately;
 - paid Pulse to Core at renewal;
 - paid Pulse to Edge immediately;
@@ -79,24 +77,18 @@ therefore observes the winning plan and fails stale instead of applying a
 second change. An exact same-target retry remains idempotent.
 
 Scheduled changes use a Stripe Subscription Schedule. The current phase keeps
-the source recurring Price until the existing period or trial ends; the future
+the source recurring Price until the existing paid period ends; the future
 phase contains only the target recurring Price. Murph stores only the Stripe
 schedule id, target plan, and effective time as a pending display projection.
 Current entitlement and allowance change only through normal Stripe
 reconciliation after the target phase applies.
 
-An active trial remains scheduled to end at its original Stripe trial boundary
-even when its included AI allowance is exhausted. Core-at-trial-end requires
-a usable subscription payment method before Murph creates or updates a
-schedule. If payment setup is needed, Web opens the payment-method flow and
-requires a fresh plan choice after return; it does not retain a Core mutation
-intent that could be applied against changed billing state. The locked
-Pulse-trial state, rather than an optional caller hint, owns both the payment
-method preflight and the requirement that Stripe itself still report
-`trialing`. Admission and those guards share the same resolver, including the
-brief reconciliation window where the retained Pulse-trial offer is canonical
-but the phase projection is still null. A local-trial/provider-paid race fails
-stale instead of scheduling one paid cycle late.
+A Starter member has no Stripe subscription to schedule. Starting Core uses the
+ordinary new paid-plan checkout path after the same live membership and Price
+validation used for every Core selection. Payment setup and paid activation
+remain Stripe-owned, and the accepted paid invoice is the positive subscription
+authority. The non-expiring starter balance remains ordinary usage credit; no
+trial deadline or deferred conversion intent is retained.
 
 Public checkout accepts only the explicit public billing-code allowlist. Adding
 Core to the private catalog must not make it publicly selectable.
@@ -111,9 +103,8 @@ Core to the private catalog must not make it publicly selectable.
   available; quote and mutation boundaries keep their stronger validation.
 - Stale membership, quote, local billing state, Stripe customer, subscription,
   subscription items, or schedule shape fails closed.
-- A cardless Core-at-trial-end choice does not create a schedule. Payment
-  setup returns the member to neutral Settings or conversation context for a
-  fresh exact-price choice.
+- A Starter-to-Core choice creates no schedule and cannot bypass the ordinary
+  paid checkout and accepted-invoice boundary.
 - The same accepted-input action and quote may replay idempotently; a conflicting
   action requires new accepted member input.
 - Unknown or foreign Stripe schedules are not reinterpreted or overwritten.
@@ -129,7 +120,7 @@ The naming change preserves the existing Web/Cloudflare wire contract, so Web
 and Cloudflare may roll independently. Deploy both to make every member-facing
 surface say Core; neither deployment changes billing behavior or Stripe state.
 
-After deployment, verify an eligible trial member can see and schedule Core,
-an ineligible member cannot select it, public checkout rejects the private
-code, and Stripe reconciliation reports the internal Group SKU with a $2.80
+After deployment, verify an eligible Starter member can see and start Core, an
+ineligible member cannot select it, public checkout rejects the private code,
+and Stripe reconciliation reports the internal Group SKU with a $2.80
 allowance while member-facing Web and assistant surfaces say Core.

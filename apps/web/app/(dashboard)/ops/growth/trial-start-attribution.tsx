@@ -37,6 +37,11 @@ const SOURCE_SUMMARIES = [
   },
   {
     className: "border-l border-t border-border/60 md:border-t-0",
+    label: "Migrated",
+    source: "legacy_trial_migration",
+  },
+  {
+    className: "border-t border-border/60 md:border-l md:border-t-0",
     label: "Unknown",
     source: "unknown",
   },
@@ -50,6 +55,10 @@ const SOURCE_PRESENTATION = {
   linq_instant_start: {
     description: "Inbound iMessage",
     label: "Direct iMessage",
+  },
+  legacy_trial_migration: {
+    description: "Historical free usage retained during migration",
+    label: "Migrated",
   },
   unknown: {
     description: "Source was not captured",
@@ -74,17 +83,17 @@ export function TrialStartAttribution(input: TrialStartAttributionProps) {
           className="font-serif text-xl font-semibold tracking-tight text-foreground"
           id={titleId}
         >
-          Trial start paths
+          Starter activation paths
         </h2>
         <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
-          Source is captured when a Pulse trial begins. Direct iMessage means
-          an inbound iMessage started the trial. Historical starts without
-          persisted provenance remain Unknown.
+          Source is captured when starter usage activates. Direct iMessage means
+          an inbound iMessage activated starter access. Historical activations
+          without persisted provenance remain Unknown.
         </p>
       </div>
 
       <div className="overflow-hidden rounded-xl border border-border/70 bg-card/90">
-        <div className="grid grid-cols-2 md:grid-cols-4">
+        <div className="grid grid-cols-2 md:grid-cols-5">
           {SOURCE_SUMMARIES.map((summary) => (
             <div
               className={cn("px-4 py-4 sm:px-5", summary.className)}
@@ -107,7 +116,8 @@ export function TrialStartAttribution(input: TrialStartAttributionProps) {
           <Table>
             {input.attribution.recent.length === 0 ? (
               <TableCaption>
-                No trial starts since {formatDate(input.attribution.windowStartDate)}.
+                No starter activations since{" "}
+                {formatDate(input.attribution.windowStartDate)}.
               </TableCaption>
             ) : null}
             <TableHeader className="hidden md:table-header-group">

@@ -845,23 +845,22 @@ describe("hosted runtime Temporal signaling", () => {
       }) => Promise<{ status: "allowed" } | { status: "denied" }>;
     }>("@/src/lib/hosted-orchestration/runtime-usage-decision");
     const explicitPrisma = mocks.prisma;
-    mocks.prisma.$transaction.mockImplementationOnce(async (callback) =>
+    const runUsageTransaction = async (callback: (tx: unknown) => unknown) =>
       await callback({
         ...explicitPrisma,
+        $queryRaw: vi.fn(async () => []),
         hostedAiUsagePeriod: {
           findUnique: vi.fn(async () => null),
         },
-      })
-    );
+      });
+    mocks.prisma.$transaction.mockImplementationOnce(runUsageTransaction);
 
     await expect(resolveHostedRuntimeAiUsageGate({
-      mode: "read_first",
+      mode: "read_only",
       now: "2026-05-20T12:00:00.000Z",
       prisma: explicitPrisma,
       userId: "member_123",
-    })).resolves.toEqual({
-      status: "allowed",
-    });
+    })).resolves.toMatchObject({ status: "denied" });
 
     expect(mocks.hostedMemberFindUnique).toHaveBeenCalledWith({
       select: expect.any(Object),

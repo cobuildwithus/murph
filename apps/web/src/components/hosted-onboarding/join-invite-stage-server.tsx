@@ -20,15 +20,11 @@ import { BillingPortalButton } from "@/src/components/settings/billing-portal-bu
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
-  HOSTED_PULSE_TRIAL_DAYS,
-  isHostedAutoPulseTrialEnabled,
-  isHostedPulseTrialCheckoutEnabled,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import {
   JOIN_EDGE_FEATURES,
   JOIN_FAMILY_FEATURES,
   JOIN_PULSE_FEATURES,
-  PULSE_TRIAL_FEATURES,
 } from "@/src/lib/hosted-onboarding/plan-features";
 import type { HostedFamilyBillingRecoveryState } from "@/src/lib/hosted-onboarding/family-plan";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
@@ -37,7 +33,7 @@ import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/s
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
-import { JoinInviteAutoTrialIsland } from "./join-invite-auto-trial-island";
+import { JoinInviteStarterUsageIsland } from "./join-invite-starter-usage-island";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type {
   JoinInvitePageModel,
@@ -56,7 +52,7 @@ const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
-  const autoPulseTrialReady = isJoinInviteAutoPulseTrialReady(
+  const starterUsageReady = isJoinInviteStarterUsageReady(
     status,
     model.familyBillingRecovery,
   );
@@ -119,8 +115,8 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
         <JoinInviteFamilyBillingManagementPanel />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && autoPulseTrialReady ? (
-        <JoinInviteAutoTrialIsland inviteCode={model.inviteCode} />
+      {!model.launchConsent.gateActive && status.stage === "checkout" && starterUsageReady ? (
+        <JoinInviteStarterUsageIsland inviteCode={model.inviteCode} />
       ) : null}
 
       {!model.launchConsent.gateActive
@@ -128,7 +124,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       && model.familyBillingRecovery !== "checkout"
       && model.familyBillingRecovery !== "manage"
       && model.familyBillingRecovery !== "syncing"
-      && !autoPulseTrialReady
+      && !starterUsageReady
       && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
           authenticated={status.session.authenticated}
@@ -143,7 +139,7 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       && model.familyBillingRecovery !== "checkout"
       && model.familyBillingRecovery !== "manage"
       && model.familyBillingRecovery !== "syncing"
-      && !autoPulseTrialReady
+      && !starterUsageReady
       && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutPanel
           billingReady={status.capabilities.billingReady}
@@ -167,15 +163,14 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
   );
 }
 
-export function isJoinInviteAutoPulseTrialReady(
+export function isJoinInviteStarterUsageReady(
   status: HostedInviteStatusPayload,
   familyBillingRecovery: HostedFamilyBillingRecoveryState | null = null,
 ): boolean {
-  return isHostedAutoPulseTrialEnabled() &&
-    familyBillingRecovery === null &&
-    status.capabilities.billingReady &&
-    !status.messagingSetupRequired &&
-    status.billing.plans.some((plan) => plan.code === "launch_monthly");
+  return familyBillingRecovery === null
+    && status.session.authenticated
+    && status.session.matchesInvite
+    && !status.messagingSetupRequired;
 }
 
 function JoinInviteSignedInMismatchAlert() {
@@ -306,7 +301,6 @@ export function JoinInviteCheckoutPanel({
 }) {
   const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly") ?? null;
   const edgePlan = billingPlans.find((p) => p.code === "launch_edge_monthly") ?? null;
-  const pulseTrialCheckoutEnabled = isHostedPulseTrialCheckoutEnabled();
   const buttonClassName =
     "h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90";
 
@@ -319,26 +313,6 @@ export function JoinInviteCheckoutPanel({
             : "grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] gap-4"
         }
       >
-        <PricingTierCard
-          tier="free"
-          name="Pulse Trial"
-          description={`Try Murph for ${HOSTED_PULSE_TRIAL_DAYS} days, no charge.`}
-          price="$0"
-          priceUnit={`for ${HOSTED_PULSE_TRIAL_DAYS} days`}
-          features={PULSE_TRIAL_FEATURES}
-          cta={
-            <JoinInviteCheckoutPlanButtonIsland
-              billingReady={billingReady && pulseTrialCheckoutEnabled}
-              checkoutOffer="pulse_trial_7d"
-              className={buttonClassName}
-              disabledLabel="Trial unavailable"
-              idleLabel={`Start ${HOSTED_PULSE_TRIAL_DAYS}-day trial`}
-              inviteCode={inviteCode}
-              planCode={pulsePlan?.code ?? null}
-            />
-          }
-        />
-
         <PricingTierCard
           tier="go"
           name="Pulse"

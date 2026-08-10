@@ -3184,7 +3184,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: null,
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "trial_conversion_pending",
+      noticeCode: "billing_inactive",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-unclaimed",
@@ -3212,13 +3212,13 @@ describe("hosted Linq webhook transport", () => {
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
 
-  it("replays trial-conversion notices through provider idempotency", async () => {
+  it("replays billing-inactive notices through provider idempotency", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: null,
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "trial_conversion_pending",
+      noticeCode: "billing_inactive",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-unclaimed",
@@ -3256,7 +3256,7 @@ describe("hosted Linq webhook transport", () => {
     } as never)).toThrow("require AI usage claim metadata");
   });
 
-  it("rejects claim tokens when constructing trial conversion quota side effects", () => {
+  it("rejects claim tokens when constructing billing-inactive quota side effects", () => {
     expect(() => createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -3266,7 +3266,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "trial_conversion_pending",
+      noticeCode: "billing_inactive",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-extra-claim",

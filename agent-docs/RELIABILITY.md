@@ -316,13 +316,35 @@ Last verified: 2026-08-10
   Roll out the nullable source index first, deploy readers and ordinary-message
   writers next, wait through the maximum edit plus webhook retry window, and
   enable the `2026-02-03` edit subscription last.
-- Linq instant start uses the existing planner twice around the existing no-card Pulse-trial owner. The first transaction may create the canonical member, verified inbound phone identity, pending same-line route, and invite, but it neither counts the inbound nor appends the conversation. The invite records the persisted model-source admission event and is the single-owner token for that exact original inbound. Only the transaction whose unique phone-identity insert actually creates a genuinely new member may mint the token; if another inbound wins that identity during classifier latency, the admitted planner re-reads the winner under the shared participant-phone lock, cannot mint a token, and follows the ordinary signup-link path without attaching its event to the winner's invite. While a token remains pending, a different inbound for the inactive member exits retryably before accounting or side effects instead of continuing or canceling the start. Stripe customer/subscription provisioning, the billing write, and activation share the existing member lock; before any Stripe mutation that owner revalidates the exact invite and event, and activation clears the token in the same transaction. The event-time start source travels in the same Stripe subscription metadata and billing write, so recovery retains `linq_instant_start` without another provider call or authority; older metadata with no source remains Unknown. Stripe calls use the existing five-second, no-network-retry authority budget. A second ordinary planner pass observes active access, promotes the route, counts the original inbound once, and appends it once. Later inbounds then take the ordinary active-member path. Only a genuinely new billing identity can enter this path; an existing Stripe customer falls back before subscription creation so a saved card cannot silently auto-convert. Any classifier, configuration, route, definitive Stripe, or activation failure falls back to the existing signup-link path, while the single-owner wait remains provider-retryable, without creating a second entitlement, queue, or runtime.
-- Card-based website Pulse trials carry `web_onboarding` in both the existing
-  Checkout Session and subscription metadata. Completion reads the canonical
-  subscription value already required for entitlement validation and writes it
-  atomically with trial redemption. A repeated completion cannot replace that
-  accepted write, standard paid Checkout carries no trial source, and legacy
-  in-flight trial Checkout without source metadata remains Unknown.
+- Linq instant start uses the existing planner twice around the starter-usage
+  owner. The first transaction may create the canonical member, verified inbound
+  phone identity, pending same-line route, and invite, but it neither counts the
+  inbound nor appends the conversation. The invite records the persisted
+  model-source admission event and is the single-owner token for that exact
+  original inbound. Only the transaction whose unique phone-identity insert
+  actually creates a genuinely new member may mint the token; if another inbound
+  wins that identity during classifier latency, the admitted planner re-reads the
+  winner under the shared participant-phone lock, cannot mint a token, and
+  follows the ordinary signup-link path without attaching its event to the
+  winner's invite. While a token remains pending, a different inbound for the
+  inactive member exits retryably before accounting or side effects instead of
+  continuing or canceling the start. The enrollment owner locks the existing
+  usage-credit beneficiary, revalidates the exact invite and event, appends the
+  policy-versioned $4.50 starter grant when absent, activates the member, and
+  clears the token in the same transaction. No Stripe state or network call is
+  created on this path. The grant source records `linq_instant_start`, so replay
+  recovers provenance from the immutable ledger. A second ordinary planner pass
+  observes active access, promotes the route, counts the original inbound once,
+  and appends it once. Later inbounds then take the ordinary active-member path.
+  Any classifier, configuration, route, conflicting billing history, or
+  activation failure falls back to the existing signup-link path, while the
+  single-owner wait remains provider-retryable, without creating a second
+  entitlement, queue, or runtime.
+- Web and companion onboarding use the same semantic-keyed starter grant with
+  their own bounded source references. A repeated enrollment cannot replace the
+  accepted grant or add balance. Historical trial metadata remains only for
+  delayed Stripe cleanup and migration audit; missing legacy provenance maps to
+  Unknown rather than being inferred from mutable identity state.
 
 - Define startup requirements, health checks, and critical invariants.
 - Document retry/idempotency expectations for writes or background work.
@@ -375,7 +397,7 @@ Last verified: 2026-08-10
   cancellation owner before preparing the final customer-cleanup receipt.
   Provider `processing` or `succeeded` state remains a deletion blocker; only a
   provider-proven cancellation may terminalize local `payment_pending` state.
-  Pulse Trial loser cleanup validates exact provider targets before one short
+  Legacy Pulse Trial loser cleanup validates exact provider targets before one short
   member-owner revalidation transaction and cancels them only after that
   transaction releases; no Stripe request is made while that lock is held.
   Direct paid and direct Trial conversion to Family updates the exact existing
@@ -480,7 +502,7 @@ Last verified: 2026-08-10
   AI-access decision as model execution before provisioning a group or
   admitting work for an existing thread container. Evaluate that decision at
   webhook processing time rather than the provider message timestamp, so a
-  delayed event cannot cross a trial-expiry boundary. A recognized inactive
+  delayed event cannot cross a current capacity or suspension boundary. A recognized inactive
   Linq sender may receive recovery only when both the persisted route contact
   and the provider's current direct-chat audience match that authenticated
   sender before and after access resolution. Otherwise the group receives only

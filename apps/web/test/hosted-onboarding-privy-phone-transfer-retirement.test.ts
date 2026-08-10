@@ -56,6 +56,12 @@ import {
 import {
   buildHostedBrowserVaultRefreshRuntimeControlEvent,
 } from "@/src/lib/hosted-orchestration/browser-vault-refresh-control";
+import {
+  HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+  buildHostedStarterUsageSemanticSourceKey,
+  buildHostedStarterUsageSourceReferenceLookupKey,
+  type HostedStarterUsageSource,
+} from "@/src/lib/hosted-onboarding/starter-usage";
 
 const NOW = new Date("2026-07-30T17:00:00.000Z");
 const TRIAL_END = new Date("2026-08-13T17:00:00.000Z");
@@ -244,6 +250,143 @@ describe("Privy phone-transfer source retirement", () => {
       sourceMemberId: SOURCE_MEMBER_ID,
     });
   });
+
+  it("fences the exact untouched Web Starter scaffold without Stripe cleanup", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+    expect(fixture.prisma.hostedUsageCreditEntry.findUnique).toHaveBeenCalledWith({
+      where: {
+        semanticSourceKey:
+          buildHostedStarterUsageSemanticSourceKey(SOURCE_MEMBER_ID),
+      },
+      select: expect.objectContaining({
+        amountUsdMicros: true,
+        beneficiaryMemberId: true,
+        grant: {
+          select: { remainingUsdMicros: true },
+        },
+      }),
+    });
+  });
+
+  it("fences the exact untouched companion Starter scaffold without a welcome item", async () => {
+    const fixture = makeFixture({ starterSource: "companion_onboarding" });
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+  });
+
+  it("fences the exact untouched companion Starter scaffold with its hosted welcome", async () => {
+    const fixture = makeFixture({
+      includeStarterWelcome: true,
+      starterSource: "companion_onboarding",
+    });
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+  });
+
+  it("ignores platform-authored Starter welcome attempt timestamps", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
+    Object.assign(fixture.sourceShape, {
+      signupNotificationEmailAttemptedAt: NOW,
+      signupWelcomeEmailAttemptedAt: NOW,
+    });
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+  });
+
+  it("rejects a Starter source after any of its canonical grant was consumed", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
+    fixture.starterGrant.grant.remainingUsdMicros = 4_000_000n;
+    fixture.sourceShape.usageCreditBalanceUsdMicros = 4_000_000n;
+    fixture.sourceShape.usageCreditLedgerVersion = 2n;
+    fixture.sourceShape._count.usageCreditEntries = 2;
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+    expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects a Web Starter scaffold without its canonical welcome item", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
+    const [activation, , runtimeControl] =
+      await fixture.prisma.hostedMailboxItem.findMany();
+    fixture.prisma.hostedMailboxItem.findMany.mockResolvedValue([
+      activation,
+      runtimeControl,
+    ]);
+    fixture.prisma.hostedMailboxLaneCounter.findMany.mockResolvedValue([
+      { consumedSeq: 0n, lane: "causal", nextSeq: 3n },
+      { consumedSeq: 0n, lane: "system", nextSeq: 3n },
+    ]);
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+  });
+
+  it("accepts a companion Starter welcome before runtime controls are enqueued", async () => {
+    const fixture = makeFixture({ starterSource: "companion_onboarding" });
+    const activationEventId =
+      `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:`
+      + buildHostedStarterUsageSemanticSourceKey(SOURCE_MEMBER_ID);
+    fixture.prisma.hostedMailboxItem.findMany.mockResolvedValue([
+      mailboxItem(1, "member.activated", activationEventId),
+      mailboxItem(
+        2,
+        "assistant.notification.requested",
+        `assistant.notification.requested:signup-welcome:${SOURCE_MEMBER_ID}:${activationEventId}`,
+      ),
+    ]);
+    fixture.prisma.hostedMailboxLaneCounter.findMany.mockResolvedValue([
+      { consumedSeq: 0n, lane: "causal", nextSeq: 3n },
+      { consumedSeq: 0n, lane: "system", nextSeq: 3n },
+    ]);
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+  });
+
+  it("rejects a Starter grant with a noncanonical first ledger sequence", async () => {
+    const fixture = makeFixture({ starterSource: "web_onboarding" });
+    fixture.starterGrant.beneficiarySequence = 2n;
+
+    await expect(prepare(fixture)).rejects.toMatchObject({
+      code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+    });
+  });
+
+  it.each([
+    ["conversation-bearing", "linq_instant_start"],
+    ["legacy-migrated", "legacy_trial_migration"],
+  ] as const)(
+    "rejects a %s Starter grant source",
+    async (_label, source) => {
+      const fixture = makeFixture({ starterSource: "web_onboarding" });
+      fixture.starterGrant.sourceReferenceLookupKey =
+        buildHostedStarterUsageSourceReferenceLookupKey(source);
+
+      await expect(prepare(fixture)).rejects.toMatchObject({
+        code: "PRIVY_PHONE_TRANSFER_REQUIRES_SUPPORT",
+      });
+      expect(fixture.prisma.hostedMember.updateMany).not.toHaveBeenCalled();
+    },
+  );
 
   it("retries an exact automatic-trial scaffold after cleanup cancellation", async () => {
     const fixture = makeFixture({ autoTrial: true });
@@ -675,15 +818,25 @@ function assertFence(fixture: Fixture) {
 
 function makeFixture(input: {
   autoTrial?: boolean;
+  includeStarterWelcome?: boolean;
+  starterSource?: Extract<
+    HostedStarterUsageSource,
+    "companion_onboarding" | "web_onboarding"
+  >;
   targetPhoneNumber?: string | null;
 } = {}) {
   const autoTrial = input.autoTrial ?? false;
+  const starterSource = input.starterSource ?? null;
+  const includeStarterWelcome = starterSource !== null
+    && (input.includeStarterWelcome ?? starterSource === "web_onboarding");
+  const includeActivationWelcome = autoTrial || includeStarterWelcome;
+  const activated = autoTrial || starterSource !== null;
   const targetMember = makeMember({
     billingStatus: HostedBillingStatus.active,
     id: TARGET_MEMBER_ID,
   });
   const sourceMember = makeMember({
-    billingStatus: autoTrial
+    billingStatus: activated
       ? HostedBillingStatus.active
       : HostedBillingStatus.not_started,
     id: SOURCE_MEMBER_ID,
@@ -707,9 +860,19 @@ function makeFixture(input: {
     ...emptySourceShape(),
     billingRef: autoTrial ? { memberId: SOURCE_MEMBER_ID } : null,
     billingStatus: sourceMember.billingStatus,
-    hostedWorkspace: autoTrial ? { userId: SOURCE_MEMBER_ID } : null,
-    routing: autoTrial ? { memberId: SOURCE_MEMBER_ID } : null,
-    _count: makeRelationCounts(autoTrial),
+    hostedWorkspace: activated ? { userId: SOURCE_MEMBER_ID } : null,
+    routing: activated ? { memberId: SOURCE_MEMBER_ID } : null,
+    usageCreditBalanceUsdMicros: starterSource
+      ? HOSTED_STARTER_USAGE_GRANT_USD_MICROS
+      : 0n,
+    usageCreditLedgerVersion: starterSource ? 1n : 0n,
+    _count: makeRelationCounts({
+      activated,
+      mailboxItems: activated
+        ? includeActivationWelcome ? 3 : 2
+        : 0,
+      starter: Boolean(starterSource),
+    }),
   };
   const rawIdentity = {
     maskedPhoneNumberHint: "*** 4567",
@@ -755,11 +918,55 @@ function makeFixture(input: {
         core: sourceMember,
       }
     : null;
-  const activationEventId =
-    `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`;
-  const cryptoDomains = autoTrial
+  const starterSemanticSourceKey = buildHostedStarterUsageSemanticSourceKey(
+    SOURCE_MEMBER_ID,
+  );
+  const starterGrant = {
+    amountUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+    beneficiaryMemberId: SOURCE_MEMBER_ID,
+    beneficiarySequence: 1n,
+    grant: {
+      remainingUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
+    },
+    kind: "starter_grant",
+    parentGrantEntryId: null,
+    purchaseId: null,
+    referralId: null,
+    sourceReferenceLookupKey: starterSource
+      ? buildHostedStarterUsageSourceReferenceLookupKey(starterSource)
+      : null,
+    sourceUsageId: null,
+  };
+  const activationEventId = autoTrial
+    ? `member.activated:hosted.auto_pulse_trial.enrolled:${SOURCE_MEMBER_ID}:auto-pulse-trial:${STRIPE_SUBSCRIPTION_ID}`
+    : starterSource
+      ? `member.activated:hosted.starter_usage.enrolled:${SOURCE_MEMBER_ID}:${starterSemanticSourceKey}`
+      : null;
+  const consentSource = starterSource === "companion_onboarding"
+    ? "native-companion"
+    : "homepage-auth-dialog";
+  const cryptoDomains = activated
     ? ["control", "device", "ingress", "runtime"]
     : ["control"];
+  const activationMailboxItems = activationEventId
+    ? [
+        mailboxItem(1, "member.activated", activationEventId),
+        ...(includeActivationWelcome
+          ? [
+              mailboxItem(
+                2,
+                "assistant.notification.requested",
+                `assistant.notification.requested:signup-welcome:${SOURCE_MEMBER_ID}:${activationEventId}`,
+              ),
+            ]
+          : []),
+        mailboxItem(
+          includeActivationWelcome ? 3 : 2,
+          "runtime.browser-vault-refresh-requested",
+          BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID,
+        ),
+      ]
+    : [];
   const nullFinder = () => ({
     findFirst: vi.fn().mockResolvedValue(null),
   });
@@ -777,34 +984,34 @@ function makeFixture(input: {
     hostedAccountDeletionCleanup: nullFinder(),
     hostedAccountGroupInvite: nullFinder(),
     hostedConsentEvent: {
-      findMany: vi.fn().mockResolvedValue(autoTrial
+      findMany: vi.fn().mockResolvedValue(activated
         ? [
             {
               action: "accepted",
               scope: "launch.health-data",
-              source: "homepage-auth-dialog",
+              source: consentSource,
             },
             {
               action: "accepted",
               scope: "launch.legal",
-              source: "homepage-auth-dialog",
+              source: consentSource,
             },
           ]
         : []),
     },
     hostedConsentGrant: {
-      findMany: vi.fn().mockResolvedValue(autoTrial
+      findMany: vi.fn().mockResolvedValue(activated
         ? [
             {
               revokedAt: null,
               scope: "launch.health-data",
-              source: "homepage-auth-dialog",
+              source: consentSource,
               status: "granted",
             },
             {
               revokedAt: null,
               scope: "launch.legal",
-              source: "homepage-auth-dialog",
+              source: consentSource,
               status: "granted",
             },
           ]
@@ -818,32 +1025,26 @@ function makeFixture(input: {
     },
     hostedLinqDelivery: nullFinder(),
     hostedLinqLine: {
-      findUnique: vi.fn().mockResolvedValue(autoTrial
+      findUnique: vi.fn().mockResolvedValue(activated
         ? { phoneNumberLookupKey: `phone:${PHONE_NUMBER}` }
         : null),
     },
     hostedMailboxItem: {
-      findMany: vi.fn().mockResolvedValue(autoTrial
-        ? [
-            mailboxItem(1, "member.activated", activationEventId),
-            mailboxItem(
-              2,
-              "assistant.notification.requested",
-              `assistant.notification.requested:signup-welcome:${SOURCE_MEMBER_ID}:${activationEventId}`,
-            ),
-            mailboxItem(
-              3,
-              "runtime.browser-vault-refresh-requested",
-              BROWSER_VAULT_REFRESH_CONTROL_EVENT_ID,
-            ),
-          ]
-        : []),
+      findMany: vi.fn().mockResolvedValue(activationMailboxItems),
     },
     hostedMailboxLaneCounter: {
-      findMany: vi.fn().mockResolvedValue(autoTrial
+      findMany: vi.fn().mockResolvedValue(activated
         ? [
-            { consumedSeq: 0n, lane: "causal", nextSeq: 4n },
-            { consumedSeq: 0n, lane: "system", nextSeq: 4n },
+            {
+              consumedSeq: 0n,
+              lane: "causal",
+              nextSeq: BigInt(activationMailboxItems.length + 1),
+            },
+            {
+              consumedSeq: 0n,
+              lane: "system",
+              nextSeq: BigInt(activationMailboxItems.length + 1),
+            },
           ]
         : []),
     },
@@ -858,9 +1059,18 @@ function makeFixture(input: {
       findUnique: vi.fn().mockResolvedValue(rawIdentity),
     },
     hostedMemberRouting: {
-      findUnique: vi.fn().mockResolvedValue(autoTrial
+      findUnique: vi.fn().mockResolvedValue(activated
         ? makeAutoTrialRouting()
         : null),
+    },
+    hostedUsageCreditEntry: {
+      findUnique: vi.fn().mockImplementation(
+        async ({ where }: { where: { semanticSourceKey: string } }) =>
+          starterSource
+            && where.semanticSourceKey === starterSemanticSourceKey
+            ? starterGrant
+            : null,
+      ),
     },
     hostedUsageReferral: nullFinder(),
     hostedUserCryptoAudit: {
@@ -891,7 +1101,7 @@ function makeFixture(input: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
     hostedWorkspace: {
-      findUnique: vi.fn().mockResolvedValue(autoTrial
+      findUnique: vi.fn().mockResolvedValue(activated
         ? {
             acceptedAttemptFailureRecheckClaimedAt: null,
             browserVaultReplicaRef: null,
@@ -915,6 +1125,7 @@ function makeFixture(input: {
     sourceIdentity,
     sourceMember,
     sourceShape,
+    starterGrant,
     targetIdentity,
     targetMember,
   };
@@ -995,11 +1206,19 @@ function emptySourceShape() {
     threadContainer: null,
     usageCreditBalanceUsdMicros: 0n,
     usageCreditLedgerVersion: 0n,
-    _count: makeRelationCounts(false),
+    _count: makeRelationCounts({
+      activated: false,
+      mailboxItems: 0,
+      starter: false,
+    }),
   };
 }
 
-function makeRelationCounts(autoTrial: boolean) {
+function makeRelationCounts(input: {
+  activated: boolean;
+  mailboxItems: number;
+  starter: boolean;
+}) {
   return {
     accountGroupInvitesAccepted: 0,
     accountGroupInvitesSent: 0,
@@ -1014,18 +1233,18 @@ function makeRelationCounts(autoTrial: boolean) {
     computerHandoffs: 0,
     computerRuns: 0,
     connectedAppConnectIntents: 0,
-    consentEvents: autoTrial ? 2 : 0,
-    consentGrants: autoTrial ? 2 : 0,
+    consentEvents: input.activated ? 2 : 0,
+    consentGrants: input.activated ? 2 : 0,
     groupSponsorshipsPaid: 0,
     groupSponsorshipsReceived: 0,
     groupSponsorshipMomentsCreated: 0,
     hostedAiUsagePeriods: 0,
-    hostedCryptoAudits: autoTrial ? 4 : 1,
-    hostedCryptoEnvelopes: autoTrial ? 4 : 1,
+    hostedCryptoAudits: input.activated ? 4 : 1,
+    hostedCryptoEnvelopes: input.activated ? 4 : 1,
     hostedGroupMemberships: 0,
     hostedGroupsOwned: 0,
-    hostedMailboxItems: autoTrial ? 3 : 0,
-    hostedMailboxLaneCounters: autoTrial ? 2 : 0,
+    hostedMailboxItems: input.mailboxItems,
+    hostedMailboxLaneCounters: input.activated ? 2 : 0,
     hostedMailboxPayloads: 0,
     linqContactCardShares: 0,
     linqDailyStates: 0,
@@ -1036,7 +1255,7 @@ function makeRelationCounts(autoTrial: boolean) {
     sensitiveActionChallenges: 0,
     subscriptionCheckouts: 0,
     threadContainerParticipations: 0,
-    usageCreditEntries: 0,
+    usageCreditEntries: input.starter ? 1 : 0,
     usageCreditPurchasesPaid: 0,
     usageCreditPurchasesReceived: 0,
     usageReferralsAsBeneficiary: 0,
