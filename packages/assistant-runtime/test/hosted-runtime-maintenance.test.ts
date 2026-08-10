@@ -2838,7 +2838,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(drainWorker).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
     await expectDenseRawRetentionMailboxWakeAt(null);
-    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("carries staged dirty acks when foreground input arrives after dirty fetch", async () => {

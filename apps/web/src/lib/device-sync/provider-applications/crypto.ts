@@ -109,15 +109,12 @@ function isPermanentHostedSecureBoxOpenFailure(error: unknown): boolean {
     return true;
   }
   if (
-    error instanceof DOMException
-    || (
-      error instanceof Error
-      && ["DataError", "InvalidCharacterError", "OperationError"].includes(
-        error.name,
-      )
+    error instanceof Error
+    && ["DataError", "InvalidCharacterError", "OperationError"].includes(
+      error.name,
     )
   ) {
-    return error.name !== "AbortError";
+    return true;
   }
   if (!(error instanceof Error)) {
     return false;

@@ -89,4 +89,20 @@ describe("member-owned device provider application crypto", () => {
     })).rejects.toBe(transient);
   });
 
+  it("does not hide transient DOM exception failures", async () => {
+    const transient = new DOMException(
+      "Timed out while opening the hosted root key.",
+      "TimeoutError",
+    );
+    mocks.open.mockRejectedValue(transient);
+
+    await expect(decryptDeviceProviderApplication({
+      applicationId: "dpa_123",
+      memberId: "member_123",
+      provider: "strava",
+      revision: 7,
+      value: "sealed-value",
+    })).rejects.toBe(transient);
+  });
+
 });
