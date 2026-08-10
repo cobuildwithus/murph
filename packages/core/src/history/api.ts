@@ -111,17 +111,38 @@ type StoredHistoryEventEntry = {
   record: HistoryEventRecord;
 };
 
-export interface ReadLatestBloodTestHistorySummaryInput {
+export interface ReadCanonicalEventAvailabilityInput {
   vaultRoot: string;
   shouldContinue?: () => boolean;
   signal?: AbortSignal | null;
 }
 
-export interface LatestBloodTestHistorySummary {
+export interface CanonicalEventAvailabilitySummary {
   interrupted: boolean;
-  latestOccurredAt: string | null;
-  present: boolean;
+  latestBloodPressureMeasurementOccurredAt: string | null;
+  latestBloodTestOccurredAt: string | null;
+  latestBodyMeasurementOccurredAt: string | null;
 }
+
+const CANONICAL_BODY_MEASUREMENT_METRICS = new Set([
+  "bmi",
+  "body-fat-percentage",
+  "body-weight",
+  "lean-body-mass",
+  "waist-circumference",
+  "weight",
+]);
+const CANONICAL_BODY_MEASUREMENT_TYPES = new Set([
+  "body_fat_pct",
+  "waist",
+  "weight",
+]);
+const CANONICAL_AVAILABILITY_EVENT_KINDS = new Set([
+  "body_measurement",
+  "measurement",
+  "observation",
+  "test",
+]);
 
 type EncounterHistoryFields = Pick<
   EncounterHistoryEventRecord,
@@ -1298,9 +1319,9 @@ export async function listHistoryEvents({
   return normalizedLimit ? records.slice(0, normalizedLimit) : records;
 }
 
-export async function readLatestBloodTestHistorySummaryInterruptible(
-  input: ReadLatestBloodTestHistorySummaryInput,
-): Promise<LatestBloodTestHistorySummary> {
+export async function readCanonicalEventAvailabilityInterruptible(
+  input: ReadCanonicalEventAvailabilityInput,
+): Promise<CanonicalEventAvailabilitySummary> {
   const shouldContinue = () =>
     !input.signal?.aborted && input.shouldContinue?.() !== false;
   const walked = await walkVaultFilesInterruptible(
@@ -1312,10 +1333,13 @@ export async function readLatestBloodTestHistorySummaryInterruptible(
     },
   );
   if (walked.interrupted) {
-    return interruptedBloodTestHistorySummary();
+    return interruptedCanonicalEventAvailability();
   }
 
-  const latestByEventId = new Map<string, StoredHistoryEventEntry>();
+  const latestByEventId = new Map<
+    string,
+    { relativePath: string; record: EventRecord }
+  >();
   for (const relativePath of walked.relativePaths) {
     const read = await visitJsonlRecordsInterruptible({
       relativePath,
@@ -1323,10 +1347,22 @@ export async function readLatestBloodTestHistorySummaryInterruptible(
       signal: input.signal,
       vaultRoot: input.vaultRoot,
       visit: (shardRecord) => {
-        const record = parseStoredHistoryEvent(shardRecord);
-        if (!record) {
+        const parsed = safeParseContract(eventRecordSchema, shardRecord);
+        if (!parsed.success) {
+          if (
+            isPlainRecord(shardRecord)
+            && typeof shardRecord.kind === "string"
+            && CANONICAL_AVAILABILITY_EVENT_KINDS.has(shardRecord.kind)
+          ) {
+            throw new VaultError(
+              "EVENT_CONTRACT_INVALID",
+              "Stored availability event record is invalid.",
+              { errors: parsed.errors },
+            );
+          }
           return;
         }
+        const record = parsed.data;
 
         const candidate = { relativePath, record };
         const current = latestByEventId.get(record.id);
@@ -1336,37 +1372,91 @@ export async function readLatestBloodTestHistorySummaryInterruptible(
       },
     });
     if (read.interrupted) {
-      return interruptedBloodTestHistorySummary();
+      return interruptedCanonicalEventAvailability();
     }
   }
 
-  let latestOccurredAt: string | null = null;
+  let latestBloodPressureMeasurementOccurredAt: string | null = null;
+  let latestBloodTestOccurredAt: string | null = null;
+  let latestBodyMeasurementOccurredAt: string | null = null;
   for (const { record } of latestByEventId.values()) {
     if (!shouldContinue()) {
-      return interruptedBloodTestHistorySummary();
+      return interruptedCanonicalEventAvailability();
+    }
+    if (isDeletedEventSpineRecord(record)) {
+      continue;
+    }
+
+    if (
+      record.kind === "test"
+      && isBloodTestHistoryRecord(record)
+      && (
+        latestBloodTestOccurredAt === null
+        || record.occurredAt > latestBloodTestOccurredAt
+      )
+    ) {
+      latestBloodTestOccurredAt = record.occurredAt;
     }
     if (
-      !isDeletedEventSpineRecord(record)
-      && record.kind === "test"
-      && isBloodTestHistoryRecord(record)
-      && (latestOccurredAt === null || record.occurredAt > latestOccurredAt)
+      canonicalEventContainsBodyMeasurement(record)
+      && (
+        latestBodyMeasurementOccurredAt === null
+        || record.occurredAt > latestBodyMeasurementOccurredAt
+      )
     ) {
-      latestOccurredAt = record.occurredAt;
+      latestBodyMeasurementOccurredAt = record.occurredAt;
+    }
+    if (
+      canonicalEventContainsPairedBloodPressure(record)
+      && (
+        latestBloodPressureMeasurementOccurredAt === null
+        || record.occurredAt > latestBloodPressureMeasurementOccurredAt
+      )
+    ) {
+      latestBloodPressureMeasurementOccurredAt = record.occurredAt;
     }
   }
 
   return {
     interrupted: false,
-    latestOccurredAt,
-    present: latestOccurredAt !== null,
+    latestBloodPressureMeasurementOccurredAt,
+    latestBloodTestOccurredAt,
+    latestBodyMeasurementOccurredAt,
   };
 }
 
-function interruptedBloodTestHistorySummary(): LatestBloodTestHistorySummary {
+function canonicalEventContainsBodyMeasurement(record: EventRecord): boolean {
+  if (record.kind === "observation") {
+    return CANONICAL_BODY_MEASUREMENT_METRICS.has(record.metric);
+  }
+  if (record.kind === "measurement") {
+    return record.measurements.some((measurement) =>
+      CANONICAL_BODY_MEASUREMENT_METRICS.has(measurement.metric)
+    );
+  }
+  if (record.kind === "body_measurement") {
+    return record.measurements.some((measurement) =>
+      CANONICAL_BODY_MEASUREMENT_TYPES.has(measurement.type)
+    );
+  }
+  return false;
+}
+
+function canonicalEventContainsPairedBloodPressure(record: EventRecord): boolean {
+  if (record.kind !== "measurement") {
+    return false;
+  }
+  const metrics = new Set(record.measurements.map((measurement) => measurement.metric));
+  return metrics.has("systolic-blood-pressure")
+    && metrics.has("diastolic-blood-pressure");
+}
+
+function interruptedCanonicalEventAvailability(): CanonicalEventAvailabilitySummary {
   return {
     interrupted: true,
-    latestOccurredAt: null,
-    present: false,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: null,
+    latestBodyMeasurementOccurredAt: null,
   };
 }
 

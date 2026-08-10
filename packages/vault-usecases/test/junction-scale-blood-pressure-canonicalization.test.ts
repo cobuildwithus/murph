@@ -45,8 +45,7 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
               provider_slug: 'withings',
               source_type: 'scale',
               observedAt: '2026-08-08T12:00:00.000Z',
-              weight_kg: 82.5,
-              body_fat_percentage: 16.2,
+              lean_body_mass_kilogram: 61.4,
             }],
           },
           timeseries: {
@@ -68,8 +67,8 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
     })
     expect(canonicalRecords.some((record) =>
       record.kind === 'observation'
-      && record.metric === 'weight'
-      && record.value === 82.5
+      && record.metric === 'lean-body-mass'
+      && record.value === 61.4
     )).toBe(true)
     expect(canonicalRecords.some((record) =>
       record.kind === 'measurement'
@@ -89,11 +88,13 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
     )).toBe(true)
 
     const points = await listMetricPointsBatch(vaultRoot, [
-      { metricKey: 'body-weight', limit: 1 },
+      { metricKey: 'lean-body-mass', limit: 1 },
       { metricKey: 'systolic-blood-pressure', limit: 1 },
       { metricKey: 'diastolic-blood-pressure', limit: 1 },
     ])
-    const bodyWeight = points.find((point) => point.metricKey === 'body-weight')
+    const leanBodyMass = points.find(
+      (point) => point.metricKey === 'lean-body-mass',
+    )
     const systolic = points.find(
       (point) => point.metricKey === 'systolic-blood-pressure',
     )
@@ -101,10 +102,10 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
       (point) => point.metricKey === 'diastolic-blood-pressure',
     )
 
-    expect(bodyWeight).toMatchObject({
-      canonicalUnit: 'kg',
-      canonicalValue: 82.5,
+    expect(leanBodyMass).toMatchObject({
       effectiveDate: '2026-08-08',
+      unit: 'kg',
+      value: 61.4,
     })
     expect(systolic).toMatchObject({
       canonicalUnit: 'mmHg',
@@ -125,6 +126,15 @@ test('Junction scale and blood-pressure readings survive as canonical vault metr
       kind: 'measurement',
     })
     expect(systolic?.source.recordId).toBe(diastolic?.source.recordId)
+
+    await expect(
+      coreRuntime.readCanonicalEventAvailabilityInterruptible({ vaultRoot }),
+    ).resolves.toEqual({
+      interrupted: false,
+      latestBloodPressureMeasurementOccurredAt: '2026-08-08T12:05:00.000Z',
+      latestBloodTestOccurredAt: null,
+      latestBodyMeasurementOccurredAt: '2026-08-08T12:00:00.000Z',
+    })
   } finally {
     await rm(parentRoot, {
       force: true,

@@ -9,7 +9,7 @@ import {
   deleteEvent,
   initializeVault,
   readJsonlRecords,
-  readLatestBloodTestHistorySummaryInterruptible,
+  readCanonicalEventAvailabilityInterruptible,
   stringifyFrontmatterDocument,
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
@@ -1127,7 +1127,7 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal((stored[0] as { specimenType?: string }).specimenType, "blood");
 });
 
-test("latest blood-test summary collapses tombstones", async () => {
+test("canonical event availability collapses blood-test tombstones", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary");
   await initializeVault({ vaultRoot });
 
@@ -1148,17 +1148,18 @@ test("latest blood-test summary collapses tombstones", async () => {
     vaultRoot,
   });
 
-  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+  const summary = await readCanonicalEventAvailabilityInterruptible({
     vaultRoot,
   });
   assert.deepEqual(summary, {
     interrupted: false,
-    latestOccurredAt: older.record.occurredAt,
-    present: true,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: older.record.occurredAt,
+    latestBodyMeasurementOccurredAt: null,
   });
 });
 
-test("latest blood-test summary collapses revisions before filtering by kind", async () => {
+test("canonical event availability collapses revisions before filtering by kind", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary-kind-revision");
   await initializeVault({ vaultRoot });
 
@@ -1189,17 +1190,18 @@ test("latest blood-test summary collapses revisions before filtering by kind", a
     },
   });
 
-  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+  const summary = await readCanonicalEventAvailabilityInterruptible({
     vaultRoot,
   });
   assert.deepEqual(summary, {
     interrupted: false,
-    latestOccurredAt: null,
-    present: false,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: null,
+    latestBodyMeasurementOccurredAt: null,
   });
 });
 
-test("latest blood-test summary stops between JSONL records", async () => {
+test("canonical event availability stops between JSONL records", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary-interrupt");
   await initializeVault({ vaultRoot });
 
@@ -1231,7 +1233,7 @@ test("latest blood-test summary stops between JSONL records", async () => {
   assert.deepEqual(walked.relativePaths, [appended.relativePath]);
 
   let continuationChecks = 0;
-  const interrupted = await readLatestBloodTestHistorySummaryInterruptible({
+  const interrupted = await readCanonicalEventAvailabilityInterruptible({
     shouldContinue: () => {
       continuationChecks += 1;
       return continuationChecks <= walkContinuationChecks + 2;
@@ -1241,8 +1243,9 @@ test("latest blood-test summary stops between JSONL records", async () => {
 
   assert.deepEqual(interrupted, {
     interrupted: true,
-    latestOccurredAt: null,
-    present: false,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: null,
+    latestBodyMeasurementOccurredAt: null,
   });
   assert.equal(continuationChecks, walkContinuationChecks + 3);
 });
