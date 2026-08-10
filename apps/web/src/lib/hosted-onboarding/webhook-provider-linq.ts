@@ -404,10 +404,11 @@ export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
     return true;
   }
   if (
-    hostedLinqFirstContactContainsBlockedContent({
-      event: messageEvent,
-      participantContact,
-    })
+    candidateSenderMemberId
+    || resolveHostedLinqFirstContactContentDisposition({
+        event: messageEvent,
+        participantContact,
+      }) !== "allow"
     || input.participantMemberIds.length === 0
   ) {
     return false;

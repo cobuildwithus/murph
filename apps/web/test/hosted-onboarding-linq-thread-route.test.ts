@@ -5692,6 +5692,13 @@ describe("Linq group chat auto-provision", () => {
   it("does not prepare new-container crypto for a sender who withdrew health-data consent", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     prisma.seedActiveManagedLinqLine("+15550000000");
+    pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx
+      .mockResolvedValue([{
+        armedAt: new Date("2026-06-24T00:00:00.000Z"),
+        id: "hpgs_withdrawn_sender",
+        ownerMemberId: senderCore.id,
+        recipientPhoneLookupKey: requireTestPhoneLookupKey("+15550000000"),
+      }]);
     prisma.hostedMemberIdentity.findMany.mockResolvedValue([
       { memberId: senderCore.id },
     ]);
@@ -5708,9 +5715,13 @@ describe("Linq group chat auto-provision", () => {
 
     await expect(shouldPrepareHostedLinqThreadContainerCrypto({
       event: buildLinqMessageReceivedEvent({}),
-      participantMemberIds: [],
+      participantMemberIds: [senderCore.id],
       prisma: prisma as never,
     })).resolves.toBe(false);
+
+    expect(
+      pendingGroupSetupMocks.readHostedPendingGroupSetupCandidatesForParticipantsTx,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not prepare new-container crypto while group roster authority is unavailable", async () => {
