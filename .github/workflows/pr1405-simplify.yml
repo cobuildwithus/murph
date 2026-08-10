@@ -1,0 +1,142 @@
+name: Validate PR 1405 simplified search
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.event.pull_request.head.ref == 'agent/pr1405-validation-run'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Reconstruct patch and reset to reviewed PR head
+        id: apply
+        shell: bash
+        run: |
+          set +e
+          : > /tmp/pr1405-validation.log
+          {
+            set -euxo pipefail
+            cat \
+              .github/pr1405-patch.parts/part00 \
+              .github/pr1405-patch.parts/part01 \
+              .github/pr1405-patch.parts/missing13000-14000 \
+              .github/pr1405-patch.parts/part02 \
+              .github/pr1405-patch.parts/part03 \
+              .github/pr1405-patch.parts/part04 \
+              .github/pr1405-patch.parts/part05 \
+              | tr -d '\n\r\t ' \
+              > /tmp/pr1405-source.patch.gz.b64
+            echo '484c569d4ed128ba3739b7d186744eb1cc4505071c47c842b1bbbb314916f1c1  /tmp/pr1405-source.patch.gz.b64' | sha256sum -c -
+            base64 --decode /tmp/pr1405-source.patch.gz.b64 | gzip --decompress --stdout > /tmp/pr1405-source.patch
+            echo '7806c60f06319c0f61d7eee38478e76618666f038b7fc9df2f4e8c3ed85d9f4f  /tmp/pr1405-source.patch' | sha256sum -c -
+
+            git checkout --detach 5f1669983dcd3850cc171877f04945aa43cc2176
+            git apply --binary --check /tmp/pr1405-source.patch
+            git apply --binary /tmp/pr1405-source.patch
+
+            echo '53be04641de4f0a639092f0a98ac816c726e4aeeb29057e86f260894fa3d08bb  .github/pr1405-fixes/core.patch.gz.b64' | sha256sum -c -
+            base64 --decode .github/pr1405-fixes/core.patch.gz.b64 | gzip --decompress --stdout > /tmp/pr1405-core-fixes.patch
+            echo 'b13e27da7367244a02c6b5188ba9c0ac7a68022dd7bce84b647214ecc4f5a509  /tmp/pr1405-core-fixes.patch' | sha256sum -c -
+            git apply --check /tmp/pr1405-core-fixes.patch
+            git apply /tmp/pr1405-core-fixes.patch
+
+            echo '9968a3c46cee4b8bfae3a5b40132478c91b524f6f2c02b553d0c0d94bdca8c75  .github/pr1405-fixes/web.patch.gz.b64' | sha256sum -c -
+            base64 --decode .github/pr1405-fixes/web.patch.gz.b64 | gzip --decompress --stdout > /tmp/pr1405-web-fix.patch
+            echo 'eaec4ff91a9d3863d2fd0fd22fd4191efca4ecee8cad8d7dcafe007f0fbfbcb9  /tmp/pr1405-web-fix.patch' | sha256sum -c -
+            git apply --check /tmp/pr1405-web-fix.patch
+            git apply /tmp/pr1405-web-fix.patch
+            git diff --check
+          } 2>&1 | tee -a /tmp/pr1405-validation.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Setup Node
+        if: steps.apply.outputs.status == '0'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+
+      - name: Setup pnpm
+        if: steps.apply.outputs.status == '0'
+        shell: bash
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.30.3 --activate
+          pnpm --version
+
+      - name: Generate and verify
+        id: verify
+        if: steps.apply.outputs.status == '0'
+        shell: bash
+        run: |
+          set +e
+          status=0
+          run_stage() {
+            name="$1"
+            shift
+            echo "===== $name =====" | tee -a /tmp/pr1405-validation.log
+            "$@" 2>&1 | tee -a /tmp/pr1405-validation.log
+            rc=${PIPESTATUS[0]}
+            echo "===== $name exit $rc =====" | tee -a /tmp/pr1405-validation.log
+            if [[ $rc -ne 0 ]]; then status=$rc; fi
+          }
+          run_stage install pnpm install --frozen-lockfile
+          run_stage generate-health-commons pnpm --dir packages/health-commons generate
+          run_stage build-test-runtime pnpm build:test-runtime:prepared
+          run_stage generate-cli pnpm --dir packages/cli gen:config-schema
+          run_stage health-commons-verify pnpm --dir packages/health-commons verify
+          run_stage cli-typecheck pnpm --dir packages/cli typecheck
+          run_stage cli-tests pnpm --dir packages/cli exec vitest run --config vitest.workspace.ts --no-coverage test/commons-command-coverage.test.ts test/incur-smoke.test.ts test/incur-skill-hash.test.ts test/cli-typed-agent-inputs-schema.test.ts
+          run_stage assistant-typecheck pnpm --dir packages/assistant-engine typecheck
+          run_stage assistant-tests pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts test/assistant-skill-assets.test.ts
+          run_stage web-typecheck pnpm --dir apps/web typecheck
+          run_stage cloudflare-typecheck pnpm --dir apps/cloudflare typecheck
+          run_stage cloudflare-tests pnpm --dir apps/cloudflare exec vitest run --config vitest.node.workspace.ts --no-coverage test/deploy-artifacts.test.ts test/runner-bundle-workspace-artifacts.test.ts
+          run_stage diff-check git diff --check
+          {
+            echo '===== simplified-contract ====='
+            if grep -En 'same catalogHash|<exact title or alias>|"<focus>"' packages/assistant-engine/src/assistant/system-prompt.ts; then status=1; fi
+            if [[ -e packages/assistant-engine/skills/red-light-therapy ]]; then status=1; fi
+            if grep -En "slug: 'red-light-therapy'|name: 'red-light-therapy'" packages/assistant-engine/src/assistant-skill-assets.ts; then status=1; fi
+            if grep -En 'skills/red-light-therapy|red-light-therapy/SKILL.md' apps/web/src/components/knowledge/deep-carousel-section.tsx; then status=1; fi
+            echo "===== simplified-contract exit $status ====="
+          } 2>&1 | tee -a /tmp/pr1405-validation.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Publish clean candidate
+        if: steps.apply.outputs.status == '0' && steps.verify.outputs.status == '0'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git add -A
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'refactor(health-commons): simplify agent knowledge search'
+          git push --force origin HEAD:refs/heads/agent/pr1405-simplified-candidate
+
+      - name: Upload validation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1405-validation-log
+          path: /tmp/pr1405-validation.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Fail validation when a check failed
+        if: steps.apply.outputs.status != '0' || steps.verify.outputs.status != '0'
+        run: exit 1
