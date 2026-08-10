@@ -2,6 +2,9 @@ import type { Prisma } from "@prisma/client";
 
 import { generateHostedRandomPrefixedId } from "../primitives";
 import {
+  readHostedUsageCreditGrantCapacityTx,
+} from "./usage-credit-grant-capacity";
+import {
   applyHostedUsageCreditProjectionDeltaTx,
   assertHostedUsageCreditDate,
   reconcileHostedUsageCreditCurrentPeriodBlockTx,
@@ -84,6 +87,26 @@ export async function appendHostedUsageCreditGrantTx(input: {
       granted: false,
       ledgerVersion: input.lockedBeneficiary.ledgerVersion,
     };
+  }
+
+  // A verified purchase may already have crossed its external payment effect,
+  // so purchase conversion is the sole temporary admission exception. Every
+  // current or future non-purchase grant consumes unreserved capacity here.
+  if (input.source.kind !== "purchase") {
+    const capacity = await readHostedUsageCreditGrantCapacityTx({
+      lockedBeneficiary: input.lockedBeneficiary,
+      tx: input.tx,
+    });
+    if (capacity === "at_capacity") {
+      throw new TypeError(
+        "Hosted usage-credit active grant capacity is full.",
+      );
+    }
+    if (capacity === "overflow") {
+      throw new TypeError(
+        "Hosted usage-credit active grant capacity exceeds its contract.",
+      );
+    }
   }
 
   const projection = await applyHostedUsageCreditProjectionDeltaTx({

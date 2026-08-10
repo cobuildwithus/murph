@@ -2,6 +2,9 @@ import type { Prisma } from "@prisma/client";
 
 import { generateHostedRandomPrefixedId } from "../primitives";
 import {
+  HOSTED_USAGE_CREDIT_MAX_OCCUPIED_GRANT_SLOTS as MAX_ACTIVE_SPENDABLE_GRANTS,
+} from "./usage-credit-grant-capacity";
+import {
   assertHostedUsageCreditDate,
   lockHostedUsageCreditBeneficiaryTx,
   type HostedUsageCreditProjection,
@@ -32,7 +35,6 @@ interface HostedUsageCreditSettlementMutationRow {
   purchaseUpdatedCount: number;
 }
 
-const MAX_ACTIVE_SPENDABLE_GRANTS = 32;
 const ACTIVE_SPENDABLE_GRANT_INSPECTION_LIMIT =
   MAX_ACTIVE_SPENDABLE_GRANTS + 1;
 const USAGE_DEBIT_SEMANTIC_SOURCE_VERSION = "v1";
