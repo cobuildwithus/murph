@@ -2,6 +2,11 @@ import { PrismaClient } from "@prisma/client";
 
 import type { ConsumeOAuthStateResult, OAuthStateRecord } from "@murphai/device-syncd/types";
 
+import type { DeviceProviderApplicationBinding } from "../provider-applications/types";
+import {
+  requireDeviceProviderApplicationRevision,
+  requireMemberOwnedDeviceProviderApplicationProvider,
+} from "../provider-applications/types";
 import { toJsonRecord } from "../shared";
 import { toPrismaJsonObject } from "./prisma-json";
 
@@ -24,19 +29,85 @@ export class PrismaHostedOAuthSessionStore {
   }
 
   async createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {
-    await this.prisma.deviceOauthSession.create({
-      data: {
+    return createOAuthStateRecord(this.prisma, input, null);
+  }
+
+  async createOAuthStateWithProviderApplication(
+    input: OAuthStateRecord,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<OAuthStateRecord> {
+    if (!input.ownerId) {
+      throw new TypeError(
+        "Member-owned provider application OAuth state requires an owner.",
+      );
+    }
+    const provider = requireMemberOwnedDeviceProviderApplicationProvider(
+      binding.provider,
+    );
+    const revision = requireDeviceProviderApplicationRevision(binding.revision);
+    if (!binding.applicationId.trim()) {
+      throw new TypeError(
+        "Member-owned provider application OAuth state requires an application id.",
+      );
+    }
+    if (input.provider !== provider) {
+      throw new TypeError(
+        "Member-owned provider application OAuth state provider mismatch.",
+      );
+    }
+    return createOAuthStateRecord(this.prisma, input, {
+      applicationId: binding.applicationId,
+      provider,
+      revision,
+    });
+  }
+
+  async readOAuthStateProviderApplicationBinding(input: {
+    expectedOwnerId: string;
+    expectedProvider: string;
+    now: string;
+    state: string;
+  }): Promise<DeviceProviderApplicationBinding | null> {
+    const record = await this.prisma.deviceOauthSession.findFirst({
+      select: {
+        provider: true,
+        providerApplicationId: true,
+        providerApplicationRevision: true,
+        userId: true,
+      },
+      where: {
+        expiresAt: { gt: new Date(input.now) },
+        provider: input.expectedProvider,
         state: input.state,
-        userId: input.ownerId ?? null,
-        provider: input.provider,
-        returnTo: input.returnTo,
-        metadataJson: toPrismaJsonObject(input.metadata ?? {}),
-        createdAt: new Date(input.createdAt),
-        expiresAt: new Date(input.expiresAt),
+        userId: input.expectedOwnerId,
       },
     });
-
-    return input;
+    if (!record) {
+      return null;
+    }
+    if (
+      record.providerApplicationId === null
+      && record.providerApplicationRevision === null
+    ) {
+      return null;
+    }
+    if (
+      !record.providerApplicationId
+      || record.providerApplicationRevision === null
+    ) {
+      throw new TypeError(
+        "Stored OAuth state has an incomplete provider application binding.",
+      );
+    }
+    return {
+      applicationId: record.providerApplicationId,
+      provider: requireMemberOwnedDeviceProviderApplicationProvider(
+        record.provider,
+      ),
+      revision: requireDeviceProviderApplicationRevision(
+        record.providerApplicationRevision,
+      ),
+    };
   }
 
   async consumeOAuthState(
@@ -126,4 +197,26 @@ export class PrismaHostedOAuthSessionStore {
       };
     });
   }
+}
+
+async function createOAuthStateRecord(
+  prisma: PrismaClient,
+  input: OAuthStateRecord,
+  binding: DeviceProviderApplicationBinding | null,
+): Promise<OAuthStateRecord> {
+  await prisma.deviceOauthSession.create({
+    data: {
+      state: input.state,
+      userId: input.ownerId ?? null,
+      provider: input.provider,
+      providerApplicationId: binding?.applicationId ?? null,
+      providerApplicationRevision: binding?.revision ?? null,
+      returnTo: input.returnTo,
+      metadataJson: toPrismaJsonObject(input.metadata ?? {}),
+      createdAt: new Date(input.createdAt),
+      expiresAt: new Date(input.expiresAt),
+    },
+  });
+
+  return input;
 }

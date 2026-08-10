@@ -1,15 +1,19 @@
 import {
   createConfiguredDeviceSyncProvidersFromConfigs,
-  readConfiguredJunctionDeviceSyncProviderConfig,
 } from "@murphai/device-syncd/config";
-import type { ConfiguredDeviceSyncProviderConfigs } from "@murphai/device-syncd/config";
+import type {
+  SerializableConfiguredDeviceSyncProviderConfigs,
+} from "@murphai/device-syncd/config";
 import type { DeviceSyncJobFailureDiagnostic } from "@murphai/device-syncd/types";
 import {
   resolveDeviceSyncStoreNextWakeAt,
   type DeviceSyncService,
 } from "@murphai/device-syncd/service";
 import { createDeviceSyncRegistry } from "@murphai/device-syncd/registry";
-import { sanitizeHostedRuntimeErrorText } from "@murphai/device-syncd/hosted-runtime";
+import {
+  sanitizeHostedRuntimeErrorText,
+  type HostedExecutionDeviceSyncRuntimeSnapshotResponse,
+} from "@murphai/device-syncd/hosted-runtime";
 import { evaluatePushPrimarySourceStaleness } from "@murphai/device-syncd/source-staleness";
 import {
   pruneWearableDenseRawTimeseries,
@@ -51,19 +55,15 @@ import {
 import {
   setHostedDeviceSyncDenseRawRetentionMailboxWakeAt,
 } from "./system-mailbox-state.ts";
+import {
+  resolveHostedRuntimeDeviceSyncProviderConfigs,
+} from "./device-sync-provider-configs.ts";
 
 const HOSTED_MAX_DEVICE_SYNC_JOBS = 100;
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_FAILURE_SUMMARY_MAX_LENGTH = 2048;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
-const HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS = [
-  "JUNCTION_API_KEY",
-  "JUNCTION_CLIENT_USER_ID_SECRET",
-  "JUNCTION_ENV",
-  "JUNCTION_REGION",
-] as const;
-
 export async function runHostedDeviceSyncPass(
   wake: HostedRuntimeEvent,
   vaultRoot: string,
@@ -96,9 +96,33 @@ export async function runHostedDeviceSyncPass(
     options.signal ?? null,
   );
   const startedAtMs = Date.now();
+  if (shouldYieldHostedDeviceSync(shouldYield)) {
+    return buildHostedDeviceSyncPreServiceYieldedPassResult(
+      options.stagedDirtyAcks ?? null,
+    );
+  }
+
+  let preloadedSnapshot: HostedExecutionDeviceSyncRuntimeSnapshotResponse | undefined;
+  try {
+    preloadedSnapshot = await preloadHostedDeviceSyncRuntimeSnapshot({
+      deviceSyncConfig,
+      deviceSyncPort,
+      signal: options.signal ?? null,
+    });
+  } catch (error) {
+    if (isHostedDeviceSyncAbortError(error, options.signal ?? null)) {
+      return buildHostedDeviceSyncPreServiceYieldedPassResult(
+        options.stagedDirtyAcks ?? null,
+      );
+    }
+    throw error;
+  }
+
   const service = createHostedDeviceSyncRuntime({
     deviceSyncConfig,
     deviceSyncPort,
+    hasHostedConnections: (preloadedSnapshot?.connections.length ?? 0) > 0,
+    memberProviderConfigs: preloadedSnapshot?.providerConfigs ?? {},
     platformEnv,
     shouldYield,
     vaultRoot,
@@ -152,6 +176,7 @@ export async function runHostedDeviceSyncPass(
         secret,
         signal: options.signal ?? null,
         service,
+        snapshot: preloadedSnapshot,
         skipDirtyPendingFetch: options.skipDirtyPendingFetch ?? false,
         stagedDirtyAcks: options.stagedDirtyAcks ?? null,
       });
@@ -358,6 +383,26 @@ function isHostedDeviceSyncAbortError(error: unknown, signal: AbortSignal | null
     return true;
   }
   return error instanceof Error && error.name === "AbortError";
+}
+
+function buildHostedDeviceSyncPreServiceYieldedPassResult(
+  stagedDirtyAcks: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[] | null,
+): {
+  nextWakeAt: string;
+  postCheckpointRecord: null;
+  processedJobs: 0;
+  skipped: true;
+  stagedDirtyAcks?: HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
+} {
+  return {
+    nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+    postCheckpointRecord: null,
+    processedJobs: 0,
+    skipped: true,
+    ...(stagedDirtyAcks && stagedDirtyAcks.length > 0
+      ? { stagedDirtyAcks: [...stagedDirtyAcks] }
+      : {}),
+  };
 }
 
 function buildHostedDeviceSyncYieldedPassResult(input: {
@@ -1119,9 +1164,26 @@ function isHostedDeviceSyncSafeRuntimeLogSummary(value: string): boolean {
     );
 }
 
+async function preloadHostedDeviceSyncRuntimeSnapshot(input: {
+  deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
+  deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
+  signal: AbortSignal | null;
+}): Promise<HostedExecutionDeviceSyncRuntimeSnapshotResponse | undefined> {
+  if (!input.deviceSyncConfig || !input.deviceSyncPort) {
+    return undefined;
+  }
+
+  return input.deviceSyncPort.fetchSnapshot({
+    includeCredentialMaterial: true,
+    signal: input.signal,
+  });
+}
+
 function createHostedDeviceSyncRuntime(input: {
   deviceSyncConfig: HostedAssistantRuntimeDeviceSyncConfig | null;
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined;
+  hasHostedConnections: boolean;
+  memberProviderConfigs: SerializableConfiguredDeviceSyncProviderConfigs;
   platformEnv: Readonly<Record<string, string>>;
   shouldYield?: (() => boolean) | null;
   vaultRoot: string;
@@ -1134,12 +1196,13 @@ function createHostedDeviceSyncRuntime(input: {
     createConfiguredDeviceSyncProvidersFromConfigs(
       resolveHostedRuntimeDeviceSyncProviderConfigs(
         input.deviceSyncConfig.providerConfigs,
+        input.memberProviderConfigs,
         input.platformEnv,
       ),
     ),
   );
 
-  if (registry.list().length === 0) {
+  if (registry.list().length === 0 && !input.hasHostedConnections) {
     return null;
   }
 
@@ -1153,39 +1216,4 @@ function createHostedDeviceSyncRuntime(input: {
     },
     registry,
   });
-}
-
-function resolveHostedRuntimeDeviceSyncProviderConfigs(
-  providerConfigs: HostedAssistantRuntimeDeviceSyncConfig["providerConfigs"],
-  platformEnv: Readonly<Record<string, string>>,
-): ConfiguredDeviceSyncProviderConfigs {
-  const runtimeProviderConfigs: ConfiguredDeviceSyncProviderConfigs = {};
-
-  if (providerConfigs.junction && hasHostedRuntimeJunctionPlatformEnv(platformEnv)) {
-    const junction = readConfiguredJunctionDeviceSyncProviderConfig(platformEnv);
-
-    if (junction) {
-      runtimeProviderConfigs.junction = junction;
-    }
-  }
-
-  if (providerConfigs.oura) {
-    runtimeProviderConfigs.oura = providerConfigs.oura;
-  }
-
-  if (providerConfigs.whoop) {
-    runtimeProviderConfigs.whoop = providerConfigs.whoop;
-  }
-
-  if (providerConfigs.strava) {
-    runtimeProviderConfigs.strava = providerConfigs.strava;
-  }
-
-  return runtimeProviderConfigs;
-}
-
-function hasHostedRuntimeJunctionPlatformEnv(
-  platformEnv: Readonly<Record<string, string>>,
-): boolean {
-  return HOSTED_RUNTIME_JUNCTION_PLATFORM_ENV_KEYS.some((key) => Boolean(platformEnv[key]));
 }

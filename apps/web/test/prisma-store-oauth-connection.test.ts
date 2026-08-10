@@ -83,6 +83,8 @@ type MutableConnectionRecord = {
   credentialKind: "oauth_tokens" | "provider_config" | "none";
   credentialMetadataJson: Record<string, unknown> | null;
   providerConfigKey: string | null;
+  providerApplicationId: string | null;
+  providerApplicationRevision: number | null;
   displayName: string | null;
   externalAccountIdEncrypted: string | null;
   keyVersion: string | null;
@@ -365,6 +367,79 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     });
     expect(createdArtifacts.secretCreateCalled).toBe(false);
     expect(created.metadata).toEqual({});
+  });
+
+  it("commits the exact provider application binding with a new OAuth connection", async () => {
+    let created: MutableConnectionRecord | null = null;
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          created = normalizeCreatedConnection(data);
+          return cloneConnection(created);
+        }),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => ({
+          id: "dpa_123",
+          memberId: "user-123",
+          provider: "strava",
+          revision: 4,
+        })),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await store.upsertConnectionWithProviderApplication({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-123",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "access-token",
+        refreshToken: "refresh-token",
+        accessTokenExpiresAt: "2026-03-25T04:00:00.000Z",
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T00:00:00.000Z",
+      nextReconcileAt: "2026-03-25T05:00:00.000Z",
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    });
+
+    expect(tx.deviceProviderApplication.findFirst).toHaveBeenCalledWith({
+      select: {
+        id: true,
+        memberId: true,
+        provider: true,
+        revision: true,
+      },
+      where: {
+        id: "dpa_123",
+        memberId: "user-123",
+        provider: "strava",
+        revision: 4,
+      },
+    });
+    expect(created).toMatchObject({
+      provider: "strava",
+      providerApplicationId: "dpa_123",
+      providerApplicationRevision: 4,
+      userId: "user-123",
+    });
   });
 
   it("keeps hosted device connection persistence provider-generic", async () => {
@@ -899,6 +974,97 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       status: "active",
     }));
     expect(tx.deviceConnection.create).not.toHaveBeenCalled();
+    expect(tx.deviceConnection.update).not.toHaveBeenCalled();
+  });
+
+  it("never lets a static OAuth callback bypass an existing private application", async () => {
+    const tx = {
+      deviceConnection: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(),
+      },
+      deviceProviderApplication: {
+        findFirst: vi.fn(async () => ({ id: "dpa_123" })),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnectionWithPrevious({
+      ownerId: "user-123",
+      existingAccountPolicy: "replace",
+      provider: "strava",
+      externalAccountId: "athlete-123",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "static-access",
+        refreshToken: "static-refresh",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T01:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_REQUIRED",
+      httpStatus: 409,
+    });
+    expect(tx.deviceConnection.create).not.toHaveBeenCalled();
+  });
+
+  it("never lets a static OAuth callback reuse an app-bound active connection", async () => {
+    const existing = createConnection({
+      id: "dsc_123",
+      provider: "strava",
+      providerApplicationId: "dpa_123",
+      providerApplicationRevision: 4,
+      status: "active",
+      userId: "user-123",
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findUnique: vi.fn(async () => cloneConnection(existing)),
+        update: vi.fn(),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      codec: TEST_CODEC,
+      prisma: {
+        $transaction: async <TResult>(
+          callback: (transaction: typeof tx) => Promise<TResult>,
+        ) => callback(tx),
+      } as never,
+      providerAccountBlindIndexKey: BLIND_INDEX_KEY,
+    });
+
+    await expect(store.upsertConnectionWithPrevious({
+      ownerId: "user-123",
+      existingAccountPolicy: "preserve_established",
+      provider: "strava",
+      externalAccountId: "acct_456",
+      displayName: "Strava",
+      scopes: ["activity:read_all"],
+      tokens: {
+        accessToken: "static-access",
+        refreshToken: "static-refresh",
+        accessTokenExpiresAt: null,
+      },
+      metadata: {},
+      connectedAt: "2026-03-25T01:00:00.000Z",
+      nextReconcileAt: null,
+    })).rejects.toMatchObject({
+      code: "PROVIDER_APPLICATION_REQUIRED",
+      httpStatus: 409,
+    });
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
@@ -2363,6 +2529,8 @@ function createConnection(overrides: Partial<MutableConnectionRecord>): MutableC
     credentialKind: overrides.credentialKind ?? "oauth_tokens",
     credentialMetadataJson: overrides.credentialMetadataJson ?? {},
     providerConfigKey: overrides.providerConfigKey ?? null,
+    providerApplicationId: overrides.providerApplicationId ?? null,
+    providerApplicationRevision: overrides.providerApplicationRevision ?? null,
     displayName: overrides.displayName ?? "Oura ring",
     externalAccountIdEncrypted: overrides.externalAccountIdEncrypted ?? "enc:acct_456",
     keyVersion: overrides.keyVersion ?? null,
@@ -2402,6 +2570,12 @@ function normalizeCreatedConnection(data: Record<string, unknown>): MutableConne
       : null,
     metadataJson: (data.metadataJson as Record<string, unknown> | null) ?? {},
     providerConfigKey: typeof data.providerConfigKey === "string" ? data.providerConfigKey : null,
+    providerApplicationId: typeof data.providerApplicationId === "string"
+      ? data.providerApplicationId
+      : null,
+    providerApplicationRevision: typeof data.providerApplicationRevision === "number"
+      ? data.providerApplicationRevision
+      : null,
     refreshLeaseExpiresAt: data.refreshLeaseExpiresAt instanceof Date ? data.refreshLeaseExpiresAt : null,
     refreshLeaseOwner: typeof data.refreshLeaseOwner === "string" ? data.refreshLeaseOwner : null,
     refreshLeaseTokenVersion: typeof data.refreshLeaseTokenVersion === "number" ? data.refreshLeaseTokenVersion : null,

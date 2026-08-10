@@ -5,7 +5,10 @@ import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-run
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncControlPlane } from "../device-sync/control-plane";
-import { createHostedDeviceSyncRegistry } from "../device-sync/providers";
+import {
+  createHostedDeviceSyncRegistry,
+  createHostedDeviceSyncRegistryWithProviderConfigs,
+} from "../device-sync/providers";
 import { ComputerUseService } from "../computer-use/service";
 import { PrismaComputerUseStore } from "../computer-use/store";
 import {
@@ -18,6 +21,9 @@ import {
   readHostedConnectedAppsConfig,
 } from "../connected-apps/config";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
+import {
+  resolveDeviceProviderApplicationForConnection,
+} from "../device-sync/provider-applications";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { createHostedPrivyUserLookupKey } from "../hosted-onboarding/contact-privacy";
 import {
@@ -459,6 +465,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Device provider connections and tokens",
     deletion: "live-delete",
     note: "Best-effort provider revocation runs first, then connection rows and encrypted tokens are deleted.",
+  },
+  {
+    slug: "prisma.device_provider_application",
+    label: "Encrypted member-owned device provider applications",
+    deletion: "live-delete",
+    note: "Deletes each member-owned OAuth client application and encrypted client credentials after linked device connection rows are removed. Browser-vault export omits the client identity, ciphertext, and credentials.",
   },
   {
     slug: "prisma.device_sync_companion_capture_receipt",
@@ -2260,6 +2272,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.device_browser_assertion_nonce", await input.prisma.deviceBrowserAssertionNonce.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_web_internal_request_nonce", await input.prisma.hostedWebInternalRequestNonce.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_connection", await input.prisma.deviceConnection.deleteMany({ where: { userId: memberIdFilter } }));
+  record("prisma.device_provider_application", await input.prisma.deviceProviderApplication.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.hosted_member", await input.prisma.hostedMember.deleteMany({ where: { id: memberIdFilter } }));
 
   return counts;
@@ -2441,8 +2454,18 @@ async function revokeDeviceProvidersBestEffort(input: {
         continue;
       }
 
-      registry ??= createHostedDeviceSyncRegistry(process.env);
-      const provider = registry.get(connection.provider);
+      const providerApplication =
+        await resolveDeviceProviderApplicationForConnection({
+          connectionId: connection.id,
+          memberId: input.memberId,
+          prisma: controlPlane.store.prisma,
+        });
+      const connectionRegistry = providerApplication
+        ? createHostedDeviceSyncRegistryWithProviderConfigs({
+            providerConfigs: providerApplication.providerConfigs,
+          })
+        : (registry ??= createHostedDeviceSyncRegistry(process.env));
+      const provider = connectionRegistry.get(connection.provider);
       const revokeAccess = provider?.connectionHandler?.revokeAccess;
 
       if (!revokeAccess) {

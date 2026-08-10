@@ -6,6 +6,8 @@ interface MockDeviceOauthSessionRow {
   state: string;
   userId: string | null;
   provider: string;
+  providerApplicationId: string | null;
+  providerApplicationRevision: number | null;
   returnTo: string | null;
   metadataJson: Record<string, unknown> | null;
   createdAt: Date;
@@ -50,6 +52,87 @@ describe("PrismaHostedOAuthSessionStore.createOAuthState", () => {
         },
       }),
     });
+  });
+});
+
+describe("PrismaHostedOAuthSessionStore member-owned provider binding", () => {
+  it("persists and re-reads the exact application revision without consuming state", async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const findFirst = vi.fn().mockResolvedValue({
+      provider: "strava",
+      providerApplicationId: "dpa_123",
+      providerApplicationRevision: 4,
+      userId: "user_123",
+    });
+    const store = {
+      prisma: {
+        deviceOauthSession: { create, findFirst },
+      },
+      createOAuthStateWithProviderApplication:
+        PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
+      readOAuthStateProviderApplicationBinding:
+        PrismaHostedOAuthSessionStore.prototype.readOAuthStateProviderApplicationBinding,
+    };
+    const state = {
+      state: "state_123",
+      ownerId: "user_123",
+      provider: "strava",
+      returnTo: "https://murph.test/connect",
+      metadata: {},
+      createdAt: "2026-04-13T12:00:00.000Z",
+      expiresAt: "2026-04-13T12:15:00.000Z",
+    };
+    const binding = {
+      applicationId: "dpa_123",
+      provider: "strava" as const,
+      revision: 4,
+    };
+
+    await store.createOAuthStateWithProviderApplication(state, binding);
+    await expect(store.readOAuthStateProviderApplicationBinding({
+      expectedOwnerId: "user_123",
+      expectedProvider: "strava",
+      now: "2026-04-13T12:01:00.000Z",
+      state: "state_123",
+    })).resolves.toEqual(binding);
+
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        providerApplicationId: "dpa_123",
+        providerApplicationRevision: 4,
+      }),
+    });
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        provider: "strava",
+        state: "state_123",
+        userId: "user_123",
+      }),
+    }));
+  });
+
+  it("rejects provider mismatch before persisting state", async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const store = {
+      prisma: { deviceOauthSession: { create } },
+      createOAuthStateWithProviderApplication:
+        PrismaHostedOAuthSessionStore.prototype.createOAuthStateWithProviderApplication,
+    };
+
+    await expect(store.createOAuthStateWithProviderApplication({
+      state: "state_123",
+      ownerId: "user_123",
+      provider: "oura",
+      returnTo: null,
+      metadata: {},
+      createdAt: "2026-04-13T12:00:00.000Z",
+      expiresAt: "2026-04-13T12:15:00.000Z",
+    }, {
+      applicationId: "dpa_123",
+      provider: "strava",
+      revision: 4,
+    })).rejects.toThrow(/provider mismatch/u);
+    expect(create).not.toHaveBeenCalled();
   });
 });
 
@@ -186,6 +269,8 @@ function buildOAuthSessionRow(
     state: overrides.state ?? "state_123",
     userId: overrides.userId ?? "user_123",
     provider: overrides.provider ?? "whoop",
+    providerApplicationId: overrides.providerApplicationId ?? null,
+    providerApplicationRevision: overrides.providerApplicationRevision ?? null,
     returnTo: overrides.returnTo ?? "https://murph.test/settings",
     metadataJson: overrides.metadataJson ?? null,
     createdAt: overrides.createdAt ?? new Date("2026-04-13T12:00:00.000Z"),

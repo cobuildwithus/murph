@@ -33,7 +33,6 @@ import type {
   HostedExecutionDeviceSyncDirtyResource,
   HostedExecutionDeviceSyncDirtyStateResponse,
   HostedExecutionDeviceSyncJobHint,
-  HostedExecutionDeviceSyncRuntimeConnectionStateSnapshot as HostedDeviceSyncRuntimeConnectionStateSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate as HostedDeviceSyncRuntimeConnectionSourceUpdate,
   HostedExecutionDeviceSyncRuntimeConnectionUpdate as HostedDeviceSyncRuntimeConnectionUpdate,
@@ -110,6 +109,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
   service: DeviceSyncService;
+  snapshot?: HostedDeviceSyncRuntimeSnapshotResponse | null;
   signal?: AbortSignal | null;
   skipDirtyPendingFetch?: boolean;
   stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
@@ -122,9 +122,14 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
     );
   }
 
-  const snapshot = input.signal
-    ? await client.fetchSnapshot({ signal: input.signal })
-    : await client.fetchSnapshot();
+  const snapshot = input.snapshot === undefined
+    ? (input.signal
+      ? await client.fetchSnapshot({
+          includeCredentialMaterial: true,
+          signal: input.signal,
+        })
+      : await client.fetchSnapshot({ includeCredentialMaterial: true }))
+    : input.snapshot;
   const state = createEmptyHostedDeviceSyncRuntimeSyncState(
     snapshot ? { ...snapshot, connections: [] } : null,
   );

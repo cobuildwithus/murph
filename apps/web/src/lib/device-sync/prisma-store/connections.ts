@@ -40,6 +40,10 @@ import {
   generateHostedRandomPrefixedId,
 } from "../shared";
 import type { HostedLocalHeartbeatStateUpdate } from "../local-heartbeat";
+import {
+  isMemberOwnedDeviceProviderApplicationProvider,
+  type DeviceProviderApplicationBinding,
+} from "../provider-applications/types";
 import type {
   HostedDeviceSyncDueReconcileConnectionRecord,
   HostedConnectionRefreshLeaseClaimResult,
@@ -133,19 +137,34 @@ export class PrismaHostedConnectionStore {
   async upsertConnectionWithPrevious(
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    return this.upsertConnectionWithOptionalProviderApplication(input, null);
+  }
+
+  async upsertConnectionWithProviderApplication(
+    input: UpsertPublicDeviceSyncConnectionInput,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    return this.upsertConnectionWithOptionalProviderApplication(input, binding);
+  }
+
+  private async upsertConnectionWithOptionalProviderApplication(
+    input: UpsertPublicDeviceSyncConnectionInput,
+    binding: DeviceProviderApplicationBinding | null,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     try {
-      return await this.upsertConnectionWithPreviousOnce(input);
+      return await this.upsertConnectionWithPreviousOnce(input, binding);
     } catch (error) {
       if (!isUniqueViolation(error)) {
         throw error;
       }
 
-      return this.resolveUpsertConnectionUniqueRace(input, error);
+      return this.resolveUpsertConnectionUniqueRace(input, error, binding);
     }
   }
 
   private async upsertConnectionWithPreviousOnce(
     input: UpsertPublicDeviceSyncConnectionInput,
+    binding: DeviceProviderApplicationBinding | null,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     const ownerId = normalizeNullableString(input.ownerId);
     const displayName = normalizeNullableString(input.displayName);
@@ -210,6 +229,14 @@ export class PrismaHostedConnectionStore {
           });
         }
 
+        await assertHostedProviderApplicationBindingForUpsert({
+          binding,
+          existing,
+          ownerId,
+          provider: input.provider,
+          tx,
+        });
+
         if (isDeviceSyncDisconnectInProgress(existing)) {
           throw deviceSyncError({
             code: "CONNECTION_DISCONNECT_IN_PROGRESS",
@@ -265,6 +292,8 @@ export class PrismaHostedConnectionStore {
             ...buildHostedConnectionSetupWrite(input, connectedAt, "update"),
             connectedAt,
             displayName,
+            providerApplicationId: binding?.applicationId ?? null,
+            providerApplicationRevision: binding?.revision ?? null,
             externalAccountIdEncrypted: await encryptHostedConnectionSecret({
               connectionId: existing.id,
               provider: input.provider,
@@ -311,6 +340,14 @@ export class PrismaHostedConnectionStore {
         });
       }
 
+      await assertHostedProviderApplicationBindingForUpsert({
+        binding,
+        existing: null,
+        ownerId,
+        provider: input.provider,
+        tx,
+      });
+
       const connectionId = generateHostedRandomPrefixedId("dsc");
       const credentialWrite = await buildHostedConnectionCredentialWrite({
         connectionId,
@@ -342,6 +379,8 @@ export class PrismaHostedConnectionStore {
           nextReconcileAt: maybeDate(input.nextReconcileAt),
           provider: input.provider,
           providerAccountBlindIndex,
+          providerApplicationId: binding?.applicationId ?? null,
+          providerApplicationRevision: binding?.revision ?? null,
           scopesJson: scopes,
           status: requestedStatus ?? "active",
           userId: ownerId,
@@ -367,6 +406,7 @@ export class PrismaHostedConnectionStore {
   private async resolveUpsertConnectionUniqueRace(
     input: UpsertPublicDeviceSyncConnectionInput,
     originalError: unknown,
+    binding: DeviceProviderApplicationBinding | null,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     const ownerId = normalizeNullableString(input.ownerId);
     if (!ownerId) {
@@ -388,19 +428,12 @@ export class PrismaHostedConnectionStore {
       });
     }
 
-    if (
-      shouldPreserveEstablishedDeviceSyncConnection(
-        existing,
-        input.existingAccountPolicy,
-      )
-    ) {
-      return {
-        account: existing,
-        previousAccount: existing,
-      };
-    }
-
-    return this.upsertConnectionWithPreviousOnce(input);
+    // Retry through the transaction after ownership has been established. The
+    // transactional path re-reads the full connection record, takes its lock,
+    // and enforces the exact provider-application binding before it can reuse
+    // an established connection. Returning the redacted account here would
+    // bypass those checks during a uniqueness race.
+    return this.upsertConnectionWithPreviousOnce(input, binding);
   }
 
   async getConnectionByExternalAccount(
@@ -1065,6 +1098,127 @@ export class PrismaHostedConnectionStore {
           tokenVersion: null,
         } satisfies HostedStoredDeviceSyncAccount;
     }
+  }
+}
+
+async function assertHostedProviderApplicationBindingForUpsert(input: {
+  binding: DeviceProviderApplicationBinding | null;
+  existing: HostedConnectionRecord | null;
+  ownerId: string | null;
+  provider: string;
+  tx: HostedPrismaTransactionClient;
+}): Promise<void> {
+  const existingApplicationId = normalizeNullableString(
+    input.existing?.providerApplicationId,
+  );
+  const existingApplicationRevision =
+    input.existing?.providerApplicationRevision ?? null;
+
+  if (!input.binding) {
+    if (existingApplicationId || existingApplicationRevision !== null) {
+      throw deviceSyncError({
+        code: "PROVIDER_APPLICATION_REQUIRED",
+        message: "This connection must be reauthorized through its private provider application.",
+        retryable: false,
+        httpStatus: 409,
+      });
+    }
+
+    if (
+      input.ownerId
+      && isMemberOwnedDeviceProviderApplicationProvider(input.provider)
+    ) {
+      const application = await input.tx.deviceProviderApplication.findFirst({
+        select: { id: true },
+        where: {
+          memberId: input.ownerId,
+          provider: input.provider,
+        },
+      });
+      if (application) {
+        throw deviceSyncError({
+          code: "PROVIDER_APPLICATION_REQUIRED",
+          message: "This provider must be authorized through the member's private provider application.",
+          retryable: false,
+          httpStatus: 409,
+        });
+      }
+    }
+    return;
+  }
+
+  if (!input.ownerId) {
+    throw deviceSyncError({
+      code: "CONNECTION_OWNER_REQUIRED",
+      message: "Member-owned provider application connections require an authenticated owner.",
+      retryable: false,
+      httpStatus: 400,
+    });
+  }
+  if (input.binding.provider !== input.provider) {
+    throw deviceSyncError({
+      code: "PROVIDER_APPLICATION_PROVIDER_MISMATCH",
+      message: "Private provider application does not match the requested provider.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  const application = await input.tx.deviceProviderApplication.findFirst({
+    select: {
+      id: true,
+      memberId: true,
+      provider: true,
+      revision: true,
+    },
+    where: {
+      id: input.binding.applicationId,
+      memberId: input.ownerId,
+      provider: input.provider,
+      revision: input.binding.revision,
+    },
+  });
+  if (!application) {
+    throw deviceSyncError({
+      code: "PROVIDER_APPLICATION_STALE",
+      message: "Private provider application changed and must be reauthorized.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  if (
+    input.existing
+    && input.existing.status !== "disconnected"
+    && (
+      existingApplicationId !== application.id
+      || existingApplicationRevision !== application.revision
+    )
+  ) {
+    throw deviceSyncError({
+      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+      message: "Disconnect the existing provider connection before switching to a private provider application.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+
+  const conflictingConnection = await input.tx.deviceConnection.findFirst({
+    select: { id: true },
+    where: {
+      ...(input.existing ? { id: { not: input.existing.id } } : {}),
+      provider: input.provider,
+      status: { not: "disconnected" },
+      userId: input.ownerId,
+    },
+  });
+  if (conflictingConnection) {
+    throw deviceSyncError({
+      code: "PROVIDER_APPLICATION_CONNECTION_CONFLICT",
+      message: "Only one active member-owned connection is supported for this provider.",
+      retryable: false,
+      httpStatus: 409,
+    });
   }
 }
 
