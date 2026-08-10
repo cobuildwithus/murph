@@ -1,6 +1,5 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
 
 import {
   BLOG_KIND_LABELS,
@@ -141,7 +140,7 @@ function ArticleLink({
       className={`group grid min-h-11 gap-5 outline-none focus-visible:ring-2 focus-visible:ring-[#7a8c6e] focus-visible:ring-offset-4 focus-visible:ring-offset-[#f5f0e8] ${
         featured
           ? "content-start"
-          : "py-8 sm:grid-cols-[150px_minmax(0,1fr)_auto] sm:items-start sm:gap-8"
+          : "py-8 sm:grid-cols-[150px_minmax(0,1fr)] sm:items-start sm:gap-8"
       }`}
       href={buildBlogArticlePath(article.slug)}
     >
@@ -158,12 +157,6 @@ function ArticleLink({
           {article.description}
         </p>
       </div>
-      <ArrowUpRight
-        aria-hidden="true"
-        className={`size-5 text-[#5a6e32] transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 ${
-          featured ? "mt-2" : "hidden sm:block"
-        }`}
-      />
     </Link>
   );
 }

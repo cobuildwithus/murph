@@ -6,6 +6,17 @@ export const BLOG_ARTICLE_KINDS = [
 
 export type BlogArticleKind = (typeof BLOG_ARTICLE_KINDS)[number];
 
+export const BLOG_CASE_STUDY_TRUST_LABELS = [
+  "self-reported",
+  "device-connected",
+  "baseline-controlled",
+  "adherence-logged",
+  "cohort-replicated",
+] as const;
+
+export type BlogCaseStudyTrustLabel =
+  (typeof BLOG_CASE_STUDY_TRUST_LABELS)[number];
+
 type BlogArticleBase = {
   body: string;
   description: string;
@@ -26,7 +37,9 @@ export type BlogGuide = BlogArticleBase & {
 export type BlogCaseStudy = BlogArticleBase & {
   evidence: {
     consentConfirmed: true;
+    limitations: string;
     resultSummary: string;
+    trustLabels: readonly BlogCaseStudyTrustLabel[];
     verifiedOn: string;
   };
   kind: "case-study";
@@ -195,6 +208,14 @@ export const BLOG_KIND_LABELS: Record<BlogArticleKind, string> = {
 
 export const BLOG_ARTICLES = validateBlogArticles(BLOG_ARTICLE_REGISTRY);
 
+export const BLOG_HAS_PUBLISHED_CASE_STUDIES = BLOG_ARTICLES.some(
+  (article) => article.kind === "case-study",
+);
+
+export const BLOG_COLLECTION_DESCRIPTION = BLOG_HAS_PUBLISHED_CASE_STUDIES
+  ? "Practical health guides, field notes from building Murph, and verified case studies about making better decisions with the whole picture."
+  : "Practical health guides and field notes from building Murph. Case studies appear only when the evidence is ready.";
+
 export function buildBlogArticlePath(slug: string): string {
   return `/blog/${slug}`;
 }
@@ -256,6 +277,19 @@ export function validateBlogArticles(
       }
       if (!article.evidence.resultSummary.trim()) {
         throw new TypeError(`Missing case-study result: ${article.slug}`);
+      }
+      if (!article.evidence.limitations.trim()) {
+        throw new TypeError(`Missing case-study limitations: ${article.slug}`);
+      }
+      const trustLabels = article.evidence.trustLabels;
+      if (
+        trustLabels.length === 0
+        || new Set(trustLabels).size !== trustLabels.length
+        || trustLabels.some((label) =>
+          !BLOG_CASE_STUDY_TRUST_LABELS.includes(label)
+        )
+      ) {
+        throw new TypeError(`Invalid case-study trust labels: ${article.slug}`);
       }
     }
 

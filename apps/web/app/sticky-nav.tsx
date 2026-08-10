@@ -176,7 +176,7 @@ export function StickyNav({
             className="border-[#c4a882]/25 bg-[#f5f0e8]"
           >
             <DrawerTitle className="sr-only">Menu</DrawerTitle>
-            <nav className="flex flex-col px-3 pb-10 pt-2">
+            <nav className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-3 pb-10 pt-2">
               {NAV_LINKS.map(({ href, label }) => (
                 <a
                   key={href}

@@ -21,8 +21,11 @@ An answer, a small adjustment, or a short watch period may be enough. More track
     featured: true,
     evidence: {
       consentConfirmed: true,
+      limitations:
+        "Synthetic catalog content only; it is not a real customer outcome.",
       resultSummary:
         "Synthetic catalog result with permission and verification recorded.",
+      trustLabels: ["self-reported"],
       verifiedOn: "2030-01-17",
     },
     keywords: ["design guide"],

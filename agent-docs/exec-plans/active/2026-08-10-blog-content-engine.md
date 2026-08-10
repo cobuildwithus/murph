@@ -72,6 +72,10 @@ Updated: 2026-08-10
 - Treat Search Console gaps as high-impression query/page mismatches, not as
   queries with literally no ranking URL.
 - Do not seed a customer case study until a result and permission are verified.
+- Require every future case study to publish its evidence basis, verification
+  date, and limitations alongside the result.
+- Treat the bounded Search Console row limit as a partial intake when the final
+  page is full, and stop oversized responses while streaming them.
 
 ## Verification
 

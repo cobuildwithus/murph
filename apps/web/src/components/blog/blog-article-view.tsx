@@ -2,10 +2,19 @@ import Link from "next/link";
 
 import { MarkdownView } from "@/src/components/ui/markdown-view";
 import {
+  type BlogCaseStudyTrustLabel,
   BLOG_KIND_LABELS,
   buildBlogArticlePath,
   type BlogArticle,
 } from "@/src/lib/blog";
+
+const TRUST_LABEL_NAMES: Record<BlogCaseStudyTrustLabel, string> = {
+  "adherence-logged": "Adherence logged",
+  "baseline-controlled": "Baseline controlled",
+  "cohort-replicated": "Cohort replicated",
+  "device-connected": "Device connected",
+  "self-reported": "Self-reported",
+};
 
 const ARTICLE_BODY_CLASSNAME = [
   "text-[#3f403d]",
@@ -53,7 +62,10 @@ export function BlogArticleView({
           </div>
         </header>
 
-        <div className="mx-auto grid max-w-[900px] gap-10 px-6 py-14 sm:px-10 sm:py-16 lg:grid-cols-[170px_minmax(0,1fr)] lg:gap-16 lg:px-0 lg:py-20">
+        <div
+          className="mx-auto grid max-w-[900px] gap-10 px-6 py-14 sm:px-10 sm:py-16 lg:grid-cols-[170px_minmax(0,1fr)] lg:gap-16 lg:px-0 lg:py-20"
+          data-blog-article-body
+        >
           <aside className="lg:pt-2">
             <p className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#5a6e32]">
               About this note
@@ -63,13 +75,38 @@ export function BlogArticleView({
               It is not diagnosis or a substitute for professional care.
             </p>
             {article.kind === "case-study" ? (
-              <div className="mt-6 border-t border-[#c4a882]/30 pt-5">
+              <div
+                className="mt-6 border-t border-[#c4a882]/30 pt-5"
+                data-blog-case-study-evidence
+              >
                 <p className="font-mono text-[10px] font-medium uppercase tracking-[0.14em] text-[#5a6e32]">
                   Verified result
                 </p>
                 <p className="mt-2 text-sm leading-[1.65] text-[#736a58]">
                   {article.evidence.resultSummary}
                 </p>
+                <dl className="mt-5 space-y-4 text-sm leading-[1.65] text-[#736a58]">
+                  <div>
+                    <dt className="font-medium text-[#2d3436]">Evidence basis</dt>
+                    <dd>
+                      {article.evidence.trustLabels
+                        .map((label) => TRUST_LABEL_NAMES[label])
+                        .join(" · ")}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-[#2d3436]">Verified</dt>
+                    <dd>
+                      <time dateTime={article.evidence.verifiedOn}>
+                        {formatBlogDate(article.evidence.verifiedOn)}
+                      </time>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-[#2d3436]">Limitations</dt>
+                    <dd>{article.evidence.limitations}</dd>
+                  </div>
+                </dl>
               </div>
             ) : null}
           </aside>

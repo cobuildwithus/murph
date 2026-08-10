@@ -39,7 +39,9 @@ type ServiceAccountCredentials = {
 
 type SearchConsoleDependencies = {
   fetch?: typeof fetch;
+  maxSearchAnalyticsRows?: number;
   now?: Date;
+  searchAnalyticsRowLimit?: number;
 };
 
 export function resolveSearchConsoleDateRange(now = new Date()) {
@@ -137,7 +139,12 @@ export function buildSearchConsoleOpportunitiesCsv(
 export async function runSearchConsoleOpportunityIntake(
   source: EnvSource = process.env,
   dependencies: SearchConsoleDependencies = {},
-): Promise<{ opportunityCount: number; outputPath: string; rowCount: number }> {
+): Promise<{
+  opportunityCount: number;
+  outputPath: string;
+  rowCount: number;
+  truncated: boolean;
+}> {
   const credentialsPath = normalizeOptionalString(
     source.MURPH_GSC_CREDENTIALS_FILE,
   );
@@ -159,12 +166,17 @@ export async function runSearchConsoleOpportunityIntake(
   const dateRange = resolveSearchConsoleDateRange(dependencies.now);
   const siteUrl = normalizeOptionalString(source.MURPH_GSC_SITE_URL)
     ?? DEFAULT_SITE_URL;
-  const rows = await fetchSearchConsoleRows({
+  const searchResult = await fetchSearchConsoleRows({
     accessToken,
     dateRange,
     fetch: request,
+    maxRows:
+      dependencies.maxSearchAnalyticsRows ?? MAX_SEARCH_ANALYTICS_ROWS,
+    rowLimit:
+      dependencies.searchAnalyticsRowLimit ?? SEARCH_ANALYTICS_ROW_LIMIT,
     siteUrl,
   });
+  const { rows } = searchResult;
   const opportunities = rankSearchConsoleOpportunities(rows);
   const outputPath = path.join(
     REPO_ROOT,
@@ -184,6 +196,7 @@ export async function runSearchConsoleOpportunityIntake(
     opportunityCount: opportunities.length,
     outputPath,
     rowCount: rows.length,
+    truncated: searchResult.truncated,
   };
 }
 
@@ -199,15 +212,11 @@ function toOpportunity(row: SearchConsoleRow): SearchConsoleOpportunity | null {
   if (!matchingArticle) {
     reason = "ranking-without-dedicated-article";
   } else {
-    const queryTokens = new Set(tokenizeSearchText(row.query));
-    const articleTokens = new Set([
-      ...tokenizeSearchText(matchingArticle.title),
-      ...matchingArticle.keywords.flatMap(tokenizeSearchText),
-    ]);
-    const hasMeaningfulOverlap = [...queryTokens].some((token) =>
-      articleTokens.has(token),
+    const queryTokens = tokenizeSearchText(row.query);
+    const coversQuery = matchingArticle.keywords.some((keyword) =>
+      includesTokenSequence(queryTokens, tokenizeSearchText(keyword))
     );
-    if (hasMeaningfulOverlap) {
+    if (coversQuery) {
       return null;
     }
     reason = "query-article-mismatch";
@@ -226,6 +235,19 @@ function toOpportunity(row: SearchConsoleRow): SearchConsoleOpportunity | null {
       ? "case-study-candidate"
       : "guide",
   };
+}
+
+function includesTokenSequence(
+  value: readonly string[],
+  sequence: readonly string[],
+): boolean {
+  if (sequence.length === 0 || sequence.length > value.length) {
+    return false;
+  }
+
+  return value.some((_, startIndex) =>
+    sequence.every((token, offset) => value[startIndex + offset] === token)
+  );
 }
 
 function suggestsCaseStudy(query: string): boolean {
@@ -327,23 +349,25 @@ async function fetchSearchConsoleRows(input: {
   accessToken: string;
   dateRange: { endDate: string; startDate: string };
   fetch: typeof fetch;
+  maxRows: number;
+  rowLimit: number;
   siteUrl: string;
-}): Promise<SearchConsoleRow[]> {
+}): Promise<{ rows: SearchConsoleRow[]; truncated: boolean }> {
   const endpoint =
     `https://searchconsole.googleapis.com/webmasters/v3/sites/${encodeURIComponent(input.siteUrl)}/searchAnalytics/query`;
   const rows: SearchConsoleRow[] = [];
 
   for (
     let startRow = 0;
-    startRow < MAX_SEARCH_ANALYTICS_ROWS;
-    startRow += SEARCH_ANALYTICS_ROW_LIMIT
+    startRow < input.maxRows;
+    startRow += input.rowLimit
   ) {
     const response = await input.fetch(endpoint, {
       body: JSON.stringify({
         ...input.dateRange,
         dataState: "final",
         dimensions: ["query", "page"],
-        rowLimit: SEARCH_ANALYTICS_ROW_LIMIT,
+        rowLimit: input.rowLimit,
         searchType: "web",
         startRow,
       }),
@@ -362,12 +386,12 @@ async function fetchSearchConsoleRows(input: {
     }
     const pageRows = parseSearchConsoleRows(payload);
     rows.push(...pageRows);
-    if (pageRows.length < SEARCH_ANALYTICS_ROW_LIMIT) {
-      break;
+    if (pageRows.length < input.rowLimit) {
+      return { rows, truncated: false };
     }
   }
 
-  return rows;
+  return { rows, truncated: true };
 }
 
 function parseSearchConsoleRows(payload: unknown): SearchConsoleRow[] {
@@ -406,15 +430,50 @@ function parseSearchConsoleRows(payload: unknown): SearchConsoleRow[] {
 }
 
 async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
-  const text = await response.text();
-  if (Buffer.byteLength(text, "utf8") > maxBytes) {
-    throw new TypeError("Google returned a response larger than the allowed limit.");
-  }
+  const text = await readBoundedResponseText(response, maxBytes);
   try {
     return JSON.parse(text);
   } catch {
     throw new TypeError("Google returned an invalid JSON response.");
   }
+}
+
+async function readBoundedResponseText(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
+  const declaredBytes = Number(response.headers.get("Content-Length"));
+  if (Number.isFinite(declaredBytes) && declaredBytes > maxBytes) {
+    await response.body?.cancel();
+    throw new TypeError("Google returned a response larger than the allowed limit.");
+  }
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      receivedBytes += value.byteLength;
+      if (receivedBytes > maxBytes) {
+        await reader.cancel();
+        throw new TypeError(
+          "Google returned a response larger than the allowed limit.",
+        );
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function encodeBase64Url(value: string): string {
@@ -455,9 +514,14 @@ function readString(value: unknown): string | undefined {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   void runSearchConsoleOpportunityIntake().then((result) => {
     const relativeOutputPath = path.relative(REPO_ROOT, result.outputPath);
-    console.info(
-      `Search Console intake complete: ${result.rowCount} rows checked, ${result.opportunityCount} opportunities saved to ${relativeOutputPath}.`,
-    );
+    const summary = `${result.rowCount} rows checked, ${result.opportunityCount} opportunities saved to ${relativeOutputPath}.`;
+    if (result.truncated) {
+      console.warn(
+        `Search Console intake partial: the ${MAX_SEARCH_ANALYTICS_ROWS}-row safety limit was reached. ${summary}`,
+      );
+    } else {
+      console.info(`Search Console intake complete: ${summary}`);
+    }
   }).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : "Search Console intake failed.";
     console.error(message);

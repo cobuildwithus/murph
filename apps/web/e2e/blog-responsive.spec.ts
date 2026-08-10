@@ -118,10 +118,78 @@ for (const study of [
         const archiveLink = surface.getByRole("link", { name: "Field notes" });
         await archiveLink.focus();
         await expect(archiveLink).toBeFocused();
+        await captureElementProof({
+          fileName: `case-study-evidence-${viewport.name}.png`,
+          page,
+          proofDirectory: PROOF_DIRECTORY,
+          selector: '[data-design-study="blog-article"] [data-blog-article-body]',
+          viewportWidth: viewport.width,
+        });
       }
     }
   });
 }
+
+test("the anonymous mobile menu keeps Log in reachable on short screens", async ({
+  page,
+}) => {
+  test.skip(
+    !PROOF_DIRECTORY,
+    "Run with DESIGN_PROOF_OUTPUT_DIR to exercise the blog design proof.",
+  );
+  test.setTimeout(120_000);
+  await keepRequestsLocal(page);
+
+  for (const viewport of [
+    { height: 812, width: 390 },
+    { height: 667, width: 375 },
+    { height: 736, width: 390 },
+    { height: 768, width: 390 },
+  ] as const) {
+    await page.setViewportSize(viewport);
+    const response = await page.goto("/blog", {
+      waitUntil: "load",
+    });
+    if (response) {
+      expect(response.status()).toBe(200);
+    } else {
+      expect(new URL(page.url()).pathname).toBe("/blog");
+    }
+
+    await page.getByRole("button", { name: "Open menu" }).click();
+    const menu = page.getByRole("dialog").filter({ hasText: "How it works" });
+    const login = menu.getByRole("button", { name: "Log in", exact: true });
+    await login.scrollIntoViewIfNeeded();
+    await login.focus();
+    await expect(login).toBeFocused();
+
+    const bounds = await login.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds?.y).toBeGreaterThanOrEqual(0);
+    expect(
+      (bounds?.y ?? 0) + (bounds?.height ?? viewport.height),
+    ).toBeLessThanOrEqual(
+      viewport.height + OVERFLOW_TOLERANCE_PX,
+    );
+
+    if (
+      PROOF_DIRECTORY
+      && viewport.width === 375
+      && viewport.height === 667
+    ) {
+      await page.screenshot({
+        animations: "disabled",
+        path: path.join(PROOF_DIRECTORY, "navigation-mobile-short.png"),
+      });
+    }
+
+    await login.click();
+    await expect(menu).toBeHidden();
+    await expect(
+      page.getByRole("heading", { name: "Log in or sign up" }),
+    ).toBeVisible();
+  }
+});
 
 async function captureElementProof(input: {
   fileName: string;
@@ -195,10 +263,16 @@ async function keepRequestsLocal(page: Page) {
   });
   await page.route("**/*", (route) => {
     const url = new URL(route.request().url());
+    if (
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+      && url.pathname === "/api/message-volume"
+    ) {
+      return route.fulfill({ json: { total: 0 }, status: 200 });
+    }
     if (url.hostname === "127.0.0.1" || url.hostname === "localhost") {
-      route.continue();
+      return route.continue();
     } else {
-      route.abort();
+      return route.abort();
     }
   });
 }

@@ -1,4 +1,8 @@
-import { BLOG_ARTICLES, buildBlogArticlePath } from "@/src/lib/blog";
+import {
+  BLOG_ARTICLES,
+  BLOG_COLLECTION_DESCRIPTION,
+  buildBlogArticlePath,
+} from "@/src/lib/blog";
 
 const SITE_ORIGIN = "https://www.withmurph.ai";
 
@@ -24,7 +28,7 @@ export function GET() {
     '<rss version="2.0"><channel>',
     "<title>Murph Field Notes</title>",
     `<link>${SITE_ORIGIN}/blog</link>`,
-    "<description>Practical health guides, field notes, and verified case studies from Murph.</description>",
+    `<description>${escapeXml(BLOG_COLLECTION_DESCRIPTION)}</description>`,
     items,
     "</channel></rss>",
   ].join("");

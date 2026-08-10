@@ -30,6 +30,8 @@ import { BlogArchive } from "../src/components/blog/blog-archive";
 import { BlogArticleView } from "../src/components/blog/blog-article-view";
 import {
   BLOG_ARTICLES,
+  BLOG_COLLECTION_DESCRIPTION,
+  BLOG_HAS_PUBLISHED_CASE_STUDIES,
   buildBlogArticlePath,
   getBlogArticle,
   listRelatedBlogArticles,
@@ -61,7 +63,9 @@ describe("blog registry", () => {
       description: "A result with incomplete evidence.",
       evidence: {
         consentConfirmed: true,
+        limitations: "No controlled baseline.",
         resultSummary: "",
+        trustLabels: ["self-reported"],
         verifiedOn: "2026-08-10",
       },
       featured: true,
@@ -76,6 +80,28 @@ describe("blog registry", () => {
     expect(() =>
       validateBlogArticles([incompleteCaseStudy]),
     ).toThrow("Missing case-study result");
+
+    expect(() =>
+      validateBlogArticles([{
+        ...incompleteCaseStudy,
+        evidence: {
+          ...incompleteCaseStudy.evidence,
+          limitations: "",
+          resultSummary: "A bounded result.",
+        },
+      }]),
+    ).toThrow("Missing case-study limitations");
+
+    expect(() =>
+      validateBlogArticles([{
+        ...incompleteCaseStudy,
+        evidence: {
+          ...incompleteCaseStudy.evidence,
+          resultSummary: "A bounded result.",
+          trustLabels: [],
+        },
+      }]),
+    ).toThrow("Invalid case-study trust labels");
   });
 
   it("returns related reading without returning the current article", () => {
@@ -119,6 +145,11 @@ describe("blog presentation and discovery", () => {
     expect(archiveMarkup).toContain('data-design-state="blog-navigation"');
     expect(archiveMarkup).toContain('id="blog-study-footer"');
     expect(articleMarkup).toContain("Verified result");
+    expect(articleMarkup).toContain("Evidence basis");
+    expect(articleMarkup).toContain("Self-reported");
+    expect(articleMarkup).toContain("January 17, 2030");
+    expect(articleMarkup).toContain("Synthetic catalog content only");
+    expect(articleMarkup).toContain("data-blog-case-study-evidence");
   });
 
   it("publishes canonical metadata, a complete RSS feed, and a blog sitemap", async () => {
@@ -136,6 +167,13 @@ describe("blog presentation and discovery", () => {
         types: { "application/rss+xml": "/blog/rss.xml" },
       }),
     );
+    expect(BLOG_HAS_PUBLISHED_CASE_STUDIES).toBe(false);
+    expect(blogMetadata.description).toBe(BLOG_COLLECTION_DESCRIPTION);
+    expect(blogMetadata.title).toContain("Practical health guides");
+    expect(feed).toContain(
+      "Case studies appear only when the evidence is ready.",
+    );
+    expect(feed).not.toContain("and verified case studies about");
     expect(articleMetadata.alternates).toEqual({
       canonical: buildBlogArticlePath(article.slug),
     });
