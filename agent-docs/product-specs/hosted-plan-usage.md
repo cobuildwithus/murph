@@ -555,16 +555,22 @@ unimplemented.
 The non-expiring Starter contract is a strict Web/runtime schema hard cut. The
 new Web response uses `accessKind: starter`, `planName: Starter`, and
 `periodKind: lifetime`; the new runner no longer accepts the retired trial
-values. Neither direction is compatible across the cut. Pause affected hosted
-usage before applying the Starter migrations, then deploy Web and the
-Cloudflare Worker/runner bundle from the same commit while the path remains
-paused. The Cloudflare deploy must use `container_rollout=immediate`. Resume
-only after managed-container smoke reports that commit's exact runner-bundle
-fingerprint and a signed `murph.plan_usage` read proves an active or exhausted
-Starter response through the deployed adapter. Also verify one exact eligible
-subscription quote before normal processing resumes. If the cutover fails,
-keep the path paused and roll Web and Cloudflare back to the same compatible
-pair; never roll back either plane independently.
+values. Neither direction is compatible across the cut. Use the existing
+operational pause: suspend the production Render `murph-temporal-worker`
+background-worker service and confirm both declared instances have stopped and
+no `ensureRuntimeProcessing` activity remains in flight. Apply the Starter
+migrations only after that drain, then deploy Web and the Cloudflare
+Worker/runner bundle from the same commit while the worker remains suspended.
+The Cloudflare deploy must use `container_rollout=immediate`. Resume the Render
+worker only after managed-container smoke reports that commit's exact
+runner-bundle fingerprint, a signed `murph.plan_usage` read proves active and
+exhausted Starter responses through the deployed adapter, and one exact
+eligible subscription quote succeeds.
+
+The complete prior Web/runner pair is a rollback target only before the Starter
+migration commits. Once it commits, keep the Render worker suspended and
+forward-fix or redeploy the exact current Web/runner pair; the prior Web or
+runner is not a resumable target against the migrated ledger.
 
 For the capacity-epoch change, deploy the assistant runtime that timestamps
 every provider operation at its own request start, then wait for work accepted
