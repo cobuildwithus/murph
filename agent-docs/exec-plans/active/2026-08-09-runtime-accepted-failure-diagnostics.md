@@ -26,8 +26,9 @@ Updated: 2026-08-09
 
 - In scope: one shared allowlist for runtime failure phases, tagging
   otherwise-generic runtime errors with the causal phase, preserving that
-  exact phase through the existing container response, and narrowly preferring
-  it over the reconstructed outer `runtime_error` during redacted persistence.
+  exact phase through the existing container response alongside any prior safe
+  source code, and narrowly preferring the phase only in the final redacted
+  diagnostic field.
 - Out of scope: guessing or patching the still-unclassified inner crash,
   suppressing warning callbacks, adding retry state, changing Temporal cadence,
   or mutating production runtime state.
@@ -59,6 +60,11 @@ Updated: 2026-08-09
    Mitigation: the Worker accepts only exact shared `runtime_phase:<phase>`
    values; identifier-shaped and unknown nested values retain outer-code
    precedence and are proven absent from persisted redacted JSON.
+5. Risk: multiplexing the phase into the existing safe-code field could erase
+   an actionable source code such as `EACCES` or `type_error`.
+   Mitigation: keep the historical safe code in `errorCodeDetail`, carry the
+   exact phase in a separate member of the same response details object, and
+   prove the reconstructed safe detail and final redacted phase together.
 
 ## Tasks
 
@@ -82,9 +88,9 @@ Updated: 2026-08-09
 - Existing direct warn/error delivery remains intact because it also owns the
   current recovery callback.
 - Production already carries `errorCodeDetail` into the reconstructed Worker
-  error, but the shared diagnostic reader gives the outer `runtime_error` code
-  precedence during final redacted persistence. The narrow shared phase
-  contract fixes that last hop without changing precedence for any other code.
+  error. That field remains the safe source-code owner; the fixed phase travels
+  beside it as `runtimeFailurePhaseCode`, and only the final Worker redaction
+  owner maps the exact allowlisted phase to the persisted diagnostic detail.
 - The phase marker is a non-enumerable shared property separate from `.code`
   and `.errorCode`. The existing canonical classifier is the only eligibility
   authority: canonical `runtime_error` receives a phase, while every actionable
@@ -94,7 +100,8 @@ Updated: 2026-08-09
 - The Worker never interpolates an allowlisted phase into the reconstructed
   error's `Code:` message fragment. This keeps checkpoint phase names from
   changing canonical message-derived classification while preserving the phase
-  in structured redacted metadata.
+  in structured redacted metadata. A prior safe source code remains in the
+  sanitized reconstructed detail instead of being replaced by the phase.
 
 ## Verification
 
@@ -127,6 +134,17 @@ Updated: 2026-08-09
   runtime phase catch, container classification, RunnerContainer reconstruction,
   and accepted-attempt persistence, and proves canonical code, phase, and
   privacy together.
+- Final ReviewGPT round 3 proved the canonical-only correction could replace an
+  existing safe source code with the phase at the container boundary. Accepted:
+  the transport now carries `errorCodeDetail` and `runtimeFailurePhaseCode`
+  separately, preserves the safe code in reconstructed diagnostic text, and
+  maps only the exact phase into the final redacted field. The full three-file
+  Cloudflare propagation slice passes with 268 tests, including natural
+  `type_error`, direct `EACCES`, phase persistence, legacy overlap, and private
+  path/cause rejection; Hosted Execution and Cloudflare typechecks pass.
+- The PR also includes the one-line current-main CI repair registering the new
+  static `/family/setup` route with the existing canonical telemetry allowlist;
+  its focused census/redaction test passes all 10 cases.
 - Passed `git diff --check` and parent scope/call-path review.
 - Production deployment proof confirmed the existing propagation bridge is
   already live at 100%; no rollout wait or duplicate transport work is needed.

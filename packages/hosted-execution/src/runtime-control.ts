@@ -86,6 +86,9 @@ const HOSTED_RUNTIME_FAILURE_PHASE_CODES = new Set<string>(
 const HOSTED_RUNTIME_FAILURE_PHASE_CODE_PROPERTY =
   "hostedRuntimeFailurePhaseCode";
 
+export const HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY =
+  "runtimeFailurePhaseCode";
+
 export function buildHostedRuntimeFailurePhaseCode(
   phase: HostedRuntimeFailurePhaseName,
 ): HostedRuntimeFailurePhaseCode {

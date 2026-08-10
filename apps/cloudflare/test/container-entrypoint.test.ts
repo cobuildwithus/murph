@@ -2893,9 +2893,12 @@ describe("classifyRunnerJobError", () => {
         timeoutSignalAborted: false,
       },
     });
-    const wrappedFailure = new Error("hidden snapshot wrapper", {
-      cause: fetchFailure,
-    });
+    const wrappedFailure = Object.assign(
+      new Error("hidden snapshot wrapper at /private/workspace/vault", {
+        cause: fetchFailure,
+      }),
+      { code: "EACCES" },
+    );
     attachHostedRuntimeFailurePhaseCode(
       wrappedFailure,
       "workspace.checkpoint.idle_compact",
@@ -2907,7 +2910,9 @@ describe("classifyRunnerJobError", () => {
       payload: {
         code: "runtime_error",
         details: {
-          errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
+          errorCodeDetail: "EACCES",
+          runtimeFailurePhaseCode:
+            "runtime_phase:workspace.checkpoint.idle_compact",
         },
         error: "Hosted execution runtime failed.",
       },
@@ -2917,6 +2922,7 @@ describe("classifyRunnerJobError", () => {
       "hidden control-plane transport failure",
     );
     expect(JSON.stringify(classified.payload)).not.toContain("hidden snapshot wrapper");
+    expect(JSON.stringify(classified.payload)).not.toContain("/private/workspace/vault");
   });
 
   it("surfaces bundle-validation failures with their dedicated code and safe properties", () => {

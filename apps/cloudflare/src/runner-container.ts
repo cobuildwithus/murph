@@ -12,6 +12,7 @@ import {
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
   type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
@@ -3331,6 +3332,12 @@ function buildHostedRunnerContainerPayloadDetailsMetadata(
   const errorCodeDetail = readHostedRunnerContainerSafeCode(record.errorCodeDetail);
   if (errorCodeDetail) {
     metadata.errorCodeDetail = errorCodeDetail;
+  }
+  const runtimeFailurePhaseCode =
+    record[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
+  if (isHostedRuntimeFailurePhaseCode(runtimeFailurePhaseCode)) {
+    metadata[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY] =
+      runtimeFailurePhaseCode;
   }
   if (hasNonEmptyHostedRunnerContainerString(record.errorDetail)) {
     metadata.errorDetailPresent = true;

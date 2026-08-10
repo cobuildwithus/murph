@@ -4,6 +4,7 @@ import {
   type HostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   isHostedRuntimeFailurePhaseCode,
   type HostedRuntimeFailurePhaseCode,
   type HostedRuntimeRedactedJson,
@@ -204,12 +205,20 @@ function readHostedRunnerTransportedErrorCodeDetail(
       return null;
     }
 
-    const codeDescriptor = Object.getOwnPropertyDescriptor(details, "errorCodeDetail");
-    if (!codeDescriptor || !("value" in codeDescriptor)) {
-      return null;
+    for (const key of [
+      HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+      "errorCodeDetail",
+    ] as const) {
+      const codeDescriptor = Object.getOwnPropertyDescriptor(details, key);
+      if (
+        codeDescriptor
+        && "value" in codeDescriptor
+        && isHostedRuntimeFailurePhaseCode(codeDescriptor.value)
+      ) {
+        return codeDescriptor.value;
+      }
     }
-    const code = codeDescriptor.value;
-    return isHostedRuntimeFailurePhaseCode(code) ? code : null;
+    return null;
   } catch {
     return null;
   }

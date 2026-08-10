@@ -40,6 +40,7 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
   readHostedRuntimeFailurePhaseCode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
@@ -2559,8 +2560,12 @@ function buildHostedContainerRunnerJobErrorMetadata(
   if (safeErrorName) {
     details.errorName = safeErrorName;
   }
-  const errorCodeDetail = readHostedRuntimeFailurePhaseCode(error)
-    ?? readHostedContainerSafeCodeProperty(error, "code")
+  const runtimeFailurePhaseCode = readHostedRuntimeFailurePhaseCode(error);
+  if (runtimeFailurePhaseCode) {
+    details[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY] =
+      runtimeFailurePhaseCode;
+  }
+  const errorCodeDetail = readHostedContainerSafeCodeProperty(error, "code")
     ?? readHostedContainerSafeCodeProperty(error, "errorCode");
   if (errorCodeDetail) {
     details.errorCodeDetail = errorCodeDetail;

@@ -7044,8 +7044,10 @@ describe("RunnerContainer", () => {
         return new Response(JSON.stringify({
           code: "runtime_error",
           details: {
-            errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
+            errorCodeDetail: "EACCES",
             errorDetail: "Missing required file \"vault.json\".",
+            runtimeFailurePhaseCode:
+              "runtime_phase:workspace.checkpoint.idle_compact",
           },
           error: "Hosted execution runtime failed.",
           errorName: "Error",
@@ -7070,11 +7072,13 @@ describe("RunnerContainer", () => {
     expect(thrown).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
+        errorCodeDetail: "EACCES",
         errorDetailPresent: true,
         payloadDetailsPresent: true,
+        runtimeFailurePhaseCode:
+          "runtime_phase:workspace.checkpoint.idle_compact",
       },
-      message: "Hosted execution runtime failed. Code: runtime_error. Status: 500.",
+      message: "Hosted execution runtime failed. Code: EACCES. Status: 500.",
       name: "Error",
       status: 500,
       statusCode: 500,
@@ -7083,6 +7087,8 @@ describe("RunnerContainer", () => {
     expect(buildHostedRunnerRedactedErrorJson(thrown)).toMatchObject({
       errorCode: "runtime_error",
       errorCodeDetail: "runtime_phase:workspace.checkpoint.idle_compact",
+      safeErrorDetail:
+        "Hosted execution runtime failed. Code: EACCES. Status: 500.",
     });
     expect(JSON.stringify(thrown)).not.toContain("vault.json");
   });

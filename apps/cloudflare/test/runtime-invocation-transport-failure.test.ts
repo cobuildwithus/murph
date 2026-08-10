@@ -159,7 +159,8 @@ describe("runtime invocation transport failure fence handling", () => {
       payload: {
         code: "runtime_error",
         details: {
-          errorCodeDetail: "runtime_phase:workspace.read",
+          errorCodeDetail: "type_error",
+          runtimeFailurePhaseCode: "runtime_phase:workspace.read",
         },
       },
       statusCode: 500,
@@ -226,8 +227,10 @@ describe("runtime invocation transport failure fence handling", () => {
     expect(reconstructedFailure).toMatchObject({
       code: "runtime_error",
       details: {
-        errorCodeDetail: "runtime_phase:workspace.read",
+        errorCodeDetail: "type_error",
+        runtimeFailurePhaseCode: "runtime_phase:workspace.read",
       },
+      message: "Hosted execution runtime failed. Code: type_error. Status: 500.",
     });
 
     const harness = await createTransportFailureHarness({
@@ -248,6 +251,8 @@ describe("runtime invocation transport failure fence handling", () => {
         redactedJson: expect.objectContaining({
           errorCode: "runtime_error",
           errorCodeDetail: "runtime_phase:workspace.read",
+          safeErrorDetail:
+            "Hosted execution runtime failed. Code: type_error. Status: 500.",
         }),
       }),
     ]);
