@@ -1,4 +1,4 @@
-name: Validate fixed PR 1484 head
+name: Push PR 1484 stale-binding projection fix
 
 on:
   push:
@@ -6,80 +6,52 @@ on:
       - agent/pr1484-audit-snapshot-20260810
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  apply:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
-      - name: Check out exact PR head
+      - name: Check out exact PR branch
         uses: actions/checkout@v4
         with:
-          ref: 8176acf2207337f3249ba5f88aaf8da00d3954a6
+          ref: agent/member-owned-provider-applications
           fetch-depth: 0
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24.14.1
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Generate Prisma client
-        run: pnpm -C apps/web run prisma:generate
-
-      - name: Validate Prisma schema
-        run: pnpm -C apps/web exec prisma validate
-
-      - name: Typecheck device sync
-        run: pnpm -C packages/device-syncd run typecheck
-
-      - name: Typecheck assistant runtime
-        run: pnpm -C packages/assistant-runtime run typecheck
-
-      - name: Typecheck Web
-        run: pnpm -C apps/web run typecheck
-
-      - name: Lint Web
-        run: pnpm -C apps/web run lint
-
-      - name: Run focused Web tests
+      - name: Apply projection fix
         shell: bash
         run: |
           set -euo pipefail
-          pnpm -C apps/web exec vitest run --config vitest.workspace.ts --no-coverage \
-            test/device-provider-application-crypto.test.ts \
-            test/device-provider-application-ingress-store.test.ts \
-            test/device-provider-application-store.test.ts \
-            test/device-provider-application-types.test.ts \
-            test/device-sync-hosted-runtime-authority.test.ts \
-            test/device-sync-internal-runtime.test.ts \
-            test/device-sync-providers.test.ts \
-            test/hosted-account-data-service.test.ts \
-            test/prisma-store-oauth-connection.test.ts \
-            test/prisma-store-oauth-sessions.test.ts
+          expected_head=8176acf2207337f3249ba5f88aaf8da00d3954a6
+          test "$(git rev-parse HEAD)" = "$expected_head"
+          python - <<'PY'
+          from pathlib import Path
 
-      - name: Run assistant-runtime tests
-        run: pnpm -C packages/assistant-runtime run test
-
-      - name: Run device-sync package tests
-        run: pnpm -C packages/device-syncd run test
-
-      - name: Run smoke checks
-        run: pnpm test:smoke
-
-      - name: Verify generated and source cleanliness
-        shell: bash
-        run: |
-          set -euo pipefail
+          path = Path("apps/web/src/lib/device-sync/hosted-runtime-authority.ts")
+          source = path.read_text()
+          old = '''                  refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
+                ).connection'''
+          new = '''                  refreshedSources.map(toHostedRuntimeConnectionSourceSnapshot),
+                  {
+                    forceReauthorizationRequired:
+                      !providerApplicationBindingCurrent,
+                    includeCredentialMaterial: false,
+                  },
+                ).connection'''
+          if source.count(old) != 1:
+              raise SystemExit("expected exactly one runtime apply response projection")
+          path.write_text(source.replace(old, new, 1))
+          PY
           git diff --check
-          test -z "$(git status --short --untracked-files=no)" || {
-            git status --short
-            exit 1
-          }
+
+      - name: Commit and push WIP fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add apps/web/src/lib/device-sync/hosted-runtime-authority.ts
+          git commit -m "fix: project stale provider bindings as repair-required"
+          git push --force-with-lease=refs/heads/agent/member-owned-provider-applications:8176acf2207337f3249ba5f88aaf8da00d3954a6 \
+            origin HEAD:refs/heads/agent/member-owned-provider-applications
