@@ -66,12 +66,12 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // installed artifact fails the assembly instead of shipping silently (the
 // June 2026 latency regression was exactly this: one static import dragged
 // the whole command surface onto the hot path with nothing watching).
-// Baselines measured from the real assembled bundle on 2026-06-11:
-// total 7,052,933 B across all chunks, entry bin.js 15,569 B. Budgets are
-// baseline + ~25-30% headroom. If a violation fires, investigate the listed
-// largest inputs first; only raise the budget deliberately for growth that
-// is understood and intended.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_000;
+// The original baseline measured from the real assembled bundle on 2026-06-11
+// was 7,052,933 B across all chunks, with a 15,569 B bin.js entry. The reviewed
+// Junction evidence path plus the reconciled mainline graph measured 9,000,682
+// B on 2026-08-10. Keep a small explicit allowance above that understood graph;
+// if it fires again, investigate the listed largest inputs before ratcheting.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_000_682 + 32_768;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 
 // Known divergence the parity battery cannot reach (it would need a live
