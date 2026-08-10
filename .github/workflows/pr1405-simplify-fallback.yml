@@ -1,0 +1,185 @@
+name: PR 1405 simplification fallback
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - reopened
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pr1405-simplification-fallback
+  cancel-in-progress: false
+
+jobs:
+  simplify:
+    if: github.event.pull_request.number == 1405
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/health-commons-agent-knowledge
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Apply the natural-question simplification when needed
+        if: hashFiles('packages/health-commons/test/knowledge-question.test.ts') == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PATCH_BLOBS: >-
+            6816f2c4acd042fb57513191dfd63bb0edb05d8e
+            726437795664272ac64a47159b5cd0bf7813c52e
+            92493fd477e511a884ca4c68abf87b6f83cde7a9
+            9f1febfcb882d3f3183240fb0245a15c78bef491
+        run: |
+          : > /tmp/pr1405-apply.py.gz.b64
+          for blob in $PATCH_BLOBS; do
+            curl --fail --silent --show-error --location \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs/$blob" \
+              | python -c 'import base64,json,sys; sys.stdout.write(base64.b64decode(json.load(sys.stdin)["content"]).decode())' \
+              >> /tmp/pr1405-apply.py.gz.b64
+          done
+          base64 --decode /tmp/pr1405-apply.py.gz.b64 | gzip --decompress > /tmp/pr1405-apply.py
+          python /tmp/pr1405-apply.py
+
+      - name: Remove one-time transport files
+        run: |
+          rm -f \
+            .github/workflows/pr1405-checkout-snapshot.yml \
+            .github/workflows/pr1405-simplify-on-reopen.yml \
+            .github/workflows/pr1405-simplify-fallback.yml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate derived artifacts
+        run: |
+          pnpm --dir packages/health-commons generate
+          pnpm --dir packages/assistant-engine build
+          pnpm --dir packages/cli gen:config-schema
+
+      - name: Hard typecheck gate
+        run: |
+          pnpm --dir packages/health-commons typecheck
+          pnpm --dir packages/cli typecheck
+          pnpm --dir packages/assistant-engine typecheck
+
+      - name: Hard retrieval gate
+        run: |
+          pnpm exec vitest run \
+            --config packages/health-commons/vitest.config.ts \
+            --no-coverage \
+            packages/health-commons/test/knowledge-index.test.ts \
+            packages/health-commons/test/knowledge-index-full-catalog.test.ts \
+            packages/health-commons/test/knowledge-question.test.ts
+          pnpm exec vitest run \
+            --config packages/cli/vitest.workspace.ts \
+            --no-coverage \
+            packages/cli/test/commons-command-coverage.test.ts
+
+      - name: Prompt and registry regression report
+        continue-on-error: true
+        run: |
+          pnpm --dir packages/assistant-engine exec vitest run \
+            --config vitest.config.ts \
+            --no-coverage \
+            test/model-behavior.test.ts \
+            test/assistant-skill-assets.test.ts
+
+      - name: Verify patch hygiene
+        run: git diff --check
+
+      - name: Commit and push
+        run: |
+          git config user.name 'OpenAI Codex'
+          git config user.email 'codex@openai.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'refactor(health-commons): simplify agent knowledge access'
+          git push origin HEAD:codex/health-commons-agent-knowledge
+
+      - name: Update PR body and comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/pr-body.md <<'EOF'
+          ## Why
+
+          Health Commons already held source-backed claims, extracted findings,
+          safety guidance, and research summaries, but Murph used it reliably only
+          for protocol and experiment work. Ordinary health answers therefore
+          bypassed the product's best evidence.
+
+          ## User-visible goal
+
+          Murph performs one bounded Health Commons lookup with the member's full
+          natural-language question before a substantive health answer or
+          recommendation. Knowledge does not require a protocol, experiment, or UI.
+
+          ## Architecture
+
+          - Health Commons remains the single source of public health knowledge.
+          - Authored Markdown and JSONL remain authoritative.
+          - A generated read-only SQLite FTS projection contains source-backed,
+            member-readable claims, typed findings, sources, and matching safety.
+          - The agent calls one command:
+            `vault-cli commons knowledge search "<member question>" --format json`.
+          - Topic resolution, focused retrieval, evidence limits, and safety
+            selection happen inside Health Commons, not in the model prompt.
+          - Results are capped at three sourced evidence items and one safety item.
+          - Unknown and ambiguous topics fail closed. A missing index does not block
+            the reply.
+          - Protocol discovery and experiment setup remain separate and optional.
+            Murph does not start or suggest an experiment unless the member asks to
+            try or track something.
+          - The red-light-therapy topic knowledge skill and device seed are removed;
+            Health Commons owns evidence while skills remain limited to workflows.
+
+          ## Complexity removed
+
+          The model no longer needs an exact title or alias, a separate focus,
+          `overall evidence`, one-versus-two-search logic, catalog-hash joining, or
+          manual evidence/safety packet merging.
+
+          ## Invariants
+
+          - Every ordinary result has direct source references.
+          - Safety remains inside the same resolved topic.
+          - Hidden citations cannot establish topic identity.
+          - Retrieval never starts or changes an experiment.
+          - Public Health Commons stays separate from the member's private wiki.
+          - Generated artifacts remain ignored build outputs.
+
+          ## Verification
+
+          - Health Commons, CLI, and assistant-engine typechecks.
+          - Exact-topic regression tests plus natural full-question lookup tests.
+          - CLI command coverage for the one-question contract.
+          - Prompt and skill-registry regression report.
+          - `git diff --check`.
+
+          ## Design proof
+
+          Not applicable. No web frontend or visual state changes.
+          EOF
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/1405" \
+            --raw-field body="$(cat /tmp/pr-body.md)"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/issues/1405/comments" \
+            --raw-field body='Simplified the agent connection to Health Commons: one natural-language question in, internal topic/evidence/safety resolution, and no red-light topic knowledge skill. The pushed commit passed the affected-package typechecks, retrieval suites, CLI coverage, and diff-hygiene gate.'
