@@ -210,9 +210,14 @@ migration.
 The current `read_shared` result gates every diagnosis. Murph applies this order
 to each `in` participant and stops at the first match:
 
+When a participant explicitly asks whether a shared metric is visible now,
+yet, or after a source change, Murph performs one new `read_shared` call for
+the exact relevant scope before answering. A prior tool result, conversation
+claim, or connection timestamp is not current shared-data evidence.
+
 | Evidence | Public status | Smallest action |
 | --- | --- | --- |
-| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. For deep/REM sleep, including the source-aware v1 scopes, `data.provisional: true` remains pending. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
+| Current challenge-metric data eligible under the scope's producer-owned completion marker | Include the participant in settled ranked standings. Reported Deep/REM sleep is scoreable immediately; the member-local future-date guard still excludes future rows, but the current local date alone does not make a reported stage value provisional. A v1 top-level value is the canonical scoring selection; source entries remain explanatory evidence. For `workouts.v0`, only dates at or before `calendarClosedThroughDate` are settled. | None. Device status cannot override current metric evidence. |
 | Current challenge-metric data exists but is not yet eligible under that completion marker | Keep the participant pending and unranked. This is not missing data or a zero. | Do not diagnose, offer permission, or advance completion from the reader's clock. |
 | No current grant for the exact scoring scope | The participant has not shared this challenge metric with the group. | Include the exact scope in one proactive offer after the current read only when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
 | Metric scope granted, but no `device-sync-status.v0` grant | The current shared read lacks a usable metric; its cause is unverified. Connection status was not shared, but that does not explain the absence. | Include only the diagnostic scope in one proactive offer after the current read when at least one affected participant has neither explicitly declined it nor a prior handled offer action recorded. |
@@ -301,6 +306,10 @@ The derivation rules are:
 - `sources` contains at most eight unique public source labels, such as Apple
   Health or WHOOP, each at most 80 characters. It does not expose an internal
   provider key.
+- When historical and current connections resolve to the same public label,
+  Web keeps the complete observation from the latest ordered connection/source
+  generation. It never combines status or timestamps from different
+  connection generations.
 - `status` is one of `connected`, `needs-attention`, `needs-reconnect`,
   `disconnected`, or `setting-up`.
 - `statusObservedAt` says when the owner observed the projected coarse status.

@@ -1458,6 +1458,65 @@ describe("readHostedGroupSharedDataByRuntimeMemberId", () => {
     }));
   });
 
+  it("keeps duplicate public device-source fields on the latest connection generation", async () => {
+    installCiphertexts({});
+    const staleObservedAt = new Date(Date.now() - 10 * 60_000);
+    const currentObservedAt = new Date(Date.now() - 60_000);
+    const currentSyncCompletedAt = new Date(Date.now() - 2 * 60_000);
+    const { prisma } = createPrisma({
+      connections: [
+        {
+          lastSyncCompletedAt: new Date(Date.now() - 60 * 60_000),
+          lastSyncErrorAt: null,
+          provider: "junction",
+          setupPhase: null,
+          sources: [{
+            sourceProviderSlug: "apple_health_kit",
+            status: "disconnected",
+            updatedAt: staleObservedAt,
+          }],
+          status: "disconnected",
+          updatedAt: staleObservedAt,
+          userId: "member_a",
+        },
+        {
+          lastSyncCompletedAt: currentSyncCompletedAt,
+          lastSyncErrorAt: null,
+          provider: "junction",
+          setupPhase: null,
+          sources: [{
+            sourceProviderSlug: "apple_health_kit",
+            status: "connected",
+            updatedAt: currentObservedAt,
+          }],
+          status: "active",
+          updatedAt: currentObservedAt,
+          userId: "member_a",
+        },
+      ],
+      shares: [
+        shareRow({ id: "share_device_a", memberId: "member_a", projectionScope: DEVICE_SCOPE }),
+      ],
+    });
+
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma,
+      projectionScopes: [DEVICE_SCOPE],
+      runtimeMemberId: RUNTIME_MEMBER_ID,
+    });
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") throw new Error("expected ok result");
+    expect(result.members[0]?.projections[0]?.records[0]?.data).toMatchObject({
+      sources: [{
+        connectionSyncJobCompletedAt: currentSyncCompletedAt.toISOString(),
+        label: "Apple Health",
+        status: "connected",
+        statusObservedAt: currentObservedAt.toISOString(),
+      }],
+    });
+  });
+
   it.each(["", "   "])(
     "fails closed without returning a roster when ciphertext is blank: %j",
     async (ciphertext) => {

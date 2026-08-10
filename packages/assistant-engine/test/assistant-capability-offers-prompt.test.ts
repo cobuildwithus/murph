@@ -168,6 +168,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
     expect(section).toContain('`action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
+    expect(section).toContain(
+      'asks whether shared data is visible now or yet',
+    )
+    expect(section).toContain('call `read_shared` once before answering')
     expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
     expect(section).toContain('never infer their departure, score, diagnostics, or permission')
     expect(section).toContain('or call the standings complete')
