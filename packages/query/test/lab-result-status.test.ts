@@ -7,6 +7,8 @@ import type {
   BrowserVaultPresentedLabResultRow,
 } from "../src/browser-replica/lab-results.ts";
 
+const WHOLE_BLOOD = "whole_blood" as unknown as BrowserVaultPresentedLabResultRow["specimenKind"];
+
 describe("lab-result display status derivation", () => {
   it("keeps an explicit reporting-lab flag authoritative", () => {
     const result = deriveBrowserVaultLabResultStatus(row({
@@ -43,6 +45,39 @@ describe("lab-result display status derivation", () => {
     })).flag).toBe("low");
   });
 
+  it("classifies censored source values only when every possible value has one status", () => {
+    expect(deriveBrowserVaultLabResultStatus(row({
+      comparator: "<",
+      normalizedReferenceRange: { high: 5, low: 3.5 },
+      normalizedValue: 3.5,
+      value: 3.5,
+    })).flag).toBe("low");
+    expect(deriveBrowserVaultLabResultStatus(row({
+      comparator: "<=",
+      normalizedReferenceRange: { high: 5, low: 3.5 },
+      normalizedValue: 3.5,
+      value: 3.5,
+    })).flag).toBeNull();
+    expect(deriveBrowserVaultLabResultStatus(row({
+      comparator: ">",
+      normalizedReferenceRange: { high: 5, low: 3.5 },
+      normalizedValue: 5,
+      value: 5,
+    })).flag).toBe("high");
+    expect(deriveBrowserVaultLabResultStatus(row({
+      comparator: ">=",
+      normalizedReferenceRange: { high: 5, low: 3.5 },
+      normalizedValue: 5,
+      value: 5,
+    })).flag).toBeNull();
+    expect(deriveBrowserVaultLabResultStatus(row({
+      comparator: "<",
+      normalizedReferenceRange: { high: 5, low: 3.5 },
+      normalizedValue: 4,
+      value: 4,
+    })).flag).toBeNull();
+  });
+
   it("lets a source range override a broader published comparator", () => {
     const result = deriveBrowserVaultLabResultStatus(row({
       normalizedReferenceRange: { high: 4, low: 3.5 },
@@ -71,15 +106,12 @@ describe("lab-result display status derivation", () => {
     expect(result.flag).toBe(expected);
   });
 
-  it("fails closed when unit, specimen, or result comparator does not match", () => {
+  it("fails closed when unit or specimen does not match", () => {
     expect(deriveBrowserVaultLabResultStatus(row({
       normalizedUnit: "g/L",
     })).flag).toBeNull();
     expect(deriveBrowserVaultLabResultStatus(row({
       specimenKind: "plasma",
-    })).flag).toBeNull();
-    expect(deriveBrowserVaultLabResultStatus(row({
-      comparator: "<",
     })).flag).toBeNull();
   });
 
@@ -112,6 +144,16 @@ describe("lab-result display status derivation", () => {
       unit: "mL/min/1.73m^2",
       value: 50,
     })).flag).toBe("low");
+    expect(deriveBrowserVaultLabResultStatus(row({
+      analyte: "eGFR",
+      biomarkerKey: "biomarker:egfr",
+      comparator: ">=",
+      metricKey: "egfr",
+      normalizedUnit: "mL/min/1.73m^2",
+      normalizedValue: 60,
+      unit: "mL/min/1.73m^2",
+      value: 60,
+    })).flag).toBe("normal");
   });
 
   it("keeps decision boundaries neutral and derives page-authored range status", () => {
@@ -154,6 +196,33 @@ describe("lab-result display status derivation", () => {
       normalizedValue: 2,
       unit: "ng/dL",
       value: 2,
+    })).flag).toBe("high");
+  });
+
+  it("derives status from sex-neutral adult whole-blood CBC ranges", () => {
+    const base = {
+      analyte: "White blood cells",
+      biomarkerKey: "biomarker:white-blood-cell-count",
+      metricKey: "white-blood-cell-count",
+      normalizedUnit: "10^3/uL",
+      specimenKind: WHOLE_BLOOD,
+      unit: "10^3/uL",
+    } satisfies Partial<BrowserVaultPresentedLabResultRow>;
+
+    expect(deriveBrowserVaultLabResultStatus(row({
+      ...base,
+      normalizedValue: 3,
+      value: 3,
+    })).flag).toBe("low");
+    expect(deriveBrowserVaultLabResultStatus(row({
+      ...base,
+      normalizedValue: 3.9,
+      value: 3.9,
+    })).flag).toBe("normal");
+    expect(deriveBrowserVaultLabResultStatus(row({
+      ...base,
+      normalizedValue: 10,
+      value: 10,
     })).flag).toBe("high");
   });
 });
