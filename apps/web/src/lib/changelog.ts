@@ -65,24 +65,25 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Patterns, local-time reminders, and a lighter homepage",
+    title:
+      "Starter access, patterns, reminders, cards, web search, and a lighter homepage",
     summary:
-      "Patterns can compare repeated actions with next-day sleep and recovery, recurring reminders keep the local time you asked for, and the public homepage starts with far less image and sign-in code to download.",
+      "Starter usage remains until it is used, patterns compare repeated actions with next-day health, reminders keep the time you asked for, workout cards keep completed rows clear, managed web search works again, and the public homepage starts with less to download.",
     items: [
       {
-        id: "lighter-accessible-homepage",
-        kind: "improvement",
-        priority: 3,
-        title: "The homepage starts lighter",
+        id: "non-expiring-starter-access",
+        kind: "feature",
+        priority: 5,
+        title: "Start with usage that does not expire",
         summary:
-          "The public homepage now uses compact avatar images and waits for sign-in intent before loading the secure sign-in code.",
+          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
         details:
-          "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
-        relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],
-        sourcePullRequests: [1573],
+          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
+        relevanceTags: ["starter", "usage", "billing", "settings"],
+        sourcePullRequests: [1464],
         tryIt: {
-          href: "/",
-          label: "Visit the homepage",
+          href: "/settings#subscription",
+          label: "View Starter usage",
         },
       },
       {
@@ -121,6 +122,63 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
+        },
+      },
+      {
+        id: "web-search-restored",
+        kind: "improvement",
+        priority: 5,
+        title: "Managed OpenAI web search works again",
+        summary:
+          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
+        details:
+          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
+        relevanceTags: ["assistant", "search", "research", "reliability"],
+        sourcePullRequests: [1583],
+      },
+      {
+        id: "appointment-reminders-by-default",
+        kind: "improvement",
+        priority: 4,
+        title: "Confirmed appointments come with a reminder",
+        summary:
+          "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
+        details:
+          "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
+        relevanceTags: ["appointments", "reminders", "automations", "care"],
+        sourcePullRequests: [1586],
+        tryIt: {
+          label: "Tell Murph about an appointment",
+          prompt:
+            "I have a confirmed dentist appointment next Thursday at 2 PM.",
+        },
+      },
+      {
+        id: "workout-card-status-rendering",
+        kind: "improvement",
+        priority: 3,
+        title: "Completed workout rows keep their checkmark",
+        summary:
+          "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
+        details:
+          "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
+        relevanceTags: ["workouts", "imessage", "cards", "reliability"],
+        sourcePullRequests: [1599],
+      },
+      {
+        id: "lighter-accessible-homepage",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage starts lighter",
+        summary:
+          "The public homepage now uses compact avatar images and waits for sign-in intent before loading the secure sign-in code.",
+        details:
+          "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
+        relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],
+        sourcePullRequests: [1573],
+        tryIt: {
+          href: "/",
+          label: "Visit the homepage",
         },
       },
     ],

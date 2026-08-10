@@ -24,8 +24,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
-  "linq.ai_usage.trial_conversion_pending",
-  "linq.ai_usage.trial_limit_reached",
+  "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
   "linq.ai_usage.group_upgrade_pulse",
@@ -46,10 +45,7 @@ const TEST_CONTEXT_BY_KEY = {
   "linq.home_redirect": {
     homeRecipientPhone: "+15555550123",
   },
-  "linq.ai_usage.trial_conversion_pending": {
-    homeUrl: "https://withmurph.ai/home",
-  },
-  "linq.ai_usage.trial_limit_reached": {
+  "linq.ai_usage.starter_limit_reached": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.edge_limit_reached": {
@@ -128,8 +124,7 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.invite_signup", "https://withmurph.ai/join/test-code");
     expectEveryVariantContains("linq.daily_quota", "12");
     expectEveryVariantContains("linq.home_redirect", "+15555550123");
-    expectEveryVariantContains("linq.ai_usage.trial_conversion_pending", "https://withmurph.ai/home");
-    expectEveryVariantContains("linq.ai_usage.trial_limit_reached", "https://withmurph.ai/home");
+    expectEveryVariantContains("linq.ai_usage.starter_limit_reached", "https://withmurph.ai/home");
     expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
   });
 
@@ -163,14 +158,11 @@ describe("user-facing message variants", () => {
     }
   });
 
-  it("keeps notice templates neutral about unprojected billing actions", () => {
-    for (const key of [
-      "linq.ai_usage.trial_conversion_pending",
-      "linq.ai_usage.family_limit_reached",
-    ] as const) {
-      for (const text of collectRenderedTexts(key)) {
-        expect(text).not.toMatch(/add usage|top[ -]?up|checkout|subscribe/iu);
-      }
+
+
+  it("keeps resetting Family allowance copy neutral about purchases", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
+      expect(text).not.toMatch(/add usage|top[ -]?up|checkout|subscribe/iu);
     }
   });
 
@@ -200,9 +192,9 @@ describe("user-facing message variants", () => {
     }
   });
 
-  it("explains how each blocked non-top-up allowance can resume", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.trial_limit_reached")) {
-      expect(text).toMatch(/Murph is paused until .+ plan/iu);
+  it("explains how each blocked allowance can resume", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.starter_limit_reached")) {
+      expect(text).toMatch(/starter|free usage|account/iu);
       expect(text).toMatch(/plan/iu);
       expect(text).not.toMatch(/add usage|top[ -]?up/iu);
     }
@@ -221,7 +213,7 @@ describe("user-facing message variants", () => {
 
   it("does not describe blocked usage as advisory", () => {
     for (const key of [
-      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.starter_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.group_upgrade_pulse",
@@ -250,7 +242,7 @@ describe("user-facing message variants", () => {
 
   it("communicates every included-usage limit as a percentage without currency progress", () => {
     for (const key of [
-      "linq.ai_usage.trial_limit_reached",
+      "linq.ai_usage.starter_limit_reached",
       "linq.ai_usage.edge_limit_reached",
       "linq.ai_usage.family_limit_reached",
       "linq.ai_usage.group_upgrade_pulse",

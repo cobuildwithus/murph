@@ -38,6 +38,22 @@ describe("changelog registry", () => {
     expect(invalidItems).toEqual([]);
   });
 
+  it("bounds restored web search to the managed OpenAI provider", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "web-search-restored",
+    );
+
+    expect(item).toMatchObject({
+      details: expect.stringContaining("managed OpenAI"),
+      summary: expect.stringContaining("managed OpenAI"),
+      title: expect.stringContaining("Managed OpenAI"),
+    });
+    expect(item?.tryIt).toBeUndefined();
+    expect(`${item?.title} ${item?.summary} ${item?.details}`).not.toContain(
+      "Murph can search the web",
+    );
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -296,6 +312,12 @@ describe("changelog registry", () => {
       details: expect.stringContaining("keeps keyboard focus"),
       tryIt: { href: "/", label: "Visit the homepage" },
     });
+    expect(items.get("workout-card-status-rendering")).toMatchObject({
+      sourcePullRequests: [1599],
+      summary: expect.stringContaining("including their static previews"),
+      details: expect.stringContaining("part of the card image itself"),
+    });
+    expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -497,9 +519,13 @@ describe("changelog registry", () => {
       {
         id: "2026-08-10",
         itemIds: [
-          "lighter-accessible-homepage",
+          "non-expiring-starter-access",
           "personal-patterns",
           "reminders-keep-requested-timezone",
+          "web-search-restored",
+          "appointment-reminders-by-default",
+          "workout-card-status-rendering",
+          "lighter-accessible-homepage",
         ],
       },
       {

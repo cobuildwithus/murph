@@ -524,6 +524,80 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the Starter ledger constraint predeploy exception to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260807204000_non_expiring_starter_usage";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_entry"',
+          '  DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",',
+          '  ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+          '    CHECK ("kind" IN (\'starter_grant\', \'purchase_grant\')) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits grant projection predeploy compatibility to its proved NOT NULL DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810150000_hosted_usage_credit_grant_slot_release";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_grant"',
+          '  ALTER COLUMN "beneficiary_member_id" SET NOT NULL,',
+          '  ALTER COLUMN "beneficiary_sequence" SET NOT NULL;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the complete Family Max plan-code contract to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

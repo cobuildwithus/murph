@@ -155,7 +155,7 @@ describe('assistant hosted low-usage skill', () => {
     const skill = await readLowUsageSkill()
     const normalizedSkill = skill.replace(/\s+/gu, ' ')
 
-    expect(skill).toContain('**Pulse Trial:**')
+    expect(skill).toContain('**Starter:**')
     expect(skill).toContain('**Direct paid Pulse or Edge:**')
     expect(skill).toContain('**Family sponsored:**')
     expect(skill).toContain('**Hosted group:**')
