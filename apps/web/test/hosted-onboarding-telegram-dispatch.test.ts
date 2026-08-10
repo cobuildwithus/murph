@@ -915,6 +915,117 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     );
   });
 
+  it("preserves the first observed Telegram preparation failure after a slower sibling also fails", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({
+      channel: "telegram",
+      threadId: "-100123",
+    });
+    const threadLookupKey = createHostedExternalThreadLookupKey({
+      accountLookupKey: "telegram:bot",
+      channel: "telegram",
+      threadId: "-100123",
+    });
+    if (!threadIdentityLookupKey || !threadLookupKey) {
+      throw new Error("Expected Telegram thread route lookup keys.");
+    }
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue({
+      channel: "telegram",
+      containerMemberId: "member_existing_group_container",
+      deliveryRouteState: {
+        deliveryRouteEncrypted: "existing-delivery-route",
+        deliveryRouteEncryptedPresent: true,
+        threadIdentityLookupKey,
+        threadLookupKey,
+      },
+      owner: { id: "member_telegram_owner" },
+    });
+    const senderCore = {
+      billingStatus: HostedBillingStatus.active,
+      createdAt: new Date("2026-03-20T12:00:00.000Z"),
+      id: "member_second_group_sender",
+      suspendedAt: null,
+      updatedAt: new Date("2026-03-20T12:00:00.000Z"),
+    };
+    const prisma = withPrismaTransaction({
+      hostedMember: {
+        findUnique: vi.fn().mockResolvedValue({
+          accountGroupMemberships: [],
+          billingRef: null,
+          billingStatus: HostedBillingStatus.active,
+          consentGrants: [],
+          suspendedAt: null,
+          threadContainer: null,
+        }),
+      },
+      hostedMemberRouting: {
+        findMany: vi.fn().mockResolvedValue([{
+          member: senderCore,
+          memberId: senderCore.id,
+        }]),
+        findUnique: vi.fn().mockResolvedValue({
+          member: senderCore,
+          memberId: senderCore.id,
+        }),
+      },
+    });
+    const originalTransaction = prisma.$transaction.bind(prisma);
+    const transaction = vi.fn(async (
+      callback: (tx: TelegramWebhookPrismaHarness) => Promise<unknown>,
+    ) => originalTransaction(callback));
+    prisma.$transaction = transaction;
+    const routeError = new Error("Telegram route preparation failed later.");
+    let releaseRoutePreparation: (() => void) | undefined;
+    const routePreparationGate = new Promise<void>((resolve) => {
+      releaseRoutePreparation = resolve;
+    });
+    let routePreparationSettled = false;
+    mocks.prepareHostedThreadContainerDeliveryRoute.mockImplementationOnce(async () => {
+      await routePreparationGate;
+      routePreparationSettled = true;
+      throw routeError;
+    });
+    const { unwrapHostedDomainRootForWeb } = await import(
+      "@/src/lib/hosted-crypto/domain-root-store"
+    );
+    const mailboxPreparation = vi.mocked(unwrapHostedDomainRootForWeb);
+    const mailboxError = new Error("Telegram mailbox preparation failed.");
+    mailboxPreparation.mockRejectedValueOnce(mailboxError);
+
+    const outcome = handleHostedOnboardingTelegramWebhook({
+      prisma,
+      rawBody: JSON.stringify({
+        message: {
+          chat: { id: -100123, title: "Family chat", type: "group" },
+          date: 1_774_522_601,
+          from: { first_name: "Casey", id: 789 },
+          message_id: 3,
+          text: "thanks murph",
+        },
+        update_id: 323,
+      }),
+      secretToken: "telegram-secret",
+    }).then(
+      (value) => ({ error: null, value }),
+      (error: unknown) => ({ error, value: null }),
+    );
+
+    await vi.waitFor(() => expect(mailboxPreparation).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(transaction).not.toHaveBeenCalled();
+    expect(routePreparationSettled).toBe(false);
+    if (!releaseRoutePreparation) {
+      throw new Error("Expected the Telegram route preparation gate.");
+    }
+    releaseRoutePreparation();
+
+    const result = await outcome;
+    expect(result.error).toBe(mailboxError);
+    expect(result.value).toBeNull();
+    expect(routePreparationSettled).toBe(true);
+    expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
   it("admits an active linked sender to an existing Telegram container whose owner expired", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-28T12:00:00.000Z"));

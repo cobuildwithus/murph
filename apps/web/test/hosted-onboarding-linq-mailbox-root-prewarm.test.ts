@@ -425,6 +425,87 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       expect(diagnostics).not.toContain("hosted-onboarding.webhook.warm-failed");
     });
 
+    it.each([
+      { failingOperation: "mailbox" as const },
+      { failingOperation: "route" as const },
+    ])("drains a slow route/mailbox sibling before BEGIN when $failingOperation preparation fails", async ({
+      failingOperation,
+    }) => {
+      const { unwrapHostedDomainRootForWeb } = await import(
+        "@/src/lib/hosted-crypto/domain-root-store"
+      );
+      const { prepareHostedThreadContainerDeliveryRoute } = await import(
+        "@/src/lib/hosted-routing/thread-container-service"
+      );
+      const routePreparation = vi.mocked(prepareHostedThreadContainerDeliveryRoute);
+      const mailboxPreparation = vi.mocked(unwrapHostedDomainRootForWeb);
+      const defaultRoutePreparation = routePreparation.getMockImplementation();
+      const defaultMailboxPreparation = mailboxPreparation.getMockImplementation();
+      if (!defaultRoutePreparation || !defaultMailboxPreparation) {
+        throw new Error("Expected the default route and mailbox preparation mocks.");
+      }
+      const preparationError = new Error(`${failingOperation} preparation failed`);
+      let releaseSlowSibling: (() => void) | undefined;
+      const slowSibling = new Promise<void>((resolve) => {
+        releaseSlowSibling = resolve;
+      });
+
+      if (failingOperation === "mailbox") {
+        routePreparation.mockImplementationOnce(async (input) => {
+          calls.push("route-started");
+          await slowSibling;
+          calls.push("route-settled");
+          return defaultRoutePreparation(input);
+        });
+        mailboxPreparation.mockImplementationOnce(async () => {
+          calls.push("mailbox-failed");
+          throw preparationError;
+        });
+      } else {
+        routePreparation.mockImplementationOnce(async () => {
+          calls.push("route-failed");
+          throw preparationError;
+        });
+        mailboxPreparation.mockImplementationOnce(async (input) => {
+          calls.push("mailbox-started");
+          await slowSibling;
+          calls.push("mailbox-settled");
+          return defaultMailboxPreparation(input);
+        });
+      }
+      const prisma = buildPrewarmPrisma();
+      const outcome = handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody({ chatIsGroup: true }),
+        signature: null,
+        timestamp: null,
+      }).then(
+        (value) => ({ error: null, value }),
+        (error: unknown) => ({ error, value: null }),
+      );
+
+      await vi.waitFor(() => expect(calls).toContain(
+        failingOperation === "mailbox" ? "mailbox-failed" : "route-failed",
+      ));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      if (!releaseSlowSibling) {
+        throw new Error("Expected the slow preparation sibling gate.");
+      }
+      releaseSlowSibling();
+
+      const result = await outcome;
+      expect(result.error).toBeNull();
+      expect(result.value).toMatchObject({
+        ok: true,
+        reason: "prewarm-owner-boundary-plan",
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(calls.indexOf("begin")).toBeGreaterThan(calls.indexOf(
+        failingOperation === "mailbox" ? "route-settled" : "mailbox-settled",
+      ));
+    });
+
     it("warms an established route when webhook metadata says the chat is a group", async () => {
       const { unwrapHostedDomainRootForWeb } = await import(
         "@/src/lib/hosted-crypto/domain-root-store"
