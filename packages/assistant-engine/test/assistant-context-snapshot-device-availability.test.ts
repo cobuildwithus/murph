@@ -101,6 +101,7 @@ describe('assistant context snapshot device availability', () => {
       expect(prompt).toContain(
         'Never substitute raw Junction artifacts for canonical history',
       )
+      expect(prompt).not.toContain('ingestion problem')
       expect(prompt).not.toContain('82.5')
       expect(prompt).not.toContain('121')
       expect(prompt).not.toContain('79')
