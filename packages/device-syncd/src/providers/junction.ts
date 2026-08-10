@@ -161,7 +161,8 @@ interface JunctionTimeseriesImportResult {
 interface JunctionPreciseTimeseriesImportResult extends JunctionTimeseriesImportResult {
   canonicalEventCount: number;
   fetchComplete: boolean;
-  providerRecordsSeen: boolean;
+  providerRecordCount: number;
+  unresolvedProviderRecordCount: number;
 }
 
 interface JunctionPreciseTimeseriesImportOptions {
@@ -1887,7 +1888,8 @@ export function createJunctionDeviceSyncProvider(
               importResult: {
                 canonicalEventCount: 0,
                 fetchComplete: false,
-                providerRecordsSeen: false,
+                providerRecordCount: 0,
+                unresolvedProviderRecordCount: 0,
                 yieldedAt: null,
               },
               job,
@@ -1923,7 +1925,8 @@ export function createJunctionDeviceSyncProvider(
             importResult: {
               canonicalEventCount: 0,
               fetchComplete: false,
-              providerRecordsSeen: false,
+              providerRecordCount: 0,
+              unresolvedProviderRecordCount: 0,
               yieldedAt: null,
             },
             job,
@@ -1950,10 +1953,16 @@ export function createJunctionDeviceSyncProvider(
           ? job.payload.historicalRecordsSeen === true
             || timeseriesImport.canonicalEventCount > 0
           : undefined;
-        const historicalProviderRecordsSeen = extendedHistoricalBackfill
-          ? job.payload.historicalProviderRecordsSeen === true
-            || timeseriesImport.providerRecordsSeen
+        const historicalUnresolvedProviderRecordCount = extendedHistoricalBackfill
+          ? Math.max(
+              readHistoricalUnresolvedProviderRecordCount(job),
+              timeseriesImport.unresolvedProviderRecordCount,
+            )
           : undefined;
+        const historicalProviderRecordsSeen =
+          historicalUnresolvedProviderRecordCount === undefined
+            ? undefined
+            : historicalUnresolvedProviderRecordCount > 0;
         if (timeseriesImport.yieldedAt) {
           return withJunctionSkippedResourceMetadata(
             context,
@@ -1961,6 +1970,7 @@ export function createJunctionDeviceSyncProvider(
               context,
               historicalProviderRecordsSeen,
               historicalRecordsSeen,
+              historicalUnresolvedProviderRecordCount,
               job,
               windowEnd: window.windowEnd,
               windowStart: timeseriesImport.yieldedAt,
@@ -2106,14 +2116,37 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const sourceProviderSlug = normalizeProviderSlug(input.job.payload.sourceProviderSlug);
+    const historicalWindowStart =
+      toIsoTimestampIfValid(normalizeString(input.job.payload.historicalWindowStart))
+      ?? input.window.windowStart;
     const recordsSeen =
       input.job.payload.historicalRecordsSeen === true
       || input.importResult.canonicalEventCount > 0;
-    const providerRecordsSeen =
-      input.job.payload.historicalProviderRecordsSeen === true
-      || input.importResult.providerRecordsSeen;
+    const carriedUnresolvedProviderRecordCount =
+      readHistoricalUnresolvedProviderRecordCount(input.job);
+    // Extended history is BP-only: after fetch-side dedupe, each admitted,
+    // valid provider row produces exactly one canonical measurement event.
+    // A complete anchored rescan may clear carried unresolved evidence only
+    // when it contains at least as many fully canonical rows; partial or empty
+    // scans must keep the existing obligation alive.
+    const currentScanCanResolveCarriedRecords =
+      input.importResult.fetchComplete
+      && input.window.windowStart === historicalWindowStart
+      && input.importResult.unresolvedProviderRecordCount === 0
+      && input.importResult.providerRecordCount >= carriedUnresolvedProviderRecordCount;
+    const unresolvedProviderRecordCount = currentScanCanResolveCarriedRecords
+      ? 0
+      : Math.max(
+          carriedUnresolvedProviderRecordCount,
+          input.importResult.unresolvedProviderRecordCount,
+        );
+    const unresolvedProviderRecordsSeen = unresolvedProviderRecordCount > 0;
 
-    if (input.importResult.fetchComplete && recordsSeen) {
+    if (
+      input.importResult.fetchComplete
+      && recordsSeen
+      && unresolvedProviderRecordCount === 0
+    ) {
       return withJunctionMetadataPatch(
         input.result,
         buildJunctionExtendedTimeseriesBackfillCompletionMetadataPatch(
@@ -2131,7 +2164,7 @@ export function createJunctionDeviceSyncProvider(
       ?? null;
     if (
       retryDelayMs === null
-      && (!input.importResult.fetchComplete || providerRecordsSeen)
+      && (!input.importResult.fetchComplete || unresolvedProviderRecordsSeen)
     ) {
       emptyBackfillAttempts = EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS.length;
       retryDelayMs =
@@ -2149,9 +2182,6 @@ export function createJunctionDeviceSyncProvider(
       );
     }
 
-    const historicalWindowStart =
-      toIsoTimestampIfValid(normalizeString(input.job.payload.historicalWindowStart))
-      ?? input.window.windowStart;
     return {
       ...input.result,
       scheduledJobs: [
@@ -2160,8 +2190,9 @@ export function createJunctionDeviceSyncProvider(
           availableAt: addMilliseconds(input.context.now, retryDelayMs),
           dedupeKey: input.job.dedupeKey,
           emptyBackfillAttempts,
-          historicalProviderRecordsSeen: providerRecordsSeen,
+          historicalProviderRecordsSeen: unresolvedProviderRecordsSeen,
           historicalRecordsSeen: recordsSeen,
+          historicalUnresolvedProviderRecordCount: unresolvedProviderRecordCount,
           historicalWindowStart,
           resource: input.resource,
           sourceProviderSlug,
@@ -2600,8 +2631,9 @@ export function createJunctionDeviceSyncProvider(
     }
 
     const dedupedTimeseries = dedupeJunctionTimeseriesSnapshotRecords(accumulatedTimeseries);
-    const providerRecordsSeen = hasJunctionSnapshotRecords(dedupedTimeseries);
-    if (executionWindowStart && executionWindowEnd && hasJunctionSnapshotRecords(dedupedTimeseries)) {
+    const providerRecordCount = countJunctionSnapshotRecords(dedupedTimeseries);
+    let unresolvedProviderRecordCount = providerRecordCount;
+    if (executionWindowStart && executionWindowEnd && providerRecordCount > 0) {
       try {
         const preparedImport = await prepareJunctionImportSnapshot(
           context,
@@ -2621,20 +2653,25 @@ export function createJunctionDeviceSyncProvider(
             timeseries: preparedImport.snapshots,
           });
           canonicalEventCount = readProviderSnapshotCanonicalEventCount(receipt);
+          unresolvedProviderRecordCount = Math.max(
+            providerRecordCount - canonicalEventCount,
+            0,
+          );
         }
       } catch (error) {
         if (
           options.preservePartialRetryableFailure === true
           && (
             options.historicalProviderRecordsSeen === true
-            || providerRecordsSeen
+            || providerRecordCount > 0
           )
           && isRetryableDeviceSyncFailure(error)
         ) {
           return {
             canonicalEventCount: 0,
             fetchComplete: false,
-            providerRecordsSeen,
+            providerRecordCount,
+            unresolvedProviderRecordCount: providerRecordCount,
             yieldedAt: null,
           };
         }
@@ -2645,7 +2682,8 @@ export function createJunctionDeviceSyncProvider(
     return {
       canonicalEventCount,
       fetchComplete,
-      providerRecordsSeen,
+      providerRecordCount,
+      unresolvedProviderRecordCount,
       yieldedAt,
     };
   }
@@ -2841,6 +2879,7 @@ export function createJunctionDeviceSyncProvider(
     context: ProviderJobContext;
     historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
+    historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
     windowEnd: string;
@@ -2858,6 +2897,7 @@ export function createJunctionDeviceSyncProvider(
   function buildYieldedJunctionFollowUpJob(input: {
     historicalProviderRecordsSeen?: boolean;
     historicalRecordsSeen?: boolean;
+    historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     timeseriesCursor?: string | null;
     windowEnd: string;
@@ -2910,6 +2950,13 @@ export function createJunctionDeviceSyncProvider(
       ...(input.historicalRecordsSeen === undefined
         ? {}
         : { historicalRecordsSeen: input.historicalRecordsSeen }),
+      ...(input.historicalUnresolvedProviderRecordCount
+          && input.historicalUnresolvedProviderRecordCount > 0
+        ? {
+            historicalUnresolvedProviderRecordCount:
+              input.historicalUnresolvedProviderRecordCount,
+          }
+        : {}),
       windowEnd: input.windowEnd,
       windowStart: input.windowStart,
     };
@@ -5064,6 +5111,13 @@ function hasJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): boolea
   return Object.values(snapshot).some((records) => records.length > 0);
 }
 
+function countJunctionSnapshotRecords(snapshot: Record<string, unknown[]>): number {
+  return Object.values(snapshot).reduce(
+    (recordCount, records) => recordCount + records.length,
+    0,
+  );
+}
+
 function hasJunctionHistoricalBackfillSummaryRecords(
   evidence: readonly JunctionSummaryNormalizationEvidence[],
 ): boolean {
@@ -5559,6 +5613,20 @@ function readHistoricalBackfillJobEmptyAttempts(job: DeviceSyncJobRecord): numbe
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts > 0 ? rawAttempts : 0;
 }
 
+function readHistoricalUnresolvedProviderRecordCount(
+  job: DeviceSyncJobRecord,
+): number {
+  const rawCount = job.payload.historicalUnresolvedProviderRecordCount;
+  if (
+    typeof rawCount === "number"
+    && Number.isSafeInteger(rawCount)
+    && rawCount > 0
+  ) {
+    return rawCount;
+  }
+  return job.payload.historicalProviderRecordsSeen === true ? 1 : 0;
+}
+
 function buildConnectHistoricalBackfillWindow(
   account: Pick<DeviceSyncAccount, "connectedAt">,
   summaryBackfillDays: number,
@@ -5660,6 +5728,7 @@ function buildExtendedTimeseriesBackfillJob(input: {
   emptyBackfillAttempts?: number;
   historicalProviderRecordsSeen?: boolean;
   historicalRecordsSeen?: boolean;
+  historicalUnresolvedProviderRecordCount?: number;
   historicalWindowStart: string;
   resource: string;
   sourceProviderSlug: string | null;
@@ -5676,6 +5745,13 @@ function buildExtendedTimeseriesBackfillJob(input: {
       : {}),
     ...(input.historicalRecordsSeen
       ? { historicalRecordsSeen: true }
+      : {}),
+    ...(input.historicalUnresolvedProviderRecordCount
+        && input.historicalUnresolvedProviderRecordCount > 0
+      ? {
+          historicalUnresolvedProviderRecordCount:
+            input.historicalUnresolvedProviderRecordCount,
+        }
       : {}),
     historicalWindowStart: input.historicalWindowStart,
     resource: input.resource,

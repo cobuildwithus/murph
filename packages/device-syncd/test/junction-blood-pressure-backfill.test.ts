@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { junctionProviderAdapter } from "@murphai/importers/device-providers/junction";
 import { test } from "vitest";
 
 import { deviceSyncError, isDeviceSyncError } from "../src/errors.ts";
@@ -224,6 +225,17 @@ function createJobContext(input: {
       : {}),
     ...(input.shouldYield ? { shouldYield: input.shouldYield } : {}),
     logger: {},
+  };
+}
+
+async function importWithRealJunctionNormalizer(
+  snapshot: unknown,
+): Promise<{ canonicalEventCount: number; durableDeliveryAccepted: true }> {
+  const parsedSnapshot = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
+  const normalized = await junctionProviderAdapter.normalizeSnapshot(parsedSnapshot);
+  return {
+    canonicalEventCount: normalized.events?.length ?? 0,
+    durableDeliveryAccepted: true,
   };
 }
 
@@ -1581,6 +1593,187 @@ test("exhausted malformed provider rows stay recoverable until canonical import 
 
   assert.equal(recovered.scheduledJobs?.length ?? 0, 0);
   assert.equal(recovered.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("mixed canonical and malformed history stays unresolved until a complete repair", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [
+    {
+      id: "bp-valid-in-mixed-history",
+      timestamp: "2026-05-20T08:30:00.000Z",
+      systolic: 121,
+      diastolic: 79,
+    },
+    {
+      id: "bp-malformed-in-mixed-history",
+      timestamp: "2026-05-21T08:30:00.000Z",
+      systolic: 120,
+    },
+  ];
+  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const exhausted = toJobRecord({
+    ...bloodPressure,
+    payload: {
+      ...bloodPressure.payload,
+      emptyBackfillAttempts: 4,
+    },
+  }, 60);
+  exhausted.dedupeKey = `hosted-device-sync:${"a".repeat(64)}`;
+
+  const mixed = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    exhausted,
+  );
+  const mixedContinuation = findBloodPressureJob(mixed.scheduledJobs ?? []);
+
+  assert.equal(mixed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(mixedContinuation.dedupeKey, exhausted.dedupeKey);
+  assert.equal(mixedContinuation.payload?.emptyBackfillAttempts, 4);
+  assert.equal(mixedContinuation.payload?.historicalRecordsSeen, true);
+  assert.equal(mixedContinuation.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(
+    mixedContinuation.payload?.historicalUnresolvedProviderRecordCount,
+    1,
+  );
+  assert.equal(
+    mixedContinuation.payload?.windowStart,
+    bloodPressure.payload?.historicalWindowStart,
+  );
+
+  bloodPressureRecords.length = 0;
+  const empty = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-12T12:00:00.000Z",
+    }),
+    toJobRecord(mixedContinuation, 61),
+  );
+  const emptyContinuation = findBloodPressureJob(empty.scheduledJobs ?? []);
+
+  assert.equal(empty.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(emptyContinuation.dedupeKey, exhausted.dedupeKey);
+  assert.equal(emptyContinuation.payload?.historicalProviderRecordsSeen, true);
+  assert.equal(
+    emptyContinuation.payload?.historicalUnresolvedProviderRecordCount,
+    1,
+  );
+
+  bloodPressureRecords.push(
+    {
+      id: "bp-valid-in-mixed-history",
+      timestamp: "2026-05-20T08:30:00.000Z",
+      systolic: 121,
+      diastolic: 79,
+    },
+    {
+      id: "bp-malformed-in-mixed-history",
+      timestamp: "2026-05-21T08:30:00.000Z",
+      systolic: 120,
+      diastolic: 78,
+    },
+  );
+  const repaired = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-13T12:00:00.000Z",
+    }),
+    toJobRecord(emptyContinuation, 62),
+  );
+
+  assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
+  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("exact provider duplicates do not create false unresolved history", async () => {
+  const duplicate = {
+    id: "bp-exact-provider-duplicate",
+    timestamp: "2026-05-20T08:30:00.000Z",
+    systolic: 121,
+    diastolic: 79,
+  };
+  const provider = createProvider({
+    bloodPressureRecords: [duplicate, { ...duplicate }],
+    requests: [],
+  });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    toJobRecord(bloodPressure, 63),
+  );
+
+  assert.equal(result.scheduledJobs?.length ?? 0, 0);
+  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+});
+
+test("a malformed post-yield segment requires one repaired anchored scan", async () => {
+  const bloodPressureRecords: Record<string, unknown>[] = [
+    {
+      id: "bp-valid-before-yield",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 118,
+      diastolic: 76,
+    },
+    {
+      id: "bp-malformed-after-yield",
+      timestamp: "2026-05-13T08:30:00.000Z",
+      systolic: 119,
+    },
+  ];
+  const provider = createProvider({ bloodPressureRecords, requests: [] });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+  const admitted = toJobRecord(bloodPressure, 64);
+  admitted.dedupeKey = `hosted-device-sync:${"b".repeat(64)}`;
+  let yieldChecks = 0;
+  const yielded = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      shouldYield: () => {
+        yieldChecks += 1;
+        return yieldChecks > 1;
+      },
+    }),
+    admitted,
+  );
+  const yieldedContinuation = findBloodPressureJob(yielded.scheduledJobs ?? []);
+
+  assert.equal(yieldedContinuation.payload?.historicalRecordsSeen, true);
+  assert.equal(
+    yieldedContinuation.payload?.historicalUnresolvedProviderRecordCount,
+    undefined,
+  );
+  assert.equal(yieldedContinuation.payload?.windowStart, "2026-05-13T00:00:00.000Z");
+
+  const malformedTail = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ importSnapshot: importWithRealJunctionNormalizer }),
+    toJobRecord(yieldedContinuation, 65),
+  );
+  const anchoredRetry = findBloodPressureJob(malformedTail.scheduledJobs ?? []);
+
+  assert.equal(malformedTail.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+  assert.equal(anchoredRetry.dedupeKey, admitted.dedupeKey);
+  assert.equal(
+    anchoredRetry.payload?.historicalUnresolvedProviderRecordCount,
+    1,
+  );
+  assert.equal(
+    anchoredRetry.payload?.windowStart,
+    bloodPressure.payload?.historicalWindowStart,
+  );
+
+  bloodPressureRecords[1] = {
+    ...bloodPressureRecords[1],
+    diastolic: 77,
+  };
+  const repaired = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      importSnapshot: importWithRealJunctionNormalizer,
+      now: "2026-06-12T12:00:00.000Z",
+    }),
+    toJobRecord(anchoredRetry, 66),
+  );
+
+  assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
+  assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
 test("source admission rejection cannot certify historical coverage", async () => {

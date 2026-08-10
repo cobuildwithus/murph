@@ -4616,7 +4616,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
         sources: [garminSource],
       }),
       importSnapshot: async () => ({
-        canonicalEventCount: 1,
+        canonicalEventCount: 2,
         durableDeliveryAccepted: true,
       }),
     }),

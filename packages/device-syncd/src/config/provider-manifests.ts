@@ -203,6 +203,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       historicalBackfill: booleanJobField({ includeInHostedHint: true }),
       historicalProviderRecordsSeen: booleanJobField({ includeInHostedHint: true }),
       historicalRecordsSeen: booleanJobField({ includeInHostedHint: true }),
+      historicalUnresolvedProviderRecordCount: numberJobField({ includeInHostedHint: true }),
       historicalWindowStart: stringJobField({ includeInHostedHint: true }),
       objectId: stringJobField({ includeInHostedHint: true }),
       occurredAt: stringJobField({ includeInHostedHint: true }),
