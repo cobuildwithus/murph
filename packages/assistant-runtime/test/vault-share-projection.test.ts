@@ -608,7 +608,7 @@ describe("selectProjectableDailyMetricDays", () => {
     ).toEqual(sleepDurations);
   });
 
-  it("marks current member-local deep and REM sleep values provisional, then settles them", async () => {
+  it("scores reported current member-local deep and REM sleep values immediately", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "vault-share-sleep-stages-"));
     const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
 
@@ -735,7 +735,6 @@ describe("selectProjectableDailyMetricDays", () => {
           data: {
             date: ACTIVITY_DAY.date,
             metricKey,
-            provisional: true,
             unit: "minutes",
             value,
           },
@@ -750,17 +749,27 @@ describe("selectProjectableDailyMetricDays", () => {
         expect(JSON.stringify(selected)).not.toMatch(/timeZone|America\/Los_Angeles/u);
       }
 
-      dateNow.mockReturnValue(Date.parse("2026-07-04T07:30:00.000Z"));
-      for (const projectionKind of [
-        "deep-sleep-days.v0",
-        "rem-sleep-days.v0",
+      for (const [projectionKind, metricKey, value] of [
+        ["deep-sleep-sources-days.v1", "deep-sleep-minutes", 0],
+        ["rem-sleep-sources-days.v1", "rem-sleep-minutes", 85],
       ] as const) {
-        const settled = await readProjectableDailyMetricDays(
+        const selected = await readProjectableDailyMetricDays(
           vaultRoot,
           requireDailyMetricSpec(projectionKind),
         );
-        expect(settled[0]?.data).not.toHaveProperty("provisional");
+        expect(selected).toHaveLength(1);
+        expect(selected[0]?.data).toMatchObject({
+          date: ACTIVITY_DAY.date,
+          metricKey,
+          value,
+        });
+        expect(selected[0]?.data).not.toHaveProperty("provisional");
       }
+
+      expect(JSON.stringify(await readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-days.v0"),
+      ))).not.toContain("provisional");
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
@@ -939,6 +948,23 @@ describe("selectProjectableDailyMetricDays", () => {
         ["2026-07-02", 4],
         ["2026-07-03", 1],
       ]));
+    } finally {
+      dateNow.mockRestore();
+      await rm(vaultRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects future member-local sleep-stage dates", async () => {
+    const vaultRoot = await createSleepSourceProjectionVault([
+      { date: "2026-07-05", providers: ["garmin"] },
+    ]);
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+
+    try {
+      await expect(readProjectableDailyMetricDays(
+        vaultRoot,
+        requireDailyMetricSpec("deep-sleep-sources-days.v1"),
+      )).resolves.toEqual([]);
     } finally {
       dateNow.mockRestore();
       await rm(vaultRoot, { recursive: true, force: true });
