@@ -878,15 +878,42 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   usage-bearing work is denied only when included capacity and generic usage
   credit are both exhausted; the crossing operation may finish, and accepted
   input remains durable and pending. Included capacity is consumed before
-  carryover credit. Credit entries, their remaining projections, and the
-  compact balance/version projection serialize under the beneficiary member
-  while base allowance stays separate. Purchase and referral producers share
-  that immutable ledger; only purchase-backed entries participate in Stripe
-  refund/dispute reversal, while earned referral rewards are final. Web derives
-  Settings and read-only `murph.plan_usage` from that same owner without
-  persisting a forecast or granting runtime billing authority; synthetic
-  thread containers receive a bounded unavailable result rather than personal
-  plan facts.
+  carryover credit. The beneficiary row lock is the sole serialization point
+  for usage-credit grants, purchase reservations, debits, projection
+  adjustments, the compact balance/version projection, and relevant
+  checkout/refill admission; base allowance remains separate. An admission
+  path that also locks a distinct payer takes the beneficiary lock first. A
+  beneficiary may occupy at most 32 grant slots: a positive active grant
+  projection or an unfulfilled purchase whose provider-final release marker,
+  `grantSlotReleasedAt`, is null. Every shared capacity inspection reads at most
+  33 combined occupied rows; a 33rd fails closed as overflow. Grant projections
+  carry immutable beneficiary/FIFO identity behind a partial active-grant index,
+  and unfulfilled reservations have a matching partial beneficiary index, so
+  those bounded reads do not scan zero-balance or terminal history. At the boundary,
+  purchase fulfillment may replace only its exact reservation; an unreserved
+  grant is rejected. Settlement similarly locks and inspects at most 33
+  positive grants, rejects more than 32, and computes FIFO allocation with
+  window sums. The same data-modifying SQL statement updates affected grant and
+  purchase projections set-wise, updates the beneficiary projection once, and
+  inserts every debit.
+  Replay reads at most 33 debit rows and rejects more than 32 before bounded
+  validation. Refund and dispute convergence performs one final shared capacity
+  inspection after all signed adjustments; crossing the slot boundary rolls the
+  transaction back before the Stripe receipt binds so its existing retry owner
+  can replay. Purchase and referral producers share that immutable ledger; only
+  purchase-backed entries participate in Stripe refund/dispute reversal, while
+  earned referral rewards are final. Web derives Settings and read-only
+  `murph.plan_usage` from that same owner without persisting a forecast or
+  granting runtime billing authority; synthetic thread containers receive a
+  bounded unavailable result rather than personal plan facts.
+
+  A genuinely new personal, Family, or group purchase that reaches the 32-slot
+  boundary returns the distinct `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` HTTP 409;
+  true eligibility failures remain 403 and exact purchase replay resolves before
+  capacity admission. Group funding preflights that serialized capacity before
+  Customer preparation, then revalidates after preparation before reserving a
+  slot. The shared top-up dialog maps only that exact code to a truthful temporary
+  block with no alternate-amount suggestion.
 
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time offers. Hosted-group funding keeps the same purchase owner and
@@ -895,8 +922,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   ordinary $5 usage-credit purchase available at any current group-capacity
   state. Later purchases are deterministic exact-$5 `HostedUsageCreditPurchase`
   rows admitted only at the existing beneficiary-serialized
-  settlement/capacity seam when capacity is low or exhausted. The
-  authorization stores status, selected cap, and anchored period only; fulfilled
+  settlement/capacity seam when capacity is low or exhausted. Ordinary
+  automatic refill admission returns no refill at 32 occupied slots; overflow
+  is an invariant failure. The authorization stores status, selected cap, and
+  anchored period only; fulfilled
   plus pending purchases derive the current-period commitment, while
   `HostedUsageCreditEntry` remains the sole balance and carries unused credit
   across sponsorship periods. A partial unique database index permits only one
@@ -1514,11 +1543,15 @@ Linq explicitly requests interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
 recipient without it, including Messages on macOS, sees a provider-owned static
 layout with a generated image that mirrors the same compact native presentation.
-Nutrition images retain the calorie ring and metric row; compact-table images
-retain the table grid or workout progress and exercise rows. Native captions
-independently repeat the complete immutable semantics, including nutrition
-totals and goal states, every generic table cell, or every workout set status,
-target, and actual value, so a missing raster never erases the useful response.
+Nutrition images retain the calorie ring and metric row while remaining
+rectangular and badge-free so the provider owns the app icon and outer mask.
+Their concise native caption keeps only the date and meal count instead of
+repeating visible totals or target amounts. A short subcaption appears only
+when some totals are partial or an assessed V2 goal needs its directional
+status preserved. Compact-table images retain the table grid or workout
+progress and exercise rows, and their native captions
+independently repeat every generic table cell or every workout set status,
+target, and actual value so a missing raster never erases the useful response.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension
@@ -1661,7 +1694,10 @@ The Linq AT_RISK home-line and recovered-setup paths genuinely inspect private
 home-line state before `BEGIN`; those speculative reads retain a failed root
 unwrap only in the existing request-scoped cache so their authoritative
 transaction rechecks fail locally instead of repeating KMS under a connection
-or authority lock.
+or authority lock. When an opted-in speculative batch fails during envelope
+metadata lookup or verification, it retains that same rejection for every
+affected uncached root reference. A later mixed cached-and-uncached request
+observes cached failures before starting new metadata or provider work.
 Established Linq direct messages resolve only a narrow blind-index/member-id
 target and unwrap the mailbox-payload ingress root; established Linq and
 Telegram group routes also retain the exact observed delivery-route ciphertext,
@@ -1670,7 +1706,10 @@ decrypt-only control root named by that ciphertext, and prewarm the mailbox
 root. For an eligible unbound group, Web generates the
 synthetic member id, prepares all four domain-root envelopes, pre-seals the
 delivery route, and prewarms the prepared control and mailbox roots before
-`BEGIN`. These reads and crypto results grant no authority: the planner repeats
+`BEGIN`. Parallel route/mailbox preparation and four-domain candidate
+preparation preserve the first observed failure but drain every started sibling
+before opening the transaction or finalizing request-scoped crypto state. These
+reads and crypto results grant no authority: the planner repeats
 route, identity, activation, access, line, pending-setup, and participant checks
 inside the transaction. A new route then commits the synthetic member,
 prepared root envelopes, container, unique external-thread route, and activation

@@ -117,6 +117,18 @@ const RAW_CHANGELOG_EDITIONS = [
       "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
       {
+        id: "group-sleep-challenges-use-fresh-data",
+        kind: "improvement",
+        priority: 4,
+        title: "Group sleep checks use fresh shared data",
+        summary:
+          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+        details:
+          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+        relevanceTags: ["groups", "sleep", "health-data", "connections"],
+        sourcePullRequests: [1565],
+      },
+      {
         id: "public-referral-home",
         kind: "feature",
         priority: 5,
@@ -263,6 +275,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "The result returns as one card in the same conversation with an accurate static or text fallback. Empty fallbacks stay silent, and invalid card data is rejected.",
         relevanceTags: ["imessage", "cards", "nutrition", "reliability"],
         sourcePullRequests: [1473, 1489, 1501],
+      },
+      {
+        id: "cleaner-imessage-nutrition-cards",
+        kind: "improvement",
+        priority: 4,
+        title: "Nutrition cards fit Messages cleanly",
+        summary:
+          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
+        details:
+          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals and assessed goals keep only their short status labels.",
+        relevanceTags: ["imessage", "cards", "nutrition", "design"],
+        sourcePullRequests: [1567],
       },
       {
         id: "typing-prewarms-private-chat",

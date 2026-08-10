@@ -28,6 +28,7 @@ import { Separator } from "@/src/components/ui/separator";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import { ValidationSlide } from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -613,7 +614,20 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with sponsorship accounting, messaging-activity, message-volume, and monthly-revenue history">
+      <StudySection title="Pitch deck progress slide">
+        <div
+          id="pitch-progress-slide"
+          data-design-section="pitch-progress-slide"
+          className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ValidationSlide />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
         <div inert>
           <GrowthScorecardStudy />
         </div>

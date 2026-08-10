@@ -8,6 +8,7 @@ import { test } from "vitest";
 
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   createBrowserVaultReplica,
   parseBrowserVaultReplica,
 } from "../src/browser.ts";
@@ -78,6 +79,7 @@ test("Browser Vault parsing preserves a missing legacy Personal Patterns project
       vaultRoot: "test://legacy-personal-patterns",
     }),
   });
+  replica.generation = BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1;
   delete replica.personalPatterns;
 
   const parsed = parseBrowserVaultReplica(replica);
