@@ -179,6 +179,12 @@ describe('murph.attach_response_card', () => {
       'Require exactly one unambiguous active scalar target for each of the five metrics, resolved across active canonical Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'nutrition-strategy/references/daily-nutrition-card-safety.md',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Before every daily_nutrition attachment, even with five active goals or on a scheduled closeout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
@@ -188,7 +194,10 @@ describe('murph.attach_response_card', () => {
       'activate it only after member acceptance',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Only a later eligible response may use the accepted goals',
+      'Any derived target addition or change atomically pauses the complete managed bundle until acceptance',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'its next unambiguous acceptance may complete that pending request after activation, safety recheck, and a fresh same-date totals read',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A scheduled closeout must not ask for inputs or create, change, or explain a proposal',

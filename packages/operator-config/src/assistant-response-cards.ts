@@ -264,8 +264,37 @@ function renderDailyNutritionResponseCardText(
   const summary = `${formatNutritionCardDate(card.localDate)}: ${
     metrics.join(' · ')
   } from ${card.mealCount} logged ${mealLabel}.`
+  const goals = isDailyNutritionResponseCardV2(card)
+    ? `Targets: ${renderDailyNutritionGoals(card).join(' · ')}.`
+    : null
   const partialLabel = renderPartialNutritionLabel(card)
-  return partialLabel === null ? summary : `${summary} ${partialLabel}`
+  return [summary, goals, partialLabel]
+    .filter((value): value is string => value !== null)
+    .join(' ')
+}
+
+function renderDailyNutritionGoals(
+  card: DailyNutritionResponseCardV2,
+): string[] {
+  const candidates: ReadonlyArray<readonly [
+    NutritionCardGoalSnapshot | null,
+    string,
+    string,
+  ]> = [
+    [card.goals.calories, 'calories', ' calories'],
+    [card.goals.proteinGrams, 'protein', 'g protein'],
+    [card.goals.carbsGrams, 'carbs', 'g carbs'],
+    [card.goals.fatGrams, 'fat', 'g fat'],
+    [card.goals.fiberGrams, 'fiber', 'g fiber'],
+  ]
+
+  return candidates.map(([goal, label, unit]) =>
+    goal === null
+      ? `${label} target unavailable`
+      : `${formatNutritionCardNumber(goal.target)}${unit} (${
+          NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]
+        })`
+  )
 }
 
 function renderAvailableNutritionTotals(

@@ -573,12 +573,13 @@ test("goal import-json preserves omitted fields on patch updates", async () => {
   }
 });
 
-test("goal import-json preserves sibling nutrition targets when editing or removing one metric", async () => {
+test("goal import-json preserves sibling nutrition targets and pauses an active derived replacement", async () => {
   const cli = createVaultCli();
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const createPayloadPath = path.join(vaultRoot, "nutrition-goal-create.json");
   const editPayloadPath = path.join(vaultRoot, "nutrition-goal-edit.json");
   const removePayloadPath = path.join(vaultRoot, "nutrition-goal-remove.json");
+  const restorePayloadPath = path.join(vaultRoot, "nutrition-goal-restore.json");
   const target = (
     targetId: string,
     metricKey: string,
@@ -635,7 +636,7 @@ test("goal import-json preserves sibling nutrition targets when editing or remov
 
     await writeFile(
       editPayloadPath,
-      JSON.stringify({ goalId, metricTargets: editedTargets }),
+      JSON.stringify({ goalId, status: "paused", metricTargets: editedTargets }),
       "utf8",
     );
     const { envelope: edited } = await runInProcessJsonCli(cli, [
@@ -647,14 +648,28 @@ test("goal import-json preserves sibling nutrition targets when editing or remov
       vaultRoot,
     ]);
     const { envelope: shownAfterEdit } = await runInProcessJsonCli<{
-      entity: { data: { metricTargets: typeof editedTargets } };
+      entity: { data: { status: string; metricTargets: typeof editedTargets } };
     }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
 
     assert.equal(edited.ok, true);
+    assert.equal(requireData(shownAfterEdit).entity.data.status, "paused");
     assert.deepEqual(
       requireData(shownAfterEdit).entity.data.metricTargets,
       editedTargets,
     );
+
+    const { envelope: activated } = await runInProcessJsonCli(cli, [
+      "goal",
+      "save",
+      "Daily nutrition targets",
+      "--id",
+      goalId,
+      "--status",
+      "active",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(activated.ok, true);
 
     const retainedTargets = editedTargets.filter(
       (entry) => entry.metricKey !== "protein-grams",
@@ -673,13 +688,47 @@ test("goal import-json preserves sibling nutrition targets when editing or remov
       vaultRoot,
     ]);
     const { envelope: shownAfterRemoval } = await runInProcessJsonCli<{
-      entity: { data: { metricTargets: typeof retainedTargets } };
+      entity: { data: { status: string; metricTargets: typeof retainedTargets } };
     }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
 
     assert.equal(removed.ok, true);
+    assert.equal(requireData(shownAfterRemoval).entity.data.status, "active");
     assert.deepEqual(
       requireData(shownAfterRemoval).entity.data.metricTargets,
       retainedTargets,
+    );
+
+    const restoredTargets = editedTargets.map((entry) =>
+      entry.metricKey === "protein-grams"
+        ? { ...entry, value: 160, highValue: 160 }
+        : entry,
+    );
+    await writeFile(
+      restorePayloadPath,
+      JSON.stringify({
+        goalId,
+        status: "paused",
+        metricTargets: restoredTargets,
+      }),
+      "utf8",
+    );
+    const { envelope: restored } = await runInProcessJsonCli(cli, [
+      "goal",
+      "import-json",
+      "--input",
+      `@${restorePayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    const { envelope: shownAfterRestore } = await runInProcessJsonCli<{
+      entity: { data: { status: string; metricTargets: typeof restoredTargets } };
+    }>(cli, ["goal", "show", goalId, "--vault", vaultRoot]);
+
+    assert.equal(restored.ok, true);
+    assert.equal(requireData(shownAfterRestore).entity.data.status, "paused");
+    assert.deepEqual(
+      requireData(shownAfterRestore).entity.data.metricTargets,
+      restoredTargets,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });

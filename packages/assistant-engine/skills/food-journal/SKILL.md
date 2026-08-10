@@ -39,12 +39,16 @@ Ask at most one question, and only when the missing detail materially changes sa
 - Do not estimate or surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users. In symptom or digestion work, keep numbers secondary to the focus rather than leading with them.
 - Structured label facts may remain available when useful; surface the details relevant to the user's request alongside the default totals.
 
-For a requested daily nutrition card, require all five canonical daily goals.
-If any are missing, read and follow
+Before every requested daily nutrition card, read and apply
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`,
+even when all five goals already exist. Require all five canonical daily goals.
+If any are missing, also read and follow
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`.
 The first setup response explains a paused canonical proposal in ordinary text;
-it does not attach a goal-less card. Only a later eligible response may use the
-accepted active goals in a card.
+it does not attach a goal-less card. An unambiguous acceptance may complete the
+pending explicit card request in that next response after activation, safety
+recheck, and a fresh same-date totals read. Other later eligible responses may
+use the accepted active goals in a card.
 
 ## Ground numeric estimates in label and USDA data
 

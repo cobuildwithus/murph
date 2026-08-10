@@ -7,16 +7,12 @@ fat, and fiber. A scheduled closeout may use an already accepted active bundle,
 but it must not use this workflow to ask for inputs, derive or save targets, or
 surface a proposal.
 
-## Safety and authority
+Before using this workflow, read and apply `daily-nutrition-card-safety.md`. If
+its card-time gate suppresses numeric goals, stop here and keep the owning
+non-numeric or clinical path.
 
-- Do not derive, save, or surface numeric goals for intuitive-eating or
-  number-sensitive contexts; known or suspected eating disorder, severe
-  restriction, purging, compulsive exercise, rapid or unexplained weight
-  change, under-fueling or RED-S concern; anyone under 18; pregnancy or
-  breastfeeding; glucose-lowering medication; kidney disease, advanced liver
-  disease, significant heart disease, relevant endocrine disease,
-  post-bariatric care, a therapeutic diet, or another clinician-managed
-  nutrition context. Keep the owning skill's non-numeric or clinical path.
+## Target authority
+
 - Read already-known goals, body measurements, training, weight trend, activity,
   and stated body-composition direction before asking. Never infer a missing
   physiological sex input from a name, pronouns, or gender label, and never infer
@@ -108,7 +104,12 @@ Use the existing canonical Goal owner; add no new state surface.
    only a metric deliberately removed because an explicit owner now exists.
    Never send only the changed or removed target. Read the Goal back and verify
    the complete retained set; never create a duplicate or rewrite an unchanged
-   proposal. A status-only update may omit `metricTargets`.
+   proposal. Any write that adds or changes a derived managed value must include
+   `status: "paused"` atomically, even when the same Goal was active; this keeps
+   the revised bundle a proposal until the member accepts it. Removing an
+   overlapping metric without adding or changing a derived value may leave the
+   managed Goal active because the explicit owner supplies that metric. A
+   status-only update may omit `metricTargets`.
 4. A turn that creates or changes the paused proposal must be ordinary text,
    never a card. Briefly name all five effective values, which facts and labeled
    assumptions materially drove them, and why calories, protein, carbohydrate,
@@ -119,18 +120,27 @@ Use the existing canonical Goal owner; add no new state surface.
    sending the complete intended post-update array and read the Goal back. Then
    run
    `vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active`
-   and read that same Goal back. When the member changes a proposed value, send
-   the complete intended post-update `metricTargets` array for the same paused
-   Goal through `goal import-json`,
+   and read that same Goal back. When the member changes a proposed value, or a
+   missing metric needs a newly derived replacement after an explicit owner
+   disappears, send the complete intended post-update `metricTargets` array
+   with `status: "paused"` for the same Goal through `goal import-json`,
    explain the revision briefly, and wait for acceptance. If the member
    declines, update the same Goal to `abandoned`. Do not silently recalculate
    accepted values later. If an explicit target appears after activation, send
    the managed Goal's complete retained array without that overlapping metric;
    never edit the explicit Goal.
-6. Only a later eligible response with five scalar values resolved from active
-   canonical goals may attach the card. Re-read meal totals immediately before
-   attachment. On an interactive card request, explain an existing paused
-   proposal again unless the member is accepting or changing it.
+6. The proposal turn never attaches a card. If an explicit card request caused
+   the proposal, its next unambiguous acceptance may be the first later eligible
+   response: after activation and readback, reapply
+   `daily-nutrition-card-safety.md`, re-read same-date canonical meal totals,
+   and attach exactly one card in that acceptance response when the pending
+   request is still unambiguous and the card alone completes it. A
+   target-setting-only request, correction, decline, ambiguous acceptance, or
+   compound request remains ordinary text with no card. Otherwise, only a later
+   eligible response with five scalar values resolved from active canonical
+   goals may attach the card. On an interactive card request, explain an
+   existing paused proposal again unless the member is accepting or changing
+   it.
 
 ## Evidence register
 
