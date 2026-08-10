@@ -147,6 +147,7 @@ import type {
 import {
   getKnowledgePage,
   upsertKnowledgePage,
+  type KnowledgeServiceDependencies,
 } from '../knowledge.js'
 import {
   normalizeKnowledgeBody,
@@ -1783,6 +1784,7 @@ export async function executeMurphDynamicToolRequest(input: {
   currentResponseCard?: AssistantResponseCard | null
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
   groupChallengeResponseCardAllowed?: boolean | null
+  knowledgePageReadTextFile?: KnowledgeServiceDependencies['readTextFile'] | null
   privateDirectResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -1882,6 +1884,7 @@ export async function executeMurphDynamicToolRequest(input: {
         allowed: input.groupChallengeResponseCardAllowed === true,
         currentResponseCard: input.currentResponseCard ?? null,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        knowledgePageReadTextFile: input.knowledgePageReadTextFile ?? null,
         request: input.request.input,
         turnState: input.groupSharedReadTurnState ?? null,
         vaultRoot: input.vaultRoot ?? null,
@@ -3533,6 +3536,7 @@ async function executeGroupChallengeResponseCardAttachment(input: {
   allowed: boolean
   currentResponseCard: AssistantResponseCard | null
   currentResponseMedia: readonly AssistantResponseMedia[]
+  knowledgePageReadTextFile: KnowledgeServiceDependencies['readTextFile'] | null
   request: GroupChallengeResponseCardToolInput
   turnState: MurphGroupSharedReadTurnState | null
   vaultRoot: string | null
@@ -3573,10 +3577,15 @@ async function executeGroupChallengeResponseCardAttachment(input: {
   }
 
   try {
-    const pageResult = await getKnowledgePage({
-      slug: input.request.challengeSlug,
-      vault: input.vaultRoot,
-    })
+    const pageResult = await getKnowledgePage(
+      {
+        slug: input.request.challengeSlug,
+        vault: input.vaultRoot,
+      },
+      input.knowledgePageReadTextFile
+        ? { readTextFile: input.knowledgePageReadTextFile }
+        : {},
+    )
     if (pageResult.page.pageType !== 'challenge') {
       throw new TypeError('Challenge standings require a challenge knowledge page.')
     }

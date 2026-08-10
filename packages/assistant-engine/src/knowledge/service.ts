@@ -21,6 +21,7 @@ import {
   normalizeKnowledgeSlug,
   normalizeKnowledgeTag,
   orderedUniqueStrings,
+  parseDerivedKnowledgeNodeMarkdown,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
   readHealthLibraryGraphWithIssues,
@@ -598,9 +599,16 @@ export async function getKnowledgePage(
 
   const absolutePath = await resolveAssistantVaultPath(input.vault, page.relativePath, 'file path')
   const markdown = await (dependencies.readTextFile ?? defaultReadTextFile)(absolutePath)
+  const exactPage = parseDerivedKnowledgeNodeMarkdown(page.relativePath, markdown)
+  if (exactPage.slug !== slug) {
+    throw new VaultCliError(
+      'knowledge_page_not_found',
+      `No derived knowledge page exists for slug "${input.slug}".`,
+    )
+  }
 
   return {
-    page: toKnowledgePage(page, markdown),
+    page: toKnowledgePage(exactPage, markdown),
     vault: input.vault,
   }
 }

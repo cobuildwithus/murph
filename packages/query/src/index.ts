@@ -356,6 +356,7 @@ export {
   DERIVED_KNOWLEDGE_LOG_PATH,
   DERIVED_KNOWLEDGE_PAGES_ROOT,
   DERIVED_KNOWLEDGE_ROOT,
+  parseDerivedKnowledgeNodeMarkdown,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
   renderDerivedKnowledgeIndex,

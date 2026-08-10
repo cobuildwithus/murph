@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -148,6 +148,7 @@ function executeCardTool(input: {
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   groupChallengeResponseCardAllowed?: boolean | null
   groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
+  knowledgePageReadTextFile?: (filePath: string) => Promise<string>
   privateDirectResponseCardAllowed?: boolean | null
   request?: Parameters<typeof executeMurphDynamicToolRequest>[0]['request']
   vaultRoot?: string | null
@@ -160,6 +161,7 @@ function executeCardTool(input: {
     groupChallengeResponseCardAllowed:
       input.groupChallengeResponseCardAllowed ?? false,
     groupSharedReadTurnState: input.groupSharedReadTurnState ?? null,
+    knowledgePageReadTextFile: input.knowledgePageReadTextFile ?? null,
     nextUsageOrdinal: () => 0,
     privateDirectResponseCardAllowed:
       input.privateDirectResponseCardAllowed ?? true,
@@ -705,6 +707,62 @@ describe('murph.attach_response_card', () => {
       expect(result.rpcResult.success).toBe(false)
       expect(after.page.markdown).toBe(before.page.markdown)
     }
+  })
+
+  it('does not emit or persist stale standings when the page changes during its read', async () => {
+    const request = readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT)
+    if (!request || request.kind !== 'attach-group-challenge-response-card') {
+      throw new TypeError('Expected a page-authorized group-card request.')
+    }
+    const vaultRoot = await createChallengeVault()
+    let winningMarkdown: string | null = null
+    let replaced = false
+    const result = await executeCardTool({
+      groupChallengeResponseCardAllowed: true,
+      groupSharedReadTurnState: COMPLETE_GROUP_READ_STATE,
+      knowledgePageReadTextFile: async (filePath) => {
+        if (!replaced) {
+          replaced = true
+          await upsertKnowledgePage({
+            body: [
+              'A concurrent ruling changed the challenge.',
+              '',
+              renderGroupChallengeDefinitionSection({
+                ...CHALLENGE_DEFINITION,
+                participants: [{
+                  participantId: 'participant_maya',
+                  state: 'declined',
+                }],
+                rulesRevision: 2,
+              }),
+            ].join('\n'),
+            pageType: 'challenge',
+            slug: 'weird-health-week',
+            title: 'Updated Weird Health Week',
+            vault: vaultRoot,
+          })
+          winningMarkdown = await readFile(filePath, 'utf8')
+        }
+        return await readFile(filePath, 'utf8')
+      },
+      privateDirectResponseCardAllowed: false,
+      request,
+      vaultRoot,
+    })
+
+    expect(replaced).toBe(true)
+    expect(result).not.toHaveProperty('responseCardPatch')
+    expect(result.rpcResult.success).toBe(false)
+    const current = await getKnowledgePage({
+      slug: 'weird-health-week',
+      vault: vaultRoot,
+    })
+    expect(current.page.markdown).toBe(winningMarkdown)
+    expect(current.page.title).toBe('Updated Weird Health Week')
+    expect(current.page.body).toContain('"rulesRevision": 2')
+    expect(current.page.body).not.toContain(
+      'murph:challenge-standings-snapshot:v1:start',
+    )
   })
 
   it('keeps page-owned participants as a scorer-ordered subset of a larger room', async () => {
