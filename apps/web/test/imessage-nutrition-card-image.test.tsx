@@ -5,17 +5,9 @@ import type {
   DailyNutritionResponseCardV1,
   DailyNutritionResponseCardV2,
 } from "@murphai/contracts";
+import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, test, vi } from "vitest";
-
-const mocks = vi.hoisted(() => ({
-  imageResponse: vi.fn(),
-  readFile: vi.fn(async (path: string | URL) => {
-    const value = String(path);
-    if (value.includes("DMSans-400.ttf")) return Buffer.from([4, 5, 6]);
-    throw new Error("Unexpected nutrition card asset read.");
-  }),
-}));
 
 type MockImageResponseInit = {
   fonts?: Array<{ data: ArrayBuffer; name: string; weight: number }>;
@@ -24,13 +16,24 @@ type MockImageResponseInit = {
   width?: number;
 };
 
+const mocks = vi.hoisted(() => ({
+  imageResponse: vi.fn<
+    (input: ReactElement, init: MockImageResponseInit) => void
+  >(),
+  readFile: vi.fn(async (path: string | URL) => {
+    const value = String(path);
+    if (value.includes("DMSans-400.ttf")) return Buffer.from([4, 5, 6]);
+    throw new Error("Unexpected nutrition card asset read.");
+  }),
+}));
+
 vi.mock("node:fs/promises", () => ({
   readFile: mocks.readFile,
 }));
 
 vi.mock("next/og", () => ({
   ImageResponse: class ImageResponse extends Response {
-    constructor(input: unknown, init: MockImageResponseInit) {
+    constructor(input: ReactElement, init: MockImageResponseInit) {
       mocks.imageResponse(input, init);
       super("mock image", {
         headers: {
@@ -265,10 +268,10 @@ function encodePayload(value: unknown): string {
   return `${Buffer.from(JSON.stringify(value), "utf8").toString("base64url")}.png`;
 }
 
-function getImageResponseCall(): [unknown, MockImageResponseInit] {
+function getImageResponseCall(): [ReactElement, MockImageResponseInit] {
   const call = mocks.imageResponse.mock.calls[0];
   assert.ok(call, "Expected ImageResponse to be constructed.");
-  return call as [unknown, MockImageResponseInit];
+  return call;
 }
 
 function headersInitToRecord(headers: HeadersInit | undefined): Record<string, string> {
