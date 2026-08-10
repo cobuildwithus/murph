@@ -34,6 +34,7 @@ import type {
   WearableMetricSummaryFilters as WearableMetricSummaryFiltersShape,
   ProjectedWearableMetricTrendSummary as WearableMetricTrendSummaryShape,
   ProjectedWearableSourceHealthSummary as WearableSourceHealthSummaryShape,
+  PersonalPatternReport as PersonalPatternReportShape,
   WearableSummaryFilters as WearableSummaryFiltersShape,
 } from '@murphai/query'
 import { loadRuntimeModule } from './runtime-import.js'
@@ -76,6 +77,7 @@ export type QueryWearableMetricTrendSummary = WearableMetricTrendSummaryShape
 export type QueryWearableDriftSummary = WearableDriftSummaryShape
 export type QueryWearableRecoverySummary = WearableRecoverySummaryShape
 export type QueryWearableSourceHealthSummary = WearableSourceHealthSummaryShape
+export type QueryPersonalPatternReport = PersonalPatternReportShape
 
 type OwnerQueryRuntimeModule = typeof import('@murphai/query')
 
