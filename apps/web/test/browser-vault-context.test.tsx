@@ -6,6 +6,7 @@ import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
+import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 import { act, useState } from "react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
@@ -628,6 +629,100 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   assert.equal(fetchMock.mock.calls.length > 1, true);
   assert.equal(rendered.container.textContent?.includes("Preparing dashboard..."), false);
   assert.equal(rendered.container.textContent?.includes("Syncing latest changes..."), false);
+
+  await rendered.cleanup();
+});
+
+test("browser-vault provider adopts a refreshed Patterns replica after the fast polling window", async () => {
+  vi.useFakeTimers();
+  const legacyRef = createReplicaRef({
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
+  });
+  const currentRef = createReplicaRef({
+    dataVersion: "e".repeat(64),
+    keyId: "browser-vault-replica:e",
+  });
+  let currentReplicaPublished = false;
+  const fetchMock = vi.fn(() => {
+    if (fetchMock.mock.calls.length === 1) {
+      return Promise.resolve(jsonResponse({
+        encryptedReplica: createReplicaEnvelope(),
+        freshness: "stale",
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: legacyRef,
+        refreshPending: true,
+        state: "ready",
+      }));
+    }
+
+    if (!currentReplicaPublished) {
+      return Promise.resolve(jsonResponse({
+        encryptedReplica: null,
+        freshness: "stale",
+        memberId: "member_123",
+        replicaAad: null,
+        replicaKeyEnvelope: null,
+        replicaRef: legacyRef,
+        refreshPending: true,
+        state: "not_modified",
+      }));
+    }
+
+    return Promise.resolve(jsonResponse({
+      encryptedReplica: createReplicaEnvelope("e"),
+      freshness: "fresh",
+      replicaAad: createReplicaAad("member_123", "e"),
+      replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "e"),
+      replicaRef: currentRef,
+      refreshPending: false,
+      state: "ready",
+    }));
+  });
+
+  installBrowserVaultCryptoMocks();
+  const legacyReplica = createReplica({
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
+  });
+  delete legacyReplica.personalPatterns;
+  mocks.decryptHostedStoragePayload
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(legacyReplica)))
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      personalPatterns: {
+        asOfDate: "2026-04-30",
+        cells: [],
+        factors: [],
+        lagDays: 1,
+        notes: [],
+        outcomes: [],
+        repeatableCellCount: 0,
+        testedCellCount: 0,
+        windowDays: 120,
+      },
+      source: {
+        dataVersion: currentRef.dataVersion,
+        sourceBundleHash: currentRef.sourceBundleHash,
+      },
+    }))));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultPatternsProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "legacy:pending");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25_000);
+  });
+  assert.equal(rendered.container.textContent, "legacy:pending");
+
+  currentReplicaPublished = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  await waitForText(rendered.container, "patterns:ready");
+  assert.equal(fetchMock.mock.calls.length > 2, true);
 
   await rendered.cleanup();
 });
@@ -1970,6 +2065,17 @@ function PublicDashboardRouteProbe() {
   );
 }
 
+function BrowserVaultPatternsProbe() {
+  const vault = useBrowserVault();
+  const patternsAvailable = vault.client?.replica.personalPatterns !== undefined;
+
+  return createElement(
+    "div",
+    null,
+    `${patternsAvailable ? "patterns" : "legacy"}:${vault.refreshPending ? "pending" : "ready"}`,
+  );
+}
+
 function installBrowserVaultCryptoMocks(): void {
   mocks.generateHostedUserRecipientKeyPair.mockResolvedValue({
     privateKeyJwk: { kty: "EC" },
@@ -2021,7 +2127,16 @@ function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
-function createReplicaRef() {
+function createReplicaRef(
+  overrides: Partial<HostedBrowserVaultReplicaRef> = {},
+): HostedBrowserVaultReplicaRef {
+  return {
+    ...createReplicaRefBase(),
+    ...overrides,
+  };
+}
+
+function createReplicaRefBase(): HostedBrowserVaultReplicaRef {
   return {
     byteLength: 128,
     dataVersion: "d".repeat(64),
@@ -2036,9 +2151,9 @@ function createReplicaRef() {
   };
 }
 
-function createReplicaAad(memberId = "member_123") {
+function createReplicaAad(memberId = "member_123", version = "d") {
   return {
-    dataVersion: "d".repeat(64),
+    dataVersion: version.repeat(64),
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     purpose: "browser-vault-replica" as const,
     runtimeRootKeyId: "udrk:runtime:test-root",
@@ -2048,21 +2163,21 @@ function createReplicaAad(memberId = "member_123") {
   };
 }
 
-function createReplicaEnvelope() {
+function createReplicaEnvelope(version = "d") {
   return {
     algorithm: "AES-GCM" as const,
     ciphertext: "ciphertext",
     iv: "iv",
-    keyId: "browser-vault-replica:d",
+    keyId: `browser-vault-replica:${version}`,
     schema: "murph.hosted-cipher.v1",
     scope: "browser-vault-replica" as const,
   };
 }
 
-function createReplicaKeyEnvelope(memberId = "member_123") {
+function createReplicaKeyEnvelope(memberId = "member_123", version = "d") {
   return {
     createdAt: "2026-04-20T08:00:00.000Z",
-    keyId: "browser-vault-replica:d",
+    keyId: `browser-vault-replica:${version}`,
     purpose: "browser-vault-replica" as const,
     recipients: [
       {
@@ -2074,7 +2189,7 @@ function createReplicaKeyEnvelope(memberId = "member_123") {
           y: "ephemeral-y",
         },
         iv: "iv",
-        keyId: "browser-vault-replica:d",
+        keyId: `browser-vault-replica:${version}`,
         kind: "browser-session" as const,
       },
     ],
