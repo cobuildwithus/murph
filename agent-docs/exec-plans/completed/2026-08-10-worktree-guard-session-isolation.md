@@ -1,6 +1,6 @@
 # Worktree guard session isolation
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -85,6 +85,9 @@ Updated: 2026-08-10
 - The current-main merge had one documentation conflict. Its resolution keeps
   the upstream changelog and shared-guard requirements together with this
   change's scoped rollout and downgrade guarantees; no code conflict occurred.
+- After the exact behavior-bearing head passed ReviewGPT round 8, the latest
+  `origin/main` merged without a conflict or manual resolution. The normal
+  base-update-only exception therefore applies; final CI owns that merge head.
 - With the live unrelated raw review checkout still registered, the repaired
   guard passed for this authorized checkout while its no-argument global audit
   and a raw-checkout-scoped audit both failed as designed. The obsolete marker
@@ -130,6 +133,9 @@ Updated: 2026-08-10
   production shell code. No marker, owner, queue, lifecycle, migration, repair,
   or reconciliation remains. The user's explicit instruction to run ReviewGPT
   audits until green supplies the continuation decision for one exact-head
-  round 8 after this accepted hard-cap finding is fixed.
-  All accepted findings await the exact-head continuation rerun.
-- Pending: exact-head ReviewGPT and GitHub Actions.
+  round 8 after this accepted hard-cap finding is fixed. Round 8 then audited
+  the complete sensitive snapshot at `2c0761e54623`, verified the round 7
+  collapse and every prior remediation, and returned `ROUND_OUTCOME: PASS`
+  with no qualifying findings.
+- Pending: final GitHub Actions on the plan-closure/base-reconciled head.
+Completed: 2026-08-10
