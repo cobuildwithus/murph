@@ -73,6 +73,7 @@ import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
 import { listAssistantCronJobs } from '../src/assistant-cron.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -3911,10 +3912,11 @@ describe('assistant outbox runtime', () => {
         now: new Date('2026-04-09T13:32:00.000Z'),
         vaultRoot,
       })
-      await expect(showAutomation({
+      const convertedAutomation = await showAutomation({
         automationId: automation.record.automationId,
         vaultRoot,
-      })).resolves.toMatchObject({
+      })
+      expect(convertedAutomation).toMatchObject({
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         schedule: expect.objectContaining({ kind: 'dailyLocal' }),
@@ -3923,20 +3925,36 @@ describe('assistant outbox runtime', () => {
         tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
         title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       })
+      if (convertedAutomation?.schedule.kind !== 'dailyLocal') {
+        throw new Error('Expected the predecessor to use the current daily schedule.')
+      }
       const convertedRuntimeStore =
         await readAssistantCronCanonicalRuntimeStore(paths)
       expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
         jobId: automation.record.automationId,
         state: expect.objectContaining({
+          activatedAt: schedule.kind === 'at'
+            ? '2026-04-09T13:32:00.000Z'
+            : automation.record.createdAt,
           pendingOccurrenceAt: occurrenceAt,
         }),
       }))
+      const expectedNextRunAt = schedule.kind === 'every'
+        ? computeAssistantCronNextRunAt(
+            {
+              kind: 'dailyLocal',
+              localTime: convertedAutomation.schedule.localTime,
+              timeZone: 'UTC',
+            },
+            new Date('2026-04-09T13:32:00.000Z'),
+          )
+        : '2026-04-09T13:31:30.000Z'
       await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
         expect.objectContaining({
           jobId: automation.record.automationId,
           prompt: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
           state: expect.objectContaining({
-            nextRunAt: '2026-04-09T13:31:30.000Z',
+            nextRunAt: expectedNextRunAt,
           }),
         }),
       )

@@ -18,7 +18,7 @@ Key decisions:
 - Update the existing schedule-owner documentation and focused contract/core/assistant/runtime tests rather than adding a new service or state owner.
 
 State:
-- ReviewGPT round two exposed and reproduced a review-induced cadence reset. The retrospective is recorded on PR #1546, the explicit timing-transition redesign is implemented locally, and final verification is in progress before round three.
+- ReviewGPT round three is auditing the pushed timing-transition redesign. Release coverage exposed one controlled predecessor-migration edge case locally; its exact occurrence-transfer fix is implemented and focused verification is green before the next pushed review head.
 
 Done:
 - Proved the production failure mechanism: a UTC-converted cron hour was persisted and then evaluated in the vault timezone.
@@ -42,12 +42,14 @@ Done:
 - ReviewGPT round two proved the round-one source-revision heuristic was too broad: the 23-hour availability refresh advanced general `updatedAt`, so an `every` reminder longer than 23 hours could be postponed indefinitely. A production-shaped failing regression moved a 48-hour occurrence from `2026-07-31T12:00:00.000Z` to `2026-08-01T00:00:00.000Z` after an instructions-only refresh.
 - Recorded the mandatory same-mechanism retrospective on PR #1546 and rejected both deletion-only runtime anchoring and a duplicated runtime schedule fingerprint. The narrow redesign stores `scheduleAnchorAt` atomically with the existing automation source, falls back to `createdAt` for legacy documents, deletes general-`updatedAt` timing authority, preserves due/pending work across non-timing edits, and reanchors only schedule changes or reactivation.
 - Added core persistence, legacy query fallback, real availability-maintenance, due-before-claim, schedule-revision, and reactivation coverage. Focused core/query/contract/CLI tests, the 219-test assistant cron/availability set, and affected package typechecks pass.
+- Reproduced the release-coverage failures from round three's candidate. A current onboarding seed is now a true no-op under deterministic timestamps, while a legacy schedule transition preserves a retrying occurrence only when reconciliation explicitly adopts that exact occurrence. The runtime cadence-reset cursor is advanced before the replacement recurrence becomes visible, so generic user schedule edits still invalidate pre-transition work.
+- Passed 356 scheduler, mutation, outbox-authority, managed-reconciliation, and availability-refresh tests plus the assistant-engine package typecheck after the occurrence-transfer correction.
 
 Now:
-- Run the complete affected suites, workspace typecheck, generated/package/bundle checks, and parent diff review; then commit and push the retrospective remediation head.
+- Complete the queued workspace typecheck, inspect ReviewGPT round three, then commit and push the occurrence-transfer correction.
 
 Next:
-- Update PR #1546's intent/evidence contract, run sensitive full-snapshot ReviewGPT round three against the exact pushed head concurrently with CI, and resolve any remaining accepted finding until the latest substantive round passes.
+- Update PR #1546's intent/evidence contract, run the required sensitive full-snapshot ReviewGPT follow-up against the repaired exact head concurrently with CI, and resolve any remaining accepted finding until the latest substantive round passes.
 
 Open questions (UNCONFIRMED if needed):
 - None. The timing result now reuses the canonical scheduler owners through an exact-file projection instead of the broad public job lookup.
