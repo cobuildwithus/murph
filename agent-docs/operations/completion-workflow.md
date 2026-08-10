@@ -92,16 +92,27 @@ when the meaningful diff is low-risk and limited to one or more of:
 - prompt-primary changes covered by the preliminary specialist ReviewGPT pass;
 - tests, fixtures, or developer tooling that do not change production behavior;
 - static copy or content; or
-- minor frontend presentation polish such as spacing, typography, color,
-  icons, imagery, or responsive containment that does not change the user
-  workflow, UI state model, data flow, or authority boundary.
+- frontend-only `apps/web` changes whose meaningful production diff stays in
+  client-rendered presentation and interaction, including component structure,
+  local UI state, semantic copy, accessibility, styling, icons, imagery, or
+  responsive behavior.
 
-The exemption applies only when the change does not affect a product-critical
-flow; auth, privacy, security, billing, or health-safety behavior or claims;
-persisted state or schemas; public APIs; runtime or deploy boundaries; or
-ordering, retries, concurrency, or idempotency. It also does not apply to broad
-refactors or cross-owner changes. When any of those conditions are present, or
-the user explicitly requests ReviewGPT, run the normal PR loop.
+Frontend-only means the PR does not change a server action or route,
+middleware, shared backend package, persistence or schema, authorization or
+permission logic, billing, health-safety logic, external ingress or egress,
+runtime or deploy behavior, production configuration, or a cross-owner
+protocol. A UI may change its user workflow or local display state and still
+qualify; the preliminary product-experience, frontend, and coverage lenses own
+those frontend concerns.
+
+The exemption applies only when the change does not affect auth, privacy,
+security, billing, health-safety, irreversible-effect, or other trust-boundary
+behavior or claims; persisted state or schemas; public APIs; runtime or deploy
+boundaries; or ordering, retries, concurrency, or idempotency. It also does not
+apply to broad or high-risk refactors, cross-owner changes, or any other
+cross-cutting-review trigger below. When any of those conditions are present,
+or the user explicitly requests the final ReviewGPT audit, run the normal PR
+loop.
 
 Every PR that enters the final ReviewGPT loop must contain exactly one
 machine-readable `ReviewGPT context sensitivity: routine` or
