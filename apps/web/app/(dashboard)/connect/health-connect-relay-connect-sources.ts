@@ -1,3 +1,5 @@
+import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
+
 import type { ConnectSource } from "./connect-page-types";
 
 const MURPH_ANDROID_PLAY_STORE_URL =
@@ -5,8 +7,7 @@ const MURPH_ANDROID_PLAY_STORE_URL =
 
 export const MOBVOI_HEALTH_CONNECT_SOURCE = Object.freeze({
   connectionAvailable: false,
-  description:
-    "Supported TicWatch data reaches Murph through Health Connect.",
+  description: "TicWatch data via Health Connect.",
   id: "mobvoi-health",
   logo: {
     className: "size-11 rounded-full object-contain",
@@ -18,5 +19,13 @@ export const MOBVOI_HEALTH_CONNECT_SOURCE = Object.freeze({
   unavailableActionLabel: "Get Murph for Android",
   unavailableActionUrl: MURPH_ANDROID_PLAY_STORE_URL,
   unavailableMessage:
-    "Turn on Health Connect in Mobvoi Health. If that option is missing, share to Google Fit and enable Sync Fit with Health Connect. In Murph for Android, connect Health Connect. No data? Recheck sharing and permissions. Categories and history depend on what Mobvoi writes.",
+    "Sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph.",
 } satisfies ConnectSource);
+
+export function listHealthConnectRelayConnectSources(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): ConnectSource[] {
+  return isMurphAndroidAppEnabled(env)
+    ? [MOBVOI_HEALTH_CONNECT_SOURCE]
+    : [];
+}

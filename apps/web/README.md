@@ -1058,6 +1058,12 @@ hostname mismatch before provider authorization begins.
 Set these under `Settings -> Environment Variables` in the Vercel project that
 deploys `apps/web`. Production is the minimum.
 
+Keep `MURPH_ANDROID_APP_ENABLED` unset or set to `0` until the Android app is
+public. Only the exact value `1` reveals Android-only Connect Devices and design
+catalog content. Enabling the complete journey also requires the same flag in
+the Cloudflare GitHub Environment so new runner containers receive matching
+assistant guidance; follow the tandem activation order in `apps/cloudflare/DEPLOY.md`.
+
 Provision `HOSTED_APP_SESSION_HMAC_KEY` in every hosted-web environment that
 will serve authenticated traffic before deploying the strict v2 session code.
 This is a deliberate secret-before-code hard cut: the deployment rejects all

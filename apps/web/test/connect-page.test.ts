@@ -173,7 +173,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />34 of 34 sources</);
+  assert.match(markup, />33 of 33 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -244,12 +244,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       description:
         "Selected watch and band data through Apple Health, where supported.",
       name: "Huawei Health",
-    },
-    {
-      assetPath: "/brand-logos/connect/mobvoi-health.png",
-      description:
-        "Supported TicWatch data reaches Murph through Health Connect.",
-      name: "Mobvoi / TicWatch",
     },
     {
       assetPath: "/brand-logos/connect/whoop.svg",
@@ -409,14 +403,14 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 34);
+  assert.equal(sources.length, 33);
   assert.equal(
     markup.match(/data-connection-state="idle"/gu)?.length,
-    sources.length - 7,
+    sources.length - 6,
   );
   assert.equal(
     markup.match(/>Not available<\/button>/gu)?.length,
-    sources.length - 8,
+    sources.length - 7,
   );
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
@@ -426,23 +420,12 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
-  assert.match(
-    markup,
-    /aria-label="Get Murph for Android for Mobvoi \/ TicWatch"/,
-  );
-  assert.match(
-    markup,
-    /href="https:\/\/play\.google\.com\/store\/apps\/details\?id=ai\.withmurph\.app"/,
-  );
-  assert.match(
-    markup,
-    /Turn on Health Connect in Mobvoi Health\. If that option is missing, share to Google Fit and enable Sync Fit with Health Connect\. In Murph for Android, connect Health Connect\. No data\? Recheck sharing and permissions\. Categories and history depend on what Mobvoi writes\./,
-  );
-  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch/u);
+  assert.doesNotMatch(markup, /Get Murph for Android/u);
+  assert.doesNotMatch(markup, /play\.google\.com/u);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.match(markup, />Get Murph for Android<\/a>/u);
   for (const relayName of [
     "Zepp / Amazfit",
     "Xiaomi / Mi Fitness",
@@ -484,10 +467,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.ok(
     sourceHeadingIndex(markup, "Google Fit") <
-      sourceHeadingIndex(markup, "Mobvoi / TicWatch"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Mobvoi / TicWatch") <
       sourceHeadingIndex(markup, "Huawei Health"),
   );
   assert.ok(
@@ -1261,10 +1240,15 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
       visibleSourceIds.has(source.connectSourceId),
     ).map((source) => source.connectSourceId),
   );
-  configuredSourceIds.add("mobvoi-health");
   assert.deepEqual(
     [...visibleSourceIds].sort(),
     [...configuredSourceIds].sort(),
+  );
+  assert.equal(visibleSourceIds.has("mobvoi-health"), false);
+  assert.equal(
+    listVisibleConnectSources({ MURPH_ANDROID_APP_ENABLED: "1" })
+      .some((source) => source.id === "mobvoi-health"),
+    true,
   );
 
   const logo = {
@@ -1529,6 +1513,7 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
 });
 
 test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async () => {
+  vi.stubEnv("MURPH_ANDROID_APP_ENABLED", "1");
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
     ok: true,
@@ -1558,6 +1543,12 @@ test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async 
     markup,
     /aria-label="Get Murph for Android for Mobvoi \/ TicWatch"/u,
   );
+  assert.match(
+    markup,
+    /Sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph\./u,
+  );
+  assert.match(markup, /src="\/brand-logos\/connect\/mobvoi-health\.png"/u);
+  assert.match(markup, /rounded-full/u);
   assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
 });
 

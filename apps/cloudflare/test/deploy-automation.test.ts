@@ -668,6 +668,18 @@ describe("hosted deploy automation helpers", () => {
     expect(environment.workerVars.HOSTED_EXECUTION_RUNNER_ENV_PROFILES).toBe("telegram,mapbox");
   });
 
+  it("passes the Android app availability gate through to worker vars", () => {
+    const environment = readHostedDeployAutomationEnvironment({
+      CF_BUNDLES_BUCKET: "hosted-bundles",
+      CF_BUNDLES_PREVIEW_BUCKET: "hosted-bundles-preview",
+      CF_WORKER_NAME: "hosted-worker",
+      ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
+      MURPH_ANDROID_APP_ENABLED: "1",
+    });
+
+    expect(environment.workerVars.MURPH_ANDROID_APP_ENABLED).toBe("1");
+  });
+
   it("defaults runner env profiles to the full hosted integration set", () => {
     const environment = readHostedDeployAutomationEnvironment({
       CF_BUNDLES_BUCKET: "hosted-bundles",

@@ -11,6 +11,10 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
+import {
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
+} from "@murphai/hosted-execution/env";
 import type {
   HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
@@ -548,7 +552,7 @@ export class RunnerContainer extends Container {
   constructor(state: unknown, env: RunnerContainerEnvironmentSource) {
     super(state as never, env as never);
     this.environment = env;
-    this.envVars = buildRunnerContainerEnvVars();
+    this.envVars = buildRunnerContainerEnvVars(env);
     this.sleepAfter = formatRunnerSleepAfter(
       readRunnerContainerLifecycleReevaluationMs(env),
     );
@@ -4226,9 +4230,21 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
   );
 }
 
-function buildRunnerContainerEnvVars(): Record<string, string> {
+function buildRunnerContainerEnvVars(
+  source: RunnerContainerEnvironmentSource,
+): Record<string, string> {
+  const androidAppAvailable = isMurphAndroidAppEnabled({
+    [MURPH_ANDROID_APP_ENABLED_ENV]:
+      typeof source[MURPH_ANDROID_APP_ENABLED_ENV] === "string"
+        ? source[MURPH_ANDROID_APP_ENABLED_ENV]
+        : undefined,
+  });
+
   return {
     ...BASE_RUNNER_CONTAINER_ENV_VARS,
+    ...(androidAppAvailable
+      ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+      : {}),
   };
 }
 

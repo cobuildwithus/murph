@@ -1402,6 +1402,7 @@ describe('assistant execution prompt contract', () => {
 describe('assistant local PDF evidence guidance', () => {
   it('describes hosted device-connect as available without stale unavailable guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantAndroidAppAvailable: true,
       onboardingGuidance: true,
     }))
 
@@ -1453,7 +1454,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Android Health Connect works in the Murph Android app. Canonical Google Play listing: https://play.google.com/store/apps/details?id=ai.withmurph.app.',
     )
     expect(prompt).toContain(
-      'Mobvoi/TicWatch: use Mobvoi Health\'s Health Connect option when present. Otherwise share to Google Fit, then enable Sync Fit with Health Connect. Connect Health Connect in Murph. If no data appears, recheck sharing and permissions. Categories and history depend on app-written data.',
+      'Mobvoi/TicWatch: sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph.',
     )
     expect(prompt).toContain('Starting Murph: if asked how to begin')
     expect(prompt).toContain(MURPH_PRODUCT_ORIGIN)
@@ -1531,7 +1532,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).not.toContain('connection links are temporarily unavailable')
   })
 
-  it('forbids fabricated wearable connect URLs even when hosted connect is unavailable', () => {
+  it('hides Android app guidance while forbidding fabricated wearable connect URLs', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       assistantHostedDeviceConnectAvailable: false,
       assistantHostedDeviceConnectProviders: [],
@@ -1543,7 +1544,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).not.toContain('Hosted wearable connection links are available')
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain('Apple Health relay:')
-    expect(prompt).toContain('Android Health Connect relay:')
+    expect(prompt).not.toContain('Android Health Connect relay:')
     expect(prompt).toContain(
       'Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.',
     )
@@ -1553,10 +1554,9 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).toContain('Zepp/Amazfit: share with Apple Health in Zepp')
     expect(prompt).toContain('Xiaomi/Mi Fitness, RingConn, COROS, and Suunto')
     expect(prompt).toContain('Huawei Health: Apple Health sharing varies')
-    expect(prompt).toContain('Android Health Connect works in the Murph Android app.')
-    expect(prompt).toContain('Mobvoi/TicWatch: use Mobvoi Health\'s Health Connect option when present')
-    expect(prompt).toContain('Otherwise share to Google Fit')
-    expect(prompt).toContain('If no data appears, recheck sharing and permissions')
+    expect(prompt).not.toContain('Android Health Connect works in the Murph Android app.')
+    expect(prompt).not.toContain('Mobvoi/TicWatch:')
+    expect(prompt).not.toContain('https://play.google.com/store/apps/details?id=ai.withmurph.app')
     expect(prompt).toContain('no direct cloud access or guaranteed history backfill')
     expect(prompt).toContain('accounts are created at')
     expect(prompt).toContain('https://apps.apple.com/us/app/murph-ai/id6786145859')
@@ -1564,7 +1564,7 @@ describe('assistant local PDF evidence guidance', () => {
       'Never invent invite/share/auth/wearable URLs',
     )
     expect(prompt).toContain(
-      `only ${MURPH_PRODUCT_ORIGIN} and both canonical app-store URLs are proof-free`,
+      `only ${MURPH_PRODUCT_ORIGIN} and the canonical iOS App Store URL are proof-free`,
     )
   })
 
@@ -1926,8 +1926,7 @@ describe('assistant system prompt cache stability', () => {
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
-    // Restoring the established Apple Health/WHOOP relay contract while adding
-    // the cross-route Android handoff measured exactly 57,469 characters.
+    // The established Apple Health/WHOOP relay contract sets this ceiling.
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(57_469)
   })
 
@@ -2208,7 +2207,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '80719222c654afca58b959ff1b74eca15ab46dfc5abc7c562e8c5310d15b6cd2',
+      '59bdee189b368b6c91df9f4cc828caf9919b7839063747c58b5d6c7281309fd1',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
@@ -2721,7 +2720,7 @@ describe('assistant Murph onboarding guidance', () => {
     expect(readHostedWearableProviderList(prompt)).toBe('WHOOP (`whoop`)')
     expect(readHostedWearableProviderList(prompt)).not.toContain('Apple Health')
     expect(prompt).toContain('Apple Health relay:')
-    expect(prompt).toContain('Android Health Connect relay:')
+    expect(prompt).not.toContain('Android Health Connect relay:')
     expect(prompt).toContain(
       'Hosted wearable connection links are available for WHOOP (`whoop`)',
     )

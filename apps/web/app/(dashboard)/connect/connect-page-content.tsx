@@ -29,7 +29,7 @@ import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 
 import { APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI } from "./apple-health-relay-connect-sources";
 import { ConnectSourcesGrid } from "./connect-page-client";
-import { MOBVOI_HEALTH_CONNECT_SOURCE } from "./health-connect-relay-connect-sources";
+import { listHealthConnectRelayConnectSources } from "./health-connect-relay-connect-sources";
 import { sortConnectSourcesByConnectionState } from "./connect-source-order";
 import type {
   ConnectCallbackInput,
@@ -428,7 +428,7 @@ export default async function ConnectPage({
       reconnectTargetBySourceId,
       recoveryKindBySourceId,
     }),
-    MOBVOI_HEALTH_CONNECT_SOURCE,
+    ...listHealthConnectRelayConnectSources(),
   ];
 
   return (
@@ -458,10 +458,12 @@ export default async function ConnectPage({
   );
 }
 
-export function listVisibleConnectSources(): ConnectSource[] {
+export function listVisibleConnectSources(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): ConnectSource[] {
   return [
     ...listVisibleDeviceConnectSources(),
-    MOBVOI_HEALTH_CONNECT_SOURCE,
+    ...listHealthConnectRelayConnectSources(env),
   ];
 }
 

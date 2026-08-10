@@ -251,6 +251,49 @@ describe('assistant Codex turn planning', () => {
     expect(plan).not.toHaveProperty(removedRouteEnvProperty)
   })
 
+  it('projects the fail-closed Android app gate into direct assistant guidance', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const resolvePlan = (env: Readonly<Record<string, string>>) =>
+      resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-10',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env,
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }),
+      })
+
+    const disabledPlan = await resolvePlan({})
+    const enabledPlan = await resolvePlan({ MURPH_ANDROID_APP_ENABLED: '1' })
+
+    expect(disabledPlan.systemPrompt).not.toContain('Android Health Connect relay:')
+    expect(disabledPlan.systemPrompt).not.toContain('Mobvoi/TicWatch:')
+    expect(disabledPlan.systemPrompt).not.toContain('play.google.com')
+    expect(enabledPlan.systemPrompt).toContain('Android Health Connect relay:')
+    expect(enabledPlan.systemPrompt).toContain('Mobvoi/TicWatch:')
+    expect(enabledPlan.systemPrompt).toContain('play.google.com')
+  })
+
   it('preserves the no-reply hooks in Codex execution plans', async () => {
     const onFinishWithoutReplyAccepted = vi.fn()
     const onFinishWithoutReplyRecorded = vi.fn()

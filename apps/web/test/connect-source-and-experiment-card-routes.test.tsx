@@ -90,7 +90,6 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
       || source.routes.some((route) => route.kind === "direct" || route.kind === "junction_link"),
     )
     .map((source) => source.connectSourceId),
-    "mobvoi-health",
   ]
     .sort();
 
@@ -102,6 +101,11 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
     DEVICE_CONNECT_SOURCES.map((source) => source.connectSourceId),
   );
   assert.equal(connectionSourceIds.has("mobvoi-health"), false);
+  assert.equal(
+    listVisibleConnectSources({ MURPH_ANDROID_APP_ENABLED: "1" })
+      .some((source) => source.id === "mobvoi-health"),
+    true,
+  );
 
   const sourceIdsWithMissingUi = actualVisibleSources
     .filter((source) => !source.name || !source.description || !source.logo.src)
