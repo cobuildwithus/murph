@@ -13,7 +13,6 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-ser
 import {
   executeMurphDynamicToolRequest,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
   type MurphGroupSharedReadTurnState,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -274,7 +273,7 @@ async function readCurrentChallengeCardToolRequest(
 }
 
 function readGroupToolRequest(argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     id: 2,
     method: 'item/tool/call',
     params: {
