@@ -69,6 +69,7 @@ import type {
 import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
@@ -2084,6 +2085,123 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
                     'No weekly digest cleared the memorability bar.',
                 })
               }
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex weekly health insight evidence fallback e2e', () => {
+  it(
+    'falls back from an unavailable personal-pattern report and accepts a usable no-clear report',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthInsight = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      )
+      if (!weeklyHealthInsight) {
+        throw new Error('Expected the managed weekly health insight automation.')
+      }
+
+      try {
+        for (const patternResult of ['unavailable', 'no-clear'] as const) {
+          const workingDirectory = await mkdtemp(
+            path.join(
+              tmpdir(),
+              `murph-weekly-health-insight-${patternResult}-e2e-`,
+            ),
+          )
+
+          try {
+            const binDirectory = path.join(workingDirectory, 'bin')
+            await materializeWeeklyHealthInsightVaultCli({
+              binDirectory,
+              patternResult,
+            })
+            const result = await executeRealCodexAppServerTurn({
+              allowFinishWithoutReply: true,
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildWeeklyHealthInsightDeveloperInstructions(),
+              dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+              env: {
+                ...config.env,
+                PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+              },
+              excludeResumeTurns: true,
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: [
+                weeklyHealthInsight.instructions,
+                'Scheduled occurrence context:',
+                '- Current local date: 2026-08-09.',
+                '- The controlled canonical vault fixture has no prior insight ledger and no send-worthy candidate.',
+                '- Recent underlying wearable summaries are available through the normal vault CLI and are stable.',
+                '- Complete the normal evidence pass and terminal scheduled decision.',
+              ].join('\n\n'),
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const patternRead = actions.find((action) =>
+              action.kind === 'command'
+              && action.command.includes('vault-cli wearables patterns')
+            )
+
+            expect(patternRead, patternResult).toBeDefined()
+            if (patternResult === 'unavailable') {
+              const manualRead = actions.find((action) =>
+                action.kind === 'command'
+                && action.eventIndex > (patternRead?.eventIndex ?? Infinity)
+                && /vault-cli (?:experiment|goal|list|meal|search|wearables (?!patterns\b))/u
+                  .test(action.command)
+              )
+              expect(manualRead, patternResult).toBeDefined()
+            } else {
+              expect(patternRead?.kind === 'command' && patternRead.output)
+                .toContain('"stage":"no_clear_pattern"')
+              const recoveryCommands = actions.filter((action) =>
+                action.kind === 'command'
+                && action.eventIndex > (patternRead?.eventIndex ?? Infinity)
+                && /(?:command -v|which |--help|\b(?:brew|npm|pnpm)\b|\binstall\b)/u
+                  .test(action.command)
+              )
+              expect(recoveryCommands, patternResult).toHaveLength(0)
+            }
+
+            expect(result.finalMessage).not.toMatch(
+              /apolog|command (?:failed|failure)|could not run|couldn't run|set ?up|tool (?:failed|failure|unavailable)/iu,
+            )
+            const finishCalls = actions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+            )
+            expect(finishCalls.length, patternResult).toBeLessThanOrEqual(1)
+            expect(
+              result.finalMessage !== '' || finishCalls.length === 1,
+              patternResult,
+            ).toBe(true)
+            if (result.finalMessage !== '') {
+              expect(JSON.parse(result.finalMessage.trim())).toEqual({
+                kind: 'skip',
+                privateSummary:
+                  'No weekly health insight cleared the interestingness bar.',
+              })
             }
           } finally {
             await removeRealCodexTemporaryPath(workingDirectory)
@@ -6265,6 +6383,91 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+async function materializeWeeklyHealthInsightVaultCli(input: {
+  binDirectory: string
+  patternResult: 'no-clear' | 'unavailable'
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const personalPatternResult = JSON.stringify({
+    filters: {
+      date: '2026-08-09',
+      windowDays: 120,
+    },
+    report: {
+      asOfDate: '2026-08-09',
+      cells: [{
+        comparisonDays: 18,
+        comparisonMean: 72,
+        delta: 0,
+        deltaPercent: 0,
+        direction: 'flat',
+        exposedDays: 6,
+        exposedMean: 72,
+        factorId: 'activity:strength-training',
+        firstExposedDate: '2026-05-12',
+        lastExposedDate: '2026-08-05',
+        outcomeId: 'recovery:score',
+        repeatedDirection: false,
+        stage: 'no_clear_pattern',
+      }],
+      factors: [{
+        id: 'activity:strength-training',
+        kind: 'activity',
+        label: 'Strength training',
+        observedDays: 6,
+      }],
+      lagDays: 1,
+      notes: [],
+      outcomes: [{
+        id: 'recovery:score',
+        label: 'Recovery score',
+        unit: 'score',
+      }],
+      repeatableCellCount: 0,
+      testedCellCount: 1,
+      windowDays: 120,
+    },
+  })
+  const patternCommand = input.patternResult === 'unavailable'
+    ? [
+        '    printf \'%s\\n\' \'personal-pattern report unavailable\' >&2',
+        '    exit 69',
+      ]
+    : [
+        `    printf '%s\\n' '${personalPatternResult}'`,
+        '    exit 0',
+      ]
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"wearables patterns"*)',
+      ...patternCommand,
+      '    ;;',
+      '  *"knowledge show weekly-health-insights"*)',
+      '    printf \'%s\\n\' \'knowledge page not found\' >&2',
+      '    exit 1',
+      '    ;;',
+      '  *"wearables sources list"*)',
+      '    printf \'%s\\n\' \'{"sources":[{"provider":"fixture","status":"healthy","lastDate":"2026-08-09","stalenessVsNewestDays":0}]}\'',
+      '    ;;',
+      '  *"wearables"*|*"experiment"*|*"goal"*|*"list"*|*"search"*|*"meal"*)',
+      '    printf \'%s\\n\' \'{"data":[],"summary":"No material change in the available canonical period."}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 async function materializeExperimentStartVaultCli(input: {
   binDirectory: string
   dryRunRevisionMismatch: boolean
@@ -6953,6 +7156,28 @@ function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: scheduled ? 'automation-cron' : null,
+  })
+}
+
+function buildWeeklyHealthInsightDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-09',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
   })
 }
 
