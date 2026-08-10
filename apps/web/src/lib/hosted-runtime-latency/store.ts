@@ -6,6 +6,7 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEYS,
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
+  HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES,
   mergeHostedRuntimeLatencyPhaseBreakdownJson,
   readHostedIngressLatencySource,
   type HostedIngressLatencySource,
@@ -926,13 +927,19 @@ function buildHostedIngressLatencySanitizedJsonObjectSql(
               ELSE '{}'::jsonb
             END
           ) AS leaf(key, value)
-          WHERE CASE input.phase_leaf_rules -> phase.key ->> leaf.key
+          WHERE CASE
+            input.phase_leaf_rules -> phase.key -> leaf.key ->> 'kind'
             WHEN 'safe_integer'
             THEN ${buildHostedIngressLatencySafeJsonIntegerPredicateSql(
               Prisma.sql`leaf.value`,
             )}
             WHEN 'boolean'
             THEN jsonb_typeof(leaf.value) = 'boolean'
+            WHEN 'enum_string'
+            THEN jsonb_typeof(leaf.value) = 'string'
+              AND (
+                input.phase_leaf_rules -> phase.key -> leaf.key -> 'values'
+              ) ? (leaf.value #>> '{}')
             WHEN 'lease_generation'
             THEN jsonb_typeof(leaf.value) = 'string'
               AND (leaf.value #>> '{}') ~ '^(0|[1-9][0-9]{0,19})$'
@@ -958,16 +965,24 @@ function buildHostedIngressLatencySanitizedJsonObjectSql(
 function readHostedIngressLatencyPhaseLeafRule(
   phase: HostedRuntimeLatencyPhaseBreakdownPhase,
   leafKey: string,
-): "boolean" | "lease_generation" | "orchestration_attempt_id" | "safe_integer" {
+): {
+  kind:
+    | "boolean"
+    | "enum_string"
+    | "lease_generation"
+    | "orchestration_attempt_id"
+    | "safe_integer";
+  values?: readonly string[];
+} {
   if (
     HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS.some(
       (key) => key === `${phase}.${leafKey}`,
     )
   ) {
-    return "boolean";
+    return { kind: "boolean" };
   }
   if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
-    return "lease_generation";
+    return { kind: "lease_generation" };
   }
   if (
     phase === "orchestration"
@@ -976,9 +991,13 @@ function readHostedIngressLatencyPhaseLeafRule(
       || leafKey === "runtimeInvocationOrchestrationAttemptId"
     )
   ) {
-    return "orchestration_attempt_id";
+    return { kind: "orchestration_attempt_id" };
   }
-  return "safe_integer";
+  const stringValues =
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES[`${phase}.${leafKey}`];
+  return stringValues
+    ? { kind: "enum_string", values: stringValues }
+    : { kind: "safe_integer" };
 }
 
 function buildHostedIngressLatencySchemaPatchSql(object: Prisma.Sql): Prisma.Sql {

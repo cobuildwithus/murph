@@ -124,7 +124,10 @@ describe.skipIf(!runPostgresProof)(
         const sanitized = requireJsonRecord(providerRows[0]?.phaseBreakdownJson);
         expect(sanitized).toEqual({
           boot: { nodeStartupMs: 3 },
-          orchestration: { triggeredByWebDirect: true },
+          orchestration: {
+            shellPrewarmOutcome: "start_issued_warm",
+            triggeredByWebDirect: true,
+          },
           preProvider: { outboxScanPerformed: true },
           provider: { promptBuildMs: 9, sessionResolveMs: 10 },
           schemaVersion: 1,
@@ -357,6 +360,8 @@ async function createLatencySetWriteFixture(
             boot: { nodeStartupMs: 3, restoreWasCold: "wrong-type" },
             orchestration: {
               directEnsureOrchestrationAttemptId: "wrong-type",
+              shellPrewarmOutcome: "start_issued_warm",
+              shellPrewarmSource: "wrong-type",
               triggeredByWebDirect: true,
             },
             provider: {

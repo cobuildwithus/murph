@@ -2540,6 +2540,21 @@ export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_BOOLEAN_LEAF_KEYS =
     "preProvider.receiptScanPerformed",
   ] as const;
 
+export const HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES:
+  Readonly<Record<string, readonly string[]>> = {
+    "orchestration.shellPrewarmOutcome": [
+      "cold_start_observed",
+      "failed",
+      "start_issued_warm",
+      "superseded",
+    ],
+    "orchestration.shellPrewarmSource": [
+      "linq-instant-start",
+      "linq-typing-started",
+      "unknown",
+    ],
+  };
+
 export type HostedRuntimeLatencyPhaseBreakdownJsonLeaf = number | boolean | string;
 export type HostedRuntimeOrchestrationLatencyDiagnostics = NonNullable<
   HostedRuntimeLatencyPhaseBreakdown["orchestration"]
@@ -2791,16 +2806,10 @@ function isHostedRuntimeLatencyPhaseBreakdownLeafSafe(
   ) {
     return isHostedRuntimeDirectEnsureOrchestrationAttemptId(value);
   }
-  if (phase === "orchestration" && leafKey === "shellPrewarmOutcome") {
-    return value === "cold_start_observed"
-      || value === "failed"
-      || value === "start_issued_warm"
-      || value === "superseded";
-  }
-  if (phase === "orchestration" && leafKey === "shellPrewarmSource") {
-    return value === "linq-instant-start"
-      || value === "linq-typing-started"
-      || value === "unknown";
+  const allowedStringValues =
+    HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_STRING_LEAF_VALUES[`${phase}.${leafKey}`];
+  if (allowedStringValues) {
+    return typeof value === "string" && allowedStringValues.includes(value);
   }
   if (phase === "assistant" && leafKey === "runtimeLeaseGeneration") {
     return typeof value === "string"
