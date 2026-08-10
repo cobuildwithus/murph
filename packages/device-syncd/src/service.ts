@@ -971,6 +971,9 @@ class DeviceSyncServiceController {
         account: currentAccount,
         now,
         signal: jobAbortController.signal,
+        connectionSourceAdmissionMode: this.listConnectionSourcesForJob
+          ? "listed_only"
+          : "discover_unlisted",
         ...(this.shouldYieldJobExecution
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),

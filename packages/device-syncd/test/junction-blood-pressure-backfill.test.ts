@@ -180,6 +180,7 @@ function toJobRecord(input: DeviceSyncJobInput, index: number): DeviceSyncJobRec
 function createJobContext(input: {
   account?: DeviceSyncAccount;
   canonicalEventCount?: number;
+  connectionSourceAdmissionMode?: ProviderJobContext["connectionSourceAdmissionMode"];
   importSnapshot?: ProviderJobContext["importSnapshot"];
   importedSnapshots?: unknown[];
   listConnectionSources?: NonNullable<ProviderJobContext["listConnectionSources"]>;
@@ -194,6 +195,9 @@ function createJobContext(input: {
   return {
     account,
     now: input.now ?? NOW,
+    ...(input.connectionSourceAdmissionMode
+      ? { connectionSourceAdmissionMode: input.connectionSourceAdmissionMode }
+      : {}),
     importSnapshot: input.importSnapshot ?? (async (snapshot) => {
       input.importedSnapshots?.push(snapshot);
       const parsedSnapshot = requireValue(junctionProviderAdapter.parseSnapshot)(snapshot);
@@ -2074,6 +2078,33 @@ test("a concurrent user-disconnect fence blocks pressure history before provider
   assert.equal(importedSnapshots.length, 0);
   assert.equal(result.metadataPatch, undefined);
   assert.equal(result.scheduledJobs, undefined);
+});
+
+test("a source absent from listed-only authority cannot trigger pressure egress", async () => {
+  const providerListRequests = { count: 0 };
+  const projectedSources: Array<{
+    resourceAvailabilitySummary: Record<string, string | number | boolean | null>;
+    status: string;
+  }> = [];
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ providerListRequests, requests });
+  const bloodPressure = createScheduledBloodPressureJob(provider);
+
+  const result = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({
+      account: createAccount({ sources: [] }),
+      connectionSourceAdmissionMode: "listed_only",
+      listConnectionSources: async () => [],
+      projectedSources,
+    }),
+    toJobRecord(bloodPressure, 81),
+  );
+
+  assert.equal(providerListRequests.count, 1);
+  assert.equal(projectedSources.length, 0);
+  assert.equal(requests.length, 0);
+  assert.equal(result.scheduledJobs, undefined);
+  assert.equal(result.metadataPatch, undefined);
 });
 
 test("an explicit user-disconnect fence blocks pressure history recovery before provider egress", async () => {

@@ -4599,6 +4599,7 @@ async function prepareJunctionImportSnapshot(
     providers,
     currentSources,
     options,
+    context.connectionSourceAdmissionMode !== "listed_only",
   );
 }
 
@@ -4607,11 +4608,13 @@ function prepareJunctionImportSnapshotForSources(
   providers: readonly JunctionProviderConnection[],
   currentSources: readonly JunctionImportAdmissionSource[],
   options: JunctionImportSnapshotSanitizeOptions = {},
+  allowUnlistedSources = true,
 ): PreparedJunctionImportSnapshot {
   const sourceProviders = providers.filter((provider) =>
     isJunctionSourceAdmittedForImport(
       currentSources,
       provider.origin.sourceProviderSlug ?? provider.slug,
+      allowUnlistedSources,
     )
   );
 
@@ -4619,7 +4622,12 @@ function prepareJunctionImportSnapshotForSources(
     connections: sanitizeJunctionImportConnections(sourceProviders),
     sourceProviders,
     snapshots: sanitizeJunctionImportSnapshots(
-      filterJunctionImportSnapshots(snapshots, providers, currentSources),
+      filterJunctionImportSnapshots(
+        snapshots,
+        providers,
+        currentSources,
+        allowUnlistedSources,
+      ),
       providers,
       options,
     ),
@@ -4630,6 +4638,7 @@ function filterJunctionImportSnapshots(
   snapshots: Record<string, unknown[]>,
   providers: readonly JunctionProviderConnection[],
   sources: readonly JunctionImportAdmissionSource[],
+  allowUnlistedSources = true,
 ): Record<string, unknown[]> {
   const sourceReferences = buildJunctionSourceReferenceMap(providers);
   const hasPendingSourceAdmission = sources.some((source) => source.status === "disconnected");
@@ -4643,6 +4652,7 @@ function filterJunctionImportSnapshots(
           sourceReferences,
           sources,
           hasPendingSourceAdmission,
+          allowUnlistedSources,
         )
       ),
     ]),
@@ -4654,6 +4664,7 @@ function isJunctionImportRecordAdmitted(
   sourceReferences: ReadonlyMap<string, Record<string, unknown>>,
   sources: readonly JunctionImportAdmissionSource[],
   hasPendingSourceAdmission: boolean,
+  allowUnlistedSources: boolean,
 ): boolean {
   const record = readPlainObject(value);
   if (!record) {
@@ -4665,7 +4676,11 @@ function isJunctionImportRecordAdmitted(
     resolveJunctionOrigin(record, fallback).sourceProviderSlug,
   );
   if (sourceProviderSlug) {
-    return isJunctionSourceAdmittedForImport(sources, sourceProviderSlug);
+    return isJunctionSourceAdmittedForImport(
+      sources,
+      sourceProviderSlug,
+      allowUnlistedSources,
+    );
   }
 
   return !hasPendingSourceAdmission || !hasJunctionSourceReferenceIdentity(record);
@@ -7089,7 +7104,19 @@ async function projectJunctionSources(
       context.listConnectionSources
         ? existingSources
         : context.account.sources ?? [];
-    if (isJunctionSourceProjectionFenced(admissionSources, source.sourceProviderSlug)) {
+    const listedOnly = context.connectionSourceAdmissionMode === "listed_only";
+    if (
+      listedOnly
+        ? !isJunctionSourceAdmittedForImport(
+            admissionSources,
+            source.sourceProviderSlug,
+            false,
+          )
+        : isJunctionSourceProjectionFenced(
+            admissionSources,
+            source.sourceProviderSlug,
+          )
+    ) {
       continue;
     }
     const existingByInstanceKey = new Map(
@@ -7144,6 +7171,7 @@ async function projectJunctionSources(
 function isJunctionSourceAdmittedForImport(
   sources: readonly JunctionImportAdmissionSource[],
   sourceProviderSlug: string | null | undefined,
+  allowUnlistedSources = true,
 ): boolean {
   const normalizedSourceProviderSlug = normalizeProviderSlug(sourceProviderSlug);
   if (!normalizedSourceProviderSlug) {
@@ -7154,7 +7182,8 @@ function isJunctionSourceAdmittedForImport(
     normalizeProviderSlug(source.sourceProviderSlug) === normalizedSourceProviderSlug
   );
   return matchingSources.length === 0
-    || matchingSources.some((source) => source.status !== "disconnected");
+    ? allowUnlistedSources
+    : matchingSources.some((source) => source.status !== "disconnected");
 }
 
 function isJunctionSourceProjectionFenced(
@@ -7182,7 +7211,11 @@ async function resolveJunctionCurrentSourceAdmission(
   if (isJunctionSourceProjectionFenced(sources, sourceProviderSlug)) {
     return "fenced";
   }
-  return isJunctionSourceAdmittedForImport(sources, sourceProviderSlug)
+  return isJunctionSourceAdmittedForImport(
+    sources,
+    sourceProviderSlug,
+    context.connectionSourceAdmissionMode !== "listed_only",
+  )
     ? "admitted"
     : "pending";
 }

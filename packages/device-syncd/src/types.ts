@@ -751,6 +751,9 @@ export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
   signal?: AbortSignal;
+  // Standalone sync discovers provider sub-sources from the provider API.
+  // Hosted sync must treat the Web projection as the admission authority.
+  connectionSourceAdmissionMode?: "discover_unlisted" | "listed_only";
   shouldYield?(): boolean;
   throwIfAborted?(): void;
   // Providers must route job-time side effects through this context instead of
