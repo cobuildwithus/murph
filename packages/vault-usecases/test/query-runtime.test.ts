@@ -41,6 +41,9 @@ describe("query runtime compatibility surface", () => {
     );
     expect(runtime.summarizeWearableSleepRuntime).toBe(sharedQuery.summarizeWearableSleepRuntime);
     expect(runtime.summarizeWearableSleepPatternRuntime).toBe(sharedQuery.summarizeWearableSleepPatternRuntime);
+    expect(runtime.buildPersonalPatternReportRuntime).toBe(
+      sharedQuery.buildPersonalPatternReportRuntime,
+    );
     expect(runtime.summarizeWearableActivityRuntime).toBe(sharedQuery.summarizeWearableActivityRuntime);
     expect(runtime.summarizeWearableBodyStateRuntime).toBe(sharedQuery.summarizeWearableBodyStateRuntime);
     expect(runtime.summarizeWearableDayRuntime).toBe(sharedQuery.summarizeWearableDayRuntime);

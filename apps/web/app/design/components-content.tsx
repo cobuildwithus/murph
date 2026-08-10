@@ -175,6 +175,7 @@ import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
+import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
@@ -917,6 +918,23 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="personal-patterns"
+          id="personal-patterns-component"
+          inert
+        >
+          <Section title="Personal patterns matrix">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production overview component. It compares repeated actions with
+              next-day outcomes and shows evidence strength without causal or
+              good-versus-bad labels.
+            </p>
+            <PersonalPatternsComponentStudy />
+          </Section>
+        </div>
 
         <Separator />
 
@@ -2399,9 +2417,9 @@ export function ComponentsContent() {
         <Section title="Progress">
           <div className="flex flex-col gap-2">
             <div className="flex justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
-              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
+              <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
             </div>
             <Progress value={54} className="h-1.5" />
           </div>

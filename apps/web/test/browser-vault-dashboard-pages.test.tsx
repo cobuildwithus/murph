@@ -142,6 +142,8 @@ test("OverviewPage renders the dashboard overview", () => {
   );
   assert.match(markup, /Morning walk/);
   assert.match(markup, /Travel recovery note/);
+  assert.match(markup, /What tends to move together/);
+  assert.match(markup, /No clear comparison is ready yet/);
   assert.match(markup, /Weekly changes/);
 });
 
