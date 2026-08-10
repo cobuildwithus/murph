@@ -230,7 +230,7 @@ function createHostedAutomationRuntime(input: {
 }
 
 beforeEach(async () => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   await rm(FIXED_MAINTENANCE_VAULT_ROOT, {
     force: true,
     recursive: true,
@@ -2837,7 +2837,7 @@ describe("runHostedDeviceSyncPass", () => {
     expect(runSchedulerOnce).not.toHaveBeenCalled();
     expect(drainWorker).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
-    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt(null);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -2846,6 +2846,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValue(true);
 
@@ -2924,6 +2925,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValue(true);
