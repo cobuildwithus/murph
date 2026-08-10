@@ -104,6 +104,8 @@ Updated: 2026-08-10
   files and no errors.
 - `pnpm --dir apps/web typecheck`: passed.
 - `pnpm test:frontend-design-proof`: passed, 10 tests.
+- ReviewGPT package check: installed CLI `0.5.124` matches the registry's
+  `latest` tag (`0.5.124`).
 - Focused Growth Playwright plus repository capture: passed at desktop and
   mobile viewports, 6 tests, including populated and zero-claim states,
   keyboard tooltip, and focus treatment.
