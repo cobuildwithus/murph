@@ -241,20 +241,19 @@ describe("ChangelogPage", () => {
     const markup = renderToStaticMarkup(<ChangelogArchiveStudy />);
 
     expect(markup).toContain('data-design-study="changelog-archive"');
-    expect(markup).toContain("A week that closes its own loops");
-    expect(markup).toContain("Follow-ups arrive where the work started");
+    expect(markup).toContain("A week of follow-through");
+    expect(markup).toContain("Generated images can become group photos");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
     expect(markup).toContain("Compact tables make dense changes scannable");
     expect(markup).toContain("Reference context stays visible");
-    expect(markup).toContain("Scheduled follow-up");
     expect(markup).toContain("Stay in the app");
     expect(markup).toContain("Verified line after setup");
     expect(markup).toContain("Private conversation");
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
-    expect(markup).toContain('href="#design-follow-up"');
+    expect(markup).toContain('href="#design-generated-group-photo"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
   });

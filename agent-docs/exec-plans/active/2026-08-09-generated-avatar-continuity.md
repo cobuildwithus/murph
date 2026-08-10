@@ -528,3 +528,14 @@ Updated: 2026-08-10
   session, exact ref/hash/type/size, and accepted physical-delivery evidence.
   Both focused files pass 115 tests, including later-turn positive and
   wrong-session/hash negative cases.
+- Current `main` then merged with one overlapping live-provider test conflict.
+  The resolution preserves this PR's complete generated-image journey plus
+  main's fresh shared-data and detached-consultation cases. The merged six-file
+  Assistant Engine set passes 270 tests with 55 live-provider cases skipped
+  behind their explicit gate, and the Assistant Engine typecheck passes.
+- Round 10 also noted that the member-visible changelog is a rendered Web
+  surface despite the prior frontend-lens declaration. The existing synthetic
+  changelog design study now renders the generated-group-photo feature card
+  through the real archive component without live data or requests; no
+  production UI component or behavior changed. Its two catalog/changelog files
+  pass 18 tests.
