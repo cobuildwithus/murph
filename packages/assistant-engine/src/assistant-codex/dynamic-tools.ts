@@ -264,6 +264,19 @@ const attachResponseCardArgumentsSchema = z
     card: assistantResponseCardSchema,
   })
   .strict()
+  .superRefine((value, context) => {
+    if (
+      value.card.kind === 'compact_table' &&
+      'workout' in value.card &&
+      value.card.subtitle !== null
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Structured workout card subtitles must be null.',
+        path: ['card', 'subtitle'],
+      })
+    }
+  })
 
 const attachResponseMediaArgumentsSchema = z
   .object({
@@ -6152,7 +6165,7 @@ function parseAttachResponseCardArguments(
         error: parsed.error,
         rawInput: value,
         schemaName,
-        schemaRootKeys: readZodObjectRootKeys(attachResponseCardArgumentsSchema),
+        schemaRootKeys: ['card'],
         toolName,
       }),
     }

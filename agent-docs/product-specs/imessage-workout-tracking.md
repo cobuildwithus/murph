@@ -41,9 +41,10 @@ The readable response-card contract remains object-shaped for authoring and runt
 Recipients without the Messages extension, including Messages on macOS,
 receive a generated static image that mirrors the compact native workout or
 generic-table balloon. Provider chrome is intentionally bounded to the title
-plus an optional generic subtitle or derived workout progress; it does not
-repeat the image's rows and sets below the balloon. The complete semantic text
-renderer remains the recovery owner, and the value-free fallback tells the
+plus derived progress for structured workouts; it does not repeat the image's
+sets below the balloon. Generic-table provider chrome retains its existing
+title, optional subtitle, rows, and footer. The complete semantic text renderer
+remains the workout recovery owner, and the value-free fallback tells the
 member to ask Murph for the card in text if the image is unavailable.
 
 The image URL carries the exact same strict authority-free V3 or V4 presentation

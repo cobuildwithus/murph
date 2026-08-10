@@ -171,12 +171,14 @@ export function buildLinqIMessageAppLayout(
         subcaption: `${progress.completed}/${progress.total} sets complete`,
       }
     }
+    const semantic = renderCompactTableSemanticPresentation(parsed)
     return {
-      caption: parsed.title,
+      caption: semantic.heading,
       image_url: imageUrl,
-      ...(parsed.subtitle === null
+      subcaption: semantic.detailLines.join('\n'),
+      ...(semantic.footer === null
         ? {}
-        : { subcaption: parsed.subtitle }),
+        : { trailing_caption: semantic.footer }),
     }
   }
 
@@ -343,10 +345,10 @@ function renderCompactTableSemanticPresentation(
   detailLines: string[]
   footer: string | null
 } {
-  const heading = card.subtitle === null
-    ? card.title
-    : `${card.title} — ${card.subtitle}`
   if (!('workout' in card)) {
+    const heading = card.subtitle === null
+      ? card.title
+      : `${card.title} — ${card.subtitle}`
     return {
       heading,
       detailLines: card.rows.map((row) => {
@@ -382,7 +384,7 @@ function renderCompactTableSemanticPresentation(
     return `${exercise.name}: ${sets.join(' · ')}`
   })
   return {
-    heading,
+    heading: card.title,
     detailLines: [
       `${state} · ${progress.completed}/${progress.total} sets complete`,
       ...exercises,

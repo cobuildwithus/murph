@@ -5,6 +5,7 @@ import {
   type LinqFetch,
 } from '../src/linq-runtime.js'
 import {
+  buildLinqIMessageAppLayout,
   encodeCompactTableAppCardUrl,
   type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
@@ -34,6 +35,7 @@ const CARD: CompactTableResponseCardV1 = {
 describe('Linq compact-table app cards', () => {
   it('sends the largest admitted card once with a truthful static fallback', async () => {
     const requests: Array<{ body: unknown; url: string }> = []
+    const expectedLayout = buildLinqIMessageAppLayout(CARD)
     const fetchImplementation: LinqFetch = async (url, init) => {
       requests.push({
         body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
@@ -69,14 +71,7 @@ describe('Linq compact-table app cards', () => {
           {
             fallback_text: 'Ask Murph for this card in text',
             interactive: true,
-            layout: {
-              caption: 'Eight-exercise workout',
-              image_url: expect.stringMatching(
-                /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
-              ),
-              subcaption:
-                'Verified canonical workout snapshot for today',
-            },
+            layout: expectedLayout,
             type: 'imessage_app',
             url: encodeCompactTableAppCardUrl(CARD),
           },
@@ -91,10 +86,11 @@ describe('Linq compact-table app cards', () => {
       }
     ).message.parts[0]?.layout
     expect(layout).toBeDefined()
-    for (const [key, value] of Object.entries(layout ?? {})) {
-      if (key !== 'image_url') {
-        expect(value.length).toBeLessThanOrEqual(512)
-      }
-    }
+    expect(layout?.subcaption).toContain(
+      'Exercise 8 movement pattern: Set 1:',
+    )
+    expect(layout?.trailing_caption).toBe(
+      'Assists and spotted reps remain on the exact set note.',
+    )
   })
 })

@@ -234,6 +234,29 @@ describe('murph.attach_response_card', () => {
       card: REALISTIC_LATE_WORKOUT_CARD,
       kind: 'attach-response-card',
     })
+    const ordinaryTable = {
+      kind: 'compact_table',
+      version: 1,
+      title: 'Weekly plan',
+      subtitle: 'Three sessions',
+      rowHeader: 'Day',
+      columns: ['Focus'],
+      rows: [{ label: 'Monday', values: ['Upper body'] }],
+      footer: null,
+      tracking: null,
+    } satisfies AssistantResponseCard
+    expect(readCardToolRequest({ card: ordinaryTable })).toEqual({
+      card: ordinaryTable,
+      kind: 'attach-response-card',
+    })
+    expect(readCardToolRequest({
+      card: {
+        ...REALISTIC_LATE_WORKOUT_CARD,
+        subtitle: '18/24 sets complete',
+      },
+    })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
+    })
     expect(readCardToolRequest({ card: CARD, extra: true })).toMatchObject({
       kind: 'invalid-response-card-arguments',
     })

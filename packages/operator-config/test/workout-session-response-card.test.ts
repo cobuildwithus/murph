@@ -223,6 +223,21 @@ describe('workout session response cards', () => {
     expect(transcript).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-09T19:45:00.000Z]',
     )
+
+    const legacyCard = {
+      ...ACTIVE_WORKOUT_CARD,
+      subtitle: '3/6 sets complete',
+    } satisfies AssistantResponseCard
+    expect(assistantResponseCardSchema.parse(legacyCard)).toEqual(legacyCard)
+    expect(renderAssistantResponseCardText(legacyCard).match(
+      /3\/6 sets complete/gu,
+    )).toHaveLength(1)
+    expect(decodeAppCardUrl(
+      encodeWorkoutSessionAppCardUrl(legacyCard),
+    )).toMatchObject({
+      schemaVersion: 4,
+      card: { u: '3/6 sets complete' },
+    })
   })
 
   it('builds a truthful Messages preview layout', () => {

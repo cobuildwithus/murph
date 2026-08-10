@@ -39,18 +39,20 @@ describe('response-card static Linq layouts', () => {
     )
   })
 
-  it('keeps provider chrome compact and complete text free of tracking authority', () => {
+  it('preserves generic provider details without exposing tracking authority', () => {
     expect(buildLinqIMessageAppLayout(ONE_OFF_TABLE)).toEqual({
       caption: 'Weekly plan',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
+      subcaption: 'Monday: Focus: Upper body',
     })
     expect(buildLinqIMessageAppLayout(TRACKED_TABLE)).toEqual({
       caption: 'Live workout',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
+      subcaption: 'Exercise A: Set 1: 10',
     })
 
     expect(renderAssistantResponseCardText(TRACKED_TABLE)).toMatch(
