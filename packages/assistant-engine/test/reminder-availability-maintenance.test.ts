@@ -22,6 +22,9 @@ import {
   refreshReminderAvailability,
 } from '../src/assistant/reminder-availability-maintenance.js'
 import {
+  getAssistantCronJob,
+} from '../src/assistant/cron.js'
+import {
   buildAssistantSystemPromptLayers,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
@@ -162,6 +165,34 @@ describe('reminder availability maintenance', () => {
     expect(parseAutomationAvailabilityConflictBlock(block ?? '')).toMatchObject({
       busyIntervals: [],
       generatedAt: '2026-07-30T23:00:00.000Z',
+    })
+  })
+
+  it('preserves an every schedule cadence across availability-only refreshes', async () => {
+    const vaultRoot = await createVaultRoot()
+    await createReminder({
+      schedule: { everyMs: 48 * 60 * 60 * 1_000, kind: 'every' },
+      vaultRoot,
+    })
+
+    await expect(
+      getAssistantCronJob(vaultRoot, REMINDER_AUTOMATION_ID),
+    ).resolves.toMatchObject({
+      state: { nextRunAt: '2026-07-31T12:00:00.000Z' },
+    })
+
+    await refreshReminderAvailability({
+      connectedApps: {
+        request: vi.fn(async () => ({ result: { data: { items: [] } } })),
+      },
+      now: new Date('2026-07-30T00:00:00.000Z'),
+      vaultRoot,
+    })
+
+    await expect(
+      getAssistantCronJob(vaultRoot, REMINDER_AUTOMATION_ID),
+    ).resolves.toMatchObject({
+      state: { nextRunAt: '2026-07-31T12:00:00.000Z' },
     })
   })
 
@@ -407,6 +438,7 @@ async function createReminder(input: {
   schedule?:
     | { at: string; kind: 'at' }
     | { expression: string; kind: 'cron' }
+    | { everyMs: number; kind: 'every' }
   tags?: string[]
   vaultRoot: string
 }): Promise<void> {

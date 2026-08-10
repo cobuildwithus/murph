@@ -110,6 +110,7 @@ export const automationRecordSchema = z
     continuityPolicy: z.enum(automationContinuityPolicyValues),
     tags: z.array(z.string().min(1)),
     createdAt: z.string().min(1),
+    scheduleAnchorAt: z.string().min(1).optional(),
     updatedAt: z.string().min(1),
     instructions: z.string().min(1),
     relativePath: pathSchema,

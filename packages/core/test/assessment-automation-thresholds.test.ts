@@ -332,7 +332,7 @@ test("automation schedule normalization rejects malformed schedule shapes", asyn
         expression: "0 9 * * 1",
         timeZone: "Invalid/Timezone",
       },
-      message: "schedule.timeZone is not supported for canonical automation schedules.",
+      message: "schedule.timeZone must be a valid IANA timezone.",
     },
     {
       schedule: {
@@ -376,7 +376,7 @@ test("automation schedule normalization rejects malformed schedule shapes", asyn
   }
 });
 
-test("automation rejects legacy schema names and recurring schedule timezones", async () => {
+test("automation rejects legacy schema names and accepts recurring schedule timezones", async () => {
   const legacySchemaVaultRoot = await makeTempDirectory("murph-core-automation-legacy-schema");
   await initializeVault({ vaultRoot: legacySchemaVaultRoot });
 
@@ -458,17 +458,15 @@ test("automation rejects legacy schema names and recurring schedule timezones", 
     "utf8",
   );
 
-  await assert.rejects(
-    () =>
-      readAutomation({
-        vaultRoot,
-        automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH",
-      }),
-    (error: unknown) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_INPUT" &&
-      error.message === "schedule.timeZone is not supported for canonical automation schedules.",
-  );
+  const automation = await readAutomation({
+    vaultRoot,
+    automationId: "automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FH",
+  });
+  assert.deepEqual(automation?.schedule, {
+    kind: "cron",
+    expression: "0 9 * * 1",
+    timeZone: "Australia/Sydney",
+  });
 });
 
 test("automation list and read lookups keep filters, blanks, and misses deterministic", async () => {

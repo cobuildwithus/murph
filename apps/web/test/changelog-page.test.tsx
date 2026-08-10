@@ -59,6 +59,7 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("Reminders that keep their local time");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain("Continue a group question privately");
     expect(markup).toContain(
@@ -73,7 +74,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("More ways to connect, prepare, and finish");
     expect(markup).toContain("Ask about images and video on X");
     expect(markup).toContain("More control over data, models, and connections");
-    expect(markup).toContain(
+    expect(markup).not.toContain(
       "Connected apps recover with a clearer next step",
     );
     expect(markup).not.toContain("Recovery that stops at the right moment");
@@ -101,7 +102,7 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-08-02"');
+    expect(markup).toContain('href="/changelog?edition=2026-08-03"');
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
     );
@@ -148,6 +149,12 @@ describe("ChangelogPage", () => {
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
       expect.arrayContaining([
+        {
+          message: {
+            body: "Remind me every day at 9 PM Central to wind down.",
+            subject: "Try it: Reminders keep the time you asked for",
+          },
+        },
         {
           message: {
             body: "Look at the images or video in this X post and tell me what they show: [paste X post URL]",

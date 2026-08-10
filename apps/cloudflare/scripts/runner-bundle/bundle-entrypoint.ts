@@ -164,23 +164,45 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // while reducing total lazy output to 9,851,385B. Ratchet the total ceiling to
 // retain that removal without changing the startup tolerances.
 //
-// Adding the workout response-card contract, canonical command reconciliation,
-// and generated CLI option puts their code in the runner output. Exact Ubuntu
-// assembly measured a 9,922,798B total on 2026-08-10. The matching macOS
-// assembly measured a 9,969,877B total and 7,994,746B static boot closure; use
-// the larger cross-host measurements while keeping the entry baseline and all
-// tolerances unchanged.
-// Main's later reviewed biomarker, runtime-control, and named-diet changes
-// measured 9,933,847B total on Ubuntu. The combined merged tree measured a
-// 9,994,210B total and 8,019,079B static boot closure on macOS; retain those
-// cross-host measurements. Other reviewed mainline and current-sender changes
-// measured higher pre-merge maxima of 10,000,845B total and an 8,023,354B
-// static closure. Exact merged macOS production assembly measured 10,029,806B
-// total and an 8,049,480B static closure. Ratchet the total baseline to that
-// combined graph while keeping the entry/static baselines and every tolerance
-// unchanged.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_029_806 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
+// Adding the personalized generated contact card puts its request contract,
+// exact-shape parser, direct route resolution, and acknowledgement handling in
+// the runner's lazy output. Exact ubuntu assembly measured a 9,887,441B total
+// on 2026-08-09; startup entry and static closure are unchanged, so ratchet
+// only the total ceiling and keep both startup baselines and all tolerances.
+//
+// Adding the single-message group offer, exact reply ownership, and weekly
+// contextualization instructions grows only that lazy assistant output. Exact
+// ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
+// baselines and established total tolerance.
+//
+// Subsequent reviewed biomarker ranges, hosted
+// runtime-control compaction, and named-diet guidance moved exact ubuntu total
+// output from 9,908,973B to 9,933,847B by 2026-08-10. Entry and static closure
+// remain within their existing ceilings and no forbidden subsystem enters the
+// boot graph, so ratchet only the total ceiling and keep both startup baselines
+// and all tolerances.
+//
+// Bounded group-tool failure diagnostics plus the strict included-usage read
+// contract measured a 9,938,038B total on ubuntu and a 7,983,431B static
+// closure on macOS before the mainline additions above were merged. Exact local
+// production assembly of the combined graph measured a 9,986,541B total on
+// 2026-08-10. Adding the workout response-card contract and canonical command
+// reconciliation to that mainline graph measured a 9,994,210B total and
+// 8,019,079B static closure on macOS. After adding the timezone and
+// deliverable-occurrence projection, exact local production assembly measured
+// a 1,674,361B entry, 8,046,334B static closure, and 10,024,188B total. The
+// later combined graph measured the same 1,674,361B entry, an 8,044,557B static
+// closure, and a 10,022,523B total. Retain the larger reviewed measurements and
+// established cross-platform tolerances. The reviewed current-sender private
+// completion path previously raised the exact combined macOS total to
+// 10,029,806B and the static closure to 8,049,480B without adding a forbidden
+// startup input. Adding the recurring-timezone and deliverable-occurrence
+// projection to that graph measured a 1,689,761B entry, 8,064,335B static
+// closure, and 10,044,661B total. Ratchet the entry and total baselines to the
+// exact combined graph while retaining the established cross-platform
+// tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_044_661 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_761;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_023_354;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
