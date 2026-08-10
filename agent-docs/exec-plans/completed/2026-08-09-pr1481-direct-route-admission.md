@@ -1,6 +1,6 @@
 # PR 1481 direct-route admission correction
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -163,3 +163,23 @@ Updated: 2026-08-10
   are unchanged. Focused Web route-matrix coverage passed 10/10, existing Linq
   egress-authority coverage passed 44/44, Web typecheck passed, scoped ESLint
   passed, and `git diff --check` passed.
+- Focused Assistant Runtime provider-boundary proof passed 2/2 for accepted
+  Linq and Telegram private thread routes reaching provider entry under the
+  existing repeated authority checks.
+- Exact-head CI at `969f7b79ee` passed every required workflow and job:
+  Frontend Design Proof, Repo Hygiene, Cloudflare Runner Permission Sandbox,
+  Hosted Stripe Billing, Web Viewport Overflow, and the complete Murph Host
+  Support matrix and aggregate.
+- Final ReviewGPT round 3 ran a fresh full-patch audit for more than 17 minutes
+  on the requested `gpt-5.6-sol` route (response model `gpt-5-6-pro`) and
+  returned `ROUND_OUTCOME: PASS` with no qualifying findings. It explicitly
+  verified the round-1 route gate, direct-recipient answer profile, completed
+  round-2 retrospective, Linq participant exclusion, exact-text delivery
+  authority, privacy boundary, simplicity, and exact 4,454/144 change shape.
+- Parent product-experience revalidation found no material issue: the smallest
+  complete journey is still one self-contained same-channel private answer to
+  the exact author, nothing in the group, or the existing direct-chat recovery
+  before personal work. Parent final full-diff review, prohibited-cast scan,
+  identifier/secret scan, `git diff --check`, ancestry check, and worktree
+  cleanliness all passed with no additional finding.
+Completed: 2026-08-10
