@@ -261,6 +261,7 @@ export async function bundleRunnerContainerEntrypoint(
     format: "esm",
     logLevel: "error",
     metafile: true,
+    minifySyntax: true,
     outdir: bundleOutDir,
     platform: "node",
     splitting: true,

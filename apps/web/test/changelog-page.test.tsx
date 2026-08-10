@@ -59,7 +59,9 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
-    expect(markup).toContain("Reminders that keep their local time");
+    expect(markup).toContain(
+      "Patterns and reminders that keep their local time",
+    );
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain("Continue a group question privately");
     expect(markup).toContain(
@@ -103,6 +105,9 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain('href="/changelog?edition=2026-08-03"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-10#personal-patterns"',
+    );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
     );

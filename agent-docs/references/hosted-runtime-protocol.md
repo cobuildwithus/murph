@@ -328,7 +328,20 @@ time. It excludes connection, account, device, and provider identifiers,
 credentials, provider payloads and errors, raw health values, and private
 diagnostics. A connection sync-job time is not evidence that a health record or
 challenge metric arrived. Device data is never produced by the grantor runtime
-or stored in the share snapshot column.
+or stored in the share snapshot column. Duplicate public labels select one
+complete observation from the latest connection `connectedAt` and source
+`lastSeenAt` generation; fields from different generations are never combined.
+
+Reported Deep and REM sleep rows for the member's current local date are
+available immediately. The producer still rejects rows dated after the
+member-local current date, but it does not attach a calendar-only provisional
+flag to a reported value. When a user explicitly asks whether shared data is
+visible now, yet, or after a source change, the group-authorized answer model
+must invoke one fresh exact-scope `read_shared` call before answering instead
+of relying on earlier tool output, conversation context, or connection
+timestamps. For a private group consultation, the private root still only
+admits `ask`; the detached joined-group child owns this read and returns the
+bounded answer through the existing durable completion path.
 
 The runtime's shared reader is a synchronous no-I/O adapter. Constructing it,
 starting or resuming App Server, and admitting foreground, scheduled,
