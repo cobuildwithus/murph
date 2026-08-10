@@ -1,8 +1,8 @@
 # Hosted group usage-status read reliability
 
-Status: active
+Status: completed
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Goal
 
@@ -98,5 +98,35 @@ Updated: 2026-08-09
 
 ## Verification
 
-- Exact focused commands will be recorded after the affected owners and test
-  targets are finalized from `agent-docs/references/testing-ci-map.md`.
+- Hosted parser and durable deploy-contract coverage passed: 67 tests.
+- Web group-tool and funding coverage passed: 175 tests.
+- Assistant group-tool and low-usage policy coverage passed: 112 tests.
+- Assistant prompt assembly and model-scenario definitions passed: 86 tests;
+  40 real-provider cases were collected and skipped by the credential gate,
+  including the six new chat/email usage-progress scenarios.
+- Cloudflare group-tool adapter/replay coverage passed: 18 tests. The four new
+  direct/proxy stalled-body deadline and caller-cancel regressions failed before
+  the transport correction and passed afterward; each proves one request and
+  no replay.
+- Relevant hosted-execution, Cloudflare, assistant-engine, and prepared Web
+  typechecks passed.
+- Runner bundle budget coverage passed 42 tests, and the full production runner
+  bundle assembled within the ratcheted byte limits.
+- Complete first-provider-request capture passed for matching base/head
+  individual-chat, group-chat, and group-email turns. The only measured prompt
+  delta was +2 tokens and -8 bytes for the required group-email resident rule;
+  the temporary harness was removed.
+- Final ReviewGPT round 5 audited the full exact-head snapshot with the requested
+  Pro model and returned `ROUND_OUTCOME: PASS` with no qualifying findings.
+- Exact-head GitHub Actions passed, including release build/typecheck, app and
+  fixture verification, assistant/platform/CLI coverage, macOS/Linux host
+  matrices, runner permission sandbox, billing, Vercel, hygiene, frontend
+  proof, and viewport overflow.
+- `git diff --check`, privacy review, and the PR change-shape reconciliation
+  passed. No secrets, direct identifiers, environment files, build artifacts,
+  generated artifacts, or binaries are part of the patch.
+- Additional local Vitest expansion was stopped after unrelated shared-host
+  saturation prevented one-file runs from advancing past startup; it emitted no
+  assertion failure. The exact-head isolated CI suite supplied the required
+  broad completion proof.
+Completed: 2026-08-10
