@@ -24,10 +24,10 @@ Updated: 2026-08-10
 ## Scope
 
 - In scope: the generated nutrition image, Linq nutrition layout shape, design
-  catalog study, direct request-shape tests, and matching durable presentation
-  contracts.
+  catalog study, direct request-shape tests, and matching
+  durable presentation contracts.
 - Out of scope: changing the interactive iMessage app, App Store identity,
-  nutrition calculations, goals, delivery ownership, or fallback text.
+  nutrition calculations, goals, or delivery ownership.
 
 ## Constraints
 
@@ -40,8 +40,9 @@ Updated: 2026-08-10
 ## Risks and mitigations
 
 1. Risk: Omitting `subcaption` could accidentally affect compact-table cards.
-   Mitigation: Make the field optional at the shared layout boundary and retain
-   exact compact-table request-shape coverage.
+   Mitigation: Make the field optional at the shared layout boundary, preserve
+   it for partial nutrition cards, and retain exact compact-table request-shape
+   coverage.
 2. Risk: Removing bitmap rounding could look unfinished outside Messages.
    Mitigation: Keep native/card-shell clipping in the design study and inspect
    the production component at both routed viewport sizes.
@@ -64,7 +65,8 @@ Updated: 2026-08-10
 - Preserve `app_store_id`; Linq's native app icon and app action remain
   provider-owned.
 - Keep the short date and meal-count caption as the minimum useful card label.
-- Omit `subcaption` rather than sending an empty string.
+- Omit `subcaption` rather than sending an empty string for complete nutrition
+  cards; retain only a short partial-state warning when totals are incomplete.
 
 ## Verification
 

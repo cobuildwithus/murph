@@ -1517,8 +1517,9 @@ layout with a generated image that mirrors the same compact native presentation.
 Nutrition images retain the calorie ring and metric row while remaining
 rectangular and badge-free so the provider owns the app icon and outer mask.
 Their concise native caption keeps only the date and meal count instead of
-repeating visible totals or goal detail. Compact-table images retain the table
-grid or workout progress and exercise rows, and their native captions
+repeating visible totals or goal detail; a short subcaption appears only when
+some totals are partial. Compact-table images retain the table grid or workout
+progress and exercise rows, and their native captions
 independently repeat every generic table cell or every workout set status,
 target, and actual value so a missing raster never erases the useful response.
 The nutrition image derives a quantitative calorie arc only from a complete

@@ -464,6 +464,7 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
             image_url: expect.stringMatching(
               /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
             ),
+            subcaption: 'Some calorie and nutrition estimates were partial.',
           },
           type: 'imessage_app',
           url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),

@@ -162,11 +162,13 @@ export function buildLinqIMessageAppLayout(
   }
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
+  const partialLabel = renderPartialNutritionLabel(parsed)
   return {
     caption: `${formatNutritionCardDate(parsed.localDate)} · ${
       parsed.mealCount
     } ${mealLabel}`,
     image_url: buildLinqIMessageAppCardImageUrl(parsed),
+    ...(partialLabel === null ? {} : { subcaption: partialLabel }),
   }
 }
 

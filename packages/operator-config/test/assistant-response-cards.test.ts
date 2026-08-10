@@ -485,6 +485,7 @@ describe('assistant response cards', () => {
     expect(buildLinqIMessageAppLayout(card)).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(card),
+      subcaption: 'Some nutrition estimates were partial.',
     })
   })
 
@@ -559,6 +560,7 @@ describe('assistant response cards', () => {
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
+      subcaption: 'Some calorie and nutrition estimates were partial.',
     })
     expect(buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2).length)
       .toBeLessThan(2_048)
