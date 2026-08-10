@@ -1,0 +1,388 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:murph:prod-watch:provider-evidence:v1",
+  "title": "Murph production-watch aggregate-only provider evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "sources",
+    "failures"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "prod-watch.provider-evidence.v1"
+    },
+    "generatedAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/adapterEvidence"
+      }
+    },
+    "failures": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/failure"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "enum": [
+        "vercel",
+        "cloudflare",
+        "stripe"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    },
+    "token64": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._:/-]+$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{7,64}$"
+    },
+    "number": {
+      "type": "number",
+      "minimum": 0
+    },
+    "dimensions": {
+      "type": "object",
+      "maxProperties": 6,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      },
+      "propertyNames": {
+        "enum": [
+          "component",
+          "error_code",
+          "event_code",
+          "issue_kind",
+          "level",
+          "operation",
+          "phase",
+          "runtime",
+          "severity",
+          "source",
+          "surface"
+        ]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/token64"
+      },
+      "required": [
+        "source"
+      ]
+    },
+    "releaseContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "runtime",
+        "sha",
+        "observedAt",
+        "current"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "runtime": {
+          "$ref": "#/$defs/token64"
+        },
+        "sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "deployedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      }
+    },
+    "counter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "dimensions",
+        "unit",
+        "current"
+      ],
+      "properties": {
+        "metric": {
+          "enum": [
+            "deployment_error_count",
+            "provider_error_count",
+            "provider_request_count",
+            "provider_timeout_count"
+          ]
+        },
+        "dimensions": {
+          "$ref": "#/$defs/dimensions"
+        },
+        "unit": {
+          "enum": [
+            "count",
+            "ratio",
+            "bytes",
+            "milliseconds"
+          ]
+        },
+        "current": {
+          "$ref": "#/$defs/number"
+        },
+        "previous": {
+          "$ref": "#/$defs/number"
+        },
+        "sampleCount": {
+          "$ref": "#/$defs/number"
+        },
+        "previousSampleCount": {
+          "$ref": "#/$defs/number"
+        }
+      }
+    },
+    "latency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "dimensions",
+        "count",
+        "p50Ms",
+        "p95Ms",
+        "p99Ms",
+        "maxMs"
+      ],
+      "properties": {
+        "metric": {
+          "enum": [
+            "edge_request_duration_ms",
+            "provider_duration_ms"
+          ]
+        },
+        "dimensions": {
+          "$ref": "#/$defs/dimensions"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p50Ms": {
+          "$ref": "#/$defs/number"
+        },
+        "p95Ms": {
+          "$ref": "#/$defs/number"
+        },
+        "p99Ms": {
+          "$ref": "#/$defs/number"
+        },
+        "maxMs": {
+          "$ref": "#/$defs/number"
+        },
+        "baselineCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "baselineP95Ms": {
+          "$ref": "#/$defs/number"
+        },
+        "baselineP99Ms": {
+          "$ref": "#/$defs/number"
+        }
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawFingerprint",
+        "source",
+        "component",
+        "phase",
+        "severity",
+        "count",
+        "previousCount",
+        "firstSeenAt",
+        "lastSeenAt"
+      ],
+      "properties": {
+        "rawFingerprint": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._:/-]+$"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "component": {
+          "$ref": "#/$defs/token64"
+        },
+        "phase": {
+          "$ref": "#/$defs/token64"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "previousCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "firstSeenAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "lastSeenAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/token64"
+        },
+        "issueKind": {
+          "$ref": "#/$defs/token64"
+        },
+        "releaseSha": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "adapterEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "source",
+        "collectedAt",
+        "status",
+        "auth",
+        "freshnessSeconds",
+        "releaseContext",
+        "counters",
+        "latency",
+        "fingerprints"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": "prod-watch.adapter-evidence.v1"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "collectedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "degraded",
+            "unavailable"
+          ]
+        },
+        "auth": {
+          "enum": [
+            "ok",
+            "failed",
+            "not_required",
+            "unknown"
+          ]
+        },
+        "freshnessSeconds": {
+          "$ref": "#/$defs/number"
+        },
+        "releaseContext": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/releaseContext"
+          }
+        },
+        "counters": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/counter"
+          }
+        },
+        "latency": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/latency"
+          }
+        },
+        "fingerprints": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/fingerprint"
+          }
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "class",
+        "code",
+        "retryable"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "class": {
+          "enum": [
+            "auth",
+            "timeout",
+            "rate_limit",
+            "schema",
+            "unavailable",
+            "internal"
+          ]
+        },
+        "code": {
+          "$ref": "#/$defs/token64"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

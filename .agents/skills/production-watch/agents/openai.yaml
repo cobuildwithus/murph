@@ -1,0 +1,7 @@
+interface:
+  display_name: "Production Watch"
+  short_description: "Triage redacted Murph production signals"
+  default_prompt: "Use $production-watch to run a bounded, read-only production health check and coordinate any redacted incidents."
+
+policy:
+  allow_implicit_invocation: false

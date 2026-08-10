@@ -1,0 +1,718 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:murph:prod-watch:snapshot:v1",
+  "title": "Murph production-watch redacted evidence snapshot v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "collectorVersion",
+    "generatedAt",
+    "run",
+    "monitor",
+    "sourceHealth",
+    "releaseContext",
+    "counters",
+    "latency",
+    "fingerprints",
+    "anomalyCandidates",
+    "collectorFailures",
+    "redaction"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "prod-watch.snapshot.v1"
+    },
+    "collectorVersion": {
+      "const": "phase-1"
+    },
+    "generatedAt": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "mode",
+        "dryRun",
+        "startedAt",
+        "finishedAt",
+        "durationMs",
+        "timeoutMs",
+        "skippedOverlap",
+        "window"
+      ],
+      "properties": {
+        "runId": {
+          "$ref": "#/$defs/token96"
+        },
+        "mode": {
+          "enum": [
+            "collect",
+            "scheduled",
+            "drill_down"
+          ]
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "startedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "finishedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "durationMs": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "scheduledFor": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "schedulerLagMs": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "skippedOverlap": {
+          "type": "boolean"
+        },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "previousStart",
+            "currentStart",
+            "end",
+            "lookbackMinutes",
+            "settlingDelaySeconds"
+          ],
+          "properties": {
+            "previousStart": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "currentStart": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "end": {
+              "$ref": "#/$defs/timestamp"
+            },
+            "lookbackMinutes": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 120
+            },
+            "settlingDelaySeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 300
+            }
+          }
+        }
+      }
+    },
+    "monitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "evidenceComplete",
+        "configuredSources",
+        "collectedSources"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "healthy",
+            "partial",
+            "degraded"
+          ]
+        },
+        "evidenceComplete": {
+          "type": "boolean"
+        },
+        "configuredSources": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "collectedSources": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        }
+      }
+    },
+    "sourceHealth": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "$ref": "#/$defs/sourceHealth"
+      }
+    },
+    "releaseContext": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/releaseContext"
+      }
+    },
+    "counters": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/counter"
+      }
+    },
+    "latency": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/latency"
+      }
+    },
+    "fingerprints": {
+      "type": "array",
+      "maxItems": 25,
+      "items": {
+        "$ref": "#/$defs/fingerprint"
+      }
+    },
+    "anomalyCandidates": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/anomaly"
+      }
+    },
+    "collectorFailures": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/failure"
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policyVersion",
+        "rawTextIncluded",
+        "directIdentifiersIncluded",
+        "maxFingerprints",
+        "maxAnomalyCandidates"
+      ],
+      "properties": {
+        "policyVersion": {
+          "const": "prod-watch.redaction.v1"
+        },
+        "rawTextIncluded": {
+          "const": false
+        },
+        "directIdentifiersIncluded": {
+          "const": false
+        },
+        "maxFingerprints": {
+          "const": 25
+        },
+        "maxAnomalyCandidates": {
+          "const": 20
+        }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "enum": [
+        "database",
+        "vercel",
+        "cloudflare",
+        "stripe"
+      ]
+    },
+    "releaseSource": {
+      "enum": [
+        "database",
+        "vercel",
+        "cloudflare",
+        "stripe",
+        "repository"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "unit": {
+      "enum": [
+        "count",
+        "ratio",
+        "bytes",
+        "milliseconds"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 32
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "sha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{7,64}$"
+    },
+    "token64": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9._:/-]+$"
+    },
+    "token96": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^[A-Za-z0-9._:/-]+$"
+    },
+    "dimensions": {
+      "type": "object",
+      "maxProperties": 6,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        }
+      },
+      "propertyNames": {
+        "enum": [
+          "component",
+          "error_code",
+          "event_code",
+          "issue_kind",
+          "level",
+          "operation",
+          "phase",
+          "runtime",
+          "severity",
+          "source",
+          "surface"
+        ]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/token64"
+      },
+      "required": [
+        "source"
+      ]
+    },
+    "sourceHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "status",
+        "auth",
+        "coverage",
+        "access"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "degraded",
+            "unavailable",
+            "not_collected"
+          ]
+        },
+        "auth": {
+          "enum": [
+            "ok",
+            "failed",
+            "not_required",
+            "unknown"
+          ]
+        },
+        "coverage": {
+          "enum": [
+            "complete",
+            "partial",
+            "none",
+            "on_demand"
+          ]
+        },
+        "access": {
+          "enum": [
+            "deterministic",
+            "mcp_on_demand"
+          ]
+        },
+        "collectedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "freshnessSeconds": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/token64"
+        }
+      }
+    },
+    "releaseContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "runtime",
+        "sha",
+        "observedAt",
+        "current"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/releaseSource"
+        },
+        "runtime": {
+          "$ref": "#/$defs/token64"
+        },
+        "sha": {
+          "$ref": "#/$defs/sha"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "deployedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "current": {
+          "type": "boolean"
+        }
+      }
+    },
+    "counter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "dimensions",
+        "unit",
+        "current"
+      ],
+      "properties": {
+        "metric": {
+          "enum": [
+            "assistant_issue_count",
+            "db_active_sessions",
+            "db_blocked_session_count",
+            "db_cache_hit_ratio",
+            "db_connection_ratio",
+            "db_connections",
+            "db_deadlocks_total",
+            "db_idle_in_transaction",
+            "db_long_transaction_count",
+            "db_max_active_transaction_age_ms",
+            "db_temp_bytes_total",
+            "deployment_error_count",
+            "ingress_accepted_count",
+            "ingress_incomplete_count",
+            "provider_error_count",
+            "provider_request_count",
+            "provider_timeout_count",
+            "runtime_error_count",
+            "runtime_event_count",
+            "runtime_timeout_count"
+          ]
+        },
+        "dimensions": {
+          "$ref": "#/$defs/dimensions"
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        },
+        "current": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "previous": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "sampleCount": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "previousSampleCount": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        }
+      }
+    },
+    "latency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "dimensions",
+        "count",
+        "p50Ms",
+        "p95Ms",
+        "p99Ms",
+        "maxMs"
+      ],
+      "properties": {
+        "metric": {
+          "enum": [
+            "edge_request_duration_ms",
+            "ingress_to_provider_ms",
+            "ingress_to_runner_ms",
+            "ingress_to_runtime_ms",
+            "provider_duration_ms"
+          ]
+        },
+        "dimensions": {
+          "$ref": "#/$defs/dimensions"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p50Ms": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "p95Ms": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "p99Ms": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "maxMs": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "baselineCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "baselineP95Ms": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "baselineP99Ms": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        }
+      }
+    },
+    "fingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fingerprint",
+        "source",
+        "component",
+        "phase",
+        "severity",
+        "count",
+        "previousCount",
+        "firstSeenAt",
+        "lastSeenAt"
+      ],
+      "properties": {
+        "fingerprint": {
+          "$ref": "#/$defs/hash"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "component": {
+          "$ref": "#/$defs/token64"
+        },
+        "phase": {
+          "$ref": "#/$defs/token64"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "previousCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "firstSeenAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "lastSeenAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/token64"
+        },
+        "issueKind": {
+          "$ref": "#/$defs/token64"
+        },
+        "releaseSha": {
+          "$ref": "#/$defs/sha"
+        }
+      }
+    },
+    "anomalyEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric",
+        "current",
+        "threshold",
+        "unit"
+      ],
+      "properties": {
+        "metric": {
+          "$ref": "#/$defs/token96"
+        },
+        "current": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "baseline": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "threshold": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "unit": {
+          "$ref": "#/$defs/unit"
+        }
+      }
+    },
+    "anomaly": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fingerprint",
+        "ruleId",
+        "severity",
+        "category",
+        "source",
+        "titleCode",
+        "observedAt",
+        "evidence",
+        "deploymentCorrelated",
+        "minimumConsecutiveRuns",
+        "automationClass"
+      ],
+      "properties": {
+        "fingerprint": {
+          "$ref": "#/$defs/hash"
+        },
+        "ruleId": {
+          "$ref": "#/$defs/token64"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity"
+        },
+        "category": {
+          "enum": [
+            "availability",
+            "latency",
+            "monitor",
+            "pressure",
+            "sensitive"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "titleCode": {
+          "$ref": "#/$defs/token64"
+        },
+        "observedAt": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "component": {
+          "$ref": "#/$defs/token64"
+        },
+        "phase": {
+          "$ref": "#/$defs/token64"
+        },
+        "errorCode": {
+          "$ref": "#/$defs/token64"
+        },
+        "issueKind": {
+          "$ref": "#/$defs/token64"
+        },
+        "releaseSha": {
+          "$ref": "#/$defs/sha"
+        },
+        "sourceFingerprint": {
+          "$ref": "#/$defs/hash"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/anomalyEvidence"
+          }
+        },
+        "deploymentCorrelated": {
+          "type": "boolean"
+        },
+        "minimumConsecutiveRuns": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        },
+        "automationClass": {
+          "enum": [
+            "alert_only",
+            "diagnosis_only",
+            "remediation_candidate"
+          ]
+        }
+      }
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "class",
+        "code",
+        "retryable"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "class": {
+          "enum": [
+            "auth",
+            "timeout",
+            "rate_limit",
+            "schema",
+            "unavailable",
+            "internal"
+          ]
+        },
+        "code": {
+          "$ref": "#/$defs/token64"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
