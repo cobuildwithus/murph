@@ -60,6 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
+    expect(markup).toContain("A lapsed plan no longer blocks Family");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
     );

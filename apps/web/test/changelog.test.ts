@@ -301,6 +301,18 @@ describe("changelog registry", () => {
         "The group never reads Family status or creates billing and invite links",
       ),
     });
+    expect(items.get("family-invites-after-lapsed-billing")).toMatchObject({
+      sourcePullRequests: [1529],
+      summary: expect.stringContaining(
+        "already paused or canceled",
+      ),
+      details: expect.stringContaining(
+        "individual billing is live or not yet confirmed",
+      ),
+    });
+    expect(
+      items.get("family-invites-after-lapsed-billing")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("clearer-health-source-handoffs")).toMatchObject({
       sourcePullRequests: [1432, 1447, 1506],
       details: expect.stringContaining("snapshots rather than live sync"),
@@ -486,6 +498,7 @@ describe("changelog registry", () => {
           "murph-max-plan",
           "generated-contact-card-avatar",
           "family-setup-from-group",
+          "family-invites-after-lapsed-billing",
           "live-workout-logging",
           "clearer-health-source-handoffs",
           "body-composition-guidance",

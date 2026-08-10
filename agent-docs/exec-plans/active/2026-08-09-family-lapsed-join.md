@@ -240,6 +240,12 @@ Updated: 2026-08-10
   short database-only paid-recovery claim before any portal or Stripe mutation.
   Because the merge changes only base history plus those compatibility
   resolutions, it does not itself require another ReviewGPT round.
+- `main` later added the repository-wide PR changelog gate. A second ordinary,
+  conflict-free base merge brought that contract into the candidate. The
+  member-visible Family recovery is therefore recorded as one priority-5
+  improvement in the current public edition, attributed only to PR 1529. It
+  uses prose rather than an invented visual or unsupported try-it route because
+  invite acceptance intentionally adds no new screen.
 - The required Claude Code UI double-check was attempted against the final
   desktop/mobile catalog evidence and stopped on explicit Fable usage-credit
   exhaustion. Per the completion workflow, no second Claude request or local
@@ -323,4 +329,8 @@ Updated: 2026-08-10
     the lapsed invite remains one accept action, while incomplete direct billing
     exposes one truthful exact-status recovery without a cancel chore, alternate
     plan choice, false trial label, or mutable-price implication.
+  - The current changelog entry passes its focused registry/page tests and PR
+    declaration tests. The public item plus the real archive design study render
+    cleanly at desktop and phone widths; no private incident evidence or
+    unsupported direct route appears in the release note.
   - `git diff --check` passes.

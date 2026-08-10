@@ -132,6 +132,18 @@ const RAW_CHANGELOG_EDITIONS = [
         },
       },
       {
+        id: "family-invites-after-lapsed-billing",
+        kind: "improvement",
+        priority: 5,
+        title: "A lapsed plan no longer blocks Family",
+        summary:
+          "If your individual plan is already paused or canceled, you can accept a Family invitation without canceling it again.",
+        details:
+          "Murph still stops the join when individual billing is live or not yet confirmed. If an individual-plan restart is already in progress, Settings keeps the selected plan and offers one status check instead of asking you to cancel or choose again.",
+        relevanceTags: ["family", "billing", "recovery", "settings"],
+        sourcePullRequests: [1529],
+      },
+      {
         id: "live-workout-logging",
         kind: "feature",
         priority: 5,
