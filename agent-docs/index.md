@@ -70,8 +70,10 @@ contract are jointly specified by `ARCHITECTURE.md`,
 Ready hosted generated-image completions enter the next Codex admission by
 exact trusted input id. If newer conversation input is already waiting, the
 completion precedes it in the same frozen batch while the ordinary pending
-input index remains the durable retry owner. This contract is jointly specified
-by `ARCHITECTURE.md`, `docs/contracts/00-invariants.md`, and
+input index remains the durable retry owner. The exact authenticated group-route
+match excludes provider continuation sessions; ordinary batching still uses
+them as a boundary. This contract is jointly specified by `ARCHITECTURE.md`,
+`docs/contracts/00-invariants.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
 Hosted inbound reply-thread binding, active-turn route preservation, ephemeral
