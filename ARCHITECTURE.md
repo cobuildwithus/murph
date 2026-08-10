@@ -1605,7 +1605,8 @@ receipts retain retry authority, and alert configuration or delivery failure
 cannot alter checkout results, webhook
 acknowledgement, entitlement, or reconciliation state.
 
-Hosted thread routing prepares variable crypto before the planner transaction.
+Hosted thread routing prepares thread-container domain envelopes, delivery-route
+ciphertext, and mailbox ingress roots before the planner transaction.
 Established Linq direct messages resolve only a narrow blind-index/member-id
 target and unwrap the mailbox-payload ingress root; established Linq and
 Telegram group routes also pre-seal the current delivery route and prewarm its
@@ -1625,7 +1626,9 @@ fresh prepare-before-transaction attempt. Thread-container creation therefore
 does not use the legacy all-domain provisioning bridge or perform domain-root
 provisioning, delivery-route sealing, or activation-mailbox root unwraps while
 holding its route transaction. Transaction-owned authority reads remain inside
-that boundary and may reuse request-scoped root prewarms when available.
+that boundary and may reuse request-scoped root prewarms when available. In
+particular, opening a pending-group setup transfer payload remains a pre-existing
+transaction-owned authority read; it is not thread-container crypto preparation.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The

@@ -149,3 +149,56 @@ Updated: 2026-08-09
   one retained raw-thread lock, one attempt-bound preparation package, and the
   existing bounded retry. It adds no persisted state, cache, queue, retry class,
   reconciliation owner, compatibility path, or provider work under the lock.
+- Final ReviewGPT round 4 found that Linq preflight treated any active roster
+  member as sufficient reason to prepare a synthetic container even when the
+  authoritative planner would deterministically refuse creation. It also found
+  that the PR's broad "every variable crypto input" wording obscured the
+  pre-existing pending-group setup payload read that remains transaction-owned.
+- The round-4 runtime finding was accepted. Preflight now returns before
+  domain-envelope preparation when roster authority is unavailable, recipient
+  authority is unresolved, or the incoming line cannot create a route. An
+  active sender remains eligible only on an assignable line or its exact
+  AT_RISK iMessage home line; a roster-only candidate must match a live pending
+  setup or its existing recovery association. The authoritative transaction
+  repeats every decision.
+- The round-4 documentation finding was accepted. Architecture and PR wording
+  now name the moved thread-container cryptography precisely and disclose that
+  pending-group setup transfer-payload opening remains inside the planner
+  transaction.
+- Local proof on the round-4-remediated source candidate
+  `6ee52f90ca8ce6d73900b8162fc489e1369b943a`: the focused Linq route file passed
+  137 tests; the six affected crypto/Linq/Telegram routing files passed 390
+  tests together; the PostgreSQL concurrency lane passed 9 tests; app-local
+  typecheck and scoped lint passed; and `git diff --check` passed.
+
+## Round 4 anomaly retrospective
+
+- Trigger: final round 4 returned `FINDINGS`; the next run is substantive round
+  5. The finding showed that speculative crypto eligibility had drifted from
+  the planner's existing line and pending-setup authority gates.
+- Original requirement: prepare thread-container cryptography before `BEGIN`
+  only when first-message admission can create a route, while keeping the
+  transaction authoritative, activation atomic, and concurrency retry bounded.
+- Shape comparison: authored-source churn is 767 lines at the immutable
+  first-reviewed head, 884 lines at the round-4 head, and 962 lines at the
+  remediated source head, all below the 2,000-line threshold. The round-4
+  remediation adds no schema, durable state, cache, queue, service, lock owner,
+  retry class, or compatibility path; its runtime growth is one read-only
+  eligibility gate plus focused tests.
+- Root cause: preflight correctly checked active member access but incorrectly
+  treated roster membership itself as creation authority. It did not mirror the
+  planner's earlier roster-unavailable, recipient-line, and selected-live-setup
+  decisions, so ignored messages could reach KMS before the transaction proved
+  there was no owner.
+- Decision: reuse the planner's existing read owners and selection rules in the
+  bounded preflight. Do not create a second authority record or move pending
+  setup payload opening out of its transaction-owned boundary. Preflight may
+  over-read current metadata, but only a currently eligible sender or selected
+  live setup can authorize speculative crypto work.
+- Required proof: roster-unavailable, unresolved-recipient, hard-blocked-line,
+  and roster-without-live-setup paths perform no domain-envelope preparation;
+  active pending-contact, exact AT_RISK home-line, and live-setup paths still
+  prepare once outside `BEGIN`; the PostgreSQL route races remain green.
+- Expected architecture result: no-op group webhooks retain their established
+  ignored or typed-retry outcomes without a new KMS failure dependency, while
+  genuine route creation keeps the same short atomic prepared transaction.
