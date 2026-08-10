@@ -28,9 +28,11 @@ Done:
 - Updated hosted tool/prompt guidance to keep named wall-clock times intact and confirm them only from verified tool results.
 - Added synthetic contract, core, query, cron, hosted-tool, prompt, and runtime regressions. The exact cross-timezone proof projects 9 PM `America/Chicago` to `2026-08-10T02:00:00.000Z` while the vault is `America/New_York`.
 - Passed the focused regression files and the complete workspace `pnpm typecheck` across all projects.
+- Rebased the candidate onto current `origin/main` and captured complete first provider-visible input at base `f71addfd9db4` and head `f66c55a20393` with the pinned real Codex App Server, hermetic Responses stub, `gpt-5.6-terra`, low reasoning, production code mode, synthetic ordinary direct/group scheduling turns, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. The canonical capture included `include`, `input`, `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and `tools`, normalized temporary paths, and excluded model selection, reasoning, storage, streaming, service-tier, account, cache, and transport metadata identically.
+- Direct initial input changed from 23,701 tokens / 109,497 bytes to 23,816 / 110,027 (+115, +0.4852%, +530 bytes); group changed from 20,173 / 93,946 to 20,288 / 94,476 (+115, +0.5701%, +530 bytes). The complete initial-request delta is the assembled automation timing guidance. The deferred automation description/schema payload itself grows from 4,027 tokens / 12,987 bytes to 4,451 / 14,990 (+424 / +2,003) when loaded, but that deferred payload is not present in the first request.
 
 Now:
-- Measure complete base/head provider-visible input for representative direct and group turns, then freeze the candidate head.
+- Freeze and push the exact reviewed candidate head.
 
 Next:
 - Push the exact PR candidate and run preliminary specialists plus the final ReviewGPT gate concurrently with CI.
