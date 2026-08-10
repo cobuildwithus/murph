@@ -402,7 +402,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Changelog archive edition">
+      <StudySection title="Changelog archive with explanatory visuals">
         <div data-design-section="changelog-archive">
           <ChangelogArchiveStudy />
         </div>
