@@ -143,10 +143,10 @@ spend, and future periods remain untouched.
 
 A forecast requires at least 24 hours of counted usage in the current display
 window. It uses the same overall effective capacity as the percentage and is
-shown only when that window's observed pace projects exhaustion before the
-current period ends. The forecast is conservative and optional; the product
-must not invent one when the
-projection omits it.
+available only when that window's observed pace projects exhaustion before the
+current period ends. The forecast is conservative and optional. It may inform
+`recommendedAction`, but Settings does not display an estimated number of days
+remaining.
 
 ## Actions
 
