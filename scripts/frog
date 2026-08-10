@@ -26,4 +26,9 @@ done
 
 unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA
 cd "$repo_root"
-exec pnpm dlx frog@1.1.0 "$@"
+frog_bin="$repo_root/node_modules/.bin/frog"
+if [[ ! -x "$frog_bin" ]]; then
+  echo "Frog is not installed; run pnpm install --frozen-lockfile." >&2
+  exit 2
+fi
+exec "$frog_bin" "$@"

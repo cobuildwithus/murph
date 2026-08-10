@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -37,7 +38,11 @@ describe("Frog workflow guards", () => {
       "unset FROG_DATABASE_URL FROG_NAMESPACE FROG_SCHEMA",
     );
     expect(frogScript).toContain('cd "$repo_root"');
-    expect(frogScript).toContain('exec pnpm dlx frog@1.1.0 "$@"');
+    expect(frogScript).toContain(
+      'frog_bin="$repo_root/node_modules/.bin/frog"',
+    );
+    expect(frogScript).toContain('exec "$frog_bin" "$@"');
+    expect(frogScript).not.toContain("pnpm dlx");
 
     const publish = spawnSync(frogScriptPath, ["publish"], {
       encoding: "utf8",
@@ -69,11 +74,16 @@ describe("Frog workflow guards", () => {
 
   it("enters the repository root and clears ambient database settings", () => {
     const testRoot = mkdtempSync(path.join(tmpdir(), "frog-wrapper-"));
-    const fakeBin = path.join(testRoot, "bin");
+    const testRepo = path.join(testRoot, "repo");
+    const testScriptDir = path.join(testRepo, "scripts");
+    const testScript = path.join(testScriptDir, "frog");
+    const fakeBin = path.join(testRepo, "node_modules", ".bin");
     const capturePath = path.join(testRoot, "capture.txt");
-    mkdirSync(fakeBin);
+    mkdirSync(testScriptDir, { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(testScript, readRepoFile("scripts", "frog"), { mode: 0o755 });
     writeFileSync(
-      path.join(fakeBin, "pnpm"),
+      path.join(fakeBin, "frog"),
       `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -98,7 +108,7 @@ fi
     );
 
     try {
-      const result = spawnSync(frogScriptPath, ["list"], {
+      const result = spawnSync(testScript, ["list"], {
         cwd: testRoot,
         encoding: "utf8",
         env: {
@@ -107,14 +117,13 @@ fi
           FROG_NAMESPACE: "ambient",
           FROG_SCHEMA: "ambient",
           FROG_TEST_CAPTURE: capturePath,
-          FROG_TEST_EXPECTED_CWD: repoRoot,
-          PATH: `${fakeBin}${path.delimiter}${process.env.PATH ?? ""}`,
+          FROG_TEST_EXPECTED_CWD: realpathSync(testRepo),
         },
       });
 
       expect(result.status).toBe(0);
       expect(readFileSync(capturePath, "utf8")).toBe(
-        "cwd=repo\narg=dlx\narg=frog@1.1.0\narg=list\n",
+        "cwd=repo\narg=list\n",
       );
     } finally {
       rmSync(testRoot, { force: true, recursive: true });
@@ -144,6 +153,9 @@ fi
       maxPerRun: 5,
       outbound: { enabled: false },
     });
+    expect(JSON.parse(readRepoFile("package.json")).devDependencies.frog).toBe(
+      "1.1.0",
+    );
 
     const issueTemplateDir = path.join(repoRoot, ".github", "ISSUE_TEMPLATE");
     const issueForms = existsSync(issueTemplateDir)
@@ -234,18 +246,26 @@ fi
     expect(workflow).toContain("timeout-minutes: 10");
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("ref: ${{ github.sha }}");
+    expect(workflow).toContain(
+      "run: pnpm install --frozen-lockfile --ignore-scripts",
+    );
+    expect(workflow).not.toContain("pnpm dlx");
+    expect(workflow).not.toMatch(/\bnpm install\b/u);
     expect(workflow).not.toMatch(/^\s+max:/mu);
     expect(actionRefs(workflow)).toEqual([
       "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
+      "fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
+      "48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
       "7b71c098683d49a573c279a2031a24205ea76841",
     ]);
     for (const input of [
       "branch: frog/sync",
+      "command: node_modules/.bin/frog",
       "issue-author: github-actions[bot]",
       "push: pull-request",
-      'version: "1.1.0"',
     ]) {
       expect(workflow).toContain(input);
     }
+    expect(workflow).not.toMatch(/^\s+version:/mu);
   });
 });

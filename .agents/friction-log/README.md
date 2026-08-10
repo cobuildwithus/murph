@@ -16,7 +16,8 @@ repository agents use `.agents/skills/frog/SKILL.md` for the noninteractive
 entry format. The wrapper forces the repository file store and permits no local
 publishing. It enters the repository root itself and rejects caller-supplied
 `--cwd` and `--mcp` modes; the GitHub workflow is the sole issue and
-reconciliation owner.
+reconciliation owner. Both paths use the exact Frog `1.1.0` dependency from
+Murph's reviewed manifest and committed lockfile.
 
 ## Public-data boundary
 

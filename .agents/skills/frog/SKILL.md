@@ -63,8 +63,9 @@ known. Read back the returned `friction.md` before committing it.
 
 The wrapper permits only file-backed `list` and `log`; it rejects direct
 publishing, enters the repository root itself, and rejects caller-supplied
-`--cwd` and `--mcp` modes. The Action-only workflow is the sole issue and
-reconciliation owner.
+`--cwd` and `--mcp` modes. Local and Action execution use the exact Frog
+`1.1.0` dependency from Murph's reviewed manifest and committed lockfile. The
+Action-only workflow is the sole issue and reconciliation owner.
 
 ## Public-data boundary
 

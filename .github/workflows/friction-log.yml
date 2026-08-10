@@ -40,10 +40,22 @@ jobs:
           persist-credentials: false
           ref: ${{ github.sha }}
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          cache: pnpm
+          node-version-file: .nvmrc
+
+      - name: Install reviewed dependency graph
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
       - name: Report and reconcile frictions
         uses: wevm/frog/action@7b71c098683d49a573c279a2031a24205ea76841 # v1.1.0
         with:
           branch: frog/sync
+          command: node_modules/.bin/frog
           issue-author: github-actions[bot]
           push: pull-request
-          version: "1.1.0"
