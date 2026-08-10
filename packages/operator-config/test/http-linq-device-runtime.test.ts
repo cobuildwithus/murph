@@ -460,10 +460,11 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
           fallback_text: 'Ask Murph for this card in text',
           interactive: true,
           layout: {
-            caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
-            subcaption: '1,490.25 cal',
-            trailing_caption: '94.5g protein · 193.125g carbs',
-            trailing_subcaption: '34.75g fat · 26.5g fiber',
+            caption: 'Jul 28 · 4 meals',
+            image_url: expect.stringMatching(
+              /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+            ),
+            subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
           },
           type: 'imessage_app',
           url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),

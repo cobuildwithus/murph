@@ -66,6 +66,7 @@ export interface HostedThreadRouteSnapshot {
    * do not become a second source of truth.
    */
   deliveryRouteState?: {
+    deliveryRouteEncrypted: string | null;
     deliveryRouteEncryptedPresent: boolean;
     threadIdentityLookupKey: string;
     threadLookupKey: string;
@@ -167,6 +168,7 @@ export async function readHostedThreadRouteByThreadIdentity(input: {
       || row.deliveryRouteEncrypted === null
     )
       ? {
+          deliveryRouteEncrypted: row.deliveryRouteEncrypted,
           deliveryRouteEncryptedPresent:
             typeof row.deliveryRouteEncrypted === "string"
             && row.deliveryRouteEncrypted.length > 0,

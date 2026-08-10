@@ -34,6 +34,7 @@ import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
+  deriveHostedExecutionErrorCode,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
@@ -94,6 +95,7 @@ import {
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+  readHostedRuntimeFailurePhaseCode,
   type HostedMailboxFetchRequest,
   type HostedMailboxFetchResponse,
   type HostedMailboxItem,
@@ -8364,37 +8366,114 @@ describe("hosted workspace runtime entrypoint", () => {
       process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      await expect(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
-        request: {
-          attemptId: "attempt_synthetic_phase_failure",
-          leaseGeneration: "7",
-          userId: TEST_USER_ID,
-          workspaceVersion: "0",
-        },
-      }), {
-        async createCheckpointSnapshot() {
-          throw new Error("Failure phase test should not checkpoint.");
-        },
-        async importItem() {
-          throw new Error("Failure phase test should not import mailbox items.");
-        },
-        platform: createPlatform({
-          mailboxPort: createMailboxPort({ events: [], items: [] }),
-          workspacePort: createWorkspacePort({
-            checkpointRequests: [],
-            events: [],
-            workspace: createWorkspaceState({ version: "0" }),
-          }),
+      const runFailure = (
+        attemptId: string,
+        failure: Error,
+      ) => runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
         }),
-        async runAssistantPhase() {
-          throw Object.assign(new Error(hiddenFailureMessage), {
-            details: {
-              payload: hiddenFailureDetail,
-            },
-          });
+        {
+          async createCheckpointSnapshot() {
+            throw new Error("Failure phase test should not checkpoint.");
+          },
+          async importItem() {
+            throw new Error("Failure phase test should not import mailbox items.");
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw failure;
+          },
+          vaultRoot,
         },
-        vaultRoot,
-      })).rejects.toThrow(hiddenFailureMessage);
+      );
+      const genericFailure = Object.assign(new Error(hiddenFailureMessage), {
+        details: {
+          payload: hiddenFailureDetail,
+        },
+      });
+
+      await expect(runFailure(
+        "attempt_synthetic_phase_failure",
+        genericFailure,
+      )).rejects.toBe(genericFailure);
+      expect(readHostedRuntimeFailurePhaseCode(genericFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
+      expect(genericFailure).not.toHaveProperty("errorCode");
+
+      const codedFailure = Object.assign(new Error("hidden coded runtime failure"), {
+        code: "existing_runtime_failure_code",
+      });
+      expect(deriveHostedExecutionErrorCode(codedFailure)).toBe("runtime_error");
+      await expect(runFailure(
+        "attempt_synthetic_coded_phase_failure",
+        codedFailure,
+      )).rejects.toBe(codedFailure);
+      expect(codedFailure.code).toBe("existing_runtime_failure_code");
+      expect(codedFailure).not.toHaveProperty("errorCode");
+      expect(readHostedRuntimeFailurePhaseCode(codedFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
+
+      const nestedCodedFailure = Object.assign(
+        new Error("hidden nested-coded runtime failure"),
+        {
+          cause: Object.assign(new Error("hidden nested cause"), {
+            code: "timeout",
+          }),
+        },
+      );
+      expect(deriveHostedExecutionErrorCode(nestedCodedFailure)).toBe("timeout");
+      await expect(runFailure(
+        "attempt_synthetic_nested_coded_phase_failure",
+        nestedCodedFailure,
+      )).rejects.toBe(nestedCodedFailure);
+      expect(nestedCodedFailure).not.toHaveProperty("errorCode");
+      expect(deriveHostedExecutionErrorCode(nestedCodedFailure)).toBe("timeout");
+      expect(readHostedRuntimeFailurePhaseCode(nestedCodedFailure)).toBeNull();
+
+      const genericCodedFailure = Object.assign(
+        new Error("hidden generic-coded runtime failure"),
+        { code: "runtime_error" },
+      );
+      await expect(runFailure(
+        "attempt_synthetic_generic_coded_phase_failure",
+        genericCodedFailure,
+      )).rejects.toBe(genericCodedFailure);
+      expect(genericCodedFailure.code).toBe("runtime_error");
+      expect(genericCodedFailure).not.toHaveProperty("errorCode");
+      expect(readHostedRuntimeFailurePhaseCode(genericCodedFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
+
+      const nestedGenericCodedFailure = new Error(
+        "hidden nested generic-coded wrapper",
+        {
+          cause: Object.assign(new Error("hidden generic-coded cause"), {
+            code: "runtime_error",
+          }),
+        },
+      );
+      await expect(runFailure(
+        "attempt_synthetic_nested_generic_coded_phase_failure",
+        nestedGenericCodedFailure,
+      )).rejects.toBe(nestedGenericCodedFailure);
+      expect(readHostedRuntimeFailurePhaseCode(nestedGenericCodedFailure)).toBe(
+        "runtime_phase:foreground.pass",
+      );
 
       const phaseLogs = readCapturedRuntimePhaseLogs({
         attemptId: "attempt_synthetic_phase_failure",
@@ -8421,6 +8500,12 @@ describe("hosted workspace runtime entrypoint", () => {
       expect(serializedLogs).not.toContain(TEST_USER_ID);
       expect(serializedLogs).not.toContain(hiddenFailureMessage);
       expect(serializedLogs).not.toContain(hiddenFailureDetail);
+      expect(serializedLogs).not.toContain("hidden coded runtime failure");
+      expect(serializedLogs).not.toContain("hidden nested-coded runtime failure");
+      expect(serializedLogs).not.toContain("hidden nested cause");
+      expect(serializedLogs).not.toContain("hidden generic-coded runtime failure");
+      expect(serializedLogs).not.toContain("hidden nested generic-coded wrapper");
+      expect(serializedLogs).not.toContain("hidden generic-coded cause");
     } finally {
       if (previousStdIoLogSetting === undefined) {
         delete process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS;
@@ -8444,7 +8529,7 @@ describe("hosted workspace runtime entrypoint", () => {
       process.env.MURPH_HOSTED_EXECUTION_STDIO_LOGS = "1";
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
-      await expect(runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+      const restoreFailure = await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
         request: {
           attemptId: "attempt_synthetic_restore_phase_failure",
           leaseGeneration: "7",
@@ -8474,7 +8559,13 @@ describe("hosted workspace runtime entrypoint", () => {
           }),
         }),
         vaultRoot,
-      })).rejects.toThrow("Hosted workspace runtime job snapshot restore failed.");
+      }).catch((error: unknown) => error);
+      expect(restoreFailure).toMatchObject({
+        message: "Hosted workspace runtime job snapshot restore failed.",
+      });
+      expect(readHostedRuntimeFailurePhaseCode(restoreFailure)).toBe(
+        "runtime_phase:workspace.restore",
+      );
 
       const failureLogs = readCapturedRuntimePhaseLogs({
         attemptId: "attempt_synthetic_restore_phase_failure",
