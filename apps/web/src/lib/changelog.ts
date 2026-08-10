@@ -274,7 +274,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "Installed extensions keep the interactive card. App-absent previews no longer request square App Store artwork for the wider Messages icon slot, while calories, nutrient totals, partial-state warnings, and short goal statuses remain intact.",
         relevanceTags: ["imessage", "cards", "nutrition", "design"],
-        sourcePullRequests: [1567],
+        sourcePullRequests: [1567, 1585],
       },
       {
         id: "typing-prewarms-private-chat",
