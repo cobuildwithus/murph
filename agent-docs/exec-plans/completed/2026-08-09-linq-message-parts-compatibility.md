@@ -1,6 +1,6 @@
 # linq-message-parts-compatibility
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-09
 
@@ -64,7 +64,7 @@ Updated: 2026-08-09
 2. [x] Add compatibility parsing, current part support, and privacy-safe warnings.
 3. [x] Add focused parser, Web service/logging, mailbox, and inbox regressions.
 4. [x] Update the live owner docs and SDK pins/lockfile.
-5. [ ] Run focused verification, dependency guards, exact-head review gates, and CI.
+5. [x] Run focused verification, dependency guards, exact-head review gates, and CI.
 
 ## Decisions
 
@@ -110,4 +110,14 @@ Updated: 2026-08-09
   and exact-head CI remain the executable proof for this change.
 - Final ReviewGPT round 2 required a retrospective for the default/off mode
   gap. The retrospective is recorded in the PR body; round 3 and exact-head CI
-  remain pending after the corrected candidate is pushed.
+  remained pending after the corrected candidate was pushed.
+- Final ReviewGPT round 3 reviewed the fresh full snapshot at `ff187133ac`,
+  returned `ROUND_OUTCOME: PASS`, and produced no qualifying findings after
+  verifying the tri-state boundary, legacy media behavior, active-member
+  placeholder, payload minimization, and warning fields.
+- Exact-head CI passed the task-affecting build, typecheck, package, fixture,
+  sandbox, dependency, and design-proof shards. Two unrelated frontend jobs
+  failed on stale assertions and an unscoped design-proof scenario from files
+  untouched by this PR; the latest `main` contains their repairs and merged
+  cleanly under the ReviewGPT base-update-only exception.
+Completed: 2026-08-09
