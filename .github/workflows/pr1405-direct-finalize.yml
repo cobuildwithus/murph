@@ -55,6 +55,9 @@ jobs:
 
           run_step apply python3 .github/scripts/pr1405-direct-finalize.py || true
           if [ "$FAILED" -eq 0 ]; then
+            run_step expand-child-families python3 .github/scripts/pr1405-direct-child-family.py || true
+          fi
+          if [ "$FAILED" -eq 0 ]; then
             run_step install pnpm install --frozen-lockfile || true
           fi
           if [ "$FAILED" -eq 0 ]; then
@@ -119,6 +122,7 @@ jobs:
           rm -f .github/pr1405-direct-finalization-failure.md
           rm -f .github/pr1405-direct-trigger
           rm -f .github/scripts/pr1405-direct-finalize.py
+          rm -f .github/scripts/pr1405-direct-child-family.py
           rm -f .github/workflows/pr1405-direct-finalize.yml
           git diff --check
           git add -A
