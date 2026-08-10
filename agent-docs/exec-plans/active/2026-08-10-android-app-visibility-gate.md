@@ -43,9 +43,10 @@ Updated: 2026-08-10
 - The shared parser and runner projection accept only the exact enabled value.
 - Cloudflare deploy config preserves that exact-value rule before Wrangler output;
   generic optional-var whitespace normalization cannot activate the flag.
-- The private Cloudflare deploy workflow forwards the raw flag from its selected
-  `preview` or `production` GitHub Environment; the public contract guard
-  requires that exact mapping, and the current absent preview value stays off.
+- The private Cloudflare deploy workflow forwards the raw flag on its deploy
+  render step after selecting the `preview` or `production` GitHub Environment;
+  its guard rejects the invalid job-level mapping, and the current absent
+  preview value stays off.
 - The trusted per-invocation platform projection carries the flag into the
   assistant turn; forwarded and member-provided env cannot enable or override it.
 - Default Web and assistant tests prove the Android-only journey is absent.

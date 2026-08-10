@@ -571,9 +571,12 @@ Set these in the selected GitHub environment as vars:
 `MURPH_ANDROID_APP_ENABLED` is an optional, fail-closed rollout variable. Leave
 it unset until the public Android app and the compatible Web, Worker, and runner
 code are deployed. Private `cobuildwithus/murph-cloud` must map the raw value in
-`.github/workflows/deploy-cloudflare-hosted.yml`, under the `deploy` job's
-`env`, from `${{ vars.MURPH_ANDROID_APP_ENABLED }}`. That job selects the
-`preview` or `production` GitHub Environment name from its workflow input;
+`.github/workflows/deploy-cloudflare-hosted.yml`, on the existing
+`Prepare deploy artifacts` step's `env`, from
+`${{ vars.MURPH_ANDROID_APP_ENABLED }}` after the `deploy` job selects the
+`preview` or `production` GitHub Environment name from its workflow input. A
+job-level `env` mapping is invalid because selected Environment variables are
+available only after the job starts.
 `production` is the current protected environment, while the absent preview
 value stays fail-closed. Adding either Environment value is inert until this
 private mapping has landed.
