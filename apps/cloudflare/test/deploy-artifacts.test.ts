@@ -282,6 +282,25 @@ describe("deploy artifact validation", () => {
     );
   });
 
+  it("rejects a runner bundle missing the Health Commons knowledge index", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await rm(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "knowledge.sqlite",
+      ),
+    );
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Missing Health Commons knowledge index.",
+    );
+  });
+
   it("rejects a runner bundle with a stale Health Commons protocol family graph", async () => {
     const fixture = await createDeployArtifactFixture();
 
@@ -1352,6 +1371,10 @@ async function writeHealthCommonsRuntimeArtifacts(
   const artifacts = createHealthCommonsRuntimeArtifacts(input);
 
   await mkdir(generatedDir, { recursive: true });
+  await writeFile(
+    path.join(generatedDir, "knowledge.sqlite"),
+    Buffer.from("SQLite format 3\0fixture"),
+  );
   await writeFile(
     path.join(generatedDir, "biomarker-desired-directions.json"),
     `${JSON.stringify(artifacts.biomarkerDesiredDirections, null, 2)}\n`,
