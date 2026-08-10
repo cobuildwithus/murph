@@ -1,6 +1,6 @@
 # Publish the August 5-9 Murph changelog and completion gate
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -100,7 +100,7 @@ Updated: 2026-08-10
   rule, PR template declaration, and all-PR CI guard with focused tests.
 - Focused changelog tests, PR guard tests, Web typecheck, scoped ESLint, docs
   drift, skill validation, diff checks, and privacy checks pass. Playwright
-  rendered 70 public cards with HTTP 200, no page errors, and no desktop or
+  rendered 73 public cards with HTTP 200, no page errors, and no desktop or
   mobile overflow.
 - Uploaded and inspected four desktop/mobile design-proof pairs. The required
   Claude UI double-check was attempted with Fable 5 and ended at explicit usage
@@ -159,6 +159,13 @@ Updated: 2026-08-10
   beyond the bounded pattern scrub production enforces. Deleted both misleading
   mocks, rewrote the entries around bounded model-written summaries and their
   residual free-text boundary, and added registry and render regressions.
+- Final ReviewGPT round 7 verified every correction and completed a fresh
+  full-patch audit of all 60 new entries, 45 retained visuals, actions, shared
+  primitives, design-catalog coverage, the authoring skill, workflow guidance,
+  and PR guard. It returned `PASS` with no qualifying finding. It could not
+  independently verify the ignored local browser captures because the review
+  ZIP contained no rendered evidence; the PR links the hosted exact-head
+  captures and preserves that limitation explicitly.
 
 ## Decisions
 
@@ -224,7 +231,7 @@ Updated: 2026-08-10
   `pnpm docs:drift`; `git diff --check`; privacy and public-copy punctuation
   scans.
 - Passed: desktop/mobile Playwright proof from the latest public archive and
-  `/design?tab=sections#changelog-archive`; 70 cards, HTTP 200, zero page
+  `/design?tab=sections#changelog-archive`; 73 cards, HTTP 200, zero page
   errors, zero horizontal overflow, and native-resolution inspection of local
   and hosted design-proof images.
 - Recorded gap: the Fable 5 Claude UI check reported explicit usage-credit
@@ -242,6 +249,9 @@ Updated: 2026-08-10
   referral-beneficiary phrases were absent. The refreshed scheduled-call card
   captures were inspected and uploaded through the lossless design-proof
   variant.
-- Pending: commit and push the round-6 feedback correction, complete final
-  ReviewGPT round 7, confirm exact-head CI and merge readiness, and close this
-  plan.
+- Passed: exact-head GitHub Actions on pushed head `71f0549221af`.
+- Passed: final ReviewGPT round 7 on pushed head `71f0549221af`; all prior
+  accepted findings are resolved and no new qualifying finding remains.
+- Ready: archive this plan, make the final scoped commit, push, and confirm the
+  resulting exact-head CI and merge readiness.
+Completed: 2026-08-10
