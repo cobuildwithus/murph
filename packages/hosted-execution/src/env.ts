@@ -25,7 +25,7 @@ export function isHostedRuntimeProcessEnv(env: EnvSource): boolean {
 }
 
 export function isMurphAndroidAppEnabled(env: EnvSource): boolean {
-  return env[MURPH_ANDROID_APP_ENABLED_ENV]?.trim() === "1";
+  return env[MURPH_ANDROID_APP_ENABLED_ENV] === "1";
 }
 
 export function normalizeHostedExecutionBaseUrl(

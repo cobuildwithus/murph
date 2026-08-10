@@ -524,6 +524,9 @@ describe("hosted execution coverage gaps", () => {
     expect(isHostedRuntimeProcessEnv({})).toBe(false);
     expect(
       isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: " 1 " }),
+    ).toBe(false);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }),
     ).toBe(true);
     expect(
       isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "true" }),

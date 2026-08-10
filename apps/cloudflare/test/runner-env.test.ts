@@ -1292,4 +1292,17 @@ describe("hosted private-media platform env", () => {
       HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     });
   });
+
+  it("projects the Android rollout gate only from the exact enabled value", () => {
+    expect(buildHostedRunnerContainerPlatformEnv({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    })).toEqual({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    });
+    for (const disabledValue of ["", "0", "true", " 1 "]) {
+      expect(buildHostedRunnerContainerPlatformEnv({
+        MURPH_ANDROID_APP_ENABLED: disabledValue,
+      })).not.toHaveProperty("MURPH_ANDROID_APP_ENABLED");
+    }
+  });
 });

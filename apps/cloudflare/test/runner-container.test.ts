@@ -115,25 +115,6 @@ describe("RunnerContainer", () => {
     expect(JSON.stringify(container.envVars)).not.toContain("fixture-usage-reporting-secret");
   });
 
-  it("forwards the Android app gate only when it is explicitly enabled", () => {
-    const { container: enabledContainer } = createContainerDouble({
-      env: {
-        MURPH_ANDROID_APP_ENABLED: " 1 ",
-      },
-    });
-    const { container: disabledContainer } = createContainerDouble({
-      env: {
-        MURPH_ANDROID_APP_ENABLED: "true",
-      },
-    });
-
-    expect(enabledContainer.envVars).toEqual({
-      ...EXPECTED_RUNNER_CONTAINER_ENV,
-      MURPH_ANDROID_APP_ENABLED: "1",
-    });
-    expect(disabledContainer.envVars).toEqual(EXPECTED_RUNNER_CONTAINER_ENV);
-  });
-
   it("reuses a successful per-user shell for back-to-back invocations", async () => {
     const { container, containerFetch, destroy, startAndWaitForPorts } =
       createContainerDouble({

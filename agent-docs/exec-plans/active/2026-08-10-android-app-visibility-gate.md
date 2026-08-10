@@ -41,6 +41,8 @@ Updated: 2026-08-10
 ## Evidence
 
 - The shared parser and runner projection accept only the exact enabled value.
+- The trusted per-invocation platform projection carries the flag into the
+  assistant turn; forwarded and member-provided env cannot enable or override it.
 - Default Web and assistant tests prove the Android-only journey is absent.
 - Enabled tests prove the Mobvoi card, Play link, concise guidance, and prompt route return together.
 - Focused Web, assistant-engine, hosted-execution, and Cloudflare suites pass.

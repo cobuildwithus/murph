@@ -2,6 +2,9 @@ import {
   HOSTED_LINQ_DELIVERY_ENV_NAMES,
   HOSTED_TELEGRAM_DELIVERY_FORWARDED_ENV_NAMES,
 } from "@murphai/hosted-execution/assistant-capabilities";
+import {
+  MURPH_ANDROID_APP_ENABLED_ENV,
+} from "@murphai/hosted-execution/env";
 
 // Ingress-only verification secrets stay on the control-plane/webhook boundary
 // and must not enter user-executable hosted runtime env.
@@ -56,6 +59,7 @@ export const HOSTED_SHARED_PLATFORM_ONLY_ENV_NAMES = [
   "CF_PUBLIC_BASE_URL",
   "HOSTED_LOG_FINGERPRINT_SECRET",
   "HOSTED_PHYSICAL_NOTES_ENABLED",
+  MURPH_ANDROID_APP_ENABLED_ENV,
 ] as const;
 
 // These vars may come from trusted forwarded runtime profiles for legacy/local
