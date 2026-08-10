@@ -466,6 +466,15 @@ that control. Do not add a second sales card, decorative status badge, duplicate
 headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
 secondary action.
 
+A signed-out funding link first shows one neutral sign-in handoff and returns to
+the exact funding URL after authentication. Do not reveal whether the group or
+the viewer has a private sponsorship relationship before that handoff. An
+authenticated payer keeps the cancellation path even when the group is no
+longer eligible for new funding; authenticated non-payers see the ordinary
+unavailable state. After cancellation, replace the action with a durable receipt
+that confirms future automatic refills stopped and existing usage credit stays
+with the group. Do not reload into an unrelated unavailable state.
+
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared
 choice cards. On phones, use a near-full-height bottom drawer with one large

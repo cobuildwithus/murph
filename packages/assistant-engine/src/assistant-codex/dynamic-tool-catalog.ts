@@ -383,6 +383,12 @@ export const MURPH_FAMILY_PLAN_TOOL = {
             type: 'string',
             enum: ['start_checkout'],
           },
+          confirmedTrialConversion: {
+            type: 'boolean',
+            enum: [true],
+            description:
+              'Pass true only after read_status returned activeTrialConversion terms and the member explicitly confirmed those fresh terms. Omit for every other checkout.',
+          },
         },
         required: ['action'],
       },
