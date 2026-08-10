@@ -16,6 +16,7 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
+import { DeepCarouselSection } from "@/src/components/knowledge/deep-carousel-section";
 import {
   ReferralPageContent,
   ReferralRewardCards,
@@ -109,6 +110,19 @@ export function SectionsContent() {
             messengerChannel="imessage"
             murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
           />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Knowledge topic depth">
+        <div
+          id="knowledge-topic-depth"
+          data-design-section="knowledge-topic-depth"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <DeepCarouselSection />
         </div>
       </StudySection>
 
