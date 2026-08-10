@@ -3567,10 +3567,14 @@ async function executeGroupChallengeResponseCardAttachment(input: {
   const participantIds = input.request.scoreInput.participants.map(
     (participant) => participant.participantId,
   )
-  if (!hasExactStringEntries(
-    participantIds,
-    proof.roster.map((participant) => participant.participantId),
-  )) {
+  const participantById = new Map(
+    proof.roster.map((participant) => [participant.participantId, participant]),
+  )
+  if (
+    participantById.size !== proof.roster.length
+    || new Set(participantIds).size !== participantIds.length
+    || participantIds.some((participantId) => !participantById.has(participantId))
+  ) {
     return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
   }
 
@@ -3601,7 +3605,13 @@ async function executeGroupChallengeResponseCardAttachment(input: {
       vault: input.vaultRoot,
     })
     const participantLabels = input.request.scoreInput.format.kind === 'individual'
-      ? proof.roster.map((participant) => {
+      ? input.request.scoreInput.participants.map((scoreParticipant) => {
+          const participant = participantById.get(scoreParticipant.participantId)
+          if (!participant) {
+            throw new TypeError(
+              'Every challenge participant must be present in the trusted room roster.',
+            )
+          }
           if (participant.displayName === null) {
             throw new TypeError(
               'Every individual challenge participant requires an authorized label.',

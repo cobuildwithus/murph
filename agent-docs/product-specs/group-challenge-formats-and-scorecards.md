@@ -236,8 +236,9 @@ When a requested Linq group update is eligible for the native standings card, th
 attachment tool accepts this same normalized scorer input plus the exact canonical
 projection-scope keys used by each component rather than accepting a model-authored
 scoreboard. Its one operation-local proof requires every successful batch to share
-the same ordered participant and authorized-label roster, requires the scorer roster
-and component scopes to match those reads, runs the scorer, and compare-and-set
+the same ordered current-room-member and authorized-label roster, requires the scorer roster
+to be a unique authorized subset of those current room members, requires component
+scopes to be backed by those reads, runs the scorer, and compare-and-set
 persists the exact input and result on the existing challenge page before attaching.
 Card points, target, order, coverage, counts, ranks, and ties therefore remain
 deterministic. The model still owns authorized record interpretation and component-
@@ -349,9 +350,10 @@ points, or long-running cumulative games.
 - Five distinct scopes compose through bounded reads without widening the transport.
 - A `not_granted` batch stops before a later read can replace its offer evidence.
 - Batches with different ordered participant sets are never combined.
-- A native card requires at least one successful read, exact scorer/read roster
-  equality, component scopes backed by those reads, and canonical snapshot
-  persistence before attachment.
+- A native card requires at least one successful read, unique page-owned scorer
+  participants that are all present in the stable current-room read, component
+  scopes backed by those reads, and canonical snapshot persistence before
+  attachment. Additional current room members never become challenge participants.
 - Only normalized quantities and statuses reach deterministic scoring.
 - Daily-additive settlement cannot count a settled date twice.
 - Missing or pending dates do not advance the cumulative watermark.

@@ -1719,14 +1719,19 @@ if (!tool) {
           request: async () => ({
             members: [
               buildScriptedChallengeMember({
-                displayName: 'Maya',
-                participantId: 'participant_maya',
-                value: 4_000,
+                displayName: 'Room only',
+                participantId: 'participant_room_only',
+                value: 8_000,
               }),
               buildScriptedChallengeMember({
                 displayName: 'Jon',
                 participantId: 'participant_jon',
                 value: null,
+              }),
+              buildScriptedChallengeMember({
+                displayName: 'Maya',
+                participantId: 'participant_maya',
+                value: 4_000,
               }),
             ],
             requestedProjectionScopeKeys: ['steps-days.v0'],
@@ -1779,6 +1784,7 @@ if (!tool) {
       'murph:challenge-standings-snapshot:v1:start',
     )
     expect(persisted.page.body).toContain('"participant_jon"')
+    expect(persisted.page.body).not.toContain('participant_room_only')
   })
 
   it('withholds a group challenge card after a capacity-partial shared read', {
