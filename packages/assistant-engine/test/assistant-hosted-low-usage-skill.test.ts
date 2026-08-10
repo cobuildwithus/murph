@@ -331,6 +331,9 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       'no new referral option from that request committed',
     )
+    expect(normalizedSkill).toContain(
+      'only one referral option can be started now',
+    )
     expect(normalizedSkill).toContain('invent operational limitations')
     expect(normalizedSkill).toContain('still `armed` when the group is created')
     expect(normalizedSkill).toContain('language respectful and person-first')
@@ -356,7 +359,7 @@ describe('assistant hosted low-usage skill', () => {
       'state the returned `expiresAt` as the referral option\'s public occurrence deadline',
     )
     expect(normalizedSkill).toContain(
-      '`usage_referral_arm_applied_snapshot_unavailable`, the arm committed',
+      '`usage_referral_arm_applied_snapshot_unavailable`, the selected referral option started',
     )
     expect(normalizedSkill).toContain(
       'Do not arm it again or claim that commit failed',
@@ -367,6 +370,15 @@ describe('assistant hosted low-usage skill', () => {
     expect(normalizedSkill).toContain(
       '`usage_referral_cancel_applied_snapshot_unavailable`, the cancellation committed',
     )
+    expect(normalizedSkill).toContain(
+      'the named referral option was started, but Murph could not refresh its current status',
+    )
+    expect(normalizedSkill).toContain(
+      'the named referral option was canceled, but Murph could not refresh its current status',
+    )
+    expect(normalizedSkill).not.toContain('say only one can be armed now')
+    expect(normalizedSkill).not.toContain('say the arm committed')
+    expect(normalizedSkill).not.toContain('say the cancellation committed')
     expect(normalizedSkill).toContain(
       'including a referral option started after the cancellation',
     )
@@ -579,6 +591,60 @@ describe('assistant hosted low-usage skill', () => {
     )
     expect(normalizedContext).not.toMatch(/\$|weighted usage credit/iu)
     expect(normalizedContext).toContain('or claim that commit failed')
+  })
+
+  it.each([
+    {
+      expectedMemberCopy:
+        'the named referral option was started, but Murph could not refresh its current status',
+      forbiddenMemberDirective: 'say the arm committed',
+      mutationAction: 'arm_usage_referral',
+      unavailableReason:
+        'usage_referral_arm_applied_snapshot_unavailable',
+    },
+    {
+      expectedMemberCopy:
+        'the named referral option was canceled, but Murph could not refresh its current status',
+      forbiddenMemberDirective: 'say the cancellation committed',
+      mutationAction: 'cancel_usage_referral',
+      unavailableReason:
+        'usage_referral_cancel_applied_snapshot_unavailable',
+    },
+  ])('keeps failed $mutationAction recovery plain for members', async ({
+    expectedMemberCopy,
+    forbiddenMemberDirective,
+    mutationAction,
+    unavailableReason,
+  }) => {
+    const skill = await readLowUsageSkill()
+    const assembledContext = [
+      skill,
+      '<tool_result>',
+      JSON.stringify({
+        action: mutationAction,
+        result: {
+          referral: null,
+          status: 'unavailable',
+          unavailableReason,
+        },
+      }),
+      '</tool_result>',
+      '<tool_result>',
+      JSON.stringify({
+        action: 'read_usage_referral',
+        result: {
+          referral: null,
+          status: 'unavailable',
+        },
+      }),
+      '</tool_result>',
+    ].join('\n').replace(/\s+/gu, ' ')
+
+    expect(assembledContext).toContain(
+      'keep the action and lifecycle names internal',
+    )
+    expect(assembledContext).toContain(expectedMemberCopy)
+    expect(assembledContext).not.toContain(forbiddenMemberDirective)
   })
 
   it.each([
