@@ -78,6 +78,7 @@ const STREAK_RETENTION_MS = 2 * 60 * 60 * 1_000;
 const MAX_LOCK_CLAIM_AGE_MS = 10 * 60 * 1_000;
 const LOCK_ELECTION_SETTLE_MS = 100;
 const SAFE_TOKEN_PATTERN = /^[A-Za-z0-9._:/-]+$/u;
+const SIGNAL_CODE_PATTERN = /^[A-Za-z0-9._:/=|-]+$/u;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const LOCAL_PATH_OR_URL_PATTERN = /^(?:\/|~(?:\/|$)|[A-Za-z]:[\\/]|(?:file|https?):|(?:Users|home|mnt|tmp|private|var\/folders)(?:\/|$))/iu;
 const PATH_TRAVERSAL_PATTERN = /(?:^|\/)\.\.(?:\/|$)/u;
@@ -255,7 +256,7 @@ export interface AnomalyCandidate {
   severity: Severity;
   category: "availability" | "latency" | "monitor" | "pressure" | "sensitive";
   source: WatchSource;
-  titleCode: string;
+  signalCode: string;
   observedAt: string;
   component?: string;
   phase?: string;
@@ -358,7 +359,7 @@ export interface IncidentRecord {
   automationClass: AutomationClass;
   source: WatchSource;
   ruleId: string;
-  titleCode: string;
+  signalCode: string;
   component?: string;
   phase?: string;
   errorCode?: string;
@@ -619,7 +620,19 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
     };
   });
 
-  const releaseContext = input.evidences.flatMap((evidence) => evidence.releaseContext);
+  const failedSources = new Set(input.failures.map((failure) => failure.source));
+  const scorableSources = new Set(sourceHealth
+    .filter((health) => (
+      health.status === "ok"
+      && health.coverage === "complete"
+      && (health.auth === "ok" || health.auth === "not_required")
+      && (health.freshnessSeconds ?? Number.POSITIVE_INFINITY) <= 1_800
+      && !failedSources.has(health.source)
+    ))
+    .map((health) => health.source));
+  const scorableEvidence = input.evidences.filter((evidence) => scorableSources.has(evidence.source));
+
+  const releaseContext = scorableEvidence.flatMap((evidence) => evidence.releaseContext);
   if (input.repositorySha !== undefined && RELEASE_SHA_PATTERN.test(input.repositorySha)) {
     releaseContext.push({
       source: "repository",
@@ -632,14 +645,14 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
   releaseContext.sort(compareReleases);
 
   const counters = enrichCumulativeCounters(
-    input.evidences.flatMap((evidence) => evidence.counters).sort(compareCounters).slice(0, MAX_COUNTERS),
+    scorableEvidence.flatMap((evidence) => evidence.counters).sort(compareCounters).slice(0, MAX_COUNTERS),
     input.previousCumulativeCounters ?? {},
   );
-  const latency = input.evidences
+  const latency = scorableEvidence
     .flatMap((evidence) => evidence.latency)
     .sort(compareLatency)
     .slice(0, MAX_LATENCY);
-  const allFingerprints = input.evidences
+  const allFingerprints = scorableEvidence
     .flatMap((evidence) => evidence.fingerprints.map((fingerprint) => ({
       ...fingerprint,
       fingerprint: stableHash(["source-fingerprint", evidence.source, fingerprint.rawFingerprint]),
@@ -789,7 +802,7 @@ export function evaluateAnomalies(input: {
       severity: authFailure ? "high" : "medium",
       category: "monitor",
       source: failure.source,
-      titleCode: authFailure ? "monitor_source_auth_failed" : "monitor_source_unavailable",
+      signalCode: authFailure ? "monitor_source_auth_failed" : "monitor_source_unavailable",
       observedAt,
       evidence: [{ metric: "collector_failure", current: 1, threshold: 1, unit: "count" }],
       minimumConsecutiveRuns: authFailure ? 1 : 2,
@@ -807,7 +820,7 @@ export function evaluateAnomalies(input: {
         severity: authFailure ? "high" : "medium",
         category: "monitor",
         source: health.source,
-        titleCode: authFailure ? "monitor_source_auth_failed" : "monitor_source_unavailable",
+        signalCode: authFailure ? "monitor_source_auth_failed" : "monitor_source_unavailable",
         observedAt,
         evidence: [{ metric: "collector_failure", current: 1, threshold: 1, unit: "count" }],
         minimumConsecutiveRuns: authFailure ? 1 : 2,
@@ -821,7 +834,7 @@ export function evaluateAnomalies(input: {
         severity: "medium",
         category: "monitor",
         source: health.source,
-        titleCode: "monitor_source_degraded",
+        signalCode: "monitor_source_degraded",
         observedAt,
         evidence: [{ metric: "source_degraded", current: 1, threshold: 1, unit: "count" }],
         minimumConsecutiveRuns: 2,
@@ -839,7 +852,7 @@ export function evaluateAnomalies(input: {
         severity: "medium",
         category: "monitor",
         source: health.source,
-        titleCode: "monitor_source_stale",
+        signalCode: "monitor_source_stale",
         observedAt,
         evidence: [{
           metric: "source_freshness_seconds",
@@ -858,7 +871,7 @@ export function evaluateAnomalies(input: {
     if (["provider_error_count", "deployment_error_count"].includes(counter.metric)) {
       const candidate = evaluateRateCounter(withProviderRateDenominator(counter, input.counters), {
         ruleId: "error_rate_regression",
-        titleCode: "error_rate_regression",
+        signalCode: "error_rate_regression",
         minimumCount: 10,
         minimumVolume: 50,
         fixedRate: 0.05,
@@ -874,7 +887,7 @@ export function evaluateAnomalies(input: {
     if (["provider_timeout_count", "ingress_incomplete_count"].includes(counter.metric)) {
       const candidate = evaluateRateCounter(withProviderRateDenominator(counter, input.counters), {
         ruleId: "timeout_rate_regression",
-        titleCode: "timeout_rate_regression",
+        signalCode: "timeout_rate_regression",
         minimumCount: 5,
         minimumVolume: 50,
         fixedRate: 0.02,
@@ -890,7 +903,7 @@ export function evaluateAnomalies(input: {
     if (["runtime_error_count", "runtime_timeout_count", "assistant_issue_count"].includes(counter.metric)) {
       const candidate = evaluateCountCounter(counter, {
         ruleId: counter.metric === "runtime_timeout_count" ? "timeout_count_regression" : "error_count_regression",
-        titleCode: counter.metric === "runtime_timeout_count" ? "timeout_count_regression" : "error_count_regression",
+        signalCode: counter.metric === "runtime_timeout_count" ? "timeout_count_regression" : "error_count_regression",
         minimumCount: counter.metric === "runtime_timeout_count" ? 5 : 10,
         ratio: 3,
         absoluteDelta: counter.metric === "runtime_timeout_count" ? 5 : 10,
@@ -909,7 +922,7 @@ export function evaluateAnomalies(input: {
         severity: counter.current >= 0.95 ? "high" : "medium",
         category: "pressure",
         source,
-        titleCode: "database_connection_pressure",
+        signalCode: "database_connection_pressure",
         observedAt,
         evidence: [{ metric: counter.metric, current: counter.current, threshold: 0.9, unit: "ratio" }],
         minimumConsecutiveRuns: 2,
@@ -925,7 +938,7 @@ export function evaluateAnomalies(input: {
         severity: "high",
         category: "pressure",
         source,
-        titleCode: "database_long_transaction",
+        signalCode: "database_long_transaction",
         observedAt,
         evidence: [{ metric: counter.metric, current: counter.current, threshold: 1, unit: "count" }],
         minimumConsecutiveRuns: 2,
@@ -941,7 +954,7 @@ export function evaluateAnomalies(input: {
         severity: "high",
         category: "pressure",
         source,
-        titleCode: "database_blocked_sessions",
+        signalCode: "database_blocked_sessions",
         observedAt,
         evidence: [{ metric: counter.metric, current: counter.current, threshold: 5, unit: "count" }],
         minimumConsecutiveRuns: 2,
@@ -961,7 +974,7 @@ export function evaluateAnomalies(input: {
         severity: "medium",
         category: "pressure",
         source,
-        titleCode: "database_deadlock_observed",
+        signalCode: "database_deadlock_observed",
         observedAt,
         evidence: [{
           metric: counter.metric,
@@ -1004,7 +1017,7 @@ export function evaluateAnomalies(input: {
       severity: sensitive || summary.p99Ms >= 60_000 ? "high" : "medium",
       category: sensitive ? "sensitive" : "latency",
       source,
-      titleCode: "latency_regression",
+      signalCode: "latency_regression",
       observedAt,
       component: summary.dimensions.component,
       phase: summary.dimensions.phase,
@@ -1061,7 +1074,7 @@ export function evaluateAnomalies(input: {
       severity,
       category: sensitive ? "sensitive" : "availability",
       source: fingerprint.source,
-      titleCode: sensitive ? "sensitive_domain_signal" : critical ? "critical_fingerprint" : "fingerprint_spike",
+      signalCode: sensitive ? "sensitive_domain_signal" : critical ? "critical_fingerprint" : "fingerprint_spike",
       observedAt,
       component: fingerprint.component,
       phase: fingerprint.phase,
@@ -1431,6 +1444,7 @@ export function filterSnapshotForIncident(
   snapshot: ProductionWatchSnapshot,
   incident: IncidentRecord,
 ): ProductionWatchSnapshot {
+  const metricSignal = parseMetricSignalCode(incident.signalCode);
   const matchesDimensions = (dimensions: Record<string, string>): boolean => {
     const sourceMatch = dimensions.source === incident.source;
     const componentMatch = incident.component === undefined || dimensions.component === incident.component;
@@ -1441,8 +1455,17 @@ export function filterSnapshotForIncident(
   };
   return {
     ...snapshot,
-    counters: snapshot.counters.filter((counter) => matchesDimensions(counter.dimensions)),
-    latency: snapshot.latency.filter((summary) => matchesDimensions(summary.dimensions)),
+    counters: snapshot.counters.filter((counter) => metricSignal === undefined
+      ? matchesDimensions(counter.dimensions)
+      : dimensionsKey(counter.dimensions) === metricSignal.dimensionsKey
+        && (
+          counter.metric === metricSignal.metric
+          || counter.metric === rateDenominatorMetric(metricSignal.metric)
+        )),
+    latency: snapshot.latency.filter((summary) => metricSignal === undefined
+      ? matchesDimensions(summary.dimensions)
+      : summary.metric === metricSignal.metric
+        && dimensionsKey(summary.dimensions) === metricSignal.dimensionsKey),
     fingerprints: snapshot.fingerprints.filter(
       (fingerprint) => fingerprint.fingerprint === incident.sourceFingerprint
         || (
@@ -1489,7 +1512,7 @@ export function renderActiveIncidents(state: ProductionWatchState): string {
       incident.severity,
       incident.state,
       incident.fingerprint.slice(0, 16),
-      incident.titleCode,
+      incident.signalCode,
       incident.firstDetectedAt,
       incident.lastDetectedAt,
       incident.owner?.sessionId ?? "—",
@@ -1831,7 +1854,7 @@ function evaluateCountCounter(
   counter: CounterSummary,
   rule: {
     ruleId: string;
-    titleCode: string;
+    signalCode: string;
     minimumCount: number;
     ratio: number;
     absoluteDelta: number;
@@ -1859,7 +1882,7 @@ function evaluateCountCounter(
     severity: counter.current >= Math.max(50, baseline * 10) ? "high" : "medium",
     category: "availability",
     source,
-    titleCode: rule.titleCode,
+    signalCode: rule.signalCode,
     observedAt,
     component: counter.dimensions.component,
     phase: counter.dimensions.phase,
@@ -1881,7 +1904,7 @@ function evaluateRateCounter(
   counter: CounterSummary,
   rule: {
     ruleId: string;
-    titleCode: string;
+    signalCode: string;
     minimumCount: number;
     minimumVolume: number;
     fixedRate: number;
@@ -1920,7 +1943,7 @@ function evaluateRateCounter(
     severity: sensitive || currentRate >= 0.1 ? "high" : "medium",
     category: sensitive ? "sensitive" : "availability",
     source,
-    titleCode: rule.titleCode,
+    signalCode: rule.signalCode,
     observedAt,
     component: counter.dimensions.component,
     phase: counter.dimensions.phase,
@@ -1949,6 +1972,9 @@ function makeAnomaly(
   },
 ): AnomalyCandidate {
   const { fingerprintMetric, fingerprintDimensions, ...candidate } = input;
+  const signalCode = fingerprintMetric === undefined || fingerprintDimensions === undefined
+    ? candidate.signalCode
+    : metricSignalCode(fingerprintMetric, fingerprintDimensions);
   const fingerprint = stableHash([
     "incident",
     candidate.ruleId,
@@ -1961,7 +1987,7 @@ function makeAnomaly(
     fingerprintMetric,
     fingerprintDimensions === undefined ? undefined : dimensionsKey(fingerprintDimensions),
   ]);
-  return { ...candidate, fingerprint };
+  return { ...candidate, signalCode, fingerprint };
 }
 
 function deduplicateAnomalies(anomalies: AnomalyCandidate[]): AnomalyCandidate[] {
@@ -2072,6 +2098,51 @@ function dimensionsKey(dimensions: Record<string, string>): string {
     .join("\u001f");
 }
 
+function metricSignalCode(metric: string, dimensions: Record<string, string>): string {
+  return [
+    metric,
+    ...Object.entries(dimensions)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => `${key}=${value}`),
+  ].join("|");
+}
+
+function parseMetricSignalCode(
+  signalCode: string,
+): { metric: string; dimensions: Record<string, string>; dimensionsKey: string } | undefined {
+  const [metric, ...dimensionParts] = signalCode.split("|");
+  if (
+    dimensionParts.length === 0
+    || (!ALLOWED_METRICS.has(metric!) && !ALLOWED_LATENCY_METRICS.has(metric!))
+  ) {
+    return undefined;
+  }
+  const dimensions: Record<string, string> = {};
+  for (const part of dimensionParts) {
+    const separator = part.indexOf("=");
+    if (separator <= 0) {
+      return undefined;
+    }
+    const key = part.slice(0, separator);
+    const value = part.slice(separator + 1);
+    if (!ALLOWED_DIMENSIONS.has(key) || dimensions[key] !== undefined || !SAFE_TOKEN_PATTERN.test(value)) {
+      return undefined;
+    }
+    dimensions[key] = value;
+  }
+  if (dimensions.source === undefined) {
+    return undefined;
+  }
+  return { metric: metric!, dimensions, dimensionsKey: dimensionsKey(dimensions) };
+}
+
+function rateDenominatorMetric(metric: string): string | undefined {
+  if (["deployment_error_count", "provider_error_count", "provider_timeout_count"].includes(metric)) {
+    return "provider_request_count";
+  }
+  return metric === "ingress_incomplete_count" ? "ingress_accepted_count" : undefined;
+}
+
 function providerRateEvidenceComplete(evidence: AdapterEvidence): boolean {
   if (evidence.status !== "ok" || evidence.auth !== "ok") {
     return false;
@@ -2157,7 +2228,7 @@ function incidentFromCandidate(candidate: AnomalyCandidate, at: string): Inciden
     automationClass: candidate.automationClass,
     source: candidate.source,
     ruleId: candidate.ruleId,
-    titleCode: candidate.titleCode,
+    signalCode: candidate.signalCode,
     ...(candidate.component === undefined ? {} : { component: candidate.component }),
     ...(candidate.phase === undefined ? {} : { phase: candidate.phase }),
     ...(candidate.errorCode === undefined ? {} : { errorCode: candidate.errorCode }),
@@ -2445,7 +2516,7 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     "sourceFingerprint",
     "staleLeaseRecoveries",
     "state",
-    "titleCode",
+    "signalCode",
     "transitions",
   ], "incident", true);
   const state = readEnum(object.state, [
@@ -2480,6 +2551,11 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     ["alert_only", "diagnosis_only", "remediation_candidate"] as const,
     "incident automationClass",
   );
+  const signalCode = readSignalCode(object.signalCode, "incident signalCode");
+  const metricSignal = parseMetricSignalCode(signalCode);
+  if (metricSignal !== undefined && metricSignal.dimensions.source !== source) {
+    throw new Error("incident_signal_source_mismatch");
+  }
   const record: IncidentRecord = {
     id: readToken(object.id, "incident id", 32),
     fingerprint: readHash(object.fingerprint, "incident fingerprint"),
@@ -2489,7 +2565,7 @@ function parseIncidentRecord(value: unknown): IncidentRecord {
     automationClass,
     source,
     ruleId: readToken(object.ruleId, "incident ruleId", 64),
-    titleCode: readToken(object.titleCode, "incident titleCode", 64),
+    signalCode,
     ...(object.component === undefined ? {} : { component: readEvidenceToken(object.component, "incident component", 64) }),
     ...(object.phase === undefined ? {} : { phase: readEvidenceToken(object.phase, "incident phase", 64) }),
     ...(object.errorCode === undefined ? {} : { errorCode: readEvidenceToken(object.errorCode, "incident errorCode", 64) }),
@@ -2699,6 +2775,20 @@ function readToken(value: unknown, label: string, maximum = 64): string {
     || value.length > maximum
     || value !== value.trim()
     || !SAFE_TOKEN_PATTERN.test(value)
+  ) {
+    throw new Error(`${normalizeToken(label)}_invalid`);
+  }
+  return value;
+}
+
+function readSignalCode(value: unknown, label: string): string {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > 512
+    || value !== value.trim()
+    || !SIGNAL_CODE_PATTERN.test(value)
+    || (value.includes("|") && parseMetricSignalCode(value) === undefined)
   ) {
     throw new Error(`${normalizeToken(label)}_invalid`);
   }

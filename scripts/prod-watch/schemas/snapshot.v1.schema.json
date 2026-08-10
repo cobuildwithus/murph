@@ -291,6 +291,12 @@
       "maxLength": 96,
       "pattern": "^[A-Za-z0-9._:/-]+$"
     },
+    "signalCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z0-9._:/=|\\-]+$"
+    },
     "dimensions": {
       "type": "object",
       "maxProperties": 6,
@@ -605,7 +611,7 @@
         "severity",
         "category",
         "source",
-        "titleCode",
+        "signalCode",
         "observedAt",
         "evidence",
         "deploymentCorrelated",
@@ -634,8 +640,8 @@
         "source": {
           "$ref": "#/$defs/source"
         },
-        "titleCode": {
-          "$ref": "#/$defs/token64"
+        "signalCode": {
+          "$ref": "#/$defs/signalCode"
         },
         "observedAt": {
           "$ref": "#/$defs/timestamp"

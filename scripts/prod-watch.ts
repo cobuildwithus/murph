@@ -66,6 +66,7 @@ const MAX_SUBPROCESS_OUTPUT_BYTES = 1 * 1_024 * 1_024;
 const SCHEDULER_INTERVAL_MS = 300_000;
 const LAUNCHD_LABEL = "com.murph.prod-watch";
 const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
+const SCHEDULER_SYSTEM_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] as const;
 const USAGE = `Usage:
   pnpm --silent prod-watch collect [--lookback-minutes 15] [--fixture healthy|suspicious] [--provider-evidence <file>] [--output -|<file>]
   pnpm --silent prod-watch run [--scheduled] [--dry-run] [--fixture healthy|suspicious] [--provider-evidence <file>]
@@ -877,7 +878,7 @@ async function renderLaunchdPlist(): Promise<string> {
   if (process.platform !== "darwin") {
     throw new Error("launchd_requires_macos");
   }
-  await verifySchedulerExecutableChain(repoRoot, process.execPath);
+  await verifySchedulerExecutableChain(repoRoot, process.execPath, os.homedir());
   const template = await readFile(schedulerTemplatePath, "utf8");
   return renderLaunchdPlistTemplate(template, repoRoot, os.homedir(), process.execPath);
 }
@@ -903,12 +904,14 @@ export function renderLaunchdPlistTemplate(
   return template
     .replaceAll("__LABEL__", xmlEscape(LAUNCHD_LABEL))
     .replaceAll("__REPO_HOME_RELATIVE__", xmlEscape(portableRepoPath))
-    .replaceAll("__NODE_EXECUTABLE__", xmlEscape(portableNodeExecutable));
+    .replaceAll("__NODE_EXECUTABLE__", xmlEscape(portableNodeExecutable))
+    .replaceAll("__SCHEDULER_PATH__", xmlEscape(schedulerShellPath()));
 }
 
 export async function verifySchedulerExecutableChain(
   repositoryRoot: string,
   nodeExecutable: string,
+  homeDirectory = os.homedir(),
 ): Promise<void> {
   const requiredPaths: Array<[string, number]> = [
     [nodeExecutable, fsConstants.X_OK],
@@ -917,12 +920,37 @@ export async function verifySchedulerExecutableChain(
     [path.join(repositoryRoot, "scripts", "prod-watch.ts"), fsConstants.R_OK],
   ];
   try {
-    await Promise.all(requiredPaths.map(async ([targetPath, mode]) => {
-      await access(targetPath, mode);
-    }));
+    await Promise.all([
+      ...requiredPaths.map(async ([targetPath, mode]) => {
+        await access(targetPath, mode);
+      }),
+      verifySchedulerDatabaseHelper(homeDirectory),
+    ]);
   } catch {
     throw new Error("scheduler_executable_chain_unavailable");
   }
+}
+
+async function verifySchedulerDatabaseHelper(homeDirectory: string): Promise<void> {
+  const candidates = schedulerExecutableDirectories(homeDirectory)
+    .map((directory) => path.join(directory, DATABASE_HELPER));
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, fsConstants.X_OK);
+      return;
+    } catch {
+      // Keep checking the fixed scheduler PATH.
+    }
+  }
+  throw new Error("scheduler_database_helper_unavailable");
+}
+
+function schedulerExecutableDirectories(homeDirectory: string): string[] {
+  return [path.join(homeDirectory, ".local", "bin"), ...SCHEDULER_SYSTEM_PATHS];
+}
+
+function schedulerShellPath(): string {
+  return ["$HOME/.local/bin", ...SCHEDULER_SYSTEM_PATHS].join(":");
 }
 
 function launchdShellPath(targetPath: string, homeDirectory: string): string {

@@ -31,11 +31,11 @@ Use this skill only for Murph production-watch runs and incidents.
    pnpm --silent prod-watch run --scheduled --provider-evidence "$PROVIDER_EVIDENCE_FILE"
    ```
 
-5. Remove the temporary provider envelope after the merge completes or fails. A `partial` snapshot is not healthy. Missing provider evidence must stay explicit.
+5. Remove the temporary provider envelope after the merge completes or fails. A `partial` snapshot is not healthy. Missing provider evidence must stay explicit. Only fresh, complete, authenticated, successful source evidence may contribute production counters, latency, fingerprints, or provider release context; degraded, partial, stale, failed, or unauthenticated evidence contributes monitor-health incidents only.
 
 ## Incident triage
 
-- List active incidents with `pnpm --silent prod-watch incident list` and use the displayed Incident ID for every subsequent command.
+- List active incidents with `pnpm --silent prod-watch incident list` and use the displayed Incident ID for every subsequent command. The Signal column carries the redacted canonical metric and exact dimensions (for example `provider_error_count|source=vercel|surface=hosted_web`) so simultaneous surfaces remain distinguishable.
 - Claim every incident before handling it:
 
   ```sh
@@ -48,7 +48,7 @@ Use this skill only for Murph production-watch runs and incidents.
   pnpm --silent prod-watch incident heartbeat "$INCIDENT" --session-id "$CODEX_THREAD_ID"
   ```
 
-- Database incidents support the narrowest bounded drill-down:
+- Database incidents support the narrowest bounded drill-down. Metric-rate drill-down retains only the incident's exact dimensions plus its numerator and matching denominator:
 
   ```sh
   pnpm --silent prod-watch drill-down "$INCIDENT" --session-id "$CODEX_THREAD_ID" --lookback-minutes 60

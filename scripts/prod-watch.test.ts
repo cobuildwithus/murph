@@ -1,5 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -391,6 +404,120 @@ describe("production-watch snapshot contract", () => {
     ));
     expect(simultaneousVercel).toHaveLength(3);
     expect(new Set(simultaneousVercel.map((candidate) => candidate.fingerprint)).size).toBe(3);
+    expect(simultaneousVercel.map((candidate) => candidate.signalCode)).toEqual(expect.arrayContaining([
+      "deployment_error_count|source=vercel|surface=hosted_web",
+      "provider_error_count|source=vercel|surface=api",
+      "provider_error_count|source=vercel|surface=hosted_web",
+    ]));
+
+    let simultaneousState = createInitialState(
+      new Date("2026-08-09T20:10:00.000Z"),
+      ["database", "vercel", "cloudflare", "stripe"],
+    );
+    simultaneousState = updateStateFromSnapshot(simultaneousState, simultaneous).state;
+    const repeated = structuredClone(simultaneous) as ProductionWatchSnapshot;
+    repeated.generatedAt = "2026-08-09T20:20:00.000Z";
+    repeated.run.runId = "provider-surface-repeat";
+    repeated.run.startedAt = "2026-08-09T20:19:59.900Z";
+    repeated.run.finishedAt = repeated.generatedAt;
+    simultaneousState = updateStateFromSnapshot(simultaneousState, repeated).state;
+    const rendered = renderActiveIncidents(simultaneousState);
+    expect(rendered).toContain("surface=api");
+    expect(rendered).toContain("surface=hosted_web");
+  });
+
+  it("scores production anomalies only from fresh complete successful source evidence", () => {
+    type EvidenceMode = "degraded" | "failed" | "fresh" | "stale" | "unauthenticated" | "unavailable";
+    const makeSnapshot = (mode: EvidenceMode, now: Date): ProductionWatchSnapshot => {
+      const provider = parseProviderEvidence(JSON.parse(
+        readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+      ) as unknown);
+      const evidences = provider.sources.map((source) => rebaseEvidence(source, now));
+      const vercel = evidences.find((source) => source.source === "vercel")!;
+      const errors = vercel.counters.find((counter) => counter.metric === "provider_error_count")!;
+      errors.current = 20;
+      errors.previous = 1;
+      const failures = [] as Array<{
+        source: "vercel";
+        class: "rate_limit";
+        code: string;
+        retryable: boolean;
+      }>;
+      if (mode === "degraded") {
+        vercel.status = "degraded";
+        failures.push({ source: "vercel", class: "rate_limit", code: "rate_limited", retryable: true });
+      } else if (mode === "failed") {
+        failures.push({ source: "vercel", class: "rate_limit", code: "rate_limited", retryable: true });
+      } else if (mode === "stale") {
+        vercel.collectedAt = new Date(now.getTime() - 1_901_000).toISOString();
+        vercel.freshnessSeconds = 1_901;
+      } else if (mode === "unauthenticated") {
+        vercel.auth = "failed";
+      } else if (mode === "unavailable") {
+        vercel.status = "unavailable";
+        vercel.auth = "unknown";
+        vercel.releaseContext = [];
+        vercel.counters = [];
+        vercel.latency = [];
+        vercel.fingerprints = [];
+      }
+      return buildSnapshot({
+        now,
+        runId: `${mode}-${now.toISOString()}`,
+        mode: "collect",
+        dryRun: true,
+        startedAt: new Date(now.getTime() - 100),
+        timeoutMs: 240000,
+        skippedOverlap: false,
+        previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+        currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+        end: now,
+        lookbackMinutes: 15,
+        settlingDelaySeconds: 0,
+        configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+        evidences: [rebaseEvidence(readFixture("healthy"), now), ...evidences],
+        failures,
+      });
+    };
+
+    for (const mode of ["degraded", "failed", "stale", "unauthenticated", "unavailable"] as const) {
+      const first = makeSnapshot(mode, new Date("2026-08-09T20:00:00.000Z"));
+      const second = makeSnapshot(mode, new Date("2026-08-09T20:05:00.000Z"));
+      const vercelCandidates = first.anomalyCandidates.filter((candidate) => candidate.source === "vercel");
+      expect(vercelCandidates.length).toBeGreaterThan(0);
+      expect(vercelCandidates.every((candidate) => candidate.category === "monitor")).toBe(true);
+      expect(first.counters.some((counter) => counter.dimensions.source === "vercel")).toBe(false);
+      expect(first.latency.some((summary) => summary.dimensions.source === "vercel")).toBe(false);
+      expect(first.fingerprints.some((fingerprint) => fingerprint.source === "vercel")).toBe(false);
+      expect(first.releaseContext.some((release) => release.source === "vercel")).toBe(false);
+      let state = createInitialState(
+        new Date("2026-08-09T19:55:00.000Z"),
+        ["database", "vercel", "cloudflare", "stripe"],
+      );
+      state = updateStateFromSnapshot(state, first).state;
+      state = updateStateFromSnapshot(state, second).state;
+      const vercelIncidents = state.incidents.filter((incident) => incident.source === "vercel");
+      expect(vercelIncidents.length).toBeGreaterThan(0);
+      expect(vercelIncidents.every((incident) => incident.category === "monitor")).toBe(true);
+    }
+
+    const firstFresh = makeSnapshot("fresh", new Date("2026-08-09T20:00:00.000Z"));
+    const secondFresh = makeSnapshot("fresh", new Date("2026-08-09T20:05:00.000Z"));
+    expect(firstFresh.anomalyCandidates).toContainEqual(expect.objectContaining({
+      source: "vercel",
+      ruleId: "error_rate_regression",
+      signalCode: "provider_error_count|source=vercel|surface=hosted_web",
+    }));
+    let freshState = createInitialState(
+      new Date("2026-08-09T19:55:00.000Z"),
+      ["database", "vercel", "cloudflare", "stripe"],
+    );
+    freshState = updateStateFromSnapshot(freshState, firstFresh).state;
+    freshState = updateStateFromSnapshot(freshState, secondFresh).state;
+    expect(freshState.incidents).toContainEqual(expect.objectContaining({
+      source: "vercel",
+      ruleId: "error_rate_regression",
+    }));
   });
 
   it("treats clinical, consent, and integrity code paths as sensitive", () => {
@@ -563,7 +690,7 @@ describe("production-watch incident coordination", () => {
       ...primary!,
       fingerprint: "f".repeat(64),
       source: "vercel",
-      titleCode: "unrelated_vercel_signal",
+      signalCode: "unrelated_vercel_signal",
     });
     const promoted = buildPromotedSuspiciousState();
     const incident = promoted.incidents.find((candidate) => candidate.fingerprint === primary!.fingerprint);
@@ -572,6 +699,73 @@ describe("production-watch incident coordination", () => {
     const filtered = filterSnapshotForIncident(snapshot, incident!);
     expect(filtered.anomalyCandidates.map((candidate) => candidate.fingerprint))
       .toEqual([primary!.fingerprint]);
+  });
+
+  it("keeps metric incident labels and database drill-down scoped to the exact signal", () => {
+    const buildIngressSnapshot = (now: Date): ProductionWatchSnapshot => {
+      const evidence = readFixture("suspicious");
+      const linqCounters = evidence.counters.filter((counter) => (
+        ["ingress_accepted_count", "ingress_incomplete_count"].includes(counter.metric)
+        && counter.dimensions.surface === "linq"
+      ));
+      evidence.counters.push(...linqCounters.map((counter) => ({
+        ...counter,
+        dimensions: { ...counter.dimensions, surface: "telegram" },
+      })));
+      return buildSnapshot({
+        now,
+        runId: `database-ingress-${now.toISOString()}`,
+        mode: "collect",
+        dryRun: true,
+        startedAt: new Date(now.getTime() - 100),
+        timeoutMs: 240000,
+        skippedOverlap: false,
+        previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+        currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+        end: now,
+        lookbackMinutes: 15,
+        settlingDelaySeconds: 0,
+        configuredSources: ["database"],
+        evidences: [rebaseEvidence(evidence, now)],
+        failures: [],
+      });
+    };
+
+    const first = buildIngressSnapshot(new Date("2026-08-09T20:00:00.000Z"));
+    const second = buildIngressSnapshot(new Date("2026-08-09T20:05:00.000Z"));
+    let state = createInitialState(new Date("2026-08-09T19:55:00.000Z"), ["database"]);
+    state = updateStateFromSnapshot(state, first).state;
+    state = updateStateFromSnapshot(state, second).state;
+    const ingressIncidents = state.incidents.filter((incident) => (
+      incident.ruleId === "timeout_rate_regression"
+    ));
+    expect(ingressIncidents).toHaveLength(2);
+    const linq = ingressIncidents.find((incident) => incident.signalCode.includes("surface=linq"));
+    const telegram = ingressIncidents.find((incident) => incident.signalCode.includes("surface=telegram"));
+    expect(linq).toBeDefined();
+    expect(telegram).toBeDefined();
+
+    const sourceMismatch = structuredClone(state);
+    sourceMismatch.incidents.find((incident) => incident.fingerprint === linq!.fingerprint)!
+      .signalCode = linq!.signalCode.replace("source=database", "source=vercel");
+    expect(() => parseState(sourceMismatch)).toThrow("incident_signal_source_mismatch");
+
+    for (const [incident, surface] of [[linq!, "linq"], [telegram!, "telegram"]] as const) {
+      const filtered = filterSnapshotForIncident(second, incident);
+      expect(filtered.counters.map((counter) => counter.metric).sort()).toEqual([
+        "ingress_accepted_count",
+        "ingress_incomplete_count",
+      ]);
+      expect(filtered.counters.every((counter) => counter.dimensions.surface === surface)).toBe(true);
+      expect(filtered.anomalyCandidates.map((candidate) => candidate.fingerprint))
+        .toEqual([incident.fingerprint]);
+    }
+
+    const fingerprintIncident = state.incidents.find((incident) => incident.sourceFingerprint !== undefined);
+    expect(fingerprintIncident).toBeDefined();
+    const fingerprintDrillDown = filterSnapshotForIncident(second, fingerprintIncident!);
+    expect(fingerprintDrillDown.fingerprints.map((fingerprint) => fingerprint.fingerprint))
+      .toEqual([fingerprintIncident!.sourceFingerprint]);
   });
 
   it("does not downgrade a durable escalation when its triage lease expires", () => {
@@ -1465,6 +1659,7 @@ describe("production-watch static safety contracts", () => {
     expect(template).toContain("murph-prod-watch-managed:v1");
     expect(template).toContain("__REPO_HOME_RELATIVE__");
     expect(template).toContain("__NODE_EXECUTABLE__");
+    expect(template).toContain("__SCHEDULER_PATH__");
     expect(template).toContain("<string>-c</string>");
     expect(template).not.toContain("<string>-lc</string>");
     expect(template).not.toContain("exec pnpm");
@@ -1480,31 +1675,86 @@ describe("production-watch static safety contracts", () => {
     );
     expect(rendered).toContain("$HOME/project");
     expect(rendered).toContain("$HOME/tools/node");
+    expect(rendered).toContain("$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
     expect(rendered).toContain("node_modules/tsx/dist/cli.mjs");
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
     expect(rendered).not.toContain("exec pnpm");
     expect(rendered).not.toContain(fakeHome);
     expect(() => renderLaunchdPlistTemplate(template, path.join(fakeHome, "..", "project"), fakeHome))
       .toThrow("scheduler_repo_path_unsafe");
-    await expect(verifySchedulerExecutableChain(repoRoot, path.join(fakeHome, "missing-node")))
+    await expect(verifySchedulerExecutableChain(repoRoot, path.join(fakeHome, "missing-node"), fakeHome))
+      .rejects.toThrow("scheduler_executable_chain_unavailable");
+    await expect(verifySchedulerExecutableChain(repoRoot, process.execPath, fakeHome))
       .rejects.toThrow("scheduler_executable_chain_unavailable");
   });
 
   it.runIf(process.platform === "darwin")(
     "runs the rendered scheduler command under a minimal launchd environment",
-    () => {
-      const testRoot = makeTempRoot();
-      const schedulerHome = path.parse(repoRoot).root;
+    async () => {
+      const testRoot = realpathSync(makeTempRoot());
+      const schedulerHome = path.join(testRoot, "home");
+      const checkoutRoot = path.join(schedulerHome, "project");
       const runtimeRoot = path.join(testRoot, "runtime");
       const plistPath = path.join(testRoot, "scheduler.plist");
+      const helperRoot = path.join(schedulerHome, ".local", "bin");
+      mkdirSync(path.join(checkoutRoot, "scripts", "prod-watch"), { recursive: true });
+      mkdirSync(path.join(checkoutRoot, "node_modules"), { recursive: true });
+      mkdirSync(helperRoot, { recursive: true });
+      for (const relativePath of [
+        "package.json",
+        "tsconfig.base.json",
+        "tsconfig.tools.json",
+        "scripts/prod-watch.ts",
+        "scripts/prod-watch/core.ts",
+        "scripts/prod-watch/collect-v1.sql",
+      ]) {
+        copyFileSync(path.join(repoRoot, relativePath), path.join(checkoutRoot, relativePath));
+      }
+      cpSync(
+        path.join(repoRoot, "node_modules", "tsx"),
+        path.join(checkoutRoot, "node_modules", "tsx"),
+        { recursive: true, dereference: true },
+      );
+      const tsxStoreModules = path.dirname(
+        realpathSync(path.join(repoRoot, "node_modules", "tsx")),
+      );
+      for (const dependency of ["esbuild", "get-tsconfig"]) {
+        symlinkSync(
+          realpathSync(path.join(tsxStoreModules, dependency)),
+          path.join(checkoutRoot, "node_modules", dependency),
+          "dir",
+        );
+      }
+      const helperScriptPath = path.join(helperRoot, "helper.cjs");
+      writeFileSync(helperScriptPath, [
+        "const { readFileSync } = require('node:fs');",
+        "const evidence = JSON.parse(readFileSync(process.env.TEST_DATABASE_FIXTURE, 'utf8'));",
+        "const flags = Object.fromEntries(process.argv.slice(2).filter((value) => value.startsWith('--set=')).map((value) => { const split = value.slice(6).indexOf('='); return [value.slice(6, 6 + split), value.slice(7 + split)]; }));",
+        "evidence.collectedAt = flags.window_end;",
+        "evidence.freshnessSeconds = 0;",
+        "evidence.releaseContext = [];",
+        "evidence.fingerprints = [];",
+        "process.stdout.write(`${JSON.stringify(evidence)}\\n`);",
+        "",
+      ].join("\n"), { mode: 0o600 });
+      const helperPath = path.join(helperRoot, "murph-prod-psql-ro");
+      writeFileSync(helperPath, [
+        "#!/bin/sh",
+        "cat >/dev/null",
+        "exec \"$TEST_NODE_EXECUTABLE\" \"$HOME/.local/bin/helper.cjs\" \"$@\"",
+        "",
+      ].join("\n"), { mode: 0o755 });
+      chmodSync(helperPath, 0o755);
       const template = readFileSync(
         path.join(repoRoot, "scripts", "prod-watch", "com.murph.prod-watch.plist.template"),
         "utf8",
       );
       writeFileSync(
         plistPath,
-        renderLaunchdPlistTemplate(template, repoRoot, schedulerHome, process.execPath),
+        renderLaunchdPlistTemplate(template, checkoutRoot, schedulerHome, process.execPath),
       );
+      await expect(verifySchedulerExecutableChain(checkoutRoot, process.execPath, schedulerHome))
+        .resolves.toBeUndefined();
       const commandResult = spawnSync(
         "/usr/libexec/PlistBuddy",
         ["-c", "Print :ProgramArguments:2", plistPath],
@@ -1512,20 +1762,35 @@ describe("production-watch static safety contracts", () => {
       );
       expect(commandResult.status).toBe(0);
       const run = spawnSync("/bin/zsh", ["-c", commandResult.stdout.trim()], {
-        cwd: schedulerHome,
+        cwd: path.parse(checkoutRoot).root,
         encoding: "utf8",
         env: {
           HOME: schedulerHome,
           PATH: "/usr/bin:/bin",
-          TMPDIR: os.tmpdir(),
+          TMPDIR: realpathSync(os.tmpdir()),
           NODE_ENV: "test",
           MURPH_PROD_WATCH_TEST_RUNTIME_ROOT: runtimeRoot,
+          TEST_DATABASE_FIXTURE: path.join(fixtureRoot, "healthy.database.json"),
+          TEST_NODE_EXECUTABLE: process.execPath,
         },
         timeout: 30_000,
       });
-      expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
+      const schedulerFailureCode = run.stderr
+        .replaceAll(os.homedir(), "<HOME_DIR>")
+        .trim() || "rendered_scheduler_command_failed";
+      expect(run.status, schedulerFailureCode).toBe(0);
       expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json")))
         .toBe(true);
+      const snapshot = JSON.parse(readFileSync(
+        path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"),
+        "utf8",
+      )) as ProductionWatchSnapshot;
+      expect(snapshot.sourceHealth.find((source) => source.source === "database")).toMatchObject({
+        status: "ok",
+        coverage: "complete",
+      });
+      expect(snapshot.collectorFailures.some((failure) => failure.code === "helper_not_found"))
+        .toBe(false);
     },
   );
 
@@ -1541,10 +1806,15 @@ describe("production-watch static safety contracts", () => {
       const launchctlState = path.join(testRoot, "launchctl.state");
       const launchAgentsRoot = path.join(fakeHome, "Library", "LaunchAgents");
       const plistPath = path.join(launchAgentsRoot, "com.murph.prod-watch.plist");
+      const schedulerHelperRoot = path.join(fakeHome, ".local", "bin");
+      const schedulerHelperPath = path.join(schedulerHelperRoot, "murph-prod-psql-ro");
       mkdirSync(fakeHome, { recursive: true });
       mkdirSync(binRoot, { recursive: true });
       mkdirSync(launchAgentsRoot, { recursive: true });
+      mkdirSync(schedulerHelperRoot, { recursive: true });
       symlinkSync(repoRoot, checkoutRoot, "dir");
+      writeFileSync(schedulerHelperPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      chmodSync(schedulerHelperPath, 0o755);
 
       const launchctlPath = path.join(binRoot, "launchctl");
       writeFileSync(
@@ -1597,6 +1867,19 @@ describe("production-watch static safety contracts", () => {
 
       writeFileSync(plistPath, "<!-- murph-prod-watch-managed:v1 -->\n", { mode: 0o600 });
       writeFileSync(launchctlState, "loaded\n");
+      rmSync(schedulerHelperPath);
+      const missingHelperInstall = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        sharedEnv,
+      );
+      expect(missingHelperInstall.status).toBe(1);
+      expect(missingHelperInstall.stderr).toContain("scheduler_executable_chain_unavailable");
+      expect(readFileSync(plistPath, "utf8")).toContain("murph-prod-watch-managed:v1");
+      expect(existsSync(launchctlLog)).toBe(false);
+      writeFileSync(schedulerHelperPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      chmodSync(schedulerHelperPath, 0o755);
       const replacement = runProdWatchFromCheckout(
         ["scheduler", "install"],
         runtimeRoot,
