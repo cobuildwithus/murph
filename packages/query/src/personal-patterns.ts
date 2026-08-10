@@ -1,4 +1,7 @@
-import { normalizeActivityKindToken } from "@murphai/contracts";
+import {
+  isValidIanaTimeZone,
+  normalizeActivityKindToken,
+} from "@murphai/contracts";
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import type { VaultReadModel } from "./read-model.ts";
@@ -7,6 +10,7 @@ import type {
   WearableResolvedMetric,
   WearableSummaryBundle,
 } from "./wearables.ts";
+import { resolveWearableSleepAnalysisDate } from "./wearables/sleep-pattern.ts";
 
 const DEFAULT_WINDOW_DAYS = 120;
 const MAX_FACTORS = 6;
@@ -115,32 +119,46 @@ export function buildPersonalPatternReportFromWearableBundle(
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
   const factorAccumulators = collectFactorAccumulators(vault.events, fromDate, asOfDate);
-  const factors = collectFactors(factorAccumulators)
-    .sort((left, right) =>
-      right.observedDays - left.observedDays || left.label.localeCompare(right.label)
-    )
-    .slice(0, MAX_FACTORS);
+  const candidateFactors = collectFactors(factorAccumulators)
+    .filter((factor) => factor.observedDays >= MIN_MATCHED_DAYS);
   const factorDatesById = new Map(
     [...factorAccumulators.values()].map((factor) => [factor.token, factor.dates] as const),
   );
-  const outcomes = collectOutcomeSeries(wearableBundle, fromDate, addDays(asOfDate, 1));
-  const cells = factors.flatMap((factor) =>
+  const outcomes = collectOutcomeSeries(
+    wearableBundle,
+    fromDate,
+    addDays(asOfDate, 1),
+    readVaultTimeZone(vault),
+  );
+  const candidateCells = candidateFactors.flatMap((factor) =>
     outcomes.map((outcome) => buildPatternCell(
       factor,
       factorDatesById.get(factor.id) ?? new Set<string>(),
       outcome,
     ))
   );
-  const testedCells = cells.filter((cell) => cell.stage !== "insufficient");
-  const visibleFactorIds = new Set(testedCells.map((cell) => cell.factorId));
+  const eligibleFactorIds = new Set(
+    candidateCells
+      .filter((cell) => cell.stage !== "insufficient")
+      .map((cell) => cell.factorId),
+  );
+  const factors = candidateFactors
+    .filter((factor) => eligibleFactorIds.has(factor.id))
+    .sort((left, right) =>
+      right.observedDays - left.observedDays || left.label.localeCompare(right.label)
+    )
+    .slice(0, MAX_FACTORS);
+  const visibleFactorIds = new Set(factors.map((factor) => factor.id));
+  const selectedCells = candidateCells.filter((cell) => visibleFactorIds.has(cell.factorId));
+  const testedCells = selectedCells.filter((cell) => cell.stage !== "insufficient");
   const visibleOutcomeIds = new Set(testedCells.map((cell) => cell.outcomeId));
 
   return {
     asOfDate,
-    cells: cells.filter((cell) =>
+    cells: selectedCells.filter((cell) =>
       visibleFactorIds.has(cell.factorId) && visibleOutcomeIds.has(cell.outcomeId)
     ),
-    factors: factors.filter((factor) => visibleFactorIds.has(factor.id)),
+    factors,
     lagDays: 1,
     notes: [
       "Each cell compares an action day with the next day's outcome.",
@@ -246,14 +264,18 @@ function collectOutcomeSeries(
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
   fromDate: string,
   toDate: string,
+  fallbackTimeZone: string | null,
 ): OutcomeSeries[] {
-  const sleep = wearableBundle.sleepNights.filter((day) => day.date >= fromDate && day.date <= toDate);
+  const sleep = wearableBundle.sleepNights.filter((day) => {
+    const outcomeDate = resolveWearableSleepAnalysisDate(day, fallbackTimeZone);
+    return outcomeDate >= fromDate && outcomeDate <= toDate;
+  });
   const recovery = wearableBundle.recoveryDays.filter((day) => day.date >= fromDate && day.date <= toDate);
 
   return [
-    outcome("total-sleep", "Total sleep", "min", 15, 0.03, sleep, (day) => day.totalSleepMinutes),
-    outcome("sleep-score", "Sleep score", "score", 3, 0.03, sleep, (day) => day.sleepScore),
-    outcome("sleep-efficiency", "Sleep efficiency", "%", 2, 0.02, sleep, (day) => day.sleepEfficiency),
+    outcome("total-sleep", "Total sleep", "min", 15, 0.03, sleep, (day) => day.totalSleepMinutes, (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone)),
+    outcome("sleep-score", "Sleep score", "score", 3, 0.03, sleep, (day) => day.sleepScore, (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone)),
+    outcome("sleep-efficiency", "Sleep efficiency", "%", 2, 0.02, sleep, (day) => day.sleepEfficiency, (day) => resolveWearableSleepAnalysisDate(day, fallbackTimeZone)),
     outcome("recovery-score", "Recovery score", "score", 3, 0.03, recovery, (day) => day.recoveryScore),
     outcome("readiness-score", "Readiness score", "score", 3, 0.03, recovery, (day) => day.readinessScore),
     outcome("hrv", "HRV", "ms", 2, 0.05, recovery, (day) => day.hrv),
@@ -269,15 +291,21 @@ function outcome<T extends { date: string }>(
   meaningfulRelativeDelta: number,
   days: readonly T[],
   select: (day: T) => WearableResolvedMetric,
+  selectDate: (day: T) => string = (day) => day.date,
 ): OutcomeSeries {
   const values = new Map<string, number>();
   for (const day of days) {
     const metric = select(day);
     const value = metric.selection.value;
     if (value === null || metric.confidence.level === "none") continue;
-    values.set(day.date, value);
+    values.set(selectDate(day), value);
   }
   return { id, label, meaningfulAbsoluteDelta, meaningfulRelativeDelta, unit, values };
+}
+
+function readVaultTimeZone(vault: VaultReadModel): string | null {
+  const value = vault.metadata?.timezone;
+  return typeof value === "string" && isValidIanaTimeZone(value) ? value : null;
 }
 
 function buildPatternCell(

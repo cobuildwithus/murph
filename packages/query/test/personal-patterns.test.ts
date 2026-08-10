@@ -68,6 +68,153 @@ test("Personal Patterns keeps a repeated next-day link and matched comparison ev
   assert.deepEqual(parsed.personalPatterns, report);
 });
 
+test("Personal Patterns qualifies factors before applying the six-row display cap", () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const dailyFactors = ["breathwork", "journaling", "meditation", "mobility", "stretching", "walking"];
+  const entities: CanonicalEntity[] = [
+    ...Array.from({ length: 112 }, (_, dayIndex) =>
+      dailyFactors.map((activityType, factorIndex) =>
+        event(`daily_${factorIndex}_${dayIndex}`, addDays(start, dayIndex), "activity_session", { activityType })
+      )
+    ).flat(),
+    ...runningDates.map((date, index) => event(`run_cap_${index}`, date, "activity_session", {
+      activityType: "running",
+    })),
+    ...Array.from({ length: 112 }, (_, index) => {
+      const date = addDays(start, index);
+      return observation(
+        `hrv_cap_${index}`,
+        date,
+        "hrv",
+        runningDates.includes(addDays(date, -1)) ? 70 : 50,
+        "ms",
+      );
+    }),
+  ];
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities,
+    vaultRoot: "test://personal-pattern-cap",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+
+  assert.deepEqual(report.factors.map((factor) => factor.id), ["running"]);
+  assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+});
+
+test("Personal Patterns anchors sleep outcomes to the localized sleep-end date in direct and runtime reads", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-personal-pattern-sleep-date-"));
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const canonicalEntities: CanonicalEntity[] = runningDates.map((date, index) =>
+    event(`run_sleep_${index}`, date, "activity_session", { activityType: "running" })
+  );
+  const ledgerEvents: Array<Record<string, unknown>> = runningDates.map((date, index) => ({
+    activityType: "running",
+    dayKey: date,
+    id: `evt_sleep_date_run_${index}`,
+    kind: "activity_session",
+    occurredAt: `${date}T12:00:00.000Z`,
+    schemaVersion: "murph.event.v1",
+    source: "manual",
+    title: "Running",
+  }));
+
+  for (let index = 0; index < 112; index += 1) {
+    const localEndDate = addDays(start, index);
+    const storedDate = addDays(localEndDate, -1);
+    const sleepScore = runningDates.includes(addDays(localEndDate, -1)) ? 90 : 70;
+    const sleepAttributes = {
+      durationMinutes: 480,
+      endAt: `${storedDate}T23:00:00.000Z`,
+      externalRef: {
+        resourceId: `sleep-date-${index}`,
+        resourceType: "sleep",
+        system: "oura",
+      },
+      sleepType: "main_sleep",
+      startAt: `${storedDate}T15:00:00.000Z`,
+      timeZone: "Asia/Tokyo",
+    };
+    canonicalEntities.push(
+      event(`sleep_date_${index}`, storedDate, "sleep_session", sleepAttributes),
+      observation(`sleep_score_date_${index}`, storedDate, "sleep-score", sleepScore, "score"),
+    );
+    ledgerEvents.push(
+      {
+        dayKey: storedDate,
+        id: `evt_sleep_date_${index}`,
+        kind: "sleep_session",
+        occurredAt: sleepAttributes.startAt,
+        recordedAt: sleepAttributes.endAt,
+        schemaVersion: "murph.event.v1",
+        source: "device",
+        title: "Provider sleep session",
+        ...sleepAttributes,
+      },
+      {
+        dayKey: storedDate,
+        externalRef: {
+          resourceId: `sleep-score-date-${index}`,
+          resourceType: "daily-summary",
+          system: "oura",
+        },
+        id: `evt_sleep_score_date_${index}`,
+        kind: "observation",
+        metric: "sleep-score",
+        observationGrain: "daily-summary",
+        occurredAt: `${storedDate}T23:00:00.000Z`,
+        recordedAt: `${storedDate}T23:05:00.000Z`,
+        schemaVersion: "murph.event.v1",
+        source: "device",
+        title: "Sleep score",
+        unit: "score",
+        value: sleepScore,
+      },
+    );
+  }
+
+  const direct = buildPersonalPatternReport(createVaultReadModel({
+    entities: canonicalEntities,
+    metadata: { timezone: "UTC" },
+    vaultRoot: "test://personal-pattern-sleep-date",
+  }), {
+    asOf: "2026-04-27T12:00:00.000Z",
+  });
+  const directCell = direct.cells.find((cell) => cell.outcomeId === "sleep-score");
+  assert.ok(directCell);
+  assert.equal(directCell.exposedMean, 90);
+  assert.equal(directCell.comparisonMean, 70);
+  assert.equal(directCell.stage, "seen_again");
+
+  try {
+    await mkdir(path.join(vaultRoot, "ledger/events/2026"), { recursive: true });
+    await writeFile(path.join(vaultRoot, "vault.json"), `${JSON.stringify({
+      createdAt: "2026-01-01T00:00:00.000Z",
+      formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+      timezone: "UTC",
+      title: "Personal Patterns localized sleep fixture",
+      vaultId: "vault_01JNV40W8VFYQ2H7CMJY5A9R4S",
+    })}\n`, "utf8");
+    await writeFile(
+      path.join(vaultRoot, "ledger/events/2026/2026-01.jsonl"),
+      `${ledgerEvents.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+      "utf8",
+    );
+    await rebuildQueryProjection(vaultRoot);
+
+    const runtime = await buildPersonalPatternReportRuntime(vaultRoot, { asOf: "2026-04-27" });
+    const runtimeCell = runtime.cells.find((cell) => cell.outcomeId === "sleep-score");
+    assert.ok(runtimeCell);
+    assert.equal(runtimeCell.exposedMean, directCell.exposedMean);
+    assert.equal(runtimeCell.comparisonMean, directCell.comparisonMean);
+    assert.equal(runtimeCell.stage, directCell.stage);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
 test("Personal Patterns reports a tested but unclear link without calling it a finding", () => {
   const start = "2026-01-05";
   const saunaDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));

@@ -58,6 +58,19 @@ export interface WearableSleepPatternBuildContext {
   >;
 }
 
+export function resolveWearableSleepAnalysisDate(
+  night: Pick<WearableSleepNight, "date" | "sleepEndAt" | "timeZone">,
+  fallbackTimeZone: string | null,
+): string {
+  const canonicalTimeZone = typeof night.timeZone === "string" && isValidIanaTimeZone(night.timeZone)
+    ? night.timeZone
+    : null;
+  const timeZone = canonicalTimeZone ?? fallbackTimeZone;
+  const endAt = typeof night.sleepEndAt === "string" ? night.sleepEndAt : null;
+  if (!timeZone || !endAt || !Number.isFinite(Date.parse(endAt))) return night.date;
+  return formatTimeZoneDateTimeParts(endAt, timeZone).dayKey;
+}
+
 /**
  * Sleep rows are stored under a provider date, while pattern membership is
  * anchored to the sleep end localized in the night's canonical/reporting zone.
@@ -301,7 +314,7 @@ function prepareSleepNight(
   const recordedAtMs = recordedAt ? Date.parse(recordedAt) : Number.NaN;
 
   return {
-    analysisDate: endParts?.dayKey ?? night.date,
+    analysisDate: resolveWearableSleepAnalysisDate(night, explicitReportingTimeZone),
     awakeMinutes: directMetricValue(night.awakeMinutes),
     bedtimeMinutes: startParts ? startParts.hour * 60 + startParts.minute : null,
     endAt,

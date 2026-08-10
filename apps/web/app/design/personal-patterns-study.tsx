@@ -52,8 +52,22 @@ export function PersonalPatternsStudy() {
       id="personal-patterns"
       inert
     >
-      <PersonalPatternsSection report={POPULATED_REPORT} />
-      <PersonalPatternsSection report={EMPTY_REPORT} />
+      <div data-design-state="populated">
+        <PersonalPatternsSection report={POPULATED_REPORT} />
+      </div>
+      <div data-design-state="empty">
+        <PersonalPatternsSection report={EMPTY_REPORT} />
+      </div>
+      <div data-design-state="loading">
+        <PersonalPatternsSection report={null} state="loading" />
+      </div>
+      <div data-design-state="error">
+        <PersonalPatternsSection
+          error="We couldn't unlock your pattern data right now."
+          report={null}
+          state="error"
+        />
+      </div>
     </div>
   );
 }

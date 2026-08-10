@@ -15,6 +15,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/src/components/ui/tooltip";
+import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
+import { Button } from "@/src/components/ui/button";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/src/components/ui/card";
 import { cn } from "@/src/lib/utils";
 
 const STAGE_LABELS: Record<PersonalPatternStage, string> = {
@@ -34,10 +37,43 @@ const STAGE_RANK: Record<PersonalPatternStage, number> = {
 };
 
 export function PersonalPatternsSection({
+  error,
+  onRetry,
   report,
+  state = "ready",
 }: {
+  error?: string | null;
+  onRetry?: () => void;
   report: PersonalPatternReport | null;
+  state?: "error" | "loading" | "ready";
 }) {
+  if (state === "loading") {
+    return (
+      <Card aria-live="polite" role="status">
+        <CardHeader>
+          <CardTitle>Preparing your patterns</CardTitle>
+          <CardDescription>
+            Murph is loading the latest comparisons from your private health data.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (state === "error") {
+    return (
+      <Alert variant="destructive">
+        <AlertTitle>Could not load your patterns</AlertTitle>
+        <AlertDescription>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{error ?? "We couldn't unlock your pattern data right now."}</span>
+            <Button size="sm" variant="outline" onClick={onRetry}>Retry</Button>
+          </div>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
   const lead = report ? findLeadCell(report) : null;
 
   return (
@@ -193,7 +229,14 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
                   );
                   return (
                     <div key={outcome.id} className="flex justify-center px-3 py-4">
-                      {cell ? <PatternBubble cell={cell} outcomeUnit={outcome.unit} /> : <span className="text-xs text-muted-foreground">Not enough</span>}
+                      {cell ? (
+                        <PatternBubble
+                          cell={cell}
+                          factorLabel={factor.label}
+                          outcomeLabel={outcome.label}
+                          outcomeUnit={outcome.unit}
+                        />
+                      ) : <span className="text-xs text-muted-foreground">Not enough</span>}
                     </div>
                   );
                 })}
@@ -216,9 +259,13 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
 
 function PatternBubble({
   cell,
+  factorLabel,
+  outcomeLabel,
   outcomeUnit,
 }: {
   cell: PersonalPatternCell;
+  factorLabel: string;
+  outcomeLabel: string;
   outcomeUnit: string;
 }) {
   if (cell.stage === "insufficient") {
@@ -232,7 +279,7 @@ function PatternBubble({
   const label = cell.deltaPercent === null || isFlat
     ? "No clear pattern"
     : `${cell.deltaPercent > 0 ? "+" : ""}${formatPercent(cell.deltaPercent)}`;
-  const accessibleLabel = `${STAGE_LABELS[cell.stage]}. ${label}. ${cell.exposedDays} matched action days.`;
+  const accessibleLabel = `${factorLabel}, next-day ${outcomeLabel}. ${STAGE_LABELS[cell.stage]}. ${label}. ${cell.exposedDays} matched action days.`;
 
   return (
     <Tooltip>

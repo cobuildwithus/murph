@@ -38,6 +38,7 @@ import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client";
 import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout";
+import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-study";
 
 type BrowserVaultEntity = Parameters<
   typeof createVaultReadModel
@@ -161,6 +162,13 @@ test("PatternsPage renders personal comparisons on their own route", () => {
   assert.match(markup, /What tends to move together/);
   assert.match(markup, /No clear comparison is ready yet/);
   assert.doesNotMatch(markup, /Weekly changes/);
+});
+
+test("Personal Patterns comparison controls name their factor and next-day outcome", () => {
+  const markup = renderToStaticMarkup(createElement(PersonalPatternsComponentStudy));
+
+  assert.match(markup, /aria-label="Running, next-day HRV\./);
+  assert.match(markup, /aria-label="Sauna, next-day Total sleep\./);
 });
 
 test("OverviewPage counts all tracked experiments while listing the most recent ones", async () => {
