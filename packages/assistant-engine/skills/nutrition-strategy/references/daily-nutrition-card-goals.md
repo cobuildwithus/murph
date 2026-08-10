@@ -114,12 +114,14 @@ Use the existing canonical Goal owner; add no new state surface.
    assumptions materially drove them, and why calories, protein, carbohydrate,
    fat, and fiber landed there. Call them provisional and invite correction or
    acceptance. This explanation must happen before the first goal-aware card.
-5. When the member accepts the proposal, run
+5. When the member accepts the proposal, first re-read target authority. If a
+   metric has gained an explicit owner, remove it from the managed proposal by
+   sending the complete intended post-update array and read the Goal back. Then
+   run
    `vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active`
-   and read that same Goal back. First re-read target authority and remove from
-   the managed proposal any metric that has gained an explicit owner. When the
-   member changes a proposed value, send the complete intended post-update
-   `metricTargets` array for the same paused Goal through `goal import-json`,
+   and read that same Goal back. When the member changes a proposed value, send
+   the complete intended post-update `metricTargets` array for the same paused
+   Goal through `goal import-json`,
    explain the revision briefly, and wait for acceptance. If the member
    declines, update the same Goal to `abandoned`. Do not silently recalculate
    accepted values later. If an explicit target appears after activation, send

@@ -210,6 +210,12 @@ describe('assistant nutrition strategy skill', () => {
     expect(compactGoals).toContain(
       'vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active',
     )
+    expect(compactGoals).toContain('first re-read target authority')
+    expect(compactGoals.indexOf('first re-read target authority')).toBeLessThan(
+      compactGoals.indexOf(
+        'vault-cli goal save "Daily nutrition targets" --id <goal-id> --status active',
+      ),
+    )
     expect(compactGoals).toContain(
       'Only a later eligible response with five scalar values resolved from active canonical goals may attach the card.',
     )
