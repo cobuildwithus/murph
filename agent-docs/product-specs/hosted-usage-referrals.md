@@ -333,6 +333,23 @@ failure semantics remain independent. Each bounded pass:
 4. re-signals up to 50 oldest unconsumed referral-notification mailbox items in
    their actual `system` or `conversation` lane.
 
+Referral notification producers carry the destination owner's validated
+external-route authority. A direct Linq source conversation remains an explicit
+delivery target so it cannot fall back to a different home conversation, and
+the hosted runtime treats that target as binding evidence only when the wake
+member, hosted member, channel, directness, and authority target all agree
+exactly.
+
+For a legacy direct-Linq notice queued without that proof, the same bounded
+recovery owner decrypts the current item, locks the member's existing home-route
+owner, and revalidates the exact direct destination. It then replaces only the
+encrypted payload of that unconsumed mailbox row under an expected payload-hash
+precondition. The item id, causal sequence, lane, lane sequence, dedupe key,
+kind, and occurrence time remain unchanged; no second head is appended.
+Recovery re-signals the existing device pointer only after the transaction
+commits. Missing, consumed, moved, mismatched, expired, or retired state fails
+closed and remains unsignaled.
+
 The first reward enablement intentionally applies the same oldest-first scan to
 at most the preceding 30 days of attributed activations. That bounded window
 includes legacy recipient-bound invites with exactly one durable referrer; it is

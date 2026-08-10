@@ -1,12 +1,30 @@
 import "server-only";
 
 import type { PrismaClient } from "@prisma/client";
+import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+  type HostedExecutionAssistantNotificationRequestedWake,
+  type HostedExecutionWake,
+} from "@murphai/hosted-execution";
 import { isHostedMailboxLane } from "@murphai/hosted-execution/runtime-control";
 
+import {
+  readHostedMailboxWakeByItemId,
+  replaceUnconsumedHostedMailboxEnvelopePayloadTx,
+} from "../hosted-mailbox/store";
+import {
+  acquireHostedMemberHomeLinqRouteLockTx,
+} from "../hosted-onboarding/hosted-member-routing-store";
+import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+} from "../hosted-onboarding/shared";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
+import {
+  assertHostedDirectAssistantNotificationRouteAuthority,
+} from "../hosted-routing/assistant-notification-destination";
 import {
   appendHostedSignupReferralRewardNotice,
 } from "./signup-referral-notification";
@@ -66,9 +84,11 @@ export async function recoverPendingHostedUsageReferrals(input: {
     prisma.hostedMailboxItem.findMany({
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
+        dedupeKey: true,
         id: true,
         lane: true,
         laneSeq: true,
+        payloadHash: true,
         userId: true,
       },
       take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
@@ -126,20 +146,29 @@ export async function recoverPendingHostedUsageReferrals(input: {
     }
   }
 
+  let resignaled = 0;
   for (const celebration of unconsumedCelebrations) {
     try {
+      const prepared = await prepareHostedUsageReferralCelebrationForResignal({
+        celebration,
+        prisma,
+      });
+      if (!prepared) {
+        continue;
+      }
+      resignaled += 1;
       await signalHostedMailboxAppendRuntime({
-        expectedUserId: celebration.userId,
-        ...(isHostedMailboxLane(celebration.lane)
+        expectedUserId: prepared.userId,
+        ...(isHostedMailboxLane(prepared.lane)
           ? {
               knownCheckpoint: {
-                lane: celebration.lane,
-                laneSeq: celebration.laneSeq.toString(),
-                userId: celebration.userId,
+                lane: prepared.lane,
+                laneSeq: prepared.laneSeq,
+                userId: prepared.userId,
               },
             }
           : {}),
-        mailboxItemId: celebration.id,
+        mailboxItemId: prepared.id,
         prisma,
       });
     } catch {
@@ -151,12 +180,127 @@ export async function recoverPendingHostedUsageReferrals(input: {
     failed,
     pending,
     queued,
-    resignaled: unconsumedCelebrations.length,
+    resignaled,
     scanned:
       signupRewards.scanned
       + referrals.length
       + unconsumedCelebrations.length,
   };
+}
+
+interface HostedUsageReferralCelebrationRow {
+  dedupeKey: string;
+  id: string;
+  lane: string;
+  laneSeq: bigint;
+  payloadHash: string | null;
+  userId: string;
+}
+
+interface HostedUsageReferralCelebrationPointer {
+  id: string;
+  lane: string;
+  laneSeq: string;
+  userId: string;
+}
+
+async function prepareHostedUsageReferralCelebrationForResignal(input: {
+  celebration: HostedUsageReferralCelebrationRow;
+  prisma: PrismaClient;
+}): Promise<HostedUsageReferralCelebrationPointer | null> {
+  const storedWake = await readHostedMailboxWakeByItemId({
+    mailboxItemId: input.celebration.id,
+    prisma: input.prisma,
+  });
+  const wake = readHostedUsageReferralCelebrationWake({
+    celebration: input.celebration,
+    wake: storedWake,
+  });
+  if (!wake) {
+    return null;
+  }
+
+  if (wake.notification.externalThreadRouteAuthority) {
+    return {
+      id: input.celebration.id,
+      lane: input.celebration.lane,
+      laneSeq: input.celebration.laneSeq.toString(),
+      userId: input.celebration.userId,
+    };
+  }
+
+  const payloadHash = input.celebration.payloadHash;
+  const route = wake.notification.route;
+  if (
+    !payloadHash
+    || route.channel !== "linq"
+    || route.threadIsDirect !== true
+    || route.delivery.kind !== "explicit"
+  ) {
+    return null;
+  }
+
+  const authority = {
+    channel: "linq" as const,
+    containerMemberId: wake.userId,
+    threadId: route.delivery.target,
+  };
+  const upgradedWake = buildHostedExecutionAssistantNotificationRequestedWake({
+    eventId: wake.eventId,
+    memberId: wake.userId,
+    notification: {
+      ...wake.notification,
+      externalThreadRouteAuthority: authority,
+    },
+    occurredAt: wake.occurredAt,
+  });
+
+  return await input.prisma.$transaction(async (tx) => {
+    await acquireHostedMemberHomeLinqRouteLockTx({
+      memberId: wake.userId,
+      prisma: tx,
+    });
+    await assertHostedDirectAssistantNotificationRouteAuthority({
+      authority,
+      prisma: tx,
+      requireThreadDelivery: true,
+    });
+    return await replaceUnconsumedHostedMailboxEnvelopePayloadTx({
+      envelope: upgradedWake,
+      expectedPayloadHash: payloadHash,
+      mailboxItemId: input.celebration.id,
+      tx,
+    });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+function readHostedUsageReferralCelebrationWake(input: {
+  celebration: HostedUsageReferralCelebrationRow;
+  wake: HostedExecutionWake | null | undefined;
+}): HostedExecutionAssistantNotificationRequestedWake | null {
+  const { celebration, wake } = input;
+  if (
+    !wake
+    || wake.kind !== "assistant.notification.requested"
+    || wake.eventId !== celebration.dedupeKey
+    || wake.userId !== celebration.userId
+    || !wake.eventId.startsWith(
+      "assistant.notification.requested:usage-referral-reward:",
+    )
+  ) {
+    return null;
+  }
+
+  const notificationKey = wake.eventId.slice(
+    "assistant.notification.requested:".length,
+  );
+  return (
+    wake.notification.deliveryDispatchMode === "queue-only"
+    && wake.notification.deliveryDedupeToken === notificationKey
+    && wake.notification.deliveryIdempotencyKey === notificationKey
+  )
+    ? wake
+    : null;
 }
 
 async function recoverHostedSignupReferralRewardsSafely(

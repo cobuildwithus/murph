@@ -517,6 +517,181 @@ export async function appendHostedMailboxEnvelopeTx(input: {
   return appendHostedMailboxEnvelopeInternalTx(input);
 }
 
+export async function replaceUnconsumedHostedMailboxEnvelopePayloadTx(input: {
+  envelope: HostedMailboxProducerEnvelope;
+  expectedPayloadHash: string;
+  mailboxItemId: string;
+  tx: HostedMailboxMutationTx;
+}): Promise<HostedMailboxItemRecord | null> {
+  const envelope = input.envelope;
+  const mailboxItemId = requireHostedMailboxItemId(input.mailboxItemId);
+  const expectedPayloadHash = requireNonEmptyString(
+    input.expectedPayloadHash,
+    "Hosted mailbox expected payload hash",
+  );
+  const userId = requireNonEmptyString(
+    envelope.userId,
+    "Hosted mailbox userId",
+  );
+  const dedupeKey = requireNonEmptyString(
+    envelope.eventId,
+    "Hosted mailbox dedupeKey",
+  );
+  const kind = requireHostedMailboxKind(envelope.kind);
+  const lane = resolveHostedMailboxLaneForKind(kind);
+  const occurredAt = requireDate(
+    envelope.occurredAt,
+    "Hosted mailbox occurredAt",
+  );
+
+  await assertHostedMailboxEnvelopeWorkspaceTargetTx({
+    envelope,
+    tx: input.tx,
+  });
+  const locked = await input.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id
+    FROM hosted_mailbox_item
+    WHERE id = ${mailboxItemId}
+      AND user_id = ${userId}
+    FOR UPDATE
+  `);
+  if (locked.length !== 1) {
+    return null;
+  }
+
+  const existing = await input.tx.hostedMailboxItem.findUnique({
+    where: {
+      userId_id: {
+        id: mailboxItemId,
+        userId,
+      },
+    },
+  });
+  const now = new Date();
+  if (
+    !existing
+    || existing.consumedAt !== null
+    || existing.contentRetiredAt !== null
+    || isHostedMailboxItemExpired(existing, now)
+    || existing.payloadHash !== expectedPayloadHash
+    || existing.dedupeKey !== dedupeKey
+    || existing.kind !== kind
+    || existing.lane !== lane
+    || existing.occurredAt.getTime() !== occurredAt.getTime()
+  ) {
+    return null;
+  }
+
+  const hasInlinePayload = normalizeNullableString(
+    existing.payloadInlineCiphertext,
+  ) !== null;
+  const payloadRef = normalizeNullableString(existing.payloadRef);
+  const hasPayloadRef = payloadRef !== null;
+  if (
+    hasInlinePayload === hasPayloadRef
+    || (
+      payloadRef
+      && resolveHostedMailboxPayloadRef(payloadRef) !== mailboxItemId
+    )
+  ) {
+    return null;
+  }
+
+  const encodedPayload = serializeHostedMailboxPayload(envelope);
+  const payloadMetadata = deriveHostedMailboxStoredPayloadMetadata({
+    payloadSerializedJson: encodedPayload.serialized,
+    userId,
+  });
+  const payloadStorage = await encryptHostedMailboxPayloadStorage({
+    dedupeKey,
+    itemId: mailboxItemId,
+    kind,
+    lane,
+    laneSeq: existing.laneSeq,
+    occurredAt,
+    payloadBytes: payloadMetadata.payloadBytes,
+    payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+    prisma: input.tx,
+    serialized: payloadMetadata.serialized,
+    userId,
+  });
+  const existingSidecar = await input.tx.hostedMailboxPayload.findUnique({
+    select: { userId: true },
+    where: { mailboxItemId },
+  });
+  if (hasPayloadRef && !existingSidecar) {
+    return null;
+  }
+  if (existingSidecar && existingSidecar.userId !== userId) {
+    throw new Error("Hosted mailbox payload ownership is inconsistent.");
+  }
+
+  if (payloadStorage.storage === "ref") {
+    await input.tx.hostedMailboxPayload.upsert({
+      create: {
+        mailboxItemId,
+        payloadCiphertext: payloadStorage.payloadCiphertext,
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        userId,
+      },
+      update: {
+        payloadCiphertext: payloadStorage.payloadCiphertext,
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      },
+      where: { mailboxItemId },
+    });
+  } else {
+    await input.tx.hostedMailboxPayload.deleteMany({
+      where: {
+        mailboxItemId,
+        userId,
+      },
+    });
+  }
+
+  const updatedAt = new Date();
+  const updated = await input.tx.hostedMailboxItem.updateMany({
+    data: {
+      payloadBytes: payloadMetadata.payloadBytes,
+      payloadHash: payloadMetadata.payloadHash,
+      payloadInlineCiphertext: payloadStorage.payloadInlineCiphertext,
+      payloadRef: payloadStorage.payloadRef,
+      payloadSchema: HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
+      updatedAt,
+    },
+    where: {
+      causalSeq: existing.causalSeq,
+      consumedAt: null,
+      contentRetiredAt: null,
+      dedupeKey,
+      id: mailboxItemId,
+      kind,
+      lane,
+      laneSeq: existing.laneSeq,
+      occurredAt,
+      payloadHash: expectedPayloadHash,
+      userId,
+    },
+  });
+  if (updated.count !== 1) {
+    throw new Error("Hosted mailbox payload replacement lost its item lock.");
+  }
+
+  const replaced = await input.tx.hostedMailboxItem.findUnique({
+    where: {
+      userId_id: {
+        id: mailboxItemId,
+        userId,
+      },
+    },
+  });
+  if (!replaced) {
+    throw new Error("Hosted mailbox payload replacement lost its item.");
+  }
+
+  return await hydrateHostedMailboxItemTx({ record: replaced });
+}
+
 export async function appendHostedMailboxEnvelopeWithSourceMessageTx(input: {
   envelope: HostedMailboxProducerEnvelope;
   sourceMessageLookupKey: string;

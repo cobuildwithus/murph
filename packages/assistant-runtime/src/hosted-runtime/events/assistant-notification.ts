@@ -713,8 +713,12 @@ function buildAssistantNotificationInputFromRoute(input: {
 
   return {
     actorId: route.actorId,
-    bindingDeliveryTarget:
-      delivery.kind === "explicit" ? null : delivery.target,
+    bindingDeliveryTarget: resolveAssistantNotificationBindingDeliveryTarget({
+      executionContext: input.executionContext,
+      externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
+      route,
+      wake: input.wake,
+    }),
     channel: route.channel,
     deliveryDedupeToken: input.deliveryDedupeToken,
     deliveryDispatchMode: input.deliveryDispatchMode,
@@ -780,6 +784,33 @@ function buildAssistantNotificationInputFromRoute(input: {
     turnTrigger: input.turnTrigger,
     vault: input.vault,
   };
+}
+
+function resolveAssistantNotificationBindingDeliveryTarget(input: {
+  executionContext: AssistantExecutionContext;
+  externalThreadRouteAuthority:
+    AssistantNotificationInput["outboxExternalThreadRouteAuthority"] | null;
+  route: HostedExecutionAssistantNotificationRoute;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  const delivery = input.route.delivery;
+  if (delivery.kind !== "explicit") {
+    return delivery.target;
+  }
+
+  const authority = input.externalThreadRouteAuthority;
+  const hostedMemberId = input.executionContext.hosted?.memberId ?? null;
+  return (
+    authority
+    && hostedMemberId
+    && input.wake.userId === hostedMemberId
+    && authority.containerMemberId === hostedMemberId
+    && authority.channel === input.route.channel
+    && input.route.threadIsDirect === true
+    && authority.threadId === delivery.target
+  )
+    ? delivery.target
+    : null;
 }
 
 function isHostedSignupWelcomeNotification(
