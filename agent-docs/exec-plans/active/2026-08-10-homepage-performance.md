@@ -94,7 +94,7 @@ Updated: 2026-08-10
 - Axe color-contrast checks reported zero violations at both 1440px desktop and
   390px mobile. Native-resolution catalog crops preserved the existing layout
   and avatar framing.
-- Focused Vitest passed 86 tests across 11 files; scoped ESLint passed; the
+- Focused Vitest passed 87 tests across 12 files; scoped ESLint passed; the
   official Web production build, including Web typechecking and trace checks,
   passed.
 - ReviewGPT final round 1 identified the open-session replacement and import-
@@ -118,7 +118,13 @@ Updated: 2026-08-10
   that preloaded panel skips the fallback and retains phone autofocus. A direct
   mounted-closed, preload, then open regression passes, and production-browser
   proof reports no loading fallback plus telephone-input focus on desktop and
-  mobile. The correction is pending final round 5.
+  mobile.
+- Final round 5 found that a prior per-open import error could remain visible
+  after the same closed dialog successfully preloaded the panel. Closing now
+  clears that transient error alongside the existing per-open focus state. An
+  isolated fail, close, successful preload, then reopen regression proves the
+  recovered panel appears without a fallback and retains phone autofocus. The
+  correction is pending final round 6.
 - The required Claude UI double-check could not start because the `claude`
   executable is absent; both prescribed model commands failed with `command not
   found`, so no Claude verdict is claimed.

@@ -301,6 +301,7 @@ export function AuthDialog({
 
     if (!nextOpen) {
       setPanelView("auth");
+      setLoadError(null);
       restorePanelFocusRef.current = false;
       setPhoneInputAutoFocus(true);
     }
