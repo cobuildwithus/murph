@@ -2866,7 +2866,6 @@ export function createJunctionDeviceSyncProvider(
     const payload = normalizedSourceProviderSlug
       ? { sourceProviderSlug: normalizedSourceProviderSlug }
       : undefined;
-    const extendedWindow = buildExtendedTimeseriesBackfillWindow(now);
     return [
       buildWindowJob({
         kind: "backfill",
@@ -2875,16 +2874,6 @@ export function createJunctionDeviceSyncProvider(
         windowStart: subtractDays(now, summaryBackfillDays),
         priority: JUNCTION_HISTORICAL_BACKFILL_PRIORITY,
       }),
-      ...extendedBackfillTimeseriesResources.map((resource) =>
-        buildExtendedTimeseriesBackfillJob({
-          availableAt: now,
-          historicalWindowStart: extendedWindow.windowStart,
-          resource,
-          sourceProviderSlug: normalizedSourceProviderSlug,
-          windowEnd: extendedWindow.windowEnd,
-          windowStart: extendedWindow.windowStart,
-        })
-      ),
       buildWindowJob({
         kind: "reconcile",
         now,

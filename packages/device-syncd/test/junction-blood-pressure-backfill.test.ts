@@ -114,6 +114,31 @@ async function createSourceConnection(
   });
 }
 
+function createScheduledBloodPressureJob(
+  provider: ReturnType<typeof createProvider>,
+  input: {
+    firstSeenAt?: string;
+    metadata?: Record<string, unknown>;
+    now?: string;
+    sourceProviderSlug?: string;
+    status?: "connected" | "disconnected";
+  } = {},
+): DeviceSyncJobInput {
+  const sourceProviderSlug = input.sourceProviderSlug ?? "omron";
+  const scheduled = requireValue(provider.jobExecutor).createScheduledJobs?.(
+    createStoredAccount({
+      metadata: input.metadata,
+      sources: [createSourceSummary(
+        sourceProviderSlug,
+        input.firstSeenAt ?? NOW,
+        input.status ?? "connected",
+      )],
+    }),
+    input.now ?? NOW,
+  );
+  return findBloodPressureJob(requireValue(scheduled).jobs);
+}
+
 function toJobRecord(input: DeviceSyncJobInput, index: number): DeviceSyncJobRecord {
   return {
     id: `job-${index}`,
@@ -258,13 +283,19 @@ function findBloodPressureJob(jobs: readonly DeviceSyncJobInput[]): DeviceSyncJo
   ));
 }
 
-test("Junction gives sparse blood pressure its own full-history resumable job", async () => {
+test("the persisted-source scheduler gives sparse blood pressure its own full-history resumable job", async () => {
   const requests: TimeseriesRequest[] = [];
   const provider = createProvider({ requests });
   const connection = await createSourceConnection(provider);
   const jobs = connection.initialJobs ?? [];
   const backfill = requireValue(jobs.find((job) => job.kind === "backfill"));
-  const bloodPressure = findBloodPressureJob(jobs);
+  assert.equal(
+    jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "blood_pressure"
+    ),
+    false,
+  );
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const admittedBloodPressure = toJobRecord(bloodPressure, 2);
   admittedBloodPressure.dedupeKey = `hosted-device-sync:${"a".repeat(64)}`;
 
@@ -312,8 +343,7 @@ test("Junction gives sparse blood pressure its own full-history resumable job", 
 
 test("empty blood-pressure history retries are bounded and mark source coverage terminal", async () => {
   const provider = createProvider({ requests: [] });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const exhausted = {
     ...bloodPressure,
     payload: {
@@ -330,35 +360,28 @@ test("empty blood-pressure history retries are bounded and mark source coverage 
   assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
 });
 
-test("an unscoped SDK history pass cannot certify any source", async () => {
+test("SDK setup before a source is known does not fetch unusable full history", async () => {
   const provider = createProvider({ requests: [] });
   const sdk = requireValue(provider.sdkConnectionHandler);
   const connection = await sdk.ensureConnection({
     ownerId: "member-1",
     now: NOW,
   });
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
-  const exhausted = {
-    ...bloodPressure,
-    payload: {
-      ...bloodPressure.payload,
-      emptyBackfillAttempts: 4,
-    },
-  };
-  const result = await requireValue(provider.jobExecutor).executeJob(
-    createJobContext(),
-    toJobRecord(exhausted, 1),
+  assert.deepEqual(connection.initialJobs?.map((job) => job.kind), [
+    "backfill",
+    "reconcile",
+  ]);
+  assert.equal(
+    connection.initialJobs?.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "blood_pressure"
+    ),
+    false,
   );
-
-  assert.equal(bloodPressure.payload?.sourceProviderSlug, undefined);
-  assert.equal(result.scheduledJobs?.length ?? 0, 0);
-  assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
 });
 
 test("a source-scoped terminal pass preserves completed sibling coverage", async () => {
   const provider = createProvider({ requests: [] });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const sourceScoped = {
     ...bloodPressure,
     payload: {
@@ -391,8 +414,9 @@ test("a newly confirmed source backfills older blood pressure after sibling cove
     }],
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider, {
+    metadata: { [BP_HISTORY_COVERAGE_KEY]: "v1|withings" },
+  });
   const sourceScoped = {
     ...bloodPressure,
     payload: {
@@ -452,6 +476,77 @@ test("an existing source receives one migration anchored to its first-seen windo
     completed.jobs.some((job) =>
       job.kind === "resource"
       && job.payload?.resource === "blood_pressure"
+    ),
+    false,
+  );
+});
+
+test("a Link reconnect cannot narrow or certify an older persisted-source window", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    bloodPressureRecords: [{
+      id: "bp-before-reconnect",
+      timestamp: "2026-03-01T08:30:00.000Z",
+      systolic: 122,
+      diastolic: 80,
+    }],
+    requests,
+  });
+  const callbackAt = "2026-06-12T00:05:00.000Z";
+  const persistedFirstSeenAt = "2026-03-20T23:55:00.000Z";
+  const connection = await createSourceConnection(provider, callbackAt, "omron");
+
+  assert.deepEqual(connection.initialJobs?.map((job) => job.kind), [
+    "backfill",
+    "reconcile",
+  ]);
+  assert.equal(
+    connection.initialJobs?.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "blood_pressure"
+    ),
+    false,
+  );
+
+  const schedulerJob = createScheduledBloodPressureJob(provider, {
+    firstSeenAt: persistedFirstSeenAt,
+    now: callbackAt,
+  });
+  assert.equal(schedulerJob.availableAt, callbackAt);
+  assert.deepEqual(schedulerJob.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-02-18T00:00:00.000Z",
+    resource: "blood_pressure",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "omron",
+    windowEnd: "2026-03-20T00:00:00.000Z",
+    windowStart: "2026-02-18T00:00:00.000Z",
+  });
+  assert.equal(
+    createScheduledBloodPressureJob(provider, {
+      firstSeenAt: persistedFirstSeenAt,
+      now: "2026-06-13T00:05:00.000Z",
+    }).dedupeKey,
+    schedulerJob.dedupeKey,
+  );
+
+  const completed = await requireValue(provider.jobExecutor).executeJob(
+    createJobContext({ now: callbackAt }),
+    toJobRecord(schedulerJob, 1),
+  );
+  assert.equal(completed.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  assert.equal(requests[0]?.start, "2026-02-18T00:00:00.000Z");
+  assert.equal(requests.at(-1)?.end, "2026-03-20T00:00:00.000Z");
+
+  const afterCoverage = requireValue(provider.jobExecutor).createScheduledJobs?.(
+    createStoredAccount({
+      metadata: completed.metadataPatch,
+      sources: [createSourceSummary("omron", persistedFirstSeenAt)],
+    }),
+    "2026-06-13T00:05:00.000Z",
+  );
+  assert.equal(
+    requireValue(afterCoverage).jobs.some((job) =>
+      job.kind === "resource" && job.payload?.resource === "blood_pressure"
     ),
     false,
   );
@@ -548,10 +643,10 @@ test("a fetched blood-pressure record completes without an empty retry", async (
     }],
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const result = await requireValue(provider.jobExecutor).executeJob(
     createJobContext(),
-    toJobRecord(findBloodPressureJob(connection.initialJobs ?? []), 1),
+    toJobRecord(bloodPressure, 1),
   );
 
   assert.equal(result.scheduledJobs?.length ?? 0, 0);
@@ -571,8 +666,7 @@ test("partial optional failure retries from the anchored window after importing 
     }],
     requests,
   });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const admittedBloodPressure = toJobRecord(bloodPressure, 1);
   admittedBloodPressure.dedupeKey = `hosted-device-sync:${"d".repeat(64)}`;
 
@@ -613,8 +707,7 @@ test("source history partial failure stays recoverable after the empty retry lad
     }],
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const exhausted = toJobRecord({
     ...bloodPressure,
     payload: {
@@ -657,8 +750,7 @@ test("source-scoped partial failure stays recoverable after the empty retry ladd
     }],
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const exhausted = toJobRecord({
     ...bloodPressure,
     payload: {
@@ -701,10 +793,10 @@ test("raw provider rows without canonical imported events remain on the retry la
     }],
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const result = await requireValue(provider.jobExecutor).executeJob(
     createJobContext({ canonicalEventCount: 0 }),
-    toJobRecord(findBloodPressureJob(connection.initialJobs ?? []), 1),
+    toJobRecord(bloodPressure, 1),
   );
   const retry = findBloodPressureJob(result.scheduledJobs ?? []);
 
@@ -722,8 +814,7 @@ test("exhausted malformed provider rows stay recoverable until canonical import 
     systolic: 120,
   }];
   const provider = createProvider({ bloodPressureRecords, requests: [] });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const exhausted = toJobRecord({
     ...bloodPressure,
     payload: {
@@ -772,7 +863,7 @@ test("source admission rejection cannot certify historical coverage", async () =
     }],
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const result = await requireValue(provider.jobExecutor).executeJob(
     createJobContext({
       account: createAccount({
@@ -790,7 +881,7 @@ test("source admission rejection cannot certify historical coverage", async () =
       }),
       importedSnapshots,
     }),
-    toJobRecord(findBloodPressureJob(connection.initialJobs ?? []), 1),
+    toJobRecord(bloodPressure, 1),
   );
 
   assert.equal(importedSnapshots.length, 0);
@@ -809,8 +900,7 @@ test("source-scoped partial failure retries instead of abandoning remaining hist
     }],
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const sourceScoped = toJobRecord({
     ...bloodPressure,
     payload: {
@@ -868,8 +958,7 @@ test("yielded blood-pressure history keeps one identity and remembers earlier re
     bloodPressureRecords,
     requests: [],
   });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const admittedBloodPressure = toJobRecord(bloodPressure, 1);
   admittedBloodPressure.dedupeKey = `hosted-device-sync:${"b".repeat(64)}`;
   let yieldChecks = 0;
@@ -909,8 +998,7 @@ test("malformed rows before a yield cannot become terminal empty coverage", asyn
     systolic: 118,
   }];
   const provider = createProvider({ bloodPressureRecords, requests: [] });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const exhausted = toJobRecord({
     ...bloodPressure,
     payload: {
@@ -955,8 +1043,7 @@ test("malformed rows before a yield cannot become terminal empty coverage", asyn
 
 test("an empty yielded scan retries from the original anchored window", async () => {
   const provider = createProvider({ requests: [] });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
   const admittedBloodPressure = toJobRecord(bloodPressure, 1);
   admittedBloodPressure.dedupeKey = `hosted-device-sync:${"c".repeat(64)}`;
   let yieldChecks = 0;
@@ -982,7 +1069,7 @@ test("an empty yielded scan retries from the original anchored window", async ()
   assert.equal(retry.payload?.historicalWindowStart, "2026-05-12T00:00:00.000Z");
 });
 
-test("same-day SDK ensures coalesce to one unscoped blood-pressure history identity", async () => {
+test("repeated SDK setup does not create unscoped blood-pressure history work", async () => {
   const provider = createProvider({ requests: [] });
   const sdk = requireValue(provider.sdkConnectionHandler);
   const first = await sdk.ensureConnection({
@@ -993,13 +1080,18 @@ test("same-day SDK ensures coalesce to one unscoped blood-pressure history ident
     ownerId: "member-1",
     now: SAME_DAY_LATER,
   });
-  const firstBloodPressure = findBloodPressureJob(first.initialJobs ?? []);
-  const secondBloodPressure = findBloodPressureJob(second.initialJobs ?? []);
-
-  assert.equal(firstBloodPressure.dedupeKey, secondBloodPressure.dedupeKey);
-  assert.deepEqual(firstBloodPressure.payload, secondBloodPressure.payload);
-  assert.equal(firstBloodPressure.availableAt, NOW);
-  assert.equal(secondBloodPressure.availableAt, SAME_DAY_LATER);
+  for (const connection of [first, second]) {
+    assert.deepEqual(connection.initialJobs?.map((job) => job.kind), [
+      "backfill",
+      "reconcile",
+    ]);
+    assert.equal(
+      connection.initialJobs?.some((job) =>
+        job.kind === "resource" && job.payload?.resource === "blood_pressure"
+      ),
+      false,
+    );
+  }
 });
 
 test("an explicit Junction timeseries backfill window still governs blood pressure", async () => {
@@ -1007,8 +1099,7 @@ test("an explicit Junction timeseries backfill window still governs blood pressu
     requests: [],
     timeseriesBackfillDays: 5,
   });
-  const connection = await createSourceConnection(provider);
-  const bloodPressure = findBloodPressureJob(connection.initialJobs ?? []);
+  const bloodPressure = createScheduledBloodPressureJob(provider);
 
   assert.equal(bloodPressure.payload?.windowStart, "2026-06-06T00:00:00.000Z");
   assert.equal(bloodPressure.payload?.windowEnd, BACKFILL_WINDOW_END);
