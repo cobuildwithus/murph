@@ -1,0 +1,41 @@
+name: PR 1484 audit snapshots
+
+on:
+  push:
+    branches:
+      - agent/pr1484-audit-snapshot-20260810
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out latest main
+        uses: actions/checkout@v4
+        with:
+          ref: 5cfb1d36c54440d0453ee5b86cfa736a201c5db5
+          path: main
+
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ee78d0004d070d0e9aa422f20b603a826f085545
+          path: pr
+
+      - name: Package snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=node_modules --exclude=.next \
+            -czf /tmp/pr1484-audit-snapshots.tar.gz main pr
+
+      - name: Upload snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1484-audit-snapshots
+          path: /tmp/pr1484-audit-snapshots.tar.gz
+          retention-days: 1
+          if-no-files-found: error
