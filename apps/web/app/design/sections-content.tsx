@@ -16,6 +16,7 @@ import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
+import { DeepCarouselSection } from "@/src/components/knowledge/deep-carousel-section";
 import {
   ReferralPageContent,
   ReferralRewardCards,
@@ -27,6 +28,10 @@ import { Separator } from "@/src/components/ui/separator";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import {
+  projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
+} from "@/src/lib/hosted-groups/join-policy";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
@@ -109,6 +114,19 @@ export function SectionsContent() {
             messengerChannel="imessage"
             murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
           />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Knowledge topic depth">
+        <div
+          id="knowledge-topic-depth"
+          data-design-section="knowledge-topic-depth"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <DeepCarouselSection />
         </div>
       </StudySection>
 
@@ -338,7 +356,7 @@ export function SectionsContent() {
 
           <div className="space-y-5" data-referral-reward-state="group-only">
             <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
-              Group missions only
+              Group referral options only
             </h3>
             <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
               <ReferralRewardReceiptPreview
@@ -348,6 +366,7 @@ export function SectionsContent() {
               />
             </div>
             <ReferralRewardCards
+              includeShareLink
               rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
                 ({ id }) => id !== "signup-link",
               )}
@@ -356,10 +375,49 @@ export function SectionsContent() {
 
           <div className="space-y-5" data-referral-reward-state="all-rewards">
             <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
-              Signup link and group missions
+              Signup link and group referral options
             </h3>
             <ReferralRewardCards rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
           </div>
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards page · group referrals and share link">
+        <div
+          id="referral-rewards-page"
+          data-design-section="referral-rewards-page"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated={false}
+            identityKey={null}
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards page · member share action">
+        <div
+          id="referral-rewards-page-member"
+          data-design-section="referral-rewards-page-member"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated
+            identityKey="referral-design-member"
+            referralSignupUrl="https://example.com/r/referral-design-member"
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
         </div>
       </StudySection>
 
@@ -424,7 +482,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Family billing recovery on Join">
+      <StudySection title="Family billing recovery and management on Join">
         <JoinFamilyBillingRecoveryStudy />
       </StudySection>
 
@@ -466,7 +524,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings and Family sign-in handoffs">
+      <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
         <SettingsAuthRequiredStudy />
       </StudySection>
 
@@ -478,7 +536,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Pulse billing recovery, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -503,7 +561,11 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
-        <GroupJoinStudy />
+        <GroupJoinStudy
+          comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
+            resolveHostedGroupAccessOfferProjectionScopes(undefined),
+          )}
+        />
       </StudySection>
 
       <Separator />
@@ -514,7 +576,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group sponsorship with optional creative response">
+      <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
         <GroupUsageFundingStudy />
       </StudySection>
 

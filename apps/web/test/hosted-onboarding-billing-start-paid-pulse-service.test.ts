@@ -129,7 +129,7 @@ import {
 
 describe("startHostedPulseTrialPaidPlan", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.assertHostedBillingPlanSelectable.mockResolvedValue(undefined);
     mocks.applyStripeInvoicePaid.mockResolvedValue({});
     mocks.cleanupHostedFamilySponsoredDirectSubscription.mockResolvedValue(undefined);
@@ -264,6 +264,60 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     expect(mocks.applyStripeInvoicePaid).not.toHaveBeenCalled();
     expect(mocks.signalHostedRuntimeManualWakeBestEffort).not.toHaveBeenCalled();
+  });
+
+  test("does not end a trial after account suspension wins the member lock", async () => {
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: new Date("2026-05-06T00:00:00.000Z"),
+        updatedAt: new Date("2026-05-06T00:00:00.000Z"),
+      });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_AUTHORITY_CHANGED",
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test("does not end a trial after inactive billing wins the member lock", async () => {
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.active,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.canceled,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-06T00:00:00.000Z"),
+      });
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_PULSE_TRIAL_START_PAID_AUTHORITY_CHANGED",
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
   });
 
   test("starts eligible Group billing now by replacing the Pulse trial item", async () => {
@@ -881,6 +935,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       .mockResolvedValueOnce({});
     mocks.readHostedMemberStripeBillingRef
       .mockResolvedValueOnce(makeBillingRef())
+      .mockResolvedValueOnce(makeBillingRef())
       .mockResolvedValueOnce(makeBillingRef({
         currentBillingPhase: "paid",
       }));
@@ -1048,6 +1103,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     mocks.readHostedMemberStripeBillingRef
       .mockResolvedValueOnce(makeBillingRef())
+      .mockResolvedValueOnce(makeBillingRef())
       .mockResolvedValueOnce(makeBillingRef({
         currentBillingPhase: "paid",
       }));
@@ -1197,7 +1253,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       status: "active",
       trialEnd: null,
     });
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
@@ -1280,7 +1336,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
       status: "active",
       trialEnd: null,
     });
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
@@ -1334,14 +1390,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
     const firstLockRelease = new Promise<void>((resolve) => {
       releaseFirstLock = resolve;
     });
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
@@ -1503,15 +1559,54 @@ describe("startHostedPulseTrialPaidPlan", () => {
     expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
   });
 
+  test("does not clean up or resume a paused trial after account suspension wins", async () => {
+    mocks.readHostedMemberCoreState
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: null,
+        updatedAt: new Date("2026-05-01T00:00:00.000Z"),
+      })
+      .mockResolvedValueOnce({
+        billingStatus: HostedBillingStatus.paused,
+        createdAt: new Date("2026-05-01T00:00:00.000Z"),
+        id: "member_123",
+        suspendedAt: new Date("2026-05-06T00:00:00.000Z"),
+        updatedAt: new Date("2026-05-06T00:00:00.000Z"),
+      });
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(
+      makeBillingRef({ currentBillingPhase: null }),
+    );
+    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
+      customer: makeCustomer({
+        defaultPaymentMethod: "pm_customer_123",
+        defaultSource: null,
+      }),
+      status: "paused",
+      trialEnd: null,
+    }));
+
+    await expect(startHostedPulseTrialPaidPlan({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_MEMBER_SUSPENDED",
+    });
+
+    expect(mocks.stripe.subscriptions.update).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptions.resume).not.toHaveBeenCalled();
+  });
+
   test("clears a prepared extension target before resuming paused paid billing", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     const preparedPausedSubscription = makeSubscription({
@@ -1851,14 +1946,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
   });
 
   test("canonical-reconciles an ambiguous paused metadata cleanup without resuming", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     const pausedSubscription = makeSubscription({
@@ -1898,14 +1993,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
   });
 
   test("surfaces a deterministic resume failure after paused cleanup succeeds", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     const pausedSubscription = makeSubscription({
@@ -1951,14 +2046,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
   });
 
   test("surfaces deterministic resume failures after ordinary paused cleanup", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
@@ -2095,14 +2190,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
       paymentIntentStatus: null,
       status: "open",
     });
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
@@ -2196,14 +2291,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
       paymentIntentStatus: null,
       status: "open",
     });
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
@@ -2235,14 +2330,14 @@ describe("startHostedPulseTrialPaidPlan", () => {
   });
 
   test("does not resume when Stripe omits the requested subscription payment method", async () => {
-    mocks.readHostedMemberCoreState.mockResolvedValueOnce({
+    mocks.readHostedMemberCoreState.mockResolvedValue({
       billingStatus: HostedBillingStatus.paused,
       createdAt: new Date("2026-05-01T00:00:00.000Z"),
       id: "member_123",
       suspendedAt: null,
       updatedAt: new Date("2026-05-01T00:00:00.000Z"),
     });
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce(makeBillingRef({
+    mocks.readHostedMemberStripeBillingRef.mockResolvedValue(makeBillingRef({
       currentBillingPhase: null,
     }));
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
@@ -2742,6 +2837,7 @@ describe("startHostedPulseTrialPaidPlan", () => {
     });
     mocks.stripe.subscriptions.update.mockResolvedValueOnce(subscription);
     mocks.readHostedMemberStripeBillingRef
+      .mockResolvedValueOnce(makeBillingRef())
       .mockResolvedValueOnce(makeBillingRef())
       .mockResolvedValueOnce(makeBillingRef({
         currentBillingPhase: "paid",

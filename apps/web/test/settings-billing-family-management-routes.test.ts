@@ -57,6 +57,7 @@ const ownerSnapshot = {
   members: [],
   plans: {
     edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+    max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
     pulse: { active: 2, billed: 2, invited: 0, remaining: 0, used: 2 },
   },
   seats: { active: 2, billed: 2, invited: 0, max: 6, min: 2, remaining: 0, used: 2 },
@@ -248,10 +249,14 @@ test("adds one paid seat and retries when the plan is full", async () => {
 
   expect(response.status).toBe(200);
   expect(mocks.updateHostedFamilyPlanCapacities).toHaveBeenCalledWith({
+    autoSeatInviteTarget: {
+      targetEmail: null,
+      targetPhoneNumber: "+48600000001",
+    },
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
-    targetCapacities: { edge: 0, pulse: 3 },
+    targetCapacities: { edge: 0, max: 0, pulse: 3 },
   });
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(3);
 });
@@ -314,6 +319,7 @@ test("uses a seat freed before the purchase instead of buying another", async ()
     groupId: "hbag_family",
     plans: {
       edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      max: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
       pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
     },
     seats: { active: 1, billed: 2, invited: 0, max: 6, min: 2, remaining: 1, used: 1 },
@@ -362,6 +368,31 @@ test("does not buy a seat when a full-plan invite is reused (no seat-limit error
   expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
 });
 
+test("does not buy an orphaned seat when a reused invite needs a tier rebalance", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED",
+      httpStatus: 409,
+      message: "Change the Family plan mix before moving this invite.",
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      addSeatIfNeeded: true,
+      planCode: "edge",
+      targetEmail: "relative@example.test",
+      targetLabel: "Relative",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_INVITE_PLAN_CAPACITY_REQUIRED" },
+  });
+  expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+});
+
 test("does not auto-add a seat for a label-only invite (no dedup key)", async () => {
   mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
     hostedOnboardingError({
@@ -384,6 +415,31 @@ test("does not auto-add a seat for a label-only invite (no dedup key)", async ()
   expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
 });
 
+test("does not auto-add a paid seat for a Telegram-only invite", async () => {
+  mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
+    hostedOnboardingError({
+      code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
+      message: "This Family plan has no open paid seats.",
+    }),
+  );
+
+  const response = await inviteRoute.POST(
+    inviteRequest({
+      addSeatIfNeeded: true,
+      targetLabel: "Relative",
+      targetTelegramUsername: "@relative",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  await expect(response.json()).resolves.toMatchObject({
+    error: { code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED" },
+  });
+  expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
+  expect(mocks.issueHostedFamilyInviteTx).toHaveBeenCalledTimes(1);
+});
+
 test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off", async () => {
   mocks.issueHostedFamilyInviteTx.mockRejectedValueOnce(
     hostedOnboardingError({
@@ -404,10 +460,10 @@ test("does not add a seat when the seat limit is hit but addSeatIfNeeded is off"
   expect(mocks.updateHostedFamilyPlanCapacities).not.toHaveBeenCalled();
 });
 
-test("changes an active Family member tier", async () => {
+test("changes an active Family member tier to Max", async () => {
   const response = await memberRemoveRoute.PATCH(
     new Request("https://join.example.test/api/settings/billing/family/members/member_child", {
-      body: JSON.stringify({ planCode: "edge" }),
+      body: JSON.stringify({ planCode: "max" }),
       headers: { "content-type": "application/json", origin: "https://join.example.test" },
       method: "PATCH",
     }),
@@ -423,7 +479,7 @@ test("changes an active Family member tier", async () => {
     groupId: "hbag_family",
     memberId: "member_child",
     ownerMemberId: "member_owner",
-    planCode: "edge",
+    planCode: "max",
     prisma: expect.any(Object),
   });
 });

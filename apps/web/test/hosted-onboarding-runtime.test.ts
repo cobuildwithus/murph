@@ -50,6 +50,7 @@ function createHostedOnboardingEnvironment(
     publicBaseUrl: "https://join.example.test",
     stripeFamilyPriceIdsByPlan: {
       edge: "price_family_edge_123",
+      max: "price_family_max_123",
       pulse: "price_family_pulse_123",
     },
     stripePriceIdsByPlan: {

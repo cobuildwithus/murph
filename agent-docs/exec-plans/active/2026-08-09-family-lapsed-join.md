@@ -232,6 +232,14 @@ Updated: 2026-08-10
   staging before any review request was sent. Round 7 is the substantive-round
   hard cap; after remediating its findings, another final-gate round requires an
   explicit user continuation decision.
+- Before exact-head CI could start, current `main` advanced and GitHub reported
+  the PR as conflicting. The ordinary merge had six textual conflicts in the
+  Family contract, testing map, design catalog, Settings plan actions, and paid
+  trial service. Resolution preserved current Family-owner/Max behavior and the
+  newer complete Checkout-loser cleanup from `main`, while retaining this PR's
+  short database-only paid-recovery claim before any portal or Stripe mutation.
+  Because the merge changes only base history plus those compatibility
+  resolutions, it does not itself require another ReviewGPT round.
 - The required Claude Code UI double-check was attempted against the final
   desktop/mobile catalog evidence and stopped on explicit Fable usage-credit
   exhaustion. Per the completion workflow, no second Claude request or local
@@ -296,7 +304,8 @@ Updated: 2026-08-10
     are byte-identical to the inspected local captures.
   - `git diff --check` passes.
 - Round 7 remediation proof on the local candidate:
-  - Nine focused unit/UI files pass with 531 tests, including immutable
+  - Nine focused unit/UI files pass with 562 tests after current-main
+    reconciliation, including immutable
     claim-Price recovery, fail-closed missing-Price recovery before Stripe,
     mismatched invoice rejection, exact old-Price invoice settlement after
     catalog rotation, the paid-Pulse pending label, and the absence of a

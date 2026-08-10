@@ -667,6 +667,48 @@ describe("hosted onboarding stripe billing events", () => {
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
+  it.each(["canceled", "incomplete_expired"] as const)(
+    "still requests Family refund cleanup for a paid invoice after the direct subscription is %s",
+    async (status) => {
+      mocks.readHostedMemberFamilyBillingClaim.mockResolvedValueOnce({
+        groupId: "hbag_family",
+        kind: "active_sponsorship",
+        ownerMemberId: "member_owner",
+      });
+      const invoice = makeStripeInvoice({
+        id: "in_paid_after_cleanup",
+        subscription: "sub_superseded",
+      });
+
+      await expect(applyStripeInvoicePaid(
+        invoice,
+        {
+          eventCreatedAt: new Date("2026-04-23T00:00:05.000Z"),
+          occurredAt: "2026-04-23T00:00:05.000Z",
+          sourceEventId: "evt_paid_after_cleanup",
+          sourceType: "stripe.invoice.paid",
+        },
+        {} as never,
+        HostedBillingStatus.canceled,
+        makeStripeSubscription({
+          id: "sub_superseded",
+          metadata: {
+            billingPlanCode: "launch_monthly",
+            checkoutOffer: "standard",
+            memberId: "member_123",
+          },
+          status,
+        }),
+      )).resolves.toMatchObject({
+        cleanupFamilySponsoredStripeSubscriptionId: "sub_superseded",
+        welcomeEmailMemberId: null,
+      });
+
+      expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
+      expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    },
+  );
+
   it("terminalizes an incomplete-expired direct subscription after Family sponsorship", async () => {
     const member = makeMemberSnapshot({
       billingRef: {

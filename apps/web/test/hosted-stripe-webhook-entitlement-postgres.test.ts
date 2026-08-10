@@ -1436,7 +1436,6 @@ describe.skipIf(!runPostgresProof)(
           checkoutSessionId: fixture.checkoutSessionId,
           memberId: fixture.memberId,
           prisma: cleanupClient,
-          refundCheckoutPayment: true,
           sourceEventId: `evt_family_checkout_cleanup_${fixture.fixtureId}`,
           stripe: stripe.client,
           subscriptionId: fixture.directSubscriptionId,

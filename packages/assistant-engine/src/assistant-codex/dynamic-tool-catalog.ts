@@ -13,7 +13,7 @@ import {
   HOSTED_RUNTIME_PENDING_GROUP_SETUP_ROOM_CONTEXT_MAX_CODE_POINTS,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
@@ -363,60 +363,90 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   description:
     'Read Family status, start checkout, or invite. Allow `read_status` for an explicit Family request or trusted private low-usage Family context. Checkout and invite actions require the current member\'s explicit request. Treat results as exact; never claim activation, invitation, payment, or usage completion.',
   inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['read_status', 'start_checkout', 'create_invite'],
-      },
-      invite: {
+    oneOf: [
+      {
         type: 'object',
         additionalProperties: false,
         properties: {
-          targetEmail: {
-            anyOf: [
-              { type: 'string', minLength: 3, maxLength: 320 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Email address for an email-bound web invite when the user provided one.',
-          },
-          planCode: {
+          action: {
             type: 'string',
-            enum: [...HOSTED_PLAN_CODES],
-            description: 'Pulse or Edge tier requested for this Family member. Omit for Pulse.',
-          },
-          targetLabel: {
-            anyOf: [
-              { type: 'string', minLength: 1, maxLength: 80 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Optional natural label such as mom, dad, brother, or a first name.',
-          },
-          targetPhoneNumber: {
-            anyOf: [
-              { type: 'string', minLength: 1, maxLength: 40 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Phone number for a phone-bound invite when the user provided one.',
-          },
-          targetTelegramUsername: {
-            anyOf: [
-              { type: 'string', minLength: 5, maxLength: 32 },
-              { type: 'null' },
-            ],
-            default: null,
-            description: 'Telegram username without @ when the user provided one.',
+            enum: ['read_status'],
           },
         },
-        description:
-          'Invite target for create_invite. Optional context for start_checkout when the user mentions the person they want to invite; no invite token is created until Family billing is active.',
+        required: ['action'],
       },
-    },
-    required: ['action'],
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['start_checkout'],
+          },
+          confirmedTrialConversion: {
+            type: 'boolean',
+            enum: [true],
+            description:
+              'Pass true only after read_status returned activeTrialConversion terms and the member explicitly confirmed those fresh terms. Omit for every other checkout.',
+          },
+        },
+        required: ['action'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['create_invite'],
+          },
+          invite: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              targetEmail: {
+                anyOf: [
+                  { type: 'string', minLength: 3, maxLength: 320 },
+                  { type: 'null' },
+                ],
+                default: null,
+                description: 'Email address for an email-bound web invite when the user provided one.',
+              },
+              planCode: {
+                type: 'string',
+                enum: [...HOSTED_FAMILY_PLAN_CODES],
+                description: 'Pulse, Edge, or Max tier requested for this Family member. Omit for Pulse.',
+              },
+              targetLabel: {
+                anyOf: [
+                  { type: 'string', minLength: 1, maxLength: 80 },
+                  { type: 'null' },
+                ],
+                default: null,
+                description: 'Optional natural label such as mom, dad, brother, or a first name.',
+              },
+              targetPhoneNumber: {
+                anyOf: [
+                  { type: 'string', minLength: 1, maxLength: 40 },
+                  { type: 'null' },
+                ],
+                default: null,
+                description: 'Phone number for a phone-bound invite when the user provided one.',
+              },
+              targetTelegramUsername: {
+                anyOf: [
+                  { type: 'string', minLength: 5, maxLength: 32 },
+                  { type: 'null' },
+                ],
+                default: null,
+                description: 'Telegram username without @ when the user provided one.',
+              },
+            },
+          },
+        },
+        required: ['action', 'invite'],
+      },
+    ],
   },
 } as const
 
@@ -760,6 +790,9 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
     'Opaque Message ref shown beside an accepted inbound message in the current prompt. This is not a provider message id.',
 } as const
 
+export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
+  'The native consent message completes the offer portion. If no other requested output remains, call murph.finish_without_reply. Otherwise answer the remaining request without adding a companion consent acknowledgment.'
+
 export const MURPH_GROUP_TOOL = {
   namespace: 'murph',
   name: 'group',
@@ -892,7 +925,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: [...HOSTED_USAGE_REFERRAL_POLICY_CODES],
         description:
-          'Required only for action="cancel_usage_referral". Cancel only one exact mission with state="armed" from activeMissions.',
+          'Required only for action="cancel_usage_referral". Cancel only one exact referral option with state="armed" from the legacy internal activeMissions field. Never call it a mission in member-facing copy.',
       },
       policyCodes: {
         type: 'array',
@@ -992,7 +1025,7 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, optional bounded health projections offered as one fixed permission request. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and uses a handled native consent path or a first-party link.',
+          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
       },
       standaloneLink: {
         type: 'boolean',

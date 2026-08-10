@@ -6,15 +6,34 @@ import {
   requestHostedOnboardingJson,
 } from "@/src/components/hosted-onboarding/client-api";
 import { Button } from "@/src/components/ui/button";
+import {
+  Alert,
+  AlertDescription,
+} from "@/src/components/ui/alert";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/src/components/ui/dialog";
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
 export function HostedFamilyStartButton(props: {
   block?: boolean;
+  trialConversionConfirmation?: {
+    cancelLabel: string;
+    confirmLabel: string;
+    description: string;
+    title: string;
+  };
   label: string;
   variant?: "default" | "secondary";
 }) {
+  const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -29,6 +48,9 @@ export function HostedFamilyStartButton(props: {
         url: string | null;
       }>({
         method: "POST",
+        ...(props.trialConversionConfirmation
+          ? { payload: { confirmedTrialConversion: true } }
+          : {}),
         url: "/api/settings/billing/family/checkout",
       });
       if (response.url) {
@@ -40,6 +62,7 @@ export function HostedFamilyStartButton(props: {
         return;
       }
       setIsSubmitting(false);
+      setConfirmationOpen(false);
       setStatusMessage("Your Family plan is syncing with Stripe. Refresh in a moment.");
     } catch (error) {
       setIsSubmitting(false);
@@ -52,13 +75,19 @@ export function HostedFamilyStartButton(props: {
       <Button
         type="button"
         variant={props.variant ?? "default"}
-        onClick={() => void startCheckout()}
+        onClick={() => {
+          if (props.trialConversionConfirmation) {
+            setConfirmationOpen(true);
+            return;
+          }
+          void startCheckout();
+        }}
         disabled={isSubmitting}
         className={props.block ? "w-full" : undefined}
       >
         {isSubmitting ? "Opening Stripe..." : props.label}
       </Button>
-      {errorMessage ? (
+      {!confirmationOpen && errorMessage ? (
         <p role="alert" className="max-w-xs text-xs leading-tight text-destructive">
           {errorMessage}
         </p>
@@ -67,6 +96,55 @@ export function HostedFamilyStartButton(props: {
         <p role="status" className="max-w-xs text-xs leading-tight text-muted-foreground">
           {statusMessage}
         </p>
+      ) : null}
+      {props.trialConversionConfirmation ? (
+        <Dialog
+          open={confirmationOpen}
+          onOpenChange={(open) => {
+            if (!isSubmitting) {
+              setConfirmationOpen(open);
+            }
+          }}
+        >
+          <DialogContent className="max-w-md gap-6 p-6 md:p-7">
+            <DialogHeader className="pr-10">
+              <DialogTitle>
+                {props.trialConversionConfirmation.title}
+              </DialogTitle>
+              <DialogDescription>
+                {props.trialConversionConfirmation.description}
+              </DialogDescription>
+            </DialogHeader>
+            {errorMessage ? (
+              <Alert variant="destructive">
+                <AlertDescription>{errorMessage}</AlertDescription>
+              </Alert>
+            ) : null}
+            <DialogFooter className="flex-col sm:flex-col">
+              <Button
+                type="button"
+                size="xl"
+                onClick={() => void startCheckout()}
+                disabled={isSubmitting}
+                className="w-full"
+              >
+                {isSubmitting
+                  ? "Starting Family..."
+                  : props.trialConversionConfirmation.confirmLabel}
+              </Button>
+              <Button
+                type="button"
+                size="xl"
+                variant="ghost"
+                onClick={() => setConfirmationOpen(false)}
+                disabled={isSubmitting}
+                className="w-full"
+              >
+                {props.trialConversionConfirmation.cancelLabel}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
     </div>
   );

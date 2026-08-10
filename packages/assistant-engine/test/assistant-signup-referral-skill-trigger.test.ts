@@ -77,10 +77,10 @@ describe('assistant signup link guidance', () => {
       'Never choose, contact, or message the recipient',
     )
     expect(normalizedSkill).toContain(
-      'do not append billing, low-usage, mission, or sponsorship options unless the user also asked about them',
+      'do not append billing, low-usage, group referral, or sponsorship options unless the user also asked about them',
     )
     expect(normalizedSkill).toContain(
-      'does not earn usage, complete a mission, or guarantee a reward',
+      'does not earn usage, qualify for a group referral reward, or guarantee a reward',
     )
     expect(normalizedSkill).toContain(
       'If a recipient later finishes their own Murph setup through an invite attributed to that link and the referral qualifies under server policy, Murph adds any referral reward automatically',
