@@ -175,6 +175,7 @@ package_script="scripts/package-audit-context-full.sh"
 app_connector="current"
 model="gpt-5.6-sol"
 thinking="current"
+response_timeout_ms="${response_timeout_ms:-$((180 * 60 * 1000))}"
 
 review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
