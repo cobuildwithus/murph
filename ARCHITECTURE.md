@@ -1512,16 +1512,26 @@ the reply message, reaction capability, and delivery idempotency inputs, but do
 not recreate the explicit-target override or replace the turn's thread binding.
 Linq explicitly requests interactive transcript rendering. A recipient with
 the shipping Messages extension sees the extension-owned SwiftUI balloon; a
-recipient without it sees the same provider-owned static layout carrying the
-date, meal count, available totals, explicit partial marker, and first
-available exact V2 goal plus its frozen status. The required HTTPS URL keeps
-the immutable V1 or V2 presentation snapshot in a bounded Base64URL fragment
-that the extension decodes offline. Encoding is not encryption, so that
-fragment may contain only the same private-direct card values and never member
-identity, canonical record references, credentials, or other authority. The
-fallback body remains value-free and names a truthful text-recovery action to
-avoid Apple data-detector downgrade. No card API, database, auth path, cleanup
-owner, extension network read, or second queue exists.
+recipient without it, including Messages on macOS, sees a provider-owned static
+layout with a generated nutrition image that mirrors the compact balloon's
+default visual state plus native captions that repeat the date, meal count,
+every available total, the partial state, and each available V2 goal target and
+status. The image derives a quantitative calorie arc only from a complete total
+and an assessed non-null goal; V1, partial, null-goal, and unavailable-status
+snapshots retain only the neutral ring track. The extension URL keeps the
+immutable V1 or V2
+snapshot in a bounded Base64URL fragment that the extension decodes offline.
+The static image URL carries that same bounded presentation envelope in one
+queryless path so the Web image route can render it and Linq can rehost it.
+Encoding is not encryption: either representation may contain only the same
+private-direct card values and never member identity, canonical record
+references, credentials, or
+other authority. The image route performs no database or remote read, writes no
+application log or analytics event, returns private no-store/no-index headers,
+and rejects malformed input before reading render assets. The fallback body
+remains value-free and names a truthful text-recovery action to avoid Apple
+data-detector downgrade. No persisted card state, authenticated card API,
+cleanup owner, extension network read, or second queue exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
