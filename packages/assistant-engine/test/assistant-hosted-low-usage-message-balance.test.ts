@@ -27,7 +27,10 @@ describe('assistant hosted low-usage message-balance policy', () => {
       'Do not divide or extrapolate from remaining percentage, dollars, credit formulas, forecasts, model choice, or prior turns.',
     )
     expect(normalizedSkill).toContain(
-      'Answer with only the authoritative fields allowed below: remaining percentage, reset or trial-end date, days forecast, or the exact hosted-group included-usage progress wording below.',
+      'Answer with only the authoritative fields allowed below: remaining percentage, an applicable monthly reset date, days forecast, or the exact hosted-group included-usage progress wording below.',
+    )
+    expect(normalizedSkill).toContain(
+      'Starter usage has no expiry date.',
     )
     expect(normalizedSkill).toContain(
       'never reuse it to estimate the current balance',
