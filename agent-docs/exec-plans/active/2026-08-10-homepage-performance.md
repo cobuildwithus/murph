@@ -13,7 +13,7 @@ Updated: 2026-08-10
 ## Success criteria
 
 - Above-fold avatars no longer download full-resolution PNG/JPEG originals.
-- Below-fold persona imagery is right-sized, modern-format, and lazily loaded.
+- Below-fold persona imagery is right-sized and modern-format.
 - Any homepage JavaScript or layout-work change is backed by direct code-path
   evidence from the reported Lighthouse findings.
 - Focused homepage tests, the Web typecheck, and the production Web build pass.
@@ -65,8 +65,9 @@ Updated: 2026-08-10
 - Optimize the measured multi-megabyte image path before considering secondary
   bundle or render work.
 - Keep the authentication runtime out of the initial bundle and idle task queue;
-  load it on the existing pointer/focus preparation path while preserving the
-  dialog fallback and shared-runtime reuse.
+  load it on the existing pointer/focus preparation path while preserving each
+  open dialog session, retrying transient chunk failures, and reusing the shared
+  runtime after it is ready.
 - Fix the exact automated contrast failures found on the production homepage;
   do not otherwise change the warm research-library palette.
 
@@ -83,17 +84,23 @@ Updated: 2026-08-10
 - Seven 128-by-128 AVIF derivatives total about 34 KiB on disk. Production-
   browser page loads requested 10-18 KiB of avatar data and made no request for
   the replaced homepage PNG/JPEG URLs.
-- The homepage authentication runtime stays unloaded after five idle seconds,
-  loads on the existing pointer/focus intent path, and remains shared for the
-  subsequent dialog open.
+- The homepage authentication runtime stays unloaded after five idle seconds
+  and starts loading on the existing pointer/focus intent path. An auth dialog
+  opened before that load finishes remains on the standalone owner for its
+  whole session; after close, the ready shared runtime is adopted. A transient
+  import failure is contained and retried on later intent.
 - The hero auto-scroll now runs after paint without reading `scrollHeight` in
-  its write path.
+  its write path, with a regression assertion for the maximum scroll target.
 - Axe color-contrast checks reported zero violations at both 1440px desktop and
   390px mobile. Native-resolution catalog crops preserved the existing layout
   and avatar framing.
-- Focused Vitest passed 24 tests across five files; scoped ESLint passed; the
+- Focused Vitest passed 26 tests across six files; scoped ESLint passed; the
   official Web production build, including Web typechecking and trace checks,
   passed.
+- ReviewGPT final round 1 identified the open-session replacement and import-
+  rejection risks in the first auth-loading implementation. The accepted fix
+  now has direct delayed-load, close-and-adopt, and failure-and-retry coverage;
+  the corrected head is pending preliminary and final round 2 review.
 - The required Claude UI double-check could not start because the `claude`
   executable is absent; both prescribed model commands failed with `command not
   found`, so no Claude verdict is claimed.

@@ -1,10 +1,9 @@
 "use client";
 
 import {
-  lazy,
-  Suspense,
   useCallback,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -15,12 +14,11 @@ import type { HostedPrivyCompletionPayload } from "@/src/lib/hosted-onboarding/t
 
 import { AuthContext } from "./auth-dialog-provider";
 import { AuthDialog } from "./auth-dialog";
+import {
+  loadHomepageAuthRuntime,
+  type HomepageAuthRuntimeComponent,
+} from "./homepage-auth-runtime-loader";
 import { navigateHostedAuthRedirect } from "./hosted-auth-navigation";
-
-const HostedAuthRuntime = lazy(async () => {
-  const runtimeModule = await import("./hosted-auth-runtime");
-  return { default: runtimeModule.HostedAuthRuntime };
-});
 
 export function HomepageAuthRuntimeProvider({
   authenticated,
@@ -52,14 +50,44 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [runtimeRequested, setRuntimeRequested] = useState(false);
+  const [loadedRuntime, setLoadedRuntime] =
+    useState<HomepageAuthRuntimeComponent | null>(null);
+  const [sessionRuntime, setSessionRuntime] =
+    useState<HomepageAuthRuntimeComponent | null>(null);
+  const loadedRuntimeRef = useRef<HomepageAuthRuntimeComponent | null>(null);
+  const runtimeLoadRef = useRef<Promise<void> | null>(null);
   const prepareAuth = useCallback(() => {
-    setRuntimeRequested(true);
+    if (loadedRuntimeRef.current || runtimeLoadRef.current) {
+      return;
+    }
+
+    const load = loadHomepageAuthRuntime()
+      .then((runtime) => {
+        loadedRuntimeRef.current = runtime;
+        setLoadedRuntime(() => runtime);
+      })
+      .catch(() => {
+        // The standalone AuthDialog remains usable. A later intent retries.
+      })
+      .finally(() => {
+        if (runtimeLoadRef.current === load) {
+          runtimeLoadRef.current = null;
+        }
+      });
+    runtimeLoadRef.current = load;
   }, []);
   const openAuthDialog = useCallback(() => {
+    const runtimeAtOpen = loadedRuntimeRef.current;
     prepareAuth();
+    setSessionRuntime(() => runtimeAtOpen);
     setOpen(true);
   }, [prepareAuth]);
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setSessionRuntime(null);
+    }
+  }, []);
 
   const handleAuthCompleted = useCallback(
     (payload: HostedPrivyCompletionPayload) => {
@@ -86,22 +114,21 @@ function UnauthenticatedHomepageAuthRuntimeProvider({
   const dialogProps = {
     autoSendPastedPhoneNumber: true,
     onCompleted: handleAuthCompleted,
-    onOpenChange: setOpen,
+    onOpenChange: handleOpenChange,
     open,
     requireLaunchConsentOnCompletion: true,
   } as const;
+  const Runtime = open ? sessionRuntime : loadedRuntime;
 
   return (
     <AuthContext.Provider value={value}>
       {children}
-      {runtimeRequested ? (
-        <Suspense fallback={<AuthDialog {...dialogProps} />}>
-          <HostedAuthRuntime>
-            {(runtime) => (
-              <AuthDialog {...dialogProps} privyRuntime={runtime} />
-            )}
-          </HostedAuthRuntime>
-        </Suspense>
+      {Runtime ? (
+        <Runtime>
+          {(runtime) => (
+            <AuthDialog {...dialogProps} privyRuntime={runtime} />
+          )}
+        </Runtime>
       ) : (
         <AuthDialog {...dialogProps} />
       )}

@@ -1,5 +1,5 @@
 import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { resolve } from "node:path";
 
 import { expect, test } from "vitest";
 
@@ -17,7 +17,9 @@ test("homepage avatars use compact modern-format derivatives", async () => {
   for (const source of AVATAR_SOURCES) {
     expect(source).toMatch(/-avatar\.avif$/);
 
-    const asset = await stat(join(process.cwd(), "public", source.slice(1)));
+    const asset = await stat(
+      resolve(import.meta.dirname, "..", "public", source.slice(1)),
+    );
     expect(asset.size, `${source} should stay below 16 KiB`).toBeLessThan(
       16 * 1024,
     );
