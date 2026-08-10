@@ -48,10 +48,10 @@ proof. Its complete `vault-cli memory show --format json` read is also mandatory
 because the snapshot does not inject the canonical Identity, Preferences,
 Instructions, and Context memory document; a failed or unreadable memory read
 fails closed, while missing or ambiguous age alone is not a universal block.
-Its lifetime canonical procedure-event discovery, bounded body-measurement read,
-and separate `pregnancy-test` read are likewise mandatory before deriving,
-saving, or surfacing a proposal and again before activating one. Also read and
-follow the
+Its lifetime canonical procedure-event and encounter-diagnosis discovery,
+bounded body-measurement read, and separate `pregnancy-test` read are likewise
+mandatory before deriving, saving, or surfacing a proposal and again before
+activating one. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
 before deciding that the five canonical daily goals are complete. Use its

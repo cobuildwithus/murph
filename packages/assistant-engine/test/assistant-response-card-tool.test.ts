@@ -283,6 +283,18 @@ describe('murph.attach_response_card', () => {
       'vault-cli event list --kind procedure --limit 200 --format json',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli event list --kind encounter --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use event show for every item whose list data reports nonzero diagnosesCount',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A safety-relevant active diagnosis with documented or suspected certainty suppresses numeric output.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A failed, unreadable, or exactly 200-record encounter read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Inspect every returned item; use event show for an item whose procedure or status is missing or truncated.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(

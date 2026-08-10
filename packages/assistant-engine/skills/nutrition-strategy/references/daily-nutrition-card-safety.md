@@ -63,6 +63,30 @@ context.
   procedure occurred and not a universal block. A scheduled occurrence asks no
   question and performs no mutation when this read is unavailable or suppresses
   numeric output.
+- Also run `vault-cli event list --kind encounter --limit 200 --format json`
+  and inspect every returned canonical encounter item before numeric setup,
+  proposal presentation, Goal mutation or activation, and every card. Reuse an
+  identical current-turn result. If the list fails, is unreadable, or returns
+  exactly 200 records, discovery may be incomplete: fail closed with ordinary
+  non-numeric text, no Goal or measurement mutation, and no card. Run no
+  encounter detail reads for a saturated list. Otherwise, for every item whose
+  list data reports a nonzero `diagnosesCount`, run `vault-cli event show
+  <event-id> --format json` and inspect every complete diagnosis entry; never
+  select encounters by title, visit type, context-snapshot visibility, or the
+  default list prefix. If any required detail read fails or is unreadable, use
+  the same fail-closed behavior. A safety-relevant diagnosis with explicit
+  `active` status and `documented` or `suspected` certainty is current
+  suppressing evidence. This includes the exclusions below, such as kidney,
+  advanced liver, significant heart, relevant endocrine, pregnancy,
+  eating-disorder or RED-S, underweight, frailty, or malnutrition context. If a
+  safety-relevant diagnosis has missing or `unknown` status or certainty and
+  its current meaning cannot be resolved safely, fail closed. `inactive`,
+  `resolved`, `history`, or `rule_out` status, `ruled_out` certainty, and an
+  unrelated diagnosis do not prove a current exclusion by themselves. Missing
+  encounter diagnoses are unavailable evidence, not proof that no exclusion
+  exists and not a universal block. A scheduled occurrence asks no question
+  and performs no mutation when this read is unavailable, unresolved, or
+  suppresses numeric output.
 - As part of the same pre-numeric and pre-activation gate, run one bounded
   lossless canonical-entry read for the current local date: `vault-cli
   measurement entry list --metric bmi --metric height

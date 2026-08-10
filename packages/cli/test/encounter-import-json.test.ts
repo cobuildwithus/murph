@@ -7,6 +7,7 @@ import { Cli } from 'incur'
 import { afterEach, test as vitestTest } from 'vitest'
 
 import { registerEncounterCommands } from '../src/commands/encounter.js'
+import { registerEventCommands } from '../src/commands/event.js'
 import { registerVaultCommands } from '../src/commands/vault.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
@@ -39,6 +40,27 @@ interface EncounterScaffoldResult {
     measurements?: Array<{ eventId: string }>
     procedures?: Array<{ eventId: string; status?: string }>
     tests?: Array<{ eventId: string; resultStatus?: string }>
+  }
+}
+
+interface EventListResult {
+  count: number
+  filters: {
+    kind: string | null
+    limit: number
+  }
+  items: Array<{
+    id: string
+    kind: string
+    data: Record<string, unknown>
+  }>
+}
+
+interface EventShowResult {
+  entity: {
+    id: string
+    kind: string
+    data: Record<string, unknown>
   }
 }
 
@@ -107,6 +129,7 @@ function createEncounterCli() {
 
   const services = createIntegratedVaultServices()
   registerVaultCommands(cli, services)
+  registerEventCommands(cli, services)
   registerEncounterCommands(cli)
 
   return cli
@@ -176,6 +199,15 @@ test('encounter import-json persists one encounter bundle with linked visit fact
         encounterType: 'office_visit',
         assessmentText: 'Visit-scoped assessment text.',
         planText: 'Visit-scoped plan text.',
+        diagnoses: [
+          {
+            text: 'Chronic kidney disease stage 3',
+            code: 'N18.30',
+            codeSystem: 'ICD-10-CM',
+            status: 'active',
+            certainty: 'documented',
+          },
+        ],
         rawRefs: ['raw/documents/2026/03/visit-summary.pdf'],
       },
       measurements: [
@@ -243,6 +275,15 @@ test('encounter import-json persists one encounter bundle with linked visit fact
   const test = storedById.get('evt_01JQ9R7WF97M1WAB2B4QF2Q1F3')
 
   assert.equal(encounter?.dayKey, '2026-03-05')
+  assert.deepEqual(encounter?.diagnoses, [
+    {
+      text: 'Chronic kidney disease stage 3',
+      code: 'N18.30',
+      codeSystem: 'ICD-10-CM',
+      status: 'active',
+      certainty: 'documented',
+    },
+  ])
   assert.equal(measurement?.kind, 'measurement')
   assert.equal(measurement?.dayKey, '2026-03-05')
   assert.deepEqual(measurement?.links, [
@@ -265,6 +306,39 @@ test('encounter import-json persists one encounter bundle with linked visit fact
   assert.equal(procedure?.rawRefs, undefined)
   assert.equal(test?.kind, 'test')
   assert.equal(test?.dayKey, '2026-03-05')
+
+  const encounterListResult = await runInProcessJsonCli<EventListResult>(cli, [
+    'event',
+    'list',
+    '--kind',
+    'encounter',
+    '--limit',
+    '200',
+    '--vault',
+    vaultRoot,
+  ])
+  const encounterList = requireData(encounterListResult.envelope)
+  assert.equal(encounterListResult.exitCode, null)
+  assert.equal(encounterList.filters.kind, 'encounter')
+  assert.equal(encounterList.filters.limit, 200)
+  assert.equal(encounterList.count, 1)
+  assert.equal(encounterList.items[0]?.id, saved.encounterId)
+  assert.equal(encounterList.items[0]?.kind, 'encounter')
+  assert.equal(encounterList.items[0]?.data.diagnosesCount, 1)
+  assert.equal('diagnoses' in (encounterList.items[0]?.data ?? {}), false)
+
+  const encounterShowResult = await runInProcessJsonCli<EventShowResult>(cli, [
+    'event',
+    'show',
+    saved.encounterId,
+    '--vault',
+    vaultRoot,
+  ])
+  const encounterShow = requireData(encounterShowResult.envelope)
+  assert.equal(encounterShowResult.exitCode, null)
+  assert.equal(encounterShow.entity.id, saved.encounterId)
+  assert.equal(encounterShow.entity.kind, 'encounter')
+  assert.deepEqual(encounterShow.entity.data.diagnoses, encounter?.diagnoses)
 
   const retried = await runInProcessJsonCli<EncounterImportResult>(cli, [
     'encounter',

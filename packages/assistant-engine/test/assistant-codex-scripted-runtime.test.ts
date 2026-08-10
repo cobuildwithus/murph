@@ -2052,6 +2052,8 @@ if (!tool) {
       'measurement entry list --metric pregnancy-test --from 2025-10-03 --to 2026-07-30 --limit 200 --format json'
     const procedureListCommand =
       'event list --kind procedure --limit 200 --format json'
+    const encounterListCommand =
+      'event list --kind encounter --limit 200 --format json'
     const totalsCommand =
       'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
 
@@ -2387,6 +2389,125 @@ if (!tool) {
           'completed',
         )),
     )
+    const encounterListResult = (
+      items: readonly Record<string, unknown>[],
+    ) => ({
+      count: items.length,
+      filters: {
+        experiment: null,
+        from: null,
+        kind: 'encounter',
+        limit: 200,
+        tag: [],
+        to: null,
+      },
+      items,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })
+    const encounterItem = (
+      id: string,
+      diagnosesCount: number,
+    ) => ({
+      data: {
+        encounterType: 'office_visit',
+        ...(diagnosesCount === 0 ? {} : { diagnosesCount }),
+      },
+      id,
+      kind: 'encounter',
+      occurredAt: '2026-07-14T10:00:00.000Z',
+      title: 'Clinical visit',
+    })
+    const encounterDetail = (
+      id: string,
+      diagnoses: readonly Record<string, unknown>[],
+    ) => ({
+      entity: {
+        data: {
+          diagnoses,
+          encounterType: 'office_visit',
+        },
+        id,
+        kind: 'encounter',
+        occurredAt: '2026-07-14T10:00:00.000Z',
+        title: 'Clinical visit',
+      },
+      vault: 'synthetic-vault',
+    })
+    const noEncounters = encounterListResult([])
+    const encountersWithoutDiagnoses = encounterListResult([
+      encounterItem('event_encounter_without_diagnoses', 0),
+    ])
+    const activeKidneyEncounterId = 'event_encounter_active_kidney_diagnosis'
+    const activeKidneyEncounters = encounterListResult([
+      encounterItem(activeKidneyEncounterId, 1),
+    ])
+    const activeKidneyEncounterDetail = encounterDetail(
+      activeKidneyEncounterId,
+      [{
+        certainty: 'documented',
+        code: 'N18.30',
+        codeSystem: 'ICD-10-CM',
+        status: 'active',
+        text: 'Chronic kidney disease stage 3',
+      }],
+    )
+    const unresolvedKidneyEncounterId =
+      'event_encounter_unresolved_kidney_diagnosis'
+    const unresolvedKidneyEncounters = encounterListResult([
+      encounterItem(unresolvedKidneyEncounterId, 1),
+    ])
+    const unresolvedKidneyEncounterDetail = encounterDetail(
+      unresolvedKidneyEncounterId,
+      [{
+        certainty: 'unknown',
+        status: 'unknown',
+        text: 'Chronic kidney disease',
+      }],
+    )
+    const nonCurrentEncounterId = 'event_encounter_non_current_diagnoses'
+    const nonCurrentEncounters = encounterListResult([
+      encounterItem(nonCurrentEncounterId, 6),
+    ])
+    const nonCurrentEncounterDetail = encounterDetail(
+      nonCurrentEncounterId,
+      [
+        {
+          certainty: 'documented',
+          status: 'inactive',
+          text: 'Chronic kidney disease',
+        },
+        {
+          certainty: 'documented',
+          status: 'resolved',
+          text: 'Heart disease',
+        },
+        {
+          certainty: 'documented',
+          status: 'history',
+          text: 'Liver disease',
+        },
+        {
+          certainty: 'suspected',
+          status: 'rule_out',
+          text: 'Endocrine disease',
+        },
+        {
+          certainty: 'ruled_out',
+          status: 'active',
+          text: 'Eating disorder',
+        },
+        {
+          certainty: 'documented',
+          status: 'active',
+          text: 'Seasonal allergies',
+        },
+      ],
+    )
+    const saturatedEncounters = encounterListResult(
+      Array.from({ length: 200 }, (_, index) =>
+        encounterItem(`event_encounter_${index + 1}`, 0)),
+    )
     const canonicalTotals = {
       from: '2026-07-30',
       mealCount: 3,
@@ -2623,6 +2744,7 @@ text(result.output);
         vault: 'synthetic-vault',
       }],
       [procedureListCommand, noProcedures],
+      [encounterListCommand, noEncounters],
       [measurementCommand, safeMeasurements],
       [pregnancyMeasurementCommand, noPregnancyMeasurements],
       [totalsCommand, canonicalTotals],
@@ -2634,6 +2756,7 @@ text(result.output);
       conditionListCommand,
       regimenListCommand,
       procedureListCommand,
+      encounterListCommand,
       measurementCommand,
       pregnancyMeasurementCommand,
       totalsCommand,
@@ -3124,6 +3247,161 @@ text(result.output);
       })
     }
 
+    for (const unavailableEncounterRead of [
+      {
+        failed: true,
+        finalMessage: 'I could not complete the current encounter-diagnosis safety check, so I left target setup unchanged.',
+        output: noEncounters,
+        prompt: 'Set daily nutrition targets for me, but do not proceed if canonical encounter history is unavailable.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not safely complete the encounter-diagnosis check, so I left target setup unchanged.',
+        output: saturatedEncounters,
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is saturated.',
+      },
+      {
+        failed: false,
+        finalMessage: 'I could not read the canonical encounter-diagnosis result, so I left target setup unchanged.',
+        output: { unexpected: 'unreadable encounter list' },
+        prompt: 'Set daily nutrition targets for me, but fail closed if canonical encounter discovery is unreadable.',
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          ...(unavailableEncounterRead.failed
+            ? []
+            : [[encounterListCommand, unavailableEncounterRead.output] as const]),
+        ],
+        expectedCommands: [
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+        ],
+        ...(unavailableEncounterRead.failed
+          ? { failedCommands: [encounterListCommand] }
+          : {}),
+        finalMessage: unavailableEncounterRead.finalMessage,
+        prompt: unavailableEncounterRead.prompt,
+        scheduled: false,
+        skillReadCommands: interactiveSkillReads,
+        skillSlugs: ['food-journal', 'nutrition-strategy'],
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, activeKidneyEncounters],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        `event show ${activeKidneyEncounterId} --format json`,
+      ],
+      failedCommands: [`event show ${activeKidneyEncounterId} --format json`],
+      finalMessage: 'I could not complete the encounter-diagnosis detail check, so I left target setup unchanged.',
+      prompt: 'Set daily nutrition targets for me, but do not proceed if a required encounter detail read fails.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    for (const blockedEncounterCase of [
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I kept this non-numeric because an active documented kidney diagnosis requires the qualified-care path.',
+        prompt: 'Set daily nutrition targets for me using my supplied adult profile.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused because an active documented kidney diagnosis requires the qualified-care path.',
+        prompt: 'Yes, accept those nutrition targets.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [] as readonly (readonly [string, unknown])[],
+        expectedPrefix: [] as readonly string[],
+        finalMessage: 'I left the proposal paused and did not attach the pending card because an active documented kidney diagnosis requires the qualified-care path.',
+        prompt: 'Yes, accept those targets and show the daily card I requested.',
+        scheduled: false,
+      },
+      {
+        commandPrefix: [
+          [activeListCommand, completeList],
+          [visibleGoalShowCommand, visibleGoal],
+        ] as const,
+        expectedPrefix: [activeListCommand, visibleGoalShowCommand],
+        finalMessage: 'Closeout saved without numeric feedback because an active documented kidney diagnosis requires the non-numeric path.',
+        prompt: 'Run the scheduled automatic meal closeout and resolve whether the 2026-07-30 goal-aware card is safe.',
+        scheduled: true,
+      },
+    ]) {
+      await runCase({
+        commandOutputs: [
+          ...blockedEncounterCase.commandPrefix,
+          [memoryCommand, adultMemory],
+          ...emptySafetyOutputs,
+          [procedureListCommand, noProcedures],
+          [encounterListCommand, activeKidneyEncounters],
+          [`event show ${activeKidneyEncounterId} --format json`, activeKidneyEncounterDetail],
+        ],
+        expectedCommands: [
+          ...blockedEncounterCase.expectedPrefix,
+          memoryCommand,
+          ...emptySafetyCommands,
+          procedureListCommand,
+          encounterListCommand,
+          `event show ${activeKidneyEncounterId} --format json`,
+        ],
+        finalMessage: blockedEncounterCase.finalMessage,
+        prompt: blockedEncounterCase.prompt,
+        scheduled: blockedEncounterCase.scheduled,
+        skillReadCommands: blockedEncounterCase.scheduled
+          ? scheduledSkillReads
+          : interactiveSkillReads,
+        skillSlugs: blockedEncounterCase.scheduled
+          ? ['automatic-meal-capture', 'nutrition-strategy']
+          : ['food-journal', 'nutrition-strategy'],
+        ...(!blockedEncounterCase.scheduled && blockedEncounterCase.prompt.startsWith('Yes')
+          ? { snapshotPrompt: 'A paused five-target Daily nutrition targets proposal is awaiting this member reply.' }
+          : {}),
+      })
+    }
+
+    await runCase({
+      commandOutputs: [
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, unresolvedKidneyEncounters],
+        [`event show ${unresolvedKidneyEncounterId} --format json`, unresolvedKidneyEncounterDetail],
+      ],
+      expectedCommands: [
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        `event show ${unresolvedKidneyEncounterId} --format json`,
+      ],
+      finalMessage: 'I kept this non-numeric because a safety-relevant encounter diagnosis has unresolved current status.',
+      prompt: 'Set daily nutrition targets for me, but fail closed on unresolved safety-relevant encounter diagnoses.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
     for (const blockedProposal of [
       {
         finalMessage: 'I kept this non-numeric because your current measurements make self-directed targets inappropriate.',
@@ -3146,12 +3424,14 @@ text(result.output);
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
           [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
           [measurementCommand, blockedProposal.measurements],
         ],
         expectedCommands: [
           memoryCommand,
           ...emptySafetyCommands,
           procedureListCommand,
+          encounterListCommand,
           measurementCommand,
         ],
         finalMessage: blockedProposal.finalMessage,
@@ -3166,11 +3446,13 @@ text(result.output);
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
         [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
       ],
       expectedCommands: [
         memoryCommand,
         ...emptySafetyCommands,
         procedureListCommand,
+        encounterListCommand,
         measurementCommand,
       ],
       failedCommands: [measurementCommand],
@@ -3200,6 +3482,7 @@ text(result.output);
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
           [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
           [measurementCommand, normalBmiMeasurements],
           ...(unavailablePregnancyRead.failed
             ? []
@@ -3209,6 +3492,7 @@ text(result.output);
           memoryCommand,
           ...emptySafetyCommands,
           procedureListCommand,
+          encounterListCommand,
           measurementCommand,
           pregnancyMeasurementCommand,
         ],
@@ -3228,6 +3512,7 @@ text(result.output);
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
         [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, laterNegativeAfterPositiveMeasurements],
       ],
@@ -3235,6 +3520,7 @@ text(result.output);
         memoryCommand,
         ...emptySafetyCommands,
         procedureListCommand,
+        encounterListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
       ],
@@ -3260,6 +3546,7 @@ text(result.output);
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
           [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
           [measurementCommand, normalBmiMeasurements],
           [pregnancyMeasurementCommand, positivePregnancyMeasurements],
         ],
@@ -3267,6 +3554,7 @@ text(result.output);
           memoryCommand,
           ...emptySafetyCommands,
           procedureListCommand,
+          encounterListCommand,
           measurementCommand,
           pregnancyMeasurementCommand,
         ],
@@ -3286,6 +3574,7 @@ text(result.output);
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
         [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, positivePregnancyMeasurements],
       ],
@@ -3295,6 +3584,7 @@ text(result.output);
         memoryCommand,
         ...emptySafetyCommands,
         procedureListCommand,
+        encounterListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
       ],
@@ -3320,12 +3610,14 @@ text(result.output);
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
           [procedureListCommand, noProcedures],
+          [encounterListCommand, noEncounters],
           [measurementCommand, lowBmiMeasurements],
         ],
         expectedCommands: [
           memoryCommand,
           ...emptySafetyCommands,
           procedureListCommand,
+          encounterListCommand,
           measurementCommand,
         ],
         finalMessage: acceptance.finalMessage,
@@ -3339,12 +3631,22 @@ text(result.output);
 
     for (const allowedPregnancyEvidence of [
       {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, encountersWithoutDiagnoses]] as const,
         measurements: noPregnancyMeasurements,
         prompt: 'Set daily nutrition targets for me using my supplied adult profile and representative maintenance context; no pregnancy-test rows exist.',
         procedureCommands: [procedureListCommand],
         procedureOutputs: [[procedureListCommand, noProcedures]] as const,
       },
       {
+        encounterCommands: [
+          encounterListCommand,
+          `event show ${nonCurrentEncounterId} --format json`,
+        ],
+        encounterOutputs: [
+          [encounterListCommand, nonCurrentEncounters],
+          [`event show ${nonCurrentEncounterId} --format json`, nonCurrentEncounterDetail],
+        ] as const,
         measurements: negativePregnancyMeasurements,
         prompt: 'Set daily nutrition targets for me using my supplied adult profile; a planned gastric sleeve and an exact negative pregnancy test do not prove a current exclusion.',
         procedureCommands: [
@@ -3357,6 +3659,8 @@ text(result.output);
         ] as const,
       },
       {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
         measurements: ambiguousPregnancyMeasurements,
         prompt: 'Set daily nutrition targets for me using my supplied adult profile; a cancelled gastric bypass and a conflicting pregnancy-test row do not prove current exclusions.',
         procedureCommands: [procedureListCommand],
@@ -3365,6 +3669,8 @@ text(result.output);
         ])]] as const,
       },
       {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
         measurements: noPregnancyMeasurements,
         prompt: 'Set daily nutrition targets for me using my supplied adult profile; a completed appendectomy is unrelated and an old positive pregnancy test is stale.',
         procedureCommands: [procedureListCommand],
@@ -3373,6 +3679,8 @@ text(result.output);
         ])]] as const,
       },
       {
+        encounterCommands: [encounterListCommand],
+        encounterOutputs: [[encounterListCommand, noEncounters]] as const,
         measurements: noPregnancyMeasurements,
         prompt: 'Set daily nutrition targets for me using my supplied adult profile; an ambiguously recorded gastric procedure does not prove completed bariatric surgery.',
         procedureCommands: [procedureListCommand],
@@ -3386,6 +3694,7 @@ text(result.output);
           [memoryCommand, adultMemory],
           ...emptySafetyOutputs,
           ...allowedPregnancyEvidence.procedureOutputs,
+          ...allowedPregnancyEvidence.encounterOutputs,
           [measurementCommand, normalBmiMeasurements],
           [pregnancyMeasurementCommand, allowedPregnancyEvidence.measurements],
           [activeListCommand, noActiveGoalsList],
@@ -3397,6 +3706,7 @@ text(result.output);
           memoryCommand,
           ...emptySafetyCommands,
           ...allowedPregnancyEvidence.procedureCommands,
+          ...allowedPregnancyEvidence.encounterCommands,
           measurementCommand,
           pregnancyMeasurementCommand,
           activeListCommand,
@@ -3418,6 +3728,7 @@ text(result.output);
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
         [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, noPregnancyMeasurements],
         [activeListCommand, noActiveGoalsList],
@@ -3430,6 +3741,7 @@ text(result.output);
         memoryCommand,
         ...emptySafetyCommands,
         procedureListCommand,
+        encounterListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
         activeListCommand,
@@ -3454,6 +3766,7 @@ text(result.output);
         [memoryCommand, adultMemory],
         ...completeSafetyOutputs({}),
         [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
         [measurementCommand, safeMeasurements],
         [pregnancyMeasurementCommand, noPregnancyMeasurements],
         [totalsCommand, canonicalTotals],
@@ -3464,6 +3777,7 @@ text(result.output);
         memoryCommand,
         ...completeSafetyCommands,
         procedureListCommand,
+        encounterListCommand,
         measurementCommand,
         pregnancyMeasurementCommand,
         totalsCommand,

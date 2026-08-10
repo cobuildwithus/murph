@@ -211,8 +211,14 @@ On a scheduled run:
    and follow the shared gate's procedure-item inspection and conditional detail
    reads. A completed bariatric procedure uses the same non-numeric,
    no-write, no-question, no-card path; failed, unreadable, or saturated
-   procedure discovery uses the failure path. Then run the shared gate's bounded
-   body-measurement read and separate `pregnancy-test` read. A failed read, a body-measurement read saturated
+   procedure discovery uses the failure path. Also run `vault-cli event list
+   --kind encounter --limit 200 --format json`, detail-read every returned item
+   with nonzero `data.diagnosesCount`, and apply the shared gate's current active
+   diagnosis rules. A relevant active documented or suspected diagnosis uses
+   the same non-numeric path; failed, unreadable, saturated, required-detail,
+   or unresolved safety-relevant diagnosis discovery uses the failure path.
+   Then run the shared gate's bounded body-measurement read and separate
+   `pregnancy-test` read. A failed read, a body-measurement read saturated
    without resolving usable BMI evidence, or a saturated pregnancy-test read
    uses the same failure behavior. An explicit positive pregnancy-test result
    uses the same non-numeric, no-write, no-question, no-card path. Reuse all
