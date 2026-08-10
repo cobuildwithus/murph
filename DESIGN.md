@@ -208,17 +208,16 @@ Large Fraunces stat number (the value) + DM Mono unit label + delta in sage gree
 ### iMessage Nutrition Card Image
 Render the macOS and app-absent fallback as the compact default state of the
 shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
-cream balloon, small system-style badge, large calorie value, calorie progress
-ring, and one-row protein, carbohydrates, fat, and fiber readings visually
-aligned with the Messages extension. Status color may tint nutrient values, but
+cream field, large calorie value, calorie progress ring, and one-row protein,
+carbohydrates, fat, and fiber readings visually aligned with the Messages
+extension. The bitmap stays rectangular and badge-free because Messages owns
+the app icon and outer corner mask. Status color may tint nutrient values, but
 the ring draws quantitative progress only for a complete calorie total with an
 assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
 the neutral track. The static image does not expose the native card's
-tap-to-reveal target state.
-The provider captions beneath the image use one text column to retain the date,
-meal count, every available total, partial state, and each V2 target/status for
-assistive technology and image-failure recovery. V1 renders an unavailable
-fiber dash in the image while its caption correctly omits a fiber claim.
+tap-to-reveal target state. The provider caption retains only the date and meal
+count; visible totals and goals are not repeated beneath the image. V1 renders
+an unavailable fiber dash in the image without adding a fiber caption claim.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
@@ -592,6 +591,12 @@ Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunr
 > Create an ultra-wide social header for Murph. Keep a lone figure small on the right side of the frame and leave a calm, open copy area on the left. Use soft golden-hour light, low-contrast atmosphere, and a grounded natural landscape. The image should feel warm, spacious, and quietly intelligent, not epic or motivational.
 
 Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room for copy, (3) real place with real light, (4) quiet human presence, (5) still feels like Murph without the logo.
+
+### Personal Patterns Matrix
+
+Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and next-day outcomes on columns. Circle size shows the size of the difference. Fill color shows the evidence stage: amber for a new clue, sage for a link seen again, and dark sage with a ring for a link worth testing. The plus or minus sign shows direction. Color must not label higher values as good or lower values as bad.
+
+Keep the copy observational. Use “lined up with” or “was associated with.” Never use “caused,” “proved,” or a moral label. Show matched-day counts and comparison means in the cell detail. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 
 ## 6. Do's and Don'ts
 

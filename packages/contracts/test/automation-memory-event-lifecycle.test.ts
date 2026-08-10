@@ -63,14 +63,14 @@ describe("automation contract seams", () => {
     });
   });
 
-  it("rejects recurring automation schedule time zones", () => {
+  it("rejects invalid recurring automation schedule time zones", () => {
     expect(() =>
       automationScheduleSchema.parse({
         expression: "0 8 * * *",
         kind: "cron",
         timeZone: "Mars/Olympus",
       }),
-    ).toThrow(/Unrecognized key/u);
+    ).toThrow(/Expected an IANA time zone/u);
   });
 
   it("rejects malformed cron expressions at the automation contract boundary", () => {
@@ -97,7 +97,7 @@ describe("automation contract seams", () => {
     ).toThrow(/Too small/u);
   });
 
-  it("accepts canonical recurring schedules without a time zone field", () => {
+  it("accepts canonical recurring schedules with or without an explicit time zone", () => {
     expect(
       automationScheduleSchema.parse({
         everyMs: 60_000,
@@ -112,19 +112,33 @@ describe("automation contract seams", () => {
       automationScheduleSchema.parse({
         expression: "0 8 * * *",
         kind: "cron",
+        timeZone: "America/Chicago",
       }),
     ).toEqual({
       expression: "0 8 * * *",
       kind: "cron",
+      timeZone: "America/Chicago",
+    });
+
+    expect(
+      automationScheduleSchema.parse({
+        kind: "dailyLocal",
+        localTime: "08:30",
+        timeZone: "UTC",
+      }),
+    ).toEqual({
+      kind: "dailyLocal",
+      localTime: "08:30",
+      timeZone: "UTC",
     });
 
     expect(() =>
       automationScheduleSchema.parse({
         kind: "dailyLocal",
         localTime: "08:30",
-        timeZone: "UTC",
+        timeZone: "Invalid/Timezone",
       }),
-    ).toThrow(/Unrecognized key/u);
+    ).toThrow(/Expected an IANA time zone/u);
   });
 
   it("keeps device activity in the canonical trigger schema but out of time schedules", () => {
