@@ -944,6 +944,20 @@ verification headers only in the route/service process. That code verifies the
 provider payload, appends the canonical encrypted mailbox item transactionally,
 drains any local non-mailbox side effects, and signals the per-user hosted
 Temporal workflow with only `{ mailboxItemId, lane, laneSeq }`.
+After signature verification, Linq `message.received` accepts the supported
+top-level and nested provider shapes. An absent or null `parts` field normalizes
+to the existing empty-message disposition, which records and acknowledges the
+provider event without waking the assistant; a non-array value or unsupported
+part type remains invalid. The ingress emits only bounded structural warning
+fields for either compatibility acceptance or rejection, never part values or
+the raw payload. A documented `imessage_app` part contributes only fallback
+text or a fixed placeholder to the canonical message; its app identity, layout,
+and URL are discarded before mailbox persistence. Unknown-sender admission and
+blocked-content screening resolve one shared allow, blocked, or contentless
+disposition from the same fallback text before direct or group first-contact
+routing, regardless of admission mode. A card without fallback text remains
+contentless at that gate; only accepted active-member canonicalization supplies
+the fixed placeholder. Media-only first contacts retain their legacy behavior.
 Cloudflare Email ingress verifies either a signed reply alias for an active
 member or the fixed public sender route plus a trusted authenticated-sender
 verdict, stores the encrypted raw message, appends the canonical encrypted
