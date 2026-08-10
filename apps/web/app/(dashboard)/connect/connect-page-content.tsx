@@ -78,10 +78,13 @@ type ConnectSourceDisconnectScope = NonNullable<
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
+const MURPH_ANDROID_PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=ai.withmurph.app";
 const DISPLAY_ONLY_CONNECT_SOURCE_IDS = new Set<string>([
   "apple-health",
   "coros",
   "huawei-health",
+  "mobvoi-health",
   "ringconn",
   "suunto",
   "xiaomi-mi-fitness",
@@ -98,6 +101,16 @@ const CONNECT_SOURCE_UI = {
     unavailableActionUrl: MURPH_IOS_APP_STORE_URL,
   },
   ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
+  "mobvoi-health": {
+    description:
+      "Supported TicWatch health and activity data through Google Fit and Android Health Connect.",
+    logo: logoAsset("health-connect.png"),
+    name: "Mobvoi / TicWatch",
+    unavailableActionLabel: "Download app",
+    unavailableActionUrl: MURPH_ANDROID_PLAY_STORE_URL,
+    unavailableMessage:
+      "In Mobvoi Health, turn on Google Fit sharing. In Google Fit, turn on Sync Fit with Health Connect, then connect Health Connect in Murph on Android. Available categories and history depend on what Mobvoi and Google Fit write.",
+  },
   whoop: {
     description: "Recovery, strain, sleep, and heart rate.",
     logo: logoAsset(

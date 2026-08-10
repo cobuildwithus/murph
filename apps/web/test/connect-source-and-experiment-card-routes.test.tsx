@@ -78,6 +78,7 @@ test("listVisibleConnectSources covers every hosted-visible device source with U
     "apple-health",
     "coros",
     "huawei-health",
+    "mobvoi-health",
     "ringconn",
     "suunto",
     "xiaomi-mi-fitness",

@@ -41,6 +41,8 @@ import {
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
+const MURPH_ANDROID_PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=ai.withmurph.app";
 
 export interface AssistantSystemPromptInput {
   assistantCliContract: string | null;
@@ -367,7 +369,7 @@ function buildStableRouteCapabilityPrompt(
       : null,
     buildAssistantIosAppDownloadGuidanceText(conversationScope),
     conversationScope === "direct"
-      ? buildAssistantAppleHealthRelayGuidanceText()
+      ? buildAssistantHealthRelayGuidanceText()
       : null,
     conversationScope === "direct"
       ? buildAssistantVaultNavigationText({
@@ -1398,7 +1400,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source that is neither in this list nor named in the Apple Health relay section, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source that is neither in this list nor named in the health data relay section, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantIosAppDownloadGuidanceText(
@@ -1416,17 +1418,15 @@ function buildAssistantIosAppDownloadGuidanceText(
 - In user-facing messages, put the URL alone on the final line with no text after it.`;
 }
 
-function buildAssistantAppleHealthRelayGuidanceText(): string {
-  return `Apple Health relay:
-- Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.
-- WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
-- WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
-- No documented WHOOP settings deeplink; never invent one.
-- Zepp/Amazfit: share with Apple Health in Zepp, then connect Apple Health in Murph.
-- Xiaomi/Mi Fitness, RingConn, COROS, and Suunto: enable Apple Health sharing in the vendor app, then connect Apple Health in Murph. Murph receives only categories the app writes; do not claim direct cloud access, proprietary scores, or full history.
-- Huawei Health: Apple Health sharing varies by device, region, and app version. Guide the user only through options they can see; never promise unsupported categories.
-- Apple Health relay paths have no direct cloud access or guaranteed history backfill.
-- For any relay setup named above, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the App Store URL last.`;
+function buildAssistantHealthRelayGuidanceText(): string {
+  return `Health data relays:
+- Apple Health works in Murph for iPhone. For Apple Watch and supported vendor apps, enable Apple Health sharing, then connect Apple Health in Murph.
+- WHOOP direct sync omits steps. WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow, then connect Apple Health in Murph. Do not infer/request missing steps or invent a settings deeplink.
+- Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, and Suunto use that relay. Huawei support varies by device, region, and app version. Do not claim proprietary scores, full history, or unsupported categories.
+- Android Health Connect works in the Murph Android app. Canonical Google Play listing: ${MURPH_ANDROID_PLAY_STORE_URL}.
+- Mobvoi/TicWatch: enable Google Fit sharing in Mobvoi Health, turn on Sync Fit with Health Connect in Google Fit, then connect Health Connect in Murph. Categories and history depend on what those apps write.
+- Relay paths have no direct cloud access or guaranteed history backfill; only app-written data arrives.
+- For relay setup, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the matching app-store URL last.`;
 }
 
 function buildAssistantToolTruthfulnessText(): string {

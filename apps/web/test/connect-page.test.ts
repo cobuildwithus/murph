@@ -173,7 +173,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />33 of 33 sources</);
+  assert.match(markup, />34 of 34 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -244,6 +244,12 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       description:
         "Selected watch and band data through Apple Health, where supported.",
       name: "Huawei Health",
+    },
+    {
+      assetPath: "/brand-logos/connect/health-connect.png",
+      description:
+        "Supported TicWatch health and activity data through Google Fit and Android Health Connect.",
+      name: "Mobvoi / TicWatch",
     },
     {
       assetPath: "/brand-logos/connect/whoop.svg",
@@ -403,14 +409,14 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 33);
+  assert.equal(sources.length, 34);
   assert.equal(
     markup.match(/data-connection-state="idle"/gu)?.length,
     sources.length - 6,
   );
   assert.equal(
     markup.match(/>Not available<\/button>/gu)?.length,
-    sources.length - 7,
+    sources.length - 8,
   );
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
@@ -420,6 +426,15 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
+  assert.match(markup, /aria-label="Download app for Mobvoi \/ TicWatch"/);
+  assert.match(
+    markup,
+    /href="https:\/\/play\.google\.com\/store\/apps\/details\?id=ai\.withmurph\.app"/,
+  );
+  assert.match(
+    markup,
+    /In Mobvoi Health, turn on Google Fit sharing\. In Google Fit, turn on Sync Fit with Health Connect, then connect Health Connect in Murph on Android\. Available categories and history depend on what Mobvoi and Google Fit write\./,
+  );
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
@@ -465,6 +480,10 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.ok(
     sourceHeadingIndex(markup, "Google Fit") <
+      sourceHeadingIndex(markup, "Mobvoi / TicWatch"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Mobvoi / TicWatch") <
       sourceHeadingIndex(markup, "Huawei Health"),
   );
   assert.ok(
