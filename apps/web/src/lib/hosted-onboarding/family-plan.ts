@@ -5555,7 +5555,12 @@ async function hasHostedFamilyMemberLiveDirectSubscription(input: {
 
   return (
     Boolean(member?.billingRef?.stripeSubscriptionIdEncrypted)
-    && member?.billingStatus !== HostedBillingStatus.canceled
+    && (
+      member?.billingStatus === HostedBillingStatus.active
+      || member?.billingStatus === HostedBillingStatus.incomplete
+      || member?.billingStatus === HostedBillingStatus.past_due
+      || member?.billingStatus === HostedBillingStatus.unpaid
+    )
   );
 }
 

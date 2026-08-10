@@ -1,6 +1,6 @@
 # Hosted Family Plan
 
-Last verified: 2026-07-28
+Last verified: 2026-08-09
 
 ## Purpose
 
@@ -280,9 +280,15 @@ group status, clears the current Family subscription/item binding, and keeps the
 customer plus event freshness watermark so both direct and Family checkout can
 recover without allowing an older event to reclaim billing. An older unbound
 attempt remains an ambiguous claim and requires support rather than permitting
-a blind second provider start. A non-owner sponsored member may not retain a bound live direct subscription.
-Invite acceptance rejects that state with the existing recoverable transfer
-error. If Family sponsorship and direct Checkout race, the locked Family claim
+a blind second provider start. A non-owner sponsored member may not retain a
+bound live direct subscription. Invite acceptance rejects a bound direct
+subscription whose own-billing status can still grant, settle, or retry direct
+billing: `active`, `incomplete`, `past_due`, or `unpaid`. A `paused` or
+`canceled` direct subscription is lapsed, does not add a manual cancellation
+step to Family acceptance, and keeps its provider reference only as historical
+and reconciliation evidence. If that provider object later changes, the
+existing Family-sponsored Stripe event and exact-subscription cleanup owners
+remain authoritative. If Family sponsorship and direct Checkout race, the locked Family claim
 wins without disabling sponsored access, and every Checkout, subscription, and
 invoice replay for the different personal subscription remains in the existing
 receipt-owned cancellation path until Stripe confirms terminal cleanup. The
