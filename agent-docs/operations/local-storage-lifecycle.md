@@ -1,6 +1,6 @@
 # Local Storage Lifecycle
 
-Last verified: 2026-07-19
+Last verified: 2026-08-10
 
 ## Purpose
 
@@ -76,6 +76,11 @@ Never create a Murph task clone or worktree directly under a temp directory.
 Use `scripts/create-worktree`; use `--data-research <reason>` only for genuinely
 large data or research work. Registered worktrees remain visible to the normal
 open-PR, plan, cleanliness, process-CWD, and retirement gates.
+
+The creation helper writes `.metadata_never_index` at each worktree root so
+macOS Spotlight does not crawl rebuildable checkout contents. It also adds the
+root marker to the repository's common local exclude file so the marker never
+appears as worktree dirt. Keep the marker in place for the worktree's lifetime.
 
 `scripts/worktree-storage-guard` scans only conventional direct-child
 `murph-*` Git checkouts in the system `/tmp` roots by default and matches the
