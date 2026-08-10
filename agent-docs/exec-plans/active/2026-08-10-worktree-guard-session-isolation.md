@@ -14,23 +14,26 @@ Updated: 2026-08-10
 ## Success criteria
 
 - The commit hook identifies the exact committing worktree.
-- An authorized checkout can commit while an unauthorized sibling exists.
+- After the primary guard advances, an authorized checkout can commit while an
+  unauthorized sibling exists.
 - The unauthorized sibling cannot commit.
-- `scripts/create-worktree` can create and mark a sanctioned checkout while an
-  unauthorized sibling remains counted by the global resource guard.
+- After the primary guard advances, `scripts/create-worktree` can create and
+  mark a sanctioned checkout while an unauthorized sibling remains counted by
+  the global resource guard.
 - An already-authorized checkout on the preceding guard implementation can use
-  its installer, committer wrapper, and creation helper during rollout.
+  its installer, committer wrapper, and creation helper during rollout when no
+  raw sibling exists.
 - An authorized checkout on the current guard can use those entrypoints while
   the primary checkout still has the preceding guard and no raw sibling exists;
   the older primary remains globally fail-closed if a raw sibling exists.
 - No guard publishes authorization for a raw checkout, so a later primary
   downgrade cannot reinterpret durable compatibility state as authority.
-- Any current guard scan retires the exact authorization-plus-isolation state
-  written by the rejected intermediate guard, authorization first under the
-  shared guard lock; task-local scans never publish it and malformed nodes fail
-  closed.
-- A preceding-version creator remains globally fail-closed around a raw
-  sibling until it advances; current-version creation remains checkout-scoped.
+- If the rejected intermediate authorization-plus-isolation state exists, the
+  primary advances first and retires authorization first under the guard lock;
+  task-local scans never mutate it and malformed nodes fail closed.
+- Every preceding-primary entrypoint remains globally fail-closed around a raw
+  sibling until the primary advances; current-version creation is then
+  checkout-scoped.
 - The explicit no-argument guard continues to fail when any unauthorized
   registered worktree exists when run from the primary checkout.
 
@@ -56,9 +59,10 @@ Updated: 2026-08-10
 - Focused worktree-guard coverage passed: 29 tests, including both
   mixed-version directions, hook/guard update ordering, downgrade safety, and
   scoped resource-budget coverage. The added regressions seed the exact
-  intermediate marker pair, prove current task-first retirement against the
-  exact preceding primary and hook, downgrade rejection, and malformed-node
-  fail-closed behavior.
+  intermediate marker pair, prove primary-first retirement and downgrade
+  rejection, prove that a preceding primary blocks both current-task and raw
+  entrypoints around clean raw state, and cover malformed-node fail-closed
+  behavior.
 - The first simplified scoped `pnpm test:diff` run passed syntax, source guards,
   repo-tools typechecking, dependency policy, and 519 of 520 repo-tools tests.
   Its unrelated signal-forwarding timing test then passed directly in
@@ -71,7 +75,10 @@ Updated: 2026-08-10
   all 5 tests in isolation, and the complete serialized rerun passed all 522
   tests and every preceding check. After the task-first retirement correction,
   the focused suite passed all 29 tests and the complete serialized diff suite
-  passed all 522 tests plus every preceding check again.
+  passed all 522 tests plus every preceding check again. Round 6 then exposed
+  the incompatible task-first continuity claim. After its requirement-level
+  correction, the focused suite passed all 29 tests and the complete serialized
+  diff suite passed all 522 tests plus every preceding check again.
 - The current-main merge had one documentation conflict. Its resolution keeps
   the upstream changelog and shared-guard requirements together with this
   change's scoped rollout and downgrade guarantees; no code conflict occurred.
@@ -80,6 +87,10 @@ Updated: 2026-08-10
   and a raw-checkout-scoped audit both failed as designed. The obsolete marker
   pair created by the rejected design was removed to a recoverable temporary
   backup before this live verification.
+- Both rejected publishing heads are absent from `origin/main`. A bounded scan
+  of every currently registered worktree found zero isolation nodes and zero
+  authorization-plus-isolation pairs, so the primary-first prerequisite has no
+  remaining local state to retire before landing.
 - The preliminary ReviewGPT pass identified historical-entrypoint and scoped
   resource-budget coverage gaps. Final round 1 then identified inverse-version
   compatibility and marker-write ordering gaps. Round 2 required a
@@ -93,9 +104,14 @@ Updated: 2026-08-10
   added bounded retirement under the existing primary guard and lock. Round 5
   then proved that primary-only retirement left the exact preceding primary
   trusting persisted authorization during a task-first rollout. The recorded
-  correction allows any successfully completed current guard scan to delete
-  that exact rejected authority state under the shared lock: remove
-  authorization first and remove only a regular non-symlink isolation marker
-  after authorization is absent. Task-local guards still never publish state.
+  correction allowed any successfully completed current guard scan to delete
+  that exact rejected authority state. Round 6 proved that the preceding
+  primary's global guard cannot both reject the raw sibling and preserve
+  authorized current-task entrypoints. The recorded requirement decision drops
+  task-first continuity while a raw sibling exists: every preceding-primary
+  entrypoint stays globally fail-closed until primary advancement. If a
+  rejected marker pair exists, primary-first bounded retirement is a rollout
+  prerequisite. Task-local retirement is removed, and no new authority or
+  cleanup lifecycle is added.
   All accepted findings await exact-head reruns.
 - Pending: exact-head ReviewGPT and GitHub Actions.

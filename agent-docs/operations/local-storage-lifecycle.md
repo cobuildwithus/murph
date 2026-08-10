@@ -90,27 +90,29 @@ Any new unmanaged identity fails the guard even if another legacy clone
 disappeared at the same time. Registered worktrees, including locked
 `data/research:` worktrees, do not count as unmanaged.
 
-Registered-worktree authorization is checkout-scoped at commit time. The
-branch-independent hook supplies the committing checkout, so a raw worktree
-fails its own commit without blocking an authorized sibling. Sanctioned
-creation may also continue while a raw sibling exists because every registered
-worktree still consumes the global numeric and disk budget. No guard publishes
-legacy authorization for a raw checkout. During upgrade, any current guard
-scan treats an isolation marker from the rejected intermediate guard as
-unauthorized and retires its paired authorization under the existing shared
-guard lock. It removes a regular-file or symlink authorization node first and
-removes a regular non-symlink isolation marker only after authorization is
-absent. Task-local guards may delete only this rejected authority state and
-never publish it. Interruption and malformed marker nodes therefore remain
-fail-closed for both current and preceding guards. The
-shared hook and installer pass the current checkout through an environment hint
-while retaining the preceding guard's no-argument command surface, so either
-the primary or task checkout may advance first without an argument outage. An
-authorized historical checkout can still install hooks and commit after the
-primary advances, but its preceding-version creator remains globally
-fail-closed while a raw sibling exists. Current-version sanctioned creation
-remains scoped. Once the bounded intermediate state is retired, a later primary
-downgrade leaves both the old global audit and old shared hook fail-closed.
+Registered-worktree authorization is checkout-scoped at commit time after the
+primary guard advances. The branch-independent hook then supplies the
+committing checkout, so a raw worktree fails its own commit without blocking an
+authorized sibling. Every registered worktree still consumes the global
+numeric and disk budget. No guard publishes legacy authorization for a raw
+checkout. A preceding primary remains globally fail-closed around a raw
+sibling, including for authorized current-task entrypoints, until the primary
+advances. If an isolation marker from the rejected intermediate guard exists,
+advancing the primary first is a rollout prerequisite. The current primary
+retires its paired authorization under the existing guard lock: it removes a
+regular-file or symlink authorization node first and removes a regular
+non-symlink isolation marker only after authorization is absent. Task-local
+guards never mutate this state. Interruption and malformed marker nodes
+therefore remain fail-closed for both current and preceding guards. The shared
+hook and installer pass the current checkout through an environment hint while
+retaining the preceding guard's no-argument command surface, so either the
+primary or task checkout may advance first without an argument outage when no
+raw sibling exists. An authorized historical checkout can still install hooks
+and commit after the primary advances, but every preceding-primary entrypoint
+remains globally fail-closed while a raw sibling exists. Current-version
+sanctioned creation becomes scoped after the primary advances. Once the bounded
+intermediate state is retired, a later primary downgrade leaves both the old
+global audit and old shared hook fail-closed.
 Running the primary checkout's `scripts/worktree-storage-guard` without a
 scoped checkout remains the explicit global audit and reports every isolated
 registered worktree.
