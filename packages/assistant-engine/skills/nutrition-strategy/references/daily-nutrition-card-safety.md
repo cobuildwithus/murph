@@ -38,15 +38,20 @@ is still safe in the member's current context.
   Goal write. For an existing target, first require that the containing Goal
   window and target-level dates include the exact card `localDate`; an
   out-of-window target must neither trigger nor satisfy this gate. Evaluate the
-  boundary only for `dietary-calories` in canonical `kcal`. A calorie target in
-  any other unit makes the fixed-unit card bundle
-  incompatible: never compare its raw number with 1,200, copy it as calories,
-  convert it ad hoc, or use it for macro derivation. Suppress the card and make
-  no managed Goal mutation. Do not raise a compatible low target to the
-  boundary and continue; stop numeric setup, keep ordinary supportive text,
-  and use the body-composition or qualified-care owner when the member wants
-  help with the underlying direction. This is a conservative product guard,
-  not a claim that 1,200 kcal is appropriate for every adult.
+  boundary only for an exact point `dietary-calories` target in canonical
+  `kcal`: its selected-value comparator must be `between` with identical
+  numeric `value` and `highValue`. A one-sided threshold, non-identical range,
+  or calorie target in any other unit makes the point-target card bundle
+  incompatible. Never compare a threshold bound or incompatible raw number
+  with 1,200, copy it as calories, convert it ad hoc, or use it for macro
+  derivation. In particular, a calorie threshold whose satisfying range
+  includes intake below 1,200 cannot authorize numeric self-directed card
+  feedback. Suppress the card and make no managed Goal mutation. Do not raise a
+  compatible low point target to the boundary and continue; stop numeric setup,
+  keep ordinary supportive text, and use the body-composition or qualified-care
+  owner when the member wants help with the underlying direction. This is a
+  conservative product guard, not a claim that 1,200 kcal is appropriate for
+  every adult.
 - When this gate suppresses a card, keep the owning skill's non-numeric or
   clinical path. Do not expose stored targets or their assessments in card or
   fallback text, and do not mutate a Goal merely because the current context

@@ -135,13 +135,25 @@ describe('assistant automatic meal capture skill', () => {
     )
     const compactSkill = compact(skill)
     expect(compactSkill).toContain(
-      'Only when all five qualifying scalar targets resolve from active canonical Goals',
+      'Only when all five qualifying exact point targets resolve from active canonical Goals',
     )
     expect(compactSkill).toContain(
       'A card-qualifying target must use the exact canonical metric/unit pair: `dietary-calories` with `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
     )
     expect(compactSkill).toContain(
       'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
+    )
+    expect(compactSkill).toContain(
+      'A card-qualifying target must also be an exact point: its selected-value comparator is `between` with identical numeric `value` and `highValue`.',
+    )
+    expect(compactSkill).toContain(
+      'A one-sided `<`, `<=`, `>`, or `>=` threshold, non-identical range, or other shape remains authoritative but is incompatible with this point-target card.',
+    )
+    expect(compactSkill).toContain(
+      'Never expose, compare, copy, or derive from its bound, and never create, replace, or remove a managed target around it.',
+    )
+    expect(compactSkill).toContain(
+      'On a scheduled occurrence, ask no question, perform no Goal or measurement mutation, and use ordinary closeout text without a card.',
     )
     expect(compactSkill).toContain(
       'on a scheduled occurrence, ask no question and use ordinary closeout text.',
@@ -174,7 +186,7 @@ describe('assistant automatic meal capture skill', () => {
       'do not ask for profile inputs, call `goal import-json`, create or change a paused proposal, or surface a numeric target proposal.',
     )
     expect(compactSkill).toContain(
-      'If numeric presentation is suppressed, or the active target bundle is incomplete, ambiguous, or unit-incompatible, retain the ordinary compact closeout and do not attach a card.',
+      'If numeric presentation is suppressed, or the active target bundle is incomplete, ambiguous, unit-incompatible, or comparator-incompatible, retain the ordinary compact closeout and do not attach a card.',
     )
     expect(compactSkill).not.toContain(
       'follow it exactly. Resolve all five targets from active canonical Goals.',
@@ -207,10 +219,13 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('below 1,200 kcal/day')
     expect(compactSafety).toContain('active canonical target at card time')
     expect(compactSafety).toContain(
-      'Evaluate the boundary only for `dietary-calories` in canonical `kcal`.',
+      'Evaluate the boundary only for an exact point `dietary-calories` target in canonical `kcal`: its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
     )
     expect(compactSafety).toContain(
-      'A calorie target in any other unit makes the fixed-unit card bundle incompatible',
+      'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
+    )
+    expect(compactSafety).toContain(
+      'a calorie threshold whose satisfying range includes intake below 1,200 cannot authorize numeric self-directed card feedback.',
     )
     expect(compactSafety).toContain('pregnancy or breastfeeding')
     expect(compactSafety).toContain('glucose-lowering medication')
@@ -262,7 +277,7 @@ describe('assistant automatic meal capture skill', () => {
     )
   })
 
-  it('maps applicable canonical targets and rejects incompatible units', () => {
+  it('maps applicable canonical point targets and rejects incompatible units or comparators', () => {
     const canonicalTotals = {
       mealCount: 4,
       totals: {
@@ -273,24 +288,42 @@ describe('assistant automatic meal capture skill', () => {
         fiberGrams: { total: 26, mealCount: 2 },
       },
     }
-    const canonicalTargets = [
-      { metricKey: 'dietary-calories', unit: 'kcal', value: 2_400 },
-      { metricKey: 'protein-grams', unit: 'g', value: 150 },
-      { metricKey: 'carbs-grams', unit: 'g', value: 270 },
-      { metricKey: 'fat-grams', unit: 'g', value: 80 },
-      { metricKey: 'fiber-grams', unit: 'g', value: 35 },
-    ] as const
+    type CandidateTarget = {
+      metricKey: string
+      unit: string
+      value: number
+      comparator: '<' | '<=' | '>' | '>=' | 'between'
+      highValue?: number
+    }
+    const pointTarget = (
+      metricKey: string,
+      unit: string,
+      value: number,
+    ): CandidateTarget => ({
+      metricKey,
+      unit,
+      value,
+      comparator: 'between',
+      highValue: value,
+    })
+    const canonicalTargets: readonly CandidateTarget[] = [
+      pointTarget('dietary-calories', 'kcal', 2_400),
+      pointTarget('protein-grams', 'g', 150),
+      pointTarget('carbs-grams', 'g', 270),
+      pointTarget('fat-grams', 'g', 80),
+      pointTarget('fiber-grams', 'g', 35),
+    ]
     const resolveTarget = (
       metricKey: string,
       unit: string,
-      targets: readonly {
-        metricKey: string
-        unit: string
-        value: number
-      }[] = canonicalTargets,
+      targets: readonly CandidateTarget[] = canonicalTargets,
     ): number => {
       const matches = targets.filter(
-        (target) => target.metricKey === metricKey && target.unit === unit,
+        (target) =>
+          target.metricKey === metricKey &&
+          target.unit === unit &&
+          target.comparator === 'between' &&
+          target.highValue === target.value,
       )
       expect(matches).toHaveLength(1)
       return matches[0]!.value
@@ -352,6 +385,39 @@ describe('assistant automatic meal capture skill', () => {
       kilojouleCalories,
     )).toThrow()
 
+    const lowCalorieCeiling = canonicalTargets.map((target) =>
+      target.metricKey === 'dietary-calories'
+        ? {
+            ...target,
+            comparator: '<=' as const,
+            highValue: undefined,
+            value: 1_200,
+          }
+        : target
+    )
+    expect(900).toBeLessThanOrEqual(1_200)
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      lowCalorieCeiling,
+    )).toThrow()
+
+    const residualCalorieCeiling = canonicalTargets.map((target) =>
+      target.metricKey === 'dietary-calories'
+        ? {
+            ...target,
+            comparator: '<' as const,
+            highValue: undefined,
+            value: 2_000,
+          }
+        : target
+    )
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      residualCalorieCeiling,
+    )).toThrow()
+
     for (const metricKey of [
       'protein-grams',
       'carbs-grams',
@@ -364,6 +430,17 @@ describe('assistant automatic meal capture skill', () => {
           : target
       )
       expect(() => resolveTarget(metricKey, 'g', ounceTarget)).toThrow()
+
+      const thresholdTarget = canonicalTargets.map((target) =>
+        target.metricKey === metricKey
+          ? {
+              ...target,
+              comparator: '>=' as const,
+              highValue: undefined,
+            }
+          : target
+      )
+      expect(() => resolveTarget(metricKey, 'g', thresholdTarget)).toThrow()
     }
 
     const appliesToCardDate = (input: {

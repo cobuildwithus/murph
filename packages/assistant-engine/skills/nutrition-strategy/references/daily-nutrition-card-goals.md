@@ -2,10 +2,10 @@
 
 Use this only after an explicit interactive request to set nutrition targets or
 to receive a numeric daily nutrition card when the member does not already have
-one complete, unambiguous, unit-compatible daily target for calories, protein,
-carbohydrate, fat, and fiber. A scheduled closeout may use an already accepted
-active bundle, but it must not use this workflow to ask for inputs, derive or
-save targets, or surface a proposal.
+one complete, unambiguous, unit- and comparator-compatible daily target for
+calories, protein, carbohydrate, fat, and fiber. A scheduled closeout may use
+an already accepted active bundle, but it must not use this workflow to ask for
+inputs, derive or save targets, or surface a proposal.
 
 Before using this workflow, read and apply `daily-nutrition-card-safety.md`. If
 its card-time gate suppresses numeric goals, stop here and keep the owning
@@ -27,9 +27,18 @@ remain required before the proposal can affect a card.
   replace it, average conflicts, or create a default over it. A range or dynamic
   target cannot be collapsed into the card's scalar target; ask one narrow
   question or use ordinary text instead.
-- A selected-value target is scalar when its comparator is `<`, `<=`, `>`, or
-  `>=` using `value`, or `between` with identical `value` and `highValue`.
-  Multiple active explicit owners or any other target shape is ambiguous.
+- Comparator compatibility is part of target authority. This point-target card
+  and its managed derivation accept a selected-value target only when its
+  comparator is `between` and its numeric `value` and `highValue` are identical.
+  A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between`
+  range, or any other target shape remains authoritative canonical state but is
+  incompatible with this workflow. Never translate its bound into a point:
+  do not expose, compare, or copy it into the card; use it for the 1,200 kcal
+  boundary, residual-energy, or fiber calculations; or create, replace, or
+  remove managed targets around it. Use ordinary text or one narrow interactive
+  question without mutation; a scheduled closeout asks nothing and sends no
+  card. Apply this rule before any low-energy check or derivation. Multiple
+  active explicit owners are also ambiguous.
 - Unit compatibility is part of target authority. This fixed-unit workflow
   accepts only `dietary-calories` in `kcal`, and `protein-grams`, `carbs-grams`,
   `fat-grams`, and `fiber-grams` in `g`. An explicit target in another unit
@@ -101,10 +110,11 @@ Keep population guidance separate from Murph's product judgment.
    explicit metric or an energy-feasibility check.
 3. **One residual-energy algorithm.** Run this only after the calorie target and
    every explicit protein, carbohydrate, and fat target are proven applicable
-   to the proposal's card date, then prove the calorie target is in `kcal` and
-   each macro target is in `g`. Hold those applicable, compatible explicit
-   targets fixed. Use 4 kcal/g for protein and carbohydrate and 9 kcal/g for
-   fat. Then derive only missing macros:
+   to the proposal's card date and exact points with comparator `between` and
+   identical endpoints, then prove the calorie target is in `kcal` and each
+   macro target is in `g`. Hold those applicable, compatible explicit targets
+   fixed. Use 4 kcal/g for protein and carbohydrate and 9 kcal/g for fat. Then
+   derive only missing macros:
 
    - With exactly one macro missing, assign that macro the remaining energy.
    - With protein plus another macro missing, start from the weight-based protein
@@ -200,10 +210,10 @@ Use the existing canonical Goal owner; add no new state surface.
    request is still unambiguous and the card alone completes it. A
    target-setting-only request, correction, decline, ambiguous acceptance, or
    compound request remains ordinary text with no card. Otherwise, only a later
-   eligible response with five scalar values in the exact canonical metric/unit
-   pairs resolved from active canonical goals may attach the card. On an
-   interactive card request, explain an existing paused proposal again unless
-   the member is accepting or changing it.
+   eligible response with five exact point values in the exact canonical
+   metric/unit pairs resolved from active canonical goals may attach the card.
+   On an interactive card request, explain an existing paused proposal again
+   unless the member is accepting or changing it.
 
 ## Evidence register
 

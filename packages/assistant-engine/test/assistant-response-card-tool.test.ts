@@ -176,10 +176,19 @@ describe('murph.attach_response_card', () => {
       'never calculate or reuse totals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Require exactly one unambiguous applicable scalar target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
+      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A target in another unit remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value',
+      'Each target must use selected-value comparator between with identical numeric value and highValue',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout',
@@ -215,7 +224,7 @@ describe('murph.attach_response_card', () => {
       'explicit numeric-card request authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'hold applicable, compatible explicit targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
+      'hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'an infeasible bundle means ordinary text and no mutation',
@@ -239,7 +248,7 @@ describe('murph.attach_response_card', () => {
       'one consolidated question, never a goal-less card',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'conflicts, ranges, unsafe numbers, or missing responsible calorie inputs',
+      'conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'available only to the managed private-direct closeout',

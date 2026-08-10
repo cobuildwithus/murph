@@ -327,6 +327,21 @@ describe('assistant nutrition strategy skill', () => {
       'A member- or clinician-chosen active target always wins for its metric.',
     )
     expect(compactGoals).toContain(
+      'Comparator compatibility is part of target authority.',
+    )
+    expect(compactGoals).toContain(
+      'This point-target card and its managed derivation accept a selected-value target only when its comparator is `between` and its numeric `value` and `highValue` are identical.',
+    )
+    expect(compactGoals).toContain(
+      'A one-sided `<`, `<=`, `>`, or `>=` threshold, a non-identical `between` range, or any other target shape remains authoritative canonical state but is incompatible with this workflow.',
+    )
+    expect(compactGoals).toContain(
+      'do not expose, compare, or copy it into the card; use it for the 1,200 kcal boundary, residual-energy, or fiber calculations; or create, replace, or remove managed targets around it.',
+    )
+    expect(compactGoals).toContain(
+      'Use ordinary text or one narrow interactive question without mutation; a scheduled closeout asks nothing and sends no card.',
+    )
+    expect(compactGoals).toContain(
       'Unit compatibility is part of target authority.',
     )
     expect(compactGoals).toContain(
@@ -339,7 +354,7 @@ describe('assistant nutrition strategy skill', () => {
       'perform no managed Goal mutation, use ordinary text or one narrow interactive question, and let a scheduled closeout use ordinary text without a question or card.',
     )
     expect(compactGoals).toContain(
-      "Run this only after the calorie target and every explicit protein, carbohydrate, and fat target are proven applicable to the proposal's card date, then prove the calorie target is in `kcal` and each macro target is in `g`.",
+      "Run this only after the calorie target and every explicit protein, carbohydrate, and fat target are proven applicable to the proposal's card date and exact points with comparator `between` and identical endpoints, then prove the calorie target is in `kcal` and each macro target is in `g`.",
     )
     expect(compactGoals).toContain('Effective dates are also part of target authority.')
     expect(compactGoals).toContain(
@@ -385,7 +400,13 @@ describe('assistant nutrition strategy skill', () => {
       'A usable adult BMI below 18.5 suppresses numeric goals and the card.',
     )
     expect(compactSafety).toContain(
-      'A calorie target in any other unit makes the fixed-unit card bundle incompatible',
+      'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
+    )
+    expect(compactSafety).toContain(
+      'Never compare a threshold bound or incompatible raw number with 1,200, copy it as calories, convert it ad hoc, or use it for macro derivation.',
+    )
+    expect(compactSafety).toContain(
+      'a calorie threshold whose satisfying range includes intake below 1,200 cannot authorize numeric self-directed card feedback.',
     )
     expect(compactSafety).toContain(
       'first require that the containing Goal window and target-level dates include the exact card `localDate`; an out-of-window target must neither trigger nor satisfy this gate.',
@@ -435,7 +456,10 @@ describe('assistant nutrition strategy skill', () => {
       'This applies both to an active canonical target at card time and to an adjusted or rounded derived result before any Goal write.',
     )
     expect(compactSafety).toContain(
-      'Do not raise a compatible low target to the boundary and continue',
+      'its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
+    )
+    expect(compactSafety).toContain(
+      'Do not raise a compatible low point target to the boundary and continue',
     )
     expect(cardSafety).toContain('anyone under 18')
     expect(compactSafety).toContain('pregnancy or breastfeeding')

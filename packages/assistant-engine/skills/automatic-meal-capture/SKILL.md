@@ -181,11 +181,12 @@ On a scheduled run:
    target-setting intent: do not ask for profile inputs, call `goal import-json`,
    create or change a paused proposal, or surface a numeric target proposal.
    If numeric presentation is suppressed, or the active target bundle is
-   incomplete, ambiguous, or unit-incompatible, retain the ordinary compact
-   closeout and do not attach a card. Keep the occurrence local date from step
-   1 only as the work and retry boundary. Resolve target applicability against
-   the single selected card `localDate`: the capture date whose totals and card
-   are being closed out, including a historical catch-up date. A target
+   incomplete, ambiguous, unit-incompatible, or comparator-incompatible, retain
+   the ordinary compact closeout and do not attach a card. Keep the occurrence
+   local date from step 1 only as the work and retry boundary. Resolve target
+   applicability against the single selected card `localDate`: the capture date
+   whose totals and card are being closed out, including a historical catch-up
+   date. A target
    qualifies only when that card date is on or after the containing Goal's
    `window.startAt`, on or before its optional `window.targetAt`, and inside the
    target's optional inclusive `startAt`/`targetAt` interval. Ignore an
@@ -198,10 +199,16 @@ On a scheduled run:
    A target in another unit remains authoritative, but never compare, convert,
    or copy its raw value into this fixed-unit card; on a scheduled occurrence,
    ask no question and use ordinary closeout text. Never infer a target from
-   this day's meal total or one wearable day.
-7. Only when all five qualifying scalar targets resolve from active canonical
-   Goals, run
-   the exact canonical
+   this day's meal total or one wearable day. A card-qualifying target must also
+   be an exact point: its selected-value comparator is `between` with identical
+   numeric `value` and `highValue`. A one-sided `<`, `<=`, `>`, or `>=`
+   threshold, non-identical range, or other shape remains authoritative but is
+   incompatible with this point-target card. Never expose, compare, copy, or
+   derive from its bound, and never create, replace, or remove a managed target
+   around it. On a scheduled occurrence, ask no question, perform no Goal or
+   measurement mutation, and use ordinary closeout text without a card.
+7. Only when all five qualifying exact point targets resolve from active
+   canonical Goals, run the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date
    range immediately before any response-card attachment; do not reuse an
    earlier total or calculate nutrition independently. When the run covers
@@ -214,9 +221,9 @@ On a scheduled run:
    proteinGrams, carbsGrams, fatGrams, fiberGrams } }`. Copy every metric's
    complete `{ total, mealCount }` pair unchanged from the canonical read,
    including `fiberGrams`. Each goal entry is
-   `{ target: <exact canonical daily target>, status: <assessment> }`. Respect
-   an explicit target's stored comparator and wording when assessing it. The
-   assessment must be one of `far_under_target`, `under_target`, `on_target`,
+   `{ target: <exact canonical daily target>, status: <assessment> }`. Never
+   translate a threshold or range comparator into this point-target payload.
+   The assessment must be one of `far_under_target`, `under_target`, `on_target`,
    `over_target`, `far_over_target`, or `unavailable`. A metric whose total is
    missing or whose `mealCount` is below the top-level `mealCount` must use
    `unavailable`; do not color an incomplete total as under, on, or over target.
