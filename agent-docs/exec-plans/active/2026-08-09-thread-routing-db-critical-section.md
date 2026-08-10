@@ -187,7 +187,7 @@ Updated: 2026-08-09
   non-PostgreSQL files passed 400 tests; app-local typecheck, scoped lint, and
   `git diff --check` passed.
 - Latest-main integration proof: the focused Linq route file passed 143 tests;
-  all six affected non-PostgreSQL files passed 402 tests, the PostgreSQL
+  all six affected non-PostgreSQL files passed 403 tests, the PostgreSQL
   concurrency lane passed 9 tests, and app-local prepared typecheck, scoped
   lint, and `git diff --check` passed.
 
