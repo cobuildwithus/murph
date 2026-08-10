@@ -15,10 +15,7 @@ import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
-  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
-  HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
-  HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
-} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
+} from "@/src/lib/hosted-onboarding/billing-group-payment-method-contract";
 import {
   HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
   parseHostedBillingPlanChangeReturnValue,
@@ -140,7 +137,6 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
-    || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
     || shouldResumeCurrentSettingsUsageCreditReturnUrl(payload)
   );
 }
@@ -223,25 +219,6 @@ function shouldResumeCurrentSettingsGroupPaymentUrl(
   const returnValues = params.getAll(HOSTED_START_PAID_GROUP_RETURN_PARAM);
   return returnValues.length === 1
     && returnValues[0] === HOSTED_START_PAID_GROUP_RETURN_VALUE;
-}
-
-function shouldResumeCurrentSettingsPulseTrialPaymentUrl(
-  payload: HostedPrivyCompletionPayload,
-): boolean {
-  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
-    return false;
-  }
-
-  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
-    return false;
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  return (
-    params.getAll(HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM).length === 1
-    && params.getAll(HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM).length === 1
-    && params.getAll(HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM).length === 1
-  );
 }
 
 function shouldResumeCurrentClinicalRecordsIndexUrl(

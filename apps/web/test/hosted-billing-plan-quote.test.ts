@@ -51,7 +51,7 @@ describe("hosted billing plan quotes", () => {
     })).toBe("immediate");
   });
 
-  it("quotes the ordinary Core trial choice after the free trial", () => {
+  it("quotes an immediate paid Core start from a retained legacy trial state", () => {
     const quote = createHostedBillingPlanQuote({
       memberId: "member_trial_quote",
       now: NOW,
@@ -62,14 +62,14 @@ describe("hosted billing plan quotes", () => {
         currentCheckoutOffer: "pulse_trial_7d",
       },
       targetPlanCode: "launch_group_monthly",
-      timing: "at_trial_end",
+      timing: "now",
     });
 
     expect(quote).toMatchObject({
-      label: "Choose Core after your trial ($3.50/month)",
+      label: "Start Core now ($3.50/month)",
       monthlyPriceUsdCents: 350,
       targetPlanCode: "launch_group_monthly",
-      timing: "at_trial_end",
+      timing: "now",
     });
   });
 

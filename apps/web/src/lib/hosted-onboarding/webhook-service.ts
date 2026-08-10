@@ -95,10 +95,10 @@ import {
   type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
 import {
-  ensureHostedLinqInstantStartPulseTrialEnrollment,
+  ensureHostedLinqInstantStartStarterUsageEnrollment,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
   type HostedLinqInstantStartDeferredActivationWake,
-} from "./auto-trial-enrollment-service";
+} from "./starter-usage-enrollment-service";
 import {
   isHostedLinqInstantStartEventCandidate,
 } from "./linq-instant-start";
@@ -694,7 +694,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         });
         let enrollmentFailed = false;
         try {
-          const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
+          const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
             admissionEventId: instantStartEnrollment.admissionEventId,
             inviteCode: instantStartEnrollment.inviteCode,
             memberId: instantStartEnrollment.memberId,

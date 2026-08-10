@@ -14,13 +14,136 @@ import {
 } from "./contact-privacy";
 import { hostedOnboardingError } from "./errors";
 import {
+  clearHostedMemberLegacyTrialBillingUnderLockTx,
   withHostedMemberStripeMutationLock,
   withHostedMemberStripeMutationLockForOps,
 } from "./hosted-member-billing-store";
 import {
   readHostedMemberBillingSnapshot,
 } from "./hosted-member-store";
+import {
+  canGrantHostedStarterUsageForLegacyTrial,
+} from "./starter-usage";
+import {
+  ensureHostedStarterUsageGrantTx,
+  readHostedLegacyTrialConsumedUsageUsdMicrosTx,
+} from "./starter-usage-grant";
 import { logHostedStripeFailure } from "./stripe-error-log";
+
+const HOSTED_LEGACY_TRIAL_RETIRABLE_STATUSES = new Set<Stripe.Subscription.Status>([
+  "canceled",
+  "incomplete",
+  "incomplete_expired",
+  "paused",
+  "trialing",
+]);
+
+export function isHostedLegacyPulseTrialRetirableStatus(
+  status: Stripe.Subscription.Status,
+): boolean {
+  return HOSTED_LEGACY_TRIAL_RETIRABLE_STATUSES.has(status);
+}
+
+/**
+ * Bounded rollout owner for trial rows created by an older deployment after
+ * the one-time Starter migration. It revalidates the exact provider object,
+ * preserves already-consumed trial usage in the canonical Starter ledger, and
+ * clears the obsolete billing identity under the existing member lock.
+ */
+export function retireHostedLegacyPulseTrialToStarter(input: {
+  memberId: string;
+  prisma: PrismaClient;
+  priceId: string;
+  stripe: Pick<Stripe, "subscriptions">;
+}): Promise<boolean> {
+  return withHostedMemberStripeMutationLock({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    run: async (tx) => {
+      const member = await readHostedMemberBillingSnapshot({
+        memberId: input.memberId,
+        prisma: tx,
+      });
+      const billingRef = member?.billingRef ?? null;
+      const subscriptionId = billingRef?.stripeSubscriptionId ?? null;
+      if (!member || !billingRef || !subscriptionId) {
+        return false;
+      }
+      if (billingRef.currentBillingPhase === "paid") {
+        throw buildHostedLegacyTrialRetirementBlockedError();
+      }
+
+      const subscription = await retrieveHostedPulseTrialCleanupTarget({
+        expectedCustomerId: billingRef.stripeCustomerId ?? undefined,
+        memberId: input.memberId,
+        priceId: input.priceId,
+        stripe: input.stripe,
+        subscriptionId,
+      });
+      if (
+        subscription
+        && !isHostedLegacyPulseTrialRetirableStatus(subscription.status)
+      ) {
+        throw buildHostedLegacyTrialRetirementBlockedError();
+      }
+
+      const canGrantStarter = canGrantHostedStarterUsageForLegacyTrial(
+        member.core,
+      );
+      if (canGrantStarter) {
+        const initialConsumedUsdMicros =
+          await readHostedLegacyTrialConsumedUsageUsdMicrosTx({
+            memberId: input.memberId,
+            trialStartedAt:
+              billingRef.currentTrialStartedAt
+              ?? billingRef.pulseTrialRedeemedAt
+              ?? null,
+            tx,
+          });
+        await ensureHostedStarterUsageGrantTx({
+          effectiveAt:
+            billingRef.pulseTrialRedeemedAt
+            ?? billingRef.currentTrialStartedAt
+            ?? member.core.createdAt,
+          initialConsumedUsdMicros,
+          memberId: input.memberId,
+          source: "legacy_trial_migration",
+          tx,
+        });
+      }
+      const billingStatusAfterClear = canGrantStarter
+        ? HostedBillingStatus.active
+        : member.core.billingStatus;
+
+      if (
+        subscription
+        && subscription.status !== "canceled"
+        && subscription.status !== "incomplete_expired"
+      ) {
+        await cancelHostedPulseTrialLoserSubscription({
+          stripe: input.stripe,
+          subscriptionId,
+        });
+      }
+
+      await clearHostedMemberLegacyTrialBillingUnderLockTx({
+        billingStatusAfterClear,
+        memberId: input.memberId,
+        tx,
+      });
+      return true;
+    },
+  });
+}
+
+export function buildHostedLegacyTrialRetirementBlockedError() {
+  return hostedOnboardingError({
+    code: "HOSTED_BILLING_SUBSCRIPTION_ALREADY_EXISTS",
+    httpStatus: 409,
+    message:
+      "This hosted account already has a subscription. Manage it from Settings instead of starting a new one.",
+  });
+}
 
 export type HostedPulseTrialCandidateDisposition =
   | "current"
@@ -82,16 +205,16 @@ function classifyHostedPulseTrialCandidateDispositionForIdentity(input: {
   if (input.currentSubscriptionIdentity === "candidate") {
     return "current";
   }
+  // A second legacy trial may never replace an already-bound provider
+  // identity. Retire the delayed candidate and leave the current identity for
+  // its own exact reconciliation or the bounded operator drain.
+  if (input.currentSubscriptionIdentity === "different") {
+    return "loser";
+  }
   if (
-    input.pulseTrialRedeemedAt ||
-    input.currentBillingPhase === "paid" ||
-    (
-      input.billingStatus === HostedBillingStatus.active &&
-      (
-        input.currentBillingPhase !== "trial" ||
-        input.currentSubscriptionIdentity === "different"
-      )
-    )
+    input.pulseTrialRedeemedAt
+    || input.currentBillingPhase === "paid"
+    || input.billingStatus === HostedBillingStatus.active
   ) {
     return "loser";
   }

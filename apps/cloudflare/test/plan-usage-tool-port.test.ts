@@ -15,6 +15,48 @@ afterEach(async () => {
 });
 
 describe("hosted plan usage tool port", () => {
+  it.each([
+    { remainingPercent: 75, status: "active", usedPercent: 25 },
+    { remainingPercent: 0, status: "exhausted", usedPercent: 100 },
+  ] as const)(
+    "accepts a $status non-expiring Starter response over the signed adapter",
+    async ({ remainingPercent, status, usedPercent }) => {
+      webControl = await startHostedWebControlStub({
+        respond: () => ({
+          body: {
+            accessKind: "starter",
+            forecast: null,
+            generatedAt: "2026-08-10T12:00:00.000Z",
+            periodEnd: "9999-12-31T23:59:59.999Z",
+            periodKind: "lifetime",
+            periodStart: "2026-08-10T00:00:00.000Z",
+            planCode: "launch_group_monthly",
+            planName: "Starter",
+            recommendedAction: null,
+            remainingPercent,
+            status,
+            usedPercent,
+          },
+        }),
+      });
+      const port = createHostedRuntimePlanUsageToolPort({
+        boundUserId: "member_bound",
+        fetchImpl: fetch,
+        timeoutMs: 2_000,
+        transport: webControl.transport,
+      });
+
+      await expect(port.read({})).resolves.toMatchObject({
+        accessKind: "starter",
+        periodKind: "lifetime",
+        planName: "Starter",
+        remainingPercent,
+        status,
+        usedPercent,
+      });
+    },
+  );
+
   it("signs the real HTTP request and validates the Web response", async () => {
     webControl = await startHostedWebControlStub({
       respond: () => ({
