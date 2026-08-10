@@ -2157,7 +2157,7 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 
 describeRealCodex('real Codex Health Commons knowledge e2e', () => {
   it(
-    'keeps broad health-evidence intent in one focused knowledge search',
+    'keeps the full broad health question in one knowledge search',
     async () => {
       const result = await runHealthCommonsKnowledgeProbe(
         'What does the evidence say about Finnish dry sauna?',
@@ -2171,7 +2171,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
 
       expect(knowledgeCommands).toHaveLength(1)
       expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
-      expect(knowledgeCommands[0] ?? '').toMatch(/overall evidence/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/what does the evidence say/iu)
       expect(result.actions.some((action) =>
         action.kind === 'command'
         && action.command.includes('vault-cli experiment')
@@ -2182,7 +2182,7 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
   )
 
   it(
-    'uses bounded same-topic evidence and safety packets without starting an experiment',
+    'uses one bounded evidence and safety packet without starting an experiment',
     async () => {
       const result = await runHealthCommonsKnowledgeProbe(
         'Does Finnish dry sauna improve immunity, and is it safe after I fainted recently?',
@@ -2194,12 +2194,10 @@ describeRealCodex('real Codex Health Commons knowledge e2e', () => {
           : []
       )
 
-      expect(knowledgeCommands).toHaveLength(2)
-      expect(knowledgeCommands.every((command) =>
-        /finnish dry sauna/iu.test(command)
-      )).toBe(true)
-      expect(knowledgeCommands.some((command) => /immun/iu.test(command))).toBe(true)
-      expect(knowledgeCommands.some((command) => /faint/iu.test(command))).toBe(true)
+      expect(knowledgeCommands).toHaveLength(1)
+      expect(knowledgeCommands[0] ?? '').toMatch(/finnish dry sauna/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/immun/iu)
+      expect(knowledgeCommands[0] ?? '').toMatch(/faint/iu)
       expect(
         result.actions.some((action) =>
           action.kind === 'command'

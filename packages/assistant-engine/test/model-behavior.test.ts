@@ -1707,7 +1707,7 @@ describe('assistant consumption lookup guidance', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
 
     expect(prompt).toContain(
-      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities, red-light-therapy.',
+      'Training/movement: daily-activity owns factual wearable day/workout reads; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy, recovery-modalities.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
@@ -2335,29 +2335,17 @@ describe('assistant experiment onboarding guidance', () => {
     expect(prompt).not.toContain('Supported experiment protocols:')
     expect(prompt).toContain('Health Commons tools:')
     expect(prompt).toContain(
-      '`vault-cli commons knowledge search "<exact title or alias>" "<focus>" --format json`',
+      '`vault-cli commons knowledge search "<full health question in concise English>" --format json`',
     )
-    expect(prompt).toContain('Broad: focus exactly "overall evidence"')
-    expect(prompt).not.toContain('omit focus for broad evidence')
-    expect(prompt).toContain(
-      'Skip trivial/non-health;',
-    )
-    expect(prompt).toContain(
-      'no experiments.',
-    )
-    expect(prompt).toContain(
-      'retry topic only if topicResolved=false',
-    )
-    expect(prompt).toContain(
-      'No index: continue.',
-    )
-    expect(prompt).toContain(
-      'use 2 only for separate evidence+safety.',
-    )
-    expect(prompt).toContain(
-      'Across both: same catalogHash, 3 sourced + 1 safety.',
-    )
-    expect(prompt).toContain('Use 1 search;')
+    expect(prompt).toContain('run one `vault-cli commons knowledge search')
+    expect(prompt).toContain('Preserve symptoms, medicines, timing, dose, pregnancy/fertility, and recent adverse events.')
+    expect(prompt).toContain('If unavailable or empty, continue honestly.')
+    expect(prompt).toContain('Skip jokes, acknowledgements, logs, logistics, and non-health turns.')
+    expect(prompt).toContain('only when asked to try, test, track, or set one up.')
+    expect(prompt).not.toContain('overall evidence')
+    expect(prompt).not.toContain('topicResolved')
+    expect(prompt).not.toContain('same catalogHash')
+    expect(prompt).not.toContain('use 2 only')
     expect(prompt).toContain(
       '`vault-cli commons protocol explore <query> --format json` for broad or ambiguous discovery',
     )

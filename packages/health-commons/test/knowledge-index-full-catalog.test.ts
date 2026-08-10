@@ -11,11 +11,10 @@ const knowledgeIndexPath = fileURLToPath(
   new URL("../generated/knowledge.sqlite", import.meta.url),
 );
 
-function search(query: string, focus: string): HealthCommonsKnowledgeSearchResult {
+function search(query: string, questionContext: string): HealthCommonsKnowledgeSearchResult {
   return searchHealthCommonsKnowledgeIndex({
     databasePath: knowledgeIndexPath,
-    focus,
-    query,
+    query: `${questionContext} about ${query}`,
   });
 }
 
@@ -51,16 +50,41 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
   });
 
   it("returns the core dry-sauna systematic review", () => {
-    const result = search("Finnish Dry Sauna", "overall evidence");
+    const result = search("Finnish Dry Sauna", "What does the evidence say");
 
     expect(result.items.some((item) =>
       item.sources.some((source) => source.pmid === "29849692")
     )).toBe(true);
   });
 
+  it("returns general photobiomodulation dose and safety knowledge without device seeds", () => {
+    const dose = search(
+      "red light therapy",
+      "How long is 12 J/cm2 at 109 mW/cm2 and what inputs must match",
+    );
+    const text = packetText(dose);
+
+    expect(dose.topic).toEqual({
+      key: "experiment_family:photobiomodulation",
+      title: "Photobiomodulation",
+    });
+    expect(text).toMatch(/seconds equal target J\/cm² multiplied by 1000/iu);
+    expect(text).toMatch(/distance|contact geometry/iu);
+    expect(12 * 1000 / 109).toBeCloseTo(110, 0);
+    expect(12 * 1000 / 109 / 60).toBeCloseTo(1.8, 1);
+    expect(text).toMatch(/do not calculate when units|do not match/iu);
+  });
+
+  it("keeps specific photobiomodulation child topics distinct", () => {
+    expect(search("skin PBM", "wrinkles").topic?.key)
+      .toBe("experiment_family:skin-photobiomodulation");
+    expect(search("whole-body PBM", "recovery").topic?.key)
+      .toBe("experiment_family:whole-body-photobiomodulation");
+  });
+
   it("does not substitute nearby topics for unsupported queries", () => {
-    expect(search("magnesium sleep safety", "sleep safety")).toMatchObject({ items: [], safety: null, topicResolved: false });
-    expect(search("unsupported quux topic", "overall evidence")).toMatchObject({ items: [], safety: null, topicResolved: false });
+    expect(search("magnesium sleep safety", "sleep safety")).toMatchObject({ items: [], safety: null, topic: null });
+    expect(search("unsupported quux topic", "What does the evidence say")).toMatchObject({ items: [], safety: null, topic: null });
     expect(search("vitamin k", "health evidence")).toMatchObject({ items: [], safety: null });
     expect(search("vitamin b", "health evidence")).toMatchObject({ items: [], safety: null });
     expect(search("hepatitis b", "health evidence")).toMatchObject({ items: [], safety: null });
@@ -79,8 +103,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
       expect(item.sources.length).toBeGreaterThan(0);
     }
     if (result.safety) {
-      expect(`${result.focus ?? ""} ${packetText({ ...result, items: [], safety: result.safety })}`)
-        .toMatch(expectedTopic);
+      expect(packetText({ ...result, items: [], safety: result.safety })).toMatch(expectedTopic);
     }
   });
 
@@ -170,10 +193,10 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     ["Omega-3 Supplementation", /omega|epa|dha/iu],
     ["Collagen Supplementation", /collagen/iu],
   ])("returns member-readable broad evidence for %s", (query, expected) => {
-    const result = search(query, "overall evidence");
+    const result = search(query, "What does the evidence say");
     const text = packetText(result);
 
-    expect(result.topicResolved).toBe(true);
+    expect(result.topic).not.toBeNull();
     expect(result.items.length).toBeGreaterThan(0);
     expect(text).toMatch(expected);
     expect(result.items.every((item) => item.kind === "claim" || item.kind === "source_finding"))
@@ -254,7 +277,7 @@ describe("Health Commons full-catalog knowledge retrieval", () => {
     }
     expect(search("Mean Corpuscular Hemoglobin", "evidence").items).toEqual([]);
     expect(search("Magnesium RBC", "evidence").items).toEqual([]);
-    expect(search("Mean Corpuscular Hemoglobin", "evidence").topicResolved).toBe(true);
+    expect(search("Mean Corpuscular Hemoglobin", "evidence").topic).not.toBeNull();
 
     const { DatabaseSync } = await import("node:sqlite");
     const database = new DatabaseSync(knowledgeIndexPath, { readOnly: true });

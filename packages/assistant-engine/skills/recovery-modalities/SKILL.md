@@ -15,8 +15,8 @@ Use this as Murph operating guidance, not as a consumer article. Ground the answ
 
 ## Hand Off
 
-- Use red-light-therapy for red/NIR photobiomodulation dose, duration, distance, wavelengths, device irradiance, Bestqool lamps, or PBM experiment setup.
-- This skill does not own PBM device-dose math.
+- Use Health Commons for red/NIR photobiomodulation evidence, dose context, device boundaries, and safety.
+- This skill does not own PBM device-dose math. Use experiment-onboarding only when the user asks to track PBM.
 - Use physical-therapy for pain, injury, weakness, numbness, loss of function, or rehab exercise selection.
 - Use sleep-improvement, hrv-resting-heart-rate, aerobic-fitness, or strength-training when those are the actual owner.
 - Route cardiovascular disease, pregnancy, fainting risk, uncontrolled blood pressure, wound/skin issues, neuropathy, or medical-device questions to clinician support before heat/cold/compression.

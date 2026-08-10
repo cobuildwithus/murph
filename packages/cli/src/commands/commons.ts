@@ -126,12 +126,17 @@ const commonsKnowledgeItemSchema = z.object({
 
 export const commonsKnowledgeSearchResultSchema = z.object({
   available: z.boolean(),
-  catalogHash: z.string(),
-  focus: z.string().min(1),
+  candidates: z.array(z.object({
+    key: z.string().min(1),
+    title: z.string().min(1),
+  })).max(3),
   items: z.array(commonsKnowledgeItemSchema),
   query: z.string().min(1),
   safety: commonsKnowledgeItemSchema.nullable(),
-  topicResolved: z.boolean(),
+  topic: z.object({
+    key: z.string().min(1),
+    title: z.string().min(1),
+  }).nullable(),
   warning: z.string().min(1).nullable(),
 });
 
@@ -153,17 +158,18 @@ export function registerCommonsCommands(cli: Cli.Cli) {
 
   knowledge.command("search", {
     description:
-      "Return a small evidence packet for one exact Health Commons title or alias and one required question focus.",
+      "Return a small source-backed evidence and safety packet for one complete health question.",
     args: z.object({
-      query: z.string().min(2).max(240),
-      focus: z.string().min(1).max(240),
+      query: z.string().min(2).max(500),
     }),
     options: z.object({
       limit: z.number().int().positive().max(HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT).default(3),
     }),
     examples: [{
       description: "Find evidence and safety context about dry sauna.",
-      args: { query: "Finnish Dry Sauna", focus: "recent fainting" },
+      args: {
+        query: "Does Finnish dry sauna help immunity, and is it safe after recent fainting?",
+      },
       options: { limit: 3 },
     }],
     output: commonsKnowledgeSearchResultSchema,
@@ -172,7 +178,6 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         return commonsKnowledgeSearchResultSchema.parse({
           available: true,
           ...searchGeneratedHealthCommonsKnowledge({
-            focus: args.focus,
             limit: options.limit,
             query: args.query,
           }),
@@ -181,12 +186,11 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       } catch {
         return commonsKnowledgeSearchResultSchema.parse({
           available: false,
-          catalogHash: "",
-          focus: args.focus,
+          candidates: [],
           items: [],
           query: args.query,
           safety: null,
-          topicResolved: false,
+          topic: null,
           warning: "Health Commons knowledge index is unavailable; continue without corpus context.",
         });
       }

@@ -38,12 +38,6 @@ export const ASSISTANT_SKILLS = [
       'Use for starting, configuring, modifying, supporting, or reviewing bounded health experiments, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, planned-session support reminders, and experiment outcomes.',
   },
   {
-    slug: 'red-light-therapy',
-    name: 'red-light-therapy',
-    triggerHint:
-      'Use for red light therapy or photobiomodulation questions, including dosing, session duration, treatment distance, wavelengths, device irradiance, Bestqool lamps, safety boundaries, and whether to set up a bounded Health Commons PBM experiment.',
-  },
-  {
     slug: 'sleep-improvement',
     name: 'sleep-improvement',
     triggerHint:
@@ -89,7 +83,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'recovery-modalities',
     name: 'recovery-modalities',
     triggerHint:
-      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs. Use red-light-therapy for red/NIR photobiomodulation dose, duration, distance, wavelengths, device irradiance, or Bestqool questions.',
+      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs.',
   },
   {
     slug: 'daily-activity',

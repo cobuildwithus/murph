@@ -21,7 +21,7 @@ Read `references/triage-and-contact-lenses.md` before answering any active eye s
 
 - Emergency and same-day eye problems belong to emergency care or an eye clinician after Murph names the specific trigger and immediate action.
 - Use computer-use to book eye care or order the user's exact current prescribed contact-lens parameters only after this skill establishes the safe action. Never use ordering as a substitute for an exam or current prescription.
-- Use red-light-therapy for photobiomodulation devices, dose, and device-specific eye-exposure precautions; return here for eye symptoms or vision changes.
+- Use Health Commons for photobiomodulation evidence and device-dose context; return here for eye symptoms or vision changes.
 - Use circadian-rhythm when the goal is sleep or clock timing from evening light rather than eye comfort or eye safety.
 - Use mobility-posture for whole-body desk setup; this skill owns ocular symptoms, viewing comfort, and visual setup.
 - Route diagnosis, prescription changes, ocular disease management, post-procedure concerns, and treatment decisions to an optometrist, ophthalmologist, or other appropriate clinician.
