@@ -287,6 +287,43 @@ test("Training gives a zero-data member one clear conversational start", () => {
   assert.equal((markup.match(/Just tell Murph what happened/g) ?? []).length, 0);
 });
 
+test("Training waits for a generation refresh before declaring workout history empty", () => {
+  const staleMarkup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions,
+      error: null,
+      onRefresh: () => {},
+      refreshPending: true,
+      startContactOptions,
+      status: "ready",
+      training: null,
+    }),
+  );
+
+  assert.match(staleMarkup, /Loading your training log/);
+  assert.doesNotMatch(staleMarkup, /Your workout log starts with one message/);
+  assert.doesNotMatch(staleMarkup, /Start workout/);
+
+  const refreshedMarkup = renderToStaticMarkup(
+    createElement(TrainingPageView, {
+      authenticated: true,
+      continueContactOptions,
+      error: null,
+      onRefresh: () => {},
+      refreshPending: false,
+      startContactOptions,
+      status: "ready",
+      training: trainingFixture,
+    }),
+  );
+
+  assert.match(refreshedMarkup, /Recent workouts/);
+  assert.match(refreshedMarkup, /Push day/);
+  assert.equal((refreshedMarkup.match(/Pause at the chest/g) ?? []).length, 1);
+  assert.doesNotMatch(refreshedMarkup, /Your workout log starts with one message/);
+});
+
 test("Training exposes workout actions only when vault state is known", () => {
   for (const status of ["loading", "error"] as const) {
     const markup = renderToStaticMarkup(

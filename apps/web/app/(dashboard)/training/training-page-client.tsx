@@ -95,8 +95,7 @@ export function TrainingPageView({
     : hasTraining
       ? "Start workout"
       : null;
-  const preparing =
-    status === "loading" || (status === "empty" && refreshPending);
+  const preparing = status === "loading" || (!hasTraining && refreshPending);
 
   return (
     <div className="flex flex-col gap-8">
