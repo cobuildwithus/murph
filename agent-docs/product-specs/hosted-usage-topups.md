@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-08-07
+Last verified: 2026-08-10
 
 ## Decision
 
@@ -448,8 +448,9 @@ At the cutoff, or while suspended, Settings keeps the honest reconciling state
 but withholds Retry; it never substitutes a new purchase or idempotency key.
 At the exact 90-minute frozen expiry, Settings stops projecting an unattached
 `created` row so the current amount picker is available again. The next Add
-usage request closes that old row under the payer lock before creating a fresh
-purchase; the read projection itself performs no mutation or provider I/O.
+usage request closes that old row under the beneficiary-first admission lock
+order before creating a fresh purchase; the read projection itself performs no
+mutation or provider I/O.
 Only that public reconciling state carries the derived `restartAt` capability.
 An already-open dialog uses it to clear stale local recovery state and refresh
 Settings at the exact boundary; no other general purchase timestamp is exposed.
@@ -581,8 +582,11 @@ The minimum durable v1 has three authoritative concepts:
 The member balance/version and per-purchase remaining-credit fields are bounded,
 rebuildable projections of the ledger. Settings status, polling state, usage
 notices, allowance exhaustion, and the runtime recheck are derived consumers,
-not new lifecycle owners. The beneficiary row lock is the single serialization
-boundary for grant, debit, adjustment, and projection updates.
+not new lifecycle owners. The beneficiary row lock is the sole serialization
+point for usage-credit grants, purchase reservations, debits, projection
+adjustments, and every checkout/refill admission that can occupy capacity. A
+capacity-admission path that also locks a distinct payer always locks the
+beneficiary first.
 
 Group and Family funding compose these same owners without adding a group or
 Family wallet, usage account, funding-code lifecycle, scheduler, or queue. The
@@ -597,6 +601,30 @@ For Family funding, the current group owner is the payer, one selected active
 membership identifies the beneficiary, and the active group's billing
 reference supplies the Stripe Customer. No Family identity or authorization is
 copied into the ledger.
+
+### Grant-Slot Capacity
+
+A beneficiary may occupy at most 32 grant slots. An occupied slot is either a
+positive active grant projection or an unfulfilled purchase whose
+provider-final `grantSlotReleasedAt` marker is null. Every capacity inspection
+used for admission reads at most 33 combined occupied rows. Finding a 33rd row
+is an invariant violation and fails closed; there is no second capacity owner.
+
+New personal, Family, and group Checkout purchases, automatic group-sponsorship
+refills, explicit recovery reacquisition, and unreserved referral grants all
+use this shared contract while holding the beneficiary lock. Any distinct payer
+lock follows the beneficiary lock. Exact purchase replay observes the existing
+reservation and does not reserve again. At capacity, ordinary automatic refill
+admission returns no refill, while overflow is an invariant failure.
+
+A new purchase reserves its future grant slot before provider work by persisting
+an unfulfilled row with a null release marker. Local expiry and ambiguous
+failure do not release it. Only provider-correlated final no-payment evidence
+records `grantSlotReleasedAt`; existing unfulfilled rows whose marker is null
+remain conservatively reserved. Explicit recovery may clear a prior release
+only after reacquiring capacity. At exactly 32 occupied slots, fulfillment is
+allowed only when the exact purchase reservation is replaced by its positive
+active grant; an unreserved grant is rejected at that boundary.
 
 ## Durable Model
 
@@ -618,6 +646,7 @@ One row represents one intentional attempt to purchase one offer.
 | `clientRequestKey` | Payer-scoped unique key that makes a lost browser response safely recoverable without granting a later create-capable retry. |
 | `checkoutRequestPolicyVersion` | Version of the fixed Checkout builder used to reconstruct provider parameters. |
 | `status` | `created`, `checkout_open`, `payment_pending`, `fulfilled`, `expired`, or `payment_failed`. Refund/dispute adjustments remain ledger entries. |
+| `grantSlotReleasedAt` | Null while an unfulfilled purchase conservatively reserves its future grant slot; set only from provider-correlated final no-payment evidence. |
 | Stripe references | Checkout Session, PaymentIntent, Charge, and Customer lookup/encrypted references using the existing hosted billing-ref pattern. |
 | Checkout fields and timestamps | Frozen Price and Customer references, success/cancel URLs, 90-minute expiry, and creation, paid, terminal, and last-reconciled times. |
 
@@ -644,8 +673,9 @@ matches the frozen offer. A different amount returns the earlier purchase's
 status/cancel-only projection instead of continuing it under new button copy;
 the rejected fresh key has no create authority. If that response is lost,
 times out, or is dismissed, **Check payment** resends the key only in
-recovery-only mode. Under the payer lock, recovery-only may continue an exact
-persisted request or return the current nonterminal purchase. When neither
+recovery-only mode. Under the beneficiary-first admission lock order,
+recovery-only may continue an exact persisted request or return the current
+nonterminal purchase. When neither
 exists, it returns a typed miss before offer authorization, Customer creation,
 purchase insertion, or Stripe I/O. The dialog returns to an unselected picker
 but retains that unresolved key in payer-and-target-scoped browser session
@@ -654,7 +684,7 @@ account switches. The authenticated server-rendered payer identity selects the
 slot, so another payer using the same target receives an independent key and
 cannot clear the first payer's unresolved identity. A remounted picker hydrates
 the key before enabling selection. The next explicit Add action reuses the key
-in normal create-capable mode, so the payer lock and request-key uniqueness
+in normal create-capable mode, so the admission locks and request-key uniqueness
 serialize it with any delayed original request. Only a durable purchase
 response with server-owned proof that the submitted selection key matched for
 that payer clears the stored key. Mounted active-purchase and return
@@ -771,6 +801,15 @@ For each newly canonical usage event, under that beneficiary-wide lock:
 6. Recompute effective exhaustion from base remaining plus available usage
    credit.
 
+Settlement preserves the reviewed 32-slot maximum. After the bounded replay
+check, one data-modifying SQL statement locks and inspects at most 33 positive
+grant projections in beneficiary sequence, rejects more than 32 before any
+coupled mutation, and computes FIFO allocations with window sums. The statement
+updates affected grant and purchase projections set-wise, updates the
+beneficiary balance/version projection once, and inserts every debit entry. A
+corrupt 33-grant state therefore rolls back completely. Replay reads at most 33
+debit rows and rejects more than 32 before entering its bounded validation loop.
+
 The current runtime does not transport an admission-bound credit cutoff. V1
 settles against the balance available when the canonical usage callback holds
 the beneficiary lock, so a grant committed before settlement may fund that
@@ -816,16 +855,17 @@ funding route share this sequence:
 4. Continue an exact existing request-key purchase. Reuse for another target is
    a conflict; reuse for another offer returns the winning purchase's
    status/cancel-only projection.
-5. Under the payer lock, expire an unattached purchase whose frozen window
-   ended, then recover a nonterminal purchase only when its payer and
-   beneficiary match the requested target. A purchase for another target
+5. With the beneficiary lock held and any distinct payer locked second, expire
+   an unattached purchase whose frozen window ended, then recover a nonterminal
+   purchase only when its payer and beneficiary match the requested target. A
+   purchase for another target
    conflicts. Only one created, open, or payment-pending purchase may exist for
    one payer at a time. If recovery-only finds neither an exact-key purchase nor
    a current nonterminal payer purchase, return a typed miss without resolving
    a Customer, inserting a purchase, or entering Stripe. The browser retains
    that key in payer-and-target-scoped session storage for the next explicit
    normal authorization, including after remount or a same-tab account switch,
-   which serializes with any delayed original request under the same payer lock.
+   which serializes with any delayed original request under the same lock order.
    The authenticated server-rendered member ID scopes the browser slot; another
    payer using the same target in that tab receives an independent key and
    cannot clear the first payer's unresolved identity. Only a durable response
@@ -841,7 +881,10 @@ funding route share this sequence:
    and group funding use the payer's customer, creating it through the existing
    owner when needed. Family funding uses the existing Family-group customer
    and never creates a replacement member customer.
-8. Create the durable purchase for the client request key.
+8. Under the beneficiary lock, apply the shared bounded capacity inspection,
+   then create the durable purchase for the client request key with a null
+   `grantSlotReleasedAt` marker. This reserves its future grant slot before
+   provider work; exact replay continues the existing reservation.
 9. Freeze the offer, Price, Customer, return URLs, 90-minute expiry, and request
    policy in the `created` purchase before provider I/O.
 10. Recheck that the purchase has not expired, retrieve the
