@@ -17915,6 +17915,21 @@ describe("hosted workspace runtime entrypoint", () => {
             const assistantRedactedStatus: HostedRuntimeRedactedJson = {
               hostedAssistantProgressed: true,
             };
+            const selectedInputIds = assistantPhaseInputIds.at(-1) ?? [];
+            const releaseProviderInputs =
+              await phaseInput.beforeProviderAcceptedInputs?.({
+                acceptedInputs: selectedInputIds.map((id) => ({
+                  id,
+                  source: "assistant-input" as const,
+                })),
+              });
+            for (const inputId of selectedInputIds) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId,
+                vaultRoot,
+              });
+            }
+            await releaseProviderInputs?.();
 
             return {
               checkpointReason: "assistant_runtime_commit" as const,
@@ -17940,12 +17955,19 @@ describe("hosted workspace runtime entrypoint", () => {
         "mailbox.importItem:mailbox_item_entrypoint_foreground_preempt_conversation_2",
       ));
       assert.equal(importedInputIds.length, 2);
-      assert.deepEqual(assistantPhaseInputIds[1], importedInputIds);
-      assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1", "thread_2"]);
+      assert.deepEqual(assistantPhaseInputIds[1], [importedInputIds[0]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1"]);
+      assert.deepEqual(assistantPhaseInputIds[2], [importedInputIds[1]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[2], ["thread_2"]);
       assert.ok(
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(events, "snapshot:idle_shutdown"),
         "fresh foreground input should be serviced before idle checkpoint snapshotting starts",
+      );
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:3")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        "each selected foreground route should be serviced before idle checkpoint snapshotting starts",
       );
       assert.ok(
         fetchRequests.some((request) =>
@@ -18142,14 +18164,16 @@ describe("hosted workspace runtime entrypoint", () => {
         () => events.join(","),
       );
 
-      assert.equal(assistantPhaseInputIds[1]?.length, 2);
-      assert.deepEqual(assistantPhaseInputIds[1], importedInputIds.slice(0, 2));
-      assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1", "thread_2"]);
+      assert.equal(importedInputIds.length, 3);
+      assert.deepEqual(assistantPhaseInputIds[1], [importedInputIds[0]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[1], ["thread_1"]);
       assert.equal(assistantPhaseInputIds[2]?.length, 1);
-      // The real foreground selector consumes only the first accepted input;
-      // the second stays ahead of the later third input in the next batch.
+      // The foreground selector admits one direct route per phase, so the
+      // second accepted input stays ahead of the later third input.
       assert.deepEqual(assistantPhaseInputIds[2], [importedInputIds[1]]);
       assert.deepEqual(assistantPhaseLinqContextTargets[2], ["thread_2"]);
+      assert.deepEqual(assistantPhaseInputIds[3], [importedInputIds[2]]);
+      assert.deepEqual(assistantPhaseLinqContextTargets[3], ["thread_3"]);
       assert.ok(
         requireEventIndex(events, "assistant.phase:2")
           < requireEventIndex(
@@ -25384,6 +25408,7 @@ describe("hosted workspace runtime entrypoint", () => {
           async runAssistantPhase(phaseInput) {
             secondAssistantPhaseCalls += 1;
             let assistantInputId: string;
+            let releaseProviderInputs: (() => void) | null = null;
 
             if (secondAssistantPhaseCalls === 1) {
               assert.ok(stagedInputId);
@@ -25397,13 +25422,14 @@ describe("hosted workspace runtime entrypoint", () => {
                 restoredInput?.conversation?.threadId,
                 "thread_shutdown_late_active_turn",
               );
-              const releaseProviderInputs =
+              const release =
                 await phaseInput.beforeProviderAcceptedInputs?.({
                   acceptedInputs: [{
                     id: assistantInputId,
                     source: "assistant-input",
                   }],
                 });
+              releaseProviderInputs = release ?? null;
               assert.equal(
                 phaseInput.imageGenerationLauncher?.launch({
                   continuationSessionId: "asst_foreground_shutdown_handoff",
@@ -25422,7 +25448,6 @@ describe("hosted workspace runtime entrypoint", () => {
                 }),
                 "started",
               );
-              await releaseProviderInputs?.();
             } else if (secondAssistantPhaseCalls === 2) {
               const pendingInputIds = await compactHostedPendingAssistantInputIds({
                 vaultRoot: secondVaultRoot,
@@ -25444,6 +25469,14 @@ describe("hosted workspace runtime entrypoint", () => {
                   : null,
                 "murph.hosted-image-completion.v1",
               );
+              const release =
+                await phaseInput.beforeProviderAcceptedInputs?.({
+                  acceptedInputs: [{
+                    id: assistantInputId,
+                    source: "assistant-input",
+                  }],
+                });
+              releaseProviderInputs = release ?? null;
             } else {
               throw new Error("Unexpected extra restored foreground phase.");
             }
@@ -25452,6 +25485,7 @@ describe("hosted workspace runtime entrypoint", () => {
               inputId: assistantInputId,
               vaultRoot: secondVaultRoot,
             });
+            await releaseProviderInputs?.();
             return {
               checkpointReason: "assistant_runtime_commit" as const,
               foregroundReplyFailed: 0,
