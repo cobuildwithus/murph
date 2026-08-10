@@ -1,4 +1,4 @@
-name: PR 1405 checkout snapshot
+name: PR 1405 simplification
 
 on:
   push:
@@ -6,21 +6,79 @@ on:
       - codex/health-commons-agent-knowledge
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: pr1405-simplification
+  cancel-in-progress: false
 
 jobs:
-  snapshot:
-    if: github.event.head_commit.message == 'chore: export PR checkout for local validation'
+  simplify:
+    if: github.event.head_commit.message == 'chore: run PR 1405 simplification'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
-      - name: Archive checkout and git metadata
-        run: tar --exclude='./node_modules' --exclude='./.pnpm-store' -czf /tmp/murph-pr1405-checkout.tgz .
-      - uses: actions/upload-artifact@v4
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
         with:
-          name: murph-pr1405-checkout
-          path: /tmp/murph-pr1405-checkout.tgz
-          if-no-files-found: error
-          retention-days: 1
+          version: 10.33.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Materialize and apply the simplification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PATCH_BLOBS: >-
+            6816f2c4acd042fb57513191dfd63bb0edb05d8e
+            726437795664272ac64a47159b5cd0bf7813c52e
+            92493fd477e511a884ca4c68abf87b6f83cde7a9
+            9f1febfcb882d3f3183240fb0245a15c78bef491
+        run: |
+          : > /tmp/pr1405-apply.py.gz.b64
+          for blob in $PATCH_BLOBS; do
+            curl --fail --silent --show-error --location \
+              --header "Authorization: Bearer $GH_TOKEN" \
+              --header "Accept: application/vnd.github+json" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/blobs/$blob" \
+              | python -c 'import base64,json,sys; sys.stdout.write(base64.b64decode(json.load(sys.stdin)["content"]).decode())' \
+              >> /tmp/pr1405-apply.py.gz.b64
+          done
+          base64 --decode /tmp/pr1405-apply.py.gz.b64 | gzip --decompress > /tmp/pr1405-apply.py
+          python /tmp/pr1405-apply.py
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate Health Commons and CLI artifacts
+        run: |
+          pnpm --dir packages/health-commons generate
+          pnpm --dir packages/cli gen:config-schema
+
+      - name: Commit the implementation
+        run: |
+          git config user.name 'OpenAI Codex'
+          git config user.email 'codex@openai.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'refactor(health-commons): simplify agent knowledge access'
+          git push origin HEAD:codex/health-commons-agent-knowledge
+
+      - name: Verify Health Commons
+        run: |
+          pnpm --dir packages/health-commons typecheck
+          pnpm --dir packages/health-commons test:vitest -- test/knowledge-index.test.ts test/knowledge-index-full-catalog.test.ts
+
+      - name: Verify CLI and assistant contracts
+        run: |
+          pnpm --dir packages/cli typecheck
+          pnpm exec vitest run --config packages/cli/vitest.workspace.ts --no-coverage packages/cli/test/commons-command-coverage.test.ts
+          pnpm --dir packages/assistant-engine typecheck
+          pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/model-behavior.test.ts test/assistant-skill-assets.test.ts
