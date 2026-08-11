@@ -173,3 +173,38 @@ Updated: 2026-08-11
   session-owned PostgreSQL 14 cluster configured with `max_connections=50`;
   the earlier default-port attempt failed before exercising code because it
   did not target that cluster.
+
+### Requirement-level retrospective
+
+- Original requirement: bound pending-group database and KMS work for a
+  provider-proven roster of at most 32 while preserving the one-use setup
+  owner, recovery and selection rules, transaction authority, and visible
+  behavior.
+- Base to first-reviewed head changed 1,970 authored production-source lines
+  (1,497 additions and 473 deletions across 10 files). The direct correction
+  from the first-reviewed head to the current round-two head changed 42 source
+  lines (37 additions and 5 deletions in the domain-root and runtime-state
+  owners). Base to the round-two head is 2,002 source lines (1,529 additions
+  and 473 deletions across 11 files); tests, docs, fixtures, generated code,
+  configuration, and tooling are excluded.
+- The 42-line review delta corrects missing historical verify-key failures
+  being treated as permanent corruption. It centralizes the existing
+  signature-byte predicate and deletes the duplicate app-local parser; it does
+  not add another owner or lifecycle.
+- Direction: continue as one indivisible change. The request-local package
+  replaces candidate-by-candidate preparation, set reads remain with their
+  canonical access, line, routing, recovery, and crypto owners, selected-root
+  prewarm removes provider/KMS work from the transaction, and exact live and
+  locked revalidation preserves authority and atomic consumption. These pieces
+  must land together; splitting them would leave either the unbounded/locked
+  work in place or require temporary compatibility machinery between
+  preparation and claim.
+- The 1,148-line pending-setup rewrite is the existing convergence point for
+  roster selection, recovery authority, selected-root readiness, and locked
+  claim semantics. The cross-owner surface follows those current predicates;
+  it adds no schema, queue, cache, service, framework, durable state owner, or
+  second recovery lifecycle.
+- ReviewGPT round two verified the round-one correction and returned no code
+  finding. Its sole outcome was the 2,000-line retrospective gate; the next
+  step is a fresh full-snapshot round-three audit on this docs-only successor
+  head.
