@@ -1,6 +1,6 @@
 # Foreground causal audience context
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -39,21 +39,24 @@ Updated: 2026-08-11
    Mitigation: bind the minimal context to `request.userId`; the existing guard
    still compares it with the wake and route authority.
 2. Risk: the causal-only pass could gain the full foreground setup path.
-   Mitigation: reuse only the minimal system-mailbox context and retain the
-   existing early return.
+   Mitigation: pass only request identity, user-environment key names, and the
+   existing conditional deferred-usage recorder; retain the early return and
+   skip full runtime hydration and unrelated background lanes.
 
 ## Tasks
 
-1. Extract the existing minimal system-mailbox context builder around an
-   explicit member id and use it in the causal-only pass.
-2. Add focused regression coverage for request-bound context selection and
-   preserved mismatch rejection.
+1. Pass the existing request-bound member context directly into the causal-only
+   system-mailbox owner without adding a helper or abstraction.
+2. Add focused regression coverage for request-bound context, deferred usage,
+   replay idempotency, and preserved mismatch rejection.
 3. Run focused tests, typecheck, ReviewGPT, exact-head CI, merge, deploy, and
    observe automatic retry completion.
 
 ## Decisions
 
 - Keep the audience guard unchanged.
+- Reuse the ordinary deferred-usage recorder in the causal-only context so an
+  admitted model-backed notification remains canonically accounted.
 - Do not reissue, clear, or manually signal production mailbox data.
 
 ## Verification
@@ -63,3 +66,4 @@ Updated: 2026-08-11
 - Expected outcomes: request-bound context reaches the causal-only mailbox
   preparation, genuine mismatch remains rejected, and production records two
   automatic delivery completions with no remaining referral mailbox items.
+Completed: 2026-08-11
