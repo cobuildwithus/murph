@@ -1680,8 +1680,11 @@ which must fit one 4,096-character Telegram message before rich provider entry.
 A valid retryable Telegram rejection proves non-acceptance and returns to the
 existing outbox retry owner. A transport failure or response without a valid
 Telegram success or rejection envelope is ambiguous, becomes terminal, and
-cannot release the effect for replay. Linq keeps its existing native nutrition
-and compact-table cards. New Linq/iMessage exercise turns use the existing response-media path;
+cannot release the effect for replay. The same envelope rule applies to existing
+Telegram text, photo, and voice sends because all four operations are
+non-idempotent and share the provider outcome resolver. Linq keeps its existing
+native nutrition and compact-table cards. New Linq/iMessage exercise turns use
+the existing response-media path;
 the deterministic routine text remains only compatibility behavior for retained
 card state. The card still cannot coexist with response media, and no new queue,
 persisted state owner, callback action, or mutable message state exists.

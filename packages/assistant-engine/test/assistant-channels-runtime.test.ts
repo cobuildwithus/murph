@@ -1229,6 +1229,118 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
+  it('keeps invalid Bot API response envelopes terminal across existing Telegram sends', async () => {
+    const textFetch = createQueuedFetch([
+      createTelegramResponse(502, { message: 'upstream text gateway failure' }),
+    ])
+    await expect(sendTelegramMessage(
+      { message: 'One text reply', target: '123' },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation: textFetch,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+    expect(textFetch).toHaveBeenCalledTimes(1)
+
+    const photoFetch = createQueuedFetch([
+      createTelegramResponse(502, { message: 'upstream photo gateway failure' }),
+    ])
+    await expect(sendTelegramImageMessage(
+      {
+        media: [{
+          alt: 'A chart',
+          kind: 'image',
+          source: 'test',
+          url: 'https://cdn.example.test/chart.png',
+        }],
+        message: 'One image reply',
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation: photoFetch,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+    expect(photoFetch).toHaveBeenCalledTimes(1)
+
+    const voiceFetch = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      createTelegramResponse(502, { message: 'upstream voice gateway failure' }),
+    ])
+    await expect(sendTelegramVoiceMemoMessage(
+      {
+        filename: 'memo',
+        generation: {
+          kind: 'elevenlabs_speech',
+          modelId: 'eleven_multilingual_v2',
+          outputFormat: 'mp3_44100_128',
+          text: 'Short memo.',
+          voiceId: 'voice_murph',
+        },
+        replyToMessageId: null,
+        target: '123',
+      },
+      {
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation: voiceFetch,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+    expect(voiceFetch).toHaveBeenCalledTimes(2)
+    expect(voiceFetch.mock.calls[1]?.[0]).toContain('/sendVoice')
+  })
+
+  it('keeps an old Worker rich-route rejection terminal without text fallback', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(403, {
+        code: 'ASSISTANT_PROVIDER_OPERATION_NOT_ALLOWED',
+        message: 'sendRichMessage is not allowed by this Worker release',
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Do not start fallback after an unknown provider result',
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
   it('preserves a proven pre-provider rich-message rejection', async () => {
     const providerEntryError = Object.assign(
       new Error('provider entry rejected'),

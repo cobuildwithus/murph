@@ -13,8 +13,9 @@ concurrency proof are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, and `agent-docs/references/testing-ci-map.md`.
 
 Telegram rich routine-card authority, catalog-position image provenance,
-single-message fallback ownership, and valid-envelope retry classification are
-specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
+single-message fallback ownership, and valid-envelope retry classification
+across all Telegram send operations are specified by `ARCHITECTURE.md` and
+`agent-docs/RELIABILITY.md`.
 
 Direct-insert hosted callback nonce replay convergence through the
 `nonce_hash` primary key, database-clock refusal after the inclusive callback

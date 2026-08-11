@@ -264,9 +264,11 @@ on that bundle or newer rather than restoring an older reader.
 ## Exercise Routine Response-Card Rollout
 
 The `exercise_routine` discriminator extends the strict assistant outbox card
-union. Deploy its Cloudflare Worker and runner support together with
-`container_rollout=immediate`. Before routine traffic, require managed-container
-smoke to report the exact new runner-bundle fingerprint.
+union. Deploy the Cloudflare Worker operation allowlist before the new runner can
+emit `sendRichMessage`, then use `container_rollout=immediate`. An older Worker
+returns a non-Telegram policy response. The new runner treats that result as
+terminal ambiguity and does not send text fallback. Before routine traffic,
+require managed-container smoke to report the exact new runner-bundle fingerprint.
 
 The prior runner remains safe only before the first routine-card outbox intent
 is written. After that write, the new runner bundle is a hard rollback floor for

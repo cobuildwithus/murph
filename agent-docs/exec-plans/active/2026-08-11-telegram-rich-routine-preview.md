@@ -93,6 +93,8 @@ Updated: 2026-08-11
 - Treat only a valid Telegram `ok: false` envelope as proven non-acceptance.
   Transport failure or any response without a valid success or rejection
   envelope is terminal ambiguity and must not release the effect for replay.
+- Apply that invalid-envelope rule to text, photo, voice, and rich sends. All
+  four operations are non-idempotent and use the existing shared outcome owner.
 
 ## Verification
 
@@ -120,3 +122,7 @@ Updated: 2026-08-11
 - Final ReviewGPT round 4 found that the rich adapter preserved the wrong error
   code after an ambiguous provider response. Focused correction tests prove 79
   channel-runtime cases and the later outbox drain makes no second request.
+- Final ReviewGPT round 5 confirmed the duplicate correction and found that the
+  shared text, photo, and voice impact was not disclosed or directly tested.
+  Focused proof now covers all four Telegram send operations and the old-Worker
+  policy-response rollout seam.
