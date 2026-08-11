@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   hostedPhysicalNoteSendRequestSchema,
+  hostedPhysicalNoteSendResponseSchema,
   normalizeHostedPhysicalNoteRecipient,
   stableHostedPhysicalNoteRecipientJson,
 } from "../src/physical-notes.ts";
@@ -106,6 +107,26 @@ describe("hosted physical-note contracts", () => {
         state: "GA",
       },
       requestKey: "physical_note_123",
+    })).toThrow();
+  });
+
+  it("accepts only safe optional physical-note failure reasons", () => {
+    const baseResponse = {
+      complimentary: false,
+      costUsdMicros: "250000",
+      physicalNoteId: "hpn_failed",
+      status: "failed" as const,
+    };
+
+    expect(hostedPhysicalNoteSendResponseSchema.parse({
+      ...baseResponse,
+      failureReason: "recipient_address",
+    })).toMatchObject({ failureReason: "recipient_address" });
+    expect(hostedPhysicalNoteSendResponseSchema.parse(baseResponse))
+      .toEqual(baseResponse);
+    expect(() => hostedPhysicalNoteSendResponseSchema.parse({
+      ...baseResponse,
+      failureReason: "provider message",
     })).toThrow();
   });
 

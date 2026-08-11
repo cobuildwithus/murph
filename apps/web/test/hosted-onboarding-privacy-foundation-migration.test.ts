@@ -1093,6 +1093,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260810050000_relax_detached_automatic_refill_failure",
       "20260810150000_hosted_usage_credit_grant_slot_release",
       "20260811160000_add_group_sponsorship_funding_alias_publication",
+      "20260811170000_hosted_physical_note_failure_reason",
       "migration_lock.toml",
     ]);
     expect(hostedPendingGroupSetupMigrationSql).toContain(

@@ -111,6 +111,30 @@ describe("createHostedWebPhysicalNotePort", () => {
     });
   });
 
+  it("preserves bounded physical-note failure reasons from Web", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({
+      complimentary: true,
+      costUsdMicros: "0",
+      failureReason: "recipient_address",
+      physicalNoteId: "physical_note_failed",
+      status: "failed",
+    }));
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl: fetchImpl as typeof fetch,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.send(REQUEST)).resolves.toEqual({
+      complimentary: true,
+      costUsdMicros: "0",
+      failureReason: "recipient_address",
+      physicalNoteId: "physical_note_failed",
+      status: "failed",
+    });
+  });
+
   it("preserves uncertain server failures for the no-retry boundary", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       error: {

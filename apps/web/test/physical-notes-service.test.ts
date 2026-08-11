@@ -98,6 +98,7 @@ type PhysicalNoteUpdateData = Partial<Pick<
   HostedPhysicalNote,
   | "acceptedAt"
   | "complimentaryOfferCode"
+  | "failureReason"
   | "providerLetterId"
   | "status"
 >>;
@@ -106,6 +107,10 @@ interface PhysicalNoteStore {
   allRows(): HostedPhysicalNote[];
   prisma: PrismaClient;
   setCreatedAt(id: string, createdAt: Date): void;
+  setFailureReason(
+    id: string,
+    failureReason: HostedPhysicalNote["failureReason"],
+  ): void;
 }
 
 beforeEach(() => {
@@ -541,12 +546,28 @@ describe("createHostedPhysicalNote", () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([
-      { kind: "definite_failure", status: 422 },
+      {
+        kind: "definite_failure",
+        reason: "recipient_address",
+        status: 422,
+      },
       { kind: "accepted", providerLetterId: "ltr_retry" },
     ]);
+    const failedRequest = buildRequest(5);
 
     const failed = await createHostedPhysicalNote({
-      ...buildRequest(5),
+      ...failedRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    const replay = await createHostedPhysicalNote({
+      ...failedRequest,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    store.setFailureReason(failed.physicalNoteId!, null);
+    const legacyReplay = await createHostedPhysicalNote({
+      ...failedRequest,
       prisma: store.prisma,
       runtime: provider.runtime,
     });
@@ -556,7 +577,15 @@ describe("createHostedPhysicalNote", () => {
       runtime: provider.runtime,
     });
 
-    expect(failed.status).toBe("failed");
+    expect(failed).toMatchObject({
+      failureReason: "recipient_address",
+      status: "failed",
+    });
+    expect(replay).toEqual(failed);
+    expect(legacyReplay).toMatchObject({
+      failureReason: "unknown",
+      status: "failed",
+    });
     expect(retry).toEqual({
       complimentary: true,
       costUsdMicros: COST_USD_MICROS.toString(),
@@ -567,6 +596,7 @@ describe("createHostedPhysicalNote", () => {
       (row) => row.id === failed.physicalNoteId,
     )).toMatchObject({
       complimentaryOfferCode: null,
+      failureReason: null,
       status: "failed",
     });
     expect(mocks.readUsageGate).not.toHaveBeenCalled();
@@ -967,6 +997,7 @@ function createPhysicalNoteStore(
       const row: HostedPhysicalNote = {
         acceptedAt: null,
         createdAt: now,
+        failureReason: null,
         providerLetterId: null,
         updatedAt: now,
         ...input.data,
@@ -1054,6 +1085,13 @@ function createPhysicalNoteStore(
         throw new Error(`missing physical note ${id}`);
       }
       rows.set(id, { ...row, createdAt });
+    },
+    setFailureReason(id, failureReason) {
+      const row = rows.get(id);
+      if (!row) {
+        throw new Error(`missing physical note ${id}`);
+      }
+      rows.set(id, { ...row, failureReason });
     },
   };
 }

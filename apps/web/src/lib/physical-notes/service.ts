@@ -8,6 +8,7 @@ import type {
   PrismaClient,
 } from "@prisma/client";
 import type {
+  HostedPhysicalNoteFailureReason,
   HostedPhysicalNoteSendRequest,
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
@@ -259,6 +260,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
   }
   if (providerResult.kind === "definite_failure") {
     await markHostedPhysicalNoteFailed({
+      failureReason: providerResult.reason,
       memberId: input.memberId,
       noteId: reservation.row.id,
       prisma,
@@ -350,6 +352,7 @@ async function resolveStaleComplimentaryPhysicalNote(input: {
   }
   if (providerResult.kind === "absent") {
     await markHostedPhysicalNoteFailed({
+      failureReason: "unknown",
       memberId: input.memberId,
       noteId: stale.id,
       prisma: input.prisma,
@@ -369,6 +372,7 @@ async function finalizeHostedPhysicalNoteAcceptance(input: {
     await tx.hostedPhysicalNote.updateMany({
       data: {
         acceptedAt: input.acceptedAt,
+        failureReason: null,
         providerLetterId: input.providerLetterId,
         status: "accepted",
       },
@@ -426,6 +430,7 @@ async function recordPaidPhysicalNoteUsageTx(input: {
 }
 
 async function markHostedPhysicalNoteFailed(input: {
+  failureReason: HostedPhysicalNoteFailureReason;
   memberId: string;
   noteId: string;
   prisma: PrismaClient;
@@ -435,6 +440,7 @@ async function markHostedPhysicalNoteFailed(input: {
     await tx.hostedPhysicalNote.updateMany({
       data: {
         complimentaryOfferCode: null,
+        failureReason: input.failureReason,
         status: "failed",
       },
       where: {
@@ -474,13 +480,19 @@ function requireProviderLetterId(
 function toResponse(
   note: Pick<
     HostedPhysicalNote,
-    "complimentaryOfferCode" | "id" | "providerCostUsdMicros"
+    | "complimentaryOfferCode"
+    | "failureReason"
+    | "id"
+    | "providerCostUsdMicros"
   >,
   status: HostedPhysicalNoteSendResponse["status"],
 ): HostedPhysicalNoteSendResponse {
   return {
     complimentary: note.complimentaryOfferCode !== null,
     costUsdMicros: note.providerCostUsdMicros.toString(),
+    ...(status === "failed"
+      ? { failureReason: note.failureReason ?? "unknown" }
+      : {}),
     physicalNoteId: note.id,
     status,
   };

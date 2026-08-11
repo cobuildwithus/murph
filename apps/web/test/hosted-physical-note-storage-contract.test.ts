@@ -6,6 +6,7 @@ const APPROVED_FIELDS = [
   "acceptedAt",
   "complimentaryOfferCode",
   "createdAt",
+  "failureReason",
   "id",
   "memberId",
   "pricingVersion",
@@ -47,6 +48,26 @@ describe("HostedPhysicalNote storage contract", () => {
       'ON "hosted_physical_note"("member_id", "request_key")',
     );
     expect(migration).toContain("ON DELETE CASCADE");
+  });
+
+  it("stores only the bounded safe rejection category", () => {
+    const migration = readFileSync(
+      new URL(
+        "../prisma/migrations/20260811170000_hosted_physical_note_failure_reason/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      'ADD COLUMN "failure_reason" "HostedPhysicalNoteFailureReason"',
+    );
+    expect(migration).toContain("'recipient_address'");
+    expect(migration).toContain("'artwork'");
+    expect(migration).toContain("'service_unavailable'");
+    expect(migration).toContain("'request_invalid'");
+    expect(migration).toContain("'unknown'");
+    expect(migration).not.toMatch(/message|address_line|artwork_url/iu);
   });
 });
 

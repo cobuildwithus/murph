@@ -225,6 +225,7 @@ import {
   type PhoneCallDynamicToolRequest,
 } from './dynamic-tools/phone-calls.js'
 import {
+  buildPhysicalNoteFailureInstruction,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
   resolvePhysicalNoteExplicitOriginInputId,
@@ -2383,7 +2384,14 @@ export async function executeMurphDynamicToolRequest(input: {
           case 'failed':
             return toolTextResult(
               false,
-              'The physical note was not accepted for printing.',
+              JSON.stringify({
+                failureReason: result.failureReason ?? 'unknown',
+                note: buildPhysicalNoteFailureInstruction(
+                  result.failureReason,
+                ),
+                physicalNoteId: result.physicalNoteId,
+                status: result.status,
+              }),
             )
         }
       } catch {

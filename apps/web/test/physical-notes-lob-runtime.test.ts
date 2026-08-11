@@ -104,6 +104,100 @@ describe("Lob physical-note runtime", () => {
     })).resolves.toEqual({ kind: "ambiguous_failure" });
   });
 
+  it.each([
+    ["failed_deliverability_strictness", "recipient_address"],
+    ["invalid_file", "artwork"],
+    ["billing_address_required", "service_unavailable"],
+    ["bad_request", "request_invalid"],
+    ["future_provider_code", "unknown"],
+  ] as const)(
+    "maps Lob rejection code %s to safe reason %s",
+    async (code, reason) => {
+      const runtime = createLobPhysicalNoteRuntime({
+        apiKey: "test_key",
+        fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
+          error: {
+            code,
+            message: "private provider detail must not cross the boundary",
+            status_code: 422,
+          },
+        }, { status: 422 })),
+        fromAddressId: "adr_from",
+      });
+
+      await expect(runtime.create({
+        artworkUrl: "https://media.example.test/artwork",
+        idempotencyKey: "hpn_rejected",
+        noteId: "hpn_rejected",
+        recipient: {
+          addressLine1: "123 Main St",
+          city: "Atlanta",
+          name: "Sam",
+          postalCode: "30308",
+          state: "GA",
+        },
+      })).resolves.toEqual({
+        kind: "definite_failure",
+        reason,
+        status: 422,
+      });
+    },
+  );
+
+  it("keeps a timed-out HTTP outcome ambiguous", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => Response.json({
+        error: {
+          code: "request_timeout",
+          message: "request timed out",
+          status_code: 408,
+        },
+      }, { status: 408 })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.create({
+      artworkUrl: "https://media.example.test/artwork",
+      idempotencyKey: "hpn_timeout_response",
+      noteId: "hpn_timeout_response",
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+    })).resolves.toEqual({ kind: "ambiguous_failure" });
+  });
+
+  it("uses an unknown safe reason for malformed rejection payloads", async () => {
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl: vi.fn<typeof fetch>(async () => new Response("not json", {
+        status: 422,
+      })),
+      fromAddressId: "adr_from",
+    });
+
+    await expect(runtime.create({
+      artworkUrl: "https://media.example.test/artwork",
+      idempotencyKey: "hpn_malformed_rejection",
+      noteId: "hpn_malformed_rejection",
+      recipient: {
+        addressLine1: "123 Main St",
+        city: "Atlanta",
+        name: "Sam",
+        postalCode: "30308",
+        state: "GA",
+      },
+    })).resolves.toEqual({
+      kind: "definite_failure",
+      reason: "unknown",
+      status: 422,
+    });
+  });
+
   it("finds an accepted letter through Lob's exact metadata filter", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
       const request = new Request(input, init);

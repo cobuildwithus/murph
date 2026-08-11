@@ -310,6 +310,61 @@ describe('assistant physical notes', () => {
       'action is not available to the current participant right now',
     )
   })
+
+  it.each([
+    ['recipient_address', 'check the street and unit'],
+    ['artwork', 'regenerate the image'],
+    ['service_unavailable', "on Murph's side, not the recipient address"],
+    ['request_invalid', 'correct the printing request'],
+    ['unknown', 'without a recognized safe correction'],
+  ] as const)(
+    'returns actionable recovery for %s physical-note failures',
+    async (failureReason, expectedGuidance) => {
+      const vaultRoot = await createPhysicalNoteVault()
+      const send = vi.fn(async () => ({
+        complimentary: false,
+        costUsdMicros: '250000',
+        failureReason,
+        physicalNoteId: 'hpn_failed',
+        status: 'failed' as const,
+      }))
+
+      const result = await executeMurphDynamicToolRequest({
+        authorizeAcceptedMessageTarget: authorizeApprovalInput,
+        deliveryContextOrdinal: 0,
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createHostedToolContext({
+          physicalNotes: { send },
+          privateImageUrlPublisher: {
+            publishPrivateImageUrl: async () => ({
+              expiresAt: '2027-08-01T00:00:00.000Z',
+              url: 'https://private-media.example.test/note',
+            }),
+          },
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: {
+          imageRef: IMAGE_REF,
+          imageSha256: IMAGE_SHA256,
+          kind: 'send-physical-note',
+          messageRef: APPROVAL_INPUT_ID,
+          recipient: RECIPIENT,
+        },
+        vaultRoot,
+      })
+
+      expect(result.rpcResult).toMatchObject({ success: false })
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        `"failureReason":"${failureReason}"`,
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toContain(expectedGuidance)
+      expect(result.rpcResult.contentItems[0]?.text).toMatch(
+        /do not .*retry automatically/iu,
+      )
+    },
+  )
 })
 
 async function createPhysicalNoteVault(): Promise<string> {

@@ -84,9 +84,11 @@ note.
 
 Web owns the sole durable `HostedPhysicalNote` row. It stores only operational
 facts: beneficiary, request identity and fingerprint, provider id, status,
-complimentary offer code, configured provider cost, pricing version, and
-timestamps. It never stores the postal address, image URL, artwork, prompt, or
-note text.
+complimentary offer code, configured provider cost, pricing version, one
+provider-neutral failure reason, and timestamps. The failure reason is limited
+to recipient address, artwork, service availability, invalid Murph request, or
+unknown. It never stores the postal address, image URL, artwork, prompt, note
+text, or Lob's freeform error message.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
@@ -106,6 +108,15 @@ the promotional claim; an ambiguous outcome keeps the row pending and is never
 blindly resent after Lob's idempotency window. Once admitted, the provider call
 uses its own bounded timeout rather than caller cancellation, preventing a
 durable reservation with no matching provider attempt.
+
+For a definite rejection, Web maps only Lob's allowlisted structured error code
+to the bounded failure reason and persists it before responding. Lob's
+human-readable message is untrusted, may contain address details, and never
+enters durable state or assistant context. Replays return the same safe reason;
+legacy failed rows without one use `unknown`. The assistant tells the person
+whether to check the address, regenerate the artwork, or wait for Murph to fix
+its printing setup or request. It never guesses from an unknown reason or
+retries an ambiguous outcome.
 
 For paid notes, `starting` rows from the current allowance period reserve their
 already-frozen provider cost under the same member lock used by allowance
@@ -186,3 +197,13 @@ one Lob test-mode proof before enabling the Cloudflare capability. Set
 active, then enable live sending. The older runtime simply lacks the tool during
 a Web-first compatibility window; a new runtime against an old Web deployment
 would expose a route that does not exist and is therefore the unsafe order.
+
+The additive actionable-rejection rollout uses the opposite consumer-first
+order within the already-live physical-note route: deploy Cloudflare and the
+runner bundle with the optional failure-reason parser first, then deploy Web's
+additive Prisma migration and response producer. The new consumer accepts an
+older Web response without the field, and older warm runners ignore the added
+result property after Worker validation. Deploying the new Web response through
+an older strict Worker parser is unsafe. No immediate container rollout is
+required; verify one synthetic rejection category and one accepted test-mode
+note after both sides converge.

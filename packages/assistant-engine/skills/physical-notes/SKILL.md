@@ -105,4 +105,6 @@ Treat tool results literally:
 - `pending` means do not retry or claim mailing success;
 - `insufficient_usage` means explain that the free note was used and more
   Murph time is needed;
-- `failed` means it was not accepted for printing.
+- `failed` means it was not accepted for printing. Follow the returned safe
+  failure reason and next-step note exactly. Never substitute Lob text, guess
+  that a confirmed address was wrong, or retry without a new explicit request.
