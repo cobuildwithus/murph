@@ -302,4 +302,17 @@ function clearBrowserContractEnvironment(): void {
   }
 }
 
-await main();
+function sanitizeBrowserSmokeFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/murph_session_v2\.[A-Za-z0-9._-]+/gu, "[redacted-session]")
+    .replace(/https?:\/\/[^\s)]+/gu, "[redacted-url]")
+    .slice(0, 600);
+}
+
+void main().catch((error: unknown) => {
+  process.stderr.write(
+    `Hosted browser smoke failed: ${sanitizeBrowserSmokeFailure(error)}\n`,
+  );
+  process.exitCode = 1;
+});
