@@ -10363,6 +10363,134 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("host abort after system device-sync apply still checkpoints canonical progress", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const hostAbortController = new AbortController();
+    const hostAbortReason = new Error("synthetic host abort after device-sync apply");
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:host-abort-after-apply",
+      id: "mailbox_item_system_mailbox_device_host_abort_after_apply",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const deviceSyncPort = createSnapshotDeviceSyncPort({
+      connectionId: "device_sync_connection_host_abort_after_apply",
+      nextReconcileAt: "2026-04-27T00:05:00.000Z",
+      onApplyUpdates: async () => {
+        await runCanonicalWrite({
+          mutate: async ({ batch }) => {
+            await batch.stageTextWrite(
+              "audit/system-mailbox-device-sync-apply.md",
+              "system mailbox device-sync canonical progress\n",
+            );
+          },
+          occurredAt: TEST_NOW,
+          operationType: "hosted_system_mailbox_device_sync_apply_test",
+          summary: "Persist system mailbox device-sync apply progress",
+          vaultRoot,
+        });
+        hostAbortController.abort(hostAbortReason);
+      },
+    });
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-device-host-abort-after-apply-before.bundle.json",
+        vaultRoot,
+      });
+
+      await assert.rejects(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_synthetic_system_mailbox_device_host_abort_after_apply",
+              processingMode: "system_mailbox",
+              workspaceVersion: "0",
+            },
+            resolvedConfig: createDeviceSyncResolvedConfig(),
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "e".repeat(64),
+                  key: "users/bundles/member-synthetic/system-mailbox-device-host-abort-after-apply.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              throw new Error("Already-imported system mailbox work should not import a new row.");
+            },
+            platform: createPlatform({
+              artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+              deviceSyncPort,
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef: restoredWorkspace.snapshotRef,
+                  version: "0",
+                }),
+              }),
+            }),
+            signal: hostAbortController.signal,
+            async runAssistantPhase() {
+              throw new Error("System mailbox mode must not enter assistant phase.");
+            },
+            vaultRoot,
+          },
+        ),
+        hostAbortReason,
+      );
+
+      assert.equal(hostAbortController.signal.aborted, true);
+      assert.equal(deviceSyncPort.fetchSnapshotCalls, 1);
+      assert.equal(deviceSyncPort.applyUpdatesCalls, 1);
+      assert.deepEqual(checkpointRequests.map((request) => request.reason), [
+        "canonical_runtime_commit",
+        "idle_shutdown",
+      ]);
+      assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
+      assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
+      assert.equal(
+        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        "string",
+      );
+      assert.equal(
+        checkpointRequests[1]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+      assert.equal(typeof checkpointRequests[1]?.nextWakeAt, "string");
+      // The canonical write may make an immediate assistant snapshot refresh
+      // earlier than the device continuation; either wake must be checkpointed.
+      assert.match(
+        checkpointRequests[1]?.nextWakeReason ?? "",
+        /^(assistant|device-sync\.reconcile)$/u,
+      );
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("checkpoint-reported foreground input defers system mailbox post-checkpoint recording", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];

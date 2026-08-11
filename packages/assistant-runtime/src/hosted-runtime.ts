@@ -2183,61 +2183,78 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (consumeForegroundWake()) {
           return { preempted: true, prepared: false };
         }
-        const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
-          allowedRouteActions: inputItem.allowedRouteActions,
-          allowedWakeKinds: inputItem.allowedWakeKinds,
-          operatorHomeRoot: restored.operatorHomeRoot,
-          runtime: foregroundRuntime,
-          runtimeEnv: invocationRuntimeEnv,
-          shouldYieldBackgroundMaintenance: shouldYieldSystemMailboxWork,
-          signal: runtimeAbortController.signal,
-          vaultRoot: restored.vaultRoot,
-        });
-        if (preparation?.status === "preempted") {
-          return { preempted: true, prepared: true };
-        }
-        const preparationWake =
-          resolveHostedSystemMailboxCheckpointPreparationWake(preparation);
-        const projectedWake = await resolveCurrentSystemMailboxModeWake(
-          preparationWake ? [preparationWake] : [],
-        );
-        const mustCheckpoint = importOrStartupCheckpointPending
-          || hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(preparation)
-          || hostedSystemMailboxWakeChangedFromWorkspace({
-            nextWakeAt: projectedWake.nextWakeAt,
-            nextWakeReason: projectedWake.nextWakeReason,
-            workspace: activeWorkspace,
+        return await withCanonicalWritePersistence(async () => {
+          const persistedPreparation = await runHostedWorkspaceCanonicalWriteAtBoundary({
+            previousRedactedStatus: currentRedactedStatus,
+            runnerInput: {
+              ...baseRunnerInput,
+              workspace: activeWorkspace,
+            },
+            write: async () => await prepareHostedSystemMailboxItemForCheckpoint({
+              allowedRouteActions: inputItem.allowedRouteActions,
+              allowedWakeKinds: inputItem.allowedWakeKinds,
+              operatorHomeRoot: restored.operatorHomeRoot,
+              runtime: foregroundRuntime,
+              runtimeEnv: invocationRuntimeEnv,
+              shouldYieldBackgroundMaintenance: shouldYieldSystemMailboxWork,
+              signal: runtimeAbortController.signal,
+              vaultRoot: restored.vaultRoot,
+            }),
           });
-        if (mustCheckpoint) {
-          await checkpointSystemMailboxMode(
-            `${inputItem.stagePrefix}.checkpoint.prepare`,
+          const preparation = persistedPreparation.result;
+          if (persistedPreparation.canonicalWritePersisted) {
+            activeWorkspace = persistedPreparation.workspace;
+            currentRedactedStatus =
+              persistedPreparation.redactedStatus
+              ?? persistedPreparation.workspace?.redactedStatus
+              ?? currentRedactedStatus;
+          }
+          if (preparation?.status === "preempted") {
+            return { preempted: true, prepared: true };
+          }
+          const preparationWake =
+            resolveHostedSystemMailboxCheckpointPreparationWake(preparation);
+          const projectedWake = await resolveCurrentSystemMailboxModeWake(
             preparationWake ? [preparationWake] : [],
           );
-        }
-        if (consumeForegroundWake()) {
-          return { preempted: true, prepared: preparation !== null };
-        }
-        const recordItem = readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
-        if (!recordItem?.postCheckpointRecord) {
-          return { preempted: false, prepared: preparation !== null };
-        }
-        const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
-          item: recordItem,
-          operatorHomeRoot: restored.operatorHomeRoot,
-          runtime: foregroundRuntime,
-          signal: runtimeAbortController.signal,
-          vaultRoot: restored.vaultRoot,
+          const mustCheckpoint = importOrStartupCheckpointPending
+            || hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(preparation)
+            || hostedSystemMailboxWakeChangedFromWorkspace({
+              nextWakeAt: projectedWake.nextWakeAt,
+              nextWakeReason: projectedWake.nextWakeReason,
+              workspace: activeWorkspace,
+            });
+          if (mustCheckpoint) {
+            await checkpointSystemMailboxMode(
+              `${inputItem.stagePrefix}.checkpoint.prepare`,
+              preparationWake ? [preparationWake] : [],
+            );
+          }
+          if (consumeForegroundWake()) {
+            return { preempted: true, prepared: preparation !== null };
+          }
+          const recordItem = readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
+          if (!recordItem?.postCheckpointRecord) {
+            return { preempted: false, prepared: preparation !== null };
+          }
+          const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
+            item: recordItem,
+            operatorHomeRoot: restored.operatorHomeRoot,
+            runtime: foregroundRuntime,
+            signal: runtimeAbortController.signal,
+            vaultRoot: restored.vaultRoot,
+          });
+          const recordWake = createHostedRuntimeWakeCandidate(
+            recordResult.nextWakeAt,
+            recordResult.nextWakeReason ?? null,
+          );
+          rememberSystemMailboxPostRecordWake(recordWake);
+          await checkpointSystemMailboxMode(
+            `${inputItem.stagePrefix}.checkpoint.record`,
+            recordWake.at ? [recordWake] : [],
+          );
+          return { preempted: consumeForegroundWake(), prepared: true };
         });
-        const recordWake = createHostedRuntimeWakeCandidate(
-          recordResult.nextWakeAt,
-          recordResult.nextWakeReason ?? null,
-        );
-        rememberSystemMailboxPostRecordWake(recordWake);
-        await checkpointSystemMailboxMode(
-          `${inputItem.stagePrefix}.checkpoint.record`,
-          recordWake.at ? [recordWake] : [],
-        );
-        return { preempted: consumeForegroundWake(), prepared: true };
       };
 
       if (consumeForegroundWake()) {
