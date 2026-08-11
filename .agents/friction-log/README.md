@@ -88,9 +88,17 @@ admits only an open `enhancement` issue authored by the exact Frog App with one
 matching binding already committed on `main`. The issue number is the only
 issue field in the parent Codex prompt; all issue content remains untrusted
 evidence. Codex must obtain an attached implementation patch from a fresh
-ReviewGPT Pro thread, then follow the ordinary Murph plan, verification,
-ReviewGPT review, PR, required-CI, and non-admin merge gates. It closes an issue
-only after verifying the PR merged.
+ReviewGPT Pro thread for a fresh implementation, then follow the ordinary Murph
+plan, verification, ReviewGPT review, PR, required-CI, and non-admin merge
+gates. A recovery run resumes existing reviewed state without acquiring another
+implementation patch. It closes an issue only after verifying the PR merged.
+
+Retry state is classified before model work. A clean branch with no commit or
+PR enters `implement`; an existing implementation commit or open PR enters
+`resume` without another implementation-patch request; and an exact merged PR
+with its closing relationship enters `close-issue`. Dirty, divergent,
+multiply-owned, closed-unmerged, mismatched-head, or otherwise ambiguous state
+fails closed.
 
 GitHub is the repair queue and completion ledger. Local owner-only state stores
 only relative checkout/Codex-home locators, one process-identity lock, and a

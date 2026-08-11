@@ -9,8 +9,9 @@ It intentionally lists live architecture, product, verification, and package-bou
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, ordinary protected PR merges,
-GitHub-owned recovery state, a serialized two-hour LaunchAgent, and bounded
-metadata-only local state. Its ownership and proof are jointly specified by
+GitHub-owned implement/resume/close-only recovery state, a serialized two-hour
+LaunchAgent, and bounded metadata-only local state. Its ownership and proof are
+jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.

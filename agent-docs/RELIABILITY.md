@@ -153,6 +153,12 @@ Last verified: 2026-08-11
   state locally. The owner lock records both the scheduler process identity and
   the exact detached worker process identity, so an orphaned still-live child
   also blocks a replacement run after a launcher crash.
+- Before the worker starts, the parent classifies exact clean state as fresh
+  implementation, resumable implementation/PR, or merged-PR issue closure.
+  Resumable and close-only runs cannot reacquire or reapply an implementation
+  patch. Multiple PRs, a closed-unmerged PR, branch divergence, a mismatched
+  merged head or closing relationship, and dirty state fail closed rather than
+  guessing a continuation point.
 - The worker process group has a four-hour outer deadline. The runner sends
   `SIGTERM`, then a bounded `SIGKILL` only to the exact detached process group it
   created and still owns. ReviewGPT and CI instructions impose their own

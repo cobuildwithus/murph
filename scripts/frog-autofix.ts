@@ -25,17 +25,26 @@ import {
   FROG_AUTOFIX_REPOSITORY,
   FROG_AUTOFIX_WORKER_TIMEOUT_MS,
   buildCodexWorkerArguments,
+  eligibleFrogIssues,
   isTrustedFrogIssue,
   normalizeGitHubRepository,
   parseEventLog,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
   renderWorkerPrompt,
+  runWithCleanup,
   safeFailureMessage,
+  superviseOwnedWorker,
+  terminalWorkerSucceeded,
   type EventName,
   type EventRecord,
   type FrogIssue,
 } from "./frog-autofix-lib.ts";
+import {
+  branchHasMergedPullRequest,
+  resolveWorkerMode,
+  type RecoveryCommandAdapter,
+} from "./frog-autofix-recovery.ts";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -132,6 +141,11 @@ const requireCommand = (
   return result.stdout.trim();
 };
 
+const recoveryCommands: RecoveryCommandAdapter = {
+  require: requireCommand,
+  run: runCommand,
+};
+
 function parseIssueList(raw: string): FrogIssue[] {
   const value: unknown = JSON.parse(raw);
   if (!Array.isArray(value)) throw new Error("GitHub returned an invalid issue list");
@@ -190,37 +204,53 @@ function committedBindingCount(root: string, issueNumber: number): number {
   return result.stdout.split("\n").filter(Boolean).length;
 }
 
-function discoverEligibleIssues(root: string): FrogIssue[] {
-  assertRepositoryIdentity(root);
-  fetchMain(root);
-  const issues = parseIssueList(
-    requireCommand(
-      "gh",
-      [
-        "issue",
-        "list",
-        "--repo",
-        FROG_AUTOFIX_REPOSITORY,
-        "--state",
-        "open",
-        "--limit",
-        "1000",
-        "--json",
-        "number,state,author,labels",
-      ],
-      root,
-    ),
-  );
+export interface DiscoveryDependencies {
+  assertRepository: (root: string) => void;
+  bindingCount: (root: string, issueNumber: number) => number;
+  fetchDefaultBranch: (root: string) => void;
+  listOpenIssues: (root: string) => string;
+}
+
+const defaultDiscoveryDependencies: DiscoveryDependencies = {
+  assertRepository: assertRepositoryIdentity,
+  bindingCount: committedBindingCount,
+  fetchDefaultBranch: fetchMain,
+  listOpenIssues: (root) => requireCommand(
+    "gh",
+    [
+      "issue",
+      "list",
+      "--repo",
+      FROG_AUTOFIX_REPOSITORY,
+      "--state",
+      "open",
+      "--limit",
+      "1000",
+      "--json",
+      "number,state,author,labels",
+    ],
+    root,
+  ),
+};
+
+export function discoverEligibleIssues(
+  root: string,
+  dependencies: DiscoveryDependencies = defaultDiscoveryDependencies,
+): FrogIssue[] {
+  dependencies.assertRepository(root);
+  dependencies.fetchDefaultBranch(root);
+  const issues = parseIssueList(dependencies.listOpenIssues(root));
   if (issues.length >= 1_000) {
     throw new Error("open issue scan reached its bounded limit");
   }
   const trusted = issues.filter(isTrustedFrogIssue);
   const counts = new Map(
-    trusted.map((issue) => [issue.number, committedBindingCount(root, issue.number)]),
+    trusted.map((issue) => [
+      issue.number,
+      dependencies.bindingCount(root, issue.number),
+    ]),
   );
-  return trusted
-    .filter((issue) => counts.get(issue.number) === 1)
-    .sort((left, right) => left.number - right.number);
+  return eligibleFrogIssues(issues, counts);
 }
 
 function parsePrimaryWorktree(raw: string): string {
@@ -727,80 +757,36 @@ async function runWorker(
     "scripts",
     "codex-workers",
   );
-  return await new Promise((resolve, reject) => {
-    const child = spawn(
-      "bash",
-      buildCodexWorkerArguments({
-        browserProfileRoot: path.join(
-          homedir(),
-          "Library",
-          "Application Support",
-          "BraveSoftware",
-          "Brave-Browser",
-        ),
-        codexHome,
-        gitCommonDirectory,
-        helper,
-        outputDirectory,
-        promptFile,
-        worktree,
-      }),
-      {
-        cwd: worktree,
-        detached: true,
-        env: safeToolEnvironment({ CODEX_HOME: codexHome }),
-        stdio: "ignore",
-      },
-    );
-    let timedOut = false;
-    let killTimer: NodeJS.Timeout | undefined;
-    const timeout = setTimeout(() => {
-      if (!child.pid) return;
-      timedOut = true;
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        return;
-      }
-      killTimer = setTimeout(() => {
-        try {
-          if (child.pid) process.kill(-child.pid, "SIGKILL");
-        } catch {
-          // The exact worker process group already exited.
-        }
-      }, 30_000);
-    }, FROG_AUTOFIX_WORKER_TIMEOUT_MS);
-    timeout.unref();
-
-    child.once("error", (error) => {
-      clearTimeout(timeout);
-      if (killTimer) clearTimeout(killTimer);
-      reject(error);
-    });
-    child.once("exit", (code) => {
-      clearTimeout(timeout);
-      if (killTimer) clearTimeout(killTimer);
-      resolve({ status: code ?? 1, timedOut });
-    });
-
-    if (!child.pid) {
-      clearTimeout(timeout);
-      reject(new Error("worker process did not expose an identity"));
-      return;
-    }
-    try {
-      onStart(child.pid);
-    } catch (error) {
-      clearTimeout(timeout);
-      try {
-        process.kill(-child.pid, "SIGTERM");
-      } catch {
-        // The exact worker process group already exited.
-      }
-      reject(error);
-      return;
-    }
-  });
+  const child = spawn(
+    "bash",
+    buildCodexWorkerArguments({
+      browserProfileRoot: path.join(
+        homedir(),
+        "Library",
+        "Application Support",
+        "BraveSoftware",
+        "Brave-Browser",
+      ),
+      codexHome,
+      gitCommonDirectory,
+      helper,
+      outputDirectory,
+      promptFile,
+      worktree,
+    }),
+    {
+      cwd: worktree,
+      detached: true,
+      env: safeToolEnvironment({ CODEX_HOME: codexHome }),
+      stdio: "ignore",
+    },
+  );
+  return await superviseOwnedWorker(
+    child,
+    onStart,
+    FROG_AUTOFIX_WORKER_TIMEOUT_MS,
+    30_000,
+  );
 }
 
 function issueIsClosed(root: string, issueNumber: number): boolean {
@@ -821,31 +807,18 @@ function issueIsClosed(root: string, issueNumber: number): boolean {
   ) === "CLOSED";
 }
 
-function branchHasMergedPullRequest(root: string, branch: string): boolean {
-  const raw = requireCommand(
-    "gh",
-    [
-      "pr",
-      "list",
-      "--repo",
-      FROG_AUTOFIX_REPOSITORY,
-      "--state",
-      "merged",
-      "--head",
-      branch,
-      "--limit",
-      "1",
-      "--json",
-      "number",
-    ],
-    root,
-  );
-  const value: unknown = JSON.parse(raw);
-  return Array.isArray(value) && value.length === 1;
-}
-
-function retireMergedWorktree(primary: string, worktree: string, branch: string) {
-  if (!branchHasMergedPullRequest(primary, branch)) return;
+function retireMergedWorktree(
+  primary: string,
+  worktree: string,
+  branch: string,
+  issueNumber: number,
+) {
+  if (!branchHasMergedPullRequest(
+    primary,
+    branch,
+    issueNumber,
+    recoveryCommands,
+  )) return;
   const result = runCommand(
     "bash",
     [path.join(primary, "scripts", "retire-worktree"), worktree],
@@ -883,6 +856,12 @@ async function runOnce() {
     const branch = `${FROG_AUTOFIX_BRANCH_PREFIX}${issue.number}`;
     const codexHome = readConfiguredCodexHome();
     const worktree = prepareIssueWorktree(primary, issue.number);
+    const workerMode = resolveWorkerMode(
+      worktree,
+      branch,
+      issue.number,
+      recoveryCommands,
+    );
     ensureWorkerTooling(worktree);
     const gitCommonDirectory = realpathSync(
       requireCommand(
@@ -894,26 +873,35 @@ async function runOnce() {
     const transientRoot = path.join(supportRoot, "transient");
     mkdirSync(transientRoot, { mode: 0o700, recursive: true });
     const transient = mkdtempSync(path.join(transientRoot, "run-"));
+    let cleanupOwnedByWorkerLifecycle = false;
     try {
       const template = readFileSync(
         path.join(primary, "scripts", "frog-autofix-worker.md"),
         "utf8",
       );
       const promptFile = path.join(transient, "frog-autofix.prompt.md");
-      writeFileSync(promptFile, renderWorkerPrompt(template, issue.number), {
+      writeFileSync(promptFile, renderWorkerPrompt(
+        template,
+        issue.number,
+        workerMode,
+      ), {
         encoding: "utf8",
         flag: "wx",
         mode: 0o600,
       });
       const outputDirectory = path.join(transient, "worker-output");
       recordEvent("worker_started", issue.number);
-      const result = await runWorker(
-        worktree,
-        promptFile,
-        outputDirectory,
-        codexHome,
-        gitCommonDirectory,
-        lock.setWorker,
+      cleanupOwnedByWorkerLifecycle = true;
+      const result = await runWithCleanup(
+        () => runWorker(
+          worktree,
+          promptFile,
+          outputDirectory,
+          codexHome,
+          gitCommonDirectory,
+          lock.setWorker,
+        ),
+        () => safeRemoveTransientDirectory(transientRoot, transient),
       );
       if (result.timedOut) {
         recordEvent("worker_timed_out", issue.number, result.status);
@@ -921,14 +909,21 @@ async function runOnce() {
         recordEvent("worker_failed", issue.number, result.status);
       }
     } finally {
-      safeRemoveTransientDirectory(transientRoot, transient);
+      if (!cleanupOwnedByWorkerLifecycle && existsSync(transient)) {
+        safeRemoveTransientDirectory(transientRoot, transient);
+      }
     }
 
     const issueClosed = issueIsClosed(primary, issue.number);
-    const pullRequestMerged = branchHasMergedPullRequest(primary, branch);
-    if (issueClosed && pullRequestMerged) {
+    const pullRequestMerged = branchHasMergedPullRequest(
+      primary,
+      branch,
+      issue.number,
+      recoveryCommands,
+    );
+    if (terminalWorkerSucceeded(issueClosed, pullRequestMerged)) {
       recordEvent("worker_closed_issue", issue.number);
-      retireMergedWorktree(primary, worktree, branch);
+      retireMergedWorktree(primary, worktree, branch, issue.number);
       return;
     }
     recordEvent("worker_incomplete", issue.number);

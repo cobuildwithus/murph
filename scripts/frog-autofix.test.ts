@@ -10,6 +10,8 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { EventEmitter } from "node:events";
 
 import { describe, expect, it } from "vitest";
 
@@ -17,16 +19,24 @@ import {
   FROG_AUTOFIX_BOT,
   FROG_AUTOFIX_INTERVAL_SECONDS,
   buildCodexWorkerArguments,
+  classifyWorkerMode,
+  eligibleFrogIssues,
   isTrustedFrogIssue,
   normalizeGitHubRepository,
   parseEventLog,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
   renderWorkerPrompt,
+  runWithCleanup,
   safeFailureMessage,
-  selectEligibleFrogIssue,
+  superviseOwnedWorker,
+  terminalWorkerSucceeded,
 } from "./frog-autofix-lib.ts";
-import { acquireRunLock } from "./frog-autofix.ts";
+import { acquireRunLock, discoverEligibleIssues } from "./frog-autofix.ts";
+import {
+  branchHasMergedPullRequest,
+  resolveWorkerMode,
+} from "./frog-autofix-recovery.ts";
 
 const trustedIssue = (number: number) => ({
   author: { login: FROG_AUTOFIX_BOT },
@@ -67,8 +77,50 @@ describe("Frog autofix guards", () => {
     ]);
 
     expect(isTrustedFrogIssue(trustedIssue(9))).toBe(true);
-    expect(selectEligibleFrogIssue(issues, bindings)?.number).toBe(9);
-    expect(selectEligibleFrogIssue([trustedIssue(1)], new Map())).toBeNull();
+    expect(eligibleFrogIssues(issues, bindings).map((issue) => issue.number))
+      .toEqual([9, 12]);
+    expect(eligibleFrogIssues([trustedIssue(1)], new Map())).toEqual([]);
+  });
+
+  it("uses the production discovery path for parsing, bounds, and selection", () => {
+    const bindingCalls: number[] = [];
+    const issues = [
+      trustedIssue(12),
+      trustedIssue(9),
+      trustedIssue(10),
+      trustedIssue(11),
+      { ...trustedIssue(7), author: { login: "someone" } },
+      { ...trustedIssue(8), labels: [] },
+    ];
+    const dependencies = {
+      assertRepository: () => undefined,
+      bindingCount: (_root: string, issueNumber: number) => {
+        bindingCalls.push(issueNumber);
+        if (issueNumber === 10) return 0;
+        return issueNumber === 11 ? 2 : 1;
+      },
+      fetchDefaultBranch: () => undefined,
+      listOpenIssues: () => JSON.stringify(issues),
+    };
+
+    expect(discoverEligibleIssues("<ROOT>", dependencies).map((issue) => issue.number))
+      .toEqual([9, 12]);
+    expect(bindingCalls.sort((left, right) => left - right)).toEqual([
+      9,
+      10,
+      11,
+      12,
+    ]);
+    expect(() => discoverEligibleIssues("<ROOT>", {
+      ...dependencies,
+      listOpenIssues: () => "not-json",
+    })).toThrow();
+    expect(() => discoverEligibleIssues("<ROOT>", {
+      ...dependencies,
+      listOpenIssues: () => JSON.stringify(
+        Array.from({ length: 1_000 }, (_, index) => trustedIssue(index + 1)),
+      ),
+    })).toThrow("open issue scan reached its bounded limit");
   });
 
   it("renders a two-hour LaunchAgent without direct local identifiers", () => {
@@ -110,22 +162,189 @@ describe("Frog autofix guards", () => {
 
   it("constructs the worker prompt from an issue number, not issue content", () => {
     const prompt = renderWorkerPrompt(
-      "Issue {{ISSUE_NUMBER}} must remain {{ISSUE_NUMBER}}.",
+      "Issue {{ISSUE_NUMBER}} must remain {{ISSUE_NUMBER}}. {{MODE_WORKFLOW}}",
       42,
+      "implement",
     );
-    expect(prompt).toBe("Issue 42 must remain 42.");
-    expect(() => renderWorkerPrompt("No placeholder", 42)).toThrow();
-    expect(() => renderWorkerPrompt("{{ISSUE_NUMBER}}", 0)).toThrow();
+    expect(prompt).toContain("Issue 42 must remain 42.");
+    expect(prompt).toContain("pnpm review:gpt --connector github");
+    expect(() => renderWorkerPrompt("No placeholder", 42, "implement")).toThrow();
+    expect(() => renderWorkerPrompt(
+      "{{ISSUE_NUMBER}} {{MODE_WORKFLOW}}",
+      0,
+      "implement",
+    )).toThrow();
     const template = readFileSync(
       path.join(repositoryRoot, "scripts", "frog-autofix-worker.md"),
       "utf8",
     );
-    const complete = renderWorkerPrompt(template, 42);
+    const complete = renderWorkerPrompt(template, 42, "implement");
     expect(complete).not.toContain("{{ISSUE_NUMBER}}");
+    expect(complete).not.toContain("{{MODE_WORKFLOW}}");
     expect(complete).toContain("--connector github");
     expect(complete).toContain("--send --wait");
     expect(complete).toContain("--skip-resume");
     expect(complete).toContain("exactly one patch or diff attachment");
+    const resume = renderWorkerPrompt(template, 42, "resume");
+    expect(resume).toContain("resume mode");
+    expect(resume).not.toContain("pnpm review:gpt --connector github");
+    const closeIssue = renderWorkerPrompt(template, 42, "close-issue");
+    expect(closeIssue).toContain("close-issue mode");
+    expect(closeIssue).not.toContain("pnpm review:gpt --connector github");
+  });
+
+  it("classifies only unambiguous fresh, resumable, and close-only states", () => {
+    expect(classifyWorkerMode([], 0)).toBe("implement");
+    expect(classifyWorkerMode([], 1)).toBe("resume");
+    expect(classifyWorkerMode([{
+      closesIssue: true,
+      headIsAncestorOfLocal: true,
+      headMatchesLocal: true,
+      state: "OPEN",
+    }], 2)).toBe("resume");
+    expect(classifyWorkerMode([{
+      closesIssue: true,
+      headIsAncestorOfLocal: true,
+      headMatchesLocal: true,
+      state: "MERGED",
+    }], 2)).toBe("close-issue");
+    expect(classifyWorkerMode([{
+      closesIssue: false,
+      headIsAncestorOfLocal: true,
+      headMatchesLocal: true,
+      state: "MERGED",
+    }], 2)).toBeNull();
+    expect(classifyWorkerMode([{
+      closesIssue: true,
+      headIsAncestorOfLocal: false,
+      headMatchesLocal: false,
+      state: "OPEN",
+    }], 2)).toBeNull();
+    expect(classifyWorkerMode([{
+      closesIssue: true,
+      headIsAncestorOfLocal: true,
+      headMatchesLocal: true,
+      state: "CLOSED",
+    }], 2)).toBeNull();
+    expect(classifyWorkerMode([
+      {
+        closesIssue: true,
+        headIsAncestorOfLocal: true,
+        headMatchesLocal: true,
+        state: "OPEN",
+      },
+      {
+        closesIssue: true,
+        headIsAncestorOfLocal: true,
+        headMatchesLocal: true,
+        state: "MERGED",
+      },
+    ], 2)).toBeNull();
+  });
+
+  it("drives production recovery classification from controlled Git and GitHub state", () => {
+    const branch = "agent/frog-autofix-42";
+    const mainHead = "a".repeat(40);
+    const implementationHead = "b".repeat(40);
+    const runScenario = (options: {
+      ahead: number;
+      localHead: string;
+      pullRequest?: { body: string; state: "MERGED" | "OPEN" };
+      remoteBranch: boolean;
+    }) => resolveWorkerMode("<WORKTREE>", branch, 42, {
+      require: (command, args) => {
+        if (command === "gh") {
+          return JSON.stringify(options.pullRequest ? [{
+            baseRefName: "main",
+            body: options.pullRequest.body,
+            headRefName: branch,
+            headRefOid: options.localHead,
+            number: 99,
+            state: options.pullRequest.state,
+          }] : []);
+        }
+        const invocation = args.join(" ");
+        if (invocation === "status --porcelain") return "";
+        if (invocation === "symbolic-ref --quiet --short HEAD") return branch;
+        if (invocation === "fetch --quiet origin main") return "";
+        if (invocation.startsWith("fetch --quiet origin +refs/heads/")) return "";
+        if (invocation === "rev-parse HEAD") return options.localHead;
+        if (invocation === "rev-parse origin/main") return mainHead;
+        if (invocation === `rev-parse origin/${branch}`) return options.localHead;
+        if (invocation === "rev-list --count origin/main..HEAD") {
+          return String(options.ahead);
+        }
+        throw new Error(`unexpected required command: ${command} ${invocation}`);
+      },
+      run: (command, args) => {
+        const invocation = args.join(" ");
+        if (invocation.startsWith("ls-remote --exit-code --heads origin")) {
+          return { status: options.remoteBranch ? 0 : 2, stdout: "" };
+        }
+        if (invocation.startsWith("merge-base --is-ancestor")) {
+          return { status: 0, stdout: "" };
+        }
+        throw new Error(`unexpected command: ${command} ${invocation}`);
+      },
+    });
+
+    expect(runScenario({ ahead: 0, localHead: mainHead, remoteBranch: false }))
+      .toBe("implement");
+    expect(runScenario({
+      ahead: 1,
+      localHead: implementationHead,
+      remoteBranch: true,
+    })).toBe("resume");
+    expect(runScenario({
+      ahead: 1,
+      localHead: implementationHead,
+      pullRequest: { body: "Fixes #42", state: "OPEN" },
+      remoteBranch: true,
+    })).toBe("resume");
+    expect(runScenario({
+      ahead: 1,
+      localHead: implementationHead,
+      pullRequest: { body: "Fixes #42", state: "MERGED" },
+      remoteBranch: true,
+    })).toBe("close-issue");
+  });
+
+  it("requires one exact merged branch head and closing relationship", () => {
+    const branch = "agent/frog-autofix-42";
+    const mergedHead = "b".repeat(40);
+    const record = {
+      baseRefName: "main",
+      body: "Fixes #42",
+      headRefName: branch,
+      headRefOid: mergedHead,
+      number: 99,
+      state: "MERGED",
+    };
+    const commands = (localHead: string, body = record.body) => ({
+      require: (command: string) => command === "gh"
+        ? JSON.stringify([{ ...record, body }])
+        : localHead,
+      run: () => ({ status: 0, stdout: "" }),
+    });
+
+    expect(branchHasMergedPullRequest(
+      "<ROOT>",
+      branch,
+      42,
+      commands(mergedHead),
+    )).toBe(true);
+    expect(branchHasMergedPullRequest(
+      "<ROOT>",
+      branch,
+      42,
+      commands("c".repeat(40)),
+    )).toBe(false);
+    expect(branchHasMergedPullRequest(
+      "<ROOT>",
+      branch,
+      42,
+      commands(mergedHead, "Related to #42"),
+    )).toBe(false);
   });
 
   it("redacts local identifiers from unexpected failure text", () => {
@@ -237,5 +456,129 @@ describe("Frog autofix guards", () => {
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
+  });
+
+  it("supervises and signals only the exact owned worker process group", async () => {
+    class FakeChild extends EventEmitter {
+      pid = 42;
+    }
+    const child = new FakeChild() as unknown as ChildProcess;
+    const timers: Array<{ callback: () => void; cleared: boolean }> = [];
+    const signals: Array<[number, string]> = [];
+    const started: number[] = [];
+    const resultPromise = superviseOwnedWorker(child, (pid) => started.push(pid), 100, 10, {
+      clearTimer: (timer) => {
+        (timer as { cleared: boolean }).cleared = true;
+      },
+      setTimer: (callback) => {
+        const timer = { callback, cleared: false };
+        timers.push(timer);
+        return timer;
+      },
+      signalProcessGroup: (pid, signal) => signals.push([pid, signal]),
+    });
+    expect(started).toEqual([42]);
+    timers[0]?.callback();
+    expect(signals).toEqual([[-42, "SIGTERM"]]);
+    timers[1]?.callback();
+    expect(signals).toEqual([[-42, "SIGTERM"], [-42, "SIGKILL"]]);
+    (child as unknown as EventEmitter).emit("exit", 143);
+    await expect(resultPromise).resolves.toEqual({ status: 143, timedOut: true });
+    expect(timers.every((timer) => timer.cleared)).toBe(true);
+  });
+
+  it("handles ordinary and graceful-timeout worker exits without a forced signal", async () => {
+    class FakeChild extends EventEmitter {
+      constructor(public pid: number) {
+        super();
+      }
+    }
+    const timers: Array<{ callback: () => void; cleared: boolean }> = [];
+    const signals: Array<[number, string]> = [];
+    const dependencies = {
+      clearTimer: (timer: unknown) => {
+        (timer as { cleared: boolean }).cleared = true;
+      },
+      setTimer: (callback: () => void) => {
+        const timer = { callback, cleared: false };
+        timers.push(timer);
+        return timer;
+      },
+      signalProcessGroup: (pid: number, signal: "SIGKILL" | "SIGTERM") => {
+        signals.push([pid, signal]);
+      },
+    };
+
+    const ordinary = new FakeChild(7) as unknown as ChildProcess;
+    const ordinaryResult = superviseOwnedWorker(ordinary, () => undefined, 100, 10, dependencies);
+    (ordinary as unknown as EventEmitter).emit("exit", 5);
+    await expect(ordinaryResult).resolves.toEqual({ status: 5, timedOut: false });
+    expect(signals).toEqual([]);
+
+    const graceful = new FakeChild(8) as unknown as ChildProcess;
+    const gracefulResult = superviseOwnedWorker(graceful, () => undefined, 100, 10, dependencies);
+    timers.at(-1)?.callback();
+    expect(signals).toEqual([[-8, "SIGTERM"]]);
+    (graceful as unknown as EventEmitter).emit("exit", 143);
+    await expect(gracefulResult).resolves.toEqual({ status: 143, timedOut: true });
+    expect(signals).toEqual([[-8, "SIGTERM"]]);
+    expect(timers.at(-1)?.cleared).toBe(true);
+  });
+
+  it("waits for exact child termination when lock identity recording fails", async () => {
+    class FakeChild extends EventEmitter {
+      pid = 42;
+    }
+    const child = new FakeChild() as unknown as ChildProcess;
+    const timers: Array<{ callback: () => void; cleared: boolean }> = [];
+    const signals: Array<[number, string]> = [];
+    const startError = new Error("worker identity unavailable");
+    const resultPromise = superviseOwnedWorker(child, () => {
+      throw startError;
+    }, 100, 10, {
+      clearTimer: (timer) => {
+        (timer as { cleared: boolean }).cleared = true;
+      },
+      setTimer: (callback) => {
+        const timer = { callback, cleared: false };
+        timers.push(timer);
+        return timer;
+      },
+      signalProcessGroup: (pid, signal) => signals.push([pid, signal]),
+    });
+    expect(signals).toEqual([[-42, "SIGTERM"]]);
+    let settled = false;
+    void resultPromise.finally(() => {
+      settled = true;
+    }).catch(() => undefined);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    timers.at(-1)?.callback();
+    expect(signals).toEqual([[-42, "SIGTERM"], [-42, "SIGKILL"]]);
+    (child as unknown as EventEmitter).emit("exit", 137);
+    await expect(resultPromise).rejects.toBe(startError);
+    expect(settled).toBe(true);
+  });
+
+  it("keeps transient cleanup behind worker completion and requires both remote terminals", async () => {
+    let finishWorker: ((value: number) => void) | undefined;
+    let cleaned = false;
+    const resultPromise = runWithCleanup(
+      () => new Promise<number>((resolve) => {
+        finishWorker = resolve;
+      }),
+      () => {
+        cleaned = true;
+      },
+    );
+    await Promise.resolve();
+    expect(cleaned).toBe(false);
+    finishWorker?.(0);
+    await expect(resultPromise).resolves.toBe(0);
+    expect(cleaned).toBe(true);
+    expect(terminalWorkerSucceeded(true, true)).toBe(true);
+    expect(terminalWorkerSucceeded(true, false)).toBe(false);
+    expect(terminalWorkerSucceeded(false, true)).toBe(false);
+    expect(terminalWorkerSucceeded(false, false)).toBe(false);
   });
 });
