@@ -380,6 +380,13 @@ Every automation owned by a non-experiment habit plan must set `supportSeriesId:
 
 Support kind also bounds the user-facing message shape. `reminder` authorizes a cue or skip, never a proactive repair/accountability question. `check_in` authorizes one narrow current-state or repair question. `review` authorizes the bounded review and next-decision question. Put that exact authorized shape in the automation instructions; do not let a scheduled turn widen consent because the generic notification policy can generate questions.
 
+These attended follow-up rules apply only in a private member conversation or
+to support that is explicitly room-owned under current room authority. Never
+use a group participant's message to read or mutate that participant's private
+automation, memory, preference, plan, goal, or health context. Move personal
+support changes to a private conversation; in a group, act only on room-owned
+support within the room's current authority.
+
 When Murph proposes one exact finite support package in an attended
 conversation, that proposal remains the authorization boundary for a later
 reply. A clear yes authorizes only the named plan and support writes; apply
