@@ -5,6 +5,7 @@ import {
   initializeVault,
   patchAutomation,
   showAutomation,
+  upsertAutomation,
 } from '@murphai/core'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -134,6 +135,7 @@ describe('post-onboarding support-gap automation', () => {
     }
 
     expect(buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-06-02T12:00:00.000Z'),
       onboardingState: completedOnboardingState(),
       timeZone: 'UTC',
     })).toMatchObject({
@@ -145,6 +147,7 @@ describe('post-onboarding support-gap automation', () => {
     })
 
     expect(() => buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-06-02T12:00:00.000Z'),
       onboardingState: completedOnboardingState(),
       timeZone: 'not/a-timezone',
     })).toThrow('invalid vault timezone')
@@ -274,6 +277,61 @@ describe('post-onboarding support-gap automation', () => {
         at: '2026-06-05T13:30:00.000Z',
         kind: 'at',
       },
+    })
+  })
+
+  it('retires a superseded active 21-day check instead of sending stale support', async () => {
+    const vaultRoot = await createVaultRoot()
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T18:15:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    await upsertAutomation({
+      activeUntil: '2026-06-29T13:30:00.000Z',
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Offer one low-pressure health direction choice.',
+      now: new Date('2026-06-02T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        at: '2026-06-22T13:30:00.000Z',
+        kind: 'at',
+      },
+      slug: 'onboarding-goal-checkin',
+      status: 'active',
+      summary: 'A one-time post-onboarding health direction choice.',
+      tags: [
+        'assistant',
+        'scheduled',
+        'murph-managed',
+        'onboarding',
+        'goal-checkin',
+        'murph-managed:onboarding-goal-checkin',
+      ],
+      title: 'First health direction check-in',
+      vaultRoot,
+    })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-10T12:00:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 5,
+      skipped: 0,
+      updated: 1,
+    })
+    await expect(showAutomation({
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      vaultRoot,
+    })).resolves.toMatchObject({
+      activeUntil: '2026-06-08T13:30:00.000Z',
+      schedule: {
+        at: '2026-06-04T13:30:00.000Z',
+        kind: 'at',
+      },
+      status: 'archived',
     })
   })
 
