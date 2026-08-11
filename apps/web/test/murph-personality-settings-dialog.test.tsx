@@ -245,6 +245,30 @@ test("resolves partial dials, keeping the stored value and defaulting the rest",
   }
 });
 
+test("resolves untouched dials from the selected main personality", async () => {
+  const { MurphPersonalitySettingsDialog } = await import(
+    "@/src/components/settings/murph-personality-settings-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonalitySettingsDialog, {
+      onOpenChange: () => {},
+      open: true,
+      persona: "navy-seal",
+      personality: { humor: null, push: null, detail: null },
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.equal(readDialValue(rendered.container, "Humor"), "1");
+    assert.equal(readDialValue(rendered.container, "Push"), "10");
+    assert.equal(readDialValue(rendered.container, "Detail"), "2");
+    assert.equal(findButton(rendered.container, "Save changes")?.disabled, true);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("the real Slider renders one accessible thumb with a value text", async () => {
   const actual = await vi.importActual<typeof import("@/src/components/ui/slider")>(
     "@/src/components/ui/slider",

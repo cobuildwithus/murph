@@ -687,11 +687,12 @@ receipts; the database migration must precede the web deploy.
 
 ## Hosted Assistant Personalization
 
-`apps/web` remains the canonical projection and mutation owner for hosted tone,
-voice, model, and reasoning preferences; canonical tone, voice, and personality
+`apps/web` remains the canonical projection and mutation owner for hosted persona,
+tone, voice, model, and reasoning preferences; canonical persona, tone, voice, and personality
 truth converges into the current runtime's `bank/preferences.json`. The
 assistant-accessible `murph.personalization` tool
-reads model availability as context but mutates only tone and voice through one
+reads model availability as context but mutates only the main and optional
+supporting persona, tone, and voice through one
 active-runtime-write-fenced, runtime-bound, signed `web-control.worker` callback
 with strict read/update contracts. The
 validated fence identity is the only member identity forwarded and signed for
@@ -713,10 +714,19 @@ input to be a direct conversation wake; explicitly authorized direct email is
 accepted, while non-direct Linq or email fails closed. A synthetic
 thread-container mutation requires that exact input to be a non-direct Linq
 wake whose current route authority is still bound to the same container; group
-email and stale, direct, missing, or cross-room authority fail closed. Tone and voice changes continue to
+email and stale, direct, missing, or cross-room authority fail closed. Persona,
+tone, and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
-runtime handling. Hosted `murph.assistant_style` set/reset operations use a
+runtime handling. Personal Settings projects the canonical combined persona ID
+and reuses the onboarding selector for a persona-only save. It derives displayed
+tone and voice through the same effective-style resolver used by runtime
+planning, labels each as an explicit override or personality default, and opens
+the existing editors on that effective value without writing derived defaults
+to storage. The existing
+browser Style levels editor continues to project and update Humor, Push, and
+Detail independently; Unhinged remains conversational-only. Hosted
+`murph.assistant_style` set/reset operations use a
 separate strict personality action on that same signed, input-bound callback;
 local mode continues to mutate the canonical vault directly. Web resolves the
 accepted input's causal sequence inside the transaction, applies Humor, Push,
@@ -738,7 +748,8 @@ remains the only durable path into `bank/preferences.json`.
 Authenticated hosted Linq group turns register the same `murph.personalization`
 and `murph.assistant_style` tools against the room runtime. The container's
 `HostedMember` projection fields and canonical room vault therefore own Tone,
-Voice, Humor, Push, Detail, and Unhinged for that group. Saved room tone and personality
+Voice, Main Personality, Supporting Personality, Humor, Push, Detail, and
+Unhinged for that group. Saved room tone and personality
 enter later attended and scheduled hosted group turns, and saved room voice
 enters later generated voice
 output. They never read, inherit, or mutate a speaker's private Murph
@@ -1786,8 +1797,16 @@ same-version conflict backstop.
 After taking that token, refresh compares the locked row with the exact
 pre-transaction ciphertext before demotion, mailbox work, or route decryption.
 If the route changes after preparation, Web rolls back and performs at most one
-fresh prepare-before-transaction attempt. Matching valid ciphertext opens from
-the request-scoped root cache with local AES work; absent or structurally corrupt
+fresh prepare-before-transaction attempt. Consumed Linq group-reaction staging
+uses the same authority boundary outside the planner: it reads the exact
+canonical route and active container access, unwraps the selected container's
+active mailbox ingress root before `BEGIN`, then locks chat ownership, the route
+row, and ingress-root authority while rechecking the exact route fields, access,
+and `rootKeyId`. A route or root change gets at most one fresh preparation
+attempt; a preparation/provider/KMS failure opens no transaction. The ordinary
+consumed-mailbox append then reuses the scoped root for local sealing, and its
+runtime signal remains post-commit. Matching valid ciphertext opens from the
+request-scoped root cache with local AES work; absent or structurally corrupt
 ciphertext keeps the existing owning-ingress repair path without speculative
 KMS. Thread-container creation therefore does not use the legacy all-domain
 provisioning bridge or perform domain-root provisioning, delivery-route sealing,
@@ -2400,31 +2419,30 @@ rather than a message or instruction, and uses the same path for normal and
 captureless turns. Duplicate events do not restage context, and any failed or
 raced mailbox append rolls consumption back.
 
-Hosted Linq group reactions share that one-shot context boundary. A unique,
-verified reaction for an active account-bound group route is checked against
-the live roster and exact reacted-to message, then appends one actor-attributed
-entry to the same encrypted transient buffer on that route. The legacy physical
-column name remains reaction-specific, but its logical owner is the bounded
-group-event buffer. It holds the newest ten entries in insertion order; older
-entries fall off without creating a separately processed queue. Reaction
-entries keep the canonical active roster handle, action/type, and bounded
-target text, but no provider identifier, URL, or attachment metadata.
-Participant entries keep only the normalized handle, change action, and
-optional unverified owner label. Address-book replacement or deletion takes the
-same owner-member lock as label staging and clears pending encrypted group-event
-buffers for that owner's routes before committing. A staged label therefore
-cannot survive Stop, permission-loss cleanup, or replacement; the existing
-anonymous addition bit remains independent. Clearing may also discard pending
-optional reaction context, which is already lossy and creates no work owner.
-Corrupt context fails open, authority rotation clears it, and a failed or raced
-mailbox append rolls consumption back. Append decrypt and reseal share one
-500 ms deadline, and consume decrypt has the same bound, so optional crypto
-cannot inherit the general KMS deadline while holding locks.
-When raising the consumed hint beyond the legacy 512-character contract, deploy
-the hosted runner bundle before the web producer so every parser accepts the
-new 5,129-character maximum before web can emit it. Once web has written the
-new array shape, forward-fix web rather than rolling it back until those
-transient slots have been consumed or cleared.
+Hosted Linq group reactions no longer share that transient participant-context
+boundary. A unique, verified reaction for an active account-bound group route
+is encoded as one ordinary conversation mailbox item and marked consumed in
+the same transaction. It is therefore durable replayable input context, but
+never a reply candidate or a separate queue. The signed event supplies the
+actor, operation, reaction value, exact target message id, and optional part
+index; staging does not re-read a mutable provider roster, target message, or
+target text. The mailbox event id provides idempotent replay, and the runtime
+signal is sent only after commit. Append or signal failure fails the webhook so
+the provider retry can replay the same evidence.
+
+Before that reaction transaction opens, Web unwraps and request-scopes the
+exact active ingress root for the routed container, retains only its root-key
+identity as prepared authority, and wipes the caller's plaintext-key copy. A
+preparation or provider/KMS failure opens no transaction. The append transaction
+takes the canonical Linq chat/route locks, revalidates the prepared route, then
+locks and compares the current active ingress root with the prepared root-key
+identity before it writes. A route or root change rolls back that attempt and
+allows at most one fresh prepare-before-transaction attempt; another mismatch
+fails the webhook for a provider retry. Mailbox encryption inside the
+transaction can consequently use only the matching request-scoped root and
+performs no first-time provider/KMS unwrap. This exact-root contract belongs to
+the Linq reaction append path; it does not assert that every generic mailbox
+producer prewarms its root.
 
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner
