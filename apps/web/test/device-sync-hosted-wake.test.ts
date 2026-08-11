@@ -4144,6 +4144,9 @@ describe("hosted device-sync wakes", () => {
         windowStart: null,
       }],
     }));
+    expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
+    );
     const stagedPayload = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources?.[0]?.payload;
     const staged = stagedPayload?.companionObservationJson;
     expect(staged).toEqual(expect.any(String));
@@ -5323,6 +5326,14 @@ describe("hosted device-sync wakes", () => {
       accepted: true,
     });
 
+    const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      resources: dirtyResources,
+    }));
+    expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
