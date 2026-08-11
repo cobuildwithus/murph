@@ -1231,6 +1231,100 @@ test("batch metadata query failures are retryable in the same cache scope withou
   expect(decryptMetrics.calls).toHaveLength(1);
 });
 
+test("historical authority verify-key omissions stay retryable across request scopes", async () => {
+  setHostedSecureBoxStringTestCodecForTests(null);
+  const historicalAuthorityKeyVersion = `${AUTHORITY_KEY_VERSION}/historical`;
+  const historicalSigner = await generateP256SigningKeyPair();
+  const currentSigner = await generateP256SigningKeyPair();
+  const cloudflareRecipient = await generateP256EcdhKeyPair();
+  const decryptMetrics = createLocalKmsDecryptMetrics();
+  gcpKmsMock.client = createLocalKmsClient({
+    decryptMetrics,
+    encryptCalls: [],
+    signCalls: [],
+    signer: historicalSigner.privateKey,
+  });
+  stubHostedCryptoEnv({
+    authorityKeyVersionName: historicalAuthorityKeyVersion,
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: historicalSigner.publicKeyPem,
+  });
+  const tx = createCapturingTransaction();
+  const memberId = "member-historical-authority-root";
+  const {
+    isHostedDomainRootPermanentUnwrapError,
+    provisionActiveHostedDomainRootEnvelopeForUserOnly,
+    unwrapHostedDomainRootsForWebByRootKeyIds,
+  } = await import("../src/lib/hosted-crypto/domain-root-store");
+  const { runWithHostedDomainRootUnwrapCache } = await import(
+    "../src/lib/hosted-crypto/domain-root-unwrap-cache"
+  );
+
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.historical-authority",
+    userId: memberId,
+  });
+  const envelope = tx.persistedEnvelopes[0];
+  assert.ok(envelope);
+  expect(envelope.authoritySignature.keyVersionName)
+    .toBe(historicalAuthorityKeyVersion);
+  const references = [{
+    domain: "control" as const,
+    rootKeyId: envelope.rootKeyId,
+    userId: memberId,
+  }];
+
+  gcpKmsMock.client = createLocalKmsClient({
+    decryptMetrics,
+    encryptCalls: [],
+    signCalls: [],
+    signer: currentSigner.privateKey,
+  });
+  stubHostedCryptoEnv({
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: currentSigner.publicKeyPem,
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  let missingKeyError: unknown = null;
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    missingKeyError = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: tx.prisma,
+      references,
+      retainFailureInScopedCache: true,
+    }).then(() => null, (error: unknown) => error);
+  });
+  expect(missingKeyError).toBeInstanceOf(Error);
+  expect((missingKeyError as Error).message)
+    .toMatch(/not trusted for verification/u);
+  expect(isHostedDomainRootPermanentUnwrapError(missingKeyError)).toBe(false);
+  expect(decryptMetrics.calls).toHaveLength(0);
+
+  stubHostedCryptoEnv({
+    authorityVerifyKeyringJson: JSON.stringify({
+      [historicalAuthorityKeyVersion]: {
+        publicKeyPem: historicalSigner.publicKeyPem,
+        status: "verify_only",
+      },
+    }),
+    cloudflarePublicJwk: cloudflareRecipient.publicJwk,
+    signerPublicKeyPem: currentSigner.publicKeyPem,
+  });
+  resetLocalKmsDecryptMetrics(decryptMetrics);
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const [root] = await unwrapHostedDomainRootsForWebByRootKeyIds({
+      prisma: tx.prisma,
+      references,
+      retainFailureInScopedCache: true,
+    });
+    assert.ok(root);
+    expect(root.rootKey.some((byte) => byte !== 0)).toBe(true);
+    root.rootKey.fill(0);
+  });
+  expect(decryptMetrics.calls).toHaveLength(1);
+});
+
 test("Linq authority batch retains metadata validation failures only for the current request", async () => {
   type MetadataTestRow = Omit<
     ReturnType<typeof buildBatchEnvelopeRows>[number],
@@ -2838,6 +2932,7 @@ function restoreHostedSecureBoxTestCodec(): void {
 }
 
 function stubHostedCryptoEnv(input: {
+  authorityKeyVersionName?: string;
   authorityVerifyKeyringJson?: string;
   cloudflarePublicKeyringJson?: string;
   cloudflarePublicJwk: JsonWebKey;
@@ -2849,7 +2944,10 @@ function stubHostedCryptoEnv(input: {
     JSON.stringify(input.cloudflarePublicJwk),
   );
   vi.stubEnv("HOSTED_CRYPTO_ENV", "test");
-  vi.stubEnv("HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION", AUTHORITY_KEY_VERSION);
+  vi.stubEnv(
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+    input.authorityKeyVersionName ?? AUTHORITY_KEY_VERSION,
+  );
   vi.stubEnv(
     "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
     input.signerPublicKeyPem.replace(/\n/gu, "\\n"),

@@ -660,7 +660,14 @@ export async function verifyHostedDomainRootEnvelopeSignatureWithPublicKey(input
   publicKeyPem: string;
 }): Promise<boolean> {
   const publicKey = await importP256PublicKeyFromPem(input.publicKeyPem);
-  const signature = normalizeP256EcdsaSignature(decodeBase64(input.envelope.authoritySignature.signature));
+  let signature: Uint8Array;
+  try {
+    signature = normalizeP256EcdsaSignature(
+      decodeBase64(input.envelope.authoritySignature.signature),
+    );
+  } catch {
+    return false;
+  }
   return crypto.subtle.verify(
     { hash: "SHA-256", name: "ECDSA" },
     publicKey,

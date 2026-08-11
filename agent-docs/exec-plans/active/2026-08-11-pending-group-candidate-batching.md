@@ -146,3 +146,28 @@ Updated: 2026-08-11
 - Real PostgreSQL suite after remediation: 1 file and 4 tests passed. Its 32-candidate replay used
   a one-connection pool and observed 8 SQL statements for no-sender ambiguity
   and 13 for a sender-selected locked claim, independent of roster cardinality.
+
+### Final ReviewGPT round-one remediation
+
+- Harvested replacement final ReviewGPT round one for PR #1642 at exact head
+  `7a16c35110654fd7991db68b22096bf1c5db48ce`; accepted the finding that
+  authority-reader keyring/config failures were being classified as permanent
+  corrupt setup state.
+- Narrowed root-envelope permanent classification to persisted envelope shape,
+  row/root binding, malformed persisted signature bytes, and completed
+  signature verification failure. Missing historical verify keys, runtime
+  config assembly, public-key import/runtime failures, and other availability
+  failures now escape as retryable preparation failures before setup lock or
+  deletion.
+- Added real-classifier pending-setup proof for replacement-line recovery:
+  a root signed by a historical authority key remains unconsumed when that key
+  is absent from the Web verify keyring, then claims after the verify-only key
+  is restored; malformed historical signatures remain permanent and are
+  consumed only after exact lock and live revalidation.
+- Verification after remediation: runtime-state focused test 1 file/4 tests
+  passed; web focused tests 2 files/58 tests passed; pending-group matrix
+  7 files/383 tests passed; package and web typechecks passed; focused ESLint,
+  `git diff --check`, and privacy scan passed.
+- Real PostgreSQL rerun was blocked by local database availability:
+  `pg_isready -h 127.0.0.1 -p 5432` reported no response, and the gated suite
+  failed before exercising code with Prisma `unreachable` errors.

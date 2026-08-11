@@ -900,6 +900,7 @@ async function unwrapEnvelopeForWeb(input: {
 }
 
 async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnvelopeV1): Promise<void> {
+  assertPersistedAuthoritySignatureShape(envelope.authoritySignature.signature);
   const config = getHostedWebCryptoConfig();
   const publicKeyPem = selectHostedAuthorityVerifyPublicKeyPem({
     keyring: config.authorityVerifyKeyring,
@@ -910,8 +911,117 @@ async function verifyEnvelopeAuthoritySignature(envelope: HostedDomainRootKeyEnv
     publicKeyPem,
   });
   if (!valid) {
-    throw new Error("Hosted domain root envelope authority signature verification failed.");
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature verification failed.",
+    );
   }
+}
+
+function assertPersistedAuthoritySignatureShape(signature: string): void {
+  const decoded = decodePersistedAuthoritySignature(signature);
+  if (decoded.byteLength === 64) {
+    return;
+  }
+  if (decoded[0] !== 0x30) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature must be DER or P-1363.",
+    );
+  }
+  let offset = 1;
+  const sequenceLength = readDerLength(decoded, offset);
+  offset = sequenceLength.nextOffset;
+  if (sequenceLength.length + offset !== decoded.byteLength) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature DER length is invalid.",
+    );
+  }
+  const r = readDerInteger(decoded, offset);
+  offset = r.nextOffset;
+  const s = readDerInteger(decoded, offset);
+  if (
+    normalizedDerIntegerByteLength(r.value) > 32
+    || normalizedDerIntegerByteLength(s.value) > 32
+  ) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature DER integer is invalid.",
+    );
+  }
+  if (s.nextOffset !== decoded.byteLength) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature DER has trailing bytes.",
+    );
+  }
+}
+
+function decodePersistedAuthoritySignature(signature: string): Uint8Array {
+  let binary: string;
+  try {
+    binary = atob(signature);
+  } catch (error) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature must be base64.",
+      { cause: error },
+    );
+  }
+  const decoded = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    decoded[index] = binary.charCodeAt(index);
+  }
+  return decoded;
+}
+
+function readDerLength(bytes: Uint8Array, offset: number): {
+  length: number;
+  nextOffset: number;
+} {
+  const first = bytes[offset];
+  if (first === undefined) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature DER length is missing.",
+    );
+  }
+  if ((first & 0x80) === 0) {
+    return { length: first, nextOffset: offset + 1 };
+  }
+  const count = first & 0x7f;
+  if (count <= 0 || count > 2 || offset + count >= bytes.byteLength) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature DER length is invalid.",
+    );
+  }
+  let length = 0;
+  for (let index = 0; index < count; index += 1) {
+    length = (length << 8) | bytes[offset + 1 + index]!;
+  }
+  return { length, nextOffset: offset + 1 + count };
+}
+
+function readDerInteger(bytes: Uint8Array, offset: number): {
+  nextOffset: number;
+  value: Uint8Array;
+} {
+  if (bytes[offset] !== 0x02) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature DER integer is missing.",
+    );
+  }
+  const length = readDerLength(bytes, offset + 1);
+  const start = length.nextOffset;
+  const end = start + length.length;
+  if (length.length <= 0 || end > bytes.byteLength) {
+    throw new HostedDomainRootPermanentUnwrapError(
+      "Hosted domain root envelope authority signature DER integer length is invalid.",
+    );
+  }
+  return { nextOffset: end, value: bytes.slice(start, end) };
+}
+
+function normalizedDerIntegerByteLength(value: Uint8Array): number {
+  let offset = 0;
+  while (offset < value.byteLength && value[offset] === 0x00) {
+    offset += 1;
+  }
+  return value.byteLength - offset;
 }
 
 function assertExpectedGcpKmsWrap(input: {
@@ -1128,8 +1238,9 @@ async function parseAssertAndVerifyEnvelope(
   row: HostedUserCryptoEnvelopeRow,
   expected: { domain: HostedCryptoDomain; rootKeyId?: string | null; userId: string },
 ): Promise<HostedDomainRootKeyEnvelopeV1> {
+  let envelope: HostedDomainRootKeyEnvelopeV1;
   try {
-    const envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
+    envelope = parseHostedDomainRootKeyEnvelope(row.signedEnvelopeJson);
     if (envelope.userId !== expected.userId || envelope.domain !== expected.domain) {
       throw new Error("Hosted domain root envelope row does not match requested user/domain.");
     }
@@ -1139,8 +1250,6 @@ async function parseAssertAndVerifyEnvelope(
     if (envelope.rootKeyId !== row.rootKeyId) {
       throw new Error("Hosted domain root envelope row rootKeyId mismatch.");
     }
-    await verifyEnvelopeAuthoritySignature(envelope);
-    return envelope;
   } catch (error) {
     if (isHostedDomainRootPermanentUnwrapError(error)) {
       throw error;
@@ -1152,6 +1261,8 @@ async function parseAssertAndVerifyEnvelope(
       { cause: error },
     );
   }
+  await verifyEnvelopeAuthoritySignature(envelope);
+  return envelope;
 }
 
 function createHostedDomainRootReferenceKey(

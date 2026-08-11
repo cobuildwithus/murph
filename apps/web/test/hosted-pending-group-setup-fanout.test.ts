@@ -1,4 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Buffer } from "node:buffer";
+
+import {
+  attachHostedDomainRootEnvelopeSignature,
+  buildHostedDomainRootEnvelopeSigningPayload,
+  buildHostedDomainRootWrapContext,
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+  serializeAdditionalAuthenticatedData,
+  type HostedDomainRootKeyEnvelopeBodyV1,
+  type HostedDomainRootKeyEnvelopeV1,
+} from "@murphai/runtime-state";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { HostedGcpKmsClient } from "@/src/lib/hosted-crypto/gcp-kms";
+
+type UnwrapHostedDomainRootsForWebByRootKeyIds =
+  typeof import("@/src/lib/hosted-crypto/domain-root-store")
+    .unwrapHostedDomainRootsForWebByRootKeyIds;
 
 const mocks = vi.hoisted(() => ({
   openHostedUserSecureBoxStrings: vi.fn(),
@@ -10,24 +27,39 @@ const mocks = vi.hoisted(() => ({
   unwrapHostedDomainRootsForWebByRootKeyIds: vi.fn(),
 }));
 
-vi.mock("@murphai/runtime-state", () => ({
-  getHostedCryptoDomainForLane: () => "control",
-  parseSerializedHostedSecureBoxEnvelope: (value: string) => {
-    const [, domain, rootKeyId] = value.split(":");
-    if (!domain || !rootKeyId) {
-      throw new TypeError("Invalid test secure-box envelope.");
-    }
-    return { domain, rootKeyId };
-  },
+const cryptoMocks = vi.hoisted(() => ({
+  actualUnwrapHostedDomainRootsForWebByRootKeyIds:
+    null as UnwrapHostedDomainRootsForWebByRootKeyIds | null,
+  gcpKmsClient: null as HostedGcpKmsClient | null,
 }));
 
-vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
-  isHostedDomainRootPermanentUnwrapError: (error: unknown) =>
-    error instanceof Error
-    && error.name === "HostedDomainRootPermanentUnwrapError",
-  unwrapHostedDomainRootsForWebByRootKeyIds:
-    mocks.unwrapHostedDomainRootsForWebByRootKeyIds,
-}));
+vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/domain-root-store")
+  >();
+  cryptoMocks.actualUnwrapHostedDomainRootsForWebByRootKeyIds =
+    actual.unwrapHostedDomainRootsForWebByRootKeyIds;
+  return {
+    ...actual,
+    unwrapHostedDomainRootsForWebByRootKeyIds:
+      mocks.unwrapHostedDomainRootsForWebByRootKeyIds,
+  };
+});
+
+vi.mock("@/src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-crypto/gcp-kms")
+  >();
+  return {
+    ...actual,
+    createHostedGcpKmsClientFromEnv: () => {
+      if (!cryptoMocks.gcpKmsClient) {
+        throw new Error("Hosted crypto GCP KMS test client was not configured.");
+      }
+      return cryptoMocks.gcpKmsClient;
+    },
+  };
+});
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
   getHostedDomainRootUnwrapCache: () => new Map(),
@@ -81,6 +113,7 @@ vi.mock("@/src/lib/hosted-onboarding/phone", () => ({
     typeof value === "string" && value.trim() ? value.trim() : null,
 }));
 
+import { HostedDomainRootPermanentUnwrapError } from "@/src/lib/hosted-crypto/domain-root-store";
 import {
   claimHostedPendingGroupSetupForParticipantsTx,
   prepareHostedPendingGroupSetupForParticipants,
@@ -91,6 +124,12 @@ const PREPARED_AT = new Date("2026-08-11T12:00:00.000Z");
 const OCCURRED_AT = new Date("2026-08-11T11:59:00.000Z");
 const INCOMING_LINE = "incoming-line-token";
 const THREAD_ID = "provider-thread-token";
+const ACTIVE_AUTHORITY_KEY_VERSION =
+  "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1";
+const HISTORICAL_AUTHORITY_KEY_VERSION =
+  "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/2";
+const WEB_WRAP_KEY_NAME =
+  "projects/test/locations/global/keyRings/ring/cryptoKeys/wrap";
 
 type CandidateRow = {
   armedAt: Date;
@@ -123,6 +162,187 @@ type FanoutFixture = {
 
 let fixture: FanoutFixture;
 
+function serializeTestSecureBoxEnvelope(rootKeyId: string): string {
+  return JSON.stringify({
+    alg: "AES-256-GCM-HKDF-SHA256",
+    ciphertext: "AA==",
+    domain: "control",
+    iv: "AA==",
+    lane: "hosted-member-private-field",
+    rootKeyId,
+    schema: "murph.hosted-secure-box.v1",
+    scope: "hosted-pending-group-setup:payload:v1",
+  });
+}
+
+async function generateTestSigningKeyPair(): Promise<{
+  privateKey: CryptoKey;
+  publicKeyPem: string;
+}> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const spki = new Uint8Array(
+    await crypto.subtle.exportKey("spki", keyPair.publicKey),
+  );
+  const base64 = Buffer.from(spki).toString("base64");
+  return {
+    privateKey: keyPair.privateKey,
+    publicKeyPem: [
+      "-----BEGIN PUBLIC KEY-----",
+      ...(base64.match(/.{1,64}/gu) ?? []),
+      "-----END PUBLIC KEY-----",
+    ].join("\n"),
+  };
+}
+
+async function generateTestEcdhPublicJwk(): Promise<JsonWebKey> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" },
+    true,
+    ["deriveBits"],
+  );
+  return crypto.subtle.exportKey("jwk", keyPair.publicKey);
+}
+
+async function createSignedTestControlEnvelope(input: {
+  privateKey: CryptoKey;
+  rootKeyId: string;
+  userId: string;
+}): Promise<HostedDomainRootKeyEnvelopeV1> {
+  const encryptionContext = buildHostedDomainRootWrapContext({
+    domain: "control",
+    env: "test",
+    recipient: "web-control-kms",
+    rootKeyId: input.rootKeyId,
+    userId: input.userId,
+  });
+  const now = "2026-08-11T11:30:00.000Z";
+  const body: HostedDomainRootKeyEnvelopeBodyV1 = {
+    createdAt: now,
+    domain: "control" as const,
+    generation: 1,
+    rootKeyId: input.rootKeyId,
+    schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+    updatedAt: now,
+    userId: input.userId,
+    wraps: [{
+      additionalAuthenticatedData:
+        serializeAdditionalAuthenticatedData(encryptionContext),
+      ciphertextBlob: "test-ciphertext",
+      encryptionContext,
+      kind: "gcp-kms" as const,
+      kmsKeyName: WEB_WRAP_KEY_NAME,
+      recipient: "web-control-kms" as const,
+    }],
+  };
+  const signingPayload = new Uint8Array(
+    buildHostedDomainRootEnvelopeSigningPayload(body),
+  );
+  const signature = await crypto.subtle.sign(
+    { hash: "SHA-256", name: "ECDSA" },
+    input.privateKey,
+    signingPayload,
+  );
+  return attachHostedDomainRootEnvelopeSignature({
+    body,
+    keyVersionName: HISTORICAL_AUTHORITY_KEY_VERSION,
+    signature: Buffer.from(new Uint8Array(signature)).toString("base64"),
+    signedAt: now,
+  });
+}
+
+function stubHostedCryptoEnv(input: {
+  activePublicKeyPem: string;
+  cloudflarePublicJwk: JsonWebKey;
+  historicalPublicKeyPem?: string;
+}): void {
+  vi.stubEnv(
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_KEY_VERSION",
+    ACTIVE_AUTHORITY_KEY_VERSION,
+  );
+  vi.stubEnv(
+    "HOSTED_CRYPTO_GCP_AUTHORITY_SIGN_PUBLIC_KEY_PEM",
+    input.activePublicKeyPem.replace(/\n/gu, "\\n"),
+  );
+  vi.stubEnv("HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME", WEB_WRAP_KEY_NAME);
+  vi.stubEnv("HOSTED_CRYPTO_ENV", "test");
+  vi.stubEnv(
+    "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID",
+    "cloudflare-automation:test",
+  );
+  vi.stubEnv(
+    "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK",
+    JSON.stringify(input.cloudflarePublicJwk),
+  );
+  vi.stubEnv(
+    "HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON",
+    input.historicalPublicKeyPem
+      ? JSON.stringify({
+          [HISTORICAL_AUTHORITY_KEY_VERSION]: {
+            publicKeyPem: input.historicalPublicKeyPem,
+            status: "verify_only",
+          },
+        })
+      : "",
+  );
+}
+
+function installTestDomainRootEnvelope(input: {
+  envelope: () => HostedDomainRootKeyEnvelopeV1;
+  prisma: never;
+}): void {
+  Object.defineProperty(input.prisma, "hostedUserCryptoEnvelope", {
+    configurable: true,
+    value: {
+      findMany: vi.fn(async () => {
+        const envelope = input.envelope();
+        return [{
+          domain: envelope.domain,
+          id: `row-${envelope.rootKeyId}`,
+          rootKeyId: envelope.rootKeyId,
+          signedEnvelopeJson: envelope,
+          status: "active",
+          updatedAt: new Date(envelope.updatedAt),
+          userId: envelope.userId,
+        }];
+      }),
+    },
+  });
+}
+
+function installTestGcpKmsDecrypt(rootKey: Uint8Array) {
+  const decrypt = vi.fn(async () => ({
+    plaintext: Uint8Array.from(rootKey),
+  }));
+  cryptoMocks.gcpKmsClient = {
+    asymmetricSign: vi.fn(async () => {
+      throw new Error("Unexpected test KMS asymmetricSign.");
+    }),
+    decrypt,
+    encrypt: vi.fn(async () => {
+      throw new Error("Unexpected test KMS encrypt.");
+    }),
+    macSign: vi.fn(async () => {
+      throw new Error("Unexpected test KMS macSign.");
+    }),
+  };
+  return decrypt;
+}
+
+function installActualDomainRootUnwrap(): void {
+  const unwrap =
+    cryptoMocks.actualUnwrapHostedDomainRootsForWebByRootKeyIds;
+  if (!unwrap) {
+    throw new Error("Expected the actual hosted domain-root unwrap implementation.");
+  }
+  mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mockImplementation(
+    (input) => unwrap(input),
+  );
+}
+
 function buildFixture(input: {
   count: number;
   selectedIndex?: number | null;
@@ -139,7 +359,7 @@ function buildFixture(input: {
       expiresAt: new Date("2026-08-11T12:30:00.000Z"),
       id: `setup-${suffix}`,
       ownerMemberId: `member-${suffix}`,
-      payloadEncrypted: `sealed:control:setup-root-${suffix}:ciphertext`,
+      payloadEncrypted: serializeTestSecureBoxEnvelope(`setup-root-${suffix}`),
       recipientPhoneLookupKey,
     };
   });
@@ -324,6 +544,11 @@ beforeEach(() => {
   installOwnerMocks();
 });
 
+afterEach(() => {
+  cryptoMocks.gcpKmsClient = null;
+  vi.unstubAllEnvs();
+});
+
 describe("pending-group preparation fanout", () => {
   it("keeps the exact K=32 no-sender/no-recovery prepare-and-claim statement shape constant in roster size", async () => {
     const statementShapeFor = async (count: number) => {
@@ -502,8 +727,9 @@ describe("pending-group preparation fanout", () => {
   it("consumes a permanently unreadable selected root only after exact lock", async () => {
     fixture = buildFixture({ count: 1, selectedIndex: 0 });
     installOwnerMocks();
-    const permanent = new Error("missing root metadata");
-    permanent.name = "HostedDomainRootPermanentUnwrapError";
+    const permanent = new HostedDomainRootPermanentUnwrapError(
+      "missing root metadata",
+    );
     mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mockRejectedValueOnce(
       permanent,
     );
@@ -551,6 +777,124 @@ describe("pending-group preparation fanout", () => {
       queryText(query).includes("FOR UPDATE")
     )).toBe(false);
     expect(executeRaw).not.toHaveBeenCalled();
+  });
+
+  it("keeps a replacement setup retryable until its historical verify key is restored", async () => {
+    fixture = buildFixture({
+      count: 1,
+      selectedIndex: 0,
+      selectedViaRecovery: true,
+    });
+    installOwnerMocks();
+    installActualDomainRootUnwrap();
+    const activeSigner = await generateTestSigningKeyPair();
+    const historicalSigner = await generateTestSigningKeyPair();
+    const cloudflarePublicJwk = await generateTestEcdhPublicJwk();
+    const selected = fixture.candidateRows[0]!;
+    const envelope = await createSignedTestControlEnvelope({
+      privateKey: historicalSigner.privateKey,
+      rootKeyId: "setup-root-01",
+      userId: selected.ownerMemberId,
+    });
+    const decrypt = installTestGcpKmsDecrypt(new Uint8Array(32).fill(7));
+    const { executeRaw, prisma, queryRaw } = createPrismaFixture();
+    installTestDomainRootEnvelope({ envelope: () => envelope, prisma });
+    stubHostedCryptoEnv({
+      activePublicKeyPem: activeSigner.publicKeyPem,
+      cloudflarePublicJwk,
+    });
+
+    const unavailableKeyPrepared = await prepare({ prisma });
+    const unavailableKeyError = await claim({
+      prepared: unavailableKeyPrepared,
+      prisma,
+      requiredCandidateId: selected.id,
+    }).then(() => null, (error: unknown) => error);
+    expect(unavailableKeyError).toBeInstanceOf(Error);
+    expect((unavailableKeyError as Error).message).toMatch(
+      /not trusted for verification/u,
+    );
+    expect(unavailableKeyError).not.toBeInstanceOf(
+      HostedDomainRootPermanentUnwrapError,
+    );
+    expect(queryRaw.mock.calls.some(([query]) =>
+      queryText(query).includes("FOR UPDATE")
+    )).toBe(false);
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(decrypt).not.toHaveBeenCalled();
+
+    stubHostedCryptoEnv({
+      activePublicKeyPem: activeSigner.publicKeyPem,
+      cloudflarePublicJwk,
+      historicalPublicKeyPem: historicalSigner.publicKeyPem,
+    });
+    const restoredKeyPrepared = await prepare({ prisma });
+    await expect(claim({
+      prepared: restoredKeyPrepared,
+      prisma,
+      requiredCandidateId: selected.id,
+    })).resolves.toMatchObject({
+      kind: "claimed",
+      setup: { ownerMemberId: selected.ownerMemberId },
+    });
+    expect(queryRaw.mock.calls.some(([query]) =>
+      queryText(query).includes("FOR UPDATE")
+    )).toBe(true);
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(decrypt).toHaveBeenCalledOnce();
+  });
+
+  it("consumes a malformed historical signature only after exact replacement lock", async () => {
+    fixture = buildFixture({
+      count: 1,
+      selectedIndex: 0,
+      selectedViaRecovery: true,
+    });
+    installOwnerMocks();
+    installActualDomainRootUnwrap();
+    const activeSigner = await generateTestSigningKeyPair();
+    const historicalSigner = await generateTestSigningKeyPair();
+    const cloudflarePublicJwk = await generateTestEcdhPublicJwk();
+    const selected = fixture.candidateRows[0]!;
+    const signedEnvelope = await createSignedTestControlEnvelope({
+      privateKey: historicalSigner.privateKey,
+      rootKeyId: "setup-root-01",
+      userId: selected.ownerMemberId,
+    });
+    const malformedEnvelope: HostedDomainRootKeyEnvelopeV1 = {
+      ...signedEnvelope,
+      authoritySignature: {
+        ...signedEnvelope.authoritySignature,
+        signature: "AA==",
+      },
+    };
+    const decrypt = installTestGcpKmsDecrypt(new Uint8Array(32).fill(9));
+    const { executeRaw, prisma, queryRaw } = createPrismaFixture();
+    installTestDomainRootEnvelope({
+      envelope: () => malformedEnvelope,
+      prisma,
+    });
+    stubHostedCryptoEnv({
+      activePublicKeyPem: activeSigner.publicKeyPem,
+      cloudflarePublicJwk,
+      historicalPublicKeyPem: historicalSigner.publicKeyPem,
+    });
+
+    const prepared = await prepare({ prisma });
+    expect(queryRaw.mock.calls.some(([query]) =>
+      queryText(query).includes("FOR UPDATE")
+    )).toBe(false);
+    await expect(claim({
+      prepared,
+      prisma,
+      requiredCandidateId: selected.id,
+    })).resolves.toEqual({ kind: "none", reason: "invalid_payload" });
+    expect(queryRaw.mock.calls.some(([query]) =>
+      queryText(query).includes("FOR UPDATE")
+    )).toBe(true);
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(decrypt).not.toHaveBeenCalled();
+    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
   });
 
   it("returns route-free when fresh preparation selects a different recovery owner than the immutable pin", async () => {
@@ -700,7 +1044,7 @@ describe("pending-group live mutation fences", () => {
     ["setup ciphertext or root", () => {
       fixture.liveCandidateRows[0] = {
         ...fixture.liveCandidateRows[0]!,
-        payloadEncrypted: "sealed:control:changed-setup-root:ciphertext",
+        payloadEncrypted: serializeTestSecureBoxEnvelope("changed-setup-root"),
       };
     }],
   ] as const)("rejects stale %s authority", async (_label, mutate) => {
@@ -723,7 +1067,7 @@ describe("pending-group live mutation fences", () => {
       ...selected,
       id: "setup-new-competitor",
       ownerMemberId: competitorOwnerMemberId,
-      payloadEncrypted: "sealed:control:competitor-root:ciphertext",
+      payloadEncrypted: serializeTestSecureBoxEnvelope("competitor-root"),
       recipientPhoneLookupKey: INCOMING_LINE,
     };
     fixture.liveCandidateRows = [...fixture.liveCandidateRows, competitor];
@@ -765,7 +1109,9 @@ describe("pending-group live mutation fences", () => {
         ...selected,
         id: "setup-post-lock-competitor",
         ownerMemberId: competitorOwnerMemberId,
-        payloadEncrypted: "sealed:control:post-lock-competitor-root:ciphertext",
+        payloadEncrypted: serializeTestSecureBoxEnvelope(
+          "post-lock-competitor-root",
+        ),
         recipientPhoneLookupKey: INCOMING_LINE,
       };
       fixture.liveCandidateRows = [...fixture.liveCandidateRows, competitor];
@@ -885,7 +1231,7 @@ describe("pending-group live mutation fences", () => {
     });
     fixture.lockedRow = {
       ...selected,
-      payloadEncrypted: "sealed:control:post-selection-root:ciphertext",
+      payloadEncrypted: serializeTestSecureBoxEnvelope("post-selection-root"),
     };
 
     await expect(claim({
