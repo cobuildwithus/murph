@@ -322,6 +322,60 @@ describe("stageHostedLinqGroupReactionContext", () => {
     ).toHaveBeenCalledTimes(2);
   });
 
+  it("stops after one fresh preparation retry when ingress authority keeps changing", async () => {
+    state.preparedRootKeyIds.push(
+      "root_ingress_attempt_1",
+      "root_ingress_attempt_2",
+    );
+    state.activeRootKeyIds.push(
+      "root_ingress_current_1",
+      "root_ingress_current_2",
+    );
+    const prisma = createPrismaStub();
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ reactionType: "laugh" }),
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_GROUP_REACTION_PREPARATION_REQUIRED",
+      details: { reason: "ingress-root" },
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(prisma.__transaction).toHaveBeenCalledTimes(2);
+    expect(mocks.providerKmsWork).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+    ).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it("returns false without appending when active access is revoked after preparation", async () => {
+    mocks.readActiveHostedMemberAccess
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    const prisma = createPrismaStub();
+
+    await expect(stageHostedLinqGroupReactionContext({
+      event: buildReactionEvent({ reactionType: "laugh" }),
+      prisma,
+    })).resolves.toBe(false);
+
+    expect(prisma.__transaction).toHaveBeenCalledTimes(1);
+    expect(mocks.providerKmsWork).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.lockAndReadActiveHostedDomainRootKeyIdTx,
+    ).not.toHaveBeenCalled();
+    expect(
+      mocks.appendConsumedHostedGroupReactionMailboxEnvelopeTx,
+    ).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
   it("does no provider or KMS work after the transaction starts", async () => {
     const prisma = createPrismaStub();
 
