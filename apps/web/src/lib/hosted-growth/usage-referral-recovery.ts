@@ -34,8 +34,9 @@ export interface HostedUsageReferralRecoveryResult {
 /**
  * One bounded recovery owner settles signup-link rewards, reconciles ordinary
  * referral missions, queues each path's completion notice through the shared
- * assistant-notification mailbox, and re-signals durable notices after a
- * best-effort wake failure.
+ * assistant-notification mailbox, and re-signals existing mailbox pointers
+ * after a best-effort wake failure. Already-imported legacy payload recovery
+ * belongs to the local runtime; Web never rewrites mailbox ciphertext here.
  */
 export async function recoverPendingHostedUsageReferrals(input: {
   prisma?: PrismaClient;
@@ -126,8 +127,10 @@ export async function recoverPendingHostedUsageReferrals(input: {
     }
   }
 
+  let resignaled = 0;
   for (const celebration of unconsumedCelebrations) {
     try {
+      resignaled += 1;
       await signalHostedMailboxAppendRuntime({
         expectedUserId: celebration.userId,
         ...(isHostedMailboxLane(celebration.lane)
@@ -151,7 +154,7 @@ export async function recoverPendingHostedUsageReferrals(input: {
     failed,
     pending,
     queued,
-    resignaled: unconsumedCelebrations.length,
+    resignaled,
     scanned:
       signupRewards.scanned
       + referrals.length
