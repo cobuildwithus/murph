@@ -6,6 +6,9 @@ import type {
 import {
   parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from '@murphai/hosted-execution/assistant-identifiers'
 import type {
   HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
@@ -899,6 +902,8 @@ async function sendAssistantExactTextNotificationLocal(input: {
     input.responseText,
     'notification response',
   )
+  const invalidateNativeResume =
+    isAssistantReviewedPrivateExactCompletion(input.input)
   const turnId = createAssistantTurnId()
   const turnCreatedAt = new Date().toISOString()
   const state = createAssistantRuntimeStateService(input.input.vault)
@@ -975,6 +980,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
         vault: input.input.vault,
       })
       savedSession = await persistAssistantExactTextNotificationSession({
+        invalidateNativeResume,
         responseText,
         session: deliveryOutcome.session,
         turnCreatedAt,
@@ -1010,6 +1016,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
       throw deliveryOutcome.error
     }
     savedSession = await persistAssistantExactTextNotificationSession({
+      invalidateNativeResume,
       responseText,
       session: deliveryOutcome.session,
       turnCreatedAt,
@@ -1109,6 +1116,7 @@ function assistantNotificationDeliveryAcceptedFirstContact(input: {
 }
 
 async function persistAssistantExactTextNotificationSession(input: {
+  invalidateNativeResume: boolean
   responseText: string
   session: AssistantSession
   turnCreatedAt: string
@@ -1128,10 +1136,55 @@ async function persistAssistantExactTextNotificationSession(input: {
   const updatedAt = new Date().toISOString()
   return await state.sessions.save({
     ...input.session,
+    ...(input.invalidateNativeResume
+      ? {
+          codexResume: null,
+          resumeState: null,
+        }
+      : {}),
     updatedAt,
     lastTurnAt: updatedAt,
     turnCount: input.session.turnCount + 1,
   })
+}
+
+function isAssistantReviewedPrivateExactCompletion(
+  input: AssistantNotificationInput,
+): boolean {
+  const expiresAt = normalizeNullableString(
+    input.reviewedAssistantAskCompletionExpiresAt,
+  )
+  const answeredMailboxItemIds = input.answeredMailboxItemIds ?? []
+  const completionId = answeredMailboxItemIds.length === 1
+    ? normalizeNullableString(answeredMailboxItemIds[0])
+    : null
+  if (
+    expiresAt === null ||
+    !Number.isFinite(Date.parse(expiresAt)) ||
+    completionId === null ||
+    answeredMailboxItemIds[0] !== completionId ||
+    [...completionId].length > 256
+  ) {
+    return false
+  }
+
+  // The hosted runtime authenticates this envelope before assistant-engine
+  // entry. Re-check every discriminant so the expiry marker alone cannot grant
+  // conversation continuity to a generic notification.
+  const deliveryKey =
+    createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(completionId)
+  return (
+    input.executionContext?.hosted != null &&
+    input.responsePolicy?.kind === 'require_send_exact_text' &&
+    input.deliveryDispatchMode === 'queue-only' &&
+    input.firstContactPolicy == null &&
+    input.notificationPromptProfile == null &&
+    input.outboxExternalThreadRouteAuthority == null &&
+    input.threadIsDirect === true &&
+    (input.channel === 'linq' || input.channel === 'telegram') &&
+    normalizeNullableString(input.deliveryDedupeToken) === deliveryKey &&
+    normalizeNullableString(input.deliveryIdempotencyKey) === deliveryKey
+  )
 }
 
 type AssistantNotificationAnnotatedError = Error & {
@@ -1322,6 +1375,8 @@ function buildAssistantNotificationMessageInput(
   const firstContactExactText =
     input.responsePolicy?.kind === 'require_send_exact_text' &&
     input.firstContactPolicy?.markSeenOnDeliveryAccepted === true
+  const reviewedPrivateExactCompletion =
+    isAssistantReviewedPrivateExactCompletion(input)
   // One overlay for each non-user turn boundary, so provider-audit policy
   // cannot drift across caller-specific configuration.
   const executionOverlay = maintenanceTurn
@@ -1384,11 +1439,13 @@ function buildAssistantNotificationMessageInput(
     provider: input.provider,
     receiptMetadata: null,
     reasoningEffort: input.reasoningEffort,
-    // First-contact exact text does not start a provider. Keep its durable
-    // conversation session on the ordinary target so the next attended turn
-    // continues from the welcome that was already delivered.
+    // First-contact exact text and reviewed private completions do not start a
+    // provider, but they belong to the ordinary direct conversation. Generic
+    // detached notifications remain read-only and isolated.
     sandbox:
-      scheduledOccurrence || firstContactExactText
+      scheduledOccurrence ||
+      firstContactExactText ||
+      reviewedPrivateExactCompletion
         ? input.sandbox
         : 'read-only',
     scheduledAutomationAuthority: input.scheduledAutomationAuthority ?? null,
