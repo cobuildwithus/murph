@@ -12,6 +12,7 @@ export const HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV =
   "MURPH_HOSTED_CODEX_APP_SERVER_COMMAND";
 export const HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV =
   "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON";
+export const MURPH_ANDROID_APP_ENABLED_ENV = "MURPH_ANDROID_APP_ENABLED";
 
 export interface HostedExecutionBaseUrlNormalizationOptions {
   allowHttpHosts?: readonly string[];
@@ -21,6 +22,10 @@ export interface HostedExecutionBaseUrlNormalizationOptions {
 
 export function isHostedRuntimeProcessEnv(env: EnvSource): boolean {
   return env[HOSTED_RUNTIME_PROCESS_ENV]?.trim() === "1";
+}
+
+export function isMurphAndroidAppEnabled(env: EnvSource): boolean {
+  return env[MURPH_ANDROID_APP_ENABLED_ENV] === "1";
 }
 
 export function normalizeHostedExecutionBaseUrl(
