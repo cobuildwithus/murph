@@ -67,6 +67,11 @@ Updated: 2026-08-10
   should add only routing, completion evidence, and reviewer enforcement.
 - Keep the website audit read-only and outside the policy PR's implementation
   scope so any fixes can be prioritized and landed independently.
+- Keep missing deterministic-proof enforcement in the preliminary coverage
+  lens. The final audit inspects available proof but reports only reachable
+  production failures that satisfy its existing finding bar.
+- Apply the root design-time rule when an agent adds or changes a database-
+  touching collection path so implementation and review use the same trigger.
 
 ## Verification
 

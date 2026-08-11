@@ -218,9 +218,11 @@ the composed call tree at the maximum admitted cardinality. Trace callers and
 nested helpers for reachable N+1 reads, repeated owner-row loads, concurrent
 per-item transactions, and uncapped external or crypto work; compute peak query,
 pooled-connection, transaction, and external-call concurrency rather than
-reviewing each helper in isolation. Require deterministic maximum-cardinality
-call-count and concurrency proof for hot, locked, or transactional paths. Any
-read reduction must reuse owner predicates or resolvers and preserve required
+reviewing each helper in isolation. Inspect deterministic maximum-cardinality
+call-count and concurrency proof for hot, locked, or transactional paths when
+present, but independently trace the production path and report
+only reachable failures that meet this prompt's finding bar. Any read reduction
+must reuse owner predicates or resolvers and preserve required
 live authority, lifetime, target, crypto, transaction, and irreversible-effect
 revalidation at their owning boundaries; do not mistake those checks for
 removable duplicate reads.
