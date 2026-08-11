@@ -233,8 +233,6 @@ async function readLobFailureReason(
     case "failed_deliverability_strictness":
       return "recipient_address";
     case "file_size_exceeds_limit":
-    case "invalid_file_download_time":
-    case "invalid_file_url":
     case "invalid_image_dpi":
       return "artwork";
     case "billing_address_required":
@@ -244,6 +242,8 @@ async function readLobFailureReason(
     case "foreign_return_address":
     case "invalid_api_key":
     case "invalid_country_covid":
+    case "invalid_file_download_time":
+    case "invalid_file_url":
     case "not_found":
     case "payment_method_unverified":
     case "publishable_key_not_allowed":

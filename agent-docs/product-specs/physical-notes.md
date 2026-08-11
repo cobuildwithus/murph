@@ -200,10 +200,11 @@ would expose a route that does not exist and is therefore the unsafe order.
 
 The additive actionable-rejection rollout uses the opposite consumer-first
 order within the already-live physical-note route: deploy Cloudflare and the
-runner bundle with the optional failure-reason parser first, then deploy Web's
-additive Prisma migration and response producer. The new consumer accepts an
-older Web response without the field, and older warm runners ignore the added
-result property after Worker validation. Deploying the new Web response through
-an older strict Worker parser is unsafe. No immediate container rollout is
-required; verify one synthetic rejection category and one accepted test-mode
-note after both sides converge.
+runner bundle with `container_rollout=immediate`, then require the managed
+container smoke to prove the exact new runner-bundle fingerprint before
+deploying Web's additive Prisma migration and response producer. The new strict
+consumer accepts an older Web response without the optional field. An older
+warm runner rejects the added Web response field, so Web must not ship before
+runner convergence. Verify one synthetic rejection category and one accepted
+test-mode note after both sides converge. Roll back Web before Cloudflare so the
+old strict consumer never returns while Web still produces the new field.
