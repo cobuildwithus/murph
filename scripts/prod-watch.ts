@@ -101,6 +101,7 @@ const VERCEL_MIN_SAMPLE_MS = 100;
 const VERCEL_MAX_PAGES = 20;
 const STRIPE_EVENT_LIMIT = 100;
 const CLOUDFLARE_WORKER = "murph-hosted";
+const CLOUDFLARE_OBSERVABILITY_MCP = "cloudflare_observability_oauth";
 const REVIEW_GPT_REQUIRED_VERSION = "0.5.124";
 const CODEX_REQUIRED_VERSION = "codex-cli 0.144.4";
 // Automatic repository mutation remains disabled until deployment identity,
@@ -952,6 +953,89 @@ function disabledMcpConfigArgs(): string[] {
     "cloudflare_auditlogs",
     "cloudflare_radar",
   ].flatMap((server) => ["-c", `mcp_servers.${server}.enabled=false`]);
+}
+
+function cloudflareOnlyMcpConfigArgs(): string[] {
+  return [
+    "palmier-pro",
+    "vercel",
+    "stripe",
+    "cloudflare_api",
+    "cloudflare_docs",
+    "cloudflare_observability",
+    "cloudflare_bindings",
+    "cloudflare_builds",
+    "cloudflare_logpush",
+    "cloudflare_graphql",
+    "cloudflare_auditlogs",
+    "cloudflare_radar",
+    "openaiDeveloperDocs",
+  ].flatMap((server) => ["-c", `mcp_servers.${server}.enabled=false`]).concat([
+    "-c",
+    `mcp_servers.${CLOUDFLARE_OBSERVABILITY_MCP}.required=true`,
+    "-c",
+    `mcp_servers.${CLOUDFLARE_OBSERVABILITY_MCP}.tool_timeout_sec=60`,
+    "-c",
+    `mcp_servers.${CLOUDFLARE_OBSERVABILITY_MCP}.default_tools_approval_mode=\"approve\"`,
+  ]);
+}
+
+export function assertCloudflareOnlyMcpList(raw: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error("provider_mcp_allowlist_invalid");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("provider_mcp_allowlist_invalid");
+  }
+  if (parsed.some((entry) => (
+    typeof entry !== "object"
+    || entry === null
+    || Array.isArray(entry)
+    || typeof (entry as Record<string, unknown>).name !== "string"
+    || typeof (entry as Record<string, unknown>).enabled !== "boolean"
+  ))) {
+    throw new Error("provider_mcp_allowlist_invalid");
+  }
+  const enabled = (parsed as Array<Record<string, unknown>>)
+    .filter((entry) => entry.enabled === true);
+  if (
+    enabled.length !== 1
+    || enabled[0].name !== CLOUDFLARE_OBSERVABILITY_MCP
+  ) {
+    throw new Error("provider_mcp_allowlist_mismatch");
+  }
+}
+
+async function verifyCloudflareOnlyMcpConfiguration(input: {
+  codex: string;
+  profile: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}): Promise<void> {
+  const result = await spawnCaptured(
+    input.codex,
+    [
+      "--profile",
+      input.profile,
+      ...cloudflareOnlyMcpConfigArgs(),
+      "mcp",
+      "list",
+      "--json",
+    ],
+    {
+      timeoutMs: 10_000,
+      outputLimitBytes: 64 * 1_024,
+      cwd: input.cwd,
+      env: input.env,
+    },
+  );
+  if (result.status !== 0 || result.timedOut) {
+    throw new Error("provider_mcp_allowlist_unavailable");
+  }
+  assertCloudflareOnlyMcpList(result.stdout);
 }
 
 async function runCodexRemediationWorker(input: {
@@ -2169,6 +2253,8 @@ async function collectProviderEvidenceWithCodex(input: {
   try {
     const profile = requireCodexProfile();
     const codex = await resolveTrustedCodexExecutable();
+    const childEnv = buildIsolatedCodexChildEnv(tempRoot);
+    const mcpConfigArgs = cloudflareOnlyMcpConfigArgs();
     const schemaPath = path.join(
       repoRoot,
       "scripts",
@@ -2177,6 +2263,12 @@ async function collectProviderEvidenceWithCodex(input: {
       "provider-evidence.codex-output.v1.schema.json",
     );
     try {
+      await verifyCloudflareOnlyMcpConfiguration({
+        codex,
+        profile,
+        cwd: tempRoot,
+        env: childEnv,
+      });
       const result = await spawnCodexJsonChild(
         codex,
         [
@@ -2193,36 +2285,7 @@ async function collectProviderEvidenceWithCodex(input: {
           "--ignore-rules",
           "--disable",
           "shell_tool",
-          "-c",
-          "mcp_servers.palmier-pro.enabled=false",
-          "-c",
-          "mcp_servers.vercel.enabled=false",
-          "-c",
-          "mcp_servers.stripe.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_api.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_docs.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_observability.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_bindings.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_builds.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_logpush.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_graphql.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_auditlogs.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_radar.enabled=false",
-          "-c",
-          "mcp_servers.cloudflare_observability_oauth.required=true",
-          "-c",
-          "mcp_servers.cloudflare_observability_oauth.tool_timeout_sec=60",
-          "-c",
-          "mcp_servers.cloudflare_observability_oauth.default_tools_approval_mode=\"approve\"",
+          ...mcpConfigArgs,
           "--output-schema",
           schemaPath,
           "--output-last-message",
@@ -2235,7 +2298,7 @@ async function collectProviderEvidenceWithCodex(input: {
           signal: input.signal,
           outputLimitBytes: MAX_CODEX_EVENT_BYTES,
           cwd: tempRoot,
-          env: buildIsolatedCodexChildEnv(tempRoot),
+          env: childEnv,
         },
       );
       if (result.timedOut) {
@@ -2316,6 +2379,7 @@ function buildIsolatedCodexChildEnv(privateHome: string): NodeJS.ProcessEnv {
   if (process.env.NODE_ENV === "test") {
     env.TEST_PROVIDER_FIXTURE = process.env.TEST_PROVIDER_FIXTURE;
     env.TEST_DIAGNOSIS_FIXTURE = process.env.TEST_DIAGNOSIS_FIXTURE;
+    env.TEST_CODEX_EXTRA_MCP = process.env.TEST_CODEX_EXTRA_MCP;
   }
   return env;
 }
@@ -3722,11 +3786,38 @@ export function renderLaunchdPlistTemplate(
     .replaceAll("__SCHEDULER_PATH__", xmlEscape(schedulerShellPath()));
 }
 
-async function preparePinnedSchedulerRuntime(): Promise<{ root: string; head: string }> {
-  const approvedHead = process.env[APPROVED_HEAD_ENV];
-  if (approvedHead === undefined || !/^[a-f0-9]{40}$/u.test(approvedHead)) {
-    throw new Error("scheduler_approved_head_required");
+async function resolveSchedulerApprovedHead(): Promise<string> {
+  const [headResult, statusResult] = await Promise.all([
+    spawnCaptured("git", ["rev-parse", "--verify", "HEAD"], {
+      cwd: repoRoot,
+      timeoutMs: 10_000,
+      outputLimitBytes: 1_024,
+    }),
+    spawnCaptured("git", ["status", "--porcelain=v1", "--untracked-files=no"], {
+      cwd: repoRoot,
+      timeoutMs: 10_000,
+      outputLimitBytes: 64 * 1_024,
+    }),
+  ]);
+  const approvedHead = headResult.stdout.trim().toLowerCase();
+  if (
+    headResult.status !== 0
+    || headResult.timedOut
+    || !/^[a-f0-9]{40}$/u.test(approvedHead)
+    || statusResult.status !== 0
+    || statusResult.timedOut
+    || statusResult.stdout.trim().length > 0
+  ) {
+    throw new Error("scheduler_source_revision_unapproved");
   }
+  const assertedHead = process.env[APPROVED_HEAD_ENV];
+  if (assertedHead !== undefined && assertedHead !== approvedHead) {
+    throw new Error("scheduler_approved_head_conflict");
+  }
+  return approvedHead;
+}
+
+async function preparePinnedSchedulerRuntime(approvedHead: string): Promise<{ root: string; head: string }> {
   const object = await spawnCaptured("git", ["cat-file", "-e", `${approvedHead}^{commit}`], {
     cwd: repoRoot,
     timeoutMs: 10_000,
@@ -3973,11 +4064,12 @@ async function installScheduler(): Promise<void> {
   if (process.platform !== "darwin") {
     throw new Error("launchd_requires_macos");
   }
+  const approvedHead = await resolveSchedulerApprovedHead();
   const launchAgents = path.join(os.homedir(), "Library", "LaunchAgents");
   const plistPath = path.join(launchAgents, `${LAUNCHD_LABEL}.plist`);
   const existing = await readManagedSchedulerFile(plistPath);
   await verifySchedulerPreflight();
-  const pinned = await preparePinnedSchedulerRuntime();
+  const pinned = await preparePinnedSchedulerRuntime(approvedHead);
   const renderedPlist = await renderPinnedLaunchdPlist(pinned.root, pinned.head);
   await ensurePrivateDirectory(operationRoot);
   const domain = `gui/${process.getuid?.() ?? 0}`;

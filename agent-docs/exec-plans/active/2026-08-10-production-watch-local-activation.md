@@ -13,6 +13,8 @@ Activate a machine-local, five-minute monitor-only production watcher that colle
 - Keep provider and sensitive incidents read-only and escalation-only.
 - Give the network-disabled edit child no push, GitHub, ReviewGPT, provider, or production authority.
 - Reject automatic worker dispatch, repository edits, ReviewGPT invocation, push, and draft-PR creation in the launchable production CLI.
+- Derive the scheduler's immutable revision only from the exact clean checkout executing installation; reject conflicting caller assertions.
+- Refuse to start the provider child unless the effective MCP set is exactly Cloudflare Observability.
 - Never merge, enable auto-merge, deploy, or mutate production/provider state.
 
 ## Verification

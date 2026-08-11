@@ -50,6 +50,7 @@ import {
   type ProductionWatchState,
 } from "./prod-watch/core.ts";
 import {
+  assertCloudflareOnlyMcpList,
   assertSafeRemediationDiff,
   bisectVercelWindow,
   buildImmutableRemediationPushArgs,
@@ -78,6 +79,24 @@ afterEach(() => {
 });
 
 describe("production-watch snapshot contract", () => {
+  it("requires an effective Cloudflare-only MCP allowlist", () => {
+    expect(() => assertCloudflareOnlyMcpList(JSON.stringify([
+      { name: "cloudflare_observability_oauth", enabled: true },
+    ]))).not.toThrow();
+    expect(() => assertCloudflareOnlyMcpList(JSON.stringify([
+      { name: "cloudflare_observability_oauth", enabled: true },
+      { name: "synthetic_extra", enabled: true },
+    ]))).toThrow("provider_mcp_allowlist_mismatch");
+    expect(() => assertCloudflareOnlyMcpList(JSON.stringify([
+      { name: "cloudflare_observability_oauth", enabled: false },
+    ]))).toThrow("provider_mcp_allowlist_mismatch");
+    expect(() => assertCloudflareOnlyMcpList("{}"))
+      .toThrow("provider_mcp_allowlist_invalid");
+    expect(() => assertCloudflareOnlyMcpList(JSON.stringify([
+      { name: "cloudflare_observability_oauth", enabled: "true" },
+    ]))).toThrow("provider_mcp_allowlist_invalid");
+  });
+
   it("accepts only one exact terminal ReviewGPT authority block", () => {
     const patchHead = "a".repeat(40);
     const terminal = [
@@ -2846,6 +2865,23 @@ describe("production-watch static safety contracts", () => {
         TEST_PROVIDER_FIXTURE: path.join(fixtureRoot, "healthy.providers.json"),
       };
 
+      const conflictingHead = spawnSync(
+        "git",
+        ["rev-parse", "HEAD^"],
+        { cwd: repoRoot, encoding: "utf8" },
+      ).stdout.trim();
+      const conflictingInstall = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        { ...sharedEnv, MURPH_PROD_WATCH_APPROVED_HEAD: conflictingHead },
+      );
+      expect(conflictingInstall.status).toBe(1);
+      expect(conflictingInstall.stderr).toContain("scheduler_approved_head_conflict");
+      expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "scheduler-runtime")))
+        .toBe(false);
+      expect(existsSync(launchctlLog)).toBe(false);
+
       writeFileSync(plistPath, "operator-owned\n", { mode: 0o600 });
       const unmanagedInstall = runProdWatchFromCheckout(
         ["scheduler", "install"],
@@ -2860,6 +2896,17 @@ describe("production-watch static safety contracts", () => {
 
       writeFileSync(plistPath, "<!-- murph-prod-watch-managed:v1 -->\n", { mode: 0o600 });
       writeFileSync(launchctlState, "loaded\n");
+      const extraMcpInstall = runProdWatchFromCheckout(
+        ["scheduler", "install"],
+        runtimeRoot,
+        checkoutRoot,
+        { ...sharedEnv, TEST_CODEX_EXTRA_MCP: "1" },
+      );
+      expect(extraMcpInstall.status).toBe(1);
+      expect(extraMcpInstall.stderr).toContain("scheduler_provider_coverage_unavailable");
+      expect(existsSync(launchctlLog)).toBe(false);
+      expect(readFileSync(plistPath, "utf8")).toContain("murph-prod-watch-managed:v1");
+
       rmSync(schedulerHelperPath);
       const missingHelperInstall = runProdWatchFromCheckout(
         ["scheduler", "install"],
@@ -3203,6 +3250,16 @@ function writeFakeCodexExecutable(targetPath: string): void {
     "#!/bin/sh",
     "if [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'codex-cli 0.144.4'; exit 0; fi",
     "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then exit 0; fi",
+    "case \" $* \" in",
+    "  *\" mcp list --json \"*)",
+    "    if [ \"${TEST_CODEX_EXTRA_MCP:-0}\" = \"1\" ]; then",
+    "      printf '%s\\n' '[{\"name\":\"cloudflare_observability_oauth\",\"enabled\":true},{\"name\":\"synthetic_extra\",\"enabled\":true}]'",
+    "    else",
+    "      printf '%s\\n' '[{\"name\":\"cloudflare_observability_oauth\",\"enabled\":true}]'",
+    "    fi",
+    "    exit 0",
+    "    ;;",
+    "esac",
     "output=''",
     "schema=''",
     "while [ \"$#\" -gt 0 ]; do",
