@@ -456,6 +456,94 @@ describe("createHostedPhoneCall", () => {
     });
   });
 
+  it("retries callback-loss recovery until a terminal transfer result is finalized", async () => {
+    const existing = buildHostedPhoneCall({
+      id: "hpc_transfer_recovery",
+      providerCallId: "retell_transfer_recovery",
+      status: "calling",
+    });
+    const store = createPhoneCallStore({ existing });
+    const terminalUsage = {
+      combinedCostUsdMicros: 187_500,
+      occurredAt: new Date("2026-06-25T01:00:00.000Z"),
+      providerCallId: "retell_transfer_recovery",
+    };
+    const transferEndedAt = new Date("2026-06-25T01:05:00.000Z");
+    const recordTerminalUsage = vi.fn(async () => undefined);
+    const runtime = {
+      ...createPhoneCallRuntime({ providerCallId: "retell_unused" }).runtime,
+      resolveTerminalUsage: vi.fn(async () => ({
+        state: "ready" as const,
+        terminalTransfer: {
+          endedAt: transferEndedAt,
+          providerCallId: "retell_transfer_recovery",
+        },
+        usage: terminalUsage,
+      })),
+    };
+    let finalizeAttempts = 0;
+    const finalizeResult = vi.fn(async () => {
+      finalizeAttempts += 1;
+      store.advanceCurrentCall({
+        analyzedAt: transferEndedAt,
+        resultJson: {
+          outcome: "needs_user",
+          summary: "The post-handoff outcome is unknown.",
+        },
+        status: "needs_user",
+      });
+      if (finalizeAttempts === 1) {
+        throw new Error("runtime signal unavailable");
+      }
+    });
+    const prisma = {
+      ...store.prisma,
+      recordTerminalUsage,
+    };
+    const signal = new AbortController().signal;
+
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("pending");
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("complete");
+    await expect(processHostedPhoneCallRecoveryById({
+      finalizeResult,
+      phoneCallId: existing.id,
+      prisma,
+      runtime,
+      signal,
+    })).resolves.toBe("complete");
+
+    expect(recordTerminalUsage).toHaveBeenCalledTimes(3);
+    expect(finalizeResult).toHaveBeenCalledTimes(3);
+    expect(finalizeResult).toHaveBeenCalledWith({
+      call: expect.objectContaining({
+        call_id: "retell_transfer_recovery",
+        data_storage_setting: "basic_attributes_only",
+        disconnection_reason: "call_transfer",
+        end_timestamp: transferEndedAt.toISOString(),
+        transfer_end_timestamp: transferEndedAt.toISOString(),
+      }),
+      requiresTransferFollowUp: true,
+    }, {
+      abortSignal: signal,
+    });
+    expect(store.currentCall()).toMatchObject({
+      analyzedAt: transferEndedAt,
+      status: "needs_user",
+    });
+  });
+
   it("keeps fresh duplicate unstarted reservations active without a blind provider retry", async () => {
     const existing = buildHostedPhoneCall({
       id: "hpc_existing",

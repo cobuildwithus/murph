@@ -10,9 +10,6 @@ import {
   createHostedConversationMailboxImportItem,
 } from "./mailbox-conversation-import.ts";
 import {
-  importHostedGroupNewsletterEmailNeededMailboxItem,
-} from "./mailbox-group-newsletter-email-needed.ts";
-import {
   importHostedMealPhotoCapturedMailboxItem,
 } from "./meal-photo-import.ts";
 import type {
@@ -173,6 +170,23 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
     };
   }
 
+  if (input.item.route.action === "skip-retired-mailbox-item") {
+    if (input.item.item.kind !== "group-newsletter.email-needed") {
+      return {
+        reasonCode: "legacy_group_newsletter_email_needed.route_mismatch",
+        retryable: false,
+        status: "blocked",
+      };
+    }
+
+    // This compatibility reader only advances past rows accepted before the
+    // producer was retired. It deliberately does not decrypt or import them.
+    return {
+      reasonCode: "legacy_group_newsletter_email_needed.retired",
+      status: "skipped",
+    };
+  }
+
   const decoded = await input.decodeMailboxPayload.decode({
     itemRef: {
       dedupeKey: input.item.item.dedupeKey,
@@ -228,28 +242,6 @@ async function importHostedWorkspaceBridgeMailboxItem(input: {
   if (
     input.item.route.action === "import-vault-share-revoke"
     || wake.kind === "vault-share.revoke"
-  ) {
-    return {
-      reasonCode: "payload.decode_mismatch",
-      retryable: false,
-      status: "blocked",
-    };
-  }
-
-  if (
-    input.item.route.action === "import-group-newsletter-email-needed"
-    && wake.kind === "group-newsletter.email-needed"
-  ) {
-    return await importHostedGroupNewsletterEmailNeededMailboxItem({
-      item: input.item,
-      vaultRoot: input.vaultRoot,
-      wake,
-    });
-  }
-
-  if (
-    input.item.route.action === "import-group-newsletter-email-needed"
-    || wake.kind === "group-newsletter.email-needed"
   ) {
     return {
       reasonCode: "payload.decode_mismatch",

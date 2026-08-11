@@ -1208,6 +1208,29 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     },
   );
 
+  it("consumes retired newsletter rows without decoding or importing them", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const mailboxPayloadDecoder: HostedWorkspaceMailboxPayloadDecoder = {
+      decode: vi.fn(async () => {
+        throw new Error("Retired newsletter payloads must not be decoded.");
+      }),
+    };
+    const options = createBridgeOptions({
+      mailboxPayloadDecoder,
+      platform,
+      vaultRoot,
+    });
+
+    await expect(options.importItem(
+      createRetiredNewsletterMailboxImportItem(),
+    )).resolves.toEqual({
+      reasonCode: "legacy_group_newsletter_email_needed.retired",
+      status: "skipped",
+    });
+    expect(mailboxPayloadDecoder.decode).not.toHaveBeenCalled();
+  });
+
   it("binds paired Assistant Ask payloads to the mailbox row id and expiry", async () => {
     const vaultRoot = await createVaultRoot();
     const { platform } = createRuntimePlatform();
@@ -1928,6 +1951,33 @@ function createRetiredVaultShareMailboxImportItem(input: {
       itemRef: {
         id,
         kind: input.kind,
+        lane: "system",
+        laneSeq: base.item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+function createRetiredNewsletterMailboxImportItem(): Parameters<
+  HostedWorkspaceRuntimeJobOptions["importItem"]
+>[0] {
+  const base = createSystemMailboxImportItem();
+  const id = "retired_group_newsletter_email_needed";
+  return {
+    ...base,
+    item: {
+      ...base.item,
+      dedupeKey: id,
+      id,
+      kind: "group-newsletter.email-needed",
+    },
+    route: {
+      action: "skip-retired-mailbox-item",
+      advanceProgress: true,
+      itemRef: {
+        id,
+        kind: "group-newsletter.email-needed",
         lane: "system",
         laneSeq: base.item.laneSeq,
       },

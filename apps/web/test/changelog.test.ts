@@ -358,6 +358,19 @@ describe("changelog registry", () => {
     );
   });
 
+  it("keeps transferred phone-call results uncertainty-aware", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "phone-call-results-return-to-chat",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [857, 1363],
+      details: expect.stringContaining(
+        "asks what happened instead of guessing the outcome",
+      ),
+    });
+  });
+
   it("keeps the August 7 through August 10 feature claims bounded", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
@@ -408,7 +421,7 @@ describe("changelog registry", () => {
       tryIt: { href: "/", label: "Visit the homepage" },
     });
     expect(items.get("referral-notification-route-recovery")).toMatchObject({
-      sourcePullRequests: [1592],
+      sourcePullRequests: [1592, 1622, 1648],
       summary: expect.stringContaining("intended direct conversation"),
       details: expect.stringContaining(
         "ends without sending so later notifications can continue",

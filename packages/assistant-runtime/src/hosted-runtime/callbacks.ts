@@ -208,9 +208,9 @@ export async function collectHostedAssistantDeliverySideEffects(
     (intent) => reconciliationByIntentId.get(intent.intentId)?.intent ?? intent,
   );
   const causalOnly = request.preferredEffectIds.length > 0;
-  const blockedNewsletterRecipientIntentIds = causalOnly
+  const blockedGroupEmailRecipientIntentIds = causalOnly
     ? new Set<string>()
-    : await reconcileHostedNewsletterRecipientParents({
+    : await reconcileHostedGroupEmailRecipientParents({
         intents: approvalReconciledIntents,
         vaultRoot: request.vaultRoot,
       });
@@ -242,7 +242,7 @@ export async function collectHostedAssistantDeliverySideEffects(
     if (approvalBlockedIntentIds.has(intent.intentId)) {
       continue;
     }
-    if (blockedNewsletterRecipientIntentIds.has(intent.intentId)) {
+    if (blockedGroupEmailRecipientIntentIds.has(intent.intentId)) {
       continue;
     }
     let sendingWakeAt: string | null = null;
@@ -327,7 +327,7 @@ export async function collectHostedAssistantDeliverySideEffects(
   // persisted pendingDeliveryIntentId (direct scheduled deliveries, including
   // local jobs whose authority is intentionally null) or a durable
   // automationAuthority on the intent itself (canonical scheduled outputs and
-  // the recipient children that newsletter fanout copies it to after the
+  // the recipient children that group email fanout copies it to after the
   // parent manifest clears the job reference). Provider entry still
   // revalidates that authority before any irreversible send. Cohort members
   // keep their comparator position and background classification; only
@@ -1401,13 +1401,13 @@ export interface HostedAssistantDeliveryPreparedDispatch {
 function readHostedAssistantDeliveryBoundaryKey(
   intent: AssistantOutboxIntent,
 ): string {
-  const newsletterBoundaryKey = readHostedNewsletterDeliveryBoundaryKey({
+  const groupEmailBoundaryKey = readHostedGroupEmailDeliveryBoundaryKey({
     deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
     explicitTarget: intent.explicitTarget,
     turnId: intent.turnId,
   });
-  if (newsletterBoundaryKey) {
-    return newsletterBoundaryKey;
+  if (groupEmailBoundaryKey) {
+    return groupEmailBoundaryKey;
   }
   return formatHostedAssistantDeliveryBoundaryKey({
     actorId: intent.actorId ?? null,
@@ -1427,13 +1427,13 @@ function readHostedAssistantDeliveryBoundaryKey(
 function readHostedAssistantDeliveryEffectBoundaryKey(
   effect: HostedAssistantDeliveryEffect,
 ): string {
-  const newsletterBoundaryKey = readHostedNewsletterDeliveryBoundaryKey({
+  const groupEmailBoundaryKey = readHostedGroupEmailDeliveryBoundaryKey({
     deliveryIdempotencyKey: effect.payload.idempotencyKey,
     explicitTarget: effect.payload.explicitTarget,
     turnId: effect.payload.turnId,
   });
-  if (newsletterBoundaryKey) {
-    return newsletterBoundaryKey;
+  if (groupEmailBoundaryKey) {
+    return groupEmailBoundaryKey;
   }
   return formatHostedAssistantDeliveryBoundaryKey({
     actorId: effect.payload.actorId,
@@ -1450,30 +1450,35 @@ function readHostedAssistantDeliveryEffectBoundaryKey(
   });
 }
 
-function readHostedNewsletterDeliveryBoundaryKey(input: {
+function readHostedGroupEmailDeliveryBoundaryKey(input: {
   deliveryIdempotencyKey: string | null | undefined;
   explicitTarget: string | null | undefined;
   turnId: string;
 }): string | null {
   const deliveryIdempotencyKey = input.deliveryIdempotencyKey?.trim() ?? "";
-  if (!deliveryIdempotencyKey.startsWith("group-newsletter:")) {
+  if (!isHostedGroupEmailDeliveryIdempotencyKey(deliveryIdempotencyKey)) {
     return null;
   }
   const target = parseHostedEmailThreadTarget(input.explicitTarget);
   if (target?.targetKind !== "group") {
     return null;
   }
-  return JSON.stringify(["group-newsletter", deliveryIdempotencyKey, input.turnId]);
+  return JSON.stringify(["group-email", deliveryIdempotencyKey, input.turnId]);
 }
 
-async function reconcileHostedNewsletterRecipientParents(input: {
+function isHostedGroupEmailDeliveryIdempotencyKey(value: string): boolean {
+  return value.startsWith("group-email-effect:")
+    || value.startsWith("group-newsletter:");
+}
+
+async function reconcileHostedGroupEmailRecipientParents(input: {
   intents: readonly AssistantOutboxIntent[];
   vaultRoot: string;
 }): Promise<Set<string>> {
   const parentsByBoundary = new Map<string, AssistantOutboxIntent>();
   for (const intent of input.intents) {
     const target = parseHostedEmailThreadTarget(intent.explicitTarget);
-    const boundaryKey = readHostedNewsletterDeliveryBoundaryKey({
+    const boundaryKey = readHostedGroupEmailDeliveryBoundaryKey({
       deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
       explicitTarget: intent.explicitTarget,
       turnId: intent.turnId,
@@ -1490,7 +1495,7 @@ async function reconcileHostedNewsletterRecipientParents(input: {
   const blockedRecipientIntentIds = new Set<string>();
   for (const intent of input.intents) {
     const target = parseHostedEmailThreadTarget(intent.explicitTarget);
-    const boundaryKey = readHostedNewsletterDeliveryBoundaryKey({
+    const boundaryKey = readHostedGroupEmailDeliveryBoundaryKey({
       deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
       explicitTarget: intent.explicitTarget,
       turnId: intent.turnId,
@@ -1513,8 +1518,8 @@ async function reconcileHostedNewsletterRecipientParents(input: {
 
     await markAssistantOutboxIntentMirrorTerminalById({
       error: new VaultCliError(
-        "ASSISTANT_NEWSLETTER_PARENT_UNAVAILABLE",
-        "Newsletter recipient delivery was abandoned because its parent manifest was not sent.",
+        "ASSISTANT_GROUP_EMAIL_PARENT_UNAVAILABLE",
+        "Group email recipient delivery was abandoned because its parent manifest was not sent.",
       ),
       intentId: intent.intentId,
       onlyCurrentStatuses: ["awaiting_approval", "pending", "retryable", "sending"],
@@ -3131,8 +3136,8 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               html: input.assistantDeliveryEffect.payload.emailHtml ?? null,
               idempotencyKey: request.idempotencyKey ?? null,
               message: request.message,
-              newsletterAuthorizationProof:
-                input.assistantDeliveryEffect.payload.newsletterAuthorizationProof ?? null,
+              groupEmailAuthorizationProof:
+                input.assistantDeliveryEffect.payload.groupEmailAuthorizationProof ?? null,
               planGroupFanout: true,
               replyToMessageId: request.replyToMessageId ?? null,
               subject: request.subject ?? null,
@@ -3634,7 +3639,7 @@ async function persistHostedEmailGroupFanoutIntents(input: {
     );
   }
   for (const memberId of input.fanoutRecipientMemberIds) {
-    if (hasNonReplayableHostedNewsletterRecipientIntent({
+    if (hasNonReplayableHostedGroupEmailRecipientIntent({
       deliveryIdempotencyKey: payload.idempotencyKey,
       intents: existingIntents,
       memberId,
@@ -3660,7 +3665,7 @@ async function persistHostedEmailGroupFanoutIntents(input: {
         media: [],
         message: payload.message,
         emailHtml: payload.emailHtml ?? null,
-        newsletterAuthorizationProof: payload.newsletterAuthorizationProof ?? null,
+        groupEmailAuthorizationProof: payload.groupEmailAuthorizationProof ?? null,
         replyToMessageId: payload.replyToMessageId,
         sessionId: payload.sessionId,
         subject: null,
@@ -3675,7 +3680,7 @@ async function persistHostedEmailGroupFanoutIntents(input: {
   }
 }
 
-function hasNonReplayableHostedNewsletterRecipientIntent(input: {
+function hasNonReplayableHostedGroupEmailRecipientIntent(input: {
   deliveryIdempotencyKey: string;
   intents: readonly AssistantOutboxIntent[];
   memberId: string;
@@ -3693,7 +3698,7 @@ function hasNonReplayableHostedNewsletterRecipientIntent(input: {
       return true;
     }
     if (
-      input.deliveryIdempotencyKey.startsWith("group-newsletter:")
+      isHostedGroupEmailDeliveryIdempotencyKey(input.deliveryIdempotencyKey)
       && intent.turnId !== input.turnId
     ) {
       return false;
@@ -5944,6 +5949,7 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     | "media"
     | "message"
     | "nativeReplyRequested"
+    | "groupEmailAuthorizationProof"
     | "newsletterAuthorizationProof"
     | "subject"
     | "replyToMessageId"
@@ -5968,9 +5974,13 @@ function buildHostedAssistantDeliveryPayloadFromIntent(
     media: normalizeHostedAssistantDeliveryMedia(intent.media),
     message: intent.message,
     ...(intent.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
-    ...(intent.newsletterAuthorizationProof == null
+    ...(intent.groupEmailAuthorizationProof == null
+      && intent.newsletterAuthorizationProof == null
       ? {}
-      : { newsletterAuthorizationProof: intent.newsletterAuthorizationProof }),
+      : {
+          groupEmailAuthorizationProof: intent.groupEmailAuthorizationProof
+            ?? intent.newsletterAuthorizationProof,
+        }),
     subject: intent.subject ?? null,
     replyToMessageId: intent.replyToMessageId ?? null,
     sessionId: intent.sessionId,

@@ -1,33 +1,32 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildGroupNewsletterScheduledExecutionPrompt,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES,
-  GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES,
+  appendLegacyGroupNewsletterSkillInstructions,
+  isLegacyGroupNewsletterAutomationInstructions,
 } from '../src/assistant/group-newsletter-automation.js'
 
-describe('group newsletter execution prompt', () => {
-  it('requests workout details for current-chat context', () => {
-    expect(GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES).toContain('workouts.v0')
-    expect(GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES).toEqual([
-      'steps-days.v0',
-      'workouts.v0',
-      'sleep-duration-days.v0',
-    ])
+const legacyInstructions = [
+  'Murph group newsletter configuration v1.',
+  'These are configuration values. The runtime appends the current execution contract on every scheduled run.',
+  'Newsletter name: "Weekly check-in"',
+  'Delivery: group_email',
+].join('\n')
+
+describe('legacy group newsletter automation compatibility', () => {
+  it('routes a legacy saved recipe through the group-newsletter skill', () => {
+    expect(isLegacyGroupNewsletterAutomationInstructions(legacyInstructions))
+      .toBe(true)
+    expect(appendLegacyGroupNewsletterSkillInstructions(legacyInstructions))
+      .toContain('Read and follow the group-newsletter skill')
+    expect(appendLegacyGroupNewsletterSkillInstructions(legacyInstructions))
+      .toContain('Legacy saved configuration:')
+    expect(appendLegacyGroupNewsletterSkillInstructions(legacyInstructions))
+      .not.toContain('runtime appends the current execution contract')
   })
 
-  for (const delivery of ['current_chat', 'group_email'] as const) {
-    it(`grounds contextual stories for ${delivery}`, () => {
-      const prompt = buildGroupNewsletterScheduledExecutionPrompt({
-        delivery,
-        newsletterName: 'Weekly check-in',
-      })
-      expect(prompt).toContain('When highlighting or ranking a number')
-      expect(prompt).toContain('workout count, duration, or type alongside steps or movement')
-      expect(prompt).toContain('Never invent a reason')
-      expect(prompt).toContain('If no grounded context is available, state the number plainly')
-      expect(prompt).toContain('workout-kind-<type>-count')
-      expect(prompt).toContain('never multiply them into a weekly session or minute total')
-    })
-  }
+  it('leaves ordinary automation instructions unchanged', () => {
+    const ordinary = 'Read the group-newsletter skill, then prepare the weekly update.'
+    expect(isLegacyGroupNewsletterAutomationInstructions(ordinary)).toBe(false)
+    expect(appendLegacyGroupNewsletterSkillInstructions(ordinary)).toBe(ordinary)
+  })
 })
