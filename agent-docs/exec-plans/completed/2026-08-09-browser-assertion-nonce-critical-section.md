@@ -1,6 +1,6 @@
 # Bound browser assertion nonce database critical sections
 
-Status: active
+Status: completed
 Created: 2026-08-09
 Updated: 2026-08-11
 
@@ -54,7 +54,7 @@ nonce state.
 3. [x] Add focused unit, retention, route, and PostgreSQL contention coverage.
 4. [x] Run focused checks and inspect the exact candidate diff.
 5. [x] Commit and push the candidate to draft PR #1486.
-6. [ ] Complete exact-head CI, the preliminary specialist pass, and the final
+6. [x] Complete exact-head CI, the preliminary specialist pass, and the final
    ReviewGPT gate, then archive this plan.
 
 ## Verification
@@ -89,10 +89,19 @@ nonce state.
   rollout seam. The required retrospective found zero production browser nonce
   rows and zero agent sessions, so the incompatible durable state does not
   exist; the review-induced migration, trigger, and backfill were deleted.
+- Final ReviewGPT round 3 audited the corrected full patch on its exact pushed
+  head and passed with no findings.
 - The merge boundary must recheck those aggregate zero-state facts and stop for
   a separately drained cutover if production use begins before promotion.
+- One normal current-main merge combined the browser- and callback-nonce
+  documentation indexes, PostgreSQL proof map, and hosted-retention route result
+  without changing the reviewed browser nonce behavior; the affected focused
+  tests and documentation checks passed.
+- Required GitHub checks passed on the exact current-main candidate before this
+  completion-only plan archive.
 - Corrected four durable documents that still described the deleted foreground
   cleanup transaction and added the new real-PostgreSQL proof to the canonical
   testing map.
 - Kept the focused retention helper local rather than broadening the shared
   cleanup API or introducing another scheduler, queue, lock, or lifecycle owner.
+Completed: 2026-08-11
