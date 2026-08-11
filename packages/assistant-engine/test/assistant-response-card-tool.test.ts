@@ -11,7 +11,7 @@ import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 
-const CARD: AssistantResponseCard = {
+const LEGACY_CARD_V1: AssistantResponseCard = {
   kind: 'daily_nutrition',
   localDate: '2026-07-28',
   mealCount: 3,
@@ -23,7 +23,7 @@ const CARD: AssistantResponseCard = {
   },
 }
 
-const CARD_V2: AssistantResponseCard = {
+const CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
   version: 2,
   localDate: '2026-07-28',
@@ -38,7 +38,7 @@ const CARD_V2: AssistantResponseCard = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: null,
+    carbsGrams: { target: 220, status: 'on_target' },
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
@@ -216,6 +216,201 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'never calculate or reuse totals',
     )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'V2 adds fiber and nullable goal snapshots',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Each target must use selected-value comparator between with identical numeric value and highValue',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      "For the exact card localDate, require the containing active Goal window and each target's optional startAt/targetAt interval to include that date, with inclusive boundaries",
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'nutrition-strategy/references/daily-nutrition-card-safety.md',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'before every daily_nutrition attachment, even with five active goals or on a scheduled closeout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Before deriving, saving, or surfacing numeric nutrition goals, before activating a paused nutrition proposal, and before every daily_nutrition attachment',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'First run vault-cli memory show --format json and inspect the complete canonical Identity, Preferences, Instructions, and Context memory document for explicit, unambiguous safety facts; the context snapshot does not inject it',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli event list --kind procedure --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'vault-cli event list --kind encounter --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use event show for every item whose list data reports nonzero diagnosesCount',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A safety-relevant active diagnosis with documented or suspected certainty suppresses numeric output.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A failed, unreadable, or exactly 200-record encounter read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Inspect every returned item; use event show for an item whose procedure or status is missing or truncated.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A completed gastric bypass, Roux-en-Y, sleeve gastrectomy, gastric sleeve, biliopancreatic diversion, duodenal switch, adjustable gastric band, lap band, or other explicit bariatric surgery suppresses numeric output.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A failed, unreadable, or exactly 200-record procedure read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'any such positive wins over negative evidence from either pregnancy-evidence owner in the window and suppresses numeric output without diagnosing pregnancy',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A failed, unreadable, or exactly 200-record pregnancy-test read fails closed with no Goal or measurement mutation and no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Otherwise event show every returned test because list output compacts results and can truncate summaries',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'as positive evidence unless resultStatus is pending',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Canonical resultStatus unknown classifies the result rather than source lifecycle and may qualify only with that strict identity plus explicit text.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Do not infer pregnancy from numeric hCG, reference ranges, abnormal or unknown status/flags alone, titles, notes, or ambiguous or negated text.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same suppression path',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Missing, stale, ambiguous, or conflicting age alone is unavailable evidence, not a universal block; scheduled occurrences never ask',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Run both vault-cli condition list --status active --limit 200 --format json and vault-cli regimen list --status active --limit 200 --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'If either read fails or returns exactly 200 records, run no condition or regimen detail reads and fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'run vault-cli condition show <condition-id> --format json for every returned active condition and vault-cli regimen show <regimen-id> --format json for every returned active regimen',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'never select by title, substance, severity, context-snapshot visibility, or the default list prefix',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'If any required detail read fails or is unreadable, use the same fail-closed behavior',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A usable adult BMI below 18.5, including height and weight rows sharing one eventId, suppresses numeric proposal derivation or presentation, every Goal write or activation, and the card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A failed read, or a saturated read that cannot resolve usable BMI evidence, fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'known underweight, frailty, malnutrition risk, glucose-lowering medication, safety-relevant disease or clinician-managed nutrition context, and calorie targets below 1,200 kcal/day without flooring them upward',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'nutrition-strategy/references/daily-nutrition-card-goals.md',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Save one paused canonical proposal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'explain its values, reasoning, and effective date in ordinary text with no card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'an infeasible bundle means ordinary text and no mutation',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'activate it only after member acceptance',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Any derived target addition or change atomically pauses the complete managed bundle until acceptance',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Scheduled authority never permits questions or activation; only the first eligible managed meal closeout may create and explain one paused proposal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the complete safety and derivation contracts',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Explicit active targets win metric by metric',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'one consolidated question, never a goal-less card',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'available only to the managed private-direct closeout',
     )
@@ -226,9 +421,8 @@ describe('murph.attach_response_card', () => {
       card: CARD,
       kind: 'attach-response-card',
     })
-    expect(readCardToolRequest({ card: CARD_V2 })).toEqual({
-      card: CARD_V2,
-      kind: 'attach-response-card',
+    expect(readCardToolRequest({ card: LEGACY_CARD_V1 })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     expect(readCardToolRequest({ card: REALISTIC_LATE_WORKOUT_CARD })).toEqual({
       card: REALISTIC_LATE_WORKOUT_CARD,
@@ -269,14 +463,44 @@ describe('murph.attach_response_card', () => {
       kind: 'invalid-response-card-arguments',
     })
 
+    for (const metric of [
+      'calories',
+      'proteinGrams',
+      'carbsGrams',
+      'fatGrams',
+      'fiberGrams',
+    ] as const) {
+      expect(readCardToolRequest({
+        card: {
+          ...CARD,
+          goals: {
+            ...CARD.goals,
+            [metric]: null,
+          },
+        },
+      })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+    }
+    expect(readCardToolRequest({
+      card: {
+        ...CARD,
+        goals: {
+          calories: null,
+          proteinGrams: null,
+          carbsGrams: null,
+          fatGrams: null,
+          fiberGrams: null,
+        },
+      },
+    })).toMatchObject({ kind: 'invalid-response-card-arguments' })
+
     const contradictoryCard = {
-      ...CARD_V2,
+      ...CARD,
       totals: {
-        ...CARD_V2.totals,
+        ...CARD.totals,
         calories: { total: 2_300, mealCount: 3 },
       },
       goals: {
-        ...CARD_V2.goals,
+        ...CARD.goals,
         calories: { target: 2_000, status: 'under_target' },
       },
     }

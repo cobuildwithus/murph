@@ -12,6 +12,8 @@ import {
   buildWorkoutSessionAppCardEnvelopeV4,
   compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
+  dailyNutritionResponseCardV2Schema,
   nutritionCardGoalStatusValues,
   workoutSessionCardStateValues,
   workoutSessionCardV1Bounds,
@@ -27,6 +29,7 @@ import {
   type NutritionCardMetric,
   type WorkoutSessionDetailV1,
 } from '@murphai/contracts'
+import * as z from '@murphai/contracts/zod-runtime'
 
 const NUTRITION_CARD_MONTHS = [
   'Jan',
@@ -47,15 +50,21 @@ const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   useGrouping: true,
 })
 const NUTRITION_CARD_GOAL_STATUS_LABELS = {
+  far_over_target: 'far over target',
+  far_under_target: 'far under target',
+  on_target: 'on target',
+  over_target: 'over target',
+  unavailable: 'status unavailable',
+  under_target: 'under target',
+} as const satisfies Record<NutritionCardGoalStatus, string>
+const LINQ_NUTRITION_CARD_GOAL_STATUS_LABELS = {
   far_over_target: 'far over',
   far_under_target: 'far under',
   on_target: 'on target',
   over_target: 'over',
+  unavailable: 'status unavailable',
   under_target: 'under',
-} as const satisfies Record<Exclude<
-  NutritionCardGoalStatus,
-  'unavailable'
->, string>
+} as const satisfies Record<NutritionCardGoalStatus, string>
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
@@ -92,6 +101,7 @@ export {
   compactTableRowV1Schema,
   compactTableTrackingSourceV1Schema,
   dailyNutritionResponseCardV1Schema,
+  dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   dailyNutritionResponseCardSchema,
   nutritionCardGoalStatusValues,
@@ -120,6 +130,13 @@ export {
   type WorkoutSessionSetStatus,
   type WorkoutSessionSetV1,
 } from '@murphai/contracts'
+
+export const assistantResponseCardAuthoringSchema: z.ZodType<
+  AssistantResponseCard
+> = z.union([
+  dailyNutritionResponseCardV2AuthoringSchema,
+  compactTableResponseCardV1Schema,
+])
 
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
@@ -431,8 +448,37 @@ function renderDailyNutritionResponseCardText(
   const summary = `${formatNutritionCardDate(card.localDate)}: ${
     metrics.join(' · ')
   } from ${card.mealCount} logged ${mealLabel}.`
+  const goals = isDailyNutritionResponseCardV2(card)
+    ? `Targets: ${renderDailyNutritionGoals(card).join(' · ')}.`
+    : null
   const partialLabel = renderPartialNutritionLabel(card)
-  return partialLabel === null ? summary : `${summary} ${partialLabel}`
+  return [summary, goals, partialLabel]
+    .filter((value): value is string => value !== null)
+    .join(' ')
+}
+
+function renderDailyNutritionGoals(
+  card: DailyNutritionResponseCardV2,
+): string[] {
+  const candidates: ReadonlyArray<readonly [
+    NutritionCardGoalSnapshot | null,
+    string,
+    string,
+  ]> = [
+    [card.goals.calories, 'calories', ' calories'],
+    [card.goals.proteinGrams, 'protein', 'g protein'],
+    [card.goals.carbsGrams, 'carbs', 'g carbs'],
+    [card.goals.fatGrams, 'fat', 'g fat'],
+    [card.goals.fiberGrams, 'fiber', 'g fiber'],
+  ]
+
+  return candidates.map(([goal, label, unit]) =>
+    goal === null
+      ? `${label} target unavailable`
+      : `${formatNutritionCardNumber(goal.target)}${unit} (${
+          NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]
+        })`
+  )
 }
 
 function renderAvailableNutritionTotals(
@@ -484,7 +530,7 @@ function renderLinqNutritionGoalStatus(
   if (goal === null || goal.status === 'unavailable') {
     return null
   }
-  return `${label} ${NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]}`
+  return `${label} ${LINQ_NUTRITION_CARD_GOAL_STATUS_LABELS[goal.status]}`
 }
 
 function readRequiredCalorieTotal(card: DailyNutritionResponseCard): number {
@@ -591,7 +637,7 @@ function createAssistantResponseCardJsonSchema() {
     required: ['total', 'mealCount'],
   } as const)
   const goal = (maximum: number) => ({
-    type: ['object', 'null'],
+    type: 'object',
     additionalProperties: false,
     properties: {
       target: {

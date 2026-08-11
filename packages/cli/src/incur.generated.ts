@@ -211,6 +211,7 @@ declare module 'incur' {
       'meal show': { args: { id: string }; options: { requestId?: string } }
       'meal totals': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'measurement add': { args: {}; options: { requestId?: string; metric?: string[]; value?: number[]; unit?: string[]; qualifier?: string[]; measurementNote?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; tag?: string[]; timeZone?: string } }
+      'measurement entry list': { args: {}; options: { requestId?: string; metric: string[]; from?: string; to?: string; limit: number } }
       'measurement import-json': { args: {}; options: { requestId?: string; input: string; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'measurement list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
