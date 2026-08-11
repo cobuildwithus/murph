@@ -48,6 +48,11 @@ export {
   isCanonicalQuerySourcePath,
   listCanonicalSourceManifest,
 } from "./vault-source.ts";
+export {
+  listCanonicalObservationMetricEntries,
+  type CanonicalObservationMetricEntry,
+  type CanonicalObservationMetricEntryFilters,
+} from "./canonical-observation-metrics.ts";
 export type {
   CanonicalQuerySourceHash,
   QuerySourceManifestEntry,
@@ -226,12 +231,14 @@ export {
   normalizeMetricValue,
   resolveMetricDefinition,
   resolveMetricDefinitionForBiomarker,
+  resolveMetricInputKey,
   assessExperimentPrimaryMetricCapture,
   experimentSessionMetricIsDeclared,
   resolveExperimentSessionMetricSpec,
   resolveExperimentSessionMetricSpecForBiomarker,
   validateExperimentSessionMetricValue,
   selectMetricGoalProgress,
+  selectAuthoritativeMetricPoint,
   selectMetricSeries,
   selectMetricTrend,
   selectMetricValue,

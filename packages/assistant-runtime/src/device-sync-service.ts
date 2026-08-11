@@ -133,6 +133,7 @@ async function listHostedJobConnectionSources(input: {
         (candidate) => candidate.sourceProviderSlug === source.sourceProviderSlug,
       );
       const sourceInstanceKey = localSource?.sourceInstanceKey
+        ?? source.sourceInstanceKey
         ?? (
           input.provider === "junction"
             ? buildJunctionProviderSourceInstanceKey({
@@ -140,8 +141,7 @@ async function listHostedJobConnectionSources(input: {
                 sourceProviderSlug: source.sourceProviderSlug,
               })
             : null
-        )
-        ?? source.sourceInstanceKey;
+        );
 
       return {
         ...source,

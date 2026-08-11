@@ -65,9 +65,9 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Starter access, patterns, reminders, cards, and web search",
+    title: "Starter access, patterns, reminders, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, and managed OpenAI web search can reach current information again.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -122,6 +122,18 @@ const RAW_CHANGELOG_EDITIONS = [
           label: "Schedule a local-time reminder",
           prompt: "Remind me every day at 9 PM Central to wind down.",
         },
+      },
+      {
+        id: "voice-memos-use-your-voice",
+        kind: "improvement",
+        priority: 4,
+        title: "Voice memos keep your chosen voice",
+        summary:
+          "Ordinary voice memos now use the voice already selected for your Murph instead of switching voices on their own.",
+        details:
+          "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
+        relevanceTags: ["voice", "messaging", "personalization", "reliability"],
+        sourcePullRequests: [1587],
       },
       {
         id: "web-search-restored",
@@ -179,11 +191,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Group sleep checks use fresh shared data",
         summary:
-          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+          "Murph now checks the current shared sleep record before answering, counts reported Deep and REM sleep as soon as those values are shared, and includes explicit manual corrections.",
         details:
-          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+          "The latest manual correction for a sleep date wins and is labeled Manual instead of a connected source. Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
         relevanceTags: ["groups", "sleep", "health-data", "connections"],
-        sourcePullRequests: [1565],
+        sourcePullRequests: [1565, 1593],
       },
       {
         id: "public-referral-home",

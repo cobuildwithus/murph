@@ -141,6 +141,11 @@ export interface JunctionSummaryNormalizationEvidenceWindow {
   readonly windowStart: string;
 }
 
+export interface JunctionBloodPressureProviderRecordIdentityEvidence {
+  readonly providerRecordCount: number;
+  readonly repairStableExternalRefResourceIds: readonly (string | null)[];
+}
+
 type TimestampSemantics = NonNullable<DeviceDataOrigin["timestampSemantics"]>;
 type MealNutritionTotals = NonNullable<MealNutrition["totals"]>;
 type MealNutritionTotalKey = keyof MealNutritionTotals;
@@ -994,6 +999,65 @@ export function classifyJunctionSummaryNormalizationEvidence(
     left.resource.localeCompare(right.resource)
     || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
   );
+}
+
+export function identifyJunctionBloodPressureProviderRecords(
+  snapshot: Pick<
+    JunctionSnapshotInput,
+    "connections" | "importedAt" | "timeseries" | "windowEnd" | "windowStart"
+  >,
+): JunctionBloodPressureProviderRecordIdentityEvidence {
+  const connections = asArray(snapshot.connections).flatMap((connection) => {
+    const normalized = asPlainObject(connection);
+    return normalized ? [normalized] : [];
+  });
+  const context: NormalizationContext = {
+    importedAt: normalizeTimestamp(snapshot.importedAt),
+    windowStart: normalizeTimestamp(snapshot.windowStart),
+    windowEnd: normalizeTimestamp(snapshot.windowEnd),
+    connectionsByKey: buildConnectionsByKey(connections),
+    evidenceParts: [],
+    events: [],
+    samples: [],
+  };
+  const repairStableExternalRefResourceIds: Array<string | null> = [];
+
+  for (const [resource, payload] of allowedResourceEntries(
+    snapshot.timeseries,
+    TIMESERIES_RESOURCE_ALLOWLIST,
+  )) {
+    if (resource !== JUNCTION_BLOOD_PRESSURE_RESOURCE) {
+      continue;
+    }
+
+    const resourceSlug = slugify(resource, "timeseries");
+    const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+    for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+      const resourceContext = buildResourceContext({
+        entry,
+        originFallback,
+        resource,
+        resourceSlug,
+        identityKind: "timeseries",
+        index,
+        fallbackArtifactRole: baseArtifactRole,
+        context,
+      });
+      repairStableExternalRefResourceIds.push(
+        resourceContext
+          ? buildJunctionBloodPressureRepairStableExternalRefResourceId(
+              entry,
+              resourceContext,
+            )
+          : null,
+      );
+    }
+  }
+
+  return {
+    providerRecordCount: repairStableExternalRefResourceIds.length,
+    repairStableExternalRefResourceIds,
+  };
 }
 
 function isJunctionSummaryEvidenceEventInRange(
@@ -1887,16 +1951,15 @@ function pushJunctionBloodPressureReadings(
     // distinguishes them. Without an id, the identity includes the paired
     // values so same-second readings from coarse-timestamp providers never
     // collapse, while true duplicate deliveries still merge via externalRef.
-    const readingRowId = firstStringFromPaths(entry, ["id", "resourceId", "resource_id", "externalId", "external_id"]);
-    const readingIdentityHash = shortHash([
+    const readingIdentityHash = buildJunctionBloodPressureReadingIdentityHash({
+      diastolic,
+      entry,
+      occurredAt,
+      resourceContext,
       resourceSlug,
-      resourceContext.sourceProviderSlug,
-      resourceContext.origin.sourceType ?? "",
-      resourceContext.origin.sourceInstanceId ?? "",
-      ...(readingRowId
-        ? [readingRowId]
-        : [timestamp.observedAtRaw ?? occurredAt, systolic, diastolic]),
-    ]);
+      systolic,
+      timestamp,
+    });
     // Exact in-payload duplicates are skipped and the raw role is derived
     // from the same stable identity as the event externalRef (never the
     // payload index), so replays and reorderings stage identical evidence
@@ -1981,6 +2044,56 @@ function pushJunctionBloodPressureReadings(
       ),
     );
   }
+}
+
+function buildJunctionBloodPressureRepairStableExternalRefResourceId(
+  entry: PlainObject,
+  resourceContext: ResourceContext,
+): string | null {
+  const readingRowId = firstStringFromPaths(
+    entry,
+    ["id", "resourceId", "resource_id", "externalId", "external_id"],
+  );
+  if (!readingRowId) {
+    return null;
+  }
+
+  return `${resourceContext.resourceSlug}-${shortHash([
+    resourceContext.resourceSlug,
+    resourceContext.sourceProviderSlug,
+    resourceContext.origin.sourceType ?? "",
+    resourceContext.origin.sourceInstanceId ?? "",
+    readingRowId,
+  ])}`;
+}
+
+function buildJunctionBloodPressureReadingIdentityHash(input: {
+  diastolic: number;
+  entry: PlainObject;
+  occurredAt: string;
+  resourceContext: ResourceContext;
+  resourceSlug: string;
+  systolic: number;
+  timestamp: ReturnType<typeof resolveRecordTimestamp>;
+}): string {
+  const repairStableResourceId =
+    buildJunctionBloodPressureRepairStableExternalRefResourceId(
+      input.entry,
+      input.resourceContext,
+    );
+  if (repairStableResourceId) {
+    return repairStableResourceId.slice(`${input.resourceSlug}-`.length);
+  }
+
+  return shortHash([
+    input.resourceSlug,
+    input.resourceContext.sourceProviderSlug,
+    input.resourceContext.origin.sourceType ?? "",
+    input.resourceContext.origin.sourceInstanceId ?? "",
+    input.timestamp.observedAtRaw ?? input.occurredAt,
+    input.systolic,
+    input.diastolic,
+  ]);
 }
 
 function buildRawResourcePayload(

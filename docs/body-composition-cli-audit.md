@@ -1,7 +1,7 @@
 # Body-Composition CLI Audit
 
-Status: proposed
-Reviewed: 2026-08-09
+Status: partially implemented
+Reviewed: 2026-08-10
 Scope: intentional fat loss, lean-mass gain, weight gain, recomposition, maintenance, and trend review
 
 ## Decision
@@ -18,9 +18,9 @@ Murph already has canonical owners for the underlying facts:
 - wearable and connected-device data
 - automations and tracked-table presentation
 
-The missing capability is a small, generic **measurement-entry read projection**. A measurement event can contain several scalar entries, while the current event-level `measurement list` compacts nested object arrays and therefore cannot reliably return the individual values needed for filtering or trend math. Preserve that existing event-list contract. Add a typed entry-level read, build a deterministic generic trend read on the same use case, and only then consider a thin `body-composition` composition.
+The first missing capability was a small, generic **measurement-entry read projection**. A measurement event can contain several scalar entries, while the event-level `measurement list` compacts nested object arrays and therefore cannot reliably return the individual values needed for filtering or trend math. The lossless `measurement entry list` projection now composes those event entries with canonical scalar observation entries without changing the event-list contract. Build a deterministic generic trend read on the same use case before considering a thin `body-composition` composition.
 
-Keep the skill as the strategy owner and the CLI as deterministic data access. Do not encode nutrition coaching inside command handlers. This document specifies future slices only; it does not authorize hidden runtime behavior or a second canonical store.
+Keep the skill as the strategy owner and the CLI as deterministic data access. Do not encode nutrition coaching inside command handlers. The remaining slices are future work; this document does not authorize hidden runtime behavior or a second canonical store.
 
 ## Current Inventory
 
@@ -31,6 +31,7 @@ What exists:
 - `measurement add` records one or more open scalar entries with canonical metric slugs, values, units, optional qualifiers and notes, occurrence time, source, media, tags, and timezone.
 - `measurement import-json` preserves richer nested imports and raw provenance.
 - `measurement show`, `list`, and `manifest` expose canonical events and immutable import provenance.
+- `measurement entry list` returns lossless, exact-metric scalar rows from canonical `measurement`, legacy `body_measurement`, and scalar `observation` events, preserving parent-event identity and honest source shape.
 
 What works for body composition:
 
@@ -38,16 +39,14 @@ What works for body composition:
 - waist and other circumferences
 - body-fat or lean-mass estimates, provided the vendor metric and source remain explicit
 - grouped manual check-ins
-- direct or device-derived source labeling
+- direct or device-derived source labeling, including canonical connected-device observations
 
 Gap:
 
-- `measurement list` filters events by date and limit but not scalar entries by metric.
-- its generic list projection intentionally compacts nested arrays, so it is not a lossless scalar-value read.
 - there is no deterministic trend summary.
 - there is no shared unit-conversion contract.
 - there is no safe source-aware duplicate-resolution contract.
-- an assistant must inspect broad event output and calculate trends itself, which is error-prone and token-heavy.
+- an assistant must still calculate trends itself, which is error-prone.
 
 ### `goal`
 
@@ -83,8 +82,8 @@ Any new surface must:
 
 - compose canonical owners rather than create a second store
 - preserve direct measurement, estimate, device, unit, timestamp, and provenance
-- preserve the parent `evt_*` event ID and the matched entry’s original array index
-- use the existing canonical metric-slug normalization contract
+- preserve the parent `evt_*` event ID and record kind; preserve the matched entry’s original array index for array-backed records and use `null` for scalar observations
+- use the existing canonical metric-identity contract: registered aliases resolve to their owner key, while unknown custom metrics retain normalized exact identity
 - avoid silently merging different BIA devices or treating estimated tissue as measured tissue
 - avoid fuzzy metric matching, hidden unit conversion, and silent duplicate deletion
 - never change calories, exercise, targets, goals, or automations without explicit user intent
@@ -97,9 +96,9 @@ Any new surface must:
 
 ## Recommended Sequence
 
-### P0 — generic measurement-entry filtering
+### P0 — generic measurement-entry filtering (delivered 2026-08-10)
 
-Add a typed read projection rather than changing the current event-level `measurement list` response:
+The typed read projection was added without changing the current event-level `measurement list` response:
 
 ```bash
 murph measurement entry list \
@@ -112,12 +111,14 @@ Recommended behavior:
 
 - keep `measurement list` unchanged for backward-compatible event browsing
 - repeatable `--metric` with OR semantics
-- normalize each query with the existing `normalizeMetricSlug` contract, then use exact equality against the stored canonical metric slug
+- normalize each query, then resolve both query and stored spelling through the existing health-metric identity owner
+- registered aliases compare by owner key; unknown custom metrics fall back to normalized exact equality
 - no substring, semantic, or fuzzy matching
 - flatten matching canonical entries into a typed read projection; do not persist the projection
 - return one row per matching entry with:
   - parent `eventId`
-  - zero-based `measurementIndex`
+  - canonical `recordKind`
+  - zero-based `measurementIndex` for array-backed measurement records, or `null` for scalar observations
   - `occurredAt`
   - event `source`
   - canonical `metric`
@@ -137,7 +138,8 @@ Suggested row:
 ```json
 {
   "eventId": "evt_01JABCDEF0123456789ABCDEFX",
-  "measurementIndex": 0,
+  "recordKind": "observation",
+  "measurementIndex": null,
   "occurredAt": "2026-07-01T07:15:00-04:00",
   "source": "device",
   "metric": "body-weight",
@@ -201,7 +203,7 @@ Suggested output:
 
 Contract:
 
-- normalize the metric argument with the same canonical slug function used by writes and entry filtering
+- normalize the metric argument through the same canonical identity owner used by entry filtering
 - require `--stat mean|median` in the first version; do not hide a default in a generic command
 - treat `--unit` as a filter
 - if more than one unit remains, return a typed `mixed_units` result and no aggregate until a shared conversion contract exists
@@ -341,7 +343,7 @@ Do not implement this until the owner for subjective check-in fields is clear. A
 
 ## Suggested Delivery Slices
 
-1. `measurement entry list` plus its shared typed entry-read use case, tests, and generated contract refresh
+1. Delivered: `measurement entry list` plus its shared typed entry-read use case, tests, and generated contract refresh
 2. `measurement trend` over that same use case, with tests and documentation
 3. `body-composition status` only after product validation shows generic reads are too cumbersome
 4. typed goal targets only after the status or automation workflow proves the need

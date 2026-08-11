@@ -31,6 +31,7 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
@@ -101,6 +102,7 @@ const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const COUNTRY_ELEVENLABS_VOICE_ID = 'Bj9UqZbhQsanLzgalpEG'
 const ONBOARDING_POLICY_PATHS = [
   ['SKILL.md', 'murph-onboarding/SKILL.md'],
   [
@@ -1115,7 +1117,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
         expect(voiceCalls).toHaveLength(1)
         expect(songCalls).toHaveLength(0)
-        expect(generations).toHaveLength(1)
+        expect(generations).toEqual([
+          expect.objectContaining({
+            kind: 'elevenlabs_speech',
+            voiceId: 'voice_murph',
+          }),
+        ])
         expect(result.finalMessage.trim()).toBe('')
         expect(result.responseMedia).toEqual([
           {
@@ -1139,7 +1146,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             'RETALIATE_MARKER_Z9',
           )
           expect(
-            voiceCalls[0].argumentsValue.voice ?? null,
+            voiceCalls[0].argumentsValue.userRequestedVoice ?? null,
           ).toBeNull()
         }
       } finally {
@@ -1150,6 +1157,182 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'keeps the running-turn voice unless the user names an exact memo voice',
+    async () => {
+      const scenarios = [
+        {
+          expectedPersonalizationVoice: null,
+          expectedProviderVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          expectedUserRequestedVoice: null,
+          prompt:
+            'Send a short voice-only memo saying that today is a good day. Use my configured voice; do not change, save, or test a voice. Do not add response text.',
+          runningTurnVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          slug: 'configured-voice',
+        },
+        {
+          expectedPersonalizationVoice: null,
+          expectedProviderVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          expectedUserRequestedVoice: 'country',
+          prompt:
+            'Send a short voice-only memo in the Country voice saying that today is a good day. Use Country for this memo only; do not save it. Do not add response text.',
+          runningTurnVoiceId: 'voice_murph',
+          slug: 'named-one-off',
+        },
+        {
+          expectedPersonalizationVoice: 'country',
+          expectedProviderVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          expectedUserRequestedVoice: 'country',
+          prompt:
+            'Save Country as my Murph voice, then send a short voice-only memo in Country now so I can hear it. Do not add response text.',
+          runningTurnVoiceId: 'voice_murph',
+          slug: 'save-and-hear',
+        },
+      ] as const
+
+      for (const scenario of scenarios) {
+        const config = await resolveRealCodexE2eConfig()
+        const workingDirectory = await mkdtemp(
+          path.join(tmpdir(), `murph-voice-policy-${scenario.slug}-e2e-`),
+        )
+        const generations: unknown[] = []
+        const personalizationRequests: unknown[] = []
+        const hostedToolContext: AssistantHostedToolContext | undefined =
+          scenario.expectedPersonalizationVoice
+            ? {
+                ...createRealCodexSupportHostedToolContext('direct'),
+                currentAssistantInputId: () =>
+                  'ain_11111111111111111111111111111111',
+                personalizationTool: {
+                  async request(request) {
+                    personalizationRequests.push(request)
+                    if (request.action === 'read') {
+                      return {
+                        action: 'read',
+                        result: {
+                          model: 'gpt-5.6-terra',
+                          solAvailable: true,
+                          tone: 'casual',
+                          voice: 'classic',
+                        },
+                      }
+                    }
+                    if (request.action === 'update') {
+                      return {
+                        action: 'update',
+                        result: {
+                          model: 'gpt-5.6-terra',
+                          modelChangeAppliesNextRun: false,
+                          modelUpdated: false,
+                          solAvailable: true,
+                          status: 'saved',
+                          tone: 'casual',
+                          voice: request.voice ?? 'classic',
+                        },
+                      }
+                    }
+                    throw new Error('Unexpected personality update request.')
+                  },
+                },
+              }
+            : undefined
+
+        try {
+          const result = await executeRealCodexAppServerTurn({
+            approvalPolicy: 'never',
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions:
+              buildCapabilityRoutingDeveloperInstructions(),
+            dynamicTools: [
+              ...(hostedToolContext ? [MURPH_PERSONALIZATION_TOOL] : []),
+              MURPH_GENERATE_VOICE_MEMO_TOOL,
+            ],
+            env: config.env,
+            hostedToolContext,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: scenario.prompt,
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write',
+            voiceMemoRuntime: {
+              elevenLabs: {
+                apiKeyAvailable: true,
+                modelId: 'eleven_multilingual_v2',
+                voiceId: scenario.runningTurnVoiceId,
+              },
+              generateAndUpload: async (input) => {
+                generations.push(input.generation)
+                return {
+                  attachmentId: `attachment_${scenario.slug}`,
+                  filename: `${scenario.slug}.mp3`,
+                }
+              },
+              kind: 'linq',
+            },
+            workingDirectory,
+          })
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const voiceCalls = actions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_GENERATE_VOICE_MEMO_TOOL.name
+          )
+
+          expect(voiceCalls, `${scenario.slug} voice calls`).toHaveLength(1)
+          expect(generations, `${scenario.slug} generations`).toEqual([
+            expect.objectContaining({
+              kind: 'elevenlabs_speech',
+              voiceId: scenario.expectedProviderVoiceId,
+            }),
+          ])
+          expect(
+            result.finalMessage.trim(),
+            `${scenario.slug} final text`,
+          ).toBe('')
+          expect(
+            result.responseMedia,
+            `${scenario.slug} response media`,
+          ).toEqual([
+            expect.objectContaining({
+              filename: `${scenario.slug}.mp3`,
+              kind: 'voice_memo',
+              transport: {
+                attachmentId: `attachment_${scenario.slug}`,
+                kind: 'linq_attachment',
+              },
+            }),
+          ])
+          if (voiceCalls[0]?.kind === 'dynamic') {
+            expect(
+              voiceCalls[0].argumentsValue.userRequestedVoice ?? null,
+              `${scenario.slug} requested voice`,
+            ).toBe(scenario.expectedUserRequestedVoice)
+          }
+          if (scenario.expectedPersonalizationVoice) {
+            expect(
+              personalizationRequests,
+              `${scenario.slug} personalization requests`,
+            ).toContainEqual({
+              action: 'update',
+              voice: scenario.expectedPersonalizationVoice,
+            })
+          } else {
+            expect(personalizationRequests).toEqual([])
+          }
+        } finally {
+          await removeRealCodexTemporaryPaths([
+            workingDirectory,
+            ...config.temporaryPaths,
+          ])
+        }
+      }
+    },
+    720_000,
   )
 
   it(
