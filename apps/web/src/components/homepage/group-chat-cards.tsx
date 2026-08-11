@@ -3,9 +3,9 @@ import { cn } from "@/src/lib/utils";
 import { EmailIcon } from "./email-icon";
 
 export const GROUP_MEMBERS = [
-  { id: "theo", name: "Theo", avatarSrc: "/personas/sleeper.jpg" },
-  { id: "maya", name: "Maya", avatarSrc: "/personas/athlete.jpg" },
-  { id: "sam", name: "Sam", avatarSrc: "/personas/founder.jpg" },
+  { id: "theo", name: "Theo", avatarSrc: "/personas/sleeper-avatar.avif" },
+  { id: "maya", name: "Maya", avatarSrc: "/personas/athlete-avatar.avif" },
+  { id: "sam", name: "Sam", avatarSrc: "/personas/founder-avatar.avif" },
 ] as const;
 
 export type GroupMember = (typeof GROUP_MEMBERS)[number];
@@ -20,21 +20,21 @@ const CHALLENGE_ROWS = [
   },
   {
     name: "Maya",
-    avatarSrc: "/personas/athlete.jpg",
+    avatarSrc: "/personas/athlete-avatar.avif",
     daysDone: "4/5 days",
     level: 0.8,
     delta: "+22 min avg walk",
   },
   {
     name: "Sam",
-    avatarSrc: "/personas/founder.jpg",
+    avatarSrc: "/personas/founder-avatar.avif",
     daysDone: "4/5 days",
     level: 0.8,
     delta: "+12% steps vs baseline",
   },
   {
     name: "Theo",
-    avatarSrc: "/personas/sleeper.jpg",
+    avatarSrc: "/personas/sleeper-avatar.avif",
     daysDone: "3/5 days",
     level: 0.6,
     delta: "+4% steps vs baseline",
