@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Current Guardrails
 
@@ -43,6 +43,16 @@ Last verified: 2026-08-10
   attempt. Preparation/provider/KMS failure starts zero transactions, and the
   in-transaction mailbox unwrap must be a scoped-cache hit that cannot perform
   provider or KMS work.
+- Starter enrollment prepares every missing domain-root candidate and prewarms
+  the exact control and ingress roots before `BEGIN`, keeping the same
+  request-scoped unwrap cache through activation. The enrollment transaction
+  retains its existing beneficiary lock, then locks control and ingress root
+  authority and rechecks that an existing root still has the exact prewarmed
+  `rootKeyId` or that a prepared candidate is still absent. A root transition
+  or missing candidate may trigger one fresh prepare-before-transaction
+  attempt. Both prewarm operations settle before transaction entry; signing,
+  provider, or KMS failure starts no transaction, and activation's control and
+  ingress unwraps must be scoped-cache hits.
 - Connected-app email sends have no durable provider idempotency key or send ledger. Admit them only from current accepted user input in a private direct turn; scheduled, group, maintenance, system-notification, and output-only turns fail before provider egress. After an ambiguous dispatch, never replay the send. Reconcile only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and leave the outcome unknown when that evidence is not decisive.
 - Update architecture and verification docs in the same change that introduces new runtime entrypoints.
 - Avoid hidden coupling between scripts, docs, and runtime code; document new dependencies in `ARCHITECTURE.md` and `agent-docs/references/testing-ci-map.md`.
