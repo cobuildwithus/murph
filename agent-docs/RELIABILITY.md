@@ -149,30 +149,41 @@ Last verified: 2026-08-11
   primary checkout by fast-forward, revalidates repository and issue authority,
   and admits the oldest eligible issue. It processes one issue, uses a
   deterministic branch/worktree identity, and recovers from GitHub branch, PR,
-  merge, and issue state. It does not persist issue bodies or duplicate GitHub
-  state locally. The owner lock records both the scheduler process identity and
-  the exact detached worker process identity, so an orphaned still-live child
-  also blocks a replacement run after a launcher crash.
+  and issue state. An unrelated primary advance continues discovery in the same
+  invocation; a change to an already-loaded launcher module exits once so the
+  next invocation loads it. It does not persist issue bodies or duplicate
+  GitHub queue state locally. The owner lock records both the scheduler process
+  identity and the exact detached worker process identity, so an orphaned
+  still-live child also blocks a replacement run after a launcher crash.
 - Before the worker starts, the parent classifies exact clean state as fresh
-  implementation or resumable implementation/open PR. Resumable runs cannot
-  reacquire or reapply an implementation patch. A merged PR paired with an open
-  or reopened issue, multiple PRs, a closed-unmerged PR, branch divergence, a
-  mismatched head or closing relationship, and dirty state fail closed rather
-  than guessing a continuation point or closing historical state.
-- The complete invocation, including parent Git, GitHub, package-manager, and
-  launchctl commands, has one absolute four-hour deadline for a repair run.
+  implementation or resumable implementation/open PR. Under the owner lock, a
+  fresh branch with no commit, remote branch, PR, or divergence is the only
+  state whose tracked, untracked, and ignored interruption residue may be reset
+  and cleaned back to `origin/main`. Dirty work may instead resume only when
+  one open issue-closing PR, its remote branch, and the local committed head
+  identify the same repair; the edit-only child finishes the interrupted diff
+  and the parent reruns the review gates. Resumable runs cannot reacquire or
+  reapply an implementation patch. A merged PR paired with an open or reopened
+  issue, multiple PRs, a closed-unmerged PR, branch divergence, mismatched
+  ownership, head, or closing relationship, and every other dirty state fail
+  closed rather than guessing a continuation point or closing historical state.
+- The complete invocation, including parent Git, GitHub, ReviewGPT, and
+  launchctl commands, has one absolute eight-hour deadline for a repair run.
   Every external command and the worker run in an exact detached process group.
   The runner sends `SIGTERM`, then a bounded `SIGKILL` only to a group it created
   and still owns, and retains cleanup/lock ownership until the group—not merely
   its leader—disappears. ReviewGPT and CI instructions impose their own
-  three-hour waits. Timeout, browser unavailability, missing patch, dirty or
-  ambiguous worktree state, red CI, blocked merge, and failed issue closure all
-  leave recoverable GitHub/worktree state for a later pass.
-- A successful worker only prepares a clean committed branch, open PR, and
-  ignored readiness/review evidence. The parent validates that evidence and
-  revalidates live issue authority, PR head, required checks, and current-base
-  mergeability before the ordinary head-matched merge and immediate issue
-  closure.
+  three-hour waits; an individual Codex child is bounded to two hours. Timeout,
+  browser unavailability, missing patch, ambiguous worktree state, red CI,
+  blocked merge, and failed issue closure leave recoverable GitHub/worktree
+  state for a later pass.
+- A successful child leaves only uncommitted code/docs/tests and a private PR
+  draft. The parent applies implementation patches, closes plans, commits,
+  pushes, publishes, reviews, and observes CI. Before merge it revalidates live
+  issue authority, PR head, required checks, current-base mergeability, and the
+  exact changed-path scope. Proven local agent/Codex workflow changes may merge
+  and close automatically; possible product-runtime changes remain as reviewed
+  ready PRs with open issues for human approval.
 - A successful pass verifies both a merged PR for the deterministic branch and
   the closed issue before attempting ordinary worktree retirement. Retirement
   still uses `scripts/retire-worktree` and silently preserves the checkout when

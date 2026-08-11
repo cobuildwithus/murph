@@ -619,9 +619,11 @@ The local Frog autofix entrypoint uses `scripts/frog-autofix scan` for a
 non-repairing live admission proof. The command may fetch `origin/main` and
 query public issue metadata, but it must not create durable autofix state or a
 worktree, start Codex, edit GitHub state, or print issue titles/bodies. Focused
-implementation proof includes the real leader-first descendant timeout, strict
-readiness evidence, revoked-authority/head/check/conflict rejection, and
-historical merged-PR reopen refusal:
+implementation proof includes the real leader-first descendant timeout,
+parent-owned ReviewGPT/patch boundaries, network-denied worker arguments,
+tracked/untracked/ignored interruption recovery, revoked-authority/head/check/
+conflict rejection, product-runtime merge pausing, and historical merged-PR
+reopen refusal:
 
 ```sh
 pnpm exec vitest run scripts/frog-autofix.test.ts \
@@ -638,6 +640,10 @@ and identifier/credential absence, then invoke one manual `run`. When no
 committed eligible binding exists, success is a no-worker event. When one does
 exist, the exact GitHub PR/check/merge/issue lifecycle is the required end-to-
 end proof; a locally successful child exit alone is not completion evidence.
+For a local-agent-only test issue, require automatic merge plus closure. For any
+diff outside the narrow local-agent classifier, require a ready reviewed PR and
+open issue, then confirm the runner reports `awaiting_human_merge` without a
+merge or close call.
 
 ## Hosted Temporal Replay Proof
 

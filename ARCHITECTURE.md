@@ -8,9 +8,9 @@ Murph's optional local Frog repair loop is an operator-owned macOS process, not
 product runtime, hosted automation, or Frog publication authority. One
 user-session LaunchAgent invokes the repository's primary checkout at load and
 every two hours. Each invocation handles at most one issue and uses GitHub as
-its only durable queue and completion ledger; local state is limited to a
-process-identity lock, home-relative checkout/Codex-home locators, and a bounded
-metadata-only event log.
+its durable queue and completion ledger; owner-only local state contains the
+process lock, home-relative checkout/Codex-home locators, bounded metadata, and
+transient parent review material removed when the invocation ends.
 
 Admission requires an open `enhancement` issue authored by the exact Frog App
 and exactly one matching `issue:` binding already committed beneath
@@ -19,29 +19,42 @@ only issue datum placed in the parent worker prompt. Issue content remains
 untrusted evidence. A deterministic branch owns one sanctioned worktree, so a
 later run can recover an incomplete PR without a second task database.
 
-Recovery is a two-way parent classification, not a prompt guess. `implement`
-requires the current clean default-branch head with no implementation or PR;
-`resume` requires an existing deterministic implementation commit or open PR.
-A merged PR paired with an open or reopened issue is intentionally ambiguous
-and receives no recovery mode or automatic close. Only `implement` may request
-a fresh ReviewGPT implementation patch. Other ambiguous or divergent state has
-no recovery mode.
+Recovery is a parent classification, not a prompt guess. A fresh deterministic
+branch has no commit, remote branch, or PR. Under the run lock, interrupted
+tracked, untracked, and ignored residue on only that state is reset and cleaned
+back to `origin/main`. Dirty work may resume without reset only when one open
+issue-closing PR, the remote branch, and the local committed head bind the same
+repair; the child finishes the interrupted edit and the parent reruns review.
+A clean implementation commit or open PR may also resume without requesting a
+second implementation patch. Divergence, mismatched ownership, merged or
+closed-unmerged PR state, and other ambiguity fail closed. After an unrelated
+clean primary fast-forward the same invocation continues discovery; it exits
+once only when a module already loaded by the launcher changed.
 
-One ephemeral Codex worker in `implement` mode must ask a fresh ReviewGPT Pro
-thread to author a downloadable patch before implementation. Missing,
-ambiguous, stale, unsafe, or prose-only output ends the run; Codex cannot
-silently substitute its own patch. Resume workers do not repeat that
-implementation request.
-After application, the ordinary Murph plan, focused proof, preliminary
-ReviewGPT, final ReviewGPT when routed, PR metadata, required exact-head CI, and
-current-base proof remain mandatory. The worker stops with bounded ignored
-readiness and exact ReviewGPT evidence; the non-model parent revalidates the
-live App-author/label/binding authority, open PR head, required checks, and
-current-base merge immediately before an ordinary head-matched squash merge.
-Only that newly verified merge may precede parent-owned issue closure. Every
-parent command and the worker share one four-hour invocation deadline and run
-in an exact supervised process group. The worker has no branch-protection,
-ruleset, GitHub Actions, or Frog App bypass authority.
+The non-model parent opens a fresh ReviewGPT Pro thread, builds the review
+archive itself from committed Git objects, requires exactly one latest-response
+patch attachment, validates it, and applies it. Review responses, model proof,
+browser access, and downloaded patches remain in an owner-only parent transient
+directory outside the issue worktree. One ephemeral Codex child then receives
+workspace-only writes, no tool network, no SSH agent, no browser root, no Git
+common directory, no plugins, no configured MCP server, and no parent evidence
+path. It may integrate code, tests, docs, the plan, and a private PR draft, but
+cannot commit, push, publish, review, merge, close, or manufacture authority
+evidence.
+
+The parent structurally validates the diff, commits with hooks disabled, pushes
+with hooks disabled, publishes the draft PR, invokes preliminary and final
+ReviewGPT directly from parent-built exact-head archives, and waits for required
+CI. Immediately before merge it revalidates App author, label, one committed
+binding, PR head, checks, and current-base mergeability. A deterministic
+allowlist permits automatic merge only for local agent/Codex workflow paths,
+with semantic exceptions limited to the Frog script entry in `package.json`
+and this section of `ARCHITECTURE.md`. Any possible product-runtime, deployment,
+or GitHub-workflow change stays as a reviewed open PR with its issue open for a
+human merge decision. Only a newly verified parent merge may precede issue
+closure. The invocation has one eight-hour deadline; each model worker is
+bounded to two hours and every spawned command or worker has exact process-group
+ownership.
 
 ## Accepted-Message Targeting
 

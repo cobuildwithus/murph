@@ -172,9 +172,6 @@ export function resolveWorkerMode(
   issueNumber: number,
   commands: RecoveryCommandAdapter,
 ): FrogAutofixWorkerMode {
-  if (commands.require("git", ["status", "--porcelain"], worktree)) {
-    throw new Error("issue worktree is not clean");
-  }
   if (
     commands.require(
       "git",
@@ -185,6 +182,55 @@ export function resolveWorkerMode(
     throw new Error("issue worktree branch does not match its deterministic owner");
   }
   commands.require("git", ["fetch", "--quiet", "origin", "main"], worktree);
+
+  const dirty = Boolean(commands.require("git", ["status", "--porcelain"], worktree));
+  let preserveBoundDirtyState = false;
+  if (dirty) {
+    const pullRequests = branchPullRequests(worktree, branch, commands);
+    const remoteLookup = commands.run(
+      "git",
+      ["ls-remote", "--exit-code", "--heads", "origin", branch],
+      worktree,
+    );
+    const localHead = commands.require("git", ["rev-parse", "HEAD"], worktree);
+    const main = commands.require("git", ["rev-parse", "origin/main"], worktree);
+    const ahead = parseCommitCount(commands.require(
+      "git",
+      ["rev-list", "--count", "origin/main..HEAD"],
+      worktree,
+    ));
+    const exactOpenPullRequest = pullRequests.length === 1
+      && pullRequests[0]?.state === "OPEN"
+      && pullRequests[0].headRefOid === localHead
+      && issueClosingKeywordPresent(pullRequests[0].body, issueNumber);
+    preserveBoundDirtyState = Boolean(
+      exactOpenPullRequest
+      && remoteLookup.status === 0
+      && ahead > 0,
+    );
+    if (
+      !preserveBoundDirtyState
+      && (
+        pullRequests.length !== 0
+        || remoteLookup.status !== 2
+        || ahead !== 0
+        || commands.run(
+        "git",
+        ["merge-base", "--is-ancestor", localHead, main],
+        worktree,
+        ).status !== 0
+      )
+    ) {
+      throw new Error("dirty issue worktree has ambiguous recovery state");
+    }
+    if (!preserveBoundDirtyState) {
+      commands.require("git", ["reset", "--hard", "origin/main"], worktree);
+      commands.require("git", ["clean", "-ffdx"], worktree);
+      if (commands.require("git", ["status", "--porcelain"], worktree)) {
+        throw new Error("interrupted issue worktree did not recover cleanly");
+      }
+    }
+  }
   synchronizeRemoteIssueBranch(worktree, branch, commands);
 
   const pullRequests = branchPullRequests(worktree, branch, commands);
@@ -196,6 +242,26 @@ export function resolveWorkerMode(
       ["rev-list", "--count", "origin/main..HEAD"],
       worktree,
     ));
+    const remoteLookup = commands.run(
+      "git",
+      ["ls-remote", "--exit-code", "--heads", "origin", branch],
+      worktree,
+    );
+    if (ahead === 0 && remoteLookup.status === 2) {
+      if (
+        commands.run(
+          "git",
+          ["merge-base", "--is-ancestor", beforeAdvance, main],
+          worktree,
+        ).status !== 0
+      ) {
+        throw new Error("fresh issue branch cannot reset to origin/main");
+      }
+      commands.require("git", ["reset", "--hard", "origin/main"], worktree);
+      commands.require("git", ["clean", "-ffdx"], worktree);
+    } else if (remoteLookup.status !== 0) {
+      throw new Error(`git failed with status ${remoteLookup.status}`);
+    }
     if (ahead === 0 && beforeAdvance !== main) {
       if (
         commands.run(
@@ -206,7 +272,9 @@ export function resolveWorkerMode(
       ) {
         throw new Error("fresh issue branch cannot fast-forward to origin/main");
       }
-      commands.require("git", ["merge", "--ff-only", "origin/main"], worktree);
+      if (remoteLookup.status === 0) {
+        commands.require("git", ["merge", "--ff-only", "origin/main"], worktree);
+      }
     }
   }
 
@@ -234,7 +302,10 @@ export function resolveWorkerMode(
   });
   const mode = classifyWorkerMode(states, aheadCommitCount);
   if (!mode) throw new Error("issue branch or pull request recovery state is ambiguous");
-  if (commands.require("git", ["status", "--porcelain"], worktree)) {
+  if (
+    commands.require("git", ["status", "--porcelain"], worktree)
+    && !(preserveBoundDirtyState && mode === "resume")
+  ) {
     throw new Error("issue worktree changed during recovery classification");
   }
   return mode;

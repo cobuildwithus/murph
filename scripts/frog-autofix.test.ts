@@ -18,35 +18,43 @@ import { describe, expect, it } from "vitest";
 
 import {
   FROG_AUTOFIX_BOT,
-  FROG_AUTOFIX_READY_PATH,
   FROG_AUTOFIX_INTERVAL_SECONDS,
   buildCodexWorkerArguments,
   classifyWorkerMode,
   eligibleFrogIssues,
   isTrustedFrogIssue,
+  localAgentOnlyChange,
   normalizeGitHubRepository,
   parseEventLog,
-  parseReadyManifest,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
   renderWorkerPrompt,
-  runWithCleanup,
+  reviewOutcome,
   reviewEvidenceIsValid,
   safeFailureMessage,
   superviseOwnedWorker,
-  terminalWorkerSucceeded,
 } from "./frog-autofix-lib.ts";
-import { acquireRunLock, discoverEligibleIssues } from "./frog-autofix.ts";
+import {
+  acquireRunLock,
+  discoverEligibleIssues,
+  primaryAdvanceRequiresRestart,
+  reusableRepairPhase,
+} from "./frog-autofix.ts";
 import {
   branchHasMergedPullRequest,
   resolveWorkerMode,
 } from "./frog-autofix-recovery.ts";
 import {
   finalizeReadyRepair,
-  validateAndFinalizeReadyRepair,
-  type ReadyRepairDependencies,
   type ReadyRepairFinalizationDependencies,
 } from "./frog-autofix-finalize.ts";
+import {
+  extractFirstReviewedHead,
+  extractSingleConversationUrl,
+  renderImplementationPrompt,
+  validatePatchText,
+  validatePullRequestBody,
+} from "./frog-autofix-parent.ts";
 
 const trustedIssue = (number: number) => ({
   author: { login: FROG_AUTOFIX_BOT },
@@ -107,22 +115,8 @@ describe("Frog autofix guards", () => {
     })).toBe(false);
   });
 
-  it("accepts only exact readiness and verified ReviewGPT evidence", () => {
-    const branch = "agent/frog-autofix-42";
+  it("accepts only parent-bound ReviewGPT outcomes and model evidence", () => {
     const head = "a".repeat(40);
-    const specialistHead = "b".repeat(40);
-    const manifest = JSON.stringify({
-      branch,
-      head,
-      issue: 42,
-      pullRequest: 99,
-      schemaVersion: 1,
-      specialistHead,
-    });
-    expect(parseReadyManifest(manifest, 42, branch)).toMatchObject({ head });
-    expect(() => parseReadyManifest(manifest, 43, branch)).toThrow();
-    expect(FROG_AUTOFIX_READY_PATH).toBe("audit-packages/frog-autofix-ready.json");
-
     const response = `Issue #42\nReviewed ${head.slice(0, 12)}\nROUND_OUTCOME: PASS\nREVIEW_COMPLETE\n`;
     const hash = createHash("sha256").update(response).digest("hex");
     const modelVerification = JSON.stringify({
@@ -147,6 +141,12 @@ describe("Frog autofix guards", () => {
       modelVerification,
       response,
     })).toBe(false);
+    expect(reviewOutcome(response, "final")).toBe("pass");
+    expect(reviewOutcome(
+      "SPECIALIST_OUTCOME: FINDINGS\nSPECIALIST_REVIEW_COMPLETE\n",
+      "specialist",
+    )).toBe("findings");
+    expect(reviewOutcome("ROUND_OUTCOME: PASS\n", "final")).toBe("invalid");
   });
 
   it("uses the production discovery path for parsing, bounds, and selection", () => {
@@ -234,7 +234,8 @@ describe("Frog autofix guards", () => {
       "implement",
     );
     expect(prompt).toContain("Issue 42 must remain 42.");
-    expect(prompt).toContain("pnpm review:gpt --connector github");
+    expect(prompt).toContain("parent selected **implement mode**");
+    expect(prompt).toContain("not perform a mutating Git operation");
     expect(() => renderWorkerPrompt("No placeholder", 42, "implement")).toThrow();
     expect(() => renderWorkerPrompt(
       "{{ISSUE_NUMBER}} {{MODE_WORKFLOW}}",
@@ -248,13 +249,11 @@ describe("Frog autofix guards", () => {
     const complete = renderWorkerPrompt(template, 42, "implement");
     expect(complete).not.toContain("{{ISSUE_NUMBER}}");
     expect(complete).not.toContain("{{MODE_WORKFLOW}}");
-    expect(complete).toContain("--connector github");
-    expect(complete).toContain("--send --wait");
-    expect(complete).toContain("--skip-resume");
-    expect(complete).toContain("exactly one patch or diff attachment");
+    expect(complete).toContain("edit-only");
+    expect(complete).not.toContain("gh pr merge");
     const resume = renderWorkerPrompt(template, 42, "resume");
     expect(resume).toContain("resume mode");
-    expect(resume).not.toContain("pnpm review:gpt --connector github");
+    expect(resume).not.toContain("--connector github");
   });
 
   it("classifies only unambiguous fresh and resumable states", () => {
@@ -312,11 +311,17 @@ describe("Frog autofix guards", () => {
     const implementationHead = "b".repeat(40);
     const runScenario = (options: {
       ahead: number;
+      dirty?: boolean;
       localHead: string;
       pullRequest?: { body: string; state: "MERGED" | "OPEN" };
       remoteBranch: boolean;
-    }) => resolveWorkerMode("<WORKTREE>", branch, 42, {
-      require: (command, args) => {
+    }) => {
+      const required: string[] = [];
+      let recovered = false;
+      const mode = resolveWorkerMode("<WORKTREE>", branch, 42, {
+        require: (command, args) => {
+        const invocation = args.join(" ");
+        required.push(`${command} ${invocation}`);
         if (command === "gh") {
           return JSON.stringify(options.pullRequest ? [{
             baseRefName: "main",
@@ -327,8 +332,9 @@ describe("Frog autofix guards", () => {
             state: options.pullRequest.state,
           }] : []);
         }
-        const invocation = args.join(" ");
-        if (invocation === "status --porcelain") return "";
+        if (invocation === "status --porcelain") {
+          return options.dirty && !recovered ? " M tracked.ts" : "";
+        }
         if (invocation === "symbolic-ref --quiet --short HEAD") return branch;
         if (invocation === "fetch --quiet origin main") return "";
         if (invocation.startsWith("fetch --quiet origin +refs/heads/")) return "";
@@ -338,6 +344,11 @@ describe("Frog autofix guards", () => {
         if (invocation === "rev-list --count origin/main..HEAD") {
           return String(options.ahead);
         }
+        if (invocation === "reset --hard origin/main") {
+          recovered = true;
+          return "";
+        }
+        if (invocation === "clean -ffdx") return "";
         throw new Error(`unexpected required command: ${command} ${invocation}`);
       },
       run: (command, args) => {
@@ -350,27 +361,51 @@ describe("Frog autofix guards", () => {
         }
         throw new Error(`unexpected command: ${command} ${invocation}`);
       },
-    });
+      });
+      return { mode, required };
+    };
 
     expect(runScenario({ ahead: 0, localHead: mainHead, remoteBranch: false }))
-      .toBe("implement");
+      .toMatchObject({ mode: "implement" });
+    const recovered = runScenario({
+      ahead: 0,
+      dirty: true,
+      localHead: mainHead,
+      remoteBranch: false,
+    });
+    expect(recovered.mode).toBe("implement");
+    expect(recovered.required).toContain("git reset --hard origin/main");
+    expect(recovered.required).toContain("git clean -ffdx");
     expect(runScenario({
       ahead: 1,
       localHead: implementationHead,
       remoteBranch: true,
-    })).toBe("resume");
+    })).toMatchObject({ mode: "resume" });
     expect(runScenario({
       ahead: 1,
       localHead: implementationHead,
       pullRequest: { body: "Fixes #42", state: "OPEN" },
       remoteBranch: true,
-    })).toBe("resume");
+    })).toMatchObject({ mode: "resume" });
+    expect(runScenario({
+      ahead: 1,
+      dirty: true,
+      localHead: implementationHead,
+      pullRequest: { body: "Fixes #42", state: "OPEN" },
+      remoteBranch: true,
+    })).toMatchObject({ mode: "resume" });
     expect(() => runScenario({
       ahead: 1,
       localHead: implementationHead,
       pullRequest: { body: "Fixes #42", state: "MERGED" },
       remoteBranch: true,
     })).toThrow("recovery state is ambiguous");
+    expect(() => runScenario({
+      ahead: 0,
+      dirty: true,
+      localHead: mainHead,
+      remoteBranch: true,
+    })).toThrow("ambiguous recovery state");
   });
 
   it("requires one exact merged branch head and closing relationship", () => {
@@ -421,6 +456,10 @@ describe("Frog autofix guards", () => {
     const events: string[] = [];
     let closed = false;
     const dependencies: ReadyRepairFinalizationDependencies = {
+      autoMergeAllowed: () => {
+        events.push("scope");
+        return true;
+      },
       closeIssue: () => {
         events.push("close");
         closed = true;
@@ -451,9 +490,11 @@ describe("Frog autofix guards", () => {
       "pr",
       "checks",
       "merge-tree",
+      "scope",
       "verify-issue",
       "pr",
       "checks",
+      "scope",
       "merge",
       "close",
     ]);
@@ -470,6 +511,7 @@ describe("Frog autofix guards", () => {
       let mergeCalls = 0;
       let verificationCalls = 0;
       const dependencies: ReadyRepairFinalizationDependencies = {
+        autoMergeAllowed: () => true,
         closeIssue: () => undefined,
         currentPullRequest: () => failure === "head"
           ? { head: "b".repeat(40), pullRequest: 99 }
@@ -492,42 +534,32 @@ describe("Frog autofix guards", () => {
     }
   });
 
-  it("does not reach merge when readiness head, ancestry, or review evidence is stale", () => {
-    const branch = "agent/frog-autofix-42";
-    const head = "a".repeat(40);
-    const specialistHead = "b".repeat(40);
-    for (const failure of ["head", "ancestry", "specialist", "final"] as const) {
-      let mergeCalls = 0;
-      const dependencies: ReadyRepairDependencies = {
-        closeIssue: () => undefined,
-        currentPullRequest: () => ({ head, pullRequest: 99 }),
-        issueIsClosed: () => true,
-        loadManifest: () => ({
-          branch,
-          head,
-          issue: 42,
-          pullRequest: 99,
-          schemaVersion: 1,
-          specialistHead,
-        }),
-        localHead: () => failure === "head" ? "c".repeat(40) : head,
-        merge: () => {
-          mergeCalls += 1;
-        },
-        mergeTreePasses: () => true,
-        pullRequestIsMerged: () => true,
-        refreshAndVerifyIssue: () => undefined,
-        requiredChecksPass: () => true,
-        reviewEvidencePasses: (kind) => kind !== failure,
-        specialistHeadIsAncestor: () => failure !== "ancestry",
-        worktreeIsClean: () => true,
-      };
-      expect(() => validateAndFinalizeReadyRepair(
-        { branch, issueNumber: 42 },
-        dependencies,
-      )).toThrow();
-      expect(mergeCalls).toBe(0);
-    }
+  it("stops before merge and issue closure for possible product-runtime changes", () => {
+    let mergeCalls = 0;
+    let closeCalls = 0;
+    const outcome = finalizeReadyRepair({
+      branch: "agent/frog-autofix-42",
+      head: "a".repeat(40),
+      issueNumber: 42,
+      pullRequest: 99,
+    }, {
+      autoMergeAllowed: () => false,
+      closeIssue: () => {
+        closeCalls += 1;
+      },
+      currentPullRequest: () => ({ head: "a".repeat(40), pullRequest: 99 }),
+      issueIsClosed: () => false,
+      merge: () => {
+        mergeCalls += 1;
+      },
+      mergeTreePasses: () => true,
+      pullRequestIsMerged: () => false,
+      refreshAndVerifyIssue: () => undefined,
+      requiredChecksPass: () => true,
+    });
+    expect(outcome).toBe("awaiting-human");
+    expect(mergeCalls).toBe(0);
+    expect(closeCalls).toBe(0);
   });
 
   it("redacts local identifiers from unexpected failure text", () => {
@@ -563,23 +595,166 @@ describe("Frog autofix guards", () => {
     expect(parseEventLog("not-json\n")).toBeNull();
   });
 
-  it("keeps the Codex worker networked but filesystem-scoped", () => {
+  it("keeps the Codex worker edit-only without network or added host roots", () => {
     const args = buildCodexWorkerArguments({
-      browserProfileRoot: "<BROWSER_PROFILE>",
       codexHome: "<CODEX_HOME>",
-      gitCommonDirectory: "<GIT_COMMON_DIR>",
+      disabledMcpServers: ["node_repl"],
       helper: "<WORKER_HELPER>",
       outputDirectory: "<OUTPUT_DIR>",
       promptFile: "<PROMPT_FILE>",
       worktree: "<WORKTREE>",
     });
     expect(args).toContain("workspace-write");
-    expect(args).toContain("sandbox_workspace_write.network_access=true");
-    expect(args).toContain("--add-dir");
-    expect(args).toContain("<BROWSER_PROFILE>");
-    expect(args).toContain("<OUTPUT_DIR>");
-    expect(args).toContain("<GIT_COMMON_DIR>");
+    expect(args).toContain("sandbox_workspace_write.network_access=false");
+    expect(args).not.toContain("--add-dir");
+    expect(args).not.toContain("<BROWSER_PROFILE>");
+    expect(args).not.toContain("<GIT_COMMON_DIR>");
+    expect(args).toContain("plugins");
+    expect(args).toContain("mcp_servers.node_repl.enabled=false");
     expect(args).not.toContain("danger-full-access");
+    expect(() => buildCodexWorkerArguments({
+      codexHome: "<CODEX_HOME>",
+      disabledMcpServers: ["unsafe.name"],
+      helper: "<WORKER_HELPER>",
+      outputDirectory: "<OUTPUT_DIR>",
+      promptFile: "<PROMPT_FILE>",
+      worktree: "<WORKTREE>",
+    })).toThrow("MCP server name is unsafe");
+  });
+
+  it("auto-merges only deterministic local agent and Codex workflow scope", () => {
+    const packageBase = JSON.stringify({ scripts: { typecheck: "tsc" } });
+    const packageHead = JSON.stringify({
+      scripts: { typecheck: "tsc", "frog:autofix": "scripts/frog-autofix" },
+    });
+    const architectureBase = "# Murph Architecture\n\nLast verified: 2026-08-10\n\n## Product\n\nRuntime.\n";
+    const architectureHead = "# Murph Architecture\n\nLast verified: 2026-08-11\n\n## Local Frog Autofix\n\nLocal only.\n\n## Product\n\nRuntime.\n";
+    expect(localAgentOnlyChange({
+      architectureBase,
+      architectureHead,
+      packageBase,
+      packageHead,
+      paths: [
+        ".agents/friction-log/entry/friction.md",
+        "AGENTS.md",
+        "ARCHITECTURE.md",
+        "agent-docs/SECURITY.md",
+        "package.json",
+        "scripts/frog-autofix.ts",
+        "scripts/frog-autofix.test.ts",
+      ],
+    })).toBe(true);
+    for (const productPath of [
+      "apps/web/app/page.tsx",
+      "packages/assistant-runtime/src/runtime.ts",
+      ".github/workflows/release.yml",
+      "scripts/deploy-production.sh",
+    ]) {
+      expect(localAgentOnlyChange({ paths: [productPath] })).toBe(false);
+    }
+    expect(localAgentOnlyChange({
+      packageBase,
+      packageHead: JSON.stringify({ scripts: { typecheck: "echo bypass" } }),
+      paths: ["package.json"],
+    })).toBe(false);
+    expect(localAgentOnlyChange({
+      architectureBase,
+      architectureHead: architectureHead.replace("Runtime.", "Changed runtime."),
+      paths: ["ARCHITECTURE.md"],
+    })).toBe(false);
+  });
+
+  it("continues after unrelated primary advances and restarts for loaded runner changes", () => {
+    expect(primaryAdvanceRequiresRestart(["apps/web/app/page.tsx"])).toBe(false);
+    expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix.ts"])).toBe(true);
+    expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix-parent.ts"])).toBe(true);
+  });
+
+  it("reuses interrupted active plans and advances past completed phase names", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "frog-autofix-plan-"));
+    try {
+      const active = path.join(root, "agent-docs", "exec-plans", "active");
+      const completed = path.join(root, "agent-docs", "exec-plans", "completed");
+      mkdirSync(active, { recursive: true });
+      mkdirSync(completed, { recursive: true });
+      writeFileSync(path.join(active, "frog-autofix-repair-42-resume.md"), "active");
+      expect(reusableRepairPhase(root, 42, "resume")).toBe("resume");
+      writeFileSync(path.join(completed, "frog-autofix-repair-42-resume.md"), "done");
+      expect(reusableRepairPhase(root, 42, "resume")).toBe("resume-2");
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("validates parent-owned implementation patches and PR metadata", () => {
+    const patch = [
+      "diff --git a/scripts/frog-tool.ts b/scripts/frog-tool.ts",
+      "--- a/scripts/frog-tool.ts",
+      "+++ b/scripts/frog-tool.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+    expect(validatePatchText(patch)).toEqual(["scripts/frog-tool.ts"]);
+    expect(() => validatePatchText(
+      patch.replaceAll("scripts/frog-tool.ts", "../outside"),
+    )).toThrow("unsafe path");
+    expect(() => validatePatchText(`${patch}GIT binary patch\n`)).toThrow(
+      "unsupported payload",
+    );
+    expect(extractSingleConversationUrl(
+      "Created https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+    )).toContain("chatgpt.com/c/");
+    expect(() => extractSingleConversationUrl("no conversation")).toThrow();
+    expect(renderImplementationPrompt(42)).toContain(
+      "IMPLEMENTATION_PATCH_COMPLETE",
+    );
+    const reviewedHead = "a".repeat(40);
+    expect(extractFirstReviewedHead(
+      `Body\n\nReviewGPT first-reviewed head: ${reviewedHead}\n`,
+    )).toBe(reviewedHead);
+    expect(extractFirstReviewedHead("Body only\n")).toBeNull();
+    expect(() => extractFirstReviewedHead(
+      "ReviewGPT first-reviewed head: invalid\n",
+    )).toThrow("invalid ReviewGPT baseline");
+    expect(() => extractFirstReviewedHead(
+      `ReviewGPT first-reviewed head: ${reviewedHead}\nReviewGPT first-reviewed head: ${reviewedHead}\n`,
+    )).toThrow("ambiguous ReviewGPT baseline");
+
+    const body = [
+      "## Why this PR exists",
+      "Repair trusted developer friction.",
+      "## User goal / user-visible behavior",
+      "Complete the repair.",
+      "## User experience",
+      "No member-facing claim.",
+      "## Invariants",
+      "Preserve authority.",
+      "## Non-obvious affected surfaces",
+      "None.",
+      "## Architecture and reuse",
+      "- Existing systems reused: repository checks.",
+      "- New logic: bounded repair.",
+      "- New abstractions: no new service.",
+      "- Complexity intentionally avoided: no queue.",
+      "## Changelog",
+      "Changelog: not applicable",
+      "## Hot reply path impact",
+      "Not applicable.",
+      "## Preliminary specialist lenses",
+      "Coverage: applicable.",
+      "## Verification",
+      "Parent-owned checks.",
+      "## Change shape",
+      "Source and tests only.",
+      "ReviewGPT context sensitivity: sensitive",
+      "Fixes #42",
+    ].join("\n\n");
+    expect(() => validatePullRequestBody(body, 42, "<HOME>", "<USER>"))
+      .not.toThrow();
+    expect(() => validatePullRequestBody(`${body}\nFixes #43`, 42, "<HOME>", "<USER>"))
+      .toThrow("issue-closing relationship");
   });
 
   it("recovers only dead or PID-reused locks and preserves live ownership", () => {
@@ -794,25 +969,4 @@ describe("Frog autofix guards", () => {
     expect(settled).toBe(true);
   });
 
-  it("keeps transient cleanup behind worker completion and requires both remote terminals", async () => {
-    let finishWorker: ((value: number) => void) | undefined;
-    let cleaned = false;
-    const resultPromise = runWithCleanup(
-      () => new Promise<number>((resolve) => {
-        finishWorker = resolve;
-      }),
-      () => {
-        cleaned = true;
-      },
-    );
-    await Promise.resolve();
-    expect(cleaned).toBe(false);
-    finishWorker?.(0);
-    await expect(resultPromise).resolves.toBe(0);
-    expect(cleaned).toBe(true);
-    expect(terminalWorkerSucceeded(true, true)).toBe(true);
-    expect(terminalWorkerSucceeded(true, false)).toBe(false);
-    expect(terminalWorkerSucceeded(false, true)).toBe(false);
-    expect(terminalWorkerSucceeded(false, false)).toBe(false);
-  });
 });

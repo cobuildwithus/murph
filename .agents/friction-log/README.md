@@ -87,23 +87,30 @@ Its LaunchAgent runs at load and every two hours, handles at most one issue, and
 admits only an open `enhancement` issue authored by the exact Frog App with one
 matching binding already committed on `main`. The issue number is the only
 issue field in the parent Codex prompt; all issue content remains untrusted
-evidence. Codex must obtain an attached implementation patch from a fresh
-ReviewGPT Pro thread for a fresh implementation, then follow the ordinary Murph
-plan, verification, ReviewGPT review, PR, required-CI, and non-admin merge
-gates. A recovery run resumes existing reviewed state without acquiring another
-implementation patch. It closes an issue only after verifying the PR merged.
+evidence. The non-model parent obtains and validates an attached implementation
+patch from a fresh ReviewGPT Pro thread, then starts a network-denied,
+workspace-only Codex child for local integration. The parent alone commits,
+pushes, publishes the PR, runs ReviewGPT, observes required CI, merges, and
+closes. A recovery run resumes existing parent-owned state without acquiring
+another implementation patch.
 
 Retry state is classified before model work. A clean branch with no commit or
 PR enters `implement`; an existing implementation commit or open PR enters
-`resume` without another implementation-patch request; and an exact merged PR
-with its closing relationship enters `close-issue`. Dirty, divergent,
-multiply-owned, closed-unmerged, mismatched-head, or otherwise ambiguous state
-fails closed.
+`resume` without another implementation-patch request. Under the exact run
+lock, interruption residue is reset only when there is no commit, remote branch,
+PR, or divergence. Dirty work may instead resume only when one open
+issue-closing PR, its remote branch, and the local committed head all identify
+the same repair; the edit-only child must finish that work and the parent
+reruns the gates. Divergent, multiply-owned, closed-unmerged, mismatched-head,
+merged, or otherwise ambiguous state fails closed.
 
 GitHub is the repair queue and completion ledger. Local owner-only state stores
-only relative checkout/Codex-home locators, one process-identity lock, and a
-bounded metadata log. Missing browser auth, missing or unsafe patches, dirty or
-ambiguous state, red checks, and blocked merges remain open for a later run;
-the tool never bypasses repository policy. Use `scripts/frog-autofix uninstall`
-to unload the exact local job and remove its local state. Uninstall refuses
-while the verified scheduler or detached worker process is still alive.
+only relative checkout/Codex-home locators, one process-identity lock, a bounded
+metadata log, and invocation-scoped parent review artifacts. Missing browser
+auth, missing or unsafe patches, ambiguous state, red checks, and blocked
+merges remain open. A narrow exact-head classifier auto-merges local
+agent/Codex workflow changes only; every possible product-runtime change pauses
+as a reviewed PR for human merge with its issue open. Use
+`scripts/frog-autofix uninstall` to unload the exact local job and remove its
+local state. Uninstall refuses while the verified scheduler or detached worker
+process is still alive.

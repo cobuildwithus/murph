@@ -1012,16 +1012,16 @@ Last verified: 2026-08-11
 - The optional local Frog repair loop uses the operator's already-authenticated
   `gh`, Codex, and managed ReviewGPT browser sessions. It never reads, copies,
   stores, prints, or injects their credential values and never receives the
-  Frog reconciliation App's private key or installation token. Its child
-  environment is allowlisted and excludes ambient GitHub tokens, database
-  URLs, and Frog database settings. Codex uses workspace-write with explicitly
-  enabled network access and additional writable roots only for the existing
-  managed Brave profile and the exact owner-only transient worker-output
-  directory plus the repository's exact shared Git common directory needed by
-  a linked worktree; it does not receive general write authority outside those
-  roots and the task worktree. The parent installs pinned dependencies in a new
-  task worktree before model work so the child does not need a writable package
-  store outside that boundary.
+  Frog reconciliation App's private key or installation token. Only the
+  non-model parent receives ambient GitHub, browser, SSH-agent, and Git-common
+  access. It builds review archives from committed Git objects and keeps
+  ReviewGPT responses, model proof, browser downloads, and prompts in one
+  owner-only transient directory outside the issue worktree. The Codex child
+  gets workspace-write with tool network explicitly disabled, no additional
+  writable root, no SSH agent, no GitHub tokens, no browser profile, no Git
+  common directory, and no parent review path. Plugins are disabled and every
+  configured MCP server is explicitly disabled for that child. The parent
+  installs pinned dependencies before model work.
 - An issue is model-work authority only when it remains open, is authored by
   the exact configured Frog App, retains the expected label, and has exactly
   one matching binding in the protected default branch's committed friction
@@ -1035,32 +1035,47 @@ Last verified: 2026-08-11
 - Parent-selected recovery mode is derived from exact clean branch ancestry,
   deterministic PR ownership, head identity, state, and closing relationship.
   Only a fresh branch can authorize the implementation ReviewGPT request;
-  resume omits that command entirely. A merged PR with an open or reopened
-  issue, ambiguous state, or multiply-owned state grants no worker mode and no
-  automatic issue closure.
-- In fresh `implement` mode, ReviewGPT must return exactly one latest-response
-  patch or diff attachment. The worker rejects parent traversal, absolute
-  paths, binaries, unrelated scope, credentials, direct identifiers, private
-  evidence, and generated artifacts before applying it. An absent or rejected
-  patch is terminal for that run; Codex does not invent a replacement
-  implementation. Recovery modes cannot request a second implementation patch.
-- Automatic merge authority is narrower than change authority. The model
-  worker may only leave a bounded ignored readiness manifest and exact
-  CLI-generated ReviewGPT response/model evidence. The non-model parent checks
-  those files, clean head identity, specialist ancestry, the exact open PR,
+  resume omits that command entirely. An interrupted dirty diff can resume only
+  when the one open issue-closing PR, remote branch, and local committed head
+  match exactly; it returns to an edit-only child and every parent gate reruns.
+  A merged PR with an open or reopened issue, ambiguous state, or
+  multiply-owned state grants no worker mode and no automatic issue closure.
+- In fresh `implement` mode, the parent ReviewGPT request must return exactly
+  one latest-response patch or diff attachment. The parent rejects traversal,
+  absolute and control paths, binaries, generated artifacts, and an invalid
+  `git apply --check` before applying it, then rejects credential-shaped or
+  direct-identifier content before committing. An absent or rejected patch is
+  terminal; the edit-only Codex child cannot request a replacement. Recovery
+  cannot request a second implementation patch.
+- The child may edit only the issue worktree and a private ignored PR draft. It
+  cannot run Git, GitHub, ReviewGPT, browser automation, or network clients and
+  cannot author readiness, response, model-verification, or GitHub-state
+  evidence. The parent does not execute child-authored package scripts or tests
+  in its credentialed context: it runs fixed Git structural checks, commits and
+  pushes with hooks disabled, and relies on exact-head CI for independent
+  executable proof. Parent ReviewGPT uses a trusted preset read from
+  `origin/main`, a parent-generated config, and a parent-generated archive, not
+  child-modifiable review wrappers.
+- Automatic merge authority is narrower than change authority. The parent
+  requires valid preliminary/final ReviewGPT evidence, the exact open PR,
   nonempty green required checks, and a clean current-base merge. It then
   re-fetches and revalidates App author, open state, label, exactly one committed
-  binding, PR head, and checks immediately before an ordinary
-  `--match-head-commit` squash merge. The worker never merges or closes, and
-  neither owner uses admin merge, self-approval, ruleset bypass,
-  branch-protection mutation, or skipped/missing gate reinterpretation. The
-  parent closes only the issue attached to the merge it just verified.
+  binding, PR head, checks, and the exact-head scope classifier immediately
+  before an ordinary `--match-head-commit` squash merge. Only `.agents` content,
+  `AGENTS.md`, `agent-docs`, named Frog/ReviewGPT local scripts, the exact Frog
+  package script, and the isolated Local Frog Autofix architecture section may
+  auto-merge. Any other path, changed product architecture outside that section,
+  GitHub workflow/action, hook, or possible runtime surface remains open for a
+  human merge decision and does not close its issue. Neither owner uses admin
+  merge, self-approval, ruleset bypass, branch-protection mutation, or
+  skipped/missing gate reinterpretation.
 - Durable local files use owner-only permissions and contain only home-relative
   locators, process identity, issue numbers, timestamps, event names, and exit
-  status. Worker prompts, transcripts, command output, and downloaded patches
-  stay in one owner-only transient directory and are removed after the exact
-  child process group disappears. Every external command gets its own exact
-  supervised group and is bounded by the same absolute invocation deadline.
+  status. Parent prompts, responses, command output, and downloaded patches stay
+  in one owner-only transient directory and are removed at invocation end,
+  after every exact owned process group disappears. Every external command gets
+  its own exact supervised group and is bounded by the same absolute invocation
+  deadline.
 
 ## Scheduled assistant action authority
 
