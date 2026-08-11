@@ -255,6 +255,7 @@ function onboardingStateSupportsGoalCheckin(
 function shouldReactivateConsumedLegacyOneShot(
   automation: AutomationRecord | null,
 ): automation is AutomationRecord & {
+  activeUntil: string
   schedule: Extract<AutomationRecord['schedule'], { kind: 'at' }>
 } {
   if (
@@ -262,16 +263,17 @@ function shouldReactivateConsumedLegacyOneShot(
     automation.automationId !== MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID ||
     automation.slug !== 'onboarding-goal-checkin' ||
     automation.status !== 'archived' ||
+    automation.activeUntil === null ||
     automation.schedule.kind !== 'at'
   ) {
     return false
   }
 
-  const scheduledAtMs = Date.parse(automation.schedule.at)
+  const activeUntilMs = Date.parse(automation.activeUntil)
   const archivedAtMs = Date.parse(automation.updatedAt)
-  return Number.isFinite(scheduledAtMs) &&
+  return Number.isFinite(activeUntilMs) &&
     Number.isFinite(archivedAtMs) &&
-    archivedAtMs >= scheduledAtMs
+    archivedAtMs >= activeUntilMs
 }
 
 function isoDateWeekday(date: string): number {
