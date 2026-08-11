@@ -83,6 +83,8 @@ describe("ChangelogPage", () => {
 
     expect(markup).toContain('aria-label="Changelog pages"');
     expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
+    expect(markup).toContain('aria-label="Changelog pages"');
+    expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
   });

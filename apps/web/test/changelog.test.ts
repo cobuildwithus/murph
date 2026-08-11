@@ -320,6 +320,12 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("lighter-accessible-homepage")).toMatchObject({
+      sourcePullRequests: [1573],
+      summary: expect.stringContaining("compact avatar images"),
+      details: expect.stringContaining("keeps keyboard focus"),
+      tryIt: { href: "/", label: "Visit the homepage" },
+    });
     expect(items.get("referral-notification-route-recovery")).toMatchObject({
       sourcePullRequests: [1592],
       summary: expect.stringContaining("intended direct conversation"),
