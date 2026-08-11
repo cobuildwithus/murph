@@ -6,9 +6,10 @@ import {
 } from "../src/e2e.ts";
 
 describe("hosted-local browser smoke scenario", () => {
-  test("is explicit, opt-in locally, and discoverable through the canonical registry", () => {
+  test("is explicit, isolated, opt-in locally, and discoverable", () => {
     expect(resolveHostedLocalE2eScenarios("hosted-web-browser-smoke")).toEqual([
       {
+        dedicatedVitestProcess: true,
         file: "apps/cloudflare/test/hosted-local-web-browser-smoke-e2e.test.ts",
         manualOnly: true,
         name: "hosted-web-browser-smoke",
