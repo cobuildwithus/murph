@@ -79,8 +79,15 @@ import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
 } from '../src/assistant/cron/execution.ts'
 import {
+  prepareAssistantAutoReplyInput,
+  type AssistantAutoReplyPromptInput,
+} from '../src/assistant/automation/prompt-builder.ts'
+import {
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
+import {
+  resolveAssistantPromptTimeContext,
+} from '../src/assistant/prompt-time.ts'
 import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
@@ -2719,6 +2726,130 @@ describeRealCodex('real Codex weekly health insight evidence fallback e2e', () =
           }
         }
       } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () => {
+  it(
+    'rechecks a later import in the same conversation without relabeling UTC as local time',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-wearable-arrival-timezone-e2e-'),
+      )
+
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        const stateFile = path.join(workingDirectory, 'wearable-state.txt')
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'daily-activity' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'running-cardio' }),
+          materializeWearableArrivalVaultCli({ binDirectory }),
+          writeFile(stateFile, 'missing\n', 'utf8'),
+        ])
+
+        const promptTimeContext = {
+          ...await resolveAssistantPromptTimeContext(workingDirectory),
+          currentLocalDate: '2026-07-15',
+        }
+        expect(promptTimeContext).toMatchObject({
+          canonicalTimeZoneAvailable: true,
+          currentTimeZone: 'America/New_York',
+        })
+        const firstPrompt = await buildWearableArrivalPrompt({
+          occurredAt: '2026-07-15T17:45:30.000Z',
+          promptTimeContext,
+          text: 'Could you review today\'s cardio session? I alternated jogging and walking.',
+          vaultRoot: workingDirectory,
+        })
+        expect(firstPrompt).toContain(
+          'Occurred at (America/New_York local; UTC in brackets): 2026-07-15 13:45:30 [UTC 2026-07-15T17:45:30.000Z]',
+        )
+
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildWearableArrivalDeveloperInstructions(
+            promptTimeContext,
+          ),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            MURPH_WEARABLE_TIMING_E2E_STATE_FILE: stateFile,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: firstPrompt,
+        })
+        const firstActions = readCapabilityRoutingActions(first.jsonEvents)
+        expect(firstActions).toContainEqual(expect.objectContaining({
+          kind: 'command',
+          command: expect.stringMatching(/vault-cli[^\n]*wearables/iu),
+        }))
+        expect(first.finalMessage).toMatch(/cardio|run|session|workout/iu)
+        expect(first.finalMessage).toMatch(/cannot|can['’]t|hasn['’]t|isn['’]t|\bno\b|\bnot\b/iu)
+        expect(first.finalMessage).not.toMatch(/2\.4|24m|17:45/iu)
+
+        await writeFile(stateFile, 'present\n', 'utf8')
+        const secondPrompt = await buildWearableArrivalPrompt({
+          occurredAt: '2026-07-15T18:20:00.000Z',
+          promptTimeContext,
+          text: [
+            'Please check the wearable record again now.',
+            'If the run is present, summarize it and state when I originally asked you to analyze it in both my local time and UTC.',
+          ].join(' '),
+          vaultRoot: workingDirectory,
+        })
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: secondPrompt,
+          resumeSessionId: first.sessionId,
+        })
+        const secondActions = readCapabilityRoutingActions(second.jsonEvents)
+        expect(secondActions).toContainEqual(expect.objectContaining({
+          kind: 'command',
+          command: expect.stringMatching(/vault-cli[^\n]*wearables/iu),
+        }))
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(second.finalMessage).toMatch(/2\.4/iu)
+        expect(second.finalMessage).toMatch(
+          /(?:1:45|13:45).*(?:America\/New_York|Eastern|EDT|local)/iu,
+        )
+        expect(second.finalMessage).toMatch(
+          /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*UTC/iu,
+        )
+        expect(second.finalMessage).not.toMatch(
+          /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*(?:Eastern|EDT|EST)/iu,
+        )
+        process.stdout.write(
+          `[wearable-arrival-timezone-e2e] ${JSON.stringify({
+            firstFinalMessage: first.finalMessage,
+            secondFinalMessage: second.finalMessage,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPath(workingDirectory)
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
     },
@@ -6967,6 +7098,137 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
       '    ;;',
       '  *"wearables"*|*"experiment"*|*"goal"*|*"list"*|*"search"*|*"meal"*)',
       '    printf \'%s\\n\' \'{"data":[],"summary":"No material change in the available canonical period."}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function buildWearableArrivalPrompt(input: {
+  occurredAt: string
+  promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>
+  text: string
+  vaultRoot: string
+}): Promise<string> {
+  const promptInput: AssistantAutoReplyPromptInput = {
+    actorIsSelf: false,
+    attachmentDescriptors: [],
+    attachmentEvidence: {
+      attachments: [],
+      optionalInboxCaptureId: null,
+      reasonCode: null,
+      source: null,
+      status: 'not_attempted',
+      updatedAt: null,
+    },
+    conversation: {
+      accountId: null,
+      actorId: 'actor-wearable-arrival-e2e',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: 'thread-wearable-arrival-e2e',
+      threadIsDirect: true,
+    },
+    inputId: `input-${input.occurredAt}`,
+    occurredAt: input.occurredAt,
+    projection: null,
+    receivedAt: input.occurredAt,
+    replyContext: null,
+    replyTarget: {
+      channel: 'linq',
+      messageId: `message-${input.occurredAt}`,
+      threadId: 'thread-wearable-arrival-e2e',
+    },
+    source: 'linq',
+    sourceMetadata: null,
+    telegramMetadata: null,
+    text: input.text,
+  }
+  const prepared = await prepareAssistantAutoReplyInput(
+    [promptInput],
+    input.vaultRoot,
+    { promptTimeContext: input.promptTimeContext },
+  )
+  if (prepared.kind !== 'ready') {
+    throw new Error(`Expected wearable arrival prompt to be ready, received ${prepared.kind}.`)
+  }
+  return prepared.prompt
+}
+
+function buildWearableArrivalDeveloperInstructions(
+  promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>,
+): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    canonicalTimeZoneAvailable:
+      promptTimeContext.canonicalTimeZoneAvailable,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: promptTimeContext.currentLocalDate,
+    currentTimeZone: promptTimeContext.currentTimeZone,
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+async function materializeWearableArrivalVaultCli(input: {
+  binDirectory: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const missingResult = JSON.stringify({
+    activities: [],
+    date: '2026-07-15',
+    summary: {
+      totalWorkoutDurationSeconds: 0,
+      workoutCount: 0,
+    },
+  })
+  const presentResult = JSON.stringify({
+    activities: [{
+      averagePaceSecondsPerMile: 600,
+      distanceMiles: 2.4,
+      durationSeconds: 1_440,
+      startAt: '2026-07-15T17:10:00.000Z',
+      type: 'running',
+    }],
+    date: '2026-07-15',
+    summary: {
+      totalWorkoutDurationSeconds: 1_440,
+      workoutCount: 1,
+    },
+  })
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"wearables sources list"*)',
+      '    printf \'%s\\n\' \'{"sources":[{"provider":"fixture","status":"healthy","lastDate":"2026-07-15","stalenessVsNewestDays":0}]}\'',
+      '    ;;',
+      '  *"wearables"*)',
+      '    if [ "$(head -n 1 "$MURPH_WEARABLE_TIMING_E2E_STATE_FILE")" = "present" ]; then',
+      `      printf '%s\\n' '${presentResult}'`,
+      '    else',
+      `      printf '%s\\n' '${missingResult}'`,
+      '    fi',
       '    ;;',
       '  *)',
       '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',

@@ -377,6 +377,42 @@ describe('assistant Codex turn planning', () => {
     expect(plan).not.toHaveProperty(removedRouteEnvProperty)
   })
 
+  it('reuses one UTC-only time authority when the member timezone is unknown', async () => {
+    const promptTimeContext = {
+      canonicalTimeZoneAvailable: false,
+      currentLocalDate: '2026-08-11',
+      currentTimeZone: 'UTC',
+    } as const
+    const session = createSession()
+    const executionPlan = await buildCodexTurnExecutionPlan({
+      input: {
+        ...createMessageInput(),
+        promptTimeContext,
+      },
+      plan: createSharedPlan(),
+      resolvedSession: session,
+      route: createRoute(),
+      turnCreatedAt: '2026-08-11T00:00:00.000Z',
+      turnId: 'turn-utc-only-time-authority',
+    })
+    const attemptPlan = await buildCodexTurnAttemptPlan({
+      attemptCount: 1,
+      executionPlan,
+      session,
+    })
+
+    expect(executionPlan.promptTimeContext).toBe(promptTimeContext)
+    expect(attemptPlan.routePlan.systemPrompt).toContain(
+      "The member's canonical timezone is unknown for this turn.",
+    )
+    expect(attemptPlan.routePlan.systemPrompt).toContain(
+      'The current UTC date is August 11, 2026; the member-local date is unknown for this turn.',
+    )
+    expect(attemptPlan.routePlan.systemPrompt).not.toContain(
+      "The user's canonical timezone for this vault is UTC.",
+    )
+  })
+
   it('projects the fail-closed Android app gate into direct assistant guidance', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',

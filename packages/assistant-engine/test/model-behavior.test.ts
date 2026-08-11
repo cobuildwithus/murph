@@ -2039,6 +2039,9 @@ describe('assistant system prompt cache stability', () => {
       "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
     )
     expect(layers.threadContextPrompt).toContain(
+      'never relabel the raw UTC clock as local time',
+    )
+    expect(layers.threadContextPrompt).toContain(
       'In user-facing prose, refer to dates with a month name and day',
     )
     expect(layers.threadContextPrompt).toContain(

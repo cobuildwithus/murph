@@ -279,6 +279,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.onboarding_followup_reconciled",
     );
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.dense_raw_retention");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.import_completed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.job_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");

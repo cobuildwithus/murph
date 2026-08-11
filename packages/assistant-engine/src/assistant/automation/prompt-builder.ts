@@ -1,6 +1,7 @@
 import type {
   AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import { normalizeIanaTimeZone } from '@murphai/contracts'
 import type { AssistantUserMessageContentPart } from '../content-types.js'
 import type {
   AssistantGroupParticipantDisplayNameSource,
@@ -27,6 +28,12 @@ import {
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
 import { readAssistantInputMessageRef } from '../message-target-selection.js'
+import {
+  formatAssistantPromptInstant,
+  formatAssistantPromptUtcInstant,
+  resolveAssistantPromptTimeContext,
+  type ResolvedAssistantPromptTimeContext,
+} from '../prompt-time.js'
 import { normalizeNullableString } from '../shared.js'
 
 const MAX_INLINE_ATTACHMENT_TEXT_CHARS = 2000
@@ -129,6 +136,9 @@ type AssistantAutoReplyPromptInputWithBundles = AssistantAutoReplyPromptInput & 
  */
 export function buildAssistantAutoReplyPrompt(
   inputs: readonly AssistantAutoReplyPromptInput[],
+  options: {
+    timeZone?: string
+  } = {},
 ): AssistantAutoReplyPrompt {
   const sections = inputs
     .map((entry, index) => {
@@ -181,7 +191,11 @@ export function buildAssistantAutoReplyPrompt(
 
   return {
     kind: 'ready',
-    prompt: buildAssistantAutoReplyPromptText(inputs, sections),
+    prompt: buildAssistantAutoReplyPromptText(
+      inputs,
+      sections,
+      normalizeIanaTimeZone(options.timeZone),
+    ),
   }
 }
 
@@ -191,8 +205,19 @@ export async function prepareAssistantAutoReplyInput(
   options: {
     materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
     onEvent?: (event: AssistantRunEvent) => void
+    promptTimeContext?: ResolvedAssistantPromptTimeContext
+    timeZone?: string
   } = {},
 ): Promise<AssistantAutoReplyPreparedInput> {
+  const explicitTimeZone = normalizeIanaTimeZone(options.timeZone)
+  const resolvedPromptTimeContext = explicitTimeZone
+    ? null
+    : options.promptTimeContext
+      ?? await resolveAssistantPromptTimeContext(vaultRoot)
+  const promptTimeZone = explicitTimeZone
+    ?? (resolvedPromptTimeContext?.canonicalTimeZoneAvailable
+      ? resolvedPromptTimeContext.currentTimeZone
+      : null)
   const derivedEvidenceReadBudget = createAssistantDerivedEvidenceReadBudget()
   const preparedInputs: AssistantAutoReplyPromptInputWithBundles[] = []
   for (const entry of inputs) {
@@ -251,7 +276,11 @@ export async function prepareAssistantAutoReplyInput(
     .filter((section): section is string => section !== null)
 
   const hasTextualContent = textualSections.length > 0
-  const nextPrompt = buildAssistantAutoReplyPromptText(inputs, textualSections)
+  const nextPrompt = buildAssistantAutoReplyPromptText(
+    inputs,
+    textualSections,
+    promptTimeZone,
+  )
   const attachmentSources = buildPreparedAttachmentSources(preparedInputs)
 
   const preparedMultimodalInput =
@@ -729,6 +758,7 @@ function renderInlineAttachmentFragmentTitle(
 
 function buildAssistantAutoReplyContextLines(
   inputs: readonly AssistantAutoReplyPromptInput[],
+  timeZone: string | null,
 ): Array<string | null> {
   const firstInput = inputs[0]
   const lastInput = inputs[inputs.length - 1]
@@ -736,14 +766,22 @@ function buildAssistantAutoReplyContextLines(
     return []
   }
 
+  const normalizedTimeZone = normalizeIanaTimeZone(timeZone)
   const mediaGroupId = resolveGroupedTelegramMediaGroupId(inputs)
+  const occurredAt = normalizedTimeZone
+    ? `Occurred at (${normalizedTimeZone} local; UTC in brackets): ${
+        firstInput.occurredAt === lastInput.occurredAt
+          ? formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)
+          : `${formatAssistantPromptInstant(firstInput.occurredAt, normalizedTimeZone)} -> ${formatAssistantPromptInstant(lastInput.occurredAt, normalizedTimeZone)}`
+      }`
+    : `Occurred at (UTC only; member timezone unknown): ${
+        firstInput.occurredAt === lastInput.occurredAt
+          ? formatAssistantPromptUtcInstant(firstInput.occurredAt)
+          : `${formatAssistantPromptUtcInstant(firstInput.occurredAt)} -> ${formatAssistantPromptUtcInstant(lastInput.occurredAt)}`
+      }`
   return [
     `Source: ${firstInput.source}`,
-    `Occurred at: ${
-      firstInput.occurredAt === lastInput.occurredAt
-        ? firstInput.occurredAt
-        : `${firstInput.occurredAt} -> ${lastInput.occurredAt}`
-    }`,
+    occurredAt,
     `Thread: ${firstInput.conversation.threadId ?? 'unknown'}`,
     firstInput.conversation.threadIsDirect === false
       ? null
@@ -772,8 +810,9 @@ function resolveGroupedTelegramMediaGroupId(
 function buildAssistantAutoReplyPromptText(
   inputs: readonly AssistantAutoReplyPromptInput[],
   sections: readonly string[],
+  timeZone: string | null,
 ): string {
-  const contextLines = buildAssistantAutoReplyContextLines(inputs).filter(
+  const contextLines = buildAssistantAutoReplyContextLines(inputs, timeZone).filter(
     (line): line is string => line !== null,
   )
   return sections.length > 0

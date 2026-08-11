@@ -51,7 +51,7 @@ import {
   createAssistantDeliveryBlockedError,
 } from './assistant/delivery-failure.js'
 import {
-  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
   type AssistantResponseCard,
@@ -205,7 +205,7 @@ type LinqIMessageAppCardRequest = {
       }
       interactive: true
       url: string
-      fallback_text: typeof LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT
+      fallback_text: ReturnType<typeof buildLinqIMessageAppFallbackText>
       layout: LinqIMessageAppLayout
     }]
   }
@@ -728,7 +728,7 @@ export async function sendLinqIMessageAppCard(
         },
         interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
-        fallback_text: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+        fallback_text: buildLinqIMessageAppFallbackText(input.card),
         layout: buildLinqIMessageAppLayout(input.card),
       }],
     },

@@ -21,6 +21,7 @@ import type {
   AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
+import type { ResolvedAssistantPromptTimeContext } from './prompt-time.js'
 import type {
   AssistantProviderStartCriticalPathContext,
 } from './provider-start-critical-path.js'
@@ -174,6 +175,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   outboxExternalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   persistUserPromptOnFailure?: boolean
+  /** Engine-resolved once for this turn so every prompt layer shares one time authority. */
+  promptTimeContext?: ResolvedAssistantPromptTimeContext
   // Existing App Server per-turn thread option. Never enters session identity
   // or persisted provider config.
   providerThreadEphemeral?: boolean | null

@@ -1284,7 +1284,8 @@ export function createOuraDeviceSyncProvider(config: OuraDeviceSyncProviderConfi
         externalAccountId,
         eventType,
         traceId,
-        occurredAt,
+        ...(payloadOccurredAt ? { occurredAt: payloadOccurredAt } : {}),
+        providerSentAt: new Date(timestampMs).toISOString(),
         resourceCategory: dataType,
         jobs,
       };

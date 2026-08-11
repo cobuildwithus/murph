@@ -7,6 +7,13 @@ Last verified: 2026-08-11
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Direct-insert hosted callback nonce replay convergence through the
+`nonce_hash` primary key, database-clock refusal after the inclusive callback
+expiry boundary, plus bounded background retention and its opt-in PostgreSQL
+concurrency proof, are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/references/hosted-temporal-orchestration.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Member-owned device provider application ownership, exact OAuth and connection
 revision binding, invocation-scoped credential projection, exact token-return
 authority, credential-free stored-token cleanup without operator fallback, and

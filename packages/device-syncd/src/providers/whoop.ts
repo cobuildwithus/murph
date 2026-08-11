@@ -976,13 +976,17 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
           `${externalAccountId}:${eventType}:${resourceId ?? ""}:${sha256Text(context.rawBody.toString("utf8"))}`,
         );
       const jobs = buildWhoopWebhookJobs(eventType, resourceId, payload, traceId);
+      const occurredAt = normalizeIsoTimestamp(
+        payload.occurred_at ?? payload.occurredAt,
+      );
 
       return {
         acceptanceMode: classifyDeviceSyncWebhookAcceptanceMode(jobs),
         externalAccountId,
         eventType,
         traceId,
-        occurredAt: context.now,
+        ...(occurredAt ? { occurredAt } : {}),
+        providerSentAt: new Date(timestampNumber).toISOString(),
         resourceCategory: WHOOP_WEBHOOK_EVENT_MAP[eventType]?.resourceType ?? null,
         jobs,
       };
@@ -1013,4 +1017,13 @@ export function createWhoopDeviceSyncProvider(config: WhoopDeviceSyncProviderCon
   });
 
   return provider;
+}
+
+function normalizeIsoTimestamp(value: unknown): string | null {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }

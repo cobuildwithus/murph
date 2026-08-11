@@ -102,6 +102,24 @@ describe("changelog registry", () => {
     expect(item?.tryIt).toBeUndefined();
   });
 
+  it("keeps iMessage card preview copy descriptive and value-free", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "descriptive-imessage-card-previews",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-11",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1631],
+      summary: expect.stringContaining("daily nutrition"),
+      title: "Clearer iMessage card previews",
+    });
+    expect(item?.details).toContain("free of card values");
+    expect(item?.details).toContain("ask Murph for the card in text");
+    expect(item?.tryIt).toBeUndefined();
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -420,6 +438,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("local-and-utc-activity-timing")).toMatchObject({
+      sourcePullRequests: [1626],
+      summary: expect.stringContaining("local clock beside the exact UTC instant"),
+      details: expect.stringContaining(
+        "without putting health values in operational logs",
+      ),
+    });
+    expect(items.get("local-and-utc-activity-timing")?.tryIt).toBeUndefined();
     expect(items.get("environment-report-loading-preview")).toMatchObject({
       sourcePullRequests: [1617],
       summary: expect.stringContaining("report-shaped preview"),
