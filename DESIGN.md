@@ -492,6 +492,21 @@ unavailable state. After cancellation, replace the action with a durable receipt
 that confirms future automatic refills stopped and existing usage credit stays
 with the group. Do not reload into an unrelated unavailable state.
 
+For a signed-in active group participant, append one quiet **Supporters** list
+beneath the funding action when a current monthly sponsorship or recent
+one-time contribution exists. Use only a public alias entered after the dialog
+discloses its signed-in-group audience and active-monthly-or-recent-20 duration,
+and only after verified settlement preserved the sponsor's group authority;
+otherwise use `Anonymous`. Label each row only as
+`Monthly sponsor` or `One-time contribution`. Do not show amounts, monthly
+maximums, dates, payer identity, payment status, or automatic-refill history.
+Signed-out visitors and non-participants never see the supporter list. Keep the
+list absent when there is nothing to recognize. Stream it beneath the complete
+primary action in its own best-effort Suspense boundary with a null fallback so
+recognition cannot delay funding, management, cancellation, or recovery. Render
+its real component with synthetic states in both the components catalog and
+this section study.
+
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared
 choice cards. On phones, use a near-full-height bottom drawer with one large

@@ -17,15 +17,11 @@ import {
   compactAssistantProviderConfigInput,
   DEFAULT_MURPH_CODEX_REASONING_EFFORT,
   mergeAssistantProviderConfigs,
-  mergeAssistantProviderConfigsForProvider,
   normalizeAssistantHeaders,
   normalizeAssistantPersistedHeaders,
   normalizeAssistantProviderConfig,
-  resolveAssistantChatProviderFromConfig,
-  resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
-  supportsAssistantReasoningEffort,
 } from '../src/assistant/provider-config.ts'
 import {
   isSensitiveAssistantHeader,
@@ -100,8 +96,7 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     compactAssistantProviderConfigInput({ provider: 'codex-cli' }),
     null,
   )
-  const mergedCodex = mergeAssistantProviderConfigsForProvider(
-    'codex-cli',
+  const mergedCodex = mergeAssistantProviderConfigs(
     {
       approvalPolicy: 'never',
       codexCommand: ' codex ',
@@ -125,7 +120,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
       sandbox: 'danger-full-access',
     },
     target: {
-      kind: 'codex-cli',
       codexCommand: 'codex',
       codexHome: '/tmp/home',
       model: 'gpt-5.6-terra',
@@ -134,7 +128,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
       profile: 'default',
     },
   })
-  assert.equal(resolveAssistantChatProviderFromConfig(mergedCodex), 'codex-cli')
   assert.deepEqual(mergeAssistantProviderConfigs(null, mergedCodex), mergedCodex)
   assert.equal(
     normalizeAssistantProviderConfig({ provider: 'codex-cli' }).policy.reasoningEffort,
@@ -153,11 +146,11 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     true,
   )
 
-  const runtime = resolveAssistantProviderRuntimeTarget(mergedCodex)
   assert.deepEqual(serializeAssistantProviderSessionOptions(mergedCodex), {
     approvalPolicy: 'never',
     codexHome: '/tmp/home',
-    continuityFingerprint: runtime.continuityFingerprint,
+    continuityFingerprint:
+      'sha256:2659438fad64495ab8f5401b4378500461339eba8faddc9c47ebc440aa7bbf15',
     executionDriver: 'codex-app-server',
     model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
@@ -179,8 +172,6 @@ test('assistant provider config helpers merge, compact, and serialize Codex targ
     reasoningEffort: 'low',
     sandbox: 'danger-full-access',
   })
-  assert.equal(supportsAssistantReasoningEffort(mergedCodex), true)
-
   assert.throws(
     () =>
       normalizeAssistantProviderConfig({
@@ -275,9 +266,7 @@ test('hosted assistant helpers normalize Codex profiles and active-profile fallb
     normalizedConfig,
   )
   assert.equal(
-    resolveHostedAssistantProfileLabel({
-      provider: 'codex-cli',
-    }),
+    resolveHostedAssistantProfileLabel({}),
     'Codex App Server',
   )
 })

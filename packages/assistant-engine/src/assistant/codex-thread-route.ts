@@ -8,8 +8,6 @@ import {
   assistantCodexModelProviderRequiresModelThreadCompatibility,
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
-  isAssistantCodexTargetConfig,
-  resolveAssistantChatProviderFromConfig,
   serializeAssistantProviderSessionOptions,
   type AssistantProviderConfig,
 } from '@murphai/operator-config/assistant/provider-config'
@@ -29,11 +27,9 @@ export interface CodexThreadIdentity {
 export function buildCodexThreadIdentity(
   providerConfig: AssistantProviderConfig,
 ): CodexThreadIdentity {
-  const provider = resolveAssistantChatProviderFromConfig(providerConfig)
+  const provider = 'codex-cli' as const
   const providerOptions = serializeAssistantProviderSessionOptions(providerConfig)
-  const codexCommand = isAssistantCodexTargetConfig(providerConfig)
-    ? providerConfig.target.codexCommand
-    : null
+  const codexCommand = providerConfig.target.codexCommand
 
   const routeFingerprint = hashCodexThreadIdentity({
     codexCommand,
@@ -77,14 +73,10 @@ function buildCodexThreadIdentityLabel(
     'primary',
     providerLabel,
     normalizeNullableString(providerConfig.target.model),
-    normalizeNullableString(
-      isAssistantCodexTargetConfig(providerConfig)
-        ? providerConfig.target.profile
-        : null,
-    ),
+    normalizeNullableString(providerConfig.target.profile),
   ].filter((value): value is string => value !== null)
 
-  return parts.join(':') || resolveAssistantChatProviderFromConfig(providerConfig)
+  return parts.join(':')
 }
 
 function hashCodexThreadIdentity(input: {

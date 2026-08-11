@@ -23,7 +23,6 @@ export function assistantSelectionToOperatorDefaults(
   return {
     ...buildAssistantProviderDefaultsPatch({
       defaults: existingDefaults,
-      provider: assistant.provider,
       providerConfig: {
         model: assistant.model,
         modelProvider: assistant.modelProvider ?? null,
@@ -84,16 +83,12 @@ export function formatSavedAssistantDefaultsSummary(
     return null
   }
 
-  switch (backend.adapter) {
-    case 'codex-cli':
-    default:
-      return appendAssistantAccountSummary(
-        backend.oss
-          ? `${backend.model ?? 'the configured local model'} via Codex OSS app-server`
-          : `${backend.model ?? 'the configured model'} via Codex app-server`,
-        defaults?.account ?? null,
-      )
-  }
+  return appendAssistantAccountSummary(
+    backend.oss
+      ? `${backend.model ?? 'the configured local model'} via Codex OSS app-server`
+      : `${backend.model ?? 'the configured model'} via Codex app-server`,
+    defaults?.account ?? null,
+  )
 }
 
 export function buildSetupAssistantOptionsFromDefaults(
@@ -104,25 +99,17 @@ export function buildSetupAssistantOptionsFromDefaults(
     return {}
   }
 
-  switch (backend.adapter) {
-    case 'codex-cli':
-    default: {
-      const savedDefaults = resolveAssistantProviderDefaults(
-        defaults ?? null,
-        'codex-cli',
-      )
+  const savedDefaults = resolveAssistantProviderDefaults(defaults ?? null)
 
-      return {
-        assistantPreset: 'codex',
-        assistantModel: savedDefaults?.model ?? undefined,
-        assistantModelProvider: savedDefaults?.modelProvider ?? undefined,
-        assistantCodexCommand: savedDefaults?.codexCommand ?? undefined,
-        assistantCodexHome: savedDefaults?.codexHome ?? undefined,
-        assistantProfile: savedDefaults?.profile ?? undefined,
-        assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
-        assistantOss: savedDefaults?.oss === true ? true : undefined,
-      }
-    }
+  return {
+    assistantPreset: 'codex',
+    assistantModel: savedDefaults?.model ?? undefined,
+    assistantModelProvider: savedDefaults?.modelProvider ?? undefined,
+    assistantCodexCommand: savedDefaults?.codexCommand ?? undefined,
+    assistantCodexHome: savedDefaults?.codexHome ?? undefined,
+    assistantProfile: savedDefaults?.profile ?? undefined,
+    assistantReasoningEffort: savedDefaults?.reasoningEffort ?? undefined,
+    assistantOss: savedDefaults?.oss === true ? true : undefined,
   }
 }
 
