@@ -276,6 +276,18 @@ Required:
   cardinality, whether it runs serially or in parallel, its timeout, retry, and
   fallback behavior, and its expected or measured latency. Include before/after
   call counts and focused trace, benchmark, or deterministic call-count proof.
+- **Database collection fanout impact.** If the diff does not add or change a
+  database-touching collection path, write `Not applicable` and give the reason.
+  Otherwise, at the maximum admitted cardinality, report before/after query
+  count, peak pooled connections and concurrent transactions, and peak
+  concurrent external or crypto work for the composed path, including nested
+  helpers. Name set-based or bounded-page reads, reused owner facts, explicit
+  concurrency caps, and the evidence supporting these bounds. For hot, locked,
+  or transactional paths, include deterministic call-count/concurrency proof;
+  confirm that required live authority, lifetime, target, crypto, transaction,
+  and irreversible-effect revalidation checks remain at their owning boundaries.
+  Cross-reference `Hot reply path impact` when it already supplies these facts
+  instead of repeating them.
 - **Murph initial provider input impact.** Report the complete first
   provider-visible input assembled by Murph and Codex for individual and group
   Murph separately. A provider-input-affecting PR must render the PR base and

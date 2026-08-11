@@ -144,6 +144,22 @@ const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
   },
 }
 
+const CHALLENGE_STANDINGS_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'challenge_standings',
+  version: 1,
+  format: 'individual',
+  title: 'Weird Health Week',
+  subtitle: 'Day 4 of 7',
+  objective: { kind: 'ranking' },
+  entries: [{
+    label: 'Maya',
+    points: 120,
+    coverage: 'complete',
+    detail: null,
+  }],
+  footer: null,
+}
+
 const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
   kind: 'compact_table',
   version: 1,
@@ -1231,6 +1247,85 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })).rejects.toMatchObject({
       code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
+    })
+  })
+
+  it('persists and dispatches challenge standings cards for Linq groups only', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-challenge-card-',
+    )
+    const rendered = renderAssistantResponseCardText(
+      CHALLENGE_STANDINGS_RESPONSE_CARD,
+    )
+    const intent = await createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-group-challenge-card-token',
+      message: 'model-authored text must not become the durable card message',
+      sessionId: 'session-group-challenge-card',
+      threadId: 'thread-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-group-challenge-card',
+      vault: vaultRoot,
+    })
+
+    expect(intent.card).toEqual(CHALLENGE_STANDINGS_RESPONSE_CARD)
+    expect(intent.message).toBe(rendered)
+    expect(intent.threadIsDirect).toBe(false)
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-group-challenge-card-delivered',
+        target: 'thread-group-challenge-card',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+        message: rendered,
+        threadIsDirect: false,
+      }),
+      expect.any(Object),
+    )
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      message: rendered,
+      sessionId: 'session-direct-challenge-card',
+      threadId: 'thread-direct-challenge-card',
+      threadIsDirect: true,
+      turnId: 'turn-direct-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+    })
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'telegram',
+      message: rendered,
+      sessionId: 'session-telegram-group-challenge-card',
+      threadId: 'thread-telegram-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-telegram-group-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
     })
   })
 
