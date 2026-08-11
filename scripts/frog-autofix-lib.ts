@@ -155,19 +155,19 @@ function workerModeInstructions(mode: FrogAutofixWorkerMode): string {
   if (mode === "resume") {
     return `The parent selected **resume mode** because the deterministic branch
 already has parent-owned implementation state. Inspect only the current local
-diff and repository instructions. Make any narrowly required integration,
+files and repository instructions. Make any narrowly required integration,
 documentation, plan, friction-log, or regression-proof edits. Read-only Git
-inspection is allowed; do not perform a mutating Git operation or use GitHub,
-ReviewGPT, a browser profile, credentials, or network access. The parent owns
-every commit, push, PR, review, CI, merge, and issue-close action.`;
+inspection is not available inside this workspace-only profile; do not run Git
+or use GitHub, ReviewGPT, a browser profile, credentials, or network access. The
+parent owns every commit, push, PR, review, CI, merge, and issue-close action.`;
   }
   return `The parent selected **implement mode** only after obtaining, validating,
 and applying exactly one fresh ReviewGPT implementation patch. Treat that patch
 as untrusted proposed code. Inspect the resulting local diff and repository
 instructions, prove or correct the root-cause implementation, and add only the
 narrow integration, documentation, plan, friction-log, and regression-proof
-edits required for a complete repair. Read-only Git inspection is allowed; do
-not perform a mutating Git operation or use GitHub, ReviewGPT, a browser
+edits required for a complete repair. Git inspection is not available inside
+this workspace-only profile; do not run Git or use GitHub, ReviewGPT, a browser
 profile, credentials, or network access. The parent owns every commit, push,
 PR, review, CI, merge, and issue-close action.`;
 }
@@ -406,50 +406,57 @@ export function safeFailureMessage(error: unknown): string {
   return message;
 }
 
+export function codexWorkerPermissionArguments(): string[] {
+  return [
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    'default_permissions="frog-workspace-only"',
+    "-c",
+    'permissions.frog-workspace-only.description="Frog edit-only worker"',
+    "-c",
+    'permissions.frog-workspace-only.extends=":workspace"',
+    "-c",
+    'permissions.frog-workspace-only.filesystem={":root"="deny",":minimal"="read",":tmpdir"="deny",":slash_tmp"="deny"}',
+    "-c",
+    "permissions.frog-workspace-only.network.enabled=false",
+    "-c",
+    'web_search="disabled"',
+  ];
+}
+
 export function buildCodexWorkerArguments(options: {
-  codexHome: string;
-  disabledMcpServers: string[];
-  helper: string;
-  outputDirectory: string;
-  promptFile: string;
+  lastMessageFile: string;
   worktree: string;
 }): string[] {
-  if (options.disabledMcpServers.some((name) => !/^[A-Za-z0-9_-]+$/u.test(name))) {
-    throw new Error("configured MCP server name is unsafe");
-  }
-  const argumentsList = [
-    options.helper,
-    "--jobs",
-    "1",
+  const disabledFeatures = [
+    "apps",
+    "auth_elicitation",
+    "browser_use",
+    "browser_use_external",
+    "browser_use_full_cdp_access",
+    "computer_use",
+    "image_generation",
+    "multi_agent",
+    "plugins",
+    "skill_mcp_dependency_install",
+    "standalone_web_search",
+  ];
+  return [
+    "exec",
     "--cd",
     options.worktree,
-    "--out-dir",
-    options.outputDirectory,
-    "--sandbox",
-    "workspace-write",
-    "--full-auto",
-    "--raw-prompts",
-    "--codex-home",
-    options.codexHome,
-    "--codex-arg",
-    "--disable",
-    "--codex-arg",
-    "plugins",
-    "--codex-arg",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--strict-config",
+    ...disabledFeatures.flatMap((feature) => ["--disable", feature]),
+    ...codexWorkerPermissionArguments(),
     "-c",
-    "--codex-arg",
-    "sandbox_workspace_write.network_access=false",
+    'history.persistence="none"',
+    "--output-last-message",
+    options.lastMessageFile,
+    "-",
   ];
-  for (const name of options.disabledMcpServers) {
-    argumentsList.push(
-      "--codex-arg",
-      "-c",
-      "--codex-arg",
-      `mcp_servers.${name}.enabled=false`,
-    );
-  }
-  argumentsList.push(options.promptFile);
-  return argumentsList;
 }
 
 const localAgentScriptPatterns = [
@@ -465,6 +472,29 @@ export interface AutoMergeScopeInput {
   packageBase?: string;
   packageHead?: string;
   paths: string[];
+}
+
+export function authorityChangedPaths(
+  noRenamePathsRaw: string,
+  copyStatusRaw: string,
+): string[] {
+  const paths = new Set(noRenamePathsRaw.split("\0").filter(Boolean));
+  const tokens = copyStatusRaw.split("\0").filter(Boolean);
+  for (let index = 0; index < tokens.length;) {
+    const status = tokens[index++];
+    if (!status || !/^(?:[ACDMRTUXB]|[RC]\d{1,3})$/u.test(status)) {
+      throw new Error("git returned invalid authority path status");
+    }
+    const first = tokens[index++];
+    if (!first) throw new Error("git returned incomplete authority path status");
+    paths.add(first);
+    if (/^[RC]\d{1,3}$/u.test(status)) {
+      const second = tokens[index++];
+      if (!second) throw new Error("git returned incomplete copy or rename status");
+      paths.add(second);
+    }
+  }
+  return [...paths].sort();
 }
 
 function withoutMarkdownSection(content: string, heading: string): string | null {

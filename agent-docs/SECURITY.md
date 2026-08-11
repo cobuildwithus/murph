@@ -1018,11 +1018,16 @@ Last verified: 2026-08-11
   access. It builds review archives from committed Git objects and keeps
   ReviewGPT responses, model proof, browser downloads, and prompts in one
   owner-only transient directory outside the issue worktree. The Codex child
-  gets workspace-write with tool network explicitly disabled, no additional
-  writable root, no SSH agent, no GitHub tokens, no browser profile, no Git
-  common directory, and no parent review path. Plugins are disabled and every
-  configured MCP server is explicitly disabled for that child. The parent
-  installs pinned dependencies before model work.
+  uses a native permission profile that denies root access, allows only minimal
+  command-runtime reads plus issue-worktree reads and writes, and denies tool
+  network. Its synthetic home and temporary directory are inside an ignored
+  worktree output root. It receives no SSH agent, GitHub token, browser profile,
+  Git common directory, parent review path, plugin, user config, or configured
+  MCP server; browser, app, image, web-search, multi-agent, and MCP-install
+  features are explicitly disabled, and project Codex/MCP config is rejected.
+  The parent installs pinned dependencies only on a clean fresh branch before
+  model work; resumable or model-touched state may never trigger package-manager
+  configuration or installation.
 - An issue is model-work authority only when it remains open, is authored by
   the exact configured Frog App, retains the expected label, and has exactly
   one matching binding in the protected default branch's committed friction
@@ -1054,9 +1059,12 @@ Last verified: 2026-08-11
   evidence. The parent does not execute child-authored package scripts or tests
   in its credentialed context: it runs fixed Git structural checks, commits and
   pushes with hooks disabled, and relies on exact-head CI for independent
-  executable proof. Parent ReviewGPT uses a trusted preset read from
-  `origin/main`, a parent-generated config, and a parent-generated archive, not
-  child-modifiable review wrappers.
+  executable proof. The initial PR mutation includes the immutable
+  first-reviewed head. Preliminary and final parent ReviewGPT use Murph's
+  canonical packager and canonical review state from a detached exact-head
+  checkout only when every executable review control matches trusted `main`.
+  Review findings and changed review controls produce an exact-head human
+  handoff; review prose is never delegated to another autonomous editing turn.
 - Automatic merge authority is narrower than change authority. The parent
   requires valid preliminary/final ReviewGPT evidence, the exact open PR,
   nonempty green required checks, and a clean current-base merge. It then
@@ -1069,7 +1077,11 @@ Last verified: 2026-08-11
   GitHub workflow/action, hook, or possible runtime surface remains open for a
   human merge decision and does not close its issue. Neither owner uses admin
   merge, self-approval, ruleset bypass, branch-protection mutation, or
-  skipped/missing gate reinterpretation.
+  skipped/missing gate reinterpretation. Merge-authority inventories include
+  both source and destination paths for detected renames and copies. Exact-head
+  review-finding and product-runtime handoff markers are parent-owned queue
+  completion state: later scans skip those still-open issues while humans own
+  the next decision.
 - Durable local files use owner-only permissions and contain only home-relative
   locators, process identity, issue numbers, timestamps, event names, and exit
   status. Parent prompts, responses, command output, and downloaded patches stay

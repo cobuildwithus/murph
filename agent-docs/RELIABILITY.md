@@ -151,10 +151,14 @@ Last verified: 2026-08-11
   deterministic branch/worktree identity, and recovers from GitHub branch, PR,
   and issue state. An unrelated primary advance continues discovery in the same
   invocation; a change to an already-loaded launcher module exits once so the
-  next invocation loads it. It does not persist issue bodies or duplicate
-  GitHub queue state locally. The owner lock records both the scheduler process
-  identity and the exact detached worker process identity, so an orphaned
-  still-live child also blocks a replacement run after a launcher crash.
+  next invocation loads it. An exact-head parent handoff on an open deterministic
+  PR marks that issue complete for automated queue selection, whether ReviewGPT
+  found work for a human or the green repair may affect product runtime; later
+  issues therefore continue while the handed-off issue stays open. It does not
+  persist issue bodies or duplicate GitHub queue state locally. The owner lock
+  records both the scheduler process identity and the exact detached worker
+  process identity, so an orphaned still-live child also blocks a replacement
+  run after a launcher crash.
 - Before the worker starts, the parent classifies exact clean state as fresh
   implementation or resumable implementation/open PR. Under the owner lock, a
   fresh branch with no commit, remote branch, PR, or divergence is the only
@@ -179,11 +183,14 @@ Last verified: 2026-08-11
   state for a later pass.
 - A successful child leaves only uncommitted code/docs/tests and a private PR
   draft. The parent applies implementation patches, closes plans, commits,
-  pushes, publishes, reviews, and observes CI. Before merge it revalidates live
-  issue authority, PR head, required checks, current-base mergeability, and the
-  exact changed-path scope. Proven local agent/Codex workflow changes may merge
-  and close automatically; possible product-runtime changes remain as reviewed
-  ready PRs with open issues for human approval.
+  pushes, publishes the immutable review baseline, runs the canonical
+  preliminary and final ReviewGPT gates from a trusted parent checkout, and
+  observes CI. A review finding becomes a durable draft human handoff rather
+  than an autonomous remediation loop. Before merge it revalidates live issue
+  authority, PR head, required checks, current-base mergeability, and both old
+  and new paths of any rename or copy. Proven local agent/Codex workflow changes
+  may merge and close automatically; possible product-runtime changes remain as
+  reviewed ready PRs with open issues for human approval.
 - A successful pass verifies both a merged PR for the deterministic branch and
   the closed issue before attempting ordinary worktree retirement. Retirement
   still uses `scripts/retire-worktree` and silently preserves the checkout when

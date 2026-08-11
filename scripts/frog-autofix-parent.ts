@@ -112,6 +112,9 @@ export function validatePatchText(patch: string): string[] {
       || normalized.split("/").includes("..")
       || normalized === ".git"
       || normalized.startsWith(".git/")
+      || normalized === ".codex"
+      || normalized.startsWith(".codex/")
+      || normalized === ".mcp.json"
       || normalized === ".env"
       || normalized.startsWith(".env.")
       || normalized.startsWith("audit-packages/");

@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import {
   FROG_AUTOFIX_BOT,
   FROG_AUTOFIX_INTERVAL_SECONDS,
+  authorityChangedPaths,
   buildCodexWorkerArguments,
   classifyWorkerMode,
   eligibleFrogIssues,
@@ -36,6 +37,10 @@ import {
 } from "./frog-autofix-lib.ts";
 import {
   acquireRunLock,
+  bodyHasExactReviewPass,
+  bodyHandoff,
+  bodyWithParentMetadata,
+  completedHandoffIssueNumbers,
   discoverEligibleIssues,
   primaryAdvanceRequiresRestart,
   reusableRepairPhase,
@@ -168,6 +173,7 @@ describe("Frog autofix guards", () => {
       },
       fetchDefaultBranch: () => undefined,
       listOpenIssues: () => JSON.stringify(issues),
+      listOpenPullRequests: () => "[]",
     };
 
     expect(discoverEligibleIssues("<ROOT>", dependencies).map((issue) => issue.number))
@@ -188,6 +194,74 @@ describe("Frog autofix guards", () => {
         Array.from({ length: 1_000 }, (_, index) => trustedIssue(index + 1)),
       ),
     })).toThrow("open issue scan reached its bounded limit");
+  });
+
+  it("advances past exact human handoffs without trusting stale markers", () => {
+    const firstHead = "a".repeat(40);
+    const secondHead = "b".repeat(40);
+    const openPullRequests = [
+      {
+        body: `Fixes #9\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
+        headRefName: "agent/frog-autofix-9",
+        headRefOid: firstHead,
+        isDraft: true,
+        state: "OPEN",
+      },
+      {
+        body: `Fixes #10\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
+        headRefName: "agent/frog-autofix-10",
+        headRefOid: secondHead,
+        isDraft: false,
+        state: "OPEN",
+      },
+      {
+        body: `Fixes #11\n\nFrog autofix handoff: product-runtime at ${secondHead}\n`,
+        headRefName: "agent/frog-autofix-11",
+        headRefOid: secondHead,
+        isDraft: true,
+        state: "OPEN",
+      },
+      {
+        body: `Fixes #12\n\nFrog autofix handoff: review-findings at ${firstHead}\n`,
+        headRefName: "agent/frog-autofix-12",
+        headRefOid: secondHead,
+        isDraft: true,
+        state: "OPEN",
+      },
+    ];
+    expect([...completedHandoffIssueNumbers(JSON.stringify(openPullRequests))])
+      .toEqual([9, 10, 11]);
+
+    const issues = [trustedIssue(9), trustedIssue(10), trustedIssue(11), trustedIssue(12)];
+    expect(discoverEligibleIssues("<ROOT>", {
+      assertRepository: () => undefined,
+      bindingCount: () => 1,
+      fetchDefaultBranch: () => undefined,
+      listOpenIssues: () => JSON.stringify(issues),
+      listOpenPullRequests: () => JSON.stringify(openPullRequests),
+    }).map((issue) => issue.number)).toEqual([12]);
+  });
+
+  it("replaces child-authored review metadata with exact parent state", () => {
+    const head = "c".repeat(40);
+    const body = bodyWithParentMetadata(
+      `Fixes #42\nFrog autofix final review: PASS at ${"0".repeat(40)}\n`,
+      {
+        firstHead: head,
+        handoff: "review-findings",
+        handoffHead: head,
+        specialistHead: head,
+      },
+    );
+    expect(body.match(/^ReviewGPT first-reviewed head:/gmu)).toHaveLength(1);
+    expect(bodyHasExactReviewPass(body, "specialist", head)).toBe(true);
+    expect(bodyHasExactReviewPass(body, "final", head)).toBe(false);
+    expect(bodyHandoff(body, head)).toBe("review-findings");
+    expect(body).not.toContain("0".repeat(40));
+    expect(() => bodyHandoff(
+      `${body}Frog autofix handoff: product-runtime at ${head}\n`,
+      head,
+    )).toThrow("ambiguous Frog handoff metadata");
   });
 
   it("renders a two-hour LaunchAgent without direct local identifiers", () => {
@@ -212,6 +286,7 @@ describe("Frog autofix guards", () => {
     expect(wrapper).toContain('cd "$repo_root"');
     expect(wrapper).toContain("GH_TOKEN");
     expect(wrapper).toContain("GITHUB_TOKEN");
+    expect(wrapper).toContain("verify-permissions");
     expect(wrapper).toContain('exec "$tsx_bin" scripts/frog-autofix.ts "$@"');
     const implementation = readFileSync(
       path.join(repositoryRoot, "scripts", "frog-autofix.ts"),
@@ -235,7 +310,7 @@ describe("Frog autofix guards", () => {
     );
     expect(prompt).toContain("Issue 42 must remain 42.");
     expect(prompt).toContain("parent selected **implement mode**");
-    expect(prompt).toContain("not perform a mutating Git operation");
+    expect(prompt).toContain("do not run Git");
     expect(() => renderWorkerPrompt("No placeholder", 42, "implement")).toThrow();
     expect(() => renderWorkerPrompt(
       "{{ISSUE_NUMBER}} {{MODE_WORKFLOW}}",
@@ -597,29 +672,34 @@ describe("Frog autofix guards", () => {
 
   it("keeps the Codex worker edit-only without network or added host roots", () => {
     const args = buildCodexWorkerArguments({
-      codexHome: "<CODEX_HOME>",
-      disabledMcpServers: ["node_repl"],
-      helper: "<WORKER_HELPER>",
-      outputDirectory: "<OUTPUT_DIR>",
-      promptFile: "<PROMPT_FILE>",
+      lastMessageFile: "<OUTPUT_FILE>",
       worktree: "<WORKTREE>",
     });
-    expect(args).toContain("workspace-write");
-    expect(args).toContain("sandbox_workspace_write.network_access=false");
+    expect(args).toContain("exec");
+    expect(args).toContain("--ephemeral");
+    expect(args).toContain("--ignore-user-config");
+    expect(args).toContain('default_permissions="frog-workspace-only"');
+    expect(args).toContain(
+      'permissions.frog-workspace-only.filesystem={":root"="deny",":minimal"="read",":tmpdir"="deny",":slash_tmp"="deny"}',
+    );
+    expect(args).toContain(
+      "permissions.frog-workspace-only.network.enabled=false",
+    );
+    expect(args).toContain('web_search="disabled"');
     expect(args).not.toContain("--add-dir");
+    expect(args).not.toContain("--sandbox");
+    expect(args).not.toContain("--full-auto");
     expect(args).not.toContain("<BROWSER_PROFILE>");
     expect(args).not.toContain("<GIT_COMMON_DIR>");
-    expect(args).toContain("plugins");
-    expect(args).toContain("mcp_servers.node_repl.enabled=false");
+    for (const feature of [
+      "apps",
+      "browser_use",
+      "computer_use",
+      "multi_agent",
+      "plugins",
+      "standalone_web_search",
+    ]) expect(args).toContain(feature);
     expect(args).not.toContain("danger-full-access");
-    expect(() => buildCodexWorkerArguments({
-      codexHome: "<CODEX_HOME>",
-      disabledMcpServers: ["unsafe.name"],
-      helper: "<WORKER_HELPER>",
-      outputDirectory: "<OUTPUT_DIR>",
-      promptFile: "<PROMPT_FILE>",
-      worktree: "<WORKTREE>",
-    })).toThrow("MCP server name is unsafe");
   });
 
   it("auto-merges only deterministic local agent and Codex workflow scope", () => {
@@ -664,6 +744,64 @@ describe("Frog autofix guards", () => {
     })).toBe(false);
   });
 
+  it("includes both sides of renames and copies in authority decisions", () => {
+    expect(authorityChangedPaths(
+      "scripts/frog-safe.ts\0scripts/runtime.ts\0",
+      "R100\0scripts/runtime.ts\0scripts/frog-safe.ts\0",
+    )).toEqual(["scripts/frog-safe.ts", "scripts/runtime.ts"]);
+    expect(authorityChangedPaths(
+      "scripts/frog-copy.ts\0",
+      "C100\0scripts/deploy-production.sh\0scripts/frog-copy.ts\0",
+    )).toEqual(["scripts/deploy-production.sh", "scripts/frog-copy.ts"]);
+    expect(() => authorityChangedPaths("", "R100\0only-one-path\0"))
+      .toThrow("incomplete copy or rename");
+  });
+
+  it("gets prohibited sources from real Git rename and copy fixtures", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "frog-authority-git-"));
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout;
+    };
+    try {
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      mkdirSync(path.join(root, "scripts"), { recursive: true });
+      writeFileSync(path.join(root, "scripts", "deploy-production.sh"), "release\n");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "base");
+      const base = git("rev-parse", "HEAD").trim();
+      writeFileSync(path.join(root, "scripts", "frog-copy.sh"), "release\n");
+      git("mv", "scripts/deploy-production.sh", "scripts/frog-renamed.sh");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "candidate");
+      const head = git("rev-parse", "HEAD").trim();
+      const paths = authorityChangedPaths(
+        git("diff", "--no-renames", "--name-only", "-z", base, head),
+        git(
+          "diff",
+          "--find-renames=50%",
+          "--find-copies=50%",
+          "--find-copies-harder",
+          "--name-status",
+          "-z",
+          base,
+          head,
+        ),
+      );
+      expect(paths).toContain("scripts/deploy-production.sh");
+      expect(localAgentOnlyChange({ paths })).toBe(false);
+      expect(primaryAdvanceRequiresRestart([
+        "scripts/frog-autofix.ts",
+        "scripts/renamed.ts",
+      ])).toBe(true);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("continues after unrelated primary advances and restarts for loaded runner changes", () => {
     expect(primaryAdvanceRequiresRestart(["apps/web/app/page.tsx"])).toBe(false);
     expect(primaryAdvanceRequiresRestart(["scripts/frog-autofix.ts"])).toBe(true);
@@ -699,6 +837,9 @@ describe("Frog autofix guards", () => {
     expect(validatePatchText(patch)).toEqual(["scripts/frog-tool.ts"]);
     expect(() => validatePatchText(
       patch.replaceAll("scripts/frog-tool.ts", "../outside"),
+    )).toThrow("unsafe path");
+    expect(() => validatePatchText(
+      patch.replaceAll("scripts/frog-tool.ts", ".codex/config.toml"),
     )).toThrow("unsafe path");
     expect(() => validatePatchText(`${patch}GIT binary patch\n`)).toThrow(
       "unsupported payload",

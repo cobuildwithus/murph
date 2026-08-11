@@ -15,9 +15,11 @@ concurrency proof are jointly specified by `ARCHITECTURE.md`,
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
 protected PR merges, GitHub-owned implement/resume recovery state with no
-historical close-only path, one absolute process-group-bounded invocation,
-a serialized two-hour LaunchAgent, and bounded metadata-only local state. Its
-ownership and proof are jointly specified by
+historical close-only path, a native workspace-only Codex permission profile,
+canonical parent-owned ReviewGPT gates with durable human handoffs, one
+absolute process-group-bounded invocation, a serialized two-hour LaunchAgent,
+and bounded metadata-only local state. Its ownership and proof are jointly
+specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.

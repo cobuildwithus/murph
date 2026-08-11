@@ -4,22 +4,23 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 case "${1:-}" in
-  install|uninstall|status|scan|run) ;;
+  install|uninstall|status|scan|verify-permissions|run) ;;
   -h|--help|help)
     cat <<'EOF'
-Usage: scripts/frog-autofix {install|uninstall|status|scan|run} [options]
+Usage: scripts/frog-autofix {install|uninstall|status|scan|verify-permissions|run} [options]
 
 Commands:
   install [--codex-home <dir>]  Install and load the two-hour LaunchAgent.
   uninstall                     Unload the exact LaunchAgent and remove its local state.
   status                        Report loaded state and bounded metadata events.
   scan                          List eligible trusted Frog issue numbers without editing.
+  verify-permissions             Prove the native worker filesystem and network boundary.
   run                           Process at most one eligible issue now.
 EOF
     exit 0
     ;;
   *)
-    echo "Usage: scripts/frog-autofix {install|uninstall|status|scan|run} [options]" >&2
+    echo "Usage: scripts/frog-autofix {install|uninstall|status|scan|verify-permissions|run} [options]" >&2
     exit 2
     ;;
 esac

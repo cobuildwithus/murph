@@ -35,26 +35,36 @@ The non-model parent opens a fresh ReviewGPT Pro thread, builds the review
 archive itself from committed Git objects, requires exactly one latest-response
 patch attachment, validates it, and applies it. Review responses, model proof,
 browser access, and downloaded patches remain in an owner-only parent transient
-directory outside the issue worktree. One ephemeral Codex child then receives
-workspace-only writes, no tool network, no SSH agent, no browser root, no Git
-common directory, no plugins, no configured MCP server, and no parent evidence
-path. It may integrate code, tests, docs, the plan, and a private PR draft, but
-cannot commit, push, publish, review, merge, close, or manufacture authority
-evidence.
+directory outside the issue worktree. Only a clean fresh branch may install
+pinned dependencies, before any Codex child runs. One ephemeral Codex child
+then receives a native permission profile that denies root filesystem access,
+allows only minimal command-runtime reads plus issue-worktree reads and writes,
+and denies tool network. Its synthetic home and temporary directory live inside
+the ignored worktree output root. User config, plugins, configured MCP servers,
+SSH agents, browser roots, Git common metadata, and parent evidence paths are
+unavailable. It may integrate code, tests, docs, the plan, and a private PR
+draft, but cannot commit, push, publish, review, merge, close, or manufacture
+authority evidence.
 
 The parent structurally validates the diff, commits with hooks disabled, pushes
-with hooks disabled, publishes the draft PR, invokes preliminary and final
-ReviewGPT directly from parent-built exact-head archives, and waits for required
-CI. Immediately before merge it revalidates App author, label, one committed
-binding, PR head, checks, and current-base mergeability. A deterministic
-allowlist permits automatic merge only for local agent/Codex workflow paths,
+with hooks disabled, and publishes the immutable first-reviewed head in the
+initial draft PR body. Preliminary and final ReviewGPT run through Murph's
+canonical packager and state files from a detached parent-only checkout whose
+review controls exactly match trusted `main`. Either review returning findings,
+or a candidate changing those controls, creates a durable human-review handoff;
+the automation does not ask another child to remediate review prose. After both
+reviews pass, it waits for required CI. Immediately before merge it revalidates
+App author, label, one committed binding, PR head, checks, and current-base
+mergeability. A deterministic allowlist, using both sides of detected renames
+and copies, permits automatic merge only for local agent/Codex workflow paths,
 with semantic exceptions limited to the Frog script entry in `package.json`
 and this section of `ARCHITECTURE.md`. Any possible product-runtime, deployment,
-or GitHub-workflow change stays as a reviewed open PR with its issue open for a
-human merge decision. Only a newly verified parent merge may precede issue
-closure. The invocation has one eight-hour deadline; each model worker is
-bounded to two hours and every spawned command or worker has exact process-group
-ownership.
+or GitHub-workflow change stays as a reviewed ready PR with its issue open for a
+human merge decision. Exact-head handoff markers remove that issue from later
+automated scans so it cannot starve the queue. Only a newly verified parent
+merge may precede issue closure. The invocation has one eight-hour deadline;
+each model worker is bounded to two hours and every spawned command or worker
+has exact process-group ownership.
 
 ## Accepted-Message Targeting
 

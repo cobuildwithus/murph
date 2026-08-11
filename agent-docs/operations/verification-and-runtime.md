@@ -622,13 +622,17 @@ worktree, start Codex, edit GitHub state, or print issue titles/bodies. Focused
 implementation proof includes the real leader-first descendant timeout,
 parent-owned ReviewGPT/patch boundaries, network-denied worker arguments,
 tracked/untracked/ignored interruption recovery, revoked-authority/head/check/
-conflict rejection, product-runtime merge pausing, and historical merged-PR
-reopen refusal:
+conflict rejection, both sides of real Git renames/copies, product-runtime
+merge pausing, durable handoff queue advancement, and historical merged-PR
+reopen refusal. A macOS permission smoke must also apply the exact native worker
+profile and prove an in-worktree read/write succeeds while an outside-root read
+and a network request fail:
 
 ```sh
 pnpm exec vitest run scripts/frog-autofix.test.ts \
   --config scripts/vitest.config.ts --no-coverage
 bash -n scripts/frog-autofix
+scripts/frog-autofix verify-permissions
 scripts/frog-autofix scan
 ```
 
