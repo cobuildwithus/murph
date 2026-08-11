@@ -6,6 +6,7 @@
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   upstreamCommit: "be6e8eac029b183056b7e4402879f15d2c85f61b",
+  upstreamSourceRoot: "codex-rs/codex-api/src",
   upstreamSourceTree: "194e2411ddbd71f839df530635d10dc103559d85",
   upstreamTag: "rust-v0.147.0",
   version: "0.147.0",

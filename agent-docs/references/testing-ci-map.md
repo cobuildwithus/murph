@@ -763,12 +763,15 @@ keep the one-second presentation-only deadline and late-result rejection.
 - Hosted-local E2E scenarios launch the real Codex app-server binary by default, pointed at a local deterministic scripted Responses API stub through the test-only `HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL` override with a fake provider key, so default lanes exercise the production app-server protocol (including dynamic-tool `item/tool/call` relay and sandboxed shell execution of scripted vault-cli calls) with zero provider spend. No automated check calls a paid model provider by default. The opt-in `codex-gateway-prefix` hosted-local E2E scenario runs the real Codex app-server against a local Responses API recorder for cache-prefix diagnostics, fingerprints the first cacheable provider prompt prefix across repeated Linq wakes, and fails if those fingerprints diverge; it is excluded from the default `all` scenario set because it can intentionally fail while provider behavior is under investigation. The opt-in `linq-group-ios-app-download` scenario uses an authenticated live provider turn through the canonical hosted Linq group route and asserts the delivered public App Store link, final-line formatting, single-bubble delivery, and personal-setup boundary; it is manual-only so routine verification never spends provider credits. Codex App Server file/PDF inputs are not advertised as natively supported unless the app-server protocol grows a supported file input item.
 - `apps/cloudflare/test/codex-openai-egress-conformance.test.ts` binds the
   reviewed OpenAI route dispositions to the exact assistant package, runner
-  image, workspace Codex pins, and upstream source-tree identity. It scans the
-  installed native artifact offline, supplements target-specific binary layout
-  with the reviewed base-relative source inventory, and fails on every
-  unclassified route candidate; asserts allowed, websocket-only, and blocked
-  dispositions through the production Worker; and drives a real pinned App
-  Server `web.run` turn through synthetic
+  image, workspace Codex pins, and upstream source-tree identity. The required
+  Linux app-verification job resolves the version-derived upstream tag and
+  verifies its exact commit, `codex-rs/codex-api/src` tree, and declared source
+  paths. Offline tests then treat native scanning as corroboration: they cover
+  full plus separated single- and multi-segment provider-relative candidates,
+  supplement target-specific linker layout with the source-owned route list,
+  and fail on every unclassified candidate; assert allowed, websocket-only,
+  and blocked dispositions through the production Worker; and drive a real
+  pinned App Server `web.run` turn through synthetic
   `/v1/responses` and `/v1/alpha/search` upstreams. The fixture is review
   evidence only and never generates the production allowlist. Every route
   labeled `real_codex_worker` must be present in the requests observed from that

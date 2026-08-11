@@ -66,6 +66,11 @@ Updated: 2026-08-10
    Mitigation: scan the exact installed artifact on each supported platform,
    keep normalization limited to reviewed Rust literal concatenations, and
    require production Linux CI while treating other platforms as diagnostics.
+5. Risk: binary heuristics or manually copied provenance can claim completeness
+   without proving which upstream source was reviewed.
+   Mitigation: make the upstream API source tree the inventory owner; required
+   CI resolves the version-derived tag and verifies its commit, subtree object,
+   and declared source paths. Binary scanning remains corroborating evidence.
 
 ## Tasks
 
@@ -105,6 +110,12 @@ Updated: 2026-08-10
   scanner now normalizes only those exact reviewed tokens and explicitly
   classifies the two truncated non-route fragments; an independently downloaded
   pinned Linux artifact reports 19 classified candidates.
+- Final ReviewGPT round 2 required a retrospective because provider-anchored
+  discovery omitted single-segment relative routes and source provenance was
+  syntax-only. The suite now covers separated single- and multi-segment
+  candidates, while the version-derived upstream tag, exact commit, and exact
+  `codex-rs/codex-api/src` tree form the authoritative source identity. Native
+  scanning is explicitly corroborating rather than a completeness claim.
 
 ## Verification
 

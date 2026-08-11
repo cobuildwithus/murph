@@ -264,17 +264,18 @@ other OpenAI search method or path, validates the signed OpenAI provider
 credential against the active user and runner, strips caller and runtime
 authority headers, and injects the Worker-owned OpenAI credential only after
 authorization succeeds.
-The pinned Codex native binary has a test-only, version-bound route-disposition
-inventory. Offline CI scans the installed artifact for conservative `/v1/**`
-and source-reviewed base-relative provider candidates, requires every
-discovered candidate to be explicitly classified, and runs a real App Server
-web-search turn through the production Worker interceptor. The source-relative
-inventory is bound to the exact upstream Codex source-tree object as well as the
-package version, so a pin update requires a fresh source review even when
-native targets concatenate route literals differently. The inventory never
-generates or widens the Worker policy: a new candidate fails closed until its
-origin, method, transport, hosted reachability, and production policy are
-reviewed.
+The pinned Codex release has a test-only, version-bound route-disposition
+inventory whose authoritative review input is the upstream
+`codex-rs/codex-api/src` tree. Required Linux CI resolves the version-derived
+OpenAI tag and verifies its exact commit and source-tree object, so stale
+provenance cannot pass after a pin change. Offline tests scan the installed
+native artifact for conservative `/v1/**` plus separated provider-relative
+candidates, require every discovered candidate to be explicitly classified,
+corroborate enabled source-owned Codex paths, and run a real App Server
+web-search turn through the production Worker interceptor. The inventory never
+generates or widens the Worker policy: a new source identity or binary candidate
+fails closed until its origin, method, transport, hosted reachability, and
+production policy are reviewed.
 Runtime-controlled delivery/control provider integrations such as Linq and
 Telegram still use provider-egress token proof when exact runtime
 authority headers are absent. There is no tokenless active-user-fence provider

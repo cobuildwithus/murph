@@ -15,7 +15,7 @@ const FULL_ROUTE_PATTERN =
   /\/v1\/[a-z0-9][a-z0-9_{}:.-]*(?:\/[a-z0-9][a-z0-9_{}:.-]*)*/gu;
 const OPENAI_PROVIDER_BASE = "https://api.openai.com/v1";
 const PROVIDER_ANCHORED_RELATIVE_ROUTE_PATTERN =
-  /^\s*\/?([a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)+)(?=$|[^a-z0-9_\/-])/u;
+  /^(?:\s+|\/)([a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)*)(?=$|[^a-z0-9_\/-])/u;
 
 export interface CodexBinaryRouteDiscoveryOptions {
   reviewedRelativeProviderRoutes?: readonly string[];
@@ -27,8 +27,13 @@ export interface CodexBinaryRouteDiscoveryOptions {
  * full-route prefixes are trimmed to their reviewed boundary. Unknown full
  * `/v1/**` literals are intentionally returned unchanged and fail conformance
  * until they receive an explicit disposition. The caller supplies the complete
- * source-reviewed relative-route set for the pin; an unknown relative route
- * immediately paired with the OpenAI provider base is retained independently.
+ * source-reviewed relative-route set for the pin; an unknown single- or
+ * multi-segment relative route separated from the OpenAI provider base by a
+ * slash or whitespace is retained independently. Separator-free linker
+ * concatenations are intentionally covered by the source-owned route list,
+ * because arbitrary adjacent binary text cannot identify a route boundary.
+ * Binary discovery corroborates the verified upstream source inventory; it is
+ * not the authoritative inventory owner.
  */
 export function discoverCodexBinaryRouteCandidates(
   binary: Buffer,

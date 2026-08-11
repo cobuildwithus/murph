@@ -52,8 +52,16 @@ describe("pinned Codex OpenAI egress conformance", () => {
     )) as {
       devDependencies?: Record<string, string>;
     };
+    const cloudflarePackage = JSON.parse(await readFile(
+      path.join(repoRoot, "apps/cloudflare/package.json"),
+      "utf8",
+    )) as { scripts?: Record<string, string> };
     const baseDockerfile = await readFile(
       path.join(repoRoot, "Dockerfile.cloudflare-hosted-runner-base"),
+      "utf8",
+    );
+    const hostSupportWorkflow = await readFile(
+      path.join(repoRoot, ".github/workflows/host-support.yml"),
       "utf8",
     );
     const workspace = await readFile(
@@ -78,8 +86,14 @@ describe("pinned Codex OpenAI egress conformance", () => {
       .toBe(`rust-v${expectedVersion}`);
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamCommit)
       .toMatch(/^[0-9a-f]{40}$/u);
+    expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceRoot)
+      .toBe("codex-rs/codex-api/src");
     expect(PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceTree)
       .toMatch(/^[0-9a-f]{40}$/u);
+    expect(cloudflarePackage.scripts?.["verify:codex-upstream-source"])
+      .toContain("verify-codex-upstream-source.ts");
+    expect(hostSupportWorkflow)
+      .toContain("pnpm --dir apps/cloudflare verify:codex-upstream-source");
   });
 
   it("keeps every route disposition unique and tied to reviewed source provenance", () => {
@@ -96,6 +110,11 @@ describe("pinned Codex OpenAI egress conformance", () => {
     }
     for (const route of PINNED_CODEX_OPENAI_EGRESS_INVENTORY.chatGptAuthOnlyRoutes) {
       expect(reviewedSources.has(route.source), route.feature).toBe(true);
+    }
+    for (const source of reviewedSources) {
+      expect(source.startsWith(
+        `${PINNED_CODEX_OPENAI_EGRESS_INVENTORY.upstreamSourceRoot}/`,
+      ), source).toBe(true);
     }
     const providerPathnames = new Set(
       PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes.map((route) => route.pathname),
@@ -134,6 +153,16 @@ describe("pinned Codex OpenAI egress conformance", () => {
     expect(discovered.length).toBeGreaterThan(0);
     expect(discovered).toContain("/v1/alpha/search");
     expect(discovered).toContain("/v1/responses");
+    const requiredBinaryCorroboration = new Set(
+      PINNED_CODEX_OPENAI_EGRESS_INVENTORY.routes
+        .filter((route) =>
+          route.owner === "codex" && route.disposition !== "blocked"
+        )
+        .map((route) => route.pathname),
+    );
+    expect([...requiredBinaryCorroboration]
+      .filter((pathname) => !discovered.includes(pathname)))
+      .toEqual([]);
     expect(discovered.filter((candidate) => !classified.has(candidate)))
       .toEqual([]);
   });
@@ -148,14 +177,17 @@ describe("pinned Codex OpenAI egress conformance", () => {
     expect(discovered).toContain("/v1/future_route/items");
   });
 
-  it("retains an unknown provider-anchored base-relative route as a scanner candidate", () => {
-    const discovered = discoverCodexBinaryRouteCandidates(Buffer.from([
-      ...Buffer.from("https://api.openai.com/v1 future/items"),
-      0,
-    ]));
+  it.each(["future", "future/items"])(
+    "retains unknown provider-anchored base-relative route %s as a scanner candidate",
+    (relativeRoute) => {
+      const discovered = discoverCodexBinaryRouteCandidates(Buffer.from([
+        ...Buffer.from(`https://api.openai.com/v1 ${relativeRoute}`),
+        0,
+      ]));
 
-    expect(discovered).toContain("/v1/future/items");
-  });
+      expect(discovered).toContain(`/v1/${relativeRoute}`);
+    },
+  );
 
   it("keeps every reviewed route aligned with the production Worker decision", async () => {
     const credential = await createTestProviderEgressCredential();
