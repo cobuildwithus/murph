@@ -529,8 +529,18 @@ it has been explicitly elevated to a cross-cutting invariant.
   forward. One live authorization per group is database-enforced. Refill
   admission occurs only inside the existing beneficiary serialization boundary,
   provider work is post-commit, Stripe reconciliation alone grants credit, and
-  the sponsorship projection reveals only sponsored versus unsponsored. A
-  separate room-public usage projection may reveal only the bounded percentage
+  the assistant/room sponsorship projection reveals only sponsored versus
+  unsponsored. For a signed-in active group participant, the funding page may
+  separately recognize the current activation and at most 20 recent fulfilled
+  one-time moments only by an alias with exact funding-page consent metadata
+  that was marked publishable by the existing participant-authority check at
+  its first verified settlement, or as Anonymous, plus the coarse monthly
+  versus one-time kind. A later replay cannot acquire publication authority.
+  Historical aliases, pending or incompletely materialized moments, and moments
+  settled after the creator lost authority remain Anonymous. That alias is not payer identity;
+  the page projection contains no payer record, amount, monthly cap, balance,
+  payment status, charge timing, or automatic-refill event. A separate
+  room-public usage projection may reveal only the bounded percentage
   of current-period included usage already used. That aggregate is independent
   of purchased, referral, carryover, and refill credit; it never reveals or
   implies payer identity, sponsorship setup, money, credit remaining, period
