@@ -102,24 +102,49 @@ Web-owned share/control boundary.
 - Direct code-path review confirms no new persisted state, scheduler, queue,
   raw health-data logging, or group-runtime device sync was introduced.
 
+## Round 3 requirement-level retrospective
+
+- Trigger: the round-2 correction reused its new lane-completeness result for
+  dirty-projection deferral, pre-checkpoint-safe admission, and browser-vault
+  maintenance. Only dirty-projection deferral was inside the recorded decision.
+- Requirement decision: complete-lane evidence is authority only for proving a
+  `device-sync:dirty:` set may wait behind group projection. The existing
+  visible bounded-prefix contracts for exact pre-checkpoint completions and
+  browser-vault maintenance remain unchanged.
+- Shape comparison: the first-reviewed source patch was 279 additions and 100
+  deletions; round 2 was 303 additions and 91 deletions; round 3 was 342
+  additions and 94 deletions. Review-driven tests moved from 588 additions to
+  1,492 additions and 16 deletions. Round-3 growth included the required
+  shutdown/continuation proof plus the over-broad shared policy gate.
+- Decision: continue by shrinking the completeness condition out of the two
+  unrelated predicates. Preserve one serial mailbox read, exact prefetch reuse,
+  and existing import/continuation ownership. Add no abstraction, read, state,
+  queue, lease, fence, lifecycle, scheduler, or reconciler.
+- Required proof: a full visible pre-checkpoint-safe system page with a later
+  lane high-water still admits its exact completion before checkpoint, leaves
+  later work to ordinary bounded continuation, preserves conversation priority,
+  reuses the prefetch exactly, and keeps peak fetch concurrency one.
+
 ## Local proof completed
 
-- Six focused entrypoint regressions pass, including maximum-prefix dirty-wake
-  pressure, exact fetch reuse and peak concurrency, transient classifier
-  fallback through assistant admission, both classification shutdown windows,
-  failed-classifier fallback shutdown, and explicit lifecycle/manual-command
-  preemption.
-- The complete hosted-runtime entrypoint test file and package typecheck pass.
-- The complete assistant-runtime coverage suite passes: 86 files, 2,171 tests,
+- Seven focused entrypoint regressions pass, including maximum-prefix dirty-wake
+  pressure, a maximum visible safe prefix after foreground conversation work,
+  exact fetch reuse and peak concurrency, transient classifier fallback through
+  assistant admission, both classification shutdown windows, failed-classifier
+  fallback shutdown, and explicit lifecycle/manual-command preemption.
+- The complete hosted-runtime entrypoint test file passes with 283 tests, and
+  the package typecheck passes.
+- The complete assistant-runtime coverage suite passes: 86 files, 2,173 tests,
   with 4 skipped. Two pre-existing shutdown expectations were updated to the
   reviewed no-import, immediate-replacement contract after the first exact-head
   CI run exposed them; the consumed-replay case also proves the replacement
   invocation imports the still-durable row.
 - The Cloudflare due-wake owner-release regression and agent-doc drift check
   pass.
-- Final exact-head ReviewGPT round 2 required the retrospective above. Its
-  production-shaped maximum-prefix reproduction now fails against the reviewed
-  head and will gate the shrinking correction and next exact-head round.
+- Final exact-head ReviewGPT round 3 required the retrospective above. The new
+  maximum-safe-prefix regression fails against that reviewed head because the
+  first snapshot precedes the exact completion, then passes after completeness
+  is narrowed back to dirty-projection deferral. Round 4 remains pending.
 
 Status: in progress
 Updated: 2026-08-11

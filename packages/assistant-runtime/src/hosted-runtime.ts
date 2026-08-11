@@ -627,8 +627,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
       : visibleMaxSeq === maxSeq;
   });
   return {
-    containsOnlyBrowserVaultRefreshWakes: reachesEveryLaneHighWater
-      && response.items.length > 0
+    containsOnlyBrowserVaultRefreshWakes: response.items.length > 0
       && response.items.every((item) =>
         item.lane === "system"
         && item.kind === "runtime.browser-vault-refresh-requested"
@@ -640,8 +639,7 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
         && item.kind === "device-sync.wake"
         && item.dedupeKey.startsWith("device-sync:dirty:")
       ),
-    containsOnlySafeSystemWakes: reachesEveryLaneHighWater
-      && response.items.length > 0
+    containsOnlySafeSystemWakes: response.items.length > 0
       && response.items.every((item) =>
         item.lane === "system"
         && (

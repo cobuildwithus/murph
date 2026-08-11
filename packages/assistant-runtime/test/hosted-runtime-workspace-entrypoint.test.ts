@@ -7379,6 +7379,176 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("admits a full visible safe-system prefix before checkpoint despite a later lane high-water", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    let assistantPhaseCalls = 0;
+    let mailboxFetchesInFlight = 0;
+    let peakMailboxFetchesInFlight = 0;
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+      const foregroundConversationInputId =
+        await stagePendingLinqAssistantInputForMailboxItem({
+          item: createMailboxItem({
+            id: "mailbox_item_safe_prefix_foreground_conversation",
+            laneSeq: "1",
+          }),
+          threadId: "thread_maximum_safe_prefix",
+          vaultRoot,
+        });
+      const baseMailboxPort = createMailboxPort({
+        events,
+        fetchRequests,
+        items: mailboxItems,
+      });
+      const mailboxPort: HostedRuntimeMailboxPort = {
+        ...baseMailboxPort,
+        async fetch(request) {
+          mailboxFetchesInFlight += 1;
+          peakMailboxFetchesInFlight = Math.max(
+            peakMailboxFetchesInFlight,
+            mailboxFetchesInFlight,
+          );
+          try {
+            const response = await baseMailboxPort.fetch(request);
+            return response;
+          } finally {
+            mailboxFetchesInFlight -= 1;
+          }
+        },
+      };
+      const enqueueMaximumSafePrefix = () => {
+        for (let revision = 1; revision <= 51; revision += 1) {
+          mailboxItems.push(createMailboxItem({
+            id: `mailbox_item_safe_prefix_system_${revision}`,
+            kind: revision === 1
+              ? "assistant.ask.completed"
+              : "runtime.pending-effects-reconcile-requested",
+            lane: "system",
+            laneSeq: String(revision),
+          }));
+        }
+        mailboxItems.push(createMailboxItem({
+          dedupeKey:
+            "assistant.notification.requested:generic:safe_prefix_later_row",
+          id: "mailbox_item_safe_prefix_later_unsafe",
+          kind: "assistant.notification.requested",
+          lane: "system",
+          laneSeq: "52",
+        }));
+      };
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_maximum_safe_prefix",
+            budget: { maxMailboxItems: 50 },
+            idleCheckpointDelayMs: 1_000,
+            leaseGeneration: "7",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            events.push(`snapshot:${snapshotInput.reason}`);
+            return {
+              snapshotRef: createBundleRef({
+                hash: "a".repeat(64),
+                key: "users/bundles/member-synthetic/maximum-safe-prefix.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem(item) {
+            events.push(`mailbox.importItem:${item.item.id}`);
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort,
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          runtimeWakeSignal,
+          async runAssistantPhase() {
+            assistantPhaseCalls += 1;
+            events.push(`assistant.phase:${assistantPhaseCalls}`);
+            if (assistantPhaseCalls === 1) {
+              await writeSyntheticAssistantAutoReplyTerminalEvidence({
+                inputId: foregroundConversationInputId,
+                vaultRoot,
+              });
+              setTimeout(() => {
+                enqueueMaximumSafePrefix();
+                runtimeWakeSignal.notify();
+              }, 0);
+              return {
+                checkpointReason: "assistant_runtime_commit",
+                progressed: true,
+              };
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+      const result = await withRealTimeout(
+        resultPromise,
+        5_000,
+        () => events.join(","),
+      );
+
+      const exactCompletionImport =
+        "mailbox.importItem:mailbox_item_safe_prefix_system_1";
+      const laterUnsafeImport =
+        "mailbox.importItem:mailbox_item_safe_prefix_later_unsafe";
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:1")
+          < requireEventIndex(events, exactCompletionImport),
+        events.join(","),
+      );
+      assert.ok(
+        requireEventIndex(events, exactCompletionImport)
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.equal(events.includes(laterUnsafeImport), false, events.join(","));
+      assert.equal(result.status, "budget_exhausted");
+      const preCheckpointFetches = fetchRequests.filter((request) =>
+        request.requestId.includes(
+          ":checkpoint-interrupt-foreground-prefetch:",
+        )
+      );
+      assert.equal(
+        preCheckpointFetches.length,
+        1,
+        fetchRequests.map((request) =>
+          `${request.requestId}:${request.limitPerLane}`
+        ).join(","),
+      );
+      assert.ok(preCheckpointFetches.every((request) => request.limitPerLane === 51));
+      assert.equal(
+        fetchRequests.length,
+        4,
+        fetchRequests.map((request) => request.requestId).join(","),
+      );
+
+      assert.equal(result.nextWakeReason, "mailbox");
+      assert.ok(result.nextWakeAt);
+      assert.equal(peakMailboxFetchesInFlight, 1);
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   for (const completion of [
     {
       dedupeKey:
