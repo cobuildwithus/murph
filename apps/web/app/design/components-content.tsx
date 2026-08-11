@@ -1452,7 +1452,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage workout and compact table card states"
+          title="iMessage workout and compact table fallback states"
         >
           <ImessageCompactTableCardStudy />
         </Section>
