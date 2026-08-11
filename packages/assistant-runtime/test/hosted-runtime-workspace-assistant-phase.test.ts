@@ -14330,6 +14330,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           ],
           allowedRouteActions: ["dispatch-assistant-notification"],
           allowedWakeKinds: ["assistant.notification.requested"],
+          executionContext: {
+            hosted: expect.objectContaining({
+              memberId: "member_synthetic_phase",
+              userEnvKeys: [],
+            }),
+          },
         }),
       );
     expect(mocks.collectHostedAssistantDeliverySideEffects).toHaveBeenCalledWith({

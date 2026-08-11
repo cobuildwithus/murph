@@ -1883,7 +1883,12 @@ export async function runHostedWorkspaceAssistantPhase(
   if (input.foregroundCausalOnly === true) {
     try {
       const systemMailboxMaintenance = await runSystemMailboxMaintenancePhase({
-        executionContext: { hosted: null },
+        executionContext: {
+          hosted: {
+            memberId: input.request.userId,
+            userEnvKeys: Object.keys(input.runtime.userEnv),
+          },
+        },
         hasFreshConversationInput: false,
         input,
         pendingAssistantInputWakeAt: null,
