@@ -509,6 +509,27 @@ test("workout images ignore legacy subtitles in both pixels and height", async (
   assert.doesNotMatch(serialized, /Legacy progress copy/u);
 });
 
+test("workout headers use semibold metrics for intrinsic wrapping", async () => {
+  const {
+    CompactTableCardImage,
+    getCompactTableCardImageSize,
+  } = await import("@/src/components/imessage/compact-table-card-image");
+  const boundaryCard: typeof WORKOUT_CARD = {
+    ...WORKOUT_CARD,
+    title: "activity progress morning workout",
+  };
+  const serialized = renderToStaticMarkup(
+    <CompactTableCardImage card={boundaryCard} />,
+  );
+
+  assert.match(serialized, /activity progress morning\nworkout/u);
+  assert.match(serialized, /data-card-text-lines="2"/u);
+  assert.ok(
+    getCompactTableCardImageSize(boundaryCard).height
+      > getCompactTableCardImageSize(WORKOUT_CARD).height,
+  );
+});
+
 test("workout image keeps Next on the first pending set when it has no target", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const targetlessNextCard = {
@@ -619,7 +640,7 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.equal(response.status, 200);
   const [imageTree, init] = getImageResponseCall();
   assert.equal(init.width, 1_200);
-  assert.equal(init.height, 1_047);
+  assert.equal(init.height, 1_065);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /imessage-native-challenge-standings-card/u);
   assert.match(serialized, /Summer movement challenge/u);
@@ -655,7 +676,8 @@ test("standings image keeps collective progress collective", async () => {
   assert.match(serialized, /640\+/u);
   assert.match(serialized, /\/ 1,000 pts/u);
   assert.match(serialized, /data-collective-progress="0\.6400"/u);
-  assert.match(serialized, /More progress may be pending/u);
+  assert.match(serialized, /More progress may be\s+pending/u);
+  assert.match(serialized, /data-collective-status-lines="2"/u);
   assert.match(serialized, /2\/3 SCORED/u);
   assert.doesNotMatch(serialized, /North team|South team|West team/u);
 
@@ -681,7 +703,41 @@ test("standings image keeps collective progress collective", async () => {
     ...COLLECTIVE_STANDINGS_CARD,
     title: "T".repeat(60),
     subtitle: "S".repeat(120),
-  })).toEqual({ width: 1_200, height: 1_022 });
+  })).toEqual({ width: 1_200, height: 1_128 });
+});
+
+test("standings image sizes semibold titles and maximum score context", async () => {
+  const {
+    ChallengeStandingsCardImage,
+    getChallengeStandingsCardImageSize,
+  } = await import(
+    "@/src/components/imessage/challenge-standings-card-image"
+  );
+  const boundaryCard: ChallengeStandingsResponseCardV1 = {
+    kind: "challenge_standings",
+    version: 1,
+    format: "individual",
+    title: "standings progress challenge morning",
+    subtitle: null,
+    objective: { kind: "target", targetPoints: Number.MAX_SAFE_INTEGER },
+    entries: [{
+      label: "Participant with a semibold boundary label",
+      points: Number.MAX_SAFE_INTEGER - 1,
+      coverage: "complete",
+      detail: null,
+    }],
+    footer: null,
+  };
+  const serialized = renderToStaticMarkup(
+    <ChallengeStandingsCardImage card={boundaryCard} />,
+  );
+
+  assert.match(serialized, /standings progress challenge\nmorning/u);
+  assert.match(serialized, /OF 9,007,199,254,740,991 PTS/u);
+  assert.match(serialized, /data-score-column-width="525"/u);
+  assert.match(serialized, /data-score-points-font-size="47"/u);
+  assert.match(serialized, /data-score-context-font-size="32"/u);
+  assert.ok(getChallengeStandingsCardImageSize(boundaryCard).height > 500);
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {

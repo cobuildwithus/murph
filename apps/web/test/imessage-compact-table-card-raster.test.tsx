@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { inflateSync } from "node:zlib";
 
-import type { CompactTablePresentationCardV1 } from "@murphai/contracts";
+import type {
+  ChallengeStandingsResponseCardV1,
+  CompactTablePresentationCardV1,
+} from "@murphai/contracts";
 import { test } from "vitest";
 
 const KERNING_BOUNDARY_CARD: CompactTablePresentationCardV1 = {
@@ -23,6 +26,52 @@ const KERNING_BOUNDARY_CARD: CompactTablePresentationCardV1 = {
     },
   ],
   footer: null,
+};
+
+const PARTIAL_COLLECTIVE_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "collective",
+  title: "Challenge standings",
+  subtitle: null,
+  objective: { kind: "target", targetPoints: 1_000 },
+  collectivePoints: 640,
+  coverage: "partial",
+  coverageCounts: {
+    completeParticipants: 1,
+    partialParticipants: 1,
+    totalParticipants: 3,
+    unscoredParticipants: 1,
+  },
+  footer: null,
+};
+
+const SEMIBOLD_BOUNDARY_CARD: ChallengeStandingsResponseCardV1 = {
+  kind: "challenge_standings",
+  version: 1,
+  format: "individual",
+  title: "standings progress challenge morning",
+  subtitle: null,
+  objective: { kind: "target", targetPoints: 1_000_000 },
+  entries: [{
+    label: "Participant with a semibold boundary label",
+    points: 875_000,
+    coverage: "complete",
+    detail: null,
+  }],
+  footer: null,
+};
+
+const MAX_TARGET_CARD: ChallengeStandingsResponseCardV1 = {
+  ...SEMIBOLD_BOUNDARY_CARD,
+  title: "Challenge standings",
+  objective: { kind: "target", targetPoints: Number.MAX_SAFE_INTEGER },
+  entries: [{
+    label: "Participant 1",
+    points: Number.MAX_SAFE_INTEGER - 1,
+    coverage: "complete",
+    detail: null,
+  }],
 };
 
 test("real-font route keeps positive-kerning text above the stacked-row divider", async () => {
@@ -55,6 +104,68 @@ test("real-font route keeps positive-kerning text above the stacked-row divider"
     false,
   );
 });
+
+test("real-font collective status and coverage retain bottom padding", async () => {
+  const image = await renderCard({
+    schemaVersion: 5,
+    card: PARTIAL_COLLECTIVE_CARD,
+  });
+  assert.deepEqual([image.width, image.height], [1_200, 710]);
+
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.bottom <= image.height - 40);
+  assert.equal(
+    hasDarkPixel(image, {
+      left: 45,
+      right: 850,
+      top: image.height - 180,
+      bottom: image.height - 40,
+    }),
+    true,
+  );
+  assert.equal(
+    hasAccentPixel(image, {
+      left: 850,
+      right: 1_155,
+      top: image.height - 120,
+      bottom: image.height - 40,
+    }),
+    true,
+  );
+});
+
+test.each([
+  ["semibold wrapping", SEMIBOLD_BOUNDARY_CARD],
+  ["maximum target sizing", MAX_TARGET_CARD],
+])("real-font ranked challenge contains %s", async (_label, card) => {
+  const image = await renderCard({ schemaVersion: 5, card });
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.left >= 20);
+  assert.ok(bounds.right <= image.width - 30);
+  assert.ok(bounds.bottom <= image.height - 40);
+  assert.equal(
+    hasDarkPixel(image, {
+      left: 620,
+      right: 1_155,
+      top: 220,
+      bottom: image.height - 42,
+    }),
+    true,
+  );
+});
+
+async function renderCard(envelope: unknown): Promise<DecodedPng> {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload(envelope);
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+  assert.equal(response.status, 200);
+  return decodePng(Buffer.from(await response.arrayBuffer()));
+}
 
 function encodePayload(value: unknown): string {
   return `${Buffer.from(JSON.stringify(value), "utf8").toString("base64url")}.png`;
@@ -191,4 +302,46 @@ function hasDarkPixel(
     }
   }
   return false;
+}
+
+function hasAccentPixel(
+  image: DecodedPng,
+  rect: { bottom: number; left: number; right: number; top: number },
+): boolean {
+  for (let y = rect.top; y < rect.bottom; y += 1) {
+    for (let x = rect.left; x < rect.right; x += 1) {
+      const offset = (y * image.width + x) * 4;
+      if (
+        (image.pixels[offset] ?? 0) > 140
+        && (image.pixels[offset + 1] ?? 255) < 120
+        && (image.pixels[offset + 2] ?? 255) < 80
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function findNonBackgroundBounds(
+  image: DecodedPng,
+): { bottom: number; left: number; right: number; top: number } | null {
+  let left = image.width;
+  let right = -1;
+  let top = image.height;
+  let bottom = -1;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < image.width; x += 1) {
+      const offset = (y * image.width + x) * 4;
+      const red = image.pixels[offset] ?? 255;
+      const green = image.pixels[offset + 1] ?? 245;
+      const blue = image.pixels[offset + 2] ?? 230;
+      if (red === 255 && green === 245 && blue === 230) continue;
+      left = Math.min(left, x);
+      right = Math.max(right, x);
+      top = Math.min(top, y);
+      bottom = Math.max(bottom, y);
+    }
+  }
+  return right < 0 ? null : { bottom, left, right, top };
 }

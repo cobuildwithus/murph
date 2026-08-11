@@ -11,6 +11,10 @@ import {
   measureDmSans400Text,
   segmentDmSans400Text,
 } from "./dm-sans-400-card-metrics";
+import {
+  measureDmSans600Text,
+  segmentDmSans600Text,
+} from "./dm-sans-600-card-metrics";
 
 export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 
@@ -613,6 +617,7 @@ function getCompactTableCardImageLayout(
     card.title,
     isWorkout ? WORKOUT_HEADER_TEXT_WIDTH : CARD_CONTENT_WIDTH,
     TITLE_FONT_SIZE,
+    600,
   );
   const subtitle = "workout" in card || card.subtitle === null
     ? null
@@ -662,6 +667,7 @@ function getCompactTableCardImageLayout(
     card.rowHeader.toUpperCase(),
     gridWidths.rowHeaderWidth,
     CAPTION_2_FONT_SIZE,
+    600,
     0.07,
   );
   const columns = card.columns.map((column, index) =>
@@ -669,6 +675,7 @@ function getCompactTableCardImageLayout(
       column.toUpperCase(),
       gridWidths.columnWidths[index] ?? valueWidth,
       CAPTION_2_FONT_SIZE,
+      600,
       0.07,
     )
   );
@@ -686,6 +693,7 @@ function getCompactTableCardImageLayout(
         ? gridWidths.rowHeaderWidth
         : CARD_CONTENT_WIDTH,
       SUBHEADLINE_FONT_SIZE,
+      600,
     );
     const values = row.values.map((value, index) =>
       wrapCardText(
@@ -760,6 +768,7 @@ function getWorkoutExerciseLayout(
     exercise.name,
     textWidth,
     SUBHEADLINE_FONT_SIZE,
+    600,
   );
   const supportingText = wrapCardText(
     supportingValue,
@@ -784,18 +793,18 @@ function getCompactTableGridWidths(
   card: Exclude<CompactTablePresentationCardV1, { workout: unknown }>,
 ): { columnWidths: number[]; rowHeaderWidth: number; totalWidth: number } {
   const rowHeaderWidth = Math.max(
-    measureDmSans400Text(
+    measureDmSans600Text(
       card.rowHeader.toUpperCase(),
       CAPTION_2_FONT_SIZE,
       0.07,
     ),
     ...card.rows.map((row) =>
-      measureDmSans400Text(row.label, SUBHEADLINE_FONT_SIZE)
+      measureDmSans600Text(row.label, SUBHEADLINE_FONT_SIZE)
     ),
   );
   const columnWidths = card.columns.map((column, index) =>
     Math.max(
-      measureDmSans400Text(
+      measureDmSans600Text(
         column.toUpperCase(),
         CAPTION_2_FONT_SIZE,
         0.07,
@@ -822,6 +831,7 @@ function wrapCardText(
   value: string,
   width: number,
   fontSize: number,
+  fontWeight: 400 | 600 = 400,
   letterSpacingEm = 0,
 ): WrappedCardText {
   const words = value.trim().split(/\s+/u).filter(Boolean);
@@ -830,7 +840,7 @@ function wrapCardText(
 
   for (const word of words) {
     const candidate = currentLine === "" ? word : `${currentLine} ${word}`;
-    if (measureDmSans400Text(candidate, fontSize, letterSpacingEm) <= width) {
+    if (measureCardText(candidate, fontSize, fontWeight, letterSpacingEm) <= width) {
       currentLine = candidate;
       continue;
     }
@@ -842,6 +852,7 @@ function wrapCardText(
       word,
       width,
       fontSize,
+      fontWeight,
       letterSpacingEm,
     );
     lines.push(...fragments.slice(0, -1));
@@ -862,16 +873,20 @@ function breakOverwideCardToken(
   token: string,
   width: number,
   fontSize: number,
+  fontWeight: 400 | 600,
   letterSpacingEm: number,
 ): string[] {
   const fragments: string[] = [];
   let currentFragment = "";
 
-  for (const grapheme of segmentDmSans400Text(token)) {
+  const graphemes = fontWeight === 600
+    ? segmentDmSans600Text(token)
+    : segmentDmSans400Text(token);
+  for (const grapheme of graphemes) {
     const candidate = `${currentFragment}${grapheme}`;
     if (
       currentFragment !== ""
-      && measureDmSans400Text(candidate, fontSize, letterSpacingEm) > width
+      && measureCardText(candidate, fontSize, fontWeight, letterSpacingEm) > width
     ) {
       fragments.push(currentFragment);
       currentFragment = grapheme;
@@ -884,4 +899,15 @@ function breakOverwideCardToken(
     fragments.push(currentFragment);
   }
   return fragments;
+}
+
+function measureCardText(
+  value: string,
+  fontSize: number,
+  fontWeight: 400 | 600,
+  letterSpacingEm: number,
+): number {
+  return fontWeight === 600
+    ? measureDmSans600Text(value, fontSize, letterSpacingEm)
+    : measureDmSans400Text(value, fontSize, letterSpacingEm);
 }

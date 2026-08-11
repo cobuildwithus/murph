@@ -12,6 +12,10 @@ import {
   measureDmSans400Text,
   segmentDmSans400Text,
 } from "./dm-sans-400-card-metrics";
+import {
+  measureDmSans600Text,
+  segmentDmSans600Text,
+} from "./dm-sans-600-card-metrics";
 
 export const IMESSAGE_CHALLENGE_STANDINGS_CARD_IMAGE_WIDTH = 1_200;
 
@@ -36,9 +40,28 @@ type WrappedCardText = {
 type RankedRowLayout = {
   height: number;
   label: WrappedCardText;
+  score: RankedScoreLayout;
+};
+
+type RankedScoreLayout = {
+  contextFontSize: number;
+  pointsFontSize: number;
+  width: number;
+};
+
+type CollectiveLayout = {
+  pointsFontSize: number;
+  pointsWidth: number;
+  scoreRowHeight: number;
+  status: WrappedCardText;
+  statusRowHeight: number;
+  statusWidth: number;
+  targetFontSize: number;
+  targetWidth: number;
 };
 
 type ChallengeStandingsLayout = {
+  collective: CollectiveLayout | null;
   footer: WrappedCardText | null;
   headerHeight: number;
   height: number;
@@ -125,7 +148,12 @@ export function ChallengeStandingsCardImage({
       </div>
 
       {card.format === "collective"
-        ? <CollectiveStandings card={card} />
+        ? (
+            <CollectiveStandings
+              card={card}
+              layout={layout.collective ?? getCollectiveLayout(card)}
+            />
+          )
         : <RankedStandings card={card} rows={layout.rows} />}
 
       {layout.footer === null ? null : (
@@ -173,7 +201,7 @@ function RankedStandings({
             card={card}
             entry={entry}
             index={index}
-            layout={rows[index] ?? getRankedRowLayout(entry)}
+            layout={rows[index] ?? getRankedRowLayout(card, entry)}
             ranksVisible={ranksVisible}
           />
           {index === card.entries.length - 1 ? null : (
@@ -283,9 +311,10 @@ function RankedStandingsRow({
           {layout.label.text}
         </div>
         <div
+          data-score-column-width={layout.score.width}
           style={{
             display: "flex",
-            width: 315,
+            width: layout.score.width,
             flexDirection: "column",
             flexShrink: 0,
             alignItems: "flex-end",
@@ -293,9 +322,10 @@ function RankedStandingsRow({
           }}
         >
           <div
+            data-score-points-font-size={layout.score.pointsFontSize}
             style={{
               display: "flex",
-              fontSize: SUBHEADLINE_FONT_SIZE,
+              fontSize: layout.score.pointsFontSize,
               fontWeight: 600,
               lineHeight: 1,
               fontVariantNumeric: "tabular-nums",
@@ -308,13 +338,15 @@ function RankedStandingsRow({
                 }`}
           </div>
           <div
+            data-score-context-font-size={layout.score.contextFontSize}
             style={{
               display: "flex",
               color: IMESSAGE_CARD_COLOR.secondary,
-              fontSize: CAPTION_2_FONT_SIZE,
+              fontSize: layout.score.contextFontSize,
               fontWeight: 600,
               lineHeight: 1,
               letterSpacing: "0.06em",
+              whiteSpace: "nowrap",
             }}
           >
             {target === null ? "PTS" : `OF ${formatPoints(target)} PTS`}
@@ -351,8 +383,10 @@ function RankedStandingsRow({
 
 function CollectiveStandings({
   card,
+  layout,
 }: {
   card: Extract<ChallengeStandingsResponseCardV1, { format: "collective" }>;
+  layout: CollectiveLayout;
 }) {
   const points = card.collectivePoints;
   const target = card.objective.targetPoints;
@@ -362,7 +396,6 @@ function CollectiveStandings({
   const pointsText = points === null
     ? "—"
     : `${formatPoints(points)}${card.coverage === "partial" ? "+" : ""}`;
-  const pointsFontSize = fitDmSansFontSize(pointsText, 760, 135, 74);
 
   return (
     <div
@@ -376,20 +409,22 @@ function CollectiveStandings({
       <div
         style={{
           display: "flex",
-          minHeight: 162,
+          height: layout.scoreRowHeight,
           alignItems: "baseline",
           gap: 23,
         }}
       >
         <div
-          data-points-font-size={pointsFontSize}
+          data-points-font-size={layout.pointsFontSize}
           style={{
             display: "flex",
-            fontSize: pointsFontSize,
+            width: layout.pointsWidth,
+            fontSize: layout.pointsFontSize,
             fontWeight: 600,
             lineHeight: 1,
             letterSpacing: "-0.035em",
             fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
           }}
         >
           {pointsText}
@@ -397,11 +432,14 @@ function CollectiveStandings({
         <div
           style={{
             display: "flex",
+            width: layout.targetWidth,
+            flexShrink: 0,
             color: IMESSAGE_CARD_COLOR.secondary,
-            fontSize: SUBHEADLINE_FONT_SIZE,
+            fontSize: layout.targetFontSize,
             fontWeight: 500,
             lineHeight: 1,
             fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
           }}
         >
           / {formatPoints(target)} pts
@@ -432,9 +470,10 @@ function CollectiveStandings({
         </div>
       )}
       <div
+        data-collective-status-lines={layout.status.lineCount}
         style={{
           display: "flex",
-          minHeight: 90,
+          height: layout.statusRowHeight,
           alignItems: "baseline",
           justifyContent: "space-between",
           gap: 38,
@@ -443,12 +482,14 @@ function CollectiveStandings({
         <div
           style={{
             display: "flex",
+            width: layout.statusWidth,
             fontSize: SUBHEADLINE_FONT_SIZE,
             fontWeight: 600,
             lineHeight: 1.15,
+            whiteSpace: "pre-wrap",
           }}
         >
-          {collectiveStatus(card)}
+          {layout.status.text}
         </div>
         <div
           style={{
@@ -473,7 +514,12 @@ function CollectiveStandings({
 function getChallengeStandingsLayout(
   card: ChallengeStandingsResponseCardV1,
 ): ChallengeStandingsLayout {
-  const title = wrapCardText(card.title, CARD_CONTENT_WIDTH, TITLE_FONT_SIZE);
+  const title = wrapCardText(
+    card.title,
+    CARD_CONTENT_WIDTH,
+    TITLE_FONT_SIZE,
+    600,
+  );
   const subtitle = card.subtitle === null
     ? null
     : wrapCardText(card.subtitle, CARD_CONTENT_WIDTH, SUBTITLE_FONT_SIZE);
@@ -490,9 +536,12 @@ function getChallengeStandingsLayout(
     : 53 + footer.lineCount * FOOTER_FONT_SIZE * 1.25;
 
   if (card.format === "collective") {
-    const collectiveBodyHeight = 162 + 45 + 90
-      + (card.collectivePoints === null ? 0 : 45 + 15);
+    const collective = getCollectiveLayout(card);
+    const collectiveBodyHeight = collective.scoreRowHeight
+      + collective.statusRowHeight
+      + (card.collectivePoints === null ? 45 : 90 + 15);
     return {
+      collective,
       footer,
       headerHeight,
       height: Math.ceil(
@@ -504,13 +553,14 @@ function getChallengeStandingsLayout(
     };
   }
 
-  const rows = card.entries.map(getRankedRowLayout);
+  const rows = card.entries.map((entry) => getRankedRowLayout(card, entry));
   const rowsHeight = rows.reduce((total, row) => total + row.height, 0)
     + Math.max(0, rows.length - 1) * 2;
   const incompleteNoteHeight = rankingComplete(card.entries)
     ? 0
     : 38 + CAPTION_FONT_SIZE * 1.2;
   return {
+    collective: null,
     footer,
     headerHeight,
     height: Math.ceil(
@@ -523,14 +573,127 @@ function getChallengeStandingsLayout(
   };
 }
 
-function getRankedRowLayout(entry: ChallengeStandingsEntryV1): RankedRowLayout {
-  const label = wrapCardText(entry.label, 614, SUBHEADLINE_FONT_SIZE);
+function getRankedRowLayout(
+  card: RankedChallengeStandingsResponseCardV1,
+  entry: ChallengeStandingsEntryV1,
+): RankedRowLayout {
+  const score = getRankedScoreLayout(card, entry);
+  const labelWidth = CARD_CONTENT_WIDTH - 105 - 38 - 38 - score.width;
+  const label = wrapCardText(
+    entry.label,
+    labelWidth,
+    SUBHEADLINE_FONT_SIZE,
+    600,
+  );
+  const scoreHeight = score.pointsFontSize + 11 + score.contextFontSize
+    + (card.objective.kind === "target" && entry.points !== null ? 26 : 0);
   return {
     height: Math.max(
       185,
-      Math.ceil(68 + label.lineCount * SUBHEADLINE_FONT_SIZE * 1.15),
+      Math.ceil(
+        60 + Math.max(
+          label.lineCount * SUBHEADLINE_FONT_SIZE * 1.15,
+          scoreHeight,
+        ),
+      ),
     ),
     label,
+    score,
+  };
+}
+
+function getRankedScoreLayout(
+  card: RankedChallengeStandingsResponseCardV1,
+  entry: ChallengeStandingsEntryV1,
+): RankedScoreLayout {
+  const pointsText = entry.points === null
+    ? "—"
+    : `${formatPoints(entry.points)}${entry.coverage === "partial" ? "+" : ""}`;
+  const contextText = card.objective.kind === "target"
+    ? `OF ${formatPoints(card.objective.targetPoints)} PTS`
+    : "PTS";
+  const preferredWidth = Math.max(
+    measureDmSans600Text(pointsText, SUBHEADLINE_FONT_SIZE),
+    measureDmSans600Text(contextText, CAPTION_2_FONT_SIZE, 0.06),
+  );
+  const width = Math.min(525, Math.max(270, Math.ceil(preferredWidth)));
+  return {
+    contextFontSize: fitDmSans600FontSize(
+      contextText,
+      width,
+      CAPTION_2_FONT_SIZE,
+      18,
+      0.06,
+    ),
+    pointsFontSize: fitDmSans600FontSize(
+      pointsText,
+      width,
+      SUBHEADLINE_FONT_SIZE,
+      24,
+    ),
+    width,
+  };
+}
+
+function getCollectiveLayout(
+  card: Extract<ChallengeStandingsResponseCardV1, { format: "collective" }>,
+): CollectiveLayout {
+  const pointsText = card.collectivePoints === null
+    ? "—"
+    : `${formatPoints(card.collectivePoints)}${
+      card.coverage === "partial" ? "+" : ""
+    }`;
+  const targetText = `/ ${formatPoints(card.objective.targetPoints)} pts`;
+  const preferredTargetWidth = measureDmSans600Text(
+    targetText,
+    SUBHEADLINE_FONT_SIZE,
+  );
+  const targetWidth = Math.min(
+    550,
+    Math.max(200, Math.ceil(preferredTargetWidth)),
+  );
+  const pointsWidth = CARD_CONTENT_WIDTH - 23 - targetWidth;
+  const pointsFontSize = fitDmSans600FontSize(
+    pointsText,
+    pointsWidth,
+    135,
+    36,
+    -0.035,
+  );
+  const targetFontSize = fitDmSans600FontSize(
+    targetText,
+    targetWidth,
+    SUBHEADLINE_FONT_SIZE,
+    24,
+  );
+  const scoreRowHeight = Math.max(162, pointsFontSize, targetFontSize);
+  const scoredParticipants = card.coverageCounts.completeParticipants
+    + card.coverageCounts.partialParticipants;
+  const coverageText = `${formatPoints(scoredParticipants)}/${formatPoints(
+    card.coverageCounts.totalParticipants,
+  )} SCORED`;
+  const coverageWidth = Math.ceil(
+    measureDmSans600Text(coverageText, CAPTION_2_FONT_SIZE, 0.06),
+  );
+  const statusWidth = CARD_CONTENT_WIDTH - 38 - coverageWidth;
+  const status = wrapCardText(
+    collectiveStatus(card),
+    statusWidth,
+    SUBHEADLINE_FONT_SIZE,
+    600,
+  );
+  return {
+    pointsFontSize,
+    pointsWidth,
+    scoreRowHeight,
+    status,
+    statusRowHeight: Math.max(
+      90,
+      Math.ceil(status.lineCount * SUBHEADLINE_FONT_SIZE * 1.15),
+    ),
+    statusWidth,
+    targetFontSize,
+    targetWidth,
   };
 }
 
@@ -558,18 +721,22 @@ function rankingComplete(entries: readonly ChallengeStandingsEntryV1[]): boolean
   return entries.every((entry) => entry.coverage === "complete");
 }
 
-function fitDmSansFontSize(
+function fitDmSans600FontSize(
   value: string,
   width: number,
   preferredSize: number,
   minimumSize: number,
+  letterSpacingEm = 0,
 ): number {
-  if (measureDmSans400Text(value, preferredSize) <= width) {
+  if (measureDmSans600Text(value, preferredSize, letterSpacingEm) <= width) {
     return preferredSize;
   }
   return Math.max(
     minimumSize,
-    Math.floor(preferredSize * width / measureDmSans400Text(value, preferredSize)),
+    Math.floor(
+      preferredSize * width
+      / measureDmSans600Text(value, preferredSize, letterSpacingEm),
+    ),
   );
 }
 
@@ -577,6 +744,7 @@ function wrapCardText(
   value: string,
   width: number,
   fontSize: number,
+  fontWeight: 400 | 600 = 400,
   letterSpacingEm = 0,
 ): WrappedCardText {
   const words = value.trim().split(/\s+/u).filter(Boolean);
@@ -585,7 +753,7 @@ function wrapCardText(
 
   for (const word of words) {
     const candidate = currentLine === "" ? word : `${currentLine} ${word}`;
-    if (measureDmSans400Text(candidate, fontSize, letterSpacingEm) <= width) {
+    if (measureCardText(candidate, fontSize, fontWeight, letterSpacingEm) <= width) {
       currentLine = candidate;
       continue;
     }
@@ -594,6 +762,7 @@ function wrapCardText(
       word,
       width,
       fontSize,
+      fontWeight,
       letterSpacingEm,
     );
     lines.push(...fragments.slice(0, -1));
@@ -608,15 +777,19 @@ function breakOverwideCardToken(
   token: string,
   width: number,
   fontSize: number,
+  fontWeight: 400 | 600,
   letterSpacingEm: number,
 ): string[] {
   const fragments: string[] = [];
   let currentFragment = "";
-  for (const grapheme of segmentDmSans400Text(token)) {
+  const graphemes = fontWeight === 600
+    ? segmentDmSans600Text(token)
+    : segmentDmSans400Text(token);
+  for (const grapheme of graphemes) {
     const candidate = `${currentFragment}${grapheme}`;
     if (
       currentFragment !== ""
-      && measureDmSans400Text(candidate, fontSize, letterSpacingEm) > width
+      && measureCardText(candidate, fontSize, fontWeight, letterSpacingEm) > width
     ) {
       fragments.push(currentFragment);
       currentFragment = grapheme;
@@ -628,6 +801,17 @@ function breakOverwideCardToken(
     fragments.push(currentFragment);
   }
   return fragments;
+}
+
+function measureCardText(
+  value: string,
+  fontSize: number,
+  fontWeight: 400 | 600,
+  letterSpacingEm: number,
+): number {
+  return fontWeight === 600
+    ? measureDmSans600Text(value, fontSize, letterSpacingEm)
+    : measureDmSans400Text(value, fontSize, letterSpacingEm);
 }
 
 function formatPoints(points: number): string {

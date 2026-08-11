@@ -12,6 +12,10 @@ import {
   DM_SANS_400_FONT_SHA256,
   measureDmSans400Text,
 } from "../src/components/imessage/dm-sans-400-card-metrics";
+import {
+  DM_SANS_600_FONT_SHA256,
+  measureDmSans600Text,
+} from "../src/components/imessage/dm-sans-600-card-metrics";
 
 const FOUR_COLUMN_VALUE_WIDTH = 160.05;
 
@@ -33,7 +37,24 @@ test("native-parity semibold text stays pinned to its exact bundled font", async
   const font = await readFile(dmSans600FontPath);
   assert.equal(
     createHash("sha256").update(font).digest("hex"),
-    "52897fabe96fa9dfe59b52681b57493f6bdce268ca3add5b82d701460ecc100d",
+    DM_SANS_600_FONT_SHA256,
+  );
+
+  assertClose(
+    measureDmSans600Text("activity standings progress challenge", 64, -0.025),
+    1098.176,
+  );
+  assertClose(
+    measureDmSans600Text("morning recovery workout focus", 64, -0.025),
+    958.144,
+  );
+  assertClose(
+    measureDmSans600Text("More progress may be pending", 56),
+    838.88,
+  );
+  assertClose(
+    measureDmSans600Text("OF 1,000,000 PTS", 41, 0.06),
+    391.837,
   );
 });
 
