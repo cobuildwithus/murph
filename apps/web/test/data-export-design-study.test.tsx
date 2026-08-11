@@ -32,6 +32,15 @@ test("renders the retained-export error study from the production content", () =
   expect(markup).toContain("hosted-data-export-description");
 });
 
+test("renders the retained-export success study while newer data is processing", () => {
+  const markup = renderToStaticMarkup(createElement(DataExportFlowStudy));
+
+  expect(markup).toContain("Your latest retained data downloaded.");
+  expect(markup).toContain(
+    "Recent changes Murph had not finished processing may be absent.",
+  );
+});
+
 test("renders the retained-export pending study from the production content", () => {
   mocks.study = "data-export-pending";
 

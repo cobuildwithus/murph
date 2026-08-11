@@ -52,9 +52,9 @@ The bitmap remains rectangular because Messages owns the outer mask and
 caption. Because the provider request omits an App Store id, the app-absent
 layout supplies no app art of its own; the bitmap therefore embeds the checked-in
 canonical Murph mark in the same 36×27pt upper-left badge footprint as the
-native balloon. The title may sit beside that compact footprint for structured
-workouts or below it for generic tables, but no larger empty icon gutter is
-reserved.
+native balloon. Every fallback title sits beside that compact footprint in one
+shared header; optional supporting text stays directly under the title, and no
+larger empty icon gutter is reserved.
 
 Shared workout footer copy must remain truthful on both projections: it may ask
 the member to reply with an exercise, set, and result, but must not promise a
@@ -71,6 +71,16 @@ no tracking or canonical event reference. The stateless Web renderer accepts no
 identity, credential, canonical reference, or write authority, reads no database
 or remote service, logs no card values, and returns private no-store/no-index
 headers. It adds no card API, persistence owner, cache, queue, or retry path.
+
+When the same shared-card fragment reaches the public homepage outside the
+Messages extension, Web recognizes only the exact non-empty `#murph-card=`
+prefix after hydration and opens the App Store handoff. It never decodes,
+displays, stores, logs, or transmits the fragment value. Dismissal leaves the
+shared URL unchanged, and every other homepage fragment stays quiet. The web
+fallback uses Murph's canonical App Store URL independently, while the Linq
+payload omits the optional App Store id so it cannot replace the wide static
+preview with square artwork. Neither path changes the installed-extension route
+or application authority.
 
 ## Plan versus actual
 
