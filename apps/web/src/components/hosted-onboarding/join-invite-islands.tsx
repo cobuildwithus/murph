@@ -10,13 +10,13 @@ import { Button } from "@/src/components/ui/button";
 import { PaymentButton } from "@/src/components/ui/payment-button";
 import type {
   HostedBillingPlanCode,
-  HostedPublicBillingCheckoutOffer,
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { isHostedOnboardingPendingStage } from "@/src/lib/hosted-onboarding/stage";
-import type {
-  HostedInviteEmailAuthTarget,
-  HostedInvitePhoneAuthTarget,
-  HostedInviteVerificationMode,
+import {
+  HOSTED_PRIVY_AUTH_METHODS,
+  type HostedInviteEmailAuthTarget,
+  type HostedInvitePhoneAuthTarget,
+  type HostedInviteVerificationMode,
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import {
@@ -33,6 +33,7 @@ import {
   HostedIdentitySessionMismatch,
 } from "../settings/hosted-settings-identity-link-dialog";
 import { requestHostedBillingCheckout } from "./client-api";
+import { HostedAuthPanel } from "./hosted-auth-panel";
 import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
 import { logoutHostedAppSession } from "./hosted-app-session-client";
@@ -155,6 +156,23 @@ export function JoinInvitePhoneVerificationIsland({
           </Alert>
         ) : null}
       </div>
+    );
+  }
+
+  if (verificationMode === "manual_phone") {
+    return (
+      <HostedAuthPanel
+        inviteCode={inviteCode}
+        methods={HOSTED_PRIVY_AUTH_METHODS}
+        onCompleted={() => {
+          router.refresh();
+        }}
+        onSignOut={() => {
+          router.refresh();
+        }}
+        requireLaunchConsentOnCompletion
+        size="compact"
+      />
     );
   }
 
@@ -349,7 +367,6 @@ export function JoinInviteRefreshButtonIsland({
 export function JoinInviteCheckoutPlanButtonIsland({
   billingReady,
   className,
-  checkoutOffer,
   disabledLabel,
   idleLabel,
   inviteCode,
@@ -357,7 +374,6 @@ export function JoinInviteCheckoutPlanButtonIsland({
 }: {
   billingReady: boolean;
   className?: string;
-  checkoutOffer?: HostedPublicBillingCheckoutOffer | null;
   disabledLabel?: string;
   idleLabel: string;
   inviteCode: string;
@@ -381,7 +397,6 @@ export function JoinInviteCheckoutPlanButtonIsland({
 
     const payload = await requestHostedBillingCheckout({
       billingPlanCode: planCode,
-      ...(checkoutOffer ? { checkoutOffer } : {}),
       inviteCode,
     });
 

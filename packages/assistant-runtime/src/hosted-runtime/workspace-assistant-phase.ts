@@ -36,6 +36,7 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   applyMurphManagedAutomations,
+  getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
   hasGroupNewsletterDeliveryTag,
   isCanonicalOnboardingFirstPersonalReadAutomationSaveRequest,
@@ -44,8 +45,9 @@ import {
   recordHostedMailboxAssistantInputItem,
   readAssistantInputEvent,
   readAssistantOutboxIntent,
-  refreshReminderAvailability,
   refreshAssistantContextSnapshotBestEffort,
+  refreshReminderAvailability,
+  resolveAssistantCronDefaultTimeZoneProjection,
   scheduleDeviceActivityTriggeredAutomations,
   upsertAssistantInputEvent,
   type AssistantCronStatusOptions,
@@ -301,6 +303,7 @@ const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_WAKE_KINDS = [
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
+  "aask_done_",
 ] as const;
 const HOSTED_PRE_CHECKPOINT_ASSISTANT_ASK_COMPLETION_ROUTE_ACTIONS = [
   "continue-assistant-ask",
@@ -360,6 +363,20 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
   const emailIngressPresent = input.groupEmailIngress === true
     || (input.emailDeliveryContexts?.length ?? 0) > 0;
   return {
+    directAttachmentRouteStatus() {
+      const linqRoute = resolveHostedDirectToolLinqRouteContext(
+        input.linqDeliveryContexts,
+      );
+      if (linqRoute?.service === "imessage") {
+        return { status: "ok" };
+      }
+      return {
+        status: "unavailable",
+        unavailableReason: linqRoute?.service === "sms"
+          ? "sms_attachments_unsupported"
+          : "direct_attachment_route_unavailable",
+      };
+    },
     async request(request, context) {
       const forwardRequest = (forwardedRequest: HostedRuntimeGroupToolRequest) =>
         context
@@ -465,6 +482,29 @@ export function createHostedGroupToolWithCurrentTurnContext(input: {
         return await forwardRequest(request);
       }
       if (
+        request.action === "share_contact_card"
+        && request.contactCardImageUrl !== undefined
+      ) {
+        const linqRoute = resolveHostedDirectToolLinqRouteContext(
+          input.linqDeliveryContexts,
+        );
+        if (linqRoute?.service === "imessage") {
+          return await forwardRequest({
+            ...request,
+            directLinqChatId: linqRoute.chatId,
+          });
+        }
+        return linqRoute?.service === "sms"
+          ? buildHostedGroupSmsUnsupportedResponse(request)
+          : {
+            action: "share_contact_card",
+            result: {
+              status: "unavailable",
+              unavailableReason: "direct_attachment_route_unavailable",
+            },
+          };
+      }
+      if (
         request.action !== "update_display_name"
         && request.action !== "post_disclosure_request"
         && request.action !== "preflight_set_chat_avatar"
@@ -504,20 +544,22 @@ function buildHostedGroupJoinLinkFallbackRequest(
   if (!joinOffer) {
     return { action: "create_join_link" };
   }
+  const projectionScopes = joinOffer.projectionScopes;
+  const projectionKinds = joinOffer.projectionKinds;
   const joinLink = {
     ...(joinOffer.displayName
       ? { displayName: joinOffer.displayName }
       : {}),
-    ...(joinOffer.projectionScopes?.length
+    ...(projectionScopes !== undefined && projectionScopes !== null
       ? {
         requestedVaultShareProjectionScopes: [
-          ...joinOffer.projectionScopes,
+          ...projectionScopes,
         ],
       }
-      : joinOffer.projectionKinds?.length
+      : projectionKinds !== undefined && projectionKinds !== null
         ? {
           requestedVaultShareProjectionKinds: [
-            ...joinOffer.projectionKinds,
+            ...projectionKinds,
           ],
         }
         : {}),
@@ -619,6 +661,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   switch (request.action) {
     case "ask":
     case "ask_current_sender":
+    case "message_current_sender":
     case "ask_member":
       return {
         action: request.action,
@@ -752,6 +795,47 @@ type HostedGroupToolLinqRouteContext = {
   thread: HostedRuntimeGroupToolLinqThreadContext;
 };
 
+/**
+ * Direct home conversations are owned by `hostedMemberRouting`, not by the
+ * group thread-route store, and one chat may never live in both. So a direct
+ * route carries only the trusted host's exact chat id and service; Web
+ * revalidates it against the direct owner at the send boundary. Fabricating a
+ * thread-route authority here would assert an owner that cannot exist.
+ */
+type HostedDirectToolLinqRouteContext = {
+  chatId: string;
+  service: HostedGroupToolLinqService;
+};
+
+function resolveHostedDirectToolLinqRouteContext(
+  contexts: readonly HostedAssistantLinqDeliveryContext[],
+): HostedDirectToolLinqRouteContext | null {
+  const eligible = new Map<string, HostedDirectToolLinqRouteContext>();
+  let hasInvalidCandidate = false;
+  for (const context of contexts) {
+    if (context.threadIsDirect !== true) {
+      if (context.threadIsDirect !== false) {
+        hasInvalidCandidate = true;
+      }
+      continue;
+    }
+    const service = normalizeHostedGroupToolLinqService(context.service);
+    const chatId = normalizeAssistantRouteString(context.target);
+    if (!service || !chatId) {
+      hasInvalidCandidate = true;
+      continue;
+    }
+    const routeKey = JSON.stringify([chatId, service]);
+    if (!eligible.has(routeKey)) {
+      eligible.set(routeKey, { chatId, service });
+    }
+  }
+  if (hasInvalidCandidate || eligible.size !== 1) {
+    return null;
+  }
+  return [...eligible.values()][0] ?? null;
+}
+
 function resolveHostedGroupToolLinqRouteContext(
   contexts: readonly HostedAssistantLinqDeliveryContext[],
 ): HostedGroupToolLinqRouteContext | null {
@@ -861,7 +945,10 @@ function createHostedAssistantAutomationOperationScope(
       operation(
         executionContext: AssistantExecutionContext,
         turnEnvironment: AssistantTurnEnvironment | null,
+        providerStartCriticalPath?:
+          AssistantProviderStartCriticalPathContext | null,
       ): Promise<T>;
+      providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null;
       turnEnvironment: AssistantTurnEnvironment | null;
     }): Promise<T> {
       const durableContext = await resolveHostedAssistantInputIdsOperationContext({
@@ -890,9 +977,14 @@ function createHostedAssistantAutomationOperationScope(
         route,
         vaultRoot: input.restored.vaultRoot,
       });
+      const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
+        scopeInput.providerStartCriticalPath,
+        "automationGroupAndOperationScopeDoneAtMonotonicMs",
+      );
       return await scopeInput.operation(
         scopedExecutionContext,
         scopeInput.turnEnvironment,
+        providerStartCriticalPath,
       );
     },
   };
@@ -1034,12 +1126,24 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
   const event = input.event;
   const sourceMetadata = event?.sourceMetadata;
   const replyTarget = event?.replyTarget;
+  // Admit Linq events from either thread shape and carry the event's real
+  // value through. Group consumers select `false` and require the external
+  // thread-route authority these events carry. A direct home conversation
+  // structurally cannot have that authority — its route lives in
+  // `hostedMemberRouting` — so it is admitted on the trusted reply target
+  // alone and revalidated against its own owner at the Web send boundary.
   if (
     !event
     || sourceMetadata?.kind !== "linq"
-    || sourceMetadata.externalThreadRouteAuthorityPresent !== true
-    || event.conversation?.threadIsDirect !== false
+    || typeof event.conversation?.threadIsDirect !== "boolean"
     || replyTarget?.channel !== "linq"
+  ) {
+    return null;
+  }
+  const threadIsDirect = event.conversation.threadIsDirect;
+  if (
+    !threadIsDirect
+    && sourceMetadata.externalThreadRouteAuthorityPresent !== true
   ) {
     return null;
   }
@@ -1052,14 +1156,19 @@ function readHostedAssistantInputLinqDeliveryContext(input: {
       normalizeAssistantRouteString(sourceMetadata.senderHandle),
     fromPhoneNumber: null,
     replyToMessageId: normalizeAssistantRouteString(replyTarget.messageId),
-    routeAuthority: {
-      channel: "linq",
-      containerMemberId: input.memberId,
-      threadId,
-    },
+    // Only a group thread carries external thread-route authority. Leaving it
+    // null for a direct conversation keeps the group resolvers structurally
+    // unable to select it.
+    routeAuthority: threadIsDirect
+      ? null
+      : {
+        channel: "linq",
+        containerMemberId: input.memberId,
+        threadId,
+      },
     service: normalizeAssistantRouteString(sourceMetadata.service),
     target: threadId,
-    threadIsDirect: false,
+    threadIsDirect,
   };
 }
 
@@ -1443,10 +1552,11 @@ function createHostedAssistantAutomationTool(input: {
           title: request.title,
           vaultRoot: input.vaultRoot,
         });
-        return buildHostedAutomationToolResponse({
+        return await buildHostedAutomationToolResponse({
           action: "save",
           result,
           routeBinding: "current_conversation",
+          vaultRoot: input.vaultRoot,
         });
       }
 
@@ -1512,12 +1622,13 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.title === undefined ? {} : { title: request.title }),
         vaultRoot: input.vaultRoot,
       });
-      return buildHostedAutomationToolResponse({
+      return await buildHostedAutomationToolResponse({
         action: "patch",
         result,
         routeBinding: request.retargetToCurrentConversation === true
           ? "current_conversation"
           : "preserved",
+        vaultRoot: input.vaultRoot,
       });
     },
   };
@@ -1679,18 +1790,74 @@ function assertActiveHostedAutomationRoute(input: {
   }
 }
 
-function buildHostedAutomationToolResponse(input: {
+async function buildHostedAutomationToolResponse(input: {
   action: "patch" | "save";
   result: Awaited<ReturnType<typeof upsertAutomation>>;
   routeBinding: "current_conversation" | "preserved";
-}): Awaited<ReturnType<HostedAssistantAutomationTool["request"]>> {
+  vaultRoot: string;
+}): Promise<Awaited<ReturnType<HostedAssistantAutomationTool["request"]>>> {
+  const schedule = input.result.record.schedule;
+  let effectiveTimeZone =
+    schedule.kind === "cron" || schedule.kind === "dailyLocal"
+      ? schedule.timeZone ?? null
+      : null;
+  let nextOccurrenceAt: string | null = null;
+  let timingVerified = true;
+  let defaultTimeZone: string | undefined;
+  if (schedule.kind !== "deviceActivity") {
+    const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
+      input.vaultRoot,
+    );
+    defaultTimeZone = timeZoneProjection.timeZone;
+    if (
+      (schedule.kind === "cron" || schedule.kind === "dailyLocal")
+      && effectiveTimeZone === null
+    ) {
+      effectiveTimeZone = timeZoneProjection.timeZone;
+      if (!timeZoneProjection.vaultTimeZoneVerified) {
+        timingVerified = false;
+      }
+    }
+  }
+  if (
+    input.result.record.status !== "archived"
+    && schedule.kind !== "deviceActivity"
+  ) {
+    try {
+      if (defaultTimeZone === undefined) {
+        throw new Error("Automation timing projection requires a default timezone.");
+      }
+      const projection = await getAssistantCronAutomationTimingProjection(
+        input.vaultRoot,
+        input.result.record.relativePath,
+        defaultTimeZone,
+      );
+      const { job } = projection;
+      nextOccurrenceAt = projection.nextOccurrenceAt;
+      if (!projection.occurrenceVerified) {
+        timingVerified = false;
+      }
+      if (
+        job.updatedAt !== input.result.record.updatedAt
+        || JSON.stringify(job.schedule) !== JSON.stringify(schedule)
+      ) {
+        timingVerified = false;
+      }
+    } catch {
+      timingVerified = false;
+    }
+  }
   return {
     action: input.action,
     automationId: input.result.record.automationId,
     created: input.result.created,
+    effectiveTimeZone,
     lookupId: input.result.record.slug,
+    nextOccurrenceAt,
     routeBinding: input.routeBinding,
+    schedule,
     status: input.result.record.status,
+    timingVerified,
   };
 }
 

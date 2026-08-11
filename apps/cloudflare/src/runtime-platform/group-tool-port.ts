@@ -20,6 +20,18 @@ const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_RESPONSE_MAX_BYTES =
   128 * 1024;
 const HOSTED_RUNTIME_GROUP_PARTICIPANT_DISPLAY_NAME_SOFT_TIMEOUT_MS = 1_000;
 
+export const HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID =
+  "HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID";
+
+export class HostedGroupToolResponseSchemaError extends Error {
+  readonly code = HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID;
+
+  constructor() {
+    super("Hosted group tool returned an invalid response.");
+    this.name = "HostedGroupToolResponseSchemaError";
+  }
+}
+
 export function createHostedRuntimeGroupToolPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -49,7 +61,7 @@ export function createHostedRuntimeGroupToolPort(input: {
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
         path: buildHostedRuntimeGroupToolPath(),
-        replayOnceOnRetryableFailure: isHostedAssistantAskGroupToolRequest(request),
+        replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(isParticipantDisplayNameRead
           ? {
               sensitiveResponseBody: {
@@ -65,20 +77,21 @@ export function createHostedRuntimeGroupToolPort(input: {
 
       try {
         return parseHostedRuntimeGroupToolResponse(payload);
-      } catch (error) {
-        throw new Error("Hosted group tool returned invalid JSON.", { cause: error });
+      } catch {
+        throw new HostedGroupToolResponseSchemaError();
       }
     },
   };
 }
 
-function isHostedAssistantAskGroupToolRequest(
+function isHostedReplaySafeGroupToolRequest(
   request: Parameters<
     NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
   >[0],
 ): boolean {
   return request.action === "ask"
     || request.action === "ask_current_sender"
+    || request.action === "message_current_sender"
     || request.action === "ask_member";
 }
 

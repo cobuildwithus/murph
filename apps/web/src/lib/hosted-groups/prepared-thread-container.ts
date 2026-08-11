@@ -10,6 +10,8 @@ import {
 } from "../hosted-onboarding/member-preferences";
 import {
   ensureHostedThreadContainerRouteTx,
+  type PreparedHostedThreadContainerCreation,
+  type PreparedHostedThreadContainerDeliveryRoute,
   type HostedThreadContainerRouteEnsureResult,
 } from "../hosted-routing/thread-container-service";
 import { normalizeNullableString } from "../primitives";
@@ -57,6 +59,8 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   mailboxDedupeKey: string;
   occurredAt: Date;
   participantMemberIds: readonly string[];
+  preparedCreation?: PreparedHostedThreadContainerCreation;
+  preparedDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
   recipientPhoneLookupKeys: readonly string[];
   requiredPendingSetupCandidateId?: string | null;
   senderMemberId?: string | null;
@@ -121,6 +125,12 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
     mailboxDedupeKey: input.mailboxDedupeKey,
     occurredAt: input.occurredAt,
     ownerMemberId,
+    ...(input.preparedCreation
+      ? { preparedCreation: input.preparedCreation }
+      : {}),
+    ...(input.preparedDeliveryRoute
+      ? { preparedDeliveryRoute: input.preparedDeliveryRoute }
+      : {}),
     prisma: input.tx,
     threadId: input.threadId,
   });

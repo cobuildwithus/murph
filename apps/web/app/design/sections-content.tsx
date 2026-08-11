@@ -9,20 +9,34 @@ import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
+import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
+import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
 import { SiteFooter } from "@/src/components/homepage/site-footer";
 import { TechnicalCapabilitiesSection } from "@/src/components/homepage/technical-capabilities-section";
 import { TogetherSection } from "@/src/components/homepage/together-section";
-import { ReferralPageContent } from "@/src/components/referrals/referral-page-content";
+import { DeepCarouselSection } from "@/src/components/knowledge/deep-carousel-section";
+import {
+  ReferralPageContent,
+  ReferralRewardCards,
+  ReferralRewardReceiptPreview,
+} from "@/src/components/referrals/referral-page-content";
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
+import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import { ValidationSlide } from "../pitch/_components/slides";
+import {
+  projectHostedVaultShareProjectionDisplays,
+  resolveHostedGroupAccessOfferProjectionScopes,
+} from "@/src/lib/hosted-groups/join-policy";
 import { AccountDeletionMaintenanceStudy } from "./account-deletion-maintenance-study";
 import { AccountExitReasonStudy } from "./account-exit-reason-study";
 import { ActionApprovalLifecycleStudy } from "./action-approval-lifecycle-study";
@@ -46,8 +60,8 @@ import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
+import { OpsUsageStudy } from "./ops-usage-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
-import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
@@ -59,6 +73,7 @@ import {
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
+import { PersonalPatternsStudy } from "./personal-patterns-study";
 
 function StudySection({
   children,
@@ -105,6 +120,19 @@ export function SectionsContent() {
             messengerChannel="imessage"
             murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT}
           />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Knowledge topic depth">
+        <div
+          id="knowledge-topic-depth"
+          data-design-section="knowledge-topic-depth"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <DeepCarouselSection />
         </div>
       </StudySection>
 
@@ -196,7 +224,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings custom inference routing and endpoint">
+      <StudySection title="Settings inference routing, locked models, and endpoint">
         <SettingsCustomInferenceStudy />
       </StudySection>
 
@@ -228,20 +256,40 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Private Environment print report">
+      <StudySection title="Private Environment print report loading and ready states">
         <EnvironmentPrintStudy />
       </StudySection>
 
       <Separator />
 
+      <StudySection title="Patterns page">
+        <PersonalPatternsStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage experiment flow">
-        <HowItWorksSection />
+        <div
+          id="homepage-experiment-flow"
+          data-design-section="homepage-experiment-flow"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <HowItWorksSection />
+        </div>
       </StudySection>
 
       <Separator />
 
       <StudySection title="Homepage personas">
-        <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+        <div
+          id="homepage-personas"
+          data-design-section="homepage-personas"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+        </div>
       </StudySection>
 
       <Separator />
@@ -260,7 +308,46 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage referral program">
+      <StudySection title="Homepage nutrition research">
+        <div
+          id="homepage-nutrition-research"
+          data-design-section="homepage-nutrition-research"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <NutritionSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage integrations">
+        <div
+          id="homepage-integrations"
+          data-design-section="homepage-integrations"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <IntegrationsSection authenticated={false} />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage local installation">
+        <div
+          id="homepage-local-installation"
+          data-design-section="homepage-local-installation"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <LocalRunSection installCommandUrl="https://www.withmurph.ai/install.sh" />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage referral program · days-only rewards">
         <div
           id="referral-program"
           data-design-section="homepage-referral-program"
@@ -268,6 +355,134 @@ export function SectionsContent() {
           inert
         >
           <ReferralSection rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage referral program · group rewards">
+        <div
+          data-design-section="homepage-referral-program-group-only"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage referral program · signup reward">
+        <div
+          data-design-section="homepage-referral-program-signup-only"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralSection
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id === "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral page · reward presentation states">
+        <div
+          id="referral-page-reward-states"
+          data-design-section="referral-page-reward-states"
+          className="-mx-5 space-y-10 bg-[#ede5d8] p-5 sm:-mx-8 sm:p-8 lg:-mx-12 lg:p-12"
+          inert
+        >
+          <div className="space-y-5" data-referral-reward-state="signup-only">
+            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+              Signup link only
+            </h3>
+            <div className="grid gap-6 xl:grid-cols-2">
+              <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
+                <ReferralRewardReceiptPreview
+                  reward={HOSTED_PUBLIC_REFERRAL_REWARDS.find(
+                    ({ id }) => id === "signup-link",
+                  )!}
+                />
+              </div>
+              <ReferralRewardCards
+                rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                  ({ id }) => id === "signup-link",
+                )}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-5" data-referral-reward-state="group-only">
+            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+              Group referral options only
+            </h3>
+            <div className="rounded-[2rem] bg-[#1d271b] p-8 sm:p-12">
+              <ReferralRewardReceiptPreview
+                reward={HOSTED_PUBLIC_REFERRAL_REWARDS.find(
+                  ({ id }) => id === "new-person-group",
+                )!}
+              />
+            </div>
+            <ReferralRewardCards
+              includeShareLink
+              rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+                ({ id }) => id !== "signup-link",
+              )}
+            />
+          </div>
+
+          <div className="space-y-5" data-referral-reward-state="all-rewards">
+            <h3 className="font-mono text-xs uppercase tracking-[0.12em] text-[#736a58]">
+              Signup link and group referral options
+            </h3>
+            <ReferralRewardCards rewards={HOSTED_PUBLIC_REFERRAL_REWARDS} />
+          </div>
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards page · group referrals and share link">
+        <div
+          id="referral-rewards-page"
+          data-design-section="referral-rewards-page"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated={false}
+            identityKey={null}
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Referral rewards page · member share action">
+        <div
+          id="referral-rewards-page-member"
+          data-design-section="referral-rewards-page-member"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ReferralPageContent
+            authenticated
+            identityKey="referral-design-member"
+            referralSignupUrl="https://example.com/r/referral-design-member"
+            rewards={HOSTED_PUBLIC_REFERRAL_REWARDS.filter(
+              ({ id }) => id !== "signup-link",
+            )}
+          />
         </div>
       </StudySection>
 
@@ -289,7 +504,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Homepage footer">
+      <StudySection title="Homepage footer with vitals, iOS app, and split link columns">
         <div
           data-design-section="homepage-footer"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
@@ -310,7 +525,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Changelog archive edition">
+      <StudySection title="Changelog archive with explanatory visuals">
         <div data-design-section="changelog-archive">
           <ChangelogArchiveStudy />
         </div>
@@ -332,14 +547,16 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Family billing recovery on Join">
+      <StudySection title="Family billing recovery and management on Join">
         <JoinFamilyBillingRecoveryStudy />
       </StudySection>
 
       <Separator />
 
       <StudySection title="Connect source actions and disconnect lifecycle">
-        <ConnectSourceCardStudy />
+        <ConnectSourceCardStudy
+          androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
+        />
       </StudySection>
 
       <Separator />
@@ -362,7 +579,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Apple Health relay wearable setup">
+      <StudySection title="Apple Health relay wearable sources">
         <AppleHealthRelaySetupStudy />
       </StudySection>
 
@@ -374,19 +591,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings sign-in required">
+      <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
         <SettingsAuthRequiredStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Pulse billing return confirmation">
-        <PulseTrialBillingContinuationStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Subscription recovery, sponsored billing, and usage limits">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -411,7 +622,11 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Group join invites, current and legacy sharing, and setup recovery">
-        <GroupJoinStudy />
+        <GroupJoinStudy
+          comprehensivePermissions={projectHostedVaultShareProjectionDisplays(
+            resolveHostedGroupAccessOfferProjectionScopes(undefined),
+          )}
+        />
       </StudySection>
 
       <Separator />
@@ -422,13 +637,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group sponsorship with optional creative response">
+      <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
         <GroupUsageFundingStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Reusable signup referral link and recipient claim states">
+      <StudySection title="Reusable signup referral link, shared authentication, recipient claim, and signed-in recovery states">
         <SignupReferralFlowStudy />
       </StudySection>
 
@@ -436,6 +651,12 @@ export function SectionsContent() {
 
       <StudySection title="Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals">
         <PersonalUsageCreditOwnerStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops usage dashboard">
+        <OpsUsageStudy />
       </StudySection>
 
       <Separator />
@@ -452,7 +673,20 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with sponsorship accounting, messaging-activity, message-volume, and monthly-revenue history">
+      <StudySection title="Pitch deck progress slide">
+        <div
+          id="pitch-progress-slide"
+          data-design-section="pitch-progress-slide"
+          className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ValidationSlide />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
         <div inert>
           <GrowthScorecardStudy />
         </div>
@@ -486,8 +720,10 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Boundary result detail">
-        <BiomarkerBoundaryResultStudy />
+      <StudySection title="Biomarker boundary result · published comparator provenance">
+        <div id="biomarker-boundary-result">
+          <BiomarkerBoundaryResultStudy />
+        </div>
       </StudySection>
     </div>
   );

@@ -170,33 +170,55 @@ test("automation record schema accepts the canonical automation shape", () => {
   assert.equal(parsed.schedule.kind, "cron");
 });
 
-test("automation record schema rejects recurring schedules with timeZone", () => {
+const recurringTimeZoneAutomationRecord = {
+  automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWX",
+  slug: "timezone-weekly-check-in",
+  title: "Timezone weekly check-in",
+  status: "active",
+  summary: "Timezone-aware scheduled assistant notification instructions.",
+  schedule: {
+    kind: "cron",
+    expression: "0 9 * * 1",
+    timeZone: "Australia/Sydney",
+  },
+  route: {
+    channel: "telegram",
+    deliveryTarget: null,
+    identityId: null,
+    participantId: null,
+    threadId: null,
+  },
+  assistantTargetOverride: null,
+  supportKind: null,
+  continuityPolicy: "preserve",
+  tags: ["assistant", "scheduled"],
+  createdAt: "2026-04-06T00:00:00.000Z",
+  scheduleAnchorAt: "2026-04-06T00:00:00.000Z",
+  updatedAt: "2026-04-06T00:00:00.000Z",
+  instructions: "Write the scheduled assistant instructions here.",
+  relativePath: "bank/automations/timezone-weekly-check-in.md",
+  markdown: "---\n...\n---\nWrite the scheduled assistant instructions here.\n",
+} as const;
+
+test("automation record schema accepts recurring schedules with a valid timeZone", () => {
+  const parsed = automationRecordSchema.parse(recurringTimeZoneAutomationRecord);
+
+  assert.deepEqual(parsed.schedule, {
+    kind: "cron",
+    expression: "0 9 * * 1",
+    timeZone: "Australia/Sydney",
+  });
+  assert.equal(parsed.scheduleAnchorAt, "2026-04-06T00:00:00.000Z");
+});
+
+test("automation record schema rejects recurring schedules with an invalid timeZone", () => {
   assert.throws(() => automationRecordSchema.parse({
-    automationId: "automation_01HZXW2Y6Y8QWQ8QWQ8QWQ8QWX",
-    slug: "legacy-weekly-check-in",
-    title: "Legacy weekly check-in",
-    status: "active",
-    summary: "Legacy scheduled assistant notification instructions.",
+    ...recurringTimeZoneAutomationRecord,
     schedule: {
-      kind: "cron",
-      expression: "0 9 * * 1",
-      timeZone: "Australia/Sydney",
+      ...recurringTimeZoneAutomationRecord.schedule,
+      timeZone: "Mars/Olympus_Mons",
     },
-    route: {
-      channel: "telegram",
-      deliveryTarget: null,
-      identityId: null,
-      participantId: null,
-      threadId: null,
-    },
-    continuityPolicy: "preserve",
-    tags: ["assistant", "scheduled"],
-    createdAt: "2026-04-06T00:00:00.000Z",
-    updatedAt: "2026-04-06T00:00:00.000Z",
-    instructions: "Write the scheduled assistant instructions here.",
-    relativePath: "bank/automations/legacy-weekly-check-in.md",
-    markdown: "---\n...\n---\nWrite the scheduled assistant instructions here.\n",
-  }), /timeZone/u);
+  }), /IANA time zone/u);
 });
 
 test("automation record schema rejects invalid slugs", () => {
@@ -713,6 +735,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
         schedule: {
           kind: string;
           localTime?: string;
+          timeZone?: string;
         };
         tags: string[];
       } | null;
@@ -731,6 +754,7 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(shown.envelope.data?.automation?.route.deliveryTarget, "linq_chat_real");
     assert.equal(shown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(shown.envelope.data?.automation?.schedule.localTime, "08:30");
+    assert.equal(shown.envelope.data?.automation?.schedule.timeZone, undefined);
     assert.deepEqual(shown.envelope.data?.automation?.tags, ["assistant"]);
 
     const routeShown = await runInProcessJsonCli<{
@@ -827,6 +851,71 @@ test("automation edit patches sparse fields without implicit route rebinding", a
     assert.equal(tagShown.envelope.data?.automation?.schedule.kind, "dailyLocal");
     assert.equal(tagShown.envelope.data?.automation?.schedule.localTime, "08:30");
     assert.deepEqual(tagShown.envelope.data?.automation?.tags, ["scheduled", "experiment"]);
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation edit preserves an explicit timezone when changing wall-clock time", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-edit-timezone-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    await upsertAutomation({
+      vaultRoot,
+      ...createAutomationScaffoldPayload(),
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "21:00",
+        timeZone: "America/Chicago",
+      },
+      slug: "central-evening-reminder",
+      status: "paused",
+      title: "Central evening reminder",
+    });
+
+    const edited = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "central-evening-reminder",
+      "--trigger-kind",
+      "dailyLocal",
+      "--trigger-local-time",
+      "22:00",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(edited.exitCode, null);
+    assert.equal(edited.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        schedule: {
+          kind: string;
+          localTime?: string;
+          timeZone?: string;
+        };
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "central-evening-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.schedule, {
+      kind: "dailyLocal",
+      localTime: "22:00",
+      timeZone: "America/Chicago",
+    });
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }

@@ -5,6 +5,8 @@ import {
   getAvailableHostedPublicReferralRewards,
 } from "@/src/lib/hosted-growth/referral-program";
 
+import { SiteFooterVitals } from "./site-footer-vitals";
+
 function GitHubIcon() {
   return (
     <svg
@@ -38,6 +40,11 @@ const footerLinks = {
     { label: "Clubs", href: "/clubs", external: false },
     { label: "Referrals", href: "/refer", external: false },
     { label: "Changelog", href: "/changelog", external: false },
+    {
+      label: "iOS app",
+      href: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+      external: true,
+    },
     {
       label: "Status",
       href: "https://status.withmurph.ai",
@@ -80,17 +87,23 @@ export function SiteFooter({
       <div className="mx-auto max-w-[1080px]">
         {/* Logo + link columns */}
         <div className="flex flex-col gap-10 py-10 sm:flex-row sm:justify-between">
-          <Link href="/" aria-label="Murph home">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7 w-auto" />
-          </Link>
+          <div className="flex flex-col items-start gap-8">
+            <Link href="/" aria-label="Murph home">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.svg" alt="Murph" width={125} height={28} className="h-7 w-auto" />
+            </Link>
+            <SiteFooterVitals />
+          </div>
 
           <div className="grid grid-cols-2 gap-x-20 gap-y-8 sm:gap-x-28">
             <div className="flex flex-col gap-3">
               <span className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-[#736a58]">
                 Murph
               </span>
-              <nav className="flex flex-col gap-2" aria-label="Product links">
+              <nav
+                className="grid gap-2 sm:grid-flow-col sm:grid-rows-5 sm:gap-x-12 md:grid-rows-4"
+                aria-label="Product links"
+              >
                 {productLinks.map((link) => (
                   <a
                     key={link.href}

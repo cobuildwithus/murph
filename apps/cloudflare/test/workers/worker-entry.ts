@@ -55,7 +55,10 @@ import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution";
 import type { HostedRunnerStatusResponse } from "@murphai/hosted-execution/runtime-control";
-import { handleDatabaseHealthEgress } from "./database-health-fetch.ts";
+import {
+  handleDatabaseHealthEgress,
+  readDatabaseHealthNowMs,
+} from "./database-health-fetch.ts";
 
 export { DatabaseHealthDurableObject };
 
@@ -72,6 +75,7 @@ export class VitestDatabaseHealthDurableObject
       state.storage,
       environment,
       handleDatabaseHealthEgress,
+      readDatabaseHealthNowMs,
     );
   }
 
@@ -320,7 +324,6 @@ export default {
 
 async function handleTestRoute(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
-
   if (url.pathname === "/__test/wake-with-outcome" && request.method === "POST") {
     const wakePayload: unknown = await request.json();
     const wake = readTestWake(wakePayload);

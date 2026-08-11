@@ -1,6 +1,6 @@
 # Product Specs Index
 
-Last verified: 2026-08-09
+Last verified: 2026-08-11
 
 | Path | Purpose | Status |
 | --- | --- | --- |
@@ -8,13 +8,14 @@ Last verified: 2026-08-09
 | `agent-docs/product-specs/bring-your-own-inference.md` | One encrypted personal custom-inference connection with native Responses or adapted Chat Completions, Codex-only execution, fenced credential injection, and no silent managed fallback. | Specified |
 | `agent-docs/product-specs/member-owned-device-provider-applications.md` | One encrypted member-owned OAuth client application per supported device provider, provisioned through existing Kernel Managed Auth and bound by exact revision to existing device-sync OAuth, runtime, and webhook owners. | Proposed |
 | `agent-docs/product-specs/murph-personas.md` | Persona-first onboarding, canonical persona ids, and code-owned style defaults. | Implemented |
-| `agent-docs/product-specs/pulse-trial-checkout-offer.md` | Implemented Pulse Trial checkout-offer architecture over the existing hosted billing and AI usage allowance system. | Active |
-| `agent-docs/product-specs/pulse-trial-start-paid-pulse.md` | Implemented exhausted Pulse Trial conversion to paid Pulse through Stripe trial-end billing. | Active |
+| `agent-docs/product-specs/starter-usage.md` | One idempotent, non-expiring $4.50 starter-usage grant on the existing immutable usage-credit ledger, including migration and legacy Stripe-drain compatibility. | Active |
 | `agent-docs/product-specs/hosted-plan-downgrades.md` | Edge-to-Pulse renewal switches, the billing-gated Edge assistant-model choice, downgrade behavior, deployment compatibility, and the enforced composed usage boundary with separate group funding. | Active |
 | `agent-docs/product-specs/hosted-plan-usage.md` | Web-owned overall available-usage projection and enforced included-plus-generic-credit blocking, including forecast, server-selected actions, group privacy boundaries, and personal or exact Family-member Settings handoffs. | Active |
-| `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members, with an internal Group billing identity, Pulse runtime capability, $2.80 included personal AI usage, trial continuation, signed billing actions, and public-checkout exclusion. | Active |
+| `agent-docs/product-specs/hosted-group-member-plan.md` | Private $3.50 Core subscription for confirmed hosted-group members, with an internal Group billing identity, Pulse runtime capability, $2.80 included personal AI usage, signed billing actions, and public-checkout exclusion. | Active |
 | `agent-docs/product-specs/labs-discovery.md` | Live read-only lab catalog and ZIP collection-site discovery through private Murph and the authenticated unlinked `/labs` page, with provider-neutral member-facing language. | Implemented |
 | `agent-docs/product-specs/measured-biomarker-index.md` | Curated device-first Biomarkers index over preserved private lab history, with explicit identity admission, no catch-all Other section, and closed health-area notebook disclosures. | Implemented |
+| `agent-docs/product-specs/personal-patterns.md` | Private repeated action-to-next-day sleep and recovery clues, including history reuse, comparison matching, evidence stages, thresholds, refresh behavior, and ownership. | Implemented |
+| `agent-docs/product-specs/imessage-workout-tracking.md` | Canonical workout-backed live session cards with plan-versus-actual ownership, set-level composer commands, immutable native snapshots, ambiguity safety, and reader-first rollout. | Specified |
 | `agent-docs/product-specs/hosted-usage-topups.md` | Implemented fixed $5/$10/$25 personal, exact Family-member, and hosted-group funding with current-policy saved-card reuse, Checkout fallback, authenticated payer-and-target-scoped lost-response recovery, canonical purchase/referral credit entries, optional participant-authorized group creative responses, and purchase-only refund/dispute reversal; fulfilled top-ups immediately refresh the overall usage bar. | Active |
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Conversational personal/group usage missions, portable qualification, canonical credit-entry accounting, final rewards, and source-room celebration. | Active |
 | `agent-docs/product-specs/physical-notes.md` | GPT Image plus Lob physical notes composed through the existing hosted image-completion wake, one Web-owned provider effect, one complimentary claim per member or group, and ordinary Murph usage thereafter. | Active |
@@ -40,6 +41,7 @@ Last verified: 2026-08-09
 | `agent-docs/product-specs/group-health-newsletter.md` | Recurring group health newsletter emailed from a group chat: cron automation in the group vault, tone flavors, a reusable default-at-join email-sharing grant, and Cloudflare `HOSTED_EMAIL` delivery with web-side address resolution. | Specified |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats; one-to-five model-interpreted additive components; bounded shared-read composition; deterministic CLI scoring; and page-owned cumulative settlement. | Implemented |
 | `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful partial group-challenge standings plus an explicit bounded device-sync status share for evidence-backed recovery guidance. | Implemented |
+| `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation for individual, team, and collective challenge standings with truthful partial and unscored states plus authenticated Linq group-only delivery. | Implemented |
 | `agent-docs/product-specs/personal-group-awareness.md` | Personal Murph read access to the member's hosted-group memberships, requested permissions, active self grants, and owner-authorized permission links. | Implemented |
 | `agent-docs/product-specs/consented-group-disclosure.md` | Exact per-member group disclosure consent with one private read-only candidate and one fresh outgoing reviewer. | Implemented |
 | `agent-docs/product-specs/private-group-consultation.md` | Proposed on-demand private-to-group Murph consultation with automatic membership resolution, a stateless encrypted mailbox request/reply, and a temporary read-only group turn. | Proposed |

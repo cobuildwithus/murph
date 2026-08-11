@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+} from "../src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
@@ -237,6 +241,65 @@ describe("usage-credit checkout route", () => {
       offerCode: "usage_5_usd",
       prisma: { label: "test-prisma" },
     });
+  });
+
+  it("returns the same structured capacity conflict for personal, Family, and group checkouts", async () => {
+    const capacityConflict = () =>
+      hostedOnboardingError({
+        code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+        httpStatus: 409,
+        message: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+      });
+
+    mocks.createHostedUsageCreditCheckout.mockRejectedValueOnce(
+      capacityConflict(),
+    );
+    const personalResponse = await checkoutRoute.POST(
+      createCheckoutRequest({
+        clientRequestKey: "capacity_personal_1234",
+        offerCode: "usage_10_usd",
+      }),
+    );
+
+    mocks.createHostedFamilyMemberUsageCreditCheckout.mockRejectedValueOnce(
+      capacityConflict(),
+    );
+    const familyResponse = await familyCheckoutRoute.POST(
+      createCheckoutRequest(
+        {
+          clientRequestKey: "capacity_family_123456",
+          offerCode: "usage_10_usd",
+        },
+        "https://join.example.test/api/settings/billing/family/members/hbm_familymember1/usage-credit/checkout",
+      ),
+      createRouteContext({ memberId: "hbm_familymember1" }),
+    );
+
+    mocks.createHostedGroupUsageCreditCheckout.mockRejectedValueOnce(
+      capacityConflict(),
+    );
+    const groupResponse = await groupCheckoutRoute.POST(
+      createCheckoutRequest(
+        {
+          clientRequestKey: "capacity_group_123456",
+          offerCode: "usage_20_usd",
+        },
+        "https://join.example.test/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      ),
+      createRouteContext({ joinCode: "group_join_code_1234" }),
+    );
+
+    for (const response of [personalResponse, familyResponse, groupResponse]) {
+      expect(response.status).toBe(409);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      await expect(response.json()).resolves.toEqual({
+        error: {
+          code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+          message: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+          retryable: false,
+        },
+      });
+    }
   });
 
   it("propagates a typed recovery miss without enabling purchase creation", async () => {

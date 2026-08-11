@@ -7,6 +7,9 @@ import {
   type HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
 import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
+import type {
   HostedRuntimeEnsureProcessingResponse,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -142,10 +145,22 @@ export class HostedUserRunner {
       readHostedWorkspaceFromWeb: async (userId, input) => await this.readHostedWorkspaceFromWeb(userId, input),
     });
     this.runtimeInvocation = runtimeInvocation;
+    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
+      bucket,
+      runnerStoreCache: this.runnerStoreCache,
+      state,
+      stateStore: this.stateStore,
+      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
+        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
+      },
+      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
+    });
     const runtimeProcessing = new RuntimeProcessingController({
       env,
       invocationService: runtimeInvocation,
       runnerContainerNamespace,
+      readCheckpointHandoff: async (input) =>
+        await this.workspaceSnapshotSessions.readCurrentOwnerHandoff(input),
       runnerRuntimeEnvSource,
       runtimeRetryAnalytics,
       stateStore: this.stateStore,
@@ -158,16 +173,6 @@ export class HostedUserRunner {
       state,
       stateStore: this.stateStore,
     };
-    this.workspaceSnapshotSessions = createWorkspaceSnapshotSessionService({
-      bucket,
-      runnerStoreCache: this.runnerStoreCache,
-      state,
-      stateStore: this.stateStore,
-      assertWorkspaceBelongsToRunnerUser: (workspace, userId) => {
-        this.assertWorkspaceBelongsToRunnerUser(workspace, userId);
-      },
-      readHostedWorkspaceFromWeb: async (userId) => await this.readHostedWorkspaceFromWeb(userId),
-    });
   }
 
   async bindUser(userId: string): Promise<{ userId: string }> {
@@ -288,7 +293,23 @@ export class HostedUserRunner {
     });
   }
 
-  async prewarmRuntimeShellForUser(userId: string): Promise<void> {
+  async prewarmRuntimeShellForUser(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void> {
+    if (this.runtimeConsentMutationLock) {
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runner",
+        details: {
+          shellPrewarmAdmissionOutcome: "skipped_consent_busy",
+          shellPrewarmSource: source ?? "unknown",
+        },
+        message: "Hosted runner shell prewarm admission decided.",
+        phase: "scheduled",
+        userId,
+      });
+      return;
+    }
     await this.withRuntimeConsentMutationLock(async () => {
       let admission: HostedRuntimeHealthDataAdmissionResponse;
       try {
@@ -297,12 +318,33 @@ export class HostedUserRunner {
           { timeoutMs: HOSTED_RUNTIME_SHELL_PREWARM_ADMISSION_TIMEOUT_MS },
         );
       } catch {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            shellPrewarmAdmissionOutcome: "skipped_admission_unavailable",
+            shellPrewarmSource: source ?? "unknown",
+          },
+          level: "warn",
+          message: "Hosted runner shell prewarm admission decided.",
+          phase: "scheduled",
+          userId,
+        });
         return;
       }
       if (!admission.processingAllowed) {
+        emitHostedExecutionStructuredLog({
+          component: "hosted.runner",
+          details: {
+            shellPrewarmAdmissionOutcome: "skipped_processing_disallowed",
+            shellPrewarmSource: source ?? "unknown",
+          },
+          message: "Hosted runner shell prewarm admission decided.",
+          phase: "scheduled",
+          userId,
+        });
         return;
       }
-      await this.runtimeProcessing.beginShellPrewarmForUser(userId);
+      await this.runtimeProcessing.beginShellPrewarmForUser(userId, source);
     });
   }
 
@@ -476,6 +518,24 @@ export class HostedUserRunner {
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null> {
     return await this.workspaceSnapshotSessions.create(input);
+  }
+
+  async heartbeatHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.heartbeatCurrentOwner(input);
+  }
+
+  async completeHostedWorkspaceSnapshotUploadSession(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean> {
+    return await this.workspaceSnapshotSessions.completeCurrentOwner(input);
   }
 
   async rememberHostedWorkspaceSnapshotReplacedRef(input: {

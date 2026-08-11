@@ -81,6 +81,42 @@ test("opens Stripe confirmation for an authenticated hosted member upgrading to 
   });
 });
 
+test("opens Stripe confirmation for an authenticated Edge member upgrading to Max", async () => {
+  mocks.upgradeHostedBillingPlan.mockResolvedValueOnce({
+    billingPlanCode: "launch_edge_monthly",
+    paymentUrl: "https://billing.stripe.test/session_max",
+    status: "pending_payment",
+  });
+
+  const response = await billingUpgradeRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/upgrade-plan", {
+      body: JSON.stringify({
+        expectedCurrentPlanCode: "launch_edge_monthly",
+        targetPlanCode: "launch_max_monthly",
+      }),
+      headers: {
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    billingPlanCode: "launch_edge_monthly",
+    paymentUrl: "https://billing.stripe.test/session_max",
+    status: "pending_payment",
+  });
+  expect(mocks.upgradeHostedBillingPlan).toHaveBeenCalledWith({
+    expectedCurrentPlanCode: "launch_edge_monthly",
+    memberId: "member_123",
+    prisma: {
+      label: "test-prisma",
+    },
+    targetPlanCode: "launch_max_monthly",
+  });
+});
+
 test("upgrades an authenticated Group member to Pulse", async () => {
   mocks.upgradeHostedBillingPlan.mockResolvedValueOnce({
     billingPlanCode: "launch_group_monthly",

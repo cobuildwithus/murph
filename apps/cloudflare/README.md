@@ -37,6 +37,12 @@ Internal control routes:
   latency leaf, and starts, wakes, or accepts a pending runtime wake for only
   the bound user's runtime, returning after that start/wake intent is accepted,
   not after the runtime reaches idle
+- `POST /internal/users/:userId/runtime/shell-prewarm` is the optional
+  Vercel OIDC-authenticated typing/instant-start shell hint. Its bounded source
+  distinguishes those two existing callers; an empty legacy request remains
+  accepted as `unknown`. It rechecks live admission and returns after the named
+  container registers an asynchronous start attempt; it does not wait for
+  readiness or create runtime authority.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
@@ -71,7 +77,7 @@ The usage-record callback may also transport one bounded Linq group delivery
 target captured from the accepted mailbox input. The target includes the
 existing thread-route authority and is advisory to web-owned accounting; the
 Worker does not resolve, persist, or authorize an alternate recipient.
-The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a runner-scoped signed Murph provider credential in the provider's native credential slot; the Worker verifies that credential as `provider + user + runner`, asks UserRunner whether the same runner currently has an active runtime for that user/provider, then injects the real Worker-owned credential only into the upstream request. Runtime-controlled provider calls may instead carry exact write-fence headers or a provider-egress token; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, because those effects must stay behind recipient binding, journaling, and idempotency. The Worker constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through the runner-scoped provider credential path, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The legacy write-fenced `results.worker/generated-images` route returns `410 Gone` so older warm runners fall back to text instead of creating public objects. Runner container names identify the runner for server-side validation; `ctx.containerId` is not provider-egress authorization. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation.
+The runner container also uses Cloudflare HTTPS outbound interception for hosted provider egress. OpenAI, Exa, Mapbox, Linq, Telegram, hosted data API, and Workers AI transcription real credentials stay in Worker env. Native child-process integrations for OpenAI, Exa, Mapbox, `murph_data_api`, and `workers_ai_transcribe` receive a runner-scoped signed Murph provider credential in the provider's native credential slot; the Worker verifies that credential as `provider + user + runner`, asks UserRunner whether the same runner currently has an active runtime for that user/provider, then injects the real Worker-owned credential only into the upstream request. Runtime-controlled provider calls may instead carry exact write-fence headers or a provider-egress token; there is no tokenless active-user-fence provider authorization path. Delivery providers (Linq and Telegram) and ElevenLabs continue to require exact write-fence headers or a provider-egress token, because those effects must stay behind recipient binding, journaling, and idempotency. The Worker constrains Codex-native managed OpenAI search to exact `POST /v1/alpha/search`, constrains Exa to `POST /search`, constrains Linq to the runtime route matrix (`GET /phone_numbers`, `GET /attachments/:id`, `POST /attachments`, `POST /chats`, `POST /chats/:id/messages`, `POST /chats/:id/voicememo`, `POST /chats/:id/typing`, `DELETE /chats/:id/typing`, `POST /chats/:id/read`, `POST /messages/:id/reactions`, `DELETE /messages/:id`), constrains Mapbox to read-only GET allowlisted path families, and strips runtime authority headers before upstream provider egress leaves Cloudflare. Runtime code does not call Linq's contact-card provider endpoint directly; first-contact native contact-card sharing stays web-owned. Hosted generated-image turns call OpenAI through the runner-scoped provider credential path, persist the validated bytes as a canonical vault capture, and return private `vault_image` media. Final message delivery reloads and hash-verifies those bytes, then uses Linq's attachment upload or Telegram multipart `sendPhoto`. Linq group-avatar mutation is the narrow URL-only exception: after preflight, the write-fenced Worker route stores one deterministic application-encrypted R2 object and returns an opaque at-most-one-day capability on Murph's fixed Worker origin directly to the runtime provider boundary. The capability reveals no member id, R2 key, storage namespace, or image hash; the public Worker route decrypts and verifies the object and returns `private, no-store`. Retries reuse the deterministic object only while its original 24-hour lifecycle window remains, and each capability expiry is capped at that object's lifecycle boundary. At or after the boundary, the mutation-locked `UserRunner` replaces the same deterministic key before returning a newly bounded capability; the R2 lifecycle and account deletion still own cleanup without relying on Linq fetch acceptance. The URL is not response media or model-visible state. The legacy write-fenced `results.worker/generated-images` route returns `410 Gone` so older warm runners fall back to text instead of creating public objects. Runner container names identify the runner for server-side validation; `ctx.containerId` is not provider-egress authorization. Unknown egress currently passes through during migration and logs only sanitized method/host/path metadata. Adding a new hosted provider API, method, or runtime tool that calls an intercepted provider is not complete until this egress boundary and its regression tests allow the exact upstream operation. Updating the Codex pin additionally requires a source-manifest review: required CI resolves `rust-v<version>` from OpenAI, verifies its exact commit and `codex-rs/codex-api/src` tree, and then uses native binary scanning only as cross-platform corroboration. The test-only inventory cannot generate or widen the Worker policy.
 Venice joins that same Worker-owned credential boundary for core inference.
 The Worker permits only `POST /api/v1/responses` and
 `POST /api/v1/responses/compact`, accepts only canonical Luna/Terra/Sol request
@@ -208,11 +214,60 @@ application traffic is required to use transaction-mode PgBouncer on 6432 and
 the direct endpoint is migration-only. Adding another direct production client
 requires splitting that signal first.
 
-Unsafe samples open one incident. Two consecutive collection failures open the
-fallback monitoring incident. The object writes Linq provider-attempt admission
-before egress, never attempts more than once per 30 minutes across all incidents,
-and reuses the exact body plus idempotency key after an ambiguous send. The
-message reports actual collection time rather than the scheduled Cron slot.
+Each metric family is normalized independently. When a documented family is
+absent, the sample keeps that family unknown instead of substituting zero, still
+evaluates every available signal, and records the canonical missing metric names
+without retaining labels or raw scrape data. Unsafe available signals therefore
+still open an incident immediately. Two consecutive incomplete or failed
+collections open the fallback monitoring incident. An acknowledged
+telemetry-only page is one-shot for one unresolved operator-notification window.
+Crossing the two-failure threshold records one bounded alert obligation in the
+existing incident row. The first two-check window counts incomplete versus
+unavailable observations, unions only canonical missing families observed on
+partial checks, and identifies the threshold time as the window end. A bounded
+per-sample evidence value preserves that provenance across restart. An older
+pending page or direct-error priority cannot lose the obligation; recovery and
+another gap before acknowledgment coalesce into that same notification while
+the first threshold window remains authoritative. The obligation does not occupy
+a closed provider fence.
+At the same time, until an incident admits its first page, concrete evidence
+that appears on the threshold or a later sample, including a direct-error delta,
+persists in one combined immutable body. The exact pressure and truthful
+telemetry facts therefore share
+the next eligible attempt and one acknowledgment cycle. For
+acknowledged-incident recurrence, the next eligible sample
+supplies any still-current unsafe evidence while historical telemetry keeps its
+own observation time. Only acknowledgment of a
+telemetry-bearing page clears the obligation; a later complete sample then
+closes and rearms the incident. After acknowledgment, incomplete samples remain
+queryable but cannot repeat telemetry copy inside concrete-pressure pages unless
+a later rearmed threshold creates a new obligation. When a direct-error delta
+takes admission priority after an earlier page, any currently owed telemetry
+travels in that same immutable body while replayable gauges remain excluded;
+pure deferred evidence keeps its stored check time, an aggregate containing a
+new current delta uses the latest included check, and telemetry keeps its own
+condition-local observation time. Concrete unsafe conditions retain an hourly
+recurrence. The object writes Linq provider-attempt admission before egress,
+never attempts more than once per hour across all incidents, and reuses the
+exact body plus idempotency key after an ambiguous send. Concrete-pressure
+bodies select deterministically by persisted incident and alert identity from
+one hundred reviewed, observation-scoped openings. Those openings say only
+that the recorded check met alert criteria; condition-specific and current-
+state claims come from evidence that proves them. Retries therefore keep a
+truthful body after recovery, while consecutive pages avoid broadcast-shaped
+repetition without padding or filler. Telemetry-
+only pages remain evidence-led and one-shot for each unresolved monitoring
+window. The one-hundred-entry size is a bounded operator deliverability
+requirement, not a guarantee about carrier or platform filtering: at the hourly
+cap, one incident traverses one hundred reviewed leads before repeating one.
+The bank stays literal reviewed data rather than generated prose or another
+runtime dependency. The alert-state and sample-evidence columns are added idempotently without advancing the
+schema version, so the previously deployed Worker can ignore them during a
+rollback. If that Worker acknowledges a telemetry pending body, current code
+recognizes its cleared key/body plus retained marker and prevents duplicate
+re-admission after re-upgrade. The message reports actual collection time rather than the scheduled Cron
+slot and describes partial or unavailable telemetry without claiming database
+pressure.
 Before each message POST it requires the configured direct
 [Linq chat health](https://docs.linqapp.com/guides/chats/chat-health/) and its
 current [line reputation](https://docs.linqapp.com/guides/phone-numbers/phone-reputation/)
@@ -302,7 +357,23 @@ murph-prod-psql-ro -f apps/cloudflare/scripts/cold-start-latency-report.sql
 ```
 
 Pass `-v window_hours=6` (or another integer) before `-f` to change the UTC
-window. The report deduplicates causal rows by runtime attempt and keeps direct
+window. The first result groups uniquely matched Web-direct Linq runtime
+attempts by the causal typing shell-prewarm observation consumed by their
+container readiness call. It shows causal-hint lead time plus
+accepted-to-runner, provider, and reply percentiles, all from the same ingress
+trace and same reply runtime attempt. Instant-start, unknown-source, ambiguous,
+backlog, and reply-handoff rows are omitted rather than inferred. A
+`no_observed_prewarm` row is a comparison cohort, not proof that no hint was
+sent, because stop, destroy, or Durable Object eviction may clear optional
+in-memory diagnostics. `prewarm_start_issued_warm` means the platform start call
+completed without a newly observed lifecycle start;
+`prewarm_cold_start_observed` means the same container lifecycle did observe a
+cold start. Neither means health readiness completed. One observation contains
+one terminal operation outcome; later hints may increase only its bounded
+coalesced-hint count and never launch another operation before readiness
+consumes it.
+
+The remaining report deduplicates causal rows by runtime attempt and keeps direct
 cold starts separate from Temporal recovery. A direct sample must be the only
 row in its runtime attempt whose Web direct-ensure orchestration id exactly
 matches the id attached only after that request acquires the fresh runtime

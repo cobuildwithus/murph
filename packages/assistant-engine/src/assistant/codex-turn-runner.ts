@@ -26,6 +26,7 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './message-target-selection.js'
 import type {
+  AssistantGenerateSongTurnPolicy,
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -108,6 +109,10 @@ import {
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
+const ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY = {
+  maxAttempts: 1,
+  requiredDurationSeconds: 15,
+} as const satisfies AssistantGenerateSongTurnPolicy
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
 const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -492,6 +497,9 @@ async function executeAssistantCodexAttempt(input: {
     const nativeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
+    const creativeNotificationSongTurn =
+      executionPlan.profile.promptProfile === 'creative-notification' &&
+      executionPlan.profile.toolProfile === 'provider-turn'
     const systemNotificationTurn =
       executionPlan.profile.promptProfile === 'system-notification' ||
       executionPlan.profile.promptProfile === 'creative-notification'
@@ -568,6 +576,12 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
+        ...(creativeNotificationSongTurn
+          ? {
+              generateSongPolicy:
+                ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY,
+            }
+          : {}),
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         hostedToolContext:

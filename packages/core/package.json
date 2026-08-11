@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@murphai/contracts": "workspace:*",
+    "@murphai/health-metrics": "workspace:*",
     "@murphai/runtime-state": "workspace:*"
   }
 }

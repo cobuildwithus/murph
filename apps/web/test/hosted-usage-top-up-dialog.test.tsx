@@ -15,6 +15,12 @@ import {
 } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
+
 import {
   createMemoryStorage,
   renderClientComponent,
@@ -28,6 +34,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const TEST_PAYER_MEMBER_ID = "hbm_usage_top_up_payer";
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
 
 const USAGE_TOP_UP_TARGET_CASES = [
   {
@@ -57,9 +67,18 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
-}));
+vi.mock(
+  "@/src/components/hosted-onboarding/client-api",
+  async (importOriginal) => {
+    const original = await importOriginal<
+      typeof import("@/src/components/hosted-onboarding/client-api")
+    >();
+    return {
+      ...original,
+      requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+    };
+  },
+);
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   useAuth: () => ({
@@ -564,7 +583,7 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      RETIRED_USAGE_TERM_PATTERN,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -652,6 +671,97 @@ test("keeps a customizable sponsorship quiet by default", async () => {
   } finally {
     checkout.resolve({
       purchaseId: "hucp_group_quiet_sponsorship",
+      status: "payment_pending",
+    });
+    await rendered.cleanup();
+  }
+});
+
+test("drops hidden sponsor details when their owning features are disabled", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_20_usd");
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Credit it as",
+      ),
+      rendered.window,
+      "The Group Historian",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "What should it be about?",
+      ),
+      rendered.window,
+      "Celebrate the room.",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Temporary running bit",
+      ),
+      rendered.window,
+      "Treat me like Murph’s exhausted CFO.",
+    );
+
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
+    await clickRadio(rendered.container, rendered.window, "usage_5_usd");
+
+    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    assert.equal(
+      controlByLabel(rendered.container, "Temporary running bit"),
+      null,
+    );
+    await clickButton(rendered.container, rendered.window, "Contribute $5");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_5_usd",
+        sponsorship: {
+          publicAlias: null,
+          runningBitRequest: null,
+          sponsorMessage: null,
+        },
+        sponsorshipKind: "one_time",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    checkout.resolve({
+      purchaseId: "hucp_group_hidden_sponsorship_details",
       status: "payment_pending",
     });
     await rendered.cleanup();
@@ -1075,7 +1185,7 @@ test("keeps the one-time contribution action reachable in the mobile drawer", as
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      RETIRED_USAGE_TERM_PATTERN,
     );
     const selection = rendered.container.querySelector<HTMLElement>(
       '[data-slot="usage-top-up-selection"]',
@@ -2931,6 +3041,128 @@ test("shows recovered reconciliation without offering an unsafe early cancel", a
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
+  }
+});
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "maps the exact capacity conflict to truthful $scope guidance",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+        message: "Server capacity response.",
+      }),
+    );
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+      },
+    );
+
+    try {
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+
+      assert.equal(
+        rendered.container.querySelector("h2")?.textContent,
+        "More credit can’t be added right now",
+      );
+      assert.ok(
+        (rendered.container.textContent ?? "").includes(
+          HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+        ),
+      );
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /Server capacity response|choose another amount/iu,
+      );
+      assert.ok(
+        rendered.container.querySelector(
+          '[data-slot="usage-top-up-capacity-conflict"]',
+        ),
+      );
+      assert.equal(
+        rendered.container.querySelector('input[type="radio"]'),
+        null,
+      );
+      assert.equal(hasButton(rendered.container, "Change amount"), false);
+      assert.equal(hasButton(rendered.container, "Try again"), false);
+      assert.equal(hasButton(rendered.container, "Check payment"), false);
+      assert.equal(hasButton(rendered.container, "Close"), true);
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ offerCode: "usage_500" }),
+          url: checkoutUrl,
+        }),
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test("renders the exact inert capacity state without a request", async () => {
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      checkoutUrl: "/api/design/usage-credit-preview",
+      inert: true,
+      initialCheckoutErrorCode: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+      initialOpen: true,
+      offers: [],
+      payerMemberId: "design_usage_top_up_payer",
+      scope: "personal",
+    }),
+    {
+      location: { href: "https://example.test/design?tab=components" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "More credit can’t be added right now",
+    );
+    assert.ok(
+      (rendered.container.textContent ?? "").includes(
+        HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+      ),
+    );
+    assert.equal(
+      rendered.container
+        .querySelector('[role="dialog"]')
+        ?.getAttribute("data-inert"),
+      "true",
+    );
+    assert.ok(
+      rendered.container.querySelector(
+        '[data-slot="usage-top-up-capacity-conflict"]',
+      ),
+    );
+    assert.equal(
+      rendered.container.querySelector('input[type="radio"]'),
+      null,
+    );
+    assert.equal(hasButton(rendered.container, "Change amount"), false);
+    assert.equal(hasButton(rendered.container, "Try again"), false);
+    assert.equal(hasButton(rendered.container, "Close"), true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
   }
 });
 

@@ -7,8 +7,11 @@ import { getPrisma } from "../prisma";
 import {
   requireHostedLinqMessageEditedEvent,
   requireHostedLinqParticipantChangedEvent,
+  requireHostedLinqTypingIndicatorStartedEvent,
   requireHostedLinqMessageReceivedEvent,
+  inspectHostedLinqMessageReceivedParts,
   sendHostedLinqReadReceipt,
+  type HostedLinqMessageReceivedPartsInspection,
   verifyAndParseHostedLinqWebhookRequest,
 } from "./linq";
 import {
@@ -26,11 +29,18 @@ import {
   HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE,
 } from "./linq-group-line-recovery";
 import { HOSTED_LINQ_GROUP_SETUP_TEMPLATE } from "./linq-group-setup";
-import { assertHostedTelegramWebhookSecret, parseHostedTelegramWebhookUpdate } from "./telegram";
+import {
+  assertHostedTelegramWebhookSecret,
+  buildHostedTelegramMessagePayload,
+  parseHostedTelegramWebhookUpdate,
+  summarizeHostedTelegramWebhook,
+} from "./telegram";
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
+  resolveHostedLinqTypingPrewarmMemberId,
+  shouldPrepareHostedLinqThreadContainerCrypto,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -53,6 +63,7 @@ import {
   deriveHostedOnboardingTimingErrorName,
   finishHostedOnboardingTiming,
   logHostedOnboardingDiagnostic,
+  logHostedOnboardingWarning,
   startHostedOnboardingTiming,
   toHostedOnboardingLogIdSuffix,
 } from "./logging";
@@ -84,10 +95,10 @@ import {
   type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
 import {
-  ensureHostedLinqInstantStartPulseTrialEnrollment,
+  ensureHostedLinqInstantStartStarterUsageEnrollment,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
   type HostedLinqInstantStartDeferredActivationWake,
-} from "./auto-trial-enrollment-service";
+} from "./starter-usage-enrollment-service";
 import {
   isHostedLinqInstantStartEventCandidate,
 } from "./linq-instant-start";
@@ -106,6 +117,28 @@ import {
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "../hosted-routing/linq-chat-ownership-lock";
+import {
+  prepareHostedThreadContainerCreation,
+  prepareHostedThreadContainerDeliveryRoute,
+  type PreparedHostedThreadContainerCreation,
+  type PreparedHostedThreadContainerDeliveryRoute,
+} from "../hosted-routing/thread-container-service";
+import {
+  HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+} from "../hosted-routing/thread-delivery-route";
+import {
+  createHostedPhoneLookupKey,
+} from "./contact-privacy";
+import {
+  resolveHostedMemberCoreByTelegramUserId,
+} from "./hosted-member-routing-store";
+import {
+  isHostedMemberSuspended,
+} from "./entitlement";
+import { readHostedRuntimeAiAccessDecision } from "./member-access";
+import {
+  resolveHostedOnboardingLinqMessageContext,
+} from "./webhook-provider-linq-shared";
 import {
   assertHostedLinqRouteAuthorityMatchesTarget,
 } from "./linq-egress-engagement";
@@ -180,6 +213,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
   });
   let eventId: string | null = null;
   let eventType: string | null = null;
+  let eventWebhookVersion: string | null = null;
+  let messagePartsInspection: HostedLinqMessageReceivedPartsInspection | null = null;
   let responseReason: string | null = null;
   let instantStartTypingHint: HostedLinqInstantStartTypingHint | null = null;
   let pendingInstantStartActivationWake: {
@@ -210,6 +245,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     eventId = event.event_id;
     eventType = event.event_type;
+    eventWebhookVersion = event.webhook_version ?? null;
+    messagePartsInspection = inspectHostedLinqMessageReceivedParts(event);
     let affirmativeReaction = false;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
       eventIdSuffix: toHostedOnboardingLogIdSuffix(eventId),
@@ -218,6 +255,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
 
     if (event.event_type === "chat.typing_indicator.started") {
+      scheduleHostedLinqTypingShellPrewarmBestEffort({
+        event: requireHostedLinqTypingIndicatorStartedEvent(event),
+        prisma: input.prisma,
+        scheduleAfterResponse: input.scheduleAfterResponse,
+      });
       const response: HostedOnboardingLinqWebhookResponse = {
         ignored: true,
         ok: true,
@@ -237,6 +279,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       event,
       rawBody: input.rawBody,
     });
+    if (messagePartsInspection?.compatibilityFallback) {
+      logHostedLinqMessageReceivedPartsWarning({
+        eventId,
+        inspection: messagePartsInspection,
+        outcome: "compatibility-accepted",
+        webhookVersion: event.webhook_version,
+      });
+    }
     if (
       providerEvent
       && (event.event_type === "reaction.added" || event.event_type === "reaction.removed")
@@ -454,12 +504,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signal: input.signal,
     });
     const planningEvent = planningResolution.event;
-    const warmPlanningMailboxPayloadRoot = () =>
-      warmHostedLinqMailboxPayloadRoot({
-        event: planningEvent,
-        prisma,
-        threadRoute: planningResolution.threadRoute,
-      });
 
     const currentInboundReply: HostedLinqCurrentInboundReplyProof | null =
       event.event_type === "message.received" && !affirmativeReaction
@@ -496,9 +540,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             })
           : null;
       const runPlan = (instantStartAllowed = true) =>
-        runHostedOnboardingWebhookTransaction(
-          prisma,
-          (transaction) =>
+        runHostedThreadRoutingPreparedTransaction({
+          plan: ({ preparation, transaction }) =>
             planHostedOnboardingLinqWebhook({
               affirmativeReaction,
               event: planningEvent,
@@ -508,11 +551,38 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 planningResolution.pendingGroupParticipantMemberIds ?? null,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
+              ...(preparation.preparedThreadContainerCreation
+                ? {
+                    preparedThreadContainerCreation:
+                      preparation.preparedThreadContainerCreation,
+                  }
+                : {}),
+              ...(preparation.preparedThreadDeliveryRoute
+                ? {
+                    preparedThreadDeliveryRoute:
+                      preparation.preparedThreadDeliveryRoute,
+                  }
+                : {}),
               requireFirstContactAdmission,
               prisma: transaction,
             }),
-          warmPlanningMailboxPayloadRoot,
-        );
+          prepare: ({ attempt }) =>
+            prepareHostedLinqThreadRoutingCrypto({
+              event: planningEvent,
+              participantMemberIds:
+                planningResolution.pendingGroupParticipantMemberIds ?? [],
+              pendingGroupRosterUnavailable:
+                planningResolution.pendingGroupRosterUnavailable ?? false,
+              prisma,
+              // The resolver already performed the first authority read. A
+              // route-conflict retry must read again so it can prepare for the
+              // winning container instead of reusing a stale snapshot.
+              threadRoute: attempt === 0
+                ? planningResolution.threadRoute
+                : undefined,
+            }),
+          prisma,
+        });
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
           ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))
@@ -624,7 +694,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         });
         let enrollmentFailed = false;
         try {
-          const enrollment = await ensureHostedLinqInstantStartPulseTrialEnrollment({
+          const enrollment = await ensureHostedLinqInstantStartStarterUsageEnrollment({
             admissionEventId: instantStartEnrollment.admissionEventId,
             inviteCode: instantStartEnrollment.inviteCode,
             memberId: instantStartEnrollment.memberId,
@@ -856,6 +926,19 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     return plan.response;
   } catch (error) {
+    if (
+      messagePartsInspection
+      && isHostedOnboardingError(error)
+      && error.code === "LINQ_PAYLOAD_INVALID"
+    ) {
+      logHostedLinqMessageReceivedPartsWarning({
+        errorCode: error.code,
+        eventId,
+        inspection: messagePartsInspection,
+        outcome: "rejected",
+        webhookVersion: eventWebhookVersion,
+      });
+    }
     // Activation is already durable even if replanning, delivery, or the
     // conversation wake failed. Fall back to its original best-effort signal
     // before propagating the error and asking the provider to retry.
@@ -876,6 +959,100 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     });
     throw error;
   }
+}
+
+function logHostedLinqMessageReceivedPartsWarning(input: {
+  errorCode?: string;
+  eventId: string | null;
+  inspection: HostedLinqMessageReceivedPartsInspection;
+  outcome: "compatibility-accepted" | "rejected";
+  webhookVersion?: string | null;
+}): void {
+  logHostedOnboardingWarning(
+    "hosted-onboarding.webhook.linq.message-parts",
+    {
+      compatibilityFallback: input.inspection.compatibilityFallback,
+      dataKind: input.inspection.dataKind,
+      errorCode: input.errorCode,
+      eventIdSuffix: toHostedOnboardingLogIdSuffix(input.eventId),
+      messageKind: input.inspection.messageKind,
+      nestedActionPresent: input.inspection.nestedActionPresent,
+      outcome: input.outcome,
+      partCount: input.inspection.partCount,
+      partKinds: input.inspection.partKinds,
+      partsKind: input.inspection.partsKind,
+      partsLocation: input.inspection.partsLocation,
+      payloadShape: input.inspection.payloadShape,
+      topLevelActionPresent: input.inspection.topLevelActionPresent,
+      unsupportedPartCount: input.inspection.unsupportedPartCount,
+      webhookVersion: classifyHostedLinqWebhookVersion(input.webhookVersion),
+    },
+  );
+}
+
+function classifyHostedLinqWebhookVersion(
+  value: string | null | undefined,
+): "2025-01-01" | "2026-02-03" | "missing" | "other" {
+  if (value === "2025-01-01" || value === "2026-02-03") {
+    return value;
+  }
+  return value ? "other" : "missing";
+}
+
+function scheduleHostedLinqTypingShellPrewarmBestEffort(input: {
+  event: ReturnType<typeof requireHostedLinqTypingIndicatorStartedEvent>;
+  prisma?: PrismaClient;
+  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
+}): void {
+  const task = async (): Promise<void> => {
+    try {
+      const memberId = await resolveHostedLinqTypingPrewarmMemberId({
+        event: input.event,
+        prisma: input.prisma ?? getPrisma(),
+      });
+      if (!memberId) {
+        logHostedOnboardingDiagnostic(
+          "linq-typing-shell-prewarm",
+          { outcome: "target-not-found" },
+        );
+        return;
+      }
+
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        { outcome: "target-resolved" },
+      );
+      await startHostedRuntimeShellPrewarmBestEffort({
+        source: "linq-typing-started",
+        userId: memberId,
+      });
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "failed",
+        },
+      );
+    }
+  };
+
+  if (input.scheduleAfterResponse) {
+    try {
+      input.scheduleAfterResponse(task);
+      return;
+    } catch (error) {
+      logHostedOnboardingDiagnostic(
+        "linq-typing-shell-prewarm",
+        {
+          errorName: deriveHostedOnboardingTimingErrorName(error),
+          outcome: "schedule-failed",
+        },
+      );
+    }
+  }
+
+  void task();
 }
 
 interface HostedLinqPlanningEventResolution {
@@ -903,13 +1080,11 @@ async function resolveHostedLinqPlanningEvent(input: {
   const webhookIsGroup = messageEvent.data.chat?.is_group;
   if (webhookIsGroup === true) {
     logHostedLinqChatClassification("webhook-group");
-    const threadRoute = messageEvent.data.is_from_me
-      ? null
-      : await readHostedThreadRouteByThreadIdentity({
-          channel: "linq",
-          prisma: input.prisma,
-          threadId: messageEvent.data.chat_id,
-        });
+    const threadRoute = await readHostedThreadRouteByThreadIdentity({
+      channel: "linq",
+      prisma: input.prisma,
+      threadId: messageEvent.data.chat_id,
+    });
     const pendingGroupRoster =
       !messageEvent.data.is_from_me && !threadRoute
         ? await resolveHostedLinqPendingGroupParticipantMemberIds({
@@ -941,18 +1116,18 @@ async function resolveHostedLinqPlanningEvent(input: {
     };
   }
 
-  if (messageEvent.data.is_from_me) {
-    if (webhookIsGroup === false) {
-      logHostedLinqChatClassification("webhook-direct");
-    }
-    return { event: messageEvent, threadRoute: null };
-  }
-
   const threadRoute = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
     threadId: messageEvent.data.chat_id,
   });
+  if (messageEvent.data.is_from_me && !threadRoute) {
+    if (webhookIsGroup === false) {
+      logHostedLinqChatClassification("webhook-direct");
+    }
+    return { event: messageEvent, threadRoute };
+  }
+
   let resolvedIsGroup: boolean;
   let canonicalHandles: readonly HostedLinqChatHandleSummary[] | null = null;
   if (threadRoute) {
@@ -1621,14 +1796,36 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     };
   }
 
-  const plan = await runHostedOnboardingWebhookTransaction(
-    prisma,
-    (transaction) =>
+  const plan = await runHostedThreadRoutingPreparedTransaction({
+    plan: ({ preparation, transaction }) =>
       planHostedOnboardingTelegramWebhook({
+        ...(preparation.preparedSenderMemberId
+          ? {
+              preparedSenderMemberId:
+                preparation.preparedSenderMemberId,
+            }
+          : {}),
+        ...(preparation.preparedThreadContainerCreation
+          ? {
+              preparedThreadContainerCreation:
+                preparation.preparedThreadContainerCreation,
+            }
+          : {}),
+        ...(preparation.preparedThreadDeliveryRoute
+          ? {
+              preparedThreadDeliveryRoute:
+                preparation.preparedThreadDeliveryRoute,
+            }
+          : {}),
         prisma: transaction,
         update,
       }),
-  );
+    prepare: () => prepareHostedTelegramThreadRoutingCrypto({
+      prisma,
+      update,
+    }),
+    prisma,
+  });
 
   if (plan.desiredSideEffects.length > 0) {
     throw new Error(
@@ -1709,6 +1906,275 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
     return;
   }
   await reconcile();
+}
+
+interface HostedThreadRoutingCryptoPreparation {
+  preparedSenderMemberId?: string;
+  preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
+  preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+}
+
+async function prepareHostedThreadDeliveryRouteAndWarmMailbox(input: {
+  prepareDeliveryRoute: () => Promise<PreparedHostedThreadContainerDeliveryRoute>;
+  warmMailboxRoot: () => Promise<void>;
+}): Promise<PreparedHostedThreadContainerDeliveryRoute> {
+  let firstError: unknown;
+  let hasError = false;
+  const preserveFirstError = async <T>(operation: () => Promise<T>): Promise<T> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
+      throw error;
+    }
+  };
+  const [deliveryRouteResult, mailboxRootResult] = await Promise.allSettled([
+    preserveFirstError(input.prepareDeliveryRoute),
+    preserveFirstError(input.warmMailboxRoot),
+  ]);
+  if (hasError) {
+    throw firstError;
+  }
+  if (deliveryRouteResult.status === "rejected") {
+    throw deliveryRouteResult.reason;
+  }
+  if (mailboxRootResult.status === "rejected") {
+    throw mailboxRootResult.reason;
+  }
+  return deliveryRouteResult.value;
+}
+
+async function prepareHostedLinqThreadRoutingCrypto(input: {
+  event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
+  participantMemberIds: readonly string[];
+  pendingGroupRosterUnavailable: boolean;
+  prisma: PrismaClient;
+  threadRoute?: HostedThreadRouteSnapshot | null;
+}): Promise<HostedThreadRoutingCryptoPreparation> {
+  if (input.event.event_type !== "message.received") {
+    return {};
+  }
+  const context = resolveHostedOnboardingLinqMessageContext(input.event);
+  const accountLookupKey = createHostedPhoneLookupKey(
+    context.recipientPhoneNumber,
+  );
+
+  const threadRoute = input.threadRoute === undefined
+    ? await readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma: input.prisma,
+        threadId: context.summary.chatId,
+      })
+    : input.threadRoute;
+  if (threadRoute) {
+    if (!accountLookupKey) {
+      throw new TypeError(
+        "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
+      );
+    }
+    const preparedThreadDeliveryRoute =
+      await prepareHostedThreadDeliveryRouteAndWarmMailbox({
+        prepareDeliveryRoute: () =>
+          prepareHostedThreadContainerDeliveryRoute({
+            accountLookupKey,
+            channel: "linq",
+            containerMemberId: threadRoute.containerMemberId,
+            observedDeliveryRouteEncrypted:
+              threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
+            prisma: input.prisma,
+            threadId: context.summary.chatId,
+          }),
+        warmMailboxRoot: () => warmHostedLinqMailboxPayloadRoot({
+          event: input.event,
+          prisma: input.prisma,
+          threadRoute,
+        }),
+      });
+    return { preparedThreadDeliveryRoute };
+  }
+
+  if (context.messageEvent.data.chat?.is_group === true) {
+    if (!await shouldPrepareHostedLinqThreadContainerCrypto({
+      event: input.event,
+      participantMemberIds: input.participantMemberIds,
+      pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
+      prisma: input.prisma,
+    })) {
+      return {};
+    }
+    if (!accountLookupKey) {
+      return {};
+    }
+    return {
+      preparedThreadContainerCreation:
+        await prepareHostedThreadContainerCreation({
+          accountLookupKey,
+          channel: "linq",
+          prisma: input.prisma,
+          threadId: context.summary.chatId,
+        }),
+    };
+  }
+
+  if (!accountLookupKey) {
+    throw new TypeError(
+      "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
+    );
+  }
+  await warmHostedLinqMailboxPayloadRoot({
+    event: input.event,
+    prisma: input.prisma,
+    threadRoute: null,
+  });
+  return {};
+}
+
+async function prepareHostedTelegramThreadRoutingCrypto(input: {
+  prisma: PrismaClient;
+  update: ReturnType<typeof parseHostedTelegramWebhookUpdate>;
+}): Promise<HostedThreadRoutingCryptoPreparation> {
+  const summary = await summarizeHostedTelegramWebhook(input.update);
+  const message = buildHostedTelegramMessagePayload(input.update);
+  if (
+    !summary
+    || summary.isBotMessage
+    || summary.isDirect
+    || !summary.senderTelegramUserId
+    || !message
+  ) {
+    return {};
+  }
+  const memberLookup = await resolveHostedMemberCoreByTelegramUserId({
+    prisma: input.prisma,
+    telegramUserId: summary.senderTelegramUserId,
+  });
+  if (
+    memberLookup.status !== "found"
+  ) {
+    return {};
+  }
+  const preparedSenderMemberId = memberLookup.core.id;
+  if (isHostedMemberSuspended(memberLookup.core.suspendedAt)) {
+    return { preparedSenderMemberId };
+  }
+  const access = await readHostedRuntimeAiAccessDecision({
+    memberId: memberLookup.core.id,
+    now: new Date(),
+    prisma: input.prisma,
+  });
+  if (!access.allowed) {
+    return { preparedSenderMemberId };
+  }
+  const threadRoute = await readHostedThreadRouteByThreadIdentity({
+    channel: "telegram",
+    prisma: input.prisma,
+    threadId: message.threadId,
+  });
+  if (!threadRoute) {
+    return {
+      preparedSenderMemberId,
+      preparedThreadContainerCreation:
+        await prepareHostedThreadContainerCreation({
+          accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+          channel: "telegram",
+          prisma: input.prisma,
+          threadId: message.threadId,
+        }),
+    };
+  }
+
+  const preparedThreadDeliveryRoute =
+    await prepareHostedThreadDeliveryRouteAndWarmMailbox({
+      prepareDeliveryRoute: () =>
+        prepareHostedThreadContainerDeliveryRoute({
+          accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+          channel: "telegram",
+          containerMemberId: threadRoute.containerMemberId,
+          observedDeliveryRouteEncrypted:
+            threadRoute.deliveryRouteState?.deliveryRouteEncrypted ?? null,
+          prisma: input.prisma,
+          threadId: message.threadId,
+        }),
+      warmMailboxRoot: async () => {
+        const root = await unwrapHostedDomainRootForWeb({
+          domain: getHostedCryptoDomainForLane("mailbox-payload"),
+          prisma: input.prisma,
+          retainFailureInScopedCache: true,
+          userId: threadRoute.containerMemberId,
+        });
+        root.rootKey.fill(0);
+      },
+    });
+  return { preparedSenderMemberId, preparedThreadDeliveryRoute };
+}
+
+const HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES = new Set([
+  "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+  "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+]);
+
+const HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES = new Set([
+  ...HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES,
+  "HOSTED_THREAD_ROUTE_WRITE_CONFLICT",
+]);
+
+async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
+  plan: (input: {
+    preparation: HostedThreadRoutingCryptoPreparation;
+    transaction: Prisma.TransactionClient;
+  }) => Promise<TResult>;
+  prepare: (input: {
+    attempt: number;
+  }) => Promise<HostedThreadRoutingCryptoPreparation>;
+  prisma: PrismaClient;
+}): Promise<TResult> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let preparation: HostedThreadRoutingCryptoPreparation = {};
+    const preparationFailures: unknown[] = [];
+    try {
+      return await runHostedOnboardingWebhookTransaction(
+        input.prisma,
+        (transaction) => input.plan({ preparation, transaction }),
+        async () => {
+          try {
+            preparation = await input.prepare({ attempt });
+          } catch (error) {
+            preparationFailures.push(error);
+            throw error;
+          }
+        },
+      );
+    } catch (error) {
+      if (
+        preparationFailures.length > 0
+        && isHostedOnboardingError(error)
+        && HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES.has(error.code)
+      ) {
+        // The transaction helper deliberately suppresses an irrelevant warm
+        // failure so ignored branches can still complete. If the planner then
+        // proves that this exact package was required, preserve the original
+        // provider/KMS failure instead of misclassifying it as a route race and
+        // repeating slow external work inside the same webhook response window.
+        throw preparationFailures[0];
+      }
+      if (
+        attempt === 0
+        && isHostedOnboardingError(error)
+        && HOSTED_THREAD_ROUTING_PREPARATION_RETRY_CODES.has(error.code)
+      ) {
+        logHostedOnboardingDiagnostic(
+          "hosted-onboarding.webhook.thread-routing-preparation-retry",
+          { code: error.code },
+        );
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("Hosted thread routing preparation retry exhausted unexpectedly.");
 }
 
 /**

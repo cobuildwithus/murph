@@ -203,7 +203,7 @@ test('canonical measurement capture and workout unit preferences round-trip thro
   assert.deepEqual(measurement.measurements, [
     {
       note: 'Post-cut check-in.',
-      metric: 'waist',
+      metric: 'waist-circumference',
       unit: 'in',
       value: 32,
     },

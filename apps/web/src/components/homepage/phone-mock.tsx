@@ -128,7 +128,7 @@ export function ExperimentCard({ result }: { result: ExperimentResult }) {
           {result.eyebrow}
         </span>
         {sideLabel ? (
-          <span className="font-mono text-[8px] tracking-[0.08em] text-[#736a58]/70">
+          <span className="font-mono text-[8px] tracking-[0.08em] text-[#736a58]">
             {sideLabel}
           </span>
         ) : null}
@@ -148,7 +148,7 @@ export function ExperimentCard({ result }: { result: ExperimentResult }) {
             baseline={result.trend.baseline}
             active={result.trend.active}
           />
-          <div className="mt-1 flex items-center justify-end gap-2.5 text-[7.5px] tracking-tight text-[#736a58]/75">
+          <div className="mt-1 flex items-center justify-end gap-2.5 text-[7.5px] tracking-tight text-[#736a58]">
             <span className="flex items-center gap-1">
               <span className="h-px w-3 border-t border-dashed border-[#c4a882]" />
               Baseline
@@ -174,8 +174,8 @@ export function ExperimentCard({ result }: { result: ExperimentResult }) {
 
 function ComparisonRow({ row }: { row: ExperimentComparisonRow }) {
   const isGood = row.tone === "good";
-  const barColor = isGood ? "bg-[#5a6e32]" : "bg-[#b8754b]";
-  const deltaColor = isGood ? "text-[#5a6e32]" : "text-[#b8754b]";
+  const barColor = isGood ? "bg-[#5a6e32]" : "bg-[#8b5d3f]";
+  const deltaColor = isGood ? "text-[#5a6e32]" : "text-[#8b5d3f]";
   const clamped = Math.max(0, Math.min(1, row.level));
   return (
     <div>
@@ -227,7 +227,7 @@ function StatTile({ stat }: { stat: ExperimentStat }) {
       {stat.delta ? (
         <p
           className={`mt-0.5 text-[8px] font-medium tracking-tight ${
-            isNegative ? "text-[#b8754b]" : "text-[#5a6e32]"
+            isNegative ? "text-[#8b5d3f]" : "text-[#5a6e32]"
           }`}
         >
           {stat.delta}
@@ -481,7 +481,7 @@ function Composer() {
           </svg>
         </span>
         <div className="flex flex-1 items-center justify-between rounded-full border border-[#c4a882]/25 bg-white py-[6px] pl-4 pr-3">
-          <span className="text-[0.8125rem] tracking-tight text-[#736a58]/45">
+          <span className="text-[0.8125rem] tracking-tight text-[#736a58]">
             iMessage
           </span>
           <svg width="13" height="13" viewBox="0 0 14 14" fill="#736a58" fillOpacity="0.4" aria-hidden="true">

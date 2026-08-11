@@ -442,7 +442,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.145.0");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.147.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",

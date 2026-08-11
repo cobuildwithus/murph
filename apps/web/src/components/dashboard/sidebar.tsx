@@ -323,36 +323,48 @@ export function Sidebar({
       </SidebarHeader>
 
       <SidebarContent className="justify-center px-2">
-        <SidebarMenu className="mb-12 gap-3 md:gap-3">
-          {navItems.map((item) => {
-            const activePrefix = item.matchPrefix ?? item.href;
-            const isActive =
-              pathname === item.href || pathname.startsWith(activePrefix);
-            const Icon = item.icon;
-
-            return (
-              <SidebarMenuItem key={item.href}>
-                <SidebarMenuButton
-                  isActive={isActive}
-                  size="lg"
-                  className={SIDEBAR_NAV_ITEM_CLASS}
-                  render={
-                    <Link href={item.href}>
-                      {Icon ? <Icon className={SIDEBAR_NAV_ICON_CLASS} /> : null}
-                      {item.label}
-                    </Link>
-                  }
-                />
-              </SidebarMenuItem>
-            );
-          })}
-          {chatAction}
-        </SidebarMenu>
+        <SidebarPrimaryNavigation chatAction={chatAction} pathname={pathname} />
       </SidebarContent>
 
       <SidebarFooter className="pb-4">
         <AccountMenu initialAuth={initialAuth} />
       </SidebarFooter>
     </ShadcnSidebar>
+  );
+}
+
+export function SidebarPrimaryNavigation({
+  chatAction,
+  pathname,
+}: {
+  chatAction?: ReactElement;
+  pathname: string;
+}) {
+  return (
+    <SidebarMenu className="mb-12 gap-3 md:gap-3">
+      {navItems.map((item) => {
+        const activePrefix = item.matchPrefix ?? item.href;
+        const isActive =
+          pathname === item.href || pathname.startsWith(activePrefix);
+        const Icon = item.icon;
+
+        return (
+          <SidebarMenuItem key={item.href}>
+            <SidebarMenuButton
+              isActive={isActive}
+              size="lg"
+              className={SIDEBAR_NAV_ITEM_CLASS}
+              render={
+                <Link href={item.href}>
+                  {Icon ? <Icon className={SIDEBAR_NAV_ICON_CLASS} /> : null}
+                  {item.label}
+                </Link>
+              }
+            />
+          </SidebarMenuItem>
+        );
+      })}
+      {chatAction}
+    </SidebarMenu>
   );
 }

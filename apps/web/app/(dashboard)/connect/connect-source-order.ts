@@ -1,3 +1,8 @@
+import {
+  MAINSTREAM_APPLE_HEALTH_RELAY_SOURCE_IDS,
+  SPECIALTY_APPLE_HEALTH_RELAY_SOURCE_IDS,
+} from "./apple-health-relay-connect-sources";
+
 type OrderedConnectSource = {
   connected?: boolean;
   historicalResetIncomplete?: boolean;
@@ -12,16 +17,13 @@ const CONNECT_SOURCE_POPULARITY_ORDER = [
   "garmin",
   "fitbit",
   "google-fit",
+  "mobvoi-health",
   "strava",
-  "xiaomi-mi-fitness",
-  "zepp",
-  "ringconn",
-  "coros",
-  "suunto",
-  "huawei-health",
+  ...MAINSTREAM_APPLE_HEALTH_RELAY_SOURCE_IDS,
   "withings",
   "oura",
   "whoop",
+  ...SPECIALTY_APPLE_HEALTH_RELAY_SOURCE_IDS,
   "dexcom",
   "dexcom-g6-and-older",
   "freestyle-libre",

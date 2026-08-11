@@ -60,7 +60,7 @@ function LabelLookupArtifact() {
             href="https://plasticlist.org"
             target="_blank"
             rel="noreferrer"
-            className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#a04f30]/70 underline decoration-[#a04f30]/25 underline-offset-2 transition-colors hover:text-[#a04f30] hover:decoration-[#a04f30]/60"
+            className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#a04f30] underline decoration-[#a04f30]/40 underline-offset-2 transition-colors hover:decoration-[#a04f30]/70"
           >
             plasticlist.org
           </a>

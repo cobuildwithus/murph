@@ -1,20 +1,13 @@
-import { HOSTED_PULSE_TRIAL_DAYS } from "./billing-plans";
-
 // Single source of truth for the member-facing selling points on every plan
 // card. Surfaces intentionally differ — the join page markets a plan to
 // someone deciding to sign up, while settings and the plan dialogs compare
 // plans a member can switch between — but every list lives here so a wording
 // change lands on all surfaces at once.
 //
-// Copy rule: only Edge may claim the most capable AI models. The top model
-// requires an active paid Edge plan (ASSISTANT_MODEL_SOL_REQUIRES_EDGE), so
-// that claim on Pulse or Core would promise something the product blocks.
-
-export const PULSE_TRIAL_FEATURES = [
-  `Full Pulse access for ${HOSTED_PULSE_TRIAL_DAYS} days`,
-  "Card required. Then $8/month unless canceled.",
-  "Cancel anytime",
-] as const;
+// Copy rule: only Edge and Max may claim the most capable AI models. The top
+// model requires their shared premium runtime entitlement
+// (ASSISTANT_MODEL_SOL_REQUIRES_EDGE), so that claim on Pulse or Core would
+// promise something the product blocks.
 
 export const JOIN_PULSE_FEATURES = [
   "Private personal health assistant",
@@ -48,6 +41,13 @@ export const SETTINGS_EDGE_FEATURES = [
   ...EDGE_ONLY_FEATURES,
 ] as const;
 
+export const SETTINGS_MAX_FEATURES = [
+  "Everything in Edge",
+  "Highest included monthly AI usage",
+  "More room for frequent deep research and analysis",
+  "Built for heavier, ongoing Murph use",
+] as const;
+
 export const JOIN_EDGE_FEATURES = [
   "Everything in Pulse and:",
   "The most capable AI models",
@@ -75,14 +75,14 @@ export const CHECKOUT_CORE_FEATURES = [
 
 export const JOIN_FAMILY_FEATURES = [
   "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
+  "Choose Pulse, Edge, or Max for each person",
   "Each person keeps a private Murph",
   "Family members' chats and health data stay private",
 ] as const;
 
 export const SETTINGS_FAMILY_FEATURES = [
   "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
+  "Choose Pulse, Edge, or Max for each person",
   "Each person keeps a private Murph",
   "You can't see members' chats or health data",
 ] as const;

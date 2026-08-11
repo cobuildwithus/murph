@@ -452,7 +452,6 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
         idempotency_key: 'card-delivery-1',
         parts: [{
           app: {
-            app_store_id: 6786145859,
             bundle_id: 'ai.withmurph.app.messages',
             name: 'Murph',
             team_id: 'G9DJH2XUMK',
@@ -460,10 +459,11 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
           fallback_text: 'Ask Murph for this card in text',
           interactive: true,
           layout: {
-            caption: 'Jul 28 · 4 meals · PARTIAL TOTALS',
-            subcaption: '1,490.25 cal',
-            trailing_caption: '94.5g protein · 193.125g carbs',
-            trailing_subcaption: '34.75g fat · 26.5g fiber',
+            caption: 'Jul 28 · 4 meals',
+            image_url: expect.stringMatching(
+              /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+            ),
+            subcaption: 'Some calorie and nutrition estimates were partial.',
           },
           type: 'imessage_app',
           url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),

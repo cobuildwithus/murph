@@ -15,10 +15,7 @@ import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
-  HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM,
-  HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM,
-  HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM,
-} from "@/src/lib/hosted-onboarding/billing-pulse-trial-continuation-contract";
+} from "@/src/lib/hosted-onboarding/billing-group-payment-method-contract";
 import {
   HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM,
   parseHostedBillingPlanChangeReturnValue,
@@ -44,6 +41,7 @@ const INTEGRATIONS_CONNECT_PATH_PATTERN =
 const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 const SETTINGS_PATH = "/settings";
 const ENVIRONMENT_PATH = "/environment";
+const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
 interface AuthContextValue {
   authenticated: boolean;
@@ -139,7 +137,29 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
-    || shouldResumeCurrentSettingsPulseTrialPaymentUrl(payload)
+    || shouldResumeCurrentSettingsUsageCreditReturnUrl(payload)
+  );
+}
+
+function shouldResumeCurrentSettingsUsageCreditReturnUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const checkoutValues = params.getAll("usageCheckout");
+  const purchaseValues = params.getAll("usagePurchase");
+  return (
+    checkoutValues.length === 1
+    && (checkoutValues[0] === "success" || checkoutValues[0] === "cancel")
+    && purchaseValues.length === 1
+    && HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN.test(purchaseValues[0] ?? "")
   );
 }
 
@@ -199,25 +219,6 @@ function shouldResumeCurrentSettingsGroupPaymentUrl(
   const returnValues = params.getAll(HOSTED_START_PAID_GROUP_RETURN_PARAM);
   return returnValues.length === 1
     && returnValues[0] === HOSTED_START_PAID_GROUP_RETURN_VALUE;
-}
-
-function shouldResumeCurrentSettingsPulseTrialPaymentUrl(
-  payload: HostedPrivyCompletionPayload,
-): boolean {
-  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
-    return false;
-  }
-
-  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
-    return false;
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  return (
-    params.getAll(HOSTED_PULSE_TRIAL_CONTINUATION_ACTION_PARAM).length === 1
-    && params.getAll(HOSTED_PULSE_TRIAL_CONTINUATION_EXPIRES_PARAM).length === 1
-    && params.getAll(HOSTED_PULSE_TRIAL_CONTINUATION_SIGNATURE_PARAM).length === 1
-  );
 }
 
 function shouldResumeCurrentClinicalRecordsIndexUrl(

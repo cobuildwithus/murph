@@ -322,7 +322,6 @@ describe.skipIf(!runPostgresProof)(
           checkoutSessionId: fixture.checkoutSessionId,
           memberId: fixture.memberId,
           prisma: cleanupClient,
-          refundCheckoutPayment: true,
           sourceEventId: `evt_family_checkout_cleanup_${fixture.fixtureId}`,
           stripe: stripe.client,
           subscriptionId: fixture.directSubscriptionId,
@@ -1023,12 +1022,9 @@ describe.skipIf(!runPostgresProof)(
 
       workflowBoundary.start.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
-      runtimeRecheckBoundary.signal
-        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
-        .mockResolvedValue({
-          signalAccepted: true,
-          workflowId: `hosted-user-runtime:${memberId}`,
-        });
+      runtimeRecheckBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
         pulsePriceId,
@@ -1104,6 +1100,10 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ userId: memberId }),
         );
 
+        runtimeRecheckBoundary.signal.mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${memberId}`,
+        });
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
@@ -1171,6 +1171,7 @@ describe.skipIf(!runPostgresProof)(
         customerId: stripeCustomerId,
         eventId: stripeEventId,
         invoiceId: stripeInvoiceId,
+        priceId: pulsePriceId,
         subscriptionId: stripeSubscriptionId,
       });
       const stripeFixture = await startHostedStripeHttpFixture({
@@ -1181,12 +1182,9 @@ describe.skipIf(!runPostgresProof)(
 
       workflowBoundary.start.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
-      runtimeRecheckBoundary.signal
-        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
-        .mockResolvedValue({
-          signalAccepted: true,
-          workflowId: `hosted-user-runtime:${memberId}`,
-        });
+      runtimeRecheckBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
         pulsePriceId,
@@ -1257,7 +1255,7 @@ describe.skipIf(!runPostgresProof)(
           billingPlanCode: "launch_monthly",
           blockedAt: null,
           highestBillingPlanCode: "launch_monthly",
-          planResetAt: null,
+          planResetAt: eventCreatedAt,
           spentUsdMicros: 0n,
         });
         await expect(readPendingMailboxProof({
@@ -1280,6 +1278,10 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ userId: memberId }),
         );
 
+        runtimeRecheckBoundary.signal.mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${memberId}`,
+        });
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
@@ -1298,7 +1300,7 @@ describe.skipIf(!runPostgresProof)(
           billingPlanCode: "launch_monthly",
           blockedAt: null,
           highestBillingPlanCode: "launch_monthly",
-          planResetAt: null,
+          planResetAt: eventCreatedAt,
           spentUsdMicros: 0n,
         });
         await expect(readStripeReceiptProof({
@@ -1360,12 +1362,9 @@ describe.skipIf(!runPostgresProof)(
 
       workflowBoundary.start.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
-      runtimeRecheckBoundary.signal
-        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
-        .mockResolvedValue({
-          signalAccepted: true,
-          workflowId: `hosted-user-runtime:${memberId}`,
-        });
+      runtimeRecheckBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
         familyEdgePriceId,
@@ -1499,6 +1498,10 @@ describe.skipIf(!runPostgresProof)(
           expect.objectContaining({ userId: memberId }),
         );
 
+        runtimeRecheckBoundary.signal.mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${memberId}`,
+        });
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
@@ -1596,12 +1599,9 @@ describe.skipIf(!runPostgresProof)(
 
       workflowBoundary.start.mockClear();
       runtimeRecheckBoundary.signal.mockReset();
-      runtimeRecheckBoundary.signal
-        .mockRejectedValueOnce(new Error("Temporal fixture unavailable"))
-        .mockResolvedValue({
-          signalAccepted: true,
-          workflowId: `hosted-user-runtime:${ownerMemberId}`,
-        });
+      runtimeRecheckBoundary.signal.mockRejectedValue(
+        new Error("Temporal fixture unavailable"),
+      );
       configureHostedStripeFixtureEnvironment({
         edgePriceId,
         familyEdgePriceId,
@@ -1767,6 +1767,10 @@ describe.skipIf(!runPostgresProof)(
         });
         expect(runtimeRecheckBoundary.signal).toHaveBeenCalledTimes(1);
 
+        runtimeRecheckBoundary.signal.mockResolvedValue({
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${ownerMemberId}`,
+        });
         await makeStripeReceiptImmediatelyRetryable({
           eventId: stripeEventId,
           prisma,
@@ -1971,6 +1975,7 @@ function buildInvoicePaidEvent(input: {
   customerId: string;
   eventId: string;
   invoiceId: string;
+  priceId: string;
   subscriptionId: string;
 }): Stripe.Event {
   const invoiceFields = {
@@ -1979,6 +1984,18 @@ function buildInvoicePaidEvent(input: {
     charge: `ch_${input.invoiceId}`,
     customer: input.customerId,
     id: input.invoiceId,
+    lines: {
+      data: [{
+        pricing: {
+          price_details: {
+            price: input.priceId,
+            product: "prod_hosted_trial_conversion",
+          },
+          type: "price_details",
+          unit_amount_decimal: "800",
+        },
+      }],
+    },
     object: "invoice",
     payment_intent: `pi_${input.invoiceId}`,
     payments: {

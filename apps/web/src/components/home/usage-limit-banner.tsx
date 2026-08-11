@@ -18,6 +18,7 @@ const resettableMonthlyNoticeCodes = new Set<HostedAiUsageGateNoticeCode>([
   "edge_usage_limit_reached",
   "family_usage_limit_reached",
   "group_upgrade_pulse",
+  "max_usage_limit_reached",
   "pulse_upgrade_edge",
 ]);
 
@@ -48,17 +49,17 @@ const usageLimitBannerCopy: Record<
     body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Core usage",
   },
+  max_usage_limit_reached: {
+    body: "Murph is paused until your included usage resets.",
+    title: "You've used 100% of this month's included Max usage",
+  },
   pulse_upgrade_edge: {
     body: "Murph is paused until your included usage resets.",
     title: "You've used 100% of this month's included Pulse usage",
   },
-  trial_conversion_pending: {
-    body: "Murph is paused because your included trial access is no longer active.",
-    title: "Your trial just ended",
-  },
-  trial_usage_limit_reached: {
-    body: "Murph is paused because your included trial usage is exhausted.",
-    title: "You've used 100% of your included trial usage",
+  starter_usage_limit_reached: {
+    body: "Murph is paused because your starter usage is exhausted.",
+    title: "You've used 100% of your starter usage",
   },
 };
 

@@ -13,6 +13,7 @@ import {
 import {
   buildExperimentAdherenceCalendar,
   countAdherenceConfidenceSessions,
+  countCalendarAdherenceSessions,
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
   resolveActivityEvidenceLocalDate,
@@ -1832,34 +1833,59 @@ function buildProgressResult(
   const progressObservations = progressTarget
     ? buildAdherenceObservations(context, [progressTarget])
     : [];
-  const progressCounts = progressTarget && !progressTarget.calendar
-    ? countCompletedAdherenceSessions({
-        asOfDate: context.evidenceThrough,
-        observations: progressObservations,
-        target: progressTarget,
-        windows: context.run.windows,
-      })
+  const progressCells = progressTarget?.calendar && adherence
+    ? rollupTarget
+      ? adherence.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
+      : adherence.cells
     : null;
+  const occurrenceCounts =
+    progressTarget?.calendar &&
+      progressTarget.evidence.kind === "linkedEventCount" &&
+      progressCells
+      ? countCalendarAdherenceSessions({
+          asOf: context.asOf,
+          cells: progressCells,
+          observations: progressObservations,
+          target: progressTarget,
+        })
+      : null;
+  const progressCounts = occurrenceCounts ??
+    (progressTarget && !progressTarget.calendar
+      ? countCompletedAdherenceSessions({
+          asOfDate: context.evidenceThrough,
+          observations: progressObservations,
+          target: progressTarget,
+          windows: context.run.windows,
+        })
+      : null);
   const completedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
-    : progressTarget?.calendar
-    ? schedule?.completedSessions ?? 0
-    : progressCounts?.completedSessions ?? 0;
+    : occurrenceCounts
+      ? occurrenceCounts.completedSessions
+      : progressTarget?.calendar
+        ? schedule?.completedSessions ?? 0
+        : progressCounts?.completedSessions ?? 0;
   const partialSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
-    : progressTarget?.calendar
-    ? schedule?.partialSessions ?? 0
-    : progressCounts?.partialSessions ?? 0;
+    : occurrenceCounts
+      ? occurrenceCounts.partialSessions
+      : progressTarget?.calendar
+        ? schedule?.partialSessions ?? 0
+        : progressCounts?.partialSessions ?? 0;
   const missedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
-    : progressTarget?.calendar
-    ? schedule?.missedSessions ?? 0
-    : progressCounts?.missedSessions ?? 0;
+    : occurrenceCounts
+      ? occurrenceCounts.missedSessions
+      : progressTarget?.calendar
+        ? schedule?.missedSessions ?? 0
+        : progressCounts?.missedSessions ?? 0;
   const skippedSessions = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? 0
-    : progressTarget?.calendar
-    ? schedule?.skippedSessions ?? 0
-    : progressCounts?.skippedSessions ?? 0;
+    : occurrenceCounts
+      ? occurrenceCounts.skippedSessions
+      : progressTarget?.calendar
+        ? schedule?.skippedSessions ?? 0
+        : progressCounts?.skippedSessions ?? 0;
   const loggedSessions = completedSessions + partialSessions;
   const progressSchedule = progressTarget?.calendar && rollupTarget && schedule
     ? {
@@ -1867,31 +1893,32 @@ function buildProgressResult(
         cells: schedule.cells.filter((cell) => cell.targetId === rollupTarget.targetId),
       }
     : progressTarget?.calendar ? schedule : null;
-  const progressCells = progressTarget?.calendar && adherence
-    ? rollupTarget
-      ? adherence.cells.filter((cell) => cell.targetId === rollupTarget.targetId)
-      : adherence.cells
-    : null;
   const confidenceCounts = hasUnsupportedExplicitTargets || hasAmbiguousTargets
     ? { sensedSessions: 0, confirmedSessions: 0, assumedSessions: 0 }
-    : progressTarget?.calendar
-    ? countAdherenceConfidenceSessions({
-        cells: progressCells ?? [],
-        observations: progressObservations,
-      })
-    : progressCounts ?? {
-        sensedSessions: 0,
-        confirmedSessions: 0,
-        assumedSessions: 0,
-      };
-  const expectedSessionsByNow = hasUnsupportedExplicitTargets || hasAmbiguousTargets
-    ? null
-    : computeExpectedSessionsByNow(
-        context.run,
-        context.evidenceThrough,
-        targetSessions,
-        progressSchedule,
-      );
+    : occurrenceCounts ??
+      (progressTarget?.calendar
+        ? countAdherenceConfidenceSessions({
+            cells: progressCells ?? [],
+            observations: progressObservations,
+          })
+        : progressCounts ?? {
+            sensedSessions: 0,
+            confirmedSessions: 0,
+            assumedSessions: 0,
+          });
+  const scheduledExpectedSessionsByNow =
+    hasUnsupportedExplicitTargets || hasAmbiguousTargets
+      ? null
+      : computeExpectedSessionsByNow(
+          context.run,
+          context.evidenceThrough,
+          targetSessions,
+          progressSchedule,
+        );
+  const expectedSessionsByNow =
+    occurrenceCounts && scheduledExpectedSessionsByNow !== null
+      ? occurrenceCounts.expectedSessionsByNow
+      : scheduledExpectedSessionsByNow;
   const primary = biomarkers[0] ?? null;
   const primaryOutcome = resolveExperimentPrimaryOutcome(
     readExperimentAnalysisPlan(context.entity.attributes),

@@ -18,6 +18,10 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
 import {
+  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "../src/public-account.ts";
+import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
 } from "../src/providers/junction.ts";
@@ -3377,7 +3381,7 @@ test("Junction unproven historical coverage saturates at a daily retry without a
   );
 });
 
-test("Junction account jobs keep a concurrently disconnected source out of projection and import", async () => {
+test("Junction account jobs keep a concurrently fenced connected source out of projection and import", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -3475,7 +3479,9 @@ test("Junction account jobs keep a concurrently disconnected source out of proje
       sourceProviderSlug: "fitbit",
     }), "Fitbit source key should be available."),
     sourceProviderSlug: "fitbit",
-    status: "disconnected",
+    status: "connected",
+    lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+    lastErrorMessage: "Source disconnect is in progress.",
   });
   let liveSources = [garminSource, fitbitSource];
   const importedSnapshots: Array<{
@@ -3536,7 +3542,7 @@ test("Junction account jobs keep a concurrently disconnected source out of proje
   );
   assert.equal(
     liveSources.find((source) => source.sourceProviderSlug === "fitbit")?.status,
-    "disconnected",
+    "connected",
   );
   assert.deepEqual(
     importedSnapshots.flatMap((snapshot) => snapshot.summaries?.activity ?? [])
@@ -4417,10 +4423,42 @@ test("Junction direct Apple Health canonical delivery records history despite th
 });
 
 test("Junction data webhooks name the delivering source and lifecycle events do not", async () => {
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
-    throw new Error(`Unexpected request: ${readUrl(input)}`);
+    const url = new URL(readUrl(input));
+    requests.push(url.toString());
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { blood_pressure: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/blood_pressure/grouped") {
+      const timestamp = url.searchParams.get("start_date")
+        ?? "2026-03-18T00:00:00.000Z";
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              id: `bp-${timestamp}`,
+              timestamp,
+              systolic: 120,
+              diastolic: 80,
+            }],
+            source: { provider: "garmin", type: "cuff" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
     providerFilter: ["garmin"],
+    timeseriesResources: ["blood_pressure"],
     webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
   });
   const parseWebhook = async (input: {
@@ -4488,6 +4526,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       event_type: "provider.connection.created",
       user_id: "junction-user-1",
       data: {
+        created_at: "2026-03-20T14:30:00.000Z",
         provider: "garmin",
       },
     },
@@ -4496,7 +4535,137 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
 
   assert.equal(lifecycle.dataSourceProviderSlug, null);
   assert.equal(lifecycle.sourceProviderSlug, "garmin");
-  assert.equal(lifecycle.occurredAt, "2026-04-03T00:00:00.000Z");
+  assert.equal(lifecycle.occurredAt, "2026-03-20T14:30:00.000Z");
+  assert.deepEqual(lifecycle.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
+  const garminSource = {
+    displayName: "Garmin",
+    firstSeenAt: "2026-03-20T14:30:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    resourceCount: 1,
+    resourceAvailabilitySummary: { blood_pressure: true },
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  };
+  const schedulerAccount = createStoredAccount({
+    metadata: {
+      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+    },
+    nextReconcileAt: "2026-04-03T00:00:00.000Z",
+    sources: [garminSource],
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const findScheduledHistoryJob = (now: string) => requireValue(
+    executor.createScheduledJobs?.(
+      schedulerAccount,
+      now,
+    ).jobs.find((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "blood_pressure"
+      && job.payload?.sourceProviderSlug === "garmin"
+    ),
+  );
+  const schedulerJob = findScheduledHistoryJob("2026-04-03T00:00:00.000Z");
+  assert.deepEqual(schedulerJob.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-03-18T00:00:00.000Z",
+    resource: "blood_pressure",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-03-20T00:00:00.000Z",
+    windowStart: "2026-03-18T00:00:00.000Z",
+  });
+  assert.equal(
+    findScheduledHistoryJob("2026-04-04T00:00:00.000Z").dedupeKey,
+    schedulerJob.dedupeKey,
+  );
+
+  const updateCases = [
+    {
+      data: {
+        provider: "garmin",
+        updated_at: "2026-04-03T00:00:00.000Z",
+      },
+      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      messageId: "msg_lifecycle_update_timestamp",
+    },
+    {
+      data: { provider: "garmin" },
+      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      messageId: "msg_lifecycle_update_now_fallback",
+    },
+  ] as const;
+
+  for (const updateCase of updateCases) {
+    const update = await parseWebhook({
+      body: {
+        event_type: "provider.connection.updated",
+        user_id: "junction-user-1",
+        data: updateCase.data,
+      },
+      messageId: updateCase.messageId,
+    });
+    assert.equal(update.occurredAt, updateCase.expectedOccurredAt);
+    assert.deepEqual(update.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
+  }
+
+  requests.length = 0;
+  let scheduledResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        },
+        sources: [garminSource],
+      }),
+      importSnapshot: async () => ({
+        canonicalEventCount: 2,
+        durableDeliveryAccepted: true,
+      }),
+    }),
+    {
+      ...createJob("resource", schedulerJob.payload ?? {}),
+      dedupeKey: schedulerJob.dedupeKey ?? null,
+    },
+  );
+  const scheduledFollowUp = scheduledResult.scheduledJobs?.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "blood_pressure"
+  );
+  if (scheduledFollowUp) {
+    scheduledResult = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+          },
+          sources: [garminSource],
+        }),
+        importSnapshot: async () => ({
+          canonicalEventCount: 2,
+          durableDeliveryAccepted: true,
+        }),
+      }),
+      {
+        ...createJob(scheduledFollowUp.kind, scheduledFollowUp.payload ?? {}),
+        dedupeKey: scheduledFollowUp.dedupeKey ?? null,
+      },
+    );
+  }
+
+  assert.equal(
+    requests.some((request) =>
+      new URL(request).searchParams.get("start_date") === "2026-03-18T00:00:00.000Z"
+    ),
+    true,
+  );
+  assert.equal(
+    scheduledResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
+    "v1|garmin,omron",
+  );
 });
 
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
@@ -8749,7 +8918,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(sources.length, 1);
+  assert.equal(sources.length, 2);
   assert.equal(sources[0]?.sourceProviderSlug, "oura");
   assert.equal(sources[0]?.status, "connected");
   assert.equal(
@@ -8769,6 +8938,8 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(sources[0]?.resourceAvailabilitySummary.provider_connection_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.provider_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.device_id, undefined);
+  assert.equal(sources[1]?.sourceProviderSlug, "fitbit");
+  assert.equal(sources[1]?.status, "connected");
   assert.equal(sources[0]?.resourceAvailabilitySummary.deviceName, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);
