@@ -11,8 +11,9 @@ import {
 
 const CHANGELOG_ENTRY_PREFIX = "apps/web/changelog/entries/";
 const CHANGELOG_EDITION_PREFIX = "apps/web/changelog/editions/";
+const LEGACY_CHANGELOG_PATH = "apps/web/src/lib/changelog.ts";
 const CHANGELOG_CONTENT_DESCRIPTION =
-  "apps/web/changelog entries or edition metadata";
+  "changelog entries, edition metadata, or the legacy registry";
 const SECTION_HEADING = "Changelog";
 const VALID_DISPOSITIONS = new Set(["not applicable", "updated"]);
 const ITEM_REFERENCE_PATTERN =
@@ -186,7 +187,8 @@ function readChangelogItemsById(
 
 function isChangelogContentPath(changedPath) {
   const normalized = changedPath.split(path.sep).join("/");
-  return normalized.startsWith(CHANGELOG_ENTRY_PREFIX)
+  return normalized === LEGACY_CHANGELOG_PATH
+    || normalized.startsWith(CHANGELOG_ENTRY_PREFIX)
     || normalized.startsWith(CHANGELOG_EDITION_PREFIX);
 }
 

@@ -258,8 +258,10 @@ Required:
   one or more isolated entry fragments and/or edition metadata files in the
   same PR and add one `Items:` bullet naming the edition date and affected
   stable item IDs. A metadata-only edit names the existing items in that
-  edition. For `not applicable`, add one concrete `Reason:` bullet explaining
-  why no member-visible behavior changed.
+  edition. An intentional historical correction may instead edit the frozen
+  legacy registry and must name its affected existing items; normal new items
+  never use that path. For `not applicable`, add one concrete `Reason:` bullet
+  explaining why no member-visible behavior changed.
   Use `$write-changelog` to inventory source PRs, group related outcomes, add
   useful visuals, protect private or sensitive details, and update the focused
   archive proof. The pull-request body workflow validates this declaration on

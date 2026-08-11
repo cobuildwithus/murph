@@ -37,8 +37,10 @@ date.
 Historical editions in `src/lib/changelog.ts` are frozen through 2026-08-09.
 Fragment dates after that boundary remain open to independent item files; a
 normal item PR never advances the boundary or edits a hand-maintained edition
-or latest-page inventory test. Web development, tests, typechecking, and builds
-generate an ignored TypeScript module from the fragments, avoiding both a
-committed merge hotspot and runtime filesystem reads. The loader and focused
+or latest-page inventory test. An intentional correction to existing historical
+public content remains an exceptional legacy-registry edit and declares the
+affected existing date and item IDs. Web development, tests, typechecking, and
+builds generate an ignored TypeScript module from the fragments, avoiding both
+a committed merge hotspot and runtime filesystem reads. The loader and focused
 tests validate fragments and publish them through the existing archive, feed,
 permalink, and share-card contracts.

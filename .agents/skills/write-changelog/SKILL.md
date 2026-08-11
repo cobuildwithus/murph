@@ -79,6 +79,12 @@ normal item to the frozen `LEGACY_CHANGELOG_EDITIONS` array or a central test
 inventory. The fragment directory date, `publishedOn`, item `id`, and filename
 must agree.
 
+Treat `LEGACY_CHANGELOG_EDITIONS` as an exceptional correction surface only.
+If an existing historical public claim is intentionally corrected, edit that
+item in `apps/web/src/lib/changelog.ts`, declare `Changelog: updated`, and name
+the affected existing date and stable item IDs. Never use the legacy array for
+a new or current-date item.
+
 Use `order` to control presentation within the date. Higher values render
 first; equal values use the stable item ID as a deterministic tie-breaker, so
 concurrent PRs do not need to coordinate. Prefer gaps of 100 when editorial
@@ -230,11 +236,12 @@ For a truly internal-only change:
 ```
 
 The `updated` disposition must correspond to a change under
-`apps/web/changelog/entries/` or `apps/web/changelog/editions/`. The
-`Items:` bullet names the affected stable item IDs; for a metadata-only edit,
-name the existing items in that edition. The `not applicable` disposition must
-explain why members cannot experience a change. Never use a placeholder or a
-generic reason such as "not needed."
+`apps/web/changelog/entries/`, `apps/web/changelog/editions/`, or the
+exceptional legacy owner at `apps/web/src/lib/changelog.ts`. The `Items:` bullet
+names the affected stable item IDs; for a metadata-only or historical
+correction, name the existing items in that edition. The `not applicable`
+disposition must explain why members cannot experience a change. Never use a
+placeholder or a generic reason such as "not needed."
 
 ## Final review checklist
 
