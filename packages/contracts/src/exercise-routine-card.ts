@@ -3,6 +3,8 @@ import * as z from "./zod-runtime.ts";
 export const exerciseRoutineCardV1Bounds = {
   exerciseCount: 8,
   exerciseSeconds: 900,
+  fallbackTextLength: 4_096,
+  imageAltLength: 500,
   imageCount: 8,
   instructionCount: 3,
   textLength: 160,
@@ -44,20 +46,59 @@ export type ExerciseRoutineResponseCardV1 = {
   version: 1;
 };
 
+export function renderExerciseRoutineResponseCardTextV1(
+  card: ExerciseRoutineResponseCardV1,
+): string {
+  const heading = card.subtitle === null
+    ? card.title
+    : `${card.title} — ${card.subtitle}`;
+  const exercises = card.exercises.flatMap((exercise, index) => [
+    "",
+    `${index + 1}. ${exercise.name} — ${exercise.dose} (${formatExerciseRoutineDurationV1(exercise.estimatedSeconds)})`,
+    ...exercise.instructions.map((instruction) => `   • ${instruction}`),
+  ]);
+  const footer = card.footer === null ? [] : ["", card.footer];
+  return [
+    heading,
+    `${card.intensity} · ${formatExerciseRoutineDurationV1(card.totalSeconds)}`,
+    ...exercises,
+    "",
+    `⚠️ ${card.safety}`,
+    ...footer,
+  ].join("\n");
+}
+
+function formatExerciseRoutineDurationV1(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds === 0
+    ? `${minutes} min`
+    : `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
+}
+
 const boundedTextSchema = z
   .string()
   .trim()
   .min(1)
   .max(exerciseRoutineCardV1Bounds.textLength);
 
+const boundedImageAltSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(exerciseRoutineCardV1Bounds.imageAltLength);
+
 export const exerciseRoutineCardImageV1Schema: z.ZodType<
   ExerciseRoutineCardImageV1
 > = z
   .object({
-    alt: boundedTextSchema,
+    alt: boundedImageAltSchema,
     source: z
       .string()
-      .regex(/^exercise_catalog:[a-z0-9][a-z0-9-]*:[^\s:][^\s]*$/u)
+      .regex(/^exercise_catalog:[A-Za-z0-9][A-Za-z0-9_-]*:[1-8]$/u)
       .max(exerciseRoutineCardV1Bounds.textLength),
     step: boundedTextSchema,
     url: z.string().url().max(500).refine((value) => value.startsWith("https://"), {
@@ -144,6 +185,17 @@ export const exerciseRoutineResponseCardV1Schema: z.ZodType<
       context.addIssue({
         code: "custom",
         message: `A routine can include at most ${exerciseRoutineCardV1Bounds.imageCount} images.`,
+        path: ["exercises"],
+      });
+    }
+
+    if (
+      renderExerciseRoutineResponseCardTextV1(card).length >
+      exerciseRoutineCardV1Bounds.fallbackTextLength
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: `Exercise routine text fallback must fit ${exerciseRoutineCardV1Bounds.fallbackTextLength} characters.`,
         path: ["exercises"],
       });
     }

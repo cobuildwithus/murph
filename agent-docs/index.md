@@ -12,6 +12,10 @@ nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
 concurrency proof are jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, and `agent-docs/references/testing-ci-map.md`.
 
+Telegram rich routine-card authority, catalog-position image provenance, and
+single-message fallback ownership are specified by `ARCHITECTURE.md` and
+`agent-docs/RELIABILITY.md`.
+
 Direct-insert hosted callback nonce replay convergence through the
 `nonce_hash` primary key, database-clock refusal after the inclusive callback
 expiry boundary, plus bounded background retention and its opt-in PostgreSQL

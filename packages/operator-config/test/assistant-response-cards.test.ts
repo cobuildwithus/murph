@@ -61,7 +61,7 @@ const ROUTINE_CARD: ExerciseRoutineResponseCardV1 = {
       images: [
         {
           alt: 'Person standing tall with the forearm on a door frame.',
-          source: 'exercise_catalog:doorway-chest-stretch:setup',
+          source: 'exercise_catalog:ST170:1',
           step: 'Setup',
           url: 'https://cdn.example.test/doorway-stretch.png?x=1&y=2',
         },
@@ -432,23 +432,25 @@ describe('assistant response cards', () => {
     )
   })
 
-  it('keeps a maximum routine below the Telegram rich-message limit', () => {
+  it('keeps a maximum-count routine within one rich message and one text fallback', () => {
     const imageUrlPrefix = 'https://cdn.example.test/'
     const maximumText = 'x'.repeat(160)
+    const maximumAltText = 'x'.repeat(500)
+    const longExerciseText = 'x'.repeat(80)
     const maximumImageUrl = imageUrlPrefix.padEnd(500, 'a')
     const maximumRoutine: ExerciseRoutineResponseCardV1 = {
       ...ROUTINE_CARD,
-      exercises: Array.from({ length: 8 }, (_, index) => ({
-        dose: maximumText,
+      exercises: Array.from({ length: 8 }, () => ({
+        dose: longExerciseText,
         estimatedSeconds: 1,
         images: [{
-          alt: maximumText,
-          source: `exercise_catalog:${'a'.repeat(130)}:${index}`,
+          alt: maximumAltText,
+          source: 'exercise_catalog:EX001:1',
           step: maximumText,
           url: maximumImageUrl,
         }],
-        instructions: [maximumText, maximumText, maximumText],
-        name: maximumText,
+        instructions: [longExerciseText, longExerciseText],
+        name: longExerciseText,
       })),
       footer: maximumText,
       intensity: maximumText,
@@ -469,6 +471,19 @@ describe('assistant response cards', () => {
     expect(buildTelegramRichMessage(parsed).html.length).toBeLessThanOrEqual(
       32_768,
     )
+    expect(renderAssistantResponseCardText(parsed).length).toBeLessThanOrEqual(
+      4_096,
+    )
+
+    expect(() => assistantResponseCardSchema.parse({
+      ...maximumRoutine,
+      exercises: maximumRoutine.exercises.map((exercise) => ({
+        ...exercise,
+        dose: maximumText,
+        instructions: [maximumText, maximumText, maximumText],
+        name: maximumText,
+      })),
+    })).toThrow('text fallback must fit 4096 characters')
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {

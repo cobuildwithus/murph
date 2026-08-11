@@ -201,6 +201,7 @@ export async function sendTelegramRichMessage(
   providerMessageIds?: string[]
   target: string
 }> {
+  assertSingleTelegramRichFallbackMessage(input.fallbackMessage)
   const env = dependencies.env ?? process.env
   const token = resolveTelegramBotToken(env)
   if (!token) {
@@ -2388,6 +2389,28 @@ function markTelegramRichDeliveryAmbiguous(
     deliveryMayHaveSucceeded: true as const,
     retryable: false as const,
   })
+}
+
+function assertSingleTelegramRichFallbackMessage(message: string): void {
+  const renderedMessage = renderMarkdownMessageText(message)
+  const chunks = splitDecoratedMessageText(
+    renderedMessage,
+    TELEGRAM_MAX_TEXT_LENGTH,
+  )
+  if (chunks.length === 1) {
+    return
+  }
+  throw Object.assign(
+    new VaultCliError(
+      'ASSISTANT_TELEGRAM_RICH_FALLBACK_TOO_LONG',
+      'Telegram rich-message fallback must fit one text message.',
+      {
+        maxLength: TELEGRAM_MAX_TEXT_LENGTH,
+        renderedLength: renderedMessage.text.length,
+      },
+    ),
+    { deliveryMayHaveSucceeded: false as const },
+  )
 }
 
 async function sendTelegramTextChunkOnce(input: {

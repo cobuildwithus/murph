@@ -6,6 +6,7 @@ import type {
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
+  assistantResponseCardSchema,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -75,6 +76,29 @@ const ROUTINE_CARD: AssistantResponseCard = {
 }
 
 const ROUTINE_CARD_TEXT = renderAssistantResponseCardText(ROUTINE_CARD)
+
+const LONG_ROUTINE_CARD = assistantResponseCardSchema.parse({
+  ...ROUTINE_CARD,
+  exercises: Array.from({ length: 8 }, (_, index) => ({
+    dose: `Eight controlled repetitions ${'d'.repeat(50)}`,
+    estimatedSeconds: 45,
+    images: [],
+    instructions: [
+      `Keep the movement controlled ${'a'.repeat(50)}`,
+      `Stop before the range becomes forced ${'b'.repeat(50)}`,
+    ],
+    name: `Exercise ${index + 1} ${'n'.repeat(60)}`,
+  })),
+  footer: `Keep breathing normally ${'f'.repeat(130)}`,
+  intensity: `Easy and controlled ${'i'.repeat(130)}`,
+  safety: `Stop if pain or dizziness increases ${'s'.repeat(120)}`,
+  subtitle: `Complete movement guide ${'u'.repeat(130)}`,
+  title: `Long routine ${'t'.repeat(140)}`,
+  totalSeconds: 360,
+  transitionSeconds: 0,
+})
+
+const LONG_ROUTINE_CARD_TEXT = renderAssistantResponseCardText(LONG_ROUTINE_CARD)
 
 const CHALLENGE_CARD: AssistantResponseCard = {
   kind: 'challenge_standings',
@@ -1023,7 +1047,7 @@ describe('assistant channels runtime seam', () => {
 
     await expect(sendTelegramRichMessage(
       {
-        fallbackMessage: 'Readable fallback routine',
+        fallbackMessage: LONG_ROUTINE_CARD_TEXT,
         richMessage: { html: '<h2>Routine</h2>' },
         target: '123',
       },
@@ -1044,8 +1068,69 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation.mock.calls[1]?.[0]).toContain('/sendMessage')
     expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
       chat_id: '123',
-      text: 'Readable fallback routine',
+      text: LONG_ROUTINE_CARD_TEXT,
     })
+    expect(LONG_ROUTINE_CARD_TEXT.length).toBeGreaterThan(3_000)
+    expect(LONG_ROUTINE_CARD_TEXT.length).toBeLessThanOrEqual(4_096)
+  })
+
+  it('keeps a failed definitive-rejection fallback terminal and single-attempt', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'Bad Request: rich messages are not supported',
+        error_code: 400,
+        ok: false,
+      }),
+      createTelegramResponse(500, {
+        description: 'fallback unavailable',
+        error_code: 500,
+        ok: false,
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: LONG_ROUTINE_CARD_TEXT,
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects a multi-message rich fallback before provider entry', async () => {
+    const fetchImplementation = vi.fn()
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'x'.repeat(4_097),
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_RICH_FALLBACK_TOO_LONG',
+      deliveryMayHaveSucceeded: false,
+    })
+
+    expect(fetchImplementation).not.toHaveBeenCalled()
   })
 
   it('does not send a text fallback when rich-message acceptance is ambiguous', async () => {

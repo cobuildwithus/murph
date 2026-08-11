@@ -16,6 +16,7 @@ import {
   dailyNutritionResponseCardV2AuthoringSchema,
   dailyNutritionResponseCardV2Schema,
   exerciseRoutineResponseCardV1Schema,
+  renderExerciseRoutineResponseCardTextV1,
   nutritionCardGoalStatusLabels,
   nutritionCardGoalStatusValues,
   workoutSessionCardStateValues,
@@ -179,7 +180,7 @@ export function renderAssistantResponseCardText(
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, false)
     case 'exercise_routine':
-      return renderExerciseRoutineResponseCardText(parsed)
+      return renderExerciseRoutineResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -200,7 +201,7 @@ export function renderAssistantResponseCardTranscriptText(
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, true)
     case 'exercise_routine':
-      return renderExerciseRoutineResponseCardText(parsed)
+      return renderExerciseRoutineResponseCardTextV1(parsed)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
   }
@@ -767,28 +768,6 @@ function buildChallengeStandingsLinqLayout(
 
 function formatChallengePoints(points: number): string {
   return CHALLENGE_POINTS_NUMBER_FORMATTER.format(points)
-}
-
-function renderExerciseRoutineResponseCardText(
-  card: ExerciseRoutineResponseCardV1,
-): string {
-  const heading = card.subtitle === null
-    ? card.title
-    : `${card.title} — ${card.subtitle}`
-  const exercises = card.exercises.flatMap((exercise, index) => [
-    '',
-    `${index + 1}. ${exercise.name} — ${exercise.dose} (${formatRoutineDuration(exercise.estimatedSeconds)})`,
-    ...exercise.instructions.map((instruction) => `   • ${instruction}`),
-  ])
-  const footer = card.footer === null ? [] : ['', card.footer]
-  return [
-    heading,
-    `${card.intensity} · ${formatRoutineDuration(card.totalSeconds)}`,
-    ...exercises,
-    '',
-    `⚠️ ${card.safety}`,
-    ...footer,
-  ].join('\n')
 }
 
 function renderTelegramChallengeStandingsCardHtml(

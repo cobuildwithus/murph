@@ -1640,15 +1640,20 @@ member-directed request for the complete semantic text when the accepted card
 cannot render. No persisted card state, authenticated card API, cleanup owner,
 extension network read, or second queue exists.
 
-Exercise routine cards use the same singular outbox effect through a dedicated
-model tool so both model-facing schemas stay below the Codex compaction limit.
+Private Telegram exercise routine cards use the same singular outbox effect
+through a dedicated model tool so both model-facing schemas stay below the
+Codex compaction limit. Linq/iMessage does not expose that tool and keeps its
+existing catalog response-media path for visual movement guidance.
 The frozen V1 snapshot contains bounded localized labels, concrete cues, honest
 per-exercise and transition timing, and only catalog-backed public exercise
-image URLs with their alt text and provenance. The total duration must equal
-the sum of those parts. Telegram projects any response-card kind into one Bot
+image URLs with their alt text and provenance. Image provenance uses the
+returned catalog item ID plus the image's one-based position in the returned
+array, so it is stable and directly constructible from `exercise show`. The
+total duration must equal the sum of those parts. Telegram projects any response-card kind into one Bot
 API rich message. Routine cards use a table, collapsed exercise details, and a
 slideshow when catalog images exist. A definitive pre-acceptance rich-message
-rejection falls back to the deterministic card text. Timeout, transport, and
+rejection falls back to the deterministic card text, which must fit one 4,096-
+character Telegram message before rich provider entry. Timeout, transport, and
 retryable failures never start a second send because Telegram acceptance is
 then ambiguous. Linq keeps its existing native nutrition and compact-table
 cards; exercise routines use the deterministic text fallback there. The card

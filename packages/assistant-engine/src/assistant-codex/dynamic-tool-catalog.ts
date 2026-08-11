@@ -276,7 +276,7 @@ export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
   namespace: 'murph',
   name: 'attach_exercise_routine_card',
   description:
-    'Attach one private-direct exercise routine card only for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy image URL, alt, step, and exercise_catalog:<id>:<step> source exactly from those results; never invent media. Keep each instruction concrete and short. Set each estimatedSeconds honestly and make totalSeconds equal exercise time plus transitionSeconds. Do not claim a longer routine than the card contains. The runtime sends one Telegram rich message and provides deterministic text fallback on other channels. Do not repeat values in final send_message and do not combine this card with response media.',
+    'Attach one private-direct Telegram exercise routine card only for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Set each estimatedSeconds honestly and make totalSeconds equal exercise time plus transitionSeconds. Do not claim a longer routine than the card contains. The runtime sends one Telegram rich message. Do not repeat values in final send_message and do not combine this card with response media.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1430,6 +1430,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
+  exerciseRoutineResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
@@ -1463,7 +1464,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
-    [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
+    [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
+      a.exerciseRoutineResponseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],

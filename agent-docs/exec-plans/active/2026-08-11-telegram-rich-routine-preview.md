@@ -42,7 +42,11 @@ Updated: 2026-08-11
 3. [x] Build the standalone Telegram HTML preview set.
 4. [x] Verify desktop and phone rendering, then request visual approval.
 5. [x] After approval, implement production delivery and focused tests.
-6. [ ] Complete required review, CI, commit, and PR gates.
+6. [x] Route hosted rich delivery through the existing provider-entry owner and
+   remove the local rich retry loop.
+7. [x] Make fallback cardinality and catalog image provenance exact after the
+   preliminary specialist review.
+8. [ ] Complete the final ReviewGPT, CI, commit, and PR gates.
 
 ## Decisions
 
@@ -56,6 +60,12 @@ Updated: 2026-08-11
 - Omit inline buttons until Murph has an explicit callback workflow.
 - A definitive non-retryable 4xx can fall back to deterministic text. Ambiguous
   or retryable failure must not start a second provider request.
+- Every rich-card text fallback must fit one Telegram message before rich
+  provider entry.
+- Image provenance uses the returned exercise ID plus the image's one-based
+  position in the returned catalog array.
+- Offer the routine-card tool only on private Telegram. Linq/iMessage keeps the
+  existing catalog response-media path for visual movement guidance.
 
 ## Verification
 

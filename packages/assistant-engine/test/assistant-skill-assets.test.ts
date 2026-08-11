@@ -1469,7 +1469,7 @@ describe('assistant skill assets', () => {
       'If the user clearly demonstrates relevant training fluency and every movement being taught is common or already familiar, omit exercise images unless the user asks for them.',
     )
     expect(compactCatalog).toContain(
-      'Use returned `images[]` with catalog URL, alt text, and source `exercise_catalog:<id>:<step>`.',
+      'Construct source as `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`.',
     )
     expect(compactCatalog).toContain('"no catalog image yet"')
     expect(catalog).toContain(

@@ -68,7 +68,7 @@ const ROUTINE_CARD: AssistantResponseCard = {
     estimatedSeconds: 45,
     images: [{
       alt: 'Person with a forearm resting on a door frame.',
-      source: 'exercise_catalog:doorway-stretch:setup',
+      source: 'exercise_catalog:ST170:1',
       step: 'Setup',
       url: 'https://cdn.example.test/doorway-stretch.png',
     }],
