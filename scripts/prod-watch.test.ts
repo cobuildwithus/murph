@@ -2705,6 +2705,7 @@ describe("production-watch static safety contracts", () => {
     expect(template).toContain("__REPO_HOME_RELATIVE__");
     expect(template).toContain("__NODE_EXECUTABLE__");
     expect(template).toContain("__SCHEDULER_PATH__");
+    expect(template).toContain("<string>-f</string>\n    <string>-c</string>");
     expect(template).toContain("<string>-c</string>");
     expect(template).not.toContain("<string>-lc</string>");
     expect(template).not.toContain("exec pnpm");
@@ -2751,10 +2752,16 @@ describe("production-watch static safety contracts", () => {
       const checkoutRoot = path.join(schedulerHome, "project");
       const runtimeRoot = path.join(schedulerHome, "runtime");
       const plistPath = path.join(testRoot, "scheduler.plist");
+      const startupMarkerPath = path.join(schedulerHome, "startup-marker");
       const helperRoot = path.join(schedulerHome, ".local", "bin");
       mkdirSync(path.join(checkoutRoot, "scripts", "prod-watch"), { recursive: true });
       mkdirSync(path.join(checkoutRoot, "node_modules"), { recursive: true });
       mkdirSync(helperRoot, { recursive: true });
+      writeFileSync(
+        path.join(schedulerHome, ".zshenv"),
+        "printf 'sourced\\n' > \"$HOME/startup-marker\"\n",
+        { mode: 0o600 },
+      );
       for (const relativePath of [
         "package.json",
         "tsconfig.base.json",
@@ -2835,7 +2842,7 @@ describe("production-watch static safety contracts", () => {
         .resolves.toBeUndefined();
       const commandResult = spawnSync(
         "/usr/libexec/PlistBuddy",
-        ["-c", "Print :ProgramArguments:2", plistPath],
+        ["-c", "Print :ProgramArguments:3", plistPath],
         { encoding: "utf8" },
       );
       expect(commandResult.status).toBe(0);
@@ -2845,7 +2852,7 @@ describe("production-watch static safety contracts", () => {
           "unset NODE_ENV NODE_OPTIONS MURPH_PROD_WATCH_TEST_RUNTIME_ROOT TEST_PROVIDER_FIXTURE TEST_NODE_MODULES_SOURCE TEST_DIAGNOSIS_FIXTURE TEST_CODEX_EXTRA_MCP; ",
           "",
         );
-      const run = spawnSync("/bin/zsh", ["-c", testCommand], {
+      const run = spawnSync("/bin/zsh", ["-f", "-c", testCommand], {
         cwd: path.parse(checkoutRoot).root,
         encoding: "utf8",
         env: {
@@ -2877,6 +2884,7 @@ describe("production-watch static safety contracts", () => {
       });
       expect(snapshot.collectorFailures.some((failure) => failure.code === "helper_not_found"))
         .toBe(false);
+      expect(existsSync(startupMarkerPath)).toBe(false);
     },
   );
 
