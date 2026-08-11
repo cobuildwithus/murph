@@ -320,6 +320,12 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("lighter-accessible-homepage")).toMatchObject({
+      sourcePullRequests: [1573],
+      summary: expect.stringContaining("compact avatar images"),
+      details: expect.stringContaining("keeps keyboard focus"),
+      tryIt: { href: "/", label: "Visit the homepage" },
+    });
     expect(items.get("referral-notification-route-recovery")).toMatchObject({
       sourcePullRequests: [1592],
       summary: expect.stringContaining("intended direct conversation"),
@@ -343,6 +349,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("environment-report-loading-preview")).toMatchObject({
+      sourcePullRequests: [1617],
+      summary: expect.stringContaining("report-shaped preview"),
+      tryIt: {
+        href: "/environment/print",
+        label: "Open your Environment report",
+      },
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -363,6 +377,12 @@ describe("changelog registry", () => {
         "The group never reads Family status or creates billing and invite links",
       ),
     });
+    expect(items.get("private-group-follow-up")).toMatchObject({
+      sourcePullRequests: [1481],
+      summary: expect.stringContaining("only to your verified direct chat"),
+      details: expect.stringContaining("before personal work begins"),
+    });
+    expect(items.get("private-group-follow-up")?.tryIt).toBeUndefined();
     expect(items.get("clearer-health-source-handoffs")).toMatchObject({
       sourcePullRequests: [1432, 1447, 1506],
       details: expect.stringContaining("snapshots rather than live sync"),
@@ -552,6 +572,8 @@ describe("changelog registry", () => {
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",
+          "lighter-accessible-homepage",
+          "environment-report-loading-preview",
         ],
       },
       {
@@ -563,6 +585,7 @@ describe("changelog registry", () => {
           "generated-contact-card-avatar",
           "family-setup-from-group",
           "live-workout-logging",
+          "private-group-follow-up",
           "clearer-health-source-handoffs",
           "body-composition-guidance",
           "group-replies-respect-the-room",

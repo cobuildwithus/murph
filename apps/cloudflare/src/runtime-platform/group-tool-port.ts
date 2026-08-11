@@ -61,7 +61,7 @@ export function createHostedRuntimeGroupToolPort(input: {
         description: "Hosted group tool",
         fetchImpl: input.fetchImpl,
         path: buildHostedRuntimeGroupToolPath(),
-        replayOnceOnRetryableFailure: isHostedAssistantAskGroupToolRequest(request),
+        replayOnceOnRetryableFailure: isHostedReplaySafeGroupToolRequest(request),
         ...(isParticipantDisplayNameRead
           ? {
               sensitiveResponseBody: {
@@ -84,13 +84,14 @@ export function createHostedRuntimeGroupToolPort(input: {
   };
 }
 
-function isHostedAssistantAskGroupToolRequest(
+function isHostedReplaySafeGroupToolRequest(
   request: Parameters<
     NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]
   >[0],
 ): boolean {
   return request.action === "ask"
     || request.action === "ask_current_sender"
+    || request.action === "message_current_sender"
     || request.action === "ask_member";
 }
 

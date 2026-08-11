@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
+      "Starter access, patterns, reliable referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations stay with their intended conversation, reminders keep the local time you asked for, completed workout rows stay clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, referral celebrations stay in the intended conversation, reminders keep local time, workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, the homepage starts lighter, and private Environment reports show their shape while loading.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -189,6 +189,38 @@ const RAW_CHANGELOG_EDITIONS = [
         relevanceTags: ["workouts", "imessage", "cards", "reliability"],
         sourcePullRequests: [1599],
       },
+      {
+        id: "lighter-accessible-homepage",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage starts lighter",
+        summary:
+          "The public homepage now uses compact avatar images while continuing to prepare secure sign-in automatically in the background.",
+        details:
+          "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
+        relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],
+        sourcePullRequests: [1573],
+        tryIt: {
+          href: "/",
+          label: "Visit the homepage",
+        },
+      },
+      {
+        id: "environment-report-loading-preview",
+        kind: "improvement",
+        priority: 3,
+        title: "Environment reports show their shape while loading",
+        summary:
+          "The private Environment report now opens with a clear preparing state and a report-shaped preview instead of a mostly empty page.",
+        details:
+          "The preview mirrors the printable report and gives immediate feedback while the existing private Browser Vault opens. The finished report, empty state, and error recovery continue unchanged.",
+        relevanceTags: ["environment", "reports", "web", "privacy"],
+        sourcePullRequests: [1617],
+        tryIt: {
+          href: "/environment/print",
+          label: "Open your Environment report",
+        },
+      },
     ],
   },
   {
@@ -196,7 +228,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-08-09",
     title: "Referrals, Max, and a more capable Murph",
     summary:
-      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
+      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, private group follow-ups, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
       {
         id: "group-sleep-challenges-use-fresh-data",
@@ -288,6 +320,18 @@ const RAW_CHANGELOG_EDITIONS = [
           prompt:
             "Start a live workout called Upper Body and help me log each set as I go.",
         },
+      },
+      {
+        id: "private-group-follow-up",
+        kind: "feature",
+        priority: 4,
+        title: "Continue a group question privately",
+        summary:
+          "Ask Murph in a group to continue with you privately, and your personal Murph can send the answer only to your verified direct chat on the same channel.",
+        details:
+          "Murph uses the exact group message author and checks the direct chat before personal work begins. If no eligible direct chat is available, Murph asks you to open one on that channel and retry.",
+        relevanceTags: ["groups", "messaging", "privacy", "assistant"],
+        sourcePullRequests: [1481],
       },
       {
         id: "clearer-health-source-handoffs",
