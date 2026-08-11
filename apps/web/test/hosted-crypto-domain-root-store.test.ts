@@ -879,9 +879,9 @@ test("hosted web private-field encryption uses already-provisioned control roots
   assert.equal(tx.persistedEnvelopes.length, 1);
 });
 
-test("member email batches use one envelope query with bounded KMS unwraps", async () => {
+test("K=32 private-field batches use one envelope query with at most four concurrent KMS unwraps", async () => {
   const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
-  const memberIds = Array.from({ length: 6 }, (_, index) => `member-batch-${index + 1}`);
+  const memberIds = Array.from({ length: 32 }, (_, index) => `member-batch-${index + 1}`);
   const records = await createBatchPrivateFieldRecords({ memberIds, tx });
   const envelopeFindMany = createBatchEnvelopeFindMany(tx);
   const emailFindMany = vi.fn().mockResolvedValue(records.emailRecords);

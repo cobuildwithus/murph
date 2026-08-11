@@ -230,6 +230,26 @@ export async function buildHostedMemberRoutingPrivateColumns(input: {
   } as const;
 }
 
+export async function readHostedMemberRoutingHomeLinqRecipientPhones(
+  routings: ReadonlyArray<
+    Pick<HostedMemberRouting, "linqRecipientPhoneEncrypted" | "memberId">
+  >,
+  prisma?: HostedWebEncryptionPrismaClient,
+  retainFailureInScopedCache?: boolean,
+): Promise<Array<string | null>> {
+  return decryptHostedWebNullableFields({
+    entries: routings.map((routing) => ({
+      field: HOSTED_MEMBER_ROUTING_HOME_LINQ_RECIPIENT_PHONE_FIELD,
+      memberId: routing.memberId,
+      value: routing.linqRecipientPhoneEncrypted,
+    })),
+    prisma,
+    ...(retainFailureInScopedCache === undefined
+      ? {}
+      : { retainFailureInScopedCache }),
+  });
+}
+
 export async function readHostedMemberRoutingPrivateState(
   routing: Pick<
     HostedMemberRouting,

@@ -10,6 +10,7 @@ import {
   assertHostedLinqAssignableHomeLinePoolReady,
   claimHostedLinqProactiveConversationCapacityTx,
   hasActiveHostedLinqManagedLine,
+  readActiveHostedLinqManagedLineLookupKeys,
   HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT,
   listHostedLinqAssignableHomeLines,
   listHostedLinqContactCardLines,
@@ -129,23 +130,44 @@ describe("listHostedLinqContactCardLines", () => {
 
 describe("hasActiveHostedLinqManagedLine", () => {
   it("recognizes configured inbound lines independently of outbound health", async () => {
-    const findFirst = vi.fn().mockResolvedValue({
+    const findMany = vi.fn().mockResolvedValue([{
       phoneNumberLookupKey: "lookup:line",
-    });
+    }]);
 
     await expect(hasActiveHostedLinqManagedLine({
       phoneNumberLookupKeys: ["lookup:line"],
       prisma: {
-        hostedLinqLine: { findFirst },
+        hostedLinqLine: { findMany },
       } as never,
     })).resolves.toBe(true);
 
-    expect(findFirst).toHaveBeenCalledWith({
+    expect(findMany).toHaveBeenCalledWith({
       select: { phoneNumberLookupKey: true },
       where: {
         configuredAt: { not: null },
         phoneNumberEncrypted: { not: null },
         phoneNumberLookupKey: { in: ["lookup:line"] },
+      },
+    });
+  });
+
+  it("returns every active managed line from one set read", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      { phoneNumberLookupKey: "lookup:a" },
+      { phoneNumberLookupKey: "lookup:b" },
+    ]);
+
+    await expect(readActiveHostedLinqManagedLineLookupKeys({
+      phoneNumberLookupKeys: ["lookup:b", "lookup:a", "lookup:b"],
+      prisma: { hostedLinqLine: { findMany } } as never,
+    })).resolves.toEqual(new Set(["lookup:a", "lookup:b"]));
+
+    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+      select: { phoneNumberLookupKey: true },
+      where: {
+        configuredAt: { not: null },
+        phoneNumberEncrypted: { not: null },
+        phoneNumberLookupKey: { in: ["lookup:b", "lookup:a"] },
       },
     });
   });

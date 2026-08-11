@@ -18,6 +18,7 @@ import { normalizeNullableString } from "../primitives";
 import {
   claimHostedPendingGroupSetupForParticipantsTx,
   consumeHostedPendingGroupSetupClaimTx,
+  type HostedPreparedPendingGroupSetupPackage,
   type HostedPendingGroupSetupClaimReason,
   type HostedPendingGroupSetupClaimResult,
 } from "./pending-group-setup";
@@ -59,8 +60,11 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   mailboxDedupeKey: string;
   occurredAt: Date;
   participantMemberIds: readonly string[];
+  preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedCreation?: PreparedHostedThreadContainerCreation;
   preparedDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+  recoveredRecipientPhoneLookupKey: string;
+  incomingRecipientPhoneLookupKeys: readonly string[];
   recipientPhoneLookupKeys: readonly string[];
   requiredPendingSetupCandidateId?: string | null;
   senderMemberId?: string | null;
@@ -68,11 +72,16 @@ export async function ensureHostedPreparedLinqThreadContainerRouteTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<HostedPreparedLinqThreadContainerResult> {
   const pendingSetupClaim = await claimHostedPendingGroupSetupForParticipantsTx({
+    incomingRecipientPhoneLookupKeys: input.incomingRecipientPhoneLookupKeys,
     occurredAt: input.occurredAt,
     participantMemberIds: input.participantMemberIds,
+    prepared: input.preparedPendingGroupSetup,
     recipientPhoneLookupKeys: input.recipientPhoneLookupKeys,
+    recoveredRecipientPhoneLookupKey:
+      input.recoveredRecipientPhoneLookupKey,
     requiredCandidateId: input.requiredPendingSetupCandidateId,
     senderMemberId: input.senderMemberId,
+    threadId: input.threadId,
     tx: input.tx,
   });
   const requiredPendingSetupCandidateId = normalizeNullableString(

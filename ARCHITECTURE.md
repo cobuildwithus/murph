@@ -1780,9 +1780,14 @@ KMS. Thread-container creation therefore does not use the legacy all-domain
 provisioning bridge or perform domain-root provisioning, delivery-route sealing,
 or activation-mailbox root unwraps while holding its route transaction.
 Transaction-owned authority reads remain inside that boundary and may reuse
-request-scoped root prewarms when available. In particular, opening a
-pending-group setup transfer payload remains a pre-existing transaction-owned
-authority read; it is not thread-container crypto preparation.
+request-scoped preparation when available. Pending-group setup opening is not an
+exception: the request prepares one ephemeral bounded authority package before
+`BEGIN`, batch-decrypts only candidate home-line phones, prewarms only the exact
+selected setup payload root, drains all started crypto work, and
+retains request-scoped failures. After locking and revalidating that row, the
+transaction authenticates and opens its payload with local AES from the scoped
+root cache. No provider or KMS call occurs while the route transaction or
+selected setup-row lock is active.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The
@@ -1791,11 +1796,21 @@ timestamps, and one encrypted strict-version payload containing optional sparse
 existing assistant-style fields and bounded explicit room-context Markdown. It
 stores no plaintext setup, chat id, roster, provider actor, message, contact
 label, or participant handle. Before the transaction for the first inbound on
-an unbound Linq group, Web performs one bounded current-chat read and resolves
-at most 32 active non-Murph roster handles to member ids. Inside the existing
-route transaction, a lone roster-matched intent wins; if several match, only
+an unbound Linq group, Web performs one bounded current-chat read, resolves at
+most 32 active non-Murph roster handles to member ids, and prepares pending
+setup authority with one candidate projection, canonical set-based runtime
+access, one active-managed-line set, one narrow home-phone routing projection,
+and one recovery-intent set covering the five bounded attempt ids per
+candidate. Root metadata stays set-based and external unwrap concurrency stays
+at four. Inside the existing route transaction, Web repeats the complete live
+candidate set and sender precedence, locks the exact winner, then revalidates
+the same set, current access and consent, incoming and original managed lines,
+routing and setup ciphertext/root fingerprints, and exact replacement-line
+recovery authority. A lone roster-matched intent wins; if several match, only
 the current sender's own intent breaks the tie. Otherwise the canonical
 first-active-sender fallback continues when the provider roster read completed.
+A changed selection or required fingerprint fails closed through the existing
+single typed fresh-preparation retry before route creation.
 An unavailable roster leaves recovery-backed ownership indeterminate and
 returns a typed retry before route creation; a completed empty or oversized
 roster cannot match another member's setup but may retain the active-sender

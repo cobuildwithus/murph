@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 ## Current Guardrails
 
@@ -513,10 +513,16 @@ Last verified: 2026-08-10
   and future timestamps are clamped to server time before the canonical
   container decision is re-read.
 - New Linq-group ownership preparation adds one bounded, non-retried provider
-  roster read before the unbound-group transaction. Provider timeout or failure
-  leaves recovery-backed ownership indeterminate and must return the existing
-  typed retry before route creation. A completed empty, oversized, or non-group
-  result cannot select another member's setup; no eligible intent or unresolved
+  roster read before the unbound-group transaction. The provider-proven roster
+  admits at most 32 members. One request-local package then prepares candidate,
+  canonical access, managed-line, narrow home-phone, recovery-intent, and exact
+  selected-payload-root facts before `BEGIN`; it retains the observed failure,
+  uses set-based root metadata with at most
+  four external unwraps in flight, and performs no provider or KMS work while a
+  transaction or setup-row lock is active. Provider timeout or failure leaves
+  recovery-backed ownership indeterminate and must return the existing typed
+  retry before route creation. A completed empty, oversized, or non-group result
+  cannot select another member's setup; no eligible intent or unresolved
   ambiguity otherwise preserves the existing active-sender decision. After the
   request-local existing-route and roster preflight, explicit suspension or
   health-data-consent withdrawal prevents route creation and setup outreach.
@@ -526,9 +532,14 @@ Last verified: 2026-08-10
   boundary returns no route. When first-contact admission enforcement is
   enabled, an unknown sender must pass that gate before setup outreach. The
   one-use setup claim and route creation share one transaction. Claim
-  eligibility requires
-  the setup to cover the provider event time and to remain unexpired at
-  processing time, so a delayed pre-arm event cannot spend a newer intent. The
+  eligibility requires the complete live candidate set and sender precedence to
+  match preparation before and after locking the exact winner; current access
+  and consent, both managed lines, routing and setup ciphertext/root
+  fingerprints, and exact replacement-line recovery authority are revalidated.
+  A changed required fact may spend only the existing single typed fresh-
+  preparation retry. The setup must cover the provider event time and remain
+  unexpired at processing and lock time, so a delayed pre-arm event cannot spend
+  a newer intent. Final ownership remains with the canonical route owner. The
   selected setup row stays locked until route admission finishes and is deleted
   only when that transaction creates the route; rollback and convergence leave
   it unchanged without a compensation lifecycle. A concurrent loser re-reads

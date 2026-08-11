@@ -38,9 +38,9 @@ import {
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
+  prepareHostedLinqThreadContainerAdmission,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
-  shouldPrepareHostedLinqThreadContainerCrypto,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -153,6 +153,7 @@ import {
 } from "../hosted-groups/participant-member";
 import {
   HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
+  type HostedPreparedPendingGroupSetupPackage,
 } from "../hosted-groups/pending-group-setup";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
@@ -551,6 +552,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 planningResolution.pendingGroupParticipantMemberIds ?? null,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
+              ...(preparation.preparedPendingGroupSetup
+                ? {
+                    preparedPendingGroupSetup:
+                      preparation.preparedPendingGroupSetup,
+                  }
+                : {}),
               ...(preparation.preparedThreadContainerCreation
                 ? {
                     preparedThreadContainerCreation:
@@ -1909,6 +1916,7 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
 }
 
 interface HostedThreadRoutingCryptoPreparation {
+  preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
@@ -1997,18 +2005,21 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   }
 
   if (context.messageEvent.data.chat?.is_group === true) {
-    if (!await shouldPrepareHostedLinqThreadContainerCrypto({
+    const admission = await prepareHostedLinqThreadContainerAdmission({
       event: input.event,
       participantMemberIds: input.participantMemberIds,
       pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
       prisma: input.prisma,
-    })) {
-      return {};
-    }
-    if (!accountLookupKey) {
-      return {};
+    });
+    if (!admission.shouldPrepareThreadContainer || !accountLookupKey) {
+      return admission.preparedPendingGroupSetup
+        ? { preparedPendingGroupSetup: admission.preparedPendingGroupSetup }
+        : {};
     }
     return {
+      ...(admission.preparedPendingGroupSetup
+        ? { preparedPendingGroupSetup: admission.preparedPendingGroupSetup }
+        : {}),
       preparedThreadContainerCreation:
         await prepareHostedThreadContainerCreation({
           accountLookupKey,
@@ -2112,6 +2123,7 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
 }
 
 const HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES = new Set([
+  "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
   "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
   "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
 ]);

@@ -150,7 +150,15 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
         threadRoute: { containerMemberId: string } | null;
       }) => threadRoute?.containerMemberId ?? "member_direct_prewarm",
     ),
-    shouldPrepareHostedLinqThreadContainerCrypto: vi.fn(async () => true),
+    ...(() => {
+      const shouldPrepare = vi.fn(async () => true);
+      return {
+        prepareHostedLinqThreadContainerAdmission: vi.fn(async () => ({
+          shouldPrepareThreadContainer: await shouldPrepare(),
+        })),
+        shouldPrepareHostedLinqThreadContainerCrypto: shouldPrepare,
+      };
+    })(),
   };
 });
 
@@ -654,58 +662,74 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       );
     });
 
-    it("re-prepares outside a fresh transaction after a late route winner", async () => {
-      const { hostedOnboardingError } = await import(
-        "@/src/lib/hosted-onboarding/errors"
-      );
-      const { planHostedOnboardingLinqWebhook } = await import(
-        "@/src/lib/hosted-onboarding/webhook-provider-linq"
-      );
-      const prisma = buildPrewarmPrisma();
-      vi.mocked(planHostedOnboardingLinqWebhook)
-        .mockImplementationOnce(async () => {
-          calls.push("plan-conflict");
-          throw hostedOnboardingError({
-            code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
-            httpStatus: 503,
-            message: "Fresh route preparation required.",
-            retryable: true,
+    it.each([
+      {
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
+        description: "a late route winner",
+      },
+      {
+        code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+        description: "changed pending-setup authority",
+      },
+    ] as const)(
+      "re-prepares outside exactly one fresh transaction after $description",
+      async ({ code }) => {
+        const { hostedOnboardingError } = await import(
+          "@/src/lib/hosted-onboarding/errors"
+        );
+        const { planHostedOnboardingLinqWebhook } = await import(
+          "@/src/lib/hosted-onboarding/webhook-provider-linq"
+        );
+        const prisma = buildPrewarmPrisma();
+        vi.mocked(planHostedOnboardingLinqWebhook)
+          .mockImplementationOnce(async () => {
+            calls.push("plan-conflict");
+            throw hostedOnboardingError({
+              code,
+              httpStatus: 503,
+              message: "Fresh thread-routing preparation required.",
+              retryable: true,
+            });
+          })
+          .mockImplementationOnce(async () => {
+            calls.push("plan");
+            return {
+              desiredSideEffects: [],
+              response: { ok: true, reason: "prepared-retry-plan" },
+            };
           });
-        })
-        .mockImplementationOnce(async () => {
-          calls.push("plan");
-          return {
-            desiredSideEffects: [],
-            response: { ok: true, reason: "prepared-retry-plan" },
-          };
+
+        const response = await handleHostedOnboardingLinqWebhook({
+          prisma: prisma as never,
+          rawBody: buildLinqMessageWebhookBody(),
+          signature: null,
+          timestamp: null,
         });
 
-      const response = await handleHostedOnboardingLinqWebhook({
-        prisma: prisma as never,
-        rawBody: buildLinqMessageWebhookBody(),
-        signature: null,
-        timestamp: null,
-      });
-
-      expect(response).toMatchObject({ ok: true, reason: "prepared-retry-plan" });
-      expect(calls).toEqual([
-        "read-route",
-        "prepare-route",
-        "unwrap",
-        "begin",
-        "plan-conflict",
-        "read-route",
-        "prepare-route",
-        "unwrap",
-        "begin",
-        "plan",
-        "commit",
-      ]);
-      expect(rootKeysAtTransactionOpen).toEqual([
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-      ]);
-    });
+        expect(response).toMatchObject({
+          ok: true,
+          reason: "prepared-retry-plan",
+        });
+        expect(calls).toEqual([
+          "read-route",
+          "prepare-route",
+          "unwrap",
+          "begin",
+          "plan-conflict",
+          "read-route",
+          "prepare-route",
+          "unwrap",
+          "begin",
+          "plan",
+          "commit",
+        ]);
+        expect(rootKeysAtTransactionOpen).toEqual([
+          [0, 0, 0, 0],
+          [0, 0, 0, 0],
+        ]);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      },
+    );
 
     it("does not retry a failed Linq crypto preparation as a route race", async () => {
       const { hostedOnboardingError } = await import(
