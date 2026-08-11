@@ -272,12 +272,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
     })).toBeNull();
   });
 
-  it("preserves unpublished local blood-pressure source coverage", () => {
+  it("preserves unpublished local sparse-timeseries source coverage", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: true,
       localMetadata: {
         junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        junctionNoteHistoryBackfillCoverage: "v1|oura",
       },
     });
 
@@ -285,6 +286,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       metadata: {
         hostedOnly: true,
         junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        junctionNoteHistoryBackfillCoverage: "v1|oura",
       },
       preservedLocalProgress: true,
     });

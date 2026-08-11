@@ -19,4 +19,5 @@ export const JUNCTION_DEFAULT_TIMESERIES_RESOURCES = Object.freeze([
   "afib_burden",
   "glucose",
   "blood_pressure",
+  "note",
 ] as const);
