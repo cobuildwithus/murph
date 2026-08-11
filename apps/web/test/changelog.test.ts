@@ -83,6 +83,23 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("custom inference");
   });
 
+  it("keeps the health-data Settings note bound to layout only", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "health-data-settings-row",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1615],
+      tryIt: {
+        href: "/settings#data-privacy",
+        label: "Review health data controls",
+      },
+    });
+    expect(item?.summary).toContain("aligned with the other Settings controls");
+    expect(item?.details).toContain("keep their existing destinations");
+  });
+
   it("keeps cleaner plan and model settings scoped to the visible outcome", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "cleaner-plan-and-model-settings",
@@ -97,6 +114,24 @@ describe("changelog registry", () => {
       title: "Cleaner plan and model settings",
     });
     expect(item?.details).toBeUndefined();
+    expect(item?.tryIt).toBeUndefined();
+  });
+
+  it("keeps iMessage card preview copy descriptive and value-free", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "descriptive-imessage-card-previews",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-11",
+      kind: "improvement",
+      priority: 1,
+      sourcePullRequests: [1631],
+      summary: expect.stringContaining("daily nutrition"),
+      title: "Clearer iMessage card previews",
+    });
+    expect(item?.details).toContain("free of card values");
+    expect(item?.details).toContain("ask Murph for the card in text");
     expect(item?.tryIt).toBeUndefined();
   });
 
@@ -338,11 +373,33 @@ describe("changelog registry", () => {
     );
   });
 
+  it("keeps transferred phone-call results uncertainty-aware", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "phone-call-results-return-to-chat",
+    );
+
+    expect(item).toMatchObject({
+      sourcePullRequests: [857, 1363],
+      details: expect.stringContaining(
+        "asks what happened instead of guessing the outcome",
+      ),
+    });
+  });
+
   it("keeps the August 7 through August 10 feature claims bounded", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
+    expect(items.get("generated-image-group-photo")).toMatchObject({
+      sourcePullRequests: [1533],
+      summary: expect.stringContaining("same image"),
+      details: expect.stringContaining("explicit group request"),
+    });
+    expect(items.get("generated-image-group-photo")?.details).toContain(
+      "visible in the conversation",
+    );
+    expect(items.get("generated-image-group-photo")?.tryIt).toBeUndefined();
     expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
       sourcePullRequests: [1546],
       summary: expect.stringContaining("preserves that local time"),
@@ -379,7 +436,7 @@ describe("changelog registry", () => {
       tryIt: { href: "/", label: "Visit the homepage" },
     });
     expect(items.get("referral-notification-route-recovery")).toMatchObject({
-      sourcePullRequests: [1592],
+      sourcePullRequests: [1592, 1622, 1648],
       summary: expect.stringContaining("intended direct conversation"),
       details: expect.stringContaining(
         "ends without sending so later notifications can continue",
@@ -409,6 +466,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("local-and-utc-activity-timing")).toMatchObject({
+      sourcePullRequests: [1626],
+      summary: expect.stringContaining("local clock beside the exact UTC instant"),
+      details: expect.stringContaining(
+        "without putting health values in operational logs",
+      ),
+    });
+    expect(items.get("local-and-utc-activity-timing")?.tryIt).toBeUndefined();
     expect(items.get("environment-report-loading-preview")).toMatchObject({
       sourcePullRequests: [1617],
       summary: expect.stringContaining("report-shaped preview"),

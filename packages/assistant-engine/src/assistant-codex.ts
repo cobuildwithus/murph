@@ -3156,6 +3156,7 @@ async function runCodexAppServerTurnOnProcess(
   let codexTimingTurnCompletedNotificationElapsedMs: number | null = null
   let currentTurnStartedNotificationObserved = false
   let liveInterruptRequested = false
+  let terminalNoReplyInterruptRequested = false
 
   let completeTurn: (() => void) | null = null
   let failTurn: ((error: unknown) => void) | null = null
@@ -3983,6 +3984,25 @@ async function runCodexAppServerTurnOnProcess(
     return true
   }
 
+  const applyGroupEmailTerminalNoReplyPatch = (
+    patch: Extract<MurphDynamicToolFinalActionPatch, { kind: 'none' }>,
+    deliveryContextOrdinal: number,
+  ): void => {
+    // A host-authorized group email has already crossed the durable external
+    // effect boundary. Its terminal disposition is not a model-requested
+    // finish_without_reply and must not depend on trace callback visibility.
+    finalActionPatches = [
+      ...finalActionPatches.filter(
+        (action) => action.deliveryContextOrdinal !== deliveryContextOrdinal,
+      ),
+      { deliveryContextOrdinal, patch },
+    ]
+    replyTargetPatches = replyTargetPatches.filter(
+      (entry) => entry.deliveryContextOrdinal !== deliveryContextOrdinal,
+    )
+    reservedNoReplyDeliveryContextOrdinals.delete(deliveryContextOrdinal)
+  }
+
   const resolveFinalActionPatch = (
     deliveryContextOrdinal: number,
   ): MurphDynamicToolFinalActionPatch | null =>
@@ -4296,6 +4316,7 @@ async function runCodexAppServerTurnOnProcess(
       closeLiveTurn()
     }
 
+    let dynamicToolRequestSettled = false
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => {
@@ -4411,6 +4432,24 @@ async function runCodexAppServerTurnOnProcess(
       ) {
         requiredVaultFileApprovalUrls.push(result.requiredVaultFileApprovalUrl)
       }
+      if (
+        result.finalActionPatch?.kind === 'none' &&
+        result.finalActionPatch.owner === 'group-email'
+      ) {
+        applyGroupEmailTerminalNoReplyPatch(
+          result.finalActionPatch,
+          dynamicToolRequestDeliveryContextOrdinal,
+        )
+        // Interrupt while the app-server is still waiting on this dynamic
+        // tool request. Returning the tool result first lets Codex start a
+        // follow-up provider request before the interrupt is processed, and
+        // an interrupt racing that continuation can leave the turn open.
+        // TurnAborted resolves the pending server request structurally, so a
+        // terminal external effect must not also write a tool response.
+        dynamicToolRequestSettled = true
+        await interruptLiveTurnForTerminalNoReply()
+        return
+      }
       if (result.responseCardPatch) {
         try {
           applyResponseCardPatch(
@@ -4510,13 +4549,21 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolDeliveryContextOrdinal ?? 0,
         )
       }
-      void tryWriteRpcMessage({
+      const writeFailure = tryWriteRpcMessage({
         id: requestId,
         result: result.rpcResult,
       })
+      if (writeFailure) {
+        return
+      }
+      dynamicToolRequestSettled = true
     }).catch((error: unknown) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
+      }
+      if (dynamicToolRequestSettled) {
+        rejectOnce(error)
+        return
       }
       pushRuntimeIssueInput(createDynamicToolRuntimeIssueInput({
         request: dynamicToolRequest,
@@ -4765,6 +4812,14 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const status = extractCodexTurnStatus(message)
+    if (
+      status === 'interrupted' &&
+      terminalNoReplyInterruptRequested
+    ) {
+      turnTerminal = true
+      completeTurn?.()
+      return
+    }
     if (isFailedCodexTurnStatus(status)) {
       turnTerminal = true
       failTurn?.(
@@ -5101,6 +5156,22 @@ async function runCodexAppServerTurnOnProcess(
     scheduleInterruptCleanupTimeout()
     await withCodexRpcTimeout(
       sendRequest('turn/interrupt', buildCodexTurnInterruptParams(liveTurn)),
+      CODEX_RPC_STEER_TIMEOUT_MS,
+      'turn/interrupt',
+    )
+  }
+
+  const interruptLiveTurnForTerminalNoReply = async (): Promise<void> => {
+    if (!codexThreadId || !turnId || turnTerminal) {
+      throw buildLiveTurnInactiveError()
+    }
+    terminalNoReplyInterruptRequested = true
+    scheduleInterruptCleanupTimeout()
+    await withCodexRpcTimeout(
+      sendRequest('turn/interrupt', buildCodexTurnInterruptParams({
+        threadId: codexThreadId,
+        turnId,
+      })),
       CODEX_RPC_STEER_TIMEOUT_MS,
       'turn/interrupt',
     )

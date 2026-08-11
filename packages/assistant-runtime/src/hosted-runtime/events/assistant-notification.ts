@@ -59,6 +59,14 @@ type HostedAssistantNotificationSystemMailboxPreparation =
       reason: "external_route_authority_stale";
     };
 
+export type HostedLegacyUsageReferralAuthorityClassification =
+  | "eligible"
+  | "identity_mismatch"
+  | "member_mismatch"
+  | "not_usage_referral"
+  | "policy_mismatch"
+  | "route_mismatch";
+
 /**
  * Recovers only the one authority-less usage-referral notification shape that
  * shipped before direct Linq route proof was carried into the mailbox wake.
@@ -972,6 +980,23 @@ function readLegacyHostedUsageReferralDirectLinqAuthority(input: {
   mailboxDedupeKey: string;
   wake: HostedExecutionAssistantNotificationRequestedWake;
 }): HostedExecutionExternalThreadRouteAuthority | null {
+  if (classifyLegacyHostedUsageReferralDirectLinqAuthority(input) !== "eligible") {
+    return null;
+  }
+
+  const delivery = input.wake.notification.route.delivery;
+  return {
+    channel: "linq",
+    containerMemberId: input.wake.userId,
+    threadId: delivery.target,
+  };
+}
+
+export function classifyLegacyHostedUsageReferralDirectLinqAuthority(input: {
+  executionContext: AssistantExecutionContext;
+  mailboxDedupeKey: string;
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+}): HostedLegacyUsageReferralAuthorityClassification {
   const { notification, userId } = input.wake;
   const route = notification.route;
   const delivery = route.delivery;
@@ -986,31 +1011,45 @@ function readLegacyHostedUsageReferralDirectLinqAuthority(input: {
     || notificationKey.length
       === HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX.length
     || notificationKey !== notificationKey.trim()
-    || input.mailboxDedupeKey
+  ) {
+    return "not_usage_referral";
+  }
+
+  if (
+    input.mailboxDedupeKey
       !== `${HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX}${notificationKey}`
     || input.wake.eventId !== input.mailboxDedupeKey
     || notification.deliveryIdempotencyKey !== notificationKey
-    || notification.deliveryDispatchMode !== "queue-only"
+  ) {
+    return "identity_mismatch";
+  }
+
+  if (
+    notification.deliveryDispatchMode !== "queue-only"
     || notification.externalThreadRouteAuthority != null
     || notification.firstContact != null
     || notification.notificationPromptProfile != null
     || notification.responsePolicy?.kind !== "require_send"
-    || input.executionContext.hosted?.memberId !== userId
-    || route.channel !== "linq"
+  ) {
+    return "policy_mismatch";
+  }
+
+  if (input.executionContext.hosted?.memberId !== userId) {
+    return "member_mismatch";
+  }
+
+  if (
+    route.channel !== "linq"
     || route.threadIsDirect !== true
     || delivery.kind !== "explicit"
     || delivery.source != null
     || target.length === 0
     || target !== delivery.target
   ) {
-    return null;
+    return "route_mismatch";
   }
 
-  return {
-    channel: "linq",
-    containerMemberId: userId,
-    threadId: target,
-  };
+  return "eligible";
 }
 
 function isHostedThreadRouteEgressUnauthorizedError(error: unknown): boolean {

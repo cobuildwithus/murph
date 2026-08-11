@@ -408,7 +408,7 @@ export function listHostedDeployEnvironmentInvariantErrors(
 
   if (hostedExecutionContainerRollout !== STATE_ISOLATION_CONTAINER_ROLLOUT) {
     errors.push(
-      `production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; rollback floor is the audience-key and selector-scope runner bundle.`,
+      `production state-isolation deploys must use HOSTED_EXECUTION_CONTAINER_ROLLOUT=${STATE_ISOLATION_CONTAINER_ROLLOUT}; rollback floor is the audience-key, selector-scope, and runner-schema-v16 media-effect bundle.`,
     );
   }
 

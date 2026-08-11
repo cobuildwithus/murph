@@ -10,6 +10,8 @@ import {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceSyncCredentialIndependentImportJob,
+  isHostedDeviceSyncEventToProviderSendBucket,
+  mergeHostedDeviceSyncEventToProviderSendBuckets,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
   type DeviceSyncCredentialIndependentImportJobClassifier,
   type HostedExecutionDeviceSyncStagedDirtyAck,
@@ -1831,9 +1833,10 @@ function mergeDirtyResourceInto(
   const key = buildDirtyResourceKey(normalized);
   const previous = merged[key] ?? null;
   merged[key] = withDirtyResourceWindowPayload(previous
-    ? {
+      ? {
         ...normalized,
         count: previous.count + normalized.count,
+        ...mergeDirtyResourceTiming(previous, normalized),
         windowStart: minIso(previous.windowStart, normalized.windowStart),
         windowEnd: maxIso(previous.windowEnd, normalized.windowEnd),
       }
@@ -1843,10 +1846,20 @@ function mergeDirtyResourceInto(
 function normalizeDirtyResource(
   resource: HostedDeviceSyncDirtyResource,
 ): HostedDeviceSyncDirtyResource {
+  const eventToProviderSendBucket = resource.eventToProviderSendBucket ?? null;
+  const firstWebhookReceivedAt = normalizeIso(resource.firstWebhookReceivedAt);
+  const providerSendToWebhookMs = normalizeDurationMs(resource.providerSendToWebhookMs);
   return {
     count: Math.max(1, Math.min(1_000_000, Math.trunc(resource.count))),
     ...(resource.dirtyPayloadId
       ? { dirtyPayloadId: truncateDirtyKey(normalizeNullableString(resource.dirtyPayloadId)) ?? resource.dirtyPayloadId }
+      : {}),
+    ...(eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
+      ? {
+          eventToProviderSendBucket,
+          firstWebhookReceivedAt,
+          providerSendToWebhookMs,
+        }
       : {}),
     jobKind: truncateDirtyKey(normalizeNullableString(resource.jobKind) ?? "reconcile") ?? "reconcile",
     payload: readDirtyResourcePayload(resource.payload),
@@ -1856,6 +1869,34 @@ function normalizeDirtyResource(
     windowEnd: normalizeIso(resource.windowEnd),
     windowStart: normalizeIso(resource.windowStart),
   };
+}
+
+function mergeDirtyResourceTiming(
+  previous: HostedDeviceSyncDirtyResource,
+  next: HostedDeviceSyncDirtyResource,
+): Pick<
+  HostedDeviceSyncDirtyResource,
+  "eventToProviderSendBucket" | "firstWebhookReceivedAt" | "providerSendToWebhookMs"
+> | Record<string, never> {
+  const eventToProviderSendBucket = mergeHostedDeviceSyncEventToProviderSendBuckets(
+    previous.eventToProviderSendBucket,
+    next.eventToProviderSendBucket,
+  );
+  const firstWebhookReceivedAt = minIso(
+    previous.firstWebhookReceivedAt,
+    next.firstWebhookReceivedAt,
+  );
+  const providerSendToWebhookMs = maxDurationMs(
+    previous.providerSendToWebhookMs,
+    next.providerSendToWebhookMs,
+  );
+  return eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
+    ? {
+        eventToProviderSendBucket,
+        firstWebhookReceivedAt,
+        providerSendToWebhookMs,
+      }
+    : {};
 }
 
 function buildDirtyResourceKey(resource: HostedDeviceSyncDirtyResource): string {
@@ -1929,6 +1970,15 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
     mergeDirtyResourceInto(next, {
       count: typeof record.count === "number" ? record.count : 1,
       ...(typeof record.dirtyPayloadId === "string" ? { dirtyPayloadId: record.dirtyPayloadId } : {}),
+      eventToProviderSendBucket: isHostedDeviceSyncEventToProviderSendBucket(
+        record.eventToProviderSendBucket,
+      )
+        ? record.eventToProviderSendBucket
+        : null,
+      firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
+        ? record.firstWebhookReceivedAt
+        : null,
+      providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
       jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
       payload: readDirtyResourcePayload(record.payload),
       resource: typeof record.resource === "string" ? record.resource : null,
@@ -1965,6 +2015,15 @@ async function readDirtyPayloadResourceJson(input: {
   mergeDirtyResourceInto(merged, {
     count: typeof record.count === "number" ? record.count : 1,
     dirtyPayloadId: input.row.id,
+    eventToProviderSendBucket: isHostedDeviceSyncEventToProviderSendBucket(
+      record.eventToProviderSendBucket,
+    )
+      ? record.eventToProviderSendBucket
+      : null,
+    firstWebhookReceivedAt: typeof record.firstWebhookReceivedAt === "string"
+      ? record.firstWebhookReceivedAt
+      : null,
+    providerSendToWebhookMs: normalizeDurationMs(record.providerSendToWebhookMs),
     jobKind: typeof record.jobKind === "string" ? record.jobKind : "reconcile",
     payload: readDirtyResourcePayload(record.payload),
     resource: typeof record.resource === "string" ? record.resource : null,
@@ -2068,6 +2127,14 @@ function normalizeIso(value: string | null | undefined): string | null {
   }
 }
 
+function normalizeDurationMs(value: unknown): number | null {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0
+    ? value
+    : null;
+}
+
 function resolveDirtyWindowStart(resources: Record<string, HostedDeviceSyncDirtyResource>): Date | null {
   const value = Object.values(resources).reduce<string | null>(
     (earliest, resource) => minIso(earliest, resource.windowStart),
@@ -2104,9 +2171,12 @@ function maxDate(left: Date | null, right: Date | null): Date | null {
   return left.getTime() >= right.getTime() ? left : right;
 }
 
-function minIso(left: string | null, right: string | null): string | null {
+function minIso(
+  left: string | null | undefined,
+  right: string | null | undefined,
+): string | null {
   if (!left) {
-    return right;
+    return right ?? null;
   }
   if (!right) {
     return left;
@@ -2122,6 +2192,21 @@ function maxIso(left: string | null, right: string | null): string | null {
     return left;
   }
   return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function maxDurationMs(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): number | null {
+  const normalizedLeft = normalizeDurationMs(left);
+  const normalizedRight = normalizeDurationMs(right);
+  if (normalizedLeft === null) {
+    return normalizedRight;
+  }
+  if (normalizedRight === null) {
+    return normalizedLeft;
+  }
+  return Math.max(normalizedLeft, normalizedRight);
 }
 
 function truncateDirtyKey(value: string | null): string | null {

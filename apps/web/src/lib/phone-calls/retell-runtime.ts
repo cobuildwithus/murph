@@ -17,6 +17,11 @@ import type {
 import { readRetellTerminalProviderUsage } from "./usage";
 import { markPhoneCallRuntimeNoActiveEffect } from "./types";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import {
+  hasRetellBasicAttributesOnlyStorage,
+  readRetellTransferEndAt,
+  type RetellCallPayload,
+} from "./retell-payloads";
 
 const RETELL_API_BASE_URL = "https://api.retellai.com";
 const RETELL_START_TIMEOUT_MS = 15_000;
@@ -158,10 +163,13 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
       return { state: "pending" };
     }
 
-    return readRetellTerminalProviderUsage({
+    const terminalCall: RetellCallPayload = {
       call_id: call.call_id,
       ...(call.call_cost
         ? { call_cost: { combined_cost: call.call_cost.combined_cost } }
+        : {}),
+      ...(call.data_storage_setting
+        ? { data_storage_setting: call.data_storage_setting }
         : {}),
       ...(call.disconnection_reason
         ? { disconnection_reason: call.disconnection_reason }
@@ -171,7 +179,32 @@ class RetellPhoneCallRuntime implements PhoneCallRuntime, RetellPhoneCallAccount
       ...(call.transfer_end_timestamp === undefined
         ? {}
         : { transfer_end_timestamp: call.transfer_end_timestamp }),
-    });
+    };
+    const resolution = readRetellTerminalProviderUsage(terminalCall);
+    if (resolution.state === "pending") {
+      return resolution;
+    }
+
+    const transferEndedAt = readRetellTransferEndAt(terminalCall);
+    if (
+      terminalCall.disconnection_reason?.trim().toLowerCase() !== "call_transfer"
+      || !transferEndedAt
+    ) {
+      return resolution;
+    }
+    if (!hasRetellBasicAttributesOnlyStorage(terminalCall)) {
+      throw new TypeError(
+        "Retell terminal transfer must use basic_attributes_only storage.",
+      );
+    }
+
+    return {
+      ...resolution,
+      terminalTransfer: {
+        endedAt: transferEndedAt,
+        providerCallId: resolution.usage.providerCallId,
+      },
+    };
   }
 
   async deleteProviderCall(

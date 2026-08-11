@@ -199,6 +199,30 @@ test("browser vault loader opts in to stale replicas explicitly", async () => {
   assert.deepEqual(body.knownReplicaRef, createReplicaRef());
 });
 
+test("browser vault loader can request runtime-owned projection refresh", async () => {
+  const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: createReplicaRef(),
+    refreshPending: true,
+    state: "not_modified",
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  }));
+
+  await loadBrowserVaultReplica({
+    fetchImpl,
+    knownReplicaRef: createReplicaRef(),
+    requestRefresh: true,
+  });
+
+  const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
+  assert.equal(body.requestRefresh, true);
+});
+
 test("browser vault loader can surface unauthorized responses for privacy export", async () => {
   await assert.rejects(
     loadBrowserVaultReplica({

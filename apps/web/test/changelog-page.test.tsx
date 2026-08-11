@@ -226,8 +226,8 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Terra keeps lone first photos at original detail");
     expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).not.toContain("Ask Murph to search");
-    expect(markup).toContain("A week that closes its own loops");
-    expect(markup).toContain("Follow-ups arrive where the work started");
+    expect(markup).toContain("A week of follow-through");
+    expect(markup).toContain("Generated images can become group photos");
     expect(markup).toContain("Confirmed appointments come with a reminder");
     expect(markup).toContain("Tell Murph about an appointment");
     expect(markup).toContain("Confirmed appointment");
@@ -236,13 +236,12 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Corrections stay attached to the conversation");
     expect(markup).toContain("Compact tables make dense changes scannable");
     expect(markup).toContain("Reference context stays visible");
-    expect(markup).toContain("Scheduled follow-up");
     expect(markup).toContain("Stay in the app");
     expect(markup).toContain("Verified line after setup");
     expect(markup).toContain("Private conversation");
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
-    expect(markup).toContain('href="#design-follow-up"');
+    expect(markup).toContain('href="#design-generated-group-photo"');
     expect(markup).toContain('href="#appointment-reminders-by-default"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");

@@ -332,10 +332,15 @@ function buildHostedAssistantNewsletterSaveResponses(input: {
 }): readonly HostedLocalAssistantProviderScriptedResponse[] {
   return [
     buildAssistantProviderMurphToolCall("automation", {
-      action: "save_newsletter",
-      delivery: "current_chat",
-      healthScopes: ["steps-days.v0"],
-      newsletterName: groupNewsletterName,
+      action: "save",
+      continuityPolicy: "fresh",
+      instructions: [
+        "Read the group-newsletter skill before every execution.",
+        "Delivery: current_chat",
+        "Health scopes: steps-days.v0",
+        `Newsletter name: ${groupNewsletterName}`,
+        "Tone: supportive",
+      ].join("\n"),
       schedule: {
         expression: buildDailyCronExpressionInTimeZone({
           at: input.dueAtIso,
@@ -343,7 +348,9 @@ function buildHostedAssistantNewsletterSaveResponses(input: {
         }),
         kind: "cron",
       },
-      tone: "supportive",
+      slug: "group-health-newsletter",
+      summary: "Share the group's scheduled health newsletter.",
+      title: groupNewsletterName,
     }),
     input.text,
   ];
