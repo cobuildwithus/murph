@@ -108,3 +108,9 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   owner, and prove with both capabilities present that rejection recovery makes
   no feedback call or candidate. This contracts runtime scope and adds no
   replacement state or mechanism.
+- Round 4 showed that global feedback guidance could still infer eligibility
+  from the Murph-owned recovery wording. Add one narrow skill rule that a
+  rejection alone is not feedback eligibility, while preserving exactly one
+  candidate for independently expressed eligible repeated frustration. Cover
+  both outcomes in the existing opt-in real-model journey; do not add runtime
+  flags, recorder filters, or another feedback policy owner.

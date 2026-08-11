@@ -108,3 +108,10 @@ Treat tool results literally:
 - `failed` means it was not accepted for printing. Follow the returned safe
   failure reason and next-step note exactly. Never substitute Lob text, guess
   that a confirmed address was wrong, or retry without a new explicit request.
+
+A physical-note rejection by itself is recovery evidence, not product-feedback
+eligibility. Do not call `murph.submit_product_feedback` solely because the
+printer result says the problem is on Murph's side, needs correction, or needs
+investigation. The existing feedback policy still applies when the person's own
+current input independently establishes eligible frustration or repeated
+Murph-owned friction.

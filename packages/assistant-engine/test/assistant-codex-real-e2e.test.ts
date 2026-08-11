@@ -4667,6 +4667,15 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
       const imageSha256 = createHash('sha256')
         .update(imageBytes)
         .digest('hex')
+      const assertMurphOwnedRecovery = (message: string) => {
+        expect(message).toMatch(
+          /no (?:automatic )?(?:retry|follow-up)|not (?:retrying|following up)|won't (?:retry|follow up)/iu,
+        )
+        expect(message).toMatch(
+          /new explicit (?:send )?request|ask me (?:again|to try again)|request (?:it )?again|tell me to try again/iu,
+        )
+        expect(message).not.toMatch(/change.{0,30}address/iu)
+      }
       const scenarios = [
         {
           assertRecovery(message: string) {
@@ -4674,27 +4683,55 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
             expect(message).toMatch(/check|verify/iu)
             expect(message).not.toMatch(/regenerat|new image/iu)
           },
+          expectedFeedbackCount: 0,
           failureReason: 'recipient_address' as const,
+          feedbackContext: null,
         },
         {
           assertRecovery(message: string) {
             expect(message).toMatch(/regenerat|new image/iu)
             expect(message).not.toMatch(/change.{0,30}address/iu)
           },
+          expectedFeedbackCount: 0,
           failureReason: 'artwork' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/Murph|print(?:ing)? service|our side/iu)
+            assertMurphOwnedRecovery(message)
+          },
+          expectedFeedbackCount: 0,
+          failureReason: 'service_unavailable' as const,
+          feedbackContext: null,
         },
         {
           assertRecovery(message: string) {
             expect(message).toMatch(/Murph|print(?:ing)? request/iu)
-            expect(message).toMatch(
-              /no (?:automatic )?(?:retry|follow-up)|not (?:retrying|following up)|won't (?:retry|follow up)/iu,
-            )
-            expect(message).toMatch(
-              /new explicit (?:send )?request|ask me (?:again|to try again)|request (?:it )?again|tell me to try again/iu,
-            )
-            expect(message).not.toMatch(/change.{0,30}address/iu)
+            assertMurphOwnedRecovery(message)
           },
+          expectedFeedbackCount: 0,
           failureReason: 'request_invalid' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/investigat|could not identify|not clear|unknown/iu)
+            assertMurphOwnedRecovery(message)
+          },
+          expectedFeedbackCount: 0,
+          failureReason: 'unknown' as const,
+          feedbackContext: null,
+        },
+        {
+          assertRecovery(message: string) {
+            expect(message).toMatch(/Murph|print(?:ing)? request/iu)
+            assertMurphOwnedRecovery(message)
+          },
+          expectedFeedbackCount: 1,
+          failureReason: 'request_invalid' as const,
+          feedbackContext:
+            'Murph has repeatedly rejected this same note after saying the complete address and artwork were ready. This loop is frustrating.',
         },
       ]
 
@@ -4785,10 +4822,11 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
             prompt: [
               `Message ref: ${messageRef}`,
               'I explicitly approve mailing the already generated note below to Casey at 42 Example Lane, Sampleton, GA 30303.',
+              scenario.feedbackContext,
               `Exact image ref: ${imageRef}`,
               `Exact image SHA-256: ${imageSha256}`,
               'Use the physical-note tool exactly once. After it returns, explain the outcome and do not retry.',
-            ].join('\n\n'),
+            ].filter((part) => part !== null).join('\n\n'),
             reasoningEffort: 'low',
             sandbox: 'workspace-write',
             workingDirectory,
@@ -4807,8 +4845,8 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
           )
 
           expect(physicalNoteCalls).toHaveLength(1)
-          expect(feedbackCalls).toHaveLength(0)
-          expect(feedbackRecords).toHaveLength(0)
+          expect(feedbackCalls).toHaveLength(scenario.expectedFeedbackCount)
+          expect(feedbackRecords).toHaveLength(scenario.expectedFeedbackCount)
           expect(sendCount).toBe(1)
           expect(result.finalMessage).toMatch(
             /nothing was sent|was not sent|wasn't sent/iu,

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -71,6 +71,20 @@ describe('assistant physical notes', () => {
     expect(
       MURPH_SEND_PHYSICAL_NOTE_TOOL.inputSchema.properties.to.properties.state,
     ).toEqual({ type: 'string', pattern: '^[A-Za-z]{2}$' })
+  })
+
+  it('keeps rejection recovery separate from feedback eligibility', async () => {
+    const skill = await readFile(
+      new URL('../skills/physical-notes/SKILL.md', import.meta.url),
+      'utf8',
+    )
+
+    expect(skill).toMatch(
+      /A physical-note rejection by itself is recovery evidence, not product-feedback\s+eligibility\./u,
+    )
+    expect(skill).toMatch(
+      /independently establishes eligible frustration or repeated\s+Murph-owned friction/u,
+    )
   })
 
   it('normalizes the bounded US recipient', () => {
