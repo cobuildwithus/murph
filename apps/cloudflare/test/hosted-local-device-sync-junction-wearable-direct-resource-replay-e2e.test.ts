@@ -100,6 +100,26 @@ let scenario: HostedLocalFullStackScenario | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
 let browserVaultSummary: JunctionWearableBrowserVaultReplicaSummary | null = null;
 
+describe("hosted system mailbox frontier proof", () => {
+  it.each([
+    null,
+    "not-a-sequence",
+    "-1",
+  ])("rejects a %s pre-trigger imported sequence", (value) => {
+    expect(() => requireNonNegativeDecimalSequence(
+      value,
+      "pre-trigger hosted system mailbox imported sequence",
+    )).toThrow("pre-trigger hosted system mailbox imported sequence");
+  });
+
+  it("accepts an explicit non-negative pre-trigger imported sequence", () => {
+    expect(requireNonNegativeDecimalSequence(
+      "42",
+      "pre-trigger hosted system mailbox imported sequence",
+    )).toBe("42");
+  });
+});
+
 describe("hosted local Junction wearable direct-resource replay e2e", () => {
   beforeAll(async () => {
     plan = await buildJunctionWearableHostedReplayPlan({ replaySize: "smoke" });
@@ -330,6 +350,10 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     ], {
       matchInputContains: experimentActivityNudgeInstructions,
     });
+    const systemImportedSeqBeforeDeviceSync = await readHostedSystemImportedSeq({
+      scenario: activeScenario,
+      userId: experimentAdherenceUserId,
+    });
 
     await postSignedJunctionWebhook({
       dirtyResource: activityPlan.cycling,
@@ -357,6 +381,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     }
     await assertHostedDeviceSyncReplayReceiptAccepted({
       scenario: activeScenario,
+      systemImportedSeqBefore: systemImportedSeqBeforeDeviceSync,
       userId: experimentAdherenceUserId,
     });
     await assertNoHostedDeviceSyncJobFailures({
@@ -449,6 +474,10 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
 
     expect(seed.dirtyResourceCount).toBe(replayPlan.dirtyResources.length);
     expect(seed.sourceCount).toBe(3);
+    const systemImportedSeqBeforeDeviceSync = await readHostedSystemImportedSeq({
+      scenario: activeScenario,
+      userId,
+    });
 
     await activeScenario.runWake(
       buildJunctionFixtureWake(seed.connectionId, seededAt),
@@ -466,7 +495,9 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     }
 
     await assertHostedDeviceSyncReplayReceiptAccepted({
+      requireAdvancedDurableFrontier: true,
       scenario: activeScenario,
+      systemImportedSeqBefore: systemImportedSeqBeforeDeviceSync,
       userId,
     });
     await assertNoHostedDeviceSyncJobFailures({
@@ -813,6 +844,10 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
     sources: garminSources,
   });
   expect(seed.sourceCount).toBe(1);
+  const systemImportedSeqBeforeDeviceSync = await readHostedSystemImportedSeq({
+    scenario: input.scenario,
+    userId: input.userId,
+  });
 
   let retriedSleepCycleDelivery = false;
   for (const [index, dirtyResource] of input.dirtyResources.entries()) {
@@ -854,6 +889,7 @@ async function runSignedJunctionHistoricalCoverageReplay(input: {
   }
   await assertHostedDeviceSyncReplayReceiptAccepted({
     scenario: input.scenario,
+    systemImportedSeqBefore: systemImportedSeqBeforeDeviceSync,
     userId: input.userId,
   });
   await assertNoHostedDeviceSyncJobFailures({
@@ -1217,7 +1253,9 @@ async function readBrowserVaultReplica(input: {
 }
 
 async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
+  requireAdvancedDurableFrontier?: boolean;
   scenario: HostedLocalFullStackScenario;
+  systemImportedSeqBefore: string;
   userId: string;
 }): Promise<void> {
   const receiptStatus = parseHostedRunnerStatusResponse(
@@ -1265,10 +1303,13 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
     && (entry.status === "processed" || entry.status === "recorded")
     && (entry.recordFailed ?? 0) === 0
   );
-  const receiptObserved = recordedDeviceSyncLog !== undefined
-    || recorded > 0
-    || prepared > 0
-    || checkpointedSystemReceipt;
+  const durableSystemLaneAdvancedAndSettled = checkpointedSystemReceipt
+    && hasDecimalSequenceAdvanced(input.systemImportedSeqBefore, systemImportedSeq);
+  const receiptObserved = durableSystemLaneAdvancedAndSettled
+    || (
+      input.requireAdvancedDurableFrontier !== true
+      && recordedDeviceSyncLog !== undefined
+    );
 
   if (
     !receiptObserved
@@ -1288,6 +1329,9 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
         retryableFailed,
         systemHandledThroughSeq,
         systemImportedSeq,
+        systemImportedSeqBefore: input.systemImportedSeqBefore,
+        requireAdvancedDurableFrontier:
+          input.requireAdvancedDurableFrontier === true,
       })}`,
       ...(safeErrors.length > 0
         ? [`system mailbox safe errors: ${JSON.stringify(safeErrors)}`]
@@ -1295,6 +1339,29 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
       `system mailbox logs: ${JSON.stringify(systemMailboxLogs)}`,
     ]));
   }
+}
+
+async function readHostedSystemImportedSeq(input: {
+  scenario: HostedLocalFullStackScenario;
+  userId: string;
+}): Promise<string> {
+  const status = parseHostedRunnerStatusResponse(
+    await input.scenario.harness.requestJson<unknown>(
+      buildCloudflareHostedControlUserStatusPath(input.userId),
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+        },
+      },
+    ),
+  );
+  return requireNonNegativeDecimalSequence(
+    readIntegerStringAtPath(
+      status.workspace?.redactedStatus ?? null,
+      ["hostedMailboxSystemImportedSeq"],
+    ),
+    "pre-trigger hosted system mailbox imported sequence",
+  );
 }
 
 async function assertNoHostedDeviceSyncJobFailures(input: {
@@ -1740,6 +1807,23 @@ function readIntegerStringAtPath(value: unknown, keys: readonly string[]): strin
   return typeof current === "string" && /^(0|[1-9]\d*)$/u.test(current)
     ? current
     : null;
+}
+
+function hasDecimalSequenceAdvanced(before: string, after: string): boolean {
+  if (!/^\d+$/u.test(before) || !/^\d+$/u.test(after)) {
+    return false;
+  }
+  return BigInt(after) > BigInt(before);
+}
+
+function requireNonNegativeDecimalSequence(
+  value: string | null,
+  label: string,
+): string {
+  if (value === null || !/^\d+$/u.test(value)) {
+    throw new Error(`${label} must be a non-negative decimal string.`);
+  }
+  return value;
 }
 
 function collectUnsafeHostedStatusFailureKeys(value: unknown): string[] {
