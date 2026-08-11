@@ -524,9 +524,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   admission occurs only inside the existing beneficiary serialization boundary,
   provider work is post-commit, Stripe reconciliation alone grants credit, and
   the assistant/room sponsorship projection reveals only sponsored versus
-  unsponsored. After first-party sign-in, the funding page may separately
-  recognize the current activation and at most 20 recent fulfilled one-time
-  moments only by their retained opted-in public alias or as Anonymous, plus
+  unsponsored. For a signed-in active group participant, the funding page may
+  separately recognize the current activation and at most 20 recent fulfilled
+  one-time moments only by their retained opted-in public alias or as Anonymous, plus
   the coarse monthly versus one-time kind. That alias is not payer identity;
   the page projection contains no payer record, amount, monthly cap, balance,
   payment status, charge timing, or automatic-refill event. A separate

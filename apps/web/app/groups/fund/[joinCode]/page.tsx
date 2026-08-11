@@ -113,6 +113,15 @@ export default async function GroupFundingPage({
   const requestedPurchaseReturn = readUsageTopUpPurchaseReturn(
     resolvedSearchParams,
   );
+  const customizationAllowedPromise =
+    member && !managementOnly && !member.suspendedAt
+      ? hasHostedGroupSponsorshipCustomizationAuthority({
+          containerMemberId: target.runtimeMemberId,
+          now: new Date(),
+          participantMemberId: member.id,
+          prisma,
+        })
+      : Promise.resolve(false);
   const [
     usageStatus,
     activePurchase,
@@ -147,14 +156,7 @@ export default async function GroupFundingPage({
             purchaseId: requestedPurchaseReturn.purchaseId,
           }).then(() => true).catch(() => false)
         : Promise.resolve(false),
-      member && !managementOnly && !member.suspendedAt
-        ? hasHostedGroupSponsorshipCustomizationAuthority({
-            containerMemberId: target.runtimeMemberId,
-            now: new Date(),
-            participantMemberId: member.id,
-            prisma,
-          })
-        : Promise.resolve(false),
+      customizationAllowedPromise,
       member
         ? readHostedGroupSponsorshipManagementProjection({
             beneficiaryMemberId: target.runtimeMemberId,
@@ -162,18 +164,20 @@ export default async function GroupFundingPage({
             prisma,
           })
         : Promise.resolve(null),
-      member
-        ? readHostedGroupFundingSupporters({
-            beneficiaryMemberId: target.runtimeMemberId,
-            prisma,
-          }).catch(() => ({
-            monthlySponsor: null,
-            oneTimeContributions: [],
-          }))
-        : Promise.resolve({
-            monthlySponsor: null,
-            oneTimeContributions: [],
-          }),
+      customizationAllowedPromise.then((allowed) =>
+        allowed
+          ? readHostedGroupFundingSupporters({
+              beneficiaryMemberId: target.runtimeMemberId,
+              prisma,
+            }).catch(() => ({
+              monthlySponsor: null,
+              oneTimeContributions: [],
+            }))
+          : {
+              monthlySponsor: null,
+              oneTimeContributions: [],
+            },
+      ),
     ]);
   if (!usageStatus || (managementOnly && !sponsorshipManagement)) {
     return <GroupFundingUnavailable />;

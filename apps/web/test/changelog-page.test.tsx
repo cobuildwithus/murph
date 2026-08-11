@@ -222,14 +222,15 @@ describe("ChangelogPage", () => {
 
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
-    expect(markup).toContain("Managed OpenAI web search works again");
-    expect(markup).toContain("Blood-pressure history waits for the whole sync");
+    expect(markup).toContain(
+      "Recognize the people who keep a group going",
+    );
+    expect(markup).toContain("The Group Historian");
+    expect(markup).toContain("Monthly sponsor");
+    expect(markup).toContain("Anonymous");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");
-    expect(markup).toContain("Confirmed appointments come with a reminder");
-    expect(markup).toContain("Tell Murph about an appointment");
-    expect(markup).toContain("Confirmed appointment");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
@@ -242,7 +243,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("Compact response");
     expect(markup).toContain("70 mg/dL");
     expect(markup).toContain('href="#design-follow-up"');
-    expect(markup).toContain('href="#appointment-reminders-by-default"');
+    expect(markup).toContain('href="#group-funding-supporters"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
   });

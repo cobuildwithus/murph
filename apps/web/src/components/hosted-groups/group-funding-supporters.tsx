@@ -15,14 +15,8 @@ export function GroupFundingSupporters({
   }
 
   return (
-    <section
-      aria-labelledby="group-funding-supporters-heading"
-      className="mt-8 border-t border-border pt-6"
-    >
-      <h2
-        className="font-serif text-xl font-semibold leading-tight"
-        id="group-funding-supporters-heading"
-      >
+    <section className="mt-8 border-t border-border pt-6">
+      <h2 className="font-serif text-xl font-semibold leading-tight">
         Supporters
       </h2>
       <ul className="mt-3 divide-y divide-border">

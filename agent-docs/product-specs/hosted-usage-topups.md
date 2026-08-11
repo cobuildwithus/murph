@@ -227,15 +227,24 @@ builder and server canonicalizer discard an alias-only quiet request, so quiet
 funding does not store an unused public identity. No expired private copy is
 read or exposed.
 
-After first-party sign-in, the funding page may recognize the current live
-monthly sponsorship activation and at most the 20 most recent fulfilled
-one-time contribution moments. It displays only `Monthly sponsor` or
+For a signed-in active group participant, the funding page may recognize the
+current live monthly sponsorship activation and at most the 20 most recent
+fulfilled one-time contribution moments. It displays only `Monthly sponsor` or
 `One-time contribution` with the moment's retained public alias, falling back
 to `Anonymous`; the alias is a presentation label, not authenticated payer
 identity. The projection never exposes payer records, contribution amounts,
 monthly maximums, charge timing, balances, automatic refills, or payment
-status. Signed-out visitors receive no supporter projection. Alias decryption
-is best effort and degrades to `Anonymous` without blocking funding.
+status. Signed-out visitors and non-participants receive no supporter
+projection. Alias decryption is best effort and degrades to `Anonymous` without
+blocking funding.
+
+The funding-page read reuses the page's participant-authority result, then adds
+at most four set-based database calls: sponsorship authorization and 20-row
+one-time history in parallel, an optional activation purchase, and one moment
+batch for at most 21 purchase IDs. Peak added database concurrency is two. The
+secure-box owner reads envelope metadata in one batch and performs at most 21
+root unwraps with its existing concurrency cap of four; there are no per-row
+database reads, provider calls, or transactions.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:

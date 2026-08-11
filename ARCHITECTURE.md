@@ -1008,9 +1008,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   committed charges is deferred to the next period. Only the activation
   purchase may own a public sponsorship moment; refills are silent. The
   assistant/room sponsorship projection exposes only sponsored versus
-  unsponsored. After first-party sign-in, the funding page owns one separate
-  bounded recognition projection for the current activation and at most 20
-  recent fulfilled one-time moments. It exposes only each retained opted-in
+  unsponsored. For a signed-in active group participant, the funding page owns
+  one separate bounded recognition projection for the current activation and
+  at most 20 recent fulfilled one-time moments. It exposes only each retained opted-in
   public alias or `Anonymous` plus monthly versus one-time kind, never payer
   identity, amount, cap, balance, payment state, charge timing, or refill
   events. A separate room-public usage read may expose one bounded

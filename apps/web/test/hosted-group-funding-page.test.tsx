@@ -514,6 +514,26 @@ describe("hosted group funding page", () => {
     expect(mocks.readHostedGroupFundingSupporters).not.toHaveBeenCalled();
   });
 
+  it("keeps supporter recognition private from signed-in non-participants", async () => {
+    mocks.hasHostedGroupSponsorshipCustomizationAuthority.mockResolvedValueOnce(
+      false,
+    );
+    mocks.readHostedGroupFundingSupporters.mockResolvedValueOnce({
+      monthlySponsor: {
+        id: "hucp_monthlysponsor1",
+        name: "Private alias",
+      },
+      oneTimeContributions: [],
+    });
+
+    const markup = renderToStaticMarkup(await GroupFundingPage({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }));
+
+    assert.doesNotMatch(markup, /Supporters|Private alias/u);
+    expect(mocks.readHostedGroupFundingSupporters).not.toHaveBeenCalled();
+  });
+
   it("keeps inactive sponsorship management unavailable to an authenticated non-payer", async () => {
     mocks.readHostedGroupUsageFundingTargetByJoinCode.mockResolvedValueOnce(null);
     mocks.readHostedGroupUsageFundingManagementTargetByLocator.mockResolvedValueOnce({
