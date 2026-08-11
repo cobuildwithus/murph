@@ -161,6 +161,65 @@ describe("hosted mailbox import loop", () => {
     ]);
   });
 
+  test("skips a retired newsletter row and continues with later system work", async () => {
+    const items = [
+      createMailboxItem({
+        id: "mailbox_item_retired_newsletter",
+        kind: "group-newsletter.email-needed",
+        lane: "system",
+        laneSeq: "1",
+        payloadInlineCiphertext: null,
+        payloadRef: "hosted-mailbox-payload:mailbox_item_retired_newsletter",
+      }),
+      createMailboxItem({
+        id: "mailbox_item_system_after_retired_newsletter",
+        kind: "member.activated",
+        lane: "system",
+        laneSeq: "2",
+      }),
+    ];
+    const { mailboxPort, payloadFetchRequests } = createMailboxPort({ items });
+    const imported: string[] = [];
+
+    const result = await fetchAndProcessHostedMailboxPrefix({
+      expectedUserId: TEST_USER_ID,
+      async importItem(input) {
+        imported.push(input.item.id);
+        return { status: "imported" };
+      },
+      lanes: ["system"],
+      limitPerLane: 10,
+      mailboxPort,
+      now: () => TEST_NOW,
+      requestId: "request_skip_retired_newsletter",
+      state: createEmptyHostedMailboxImportState(),
+    });
+
+    assert.deepEqual(payloadFetchRequests, []);
+    assert.deepEqual(imported, ["mailbox_item_system_after_retired_newsletter"]);
+    assert.deepEqual(result.blocked, []);
+    assert.equal(result.importedCount, 1);
+    assert.equal(result.state.watermarks.system, "2");
+    assert.deepEqual(result.state.recentStatuses, [
+      {
+        itemKind: "group-newsletter.email-needed",
+        lane: "system",
+        occurredAt: TEST_NOW,
+        reasonCode: "legacy_group_newsletter_email_needed.retired",
+        seq: "1",
+        status: "skipped",
+      },
+      {
+        itemKind: "member.activated",
+        lane: "system",
+        occurredAt: TEST_NOW,
+        reasonCode: null,
+        seq: "2",
+        status: "imported",
+      },
+    ]);
+  });
+
   test("reuses one mixed prefetch for isolated conversation and system phases", async () => {
     const state = createEmptyHostedMailboxImportState();
     const conversation = createMailboxItem({

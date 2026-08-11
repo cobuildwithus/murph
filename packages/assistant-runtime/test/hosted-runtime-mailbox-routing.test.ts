@@ -78,6 +78,11 @@ describe("hosted mailbox routing", () => {
         lane: "system",
       },
       {
+        action: "skip-retired-mailbox-item",
+        kind: "group-newsletter.email-needed",
+        lane: "system",
+      },
+      {
         action: "apply-runtime-control-request",
         kind: "runtime.manual-requested",
         lane: "system",
@@ -141,6 +146,10 @@ describe("hosted mailbox routing", () => {
     assert.equal(resolveExpectedLaneForHostedMailboxKind("device-sync.wake"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("environment-voice.captured"), "system");
     assert.equal(resolveExpectedLaneForHostedMailboxKind("meal-photo.captured"), "system");
+    assert.equal(
+      resolveExpectedLaneForHostedMailboxKind("group-newsletter.email-needed"),
+      "system",
+    );
     assert.equal(resolveExpectedLaneForHostedMailboxKind("runtime.manual-requested"), "system");
     assert.equal(
       resolveExpectedLaneForHostedMailboxKind("runtime.pending-effects-reconcile-requested"),

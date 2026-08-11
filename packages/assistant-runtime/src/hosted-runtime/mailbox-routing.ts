@@ -24,6 +24,7 @@ export const HOSTED_MAILBOX_IMPORT_ACTIONS = [
   "apply-runtime-control-request",
   "import-vault-share-delivery",
   "import-vault-share-revoke",
+  "skip-retired-mailbox-item",
 ] as const;
 
 export type HostedMailboxImportAction =
@@ -71,6 +72,7 @@ const ACTION_BY_KIND = {
   "conversation.message": "import-conversation-message",
   "device-sync.wake": "run-device-sync-wake",
   "environment-voice.captured": "run-environment-voice",
+  "group-newsletter.email-needed": "skip-retired-mailbox-item",
   "meal-photo.captured": "import-meal-photo",
   "member.activated": "apply-member-activation",
   "member.channels.updated": "apply-member-channels-update",

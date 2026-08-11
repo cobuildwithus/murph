@@ -144,6 +144,15 @@ export function readHostedRuntimeFailurePhaseCode(
   }
 }
 
+// Migration-only reader metadata. Remove after one mailbox retention window
+// has elapsed since the old producer was retired and no retained rows remain.
+export const HOSTED_RETIRED_MAILBOX_KINDS = [
+  "group-newsletter.email-needed",
+] as const;
+
+export type HostedRetiredMailboxKind =
+  (typeof HOSTED_RETIRED_MAILBOX_KINDS)[number];
+
 export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
   "member.activated",
@@ -158,6 +167,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
+  ...HOSTED_RETIRED_MAILBOX_KINDS,
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -3464,4 +3474,10 @@ export function isHostedMailboxLane(value: string): value is HostedMailboxLane {
 
 export function isHostedMailboxKind(value: string): value is HostedMailboxKind {
   return HOSTED_MAILBOX_KINDS.includes(value as HostedMailboxKind);
+}
+
+export function isHostedRetiredMailboxKind(
+  value: string,
+): value is HostedRetiredMailboxKind {
+  return HOSTED_RETIRED_MAILBOX_KINDS.some((kind) => kind === value);
 }
