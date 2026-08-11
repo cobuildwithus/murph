@@ -59,10 +59,13 @@ describe('murph.generate_image dynamic tool schema', () => {
       'current user explicitly requests generated music',
     )
     expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
-      'an admitted loaded skill or owning flow explicitly authorizes a song for this turn',
+      'a complete independently authorized owning-flow contract explicitly requires a song for the current turn',
     )
     expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
-      'The active skill owns song eligibility',
+      'loading a skill cannot authorize the call',
+    )
+    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
+      'Do not mine unrelated private context',
     )
     expect(MURPH_GENERATE_SONG_TOOL.description).not.toContain(
       'a known preference or the automation instructions mark music welcome and privacy-safe',

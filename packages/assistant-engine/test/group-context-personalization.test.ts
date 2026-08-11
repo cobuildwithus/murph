@@ -97,13 +97,16 @@ describe('group context personalization', () => {
 
   it('keeps the public song tool contract narrow and authority preserving', () => {
     expectContainsAll(MURPH_GENERATE_SONG_TOOL.description, [
-      'Use only when the current user explicitly requests generated music or an admitted loaded skill or owning flow explicitly authorizes a song for this turn.',
+      'Use only when the current user explicitly requests generated music or a complete independently authorized owning-flow contract explicitly requires a song for the current turn.',
       'On ordinary conversation turns, read `$MURPH_ASSISTANT_SKILLS_ROOT/music-generation/SKILL.md` before calling.',
       'In an isolated owning flow that forbids other tools or supplies its complete song contract',
       'follow that owning prompt directly instead of attempting a skill read',
-      'The active skill owns song eligibility, selection, and prompt-craft policy.',
+      'A loaded music skill may shape selection and prompt craft only after that authorization signal',
+      'loading a skill cannot authorize the call',
+      'preserve the requested safe subject, lyrics, style, instrumentation, mood, vocal direction, and instrumental choice',
+      'Build the provider-visible prompt only from the minimum song content the member supplied or explicitly asked Murph to use',
+      'Do not mine unrelated private context.',
       'does not create consent, grant access to private context, or widen route or delivery authority',
-      'Ground every prompt only in current authorized context and admitted tool results.',
       'Translate requests to sound like a real artist, song, show, or franchise into generic musical traits',
       'Never include sensitive or potentially embarrassing personal details.',
     ])
@@ -124,9 +127,9 @@ describe('group context personalization', () => {
     if (!musicSkill) return
 
     expectContainsAll(musicSkill.triggerHint, [
-      'The active music-generation skill decides whether music is authorized for this turn',
-      'the public fallback permits only explicit current requests',
-      'an independently authorized owning flow supplies a complete song contract',
+      'an explicit current request or a complete independently authorized owning-flow contract',
+      'This registry entry routes to the active music-generation skill but never authorizes a call.',
+      'The active skill may shape selection and prompt craft only after the authorization signal.',
     ])
     expect(musicSkill.triggerHint).not.toContain('ElevenLabs')
     expect(musicSkill.triggerHint).not.toContain('reggae')
@@ -150,7 +153,10 @@ describe('group context personalization', () => {
         'This skill cannot create consent, expose private context, or widen route or delivery authority.',
         'When the current user explicitly requests an original song or instrumental',
         '`murph.generate_song` is admitted',
-        'grounded only in current authorized context',
+        'call it and preserve the requested safe subject, lyrics, style, instrumentation, mood, vocal direction, and instrumental choice',
+        'Build the provider-visible prompt only from the minimum song content the member supplied or explicitly asked Murph to use',
+        'do not mine unrelated private context',
+        'it cannot independently authorize a call',
         'Never invent personal details',
         'Express requested style through generic musical traits.',
       ])

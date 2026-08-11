@@ -275,7 +275,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'music-generation',
     name: 'music-generation',
     triggerHint:
-      'Read before calling generate_song or whenever the current request, exact automation instructions, or an admitted owning skill indicates generated music may be relevant. The active music-generation skill decides whether music is authorized for this turn and how to construct the prompt; the public fallback permits only explicit current requests unless an independently authorized owning flow supplies a complete song contract.',
+      'Read before calling generate_song when an explicit current request or a complete independently authorized owning-flow contract indicates generated music is required. This registry entry routes to the active music-generation skill but never authorizes a call. The active skill may shape selection and prompt craft only after the authorization signal.',
   },
 ] as const
 
