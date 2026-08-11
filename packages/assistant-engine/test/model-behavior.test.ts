@@ -3182,6 +3182,26 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain(
       'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
     )
+    for (const scheduleExample of [
+      '`{"kind":"at","at":"2030-01-15T15:30:00Z"}`',
+      '`{"kind":"every","everyMs":3600000}`',
+      '`{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`',
+      '`{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`',
+    ]) {
+      expect(prompt).toContain(scheduleExample)
+    }
+    expect(prompt).toContain(
+      'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
+    )
+    expect(prompt).toContain(
+      'Never invent schedule, update, or timezone fields outside the schema.',
+    )
+    expect(prompt).toContain(
+      'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
+    )
+    expect(prompt).toContain(
+      'never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field',
+    )
     expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
     )
