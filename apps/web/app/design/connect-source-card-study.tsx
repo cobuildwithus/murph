@@ -10,6 +10,7 @@ import {
   APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
   listAppleHealthRelayConnectSources,
 } from "@/app/(dashboard)/connect/apple-health-relay-connect-sources";
+import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
@@ -30,6 +31,11 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     authenticated: true,
     errorMessage: null,
     source: ZEPP_CONNECT_SOURCE,
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: MOBVOI_HEALTH_CONNECT_SOURCE,
   },
   {
     authenticated: true,
@@ -200,12 +206,21 @@ const DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES = markLocallyDisconnectedSources(
   new Set(["garmin-disconnect-journey"]),
 );
 
-export function ConnectSourceCardStudy() {
+export function ConnectSourceCardStudy({
+  androidAppAvailable,
+}: {
+  androidAppAvailable: boolean;
+}) {
   const searchParams = useSearchParams();
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
     : null;
+  const defaultStudyCases = androidAppAvailable
+    ? DESIGN_CONNECT_SOURCE_CASES
+    : DESIGN_CONNECT_SOURCE_CASES.filter(
+        ({ source }) => source.id !== MOBVOI_HEALTH_CONNECT_SOURCE.id,
+      );
   const studyCases = studyState === "source-reconnect"
     ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES
     : studyState === "source-success"
@@ -213,7 +228,7 @@ export function ConnectSourceCardStudy() {
           ...studyCase,
           source: DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES[index] ?? studyCase.source,
         }))
-      : DESIGN_CONNECT_SOURCE_CASES;
+      : defaultStudyCases;
 
   return (
     <>

@@ -1392,6 +1392,38 @@ describe("HostedUserRunner execution coordination", () => {
     expect(JSON.stringify(job)).not.toContain(logFingerprintSecret);
   });
 
+  it("places the exact Android rollout gate in the trusted invocation platform env", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const { invoke, runner } = createRunnerHarness({
+      mailboxLag: [createMailboxLag({ importedSeq: "1", lag: "0", maxSeq: "1" })],
+      runnerRuntimeEnvSource: {
+        ...TEST_RUNNER_RUNTIME_ENV_SOURCE,
+        MURPH_ANDROID_APP_ENABLED: "1",
+      },
+      workspace: createWorkspaceState({
+        nextWakeAt: WORKSPACE_NEXT_WAKE_AT,
+        nextWakeReason: "assistant",
+        version: "5",
+      }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId: "test-orchestration-attempt",
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    const job = invoke.mock.calls[0]?.[0].job;
+    expect(job?.runtime?.platformEnv?.MURPH_ANDROID_APP_ENABLED).toBe("1");
+    expect(job?.runtime?.forwardedEnv?.MURPH_ANDROID_APP_ENABLED).toBeUndefined();
+    expect(job?.runtime?.userEnv?.MURPH_ANDROID_APP_ENABLED).toBeUndefined();
+  });
+
   it("accepts runtime processing start before the invocation reaches idle", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

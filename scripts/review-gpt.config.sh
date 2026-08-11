@@ -129,6 +129,7 @@ review_gpt_selected_browser_display="$(review_gpt_browser_lane_display_name "$re
 review_gpt_selected_browser_port="$(review_gpt_browser_lane_port "$review_gpt_selected_browser_lane")" || {
   return 1 2>/dev/null || exit 1
 }
+review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
 if [[ "$review_gpt_selected_browser_lane" == "main" ]]; then
   review_gpt_selected_browser_app="/Applications/Brave Browser.app"
 else
@@ -145,10 +146,15 @@ if [[ ! -d "$review_gpt_selected_browser_app" ]] && command -v mdfind >/dev/null
 fi
 
 review_gpt_selected_browser_binary="$review_gpt_selected_browser_app/Contents/MacOS/Brave Browser"
-if [[ -x "$review_gpt_selected_browser_binary" ]]; then
+if [[ -x "$review_gpt_installed_browser_binary" ]]; then
+  # The lane's user-data directory and CDP port provide isolation. Prefer the
+  # installed browser so ignored copied app bundles cannot pin an old Brave
+  # release or its launch behavior indefinitely.
+  browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"
+elif [[ -x "$review_gpt_selected_browser_binary" ]]; then
   browser_binary_path="${browser_binary_path:-$review_gpt_selected_browser_binary}"
 else
-  browser_binary_path="${browser_binary_path:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
+  browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"
 fi
 managed_browser_user_data_dir="${managed_browser_user_data_dir:-$(review_gpt_browser_lane_data_dir "$review_gpt_selected_browser_lane")}"
 managed_browser_profile="${managed_browser_profile:-Default}"
