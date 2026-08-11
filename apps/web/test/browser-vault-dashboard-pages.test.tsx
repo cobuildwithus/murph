@@ -173,6 +173,10 @@ test("Personal Patterns comparison controls name their factor and next-day outco
 
   assert.match(markup, /aria-label="Running, next-day HRV\./);
   assert.match(markup, /aria-label="Sauna, next-day Total sleep\./);
+  assert.match(markup, /data-patterns-layout="mobile"/u);
+  assert.match(markup, /data-patterns-layout="desktop"/u);
+  assert.match(markup, />14 days</u);
+  assert.doesNotMatch(markup, /Scroll sideways/u);
 });
 
 test("PatternsPage explains the bounded wait when a legacy replica has no patterns projection", async () => {
