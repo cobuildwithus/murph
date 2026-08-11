@@ -226,13 +226,14 @@ model DeviceSyncDirtyConnection {
 }
 
 model DeviceSyncDirtyPayload {
-  id            String           @id
-  connectionId  String           @map("connection_id")
-  userId        String           @map("user_id")
-  provider      String
-  dirtyRevision BigInt           @map("dirty_revision")
-  resourceEncrypted String       @map("resource_encrypted")
-  createdAt     DateTime         @default(now()) @map("created_at")
+  id                    String           @id
+  connectionId          String           @map("connection_id")
+  userId                String           @map("user_id")
+  provider              String
+  dirtyRevision         BigInt           @map("dirty_revision")
+  resourceEncrypted     String           @map("resource_encrypted")
+  credentialIndependent Boolean?         @map("credential_independent")
+  createdAt             DateTime         @default(now()) @map("created_at")
   connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([connectionId, dirtyRevision])

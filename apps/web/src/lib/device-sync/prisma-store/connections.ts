@@ -72,6 +72,7 @@ import {
   type HostedDeviceSyncSecretTestCodec,
 } from "./connection-secrets";
 import {
+  isHostedDirtyPayloadClassificationPendingError,
   supersedeHostedCredentialScopedDirtyStateForConnectionTx,
 } from "./dirty-connections";
 import { toPrismaJsonObject } from "./prisma-json";
@@ -111,6 +112,7 @@ type HostedConnectionSetupWrite = {
 };
 
 const DEFAULT_HOSTED_DEVICE_SYNC_SETUP_TTL_MS = 30 * 60_000;
+const HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS = 2;
 
 export class PrismaHostedConnectionStore {
   readonly prisma: PrismaClient;
@@ -151,15 +153,33 @@ export class PrismaHostedConnectionStore {
     input: UpsertPublicDeviceSyncConnectionInput,
     binding: DeviceProviderApplicationBinding | null,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
-    try {
-      return await this.upsertConnectionWithPreviousOnce(input, binding);
-    } catch (error) {
-      if (!isUniqueViolation(error)) {
+    for (
+      let attempt = 0;
+      attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      try {
+        return await this.upsertConnectionWithPreviousOnce(input, binding);
+      } catch (error) {
+        if (
+          isHostedDirtyPayloadClassificationPendingError(error)
+          && attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS - 1
+        ) {
+          continue;
+        }
+        if (!isUniqueViolation(error)) {
+          throw error;
+        }
+
+        await this.resolveUpsertConnectionUniqueRace(input, error);
+        if (attempt < HOSTED_CONNECTION_UPSERT_MAX_ATTEMPTS - 1) {
+          continue;
+        }
         throw error;
       }
-
-      return this.resolveUpsertConnectionUniqueRace(input, error, binding);
     }
+
+    throw new Error("Hosted device-sync connection replacement retry loop exhausted.");
   }
 
   private async upsertConnectionWithPreviousOnce(
@@ -177,21 +197,27 @@ export class PrismaHostedConnectionStore {
     const providerAccountBlindIndex = this.buildProviderAccountBlindIndex(input.provider, input.externalAccountId);
     const credential = resolveHostedUpsertConnectionCredential(input);
     const setupWrite = buildHostedConnectionSetupWrite(input, connectedAt, "create");
+    if (!ownerId) {
+      throw deviceSyncError({
+        code: "CONNECTION_OWNER_REQUIRED",
+        message: "Hosted device-sync connections must be initiated by an authenticated Murph user.",
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
 
     const result = await this.prisma.$transaction(async (tx) => {
-      if (ownerId) {
-        await lockHostedMemberRow(tx, ownerId);
-        if (await readHostedHealthDataConsentState({
-          memberId: ownerId,
-          prisma: tx,
-        }) === "revoked") {
-          throw deviceSyncError({
-            code: "HEALTH_DATA_CONSENT_REQUIRED",
-            httpStatus: 403,
-            message: "Use Murph again before connecting a health source.",
-            retryable: false,
-          });
-        }
+      await lockHostedMemberRow(tx, ownerId);
+      if (await readHostedHealthDataConsentState({
+        memberId: ownerId,
+        prisma: tx,
+      }) === "revoked") {
+        throw deviceSyncError({
+          code: "HEALTH_DATA_CONSENT_REQUIRED",
+          httpStatus: 403,
+          message: "Use Murph again before connecting a health source.",
+          retryable: false,
+        });
       }
 
       let existing = await tx.deviceConnection.findUnique({
@@ -331,15 +357,6 @@ export class PrismaHostedConnectionStore {
 
       assertHostedUpsertExistingConnectionGuard(null, input.existingAccountGuard ?? null);
 
-      if (!ownerId) {
-        throw deviceSyncError({
-          code: "CONNECTION_OWNER_REQUIRED",
-          message: "Hosted device-sync connections must be initiated by an authenticated Murph user.",
-          retryable: false,
-          httpStatus: 400,
-        });
-      }
-
       await assertHostedProviderApplicationBindingForUpsert({
         binding,
         existing: null,
@@ -406,8 +423,7 @@ export class PrismaHostedConnectionStore {
   private async resolveUpsertConnectionUniqueRace(
     input: UpsertPublicDeviceSyncConnectionInput,
     originalError: unknown,
-    binding: DeviceProviderApplicationBinding | null,
-  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+  ): Promise<void> {
     const ownerId = normalizeNullableString(input.ownerId);
     if (!ownerId) {
       throw originalError;
@@ -428,12 +444,11 @@ export class PrismaHostedConnectionStore {
       });
     }
 
-    // Retry through the transaction after ownership has been established. The
-    // transactional path re-reads the full connection record, takes its lock,
-    // and enforces the exact provider-application binding before it can reuse
-    // an established connection. Returning the redacted account here would
-    // bypass those checks during a uniqueness race.
-    return this.upsertConnectionWithPreviousOnce(input, binding);
+    // The caller retries through the transaction after ownership has been
+    // established. That path re-reads and locks the full record, then enforces
+    // the exact provider-application binding before any established connection
+    // can be reused. Returning the redacted account here would bypass those
+    // checks during a uniqueness race.
   }
 
   async getConnectionByExternalAccount(

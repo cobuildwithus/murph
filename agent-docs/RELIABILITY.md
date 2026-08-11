@@ -572,6 +572,23 @@ Last verified: 2026-08-10
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- Store-owned device-sync dirty writes use a private prepare-then-commit
+  boundary: the dirty store derives the credential-independence authority bit,
+  compresses, and secure-box seals each payload before opening its transaction;
+  no caller can supply a prepared ciphertext or classification bundle.
+  Consent-gated webhook and companion admissions instead perform that
+  preparation inside the existing member-row transaction, after the consent
+  re-read and before the dirty-marker lock or mutation. This keeps completed
+  withdrawal authoritative without adding another fence or state owner. The
+  steady-state connection-replacement path reads no payload and uses set-based writes only.
+  Nullable rows from mixed-version writers are the bounded transitional
+  exception: replacement classifies at most 800 rows after taking the existing
+  member lock, re-reading health-data consent, and locking the dirty marker.
+  It then compare-and-sets the marker and deletes credential-scoped payloads
+  set-wise in that transaction. Reconnect and acknowledgement therefore both
+  lock the dirty marker before touching payload rows.
+  A larger nullable backlog fails retryably until runtime acknowledgement
+  reduces it; classification may never run before the consent fence.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do
@@ -674,6 +691,22 @@ Last verified: 2026-08-10
   separately says whether Web accepted the checkpoint. Only the accepted
   frontier combination routes an unconsumed row toward downstream Web stamping;
   the count alone never chooses an owner.
+  A separate hosted runtime-progress singleton uses the mailbox owner's live
+  item retention/expiry semantics and clean-handling lane high-water to catch
+  error-code-independent stalls. An active runtime is anomalous when the oldest
+  live item beyond that high-water remains pending for at least 15 minutes.
+  System and conversation lanes are covered. Eligibility uses the canonical
+  runtime AI-access decision, including current thread-container participants,
+  so inactive or consent-withdrawn people are excluded without suppressing an
+  authorized group runtime. A valid conversation usage denial with no later
+  execution evidence is also excluded; resumed work ages from its earliest
+  post-denial staging, provider, delivery, or durable consumption milestone.
+  Paging applies the alert cap only after
+  those exclusions. Its bounded scan, persisted state, and email contain aggregate
+  runtime/lane counts, pending counts, timings, and invalid/truncated evidence
+  only; they never contain member, mailbox, phone, message, trace, or exception
+  identifiers. The progress and latency incidents rearm independently, so one
+  continuous anomaly cannot hide the first alert for the other.
   Outbound paging requires the shared Resend operational-email sender and
   recipients plus a valid IANA operator timezone; it never falls back to
   Linq/iMessage. It suppresses sends from 11 PM through 7 AM local time and
@@ -688,7 +721,7 @@ Last verified: 2026-08-10
   behavior beyond that external retention window. Distinct incidents vary
   through current aggregate evidence and checked-at time, never random padding
   or synonym churn. Fresh health and operator-time rechecks precede the one
-  exact row-version compare-and-swap that admits provider entry, increments
+  exact monitor-row-version compare-and-swap that admits provider entry, increments
   attempt count, and advances the provider-attempt timestamp. The same version
   fence makes a stale recovery coalesce rather than report healthy after a
   concurrent incident cycles back to the same status. Recovery or quiet hours
@@ -696,7 +729,9 @@ Last verified: 2026-08-10
   later builds current evidence, while an ambiguous prior attempt retains its
   exact body, key, and pacing boundary. After provider entry, healthy scans
   coalesce against the bounded four-minute send lease until the attempt settles
-  or expires; only then may the persisted incident become healthy.
+  or expires; only then may that persisted incident become healthy. Both
+  monitors share this lifecycle while retaining distinct state rows, subjects,
+  bodies, and incident-scoped idempotency namespaces.
 - Hosted managed-automation reconciliation persists retry generation in the existing workspace checkpoint owner. Only eligible, explicitly retryable failures receive the bounded 30-second, 2-minute, and 10-minute backoff sequence; unclassified or permanent failures are logged without manufacturing another wake, and a later successful pass clears the retry generation.
 - Managed automation ownership is exact-seed and route-authority based. Built-in seeds without an explicit scope default to `member`; member seeds run only on personal/direct routes, while `authenticated-group` seeds run only on live non-direct Linq/iMessage or Telegram routes. Group email is excluded. Reconciliation archives every nonterminal wrong-owner built-in record, including paused records, while already archived records and caller-supplied unscoped custom seeds retain their prior behavior. Claimed static built-ins and registered dynamic identities resolve immutable ownership by automation id before lifecycle hooks and revalidate the same owner and live route before provider admission, tools, delivery, and commit; editable tags, slugs, titles, and instructions cannot acquire authority. Permanently retired built-in IDs are not seeds: reconciliation archives matching persisted records and claimed occurrences fail closed before lifecycle or model work. The post-onboarding choice point is the one registered dynamic member identity. Dynamically generated experiment-lifecycle seeds remain on their existing path until their separately coordinated owner exposes an exact resolver. Immutable personal-memory and group-room-model IDs still exclusively select silent maintenance policy and its provider-admission replay barrier.
 - The unfinished-onboarding follow-up is one finite daily-local automation with exactly three local-day opportunities, anchored to its original first occurrence and closed at 3:00 PM on day three. Migration recognizes PR 1203's exact one-shot, the older exact recurring fingerprint, and the bounded original legacy fingerprint; it preserves the one-shot's stored occurrence, derives that record's recurring local minute from the occurrence, preserves an existing daily-local minute instead of rehashing another identity, bounds a fresh recurring predecessor from its creation time, archives an established predecessor whose original three-day window already elapsed, and never restarts an old account from the current maintenance time. Conversion first leaves the source as a finite `at` schedule, durably binds that occurrence in canonical runtime state, and only then exposes the daily-local schedule, so a partial write cannot run on the signup day and normal managed reconciliation can finish a staged conversion. Each occurrence reads canonical onboarding authority before provider entry and again before tool, delivery, and commit boundaries. Queue-only delivery carries the automation revision into the existing outbox authority fence, which re-reads onboarding state at external provider entry; completed state makes the intent terminally stale, while unreadable state fails closed with `ASSISTANT_ONBOARDING_AUTHORITY_UNAVAILABLE` and remains retryable only inside the finite window. When an obsolete predecessor intent settles authority-stale, the hosted post-delivery owner re-reads cron status, preserves the resulting retry wake, and suppresses the generic delivery-failure input because the cancellation was intentional. The latest in-turn lifecycle read replaces the occurrence's earlier diagnostic snapshot. Metadata-only hosted logs identify seed, reconciliation action, persisted-versus-missing state source, status and timestamps, schedule window, model decision, delivery outcome, and run outcome without creating a second correctness owner or storing message content.
