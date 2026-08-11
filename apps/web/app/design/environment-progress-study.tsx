@@ -124,6 +124,7 @@ export function EnvironmentProgressStudy() {
               grade={overallGrade(reportNotes)}
               notes={reportNotes}
               onVoiceAccepted={() => {}}
+              onVoiceUploadStarted={() => {}}
               scene={reportScene}
               values={REPORT_DESIGN_VALUES}
               voiceCaptureDisabled={false}

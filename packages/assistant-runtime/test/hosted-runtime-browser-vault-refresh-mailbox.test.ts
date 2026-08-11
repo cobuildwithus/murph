@@ -30,6 +30,7 @@ import {
 import {
   readHostedSystemMailboxState,
   resolveHostedSystemMailboxHandledThroughSeq,
+  updateHostedSystemMailboxState,
 } from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   createHostedRuntimeResolvedConfig,
@@ -192,6 +193,77 @@ describe("legacy Browser Vault refresh mailbox compaction", () => {
         itemId: "mailbox_browser_vault_refresh_3",
       });
       expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("stops before an attempted refresh and preserves its later suffix", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-browser-vault-mailbox-attempted-",
+    );
+
+    try {
+      for (let seq = 1; seq <= 4; seq += 1) {
+        await enqueueRuntimeControlItem({
+          kind: "runtime.browser-vault-refresh-requested",
+          seq,
+          vaultRoot: workspace.vaultRoot,
+        });
+      }
+      await updateHostedSystemMailboxState(workspace.vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.mailboxLaneSeq === "3"
+            ? {
+                ...item,
+                attemptCount: 1,
+                lastAttemptAt: "2026-08-11T11:59:00.000Z",
+                lastErrorCode: "HOSTED_SYSTEM_MAILBOX_RETRYABLE_FAILURE",
+                lastErrorMessage: "Retryable Browser Vault refresh failure.",
+              }
+            : item
+        ),
+      }));
+
+      await expect(prepareNext(workspace.vaultRoot)).resolves.toMatchObject({
+        item: { mailboxLaneSeq: "2" },
+        itemId: "mailbox_browser_vault_refresh_2",
+        status: "processed",
+      });
+      const afterPrefix = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(afterPrefix.pending).toMatchObject([
+        {
+          attemptCount: 1,
+          lastAttemptAt: "2026-08-11T11:59:00.000Z",
+          lastErrorCode: "HOSTED_SYSTEM_MAILBOX_RETRYABLE_FAILURE",
+          mailboxLaneSeq: "3",
+        },
+        {
+          attemptCount: 0,
+          mailboxLaneSeq: "4",
+        },
+      ]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "4",
+        state: afterPrefix,
+      })).toBe("2");
+
+      await expect(prepareNext(workspace.vaultRoot)).resolves.toMatchObject({
+        item: { attemptCount: 2, mailboxLaneSeq: "3" },
+        itemId: "mailbox_browser_vault_refresh_3",
+        status: "processed",
+      });
+      const afterRetry = await readHostedSystemMailboxState(workspace.vaultRoot);
+      expect(afterRetry.pending).toMatchObject([
+        {
+          attemptCount: 0,
+          mailboxLaneSeq: "4",
+        },
+      ]);
+      expect(resolveHostedSystemMailboxHandledThroughSeq({
+        importedSeq: "4",
+        state: afterRetry,
+      })).toBe("3");
     } finally {
       await workspace.cleanup();
     }

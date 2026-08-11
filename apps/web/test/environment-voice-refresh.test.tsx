@@ -45,15 +45,26 @@ vi.mock(
     EnvironmentVoiceCapture: ({
       disabled,
       onAccepted,
+      onUploadStarted,
       triggerLabel,
     }: {
       disabled?: boolean;
       onAccepted?: () => void;
+      onUploadStarted?: () => void;
       triggerLabel: ReactNode;
     }) =>
       createElement(
         "button",
-        { disabled, onClick: disabled ? undefined : onAccepted, type: "button" },
+        {
+          disabled,
+          onClick: disabled
+            ? undefined
+            : () => {
+                onUploadStarted?.();
+                onAccepted?.();
+              },
+          type: "button",
+        },
         triggerLabel,
       ),
   }),
@@ -79,11 +90,12 @@ beforeEach(() => {
   });
 });
 
-test("requests a runtime refresh after voice processing and waits for a different replica ref", async () => {
+test("waits for a replica newer than the explicit post-processing refresh boundary", async () => {
   vi.useFakeTimers();
   const originalFetch = globalThis.fetch;
   const baselineRef = createReplicaRef("a");
-  const replacementRef = createReplicaRef("b");
+  const unrelatedRef = createReplicaRef("b");
+  const replacementRef = createReplicaRef("c");
   mocks.vault.ref = baselineRef;
   const processingResponses = [false, true, false];
   const fetchMock = vi.fn(async () =>
@@ -124,6 +136,7 @@ test("requests a runtime refresh after voice processing and waits for a differen
     });
     assert.equal(mocks.refresh.mock.calls.length, 0);
 
+    mocks.vault.ref = unrelatedRef;
     mocks.vault.workspaceVersion = "workspace-v2";
     await rendered.rerender(
       createElement(EnvironmentPageClient, { contactOptions: [] }),
@@ -163,16 +176,10 @@ test("requests a runtime refresh after voice processing and waits for a differen
 
     const refreshOptions = mocks.refresh.mock.calls[0]?.[0];
     assert.equal(refreshOptions?.background, true);
-    const completion = refreshOptions?.requestRuntimeRefreshUntil;
+    assert.equal(refreshOptions?.requestRuntimeRefreshUntil, undefined);
+    const completion =
+      refreshOptions?.requestRuntimeRefreshUntilAfterRequest;
     assert.ok(completion);
-    assert.equal(
-      Reflect.apply(completion, undefined, [null, baselineRef]),
-      false,
-    );
-    assert.equal(
-      Reflect.apply(completion, undefined, [null, replacementRef]),
-      true,
-    );
 
     mocks.vault.runtimeRefreshPending = true;
     await rendered.rerender(
@@ -189,6 +196,10 @@ test("requests a runtime refresh after voice processing and waits for a differen
     assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",
       /The report was not updated/,
+    );
+    assert.equal(
+      Reflect.apply(completion, undefined, [null, replacementRef]),
+      true,
     );
 
     mocks.vault.ref = replacementRef;
@@ -268,6 +279,13 @@ test("restores server-side processing after reload and still waits for the repla
 
     mocks.vault.runtimeRefreshPending = true;
     await rendered.rerender(renderEnvironment());
+    const completion = mocks.refresh.mock.calls[0]?.[0]
+      ?.requestRuntimeRefreshUntilAfterRequest;
+    assert.ok(completion);
+    assert.equal(
+      Reflect.apply(completion, undefined, [null, replacementRef]),
+      true,
+    );
     mocks.vault.ref = replacementRef;
     mocks.vault.runtimeRefreshPending = false;
     await rendered.rerender(renderEnvironment());
@@ -394,6 +412,13 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
     mocks.vault.runtimeRefreshPending = true;
     await rendered.rerender(
       createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
+    const retryCompletion = mocks.refresh.mock.calls[1]?.[0]
+      ?.requestRuntimeRefreshUntilAfterRequest;
+    assert.ok(retryCompletion);
+    assert.equal(
+      Reflect.apply(retryCompletion, undefined, [null, replacementRef]),
+      true,
     );
     mocks.vault.ref = replacementRef;
     mocks.vault.runtimeRefreshPending = false;

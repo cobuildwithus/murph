@@ -229,4 +229,4 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
 - 2026-07-31 — `/environment/print` is authenticated and derives its printable
   report from the signed-in member's Browser Vault data. The public Share card
   remains generic and contains no private Habitat facts.
-- 2026-08-11 — Before admitting Environment voice processing, the page captures the current Browser Vault replica reference. After durable processing finishes, the page explicitly requests a Browser Vault refresh and waits for a different replica reference before reporting completion; delayed recovery offers a retry without requiring another recording.
+- 2026-08-11 — Before uploading an Environment recording, the page captures its displayed Habitat values. After durable processing finishes, the page explicitly requests a Browser Vault refresh; the provider treats that request's response as the admission boundary and waits for a later replica reference before reporting completion. Delayed recovery offers a retry without requiring another recording.

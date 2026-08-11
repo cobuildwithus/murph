@@ -2185,13 +2185,15 @@ Canonical Habitat writes checkpoint through the ordinary workspace owner before
 a post-checkpoint effect deletes the recording; failed work remains retryable
 and the 24-hour R2 lifecycle is only a cleanup backstop. Neither audio nor
 transcript becomes assistant conversation history, an outbound message, or
-Browser Vault product truth. The open page captures the admitted Browser Vault
-replica ref before processing. After the durable voice job finishes, that page
-uses the existing Browser Vault runtime-refresh request owner and remains pending
-until it observes a different replica ref; only then may it distinguish changed
-Habitat facts from a completed recording with no clear new facts. Delayed and
-reload recovery reuse the same voice-processing and replica-refresh owners, with
-no second result store.
+Browser Vault product truth. The open page captures its displayed Habitat values
+before the recording upload. After the durable voice job finishes, that page
+uses the existing Browser Vault runtime-refresh request owner in its post-request
+mode. The provider excludes already-running ordinary reads, treats the explicit
+refresh response as the request-local admission boundary, and remains pending
+until a later replica ref is published; only then may the page distinguish
+changed Habitat facts from a completed recording with no clear new facts.
+Delayed and reload recovery reuse the same voice-processing and replica-refresh
+owners, with no second result store.
 
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while

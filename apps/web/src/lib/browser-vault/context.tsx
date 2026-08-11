@@ -18,6 +18,7 @@ import { type HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/bro
 import { reloadCurrentHostedAuthDocument } from "@/src/components/hosted-onboarding/hosted-auth-navigation";
 
 import { type BrowserVaultFreshness, type BrowserVaultSessionMetadata } from "./loader";
+import { browserVaultReplicaRefsMatch } from "./ref";
 import { subscribeBrowserVaultSessionInvalidation } from "./session-invalidation";
 import {
   abortBrowserVaultInFlightLoad,
@@ -50,7 +51,19 @@ type BrowserVaultRuntimeRefreshCompletion = (
 interface BrowserVaultRefreshOptions {
   background?: boolean;
   requestRuntimeRefreshUntil?: BrowserVaultRuntimeRefreshCompletion;
+  /**
+   * Treat the forced refresh response as a request-local admission boundary.
+   * Only a later replica may run the completion predicate.
+   */
+  requestRuntimeRefreshUntilAfterRequest?: BrowserVaultRuntimeRefreshCompletion;
 }
+
+type BrowserVaultRuntimeRefreshAdmission =
+  | { status: "awaiting_request" }
+  | {
+      ref: HostedBrowserVaultReplicaRef | null;
+      status: "admitted";
+    };
 
 export interface BrowserVaultContextValue {
   /**
@@ -148,12 +161,15 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const providerStartedLoadRef = useRef(false);
   const runtimeRefreshCompletionRef =
     useRef<BrowserVaultRuntimeRefreshCompletion | null>(null);
+  const runtimeRefreshAdmissionRef =
+    useRef<BrowserVaultRuntimeRefreshAdmission | null>(null);
   const runtimeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
 
   const clearRuntimeRefreshWait = useCallback(() => {
     runtimeRefreshCompletionRef.current = null;
+    runtimeRefreshAdmissionRef.current = null;
     if (runtimeRefreshTimeoutRef.current) {
       clearTimeout(runtimeRefreshTimeoutRef.current);
       runtimeRefreshTimeoutRef.current = null;
@@ -162,14 +178,21 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, []);
 
   const beginRuntimeRefreshWait = useCallback(
-    (isComplete: BrowserVaultRuntimeRefreshCompletion) => {
+    (
+      isComplete: BrowserVaultRuntimeRefreshCompletion,
+      requirePostRequestReplica: boolean,
+    ) => {
       runtimeRefreshCompletionRef.current = isComplete;
+      runtimeRefreshAdmissionRef.current = requirePostRequestReplica
+        ? { status: "awaiting_request" }
+        : null;
       if (runtimeRefreshTimeoutRef.current) {
         clearTimeout(runtimeRefreshTimeoutRef.current);
       }
       setRuntimeRefreshPending(true);
       runtimeRefreshTimeoutRef.current = setTimeout(() => {
         runtimeRefreshCompletionRef.current = null;
+        runtimeRefreshAdmissionRef.current = null;
         runtimeRefreshTimeoutRef.current = null;
         abortBrowserVaultInFlightLoad();
         providerStartedLoadRef.current = false;
@@ -184,8 +207,20 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
   const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
     const isRuntimeRefreshComplete = runtimeRefreshCompletionRef.current;
+    const admission = runtimeRefreshAdmissionRef.current;
+    const crossedRequiredAdmission = admission === null
+      || (
+        admission.status === "admitted"
+        && (
+          admission.ref === null
+          || !browserVaultReplicaRefsMatch(admission.ref, snapshot.ref)
+        )
+      );
     const awaitingRequestedReplacement = isRuntimeRefreshComplete !== null
-      && !isRuntimeRefreshComplete(snapshot.client, snapshot.ref);
+      && (
+        !crossedRequiredAdmission
+        || !isRuntimeRefreshComplete(snapshot.client, snapshot.ref)
+      );
     if (isRuntimeRefreshComplete && !awaitingRequestedReplacement) {
       // A stronger refresh may be queued behind the load that delivered this
       // matching snapshot. Fence that now-redundant continuation before it can
@@ -297,7 +332,18 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     } = {}) => {
       const background = options.background ?? false;
       const { authorityPathname } = options;
-      const runtimeRefreshCompletion = options.requestRuntimeRefreshUntil;
+      if (
+        options.requestRuntimeRefreshUntil
+        && options.requestRuntimeRefreshUntilAfterRequest
+      ) {
+        throw new TypeError(
+          "Choose one Browser Vault runtime refresh completion mode.",
+        );
+      }
+      const runtimeRefreshCompletion = options.requestRuntimeRefreshUntil
+        ?? options.requestRuntimeRefreshUntilAfterRequest;
+      const requirePostRequestReplica =
+        options.requestRuntimeRefreshUntilAfterRequest !== undefined;
       const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined;
       const authorityGeneration = authorityPathname === undefined
         ? authorityGenerationRef.current
@@ -343,7 +389,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       }
 
       if (runtimeRefreshCompletion) {
-        beginRuntimeRefreshWait(runtimeRefreshCompletion);
+        beginRuntimeRefreshWait(
+          runtimeRefreshCompletion,
+          requirePostRequestReplica,
+        );
       }
 
       const outcome = await startBrowserVaultWarmLoad({
@@ -358,6 +407,23 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         || authorityGeneration !== authorityGenerationRef.current
       ) {
         return;
+      }
+
+      if (requirePostRequestReplica) {
+        // The runtime schedules its Browser Vault rebuild after responding to
+        // the forced request. Its response is therefore the causal baseline,
+        // not evidence that the requested rebuild has already published.
+        if (outcome.status === "ready") {
+          runtimeRefreshAdmissionRef.current = {
+            ref: outcome.snapshot.ref,
+            status: "admitted",
+          };
+        } else if (outcome.status === "empty") {
+          runtimeRefreshAdmissionRef.current = {
+            ref: null,
+            status: "admitted",
+          };
+        }
       }
 
       applyOutcome(outcome, { authorityPathname, background });
@@ -377,10 +443,14 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
           ? {
               background: true,
               requestRuntimeRefreshUntil: options.requestRuntimeRefreshUntil,
+              requestRuntimeRefreshUntilAfterRequest:
+                options.requestRuntimeRefreshUntilAfterRequest,
             }
           : {
               authorityPathname: pathname,
               requestRuntimeRefreshUntil: options.requestRuntimeRefreshUntil,
+              requestRuntimeRefreshUntilAfterRequest:
+                options.requestRuntimeRefreshUntilAfterRequest,
             },
       );
     },
@@ -422,6 +492,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       mountedRef.current = false;
       const ownsRuntimeRefresh = runtimeRefreshCompletionRef.current !== null;
       runtimeRefreshCompletionRef.current = null;
+      runtimeRefreshAdmissionRef.current = null;
       if (runtimeRefreshTimeoutRef.current) {
         clearTimeout(runtimeRefreshTimeoutRef.current);
         runtimeRefreshTimeoutRef.current = null;
