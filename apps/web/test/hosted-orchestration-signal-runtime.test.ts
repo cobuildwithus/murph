@@ -597,14 +597,40 @@ describe("hosted runtime Temporal signaling", () => {
     }
   });
 
-  it("dedupes browser-vault control mailbox work for the same workspace version within a short window", async () => {
+  it("does not wake the runtime again for the same browser-vault refresh request", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-28T08:15:31.000Z"));
+    mocks.appendHostedMailboxEnvelopeTx
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {
+          id: "mailbox_runtime.browser-vault-refresh-requested",
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "77",
+          userId: "member_123",
+        },
+      })
+      .mockResolvedValueOnce({
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+        item: {
+          id: "mailbox_runtime.browser-vault-refresh-requested",
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "77",
+          userId: "member_123",
+        },
+      });
     try {
       await signalHostedBrowserVaultRefreshRuntime({
         client: buildClient(),
         userId: "member_123",
       });
+      vi.setSystemTime(new Date("2026-05-28T08:17:31.000Z"));
       await signalHostedBrowserVaultRefreshRuntime({
         client: buildClient(),
         userId: "member_123",
@@ -619,24 +645,16 @@ describe("hosted runtime Temporal signaling", () => {
       );
       expect(envelopes[1]?.eventId).toBe(envelopes[0]?.eventId);
       expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
-        "2026-05-28T08:15:00.000Z",
-        "2026-05-28T08:15:00.000Z",
+        "1970-01-01T00:00:00.000Z",
+        "1970-01-01T00:00:00.000Z",
       ]);
-      expect(mocks.signalWithStart).toHaveBeenCalledTimes(2);
-      expect(mocks.signalWithStart.mock.calls.map((call) => call[1].signalArgs[0])).toEqual([
-        {
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "77",
-          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-        },
-        {
-          kind: "mailbox_appended",
-          lane: "system",
-          laneSeq: "77",
-          mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
-        },
-      ]);
+      expect(mocks.signalWithStart).toHaveBeenCalledTimes(1);
+      expect(mocks.signalWithStart.mock.calls[0]?.[1].signalArgs[0]).toEqual({
+        kind: "mailbox_appended",
+        lane: "system",
+        laneSeq: "77",
+        mailboxItemId: "mailbox_runtime.browser-vault-refresh-requested",
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -672,8 +690,8 @@ describe("hosted runtime Temporal signaling", () => {
       );
       expect(envelopes[1]?.eventId).not.toBe(envelopes[0]?.eventId);
       expect(envelopes.map((envelope) => envelope.occurredAt)).toEqual([
-        "2026-05-28T08:15:00.000Z",
-        "2026-05-28T08:15:00.000Z",
+        "1970-01-01T00:00:00.000Z",
+        "1970-01-01T00:00:00.000Z",
       ]);
     } finally {
       vi.useRealTimers();

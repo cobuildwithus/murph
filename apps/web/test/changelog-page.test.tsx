@@ -60,12 +60,13 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, wearable recovery, reminders, and web search",
+      "Starter access, patterns, wearable recovery, reminders, cards, and web search",
     );
     expect(markup).toContain(
       "Wearable sync can recover without waking the assistant",
     );
     expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Completed workout rows keep their checkmark");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(

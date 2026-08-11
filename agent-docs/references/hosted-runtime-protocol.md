@@ -2303,6 +2303,14 @@ refresh sweeps just because a workspace has no replica yet. Foreground work may
 schedule refresh as ordinary runtime work, but workspace snapshot checkpoints
 write only the workspace snapshot ref; they do not publish browser-vault
 replicas.
+The browser refresh control identity is stable for one workspace version.
+Repeated browser polls reuse the durable mailbox row and do not signal Temporal
+again. A later workspace checkpoint creates the next refresh identity. The
+existing scheduled mailbox handoff sweep re-signals an unconsumed browser
+refresh row when its first Temporal signal failed. If a workspace checkpoint
+creates another browser-only wake before the requested refresh finishes, the
+runtime finishes or terminally defers that refresh before it imports the later
+request. Conversation and other foreground work still preempt refresh work.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a
