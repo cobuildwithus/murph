@@ -64,10 +64,10 @@ Updated: 2026-08-10
   reliable.
 - Optimize the measured multi-megabyte image path before considering secondary
   bundle or render work.
-- Keep the authentication runtime out of the initial bundle and idle task queue;
-  load it on the existing pointer/focus preparation path while preserving each
-  open dialog session, retrying transient chunk failures, and reusing the shared
-  runtime after it is ready.
+- Keep the authentication runtime out of the initial bundle, then prepare it
+  automatically during browser idle time while preserving each open dialog
+  session, retrying transient chunk failures, and reusing the shared runtime
+  after it is ready.
 - Fix the exact automated contrast failures found on the production homepage;
   do not otherwise change the warm research-library palette.
 
@@ -84,11 +84,11 @@ Updated: 2026-08-10
 - Seven 128-by-128 AVIF derivatives total about 34 KiB on disk. Production-
   browser page loads requested 10-18 KiB of avatar data and made no request for
   the replaced homepage PNG/JPEG URLs.
-- The homepage authentication runtime stays unloaded after five idle seconds
-  and starts loading on the existing pointer/focus intent path. An auth dialog
-  opened before that load finishes remains on the standalone owner for its
-  whole session; after close, the ready shared runtime is adopted. A transient
-  import failure is contained and retried on later intent.
+- The homepage authentication runtime stays out of the initial bundle and
+  starts loading automatically during browser idle time. An auth dialog opened
+  before that load finishes remains on the standalone owner for its whole
+  session; after close, the ready shared runtime is adopted. A transient
+  background import failure is contained and retried on later intent.
 - The hero auto-scroll now runs after paint without reading `scrollHeight` in
   its write path, with a regression assertion for the maximum scroll target.
 - Axe color-contrast checks reported zero violations at both 1440px desktop and

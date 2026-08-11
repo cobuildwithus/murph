@@ -171,7 +171,7 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 3,
         title: "The homepage starts lighter",
         summary:
-          "The public homepage now uses compact avatar images and waits for sign-in intent before loading the secure sign-in code.",
+          "The public homepage now uses compact avatar images while continuing to prepare secure sign-in automatically in the background.",
         details:
           "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
         relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],

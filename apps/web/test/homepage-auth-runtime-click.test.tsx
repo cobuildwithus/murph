@@ -77,7 +77,7 @@ afterEach(() => {
   mocks.authDialogProps = null;
 });
 
-test("a homepage click before idle opens immediately and starts the shared runtime", async () => {
+test("a homepage click before background warm-up opens immediately and starts the shared runtime", async () => {
   vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"

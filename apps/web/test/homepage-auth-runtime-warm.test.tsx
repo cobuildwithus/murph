@@ -114,7 +114,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-test("loads one shared Privy runtime on auth intent and reuses it on click", async () => {
+test("warms one shared Privy runtime in the background and reuses it on click", async () => {
   vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
@@ -142,17 +142,7 @@ test("loads one shared Privy runtime on auth intent and reuses it on click", asy
   expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(5_000);
-  });
-  await flushRuntimeLoad();
-
-  expect(mocks.runtimeModuleLoad).not.toHaveBeenCalled();
-  expect(mocks.runtimeMount).not.toHaveBeenCalled();
-
-  await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("pointerdown", { bubbles: true }),
-    );
+    await vi.advanceTimersByTimeAsync(1_200);
   });
   await flushRuntimeLoad();
 
@@ -203,7 +193,8 @@ test("leaves authenticated homepage children on the ordinary root auth owner", a
   expect(mocks.authDialogProps).toBeNull();
 });
 
-test("keeps a standalone auth session stable and retries a failed runtime load", async () => {
+test("keeps a standalone auth session stable and retries a failed background load", async () => {
+  vi.useFakeTimers();
   mocks.runtimeFailuresRemaining = 1;
   const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
@@ -224,11 +215,9 @@ test("keeps a standalone auth session stable and retries a failed runtime load",
   cleanupRender = rendered.cleanup;
 
   await act(async () => {
-    rendered.button.dispatchEvent(
-      new rendered.window.Event("pointerdown", { bubbles: true }),
-    );
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(1_200);
   });
+  await flushRuntimeLoad();
 
   expect(mocks.runtimeLoad).toHaveBeenCalledTimes(1);
   expect(mocks.runtimeMount).not.toHaveBeenCalled();
