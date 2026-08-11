@@ -2328,7 +2328,7 @@ test.each(SOURCE_DISCONNECT_FENCE_CODES)(
       job: toJobRecord(bloodPressure, 1),
     });
 
-    assert.equal(providerListRequests.count, 2);
+    assert.equal(providerListRequests.count, 1);
     assert.equal(requests.length, 1);
     assert.equal(importedSnapshots.length, 0);
     assert.equal(result.metadataPatch, undefined);
@@ -2379,6 +2379,11 @@ test.each(["error", "unavailable"] as const)(
       typeof continuation.payload?.historicalUnresolvedProviderRecordIdentitiesJson,
       "string",
     );
+    assert.equal(continuation.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+    assert.equal(
+      continuation.payload?.historicalWindowStart,
+      "2026-05-12T00:00:00.000Z",
+    );
 
     const { result: completedTraversal } = await executeImmediateBloodPressureContinuations({
       context: createJobContext({
@@ -2388,21 +2393,174 @@ test.each(["error", "unavailable"] as const)(
       job: toJobRecord(continuation, status === "error" ? 86 : 87),
       provider,
     });
-    const anchoredReplay = findBloodPressureJob(completedTraversal.scheduledJobs ?? []);
-    assert.equal(completedTraversal.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
-    assert.equal(anchoredReplay.payload?.windowStart, "2026-05-12T00:00:00.000Z");
+    assert.equal(completedTraversal.scheduledJobs?.length ?? 0, 0);
+    assert.equal(
+      completedTraversal.metadataPatch?.[BP_HISTORY_COVERAGE_KEY],
+      "v1|omron",
+    );
+  },
+);
 
-    const { result: repaired } = await executeImmediateBloodPressureContinuations({
-      context: createJobContext({
+test.each(["error", "unavailable"] as const)(
+  "an empty final segment becoming %s after egress preserves the anchored history obligation",
+  async (status) => {
+    const records: Record<string, unknown>[] = [{
+      id: `bp-before-empty-final-${status}`,
+      provider_connection_id: "provider-omron-1",
+      sourceProviderSlug: "omron",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 120,
+      diastolic: 78,
+    }];
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({ bloodPressureRecords: records, requests });
+    const executor = requireValue(provider.jobExecutor);
+    const scheduled = createScheduledBloodPressureJob(provider);
+    const twoDayJob = toJobRecord({
+      ...scheduled,
+      payload: {
+        ...scheduled.payload,
+        historicalWindowStart: "2026-05-12T00:00:00.000Z",
+        windowEnd: "2026-05-14T00:00:00.000Z",
+        windowStart: "2026-05-12T00:00:00.000Z",
+      },
+    }, status === "error" ? 90 : 91);
+    twoDayJob.dedupeKey = `hosted-device-sync:${status === "error" ? "e" : "u"}`;
+    const admittedSource = createSourceSummary("omron");
+
+    const firstDay = await executor.executeJob(
+      createJobContext({
         importSnapshot: importWithRealJunctionNormalizer,
+        listConnectionSources: async () => [admittedSource],
+      }),
+      twoDayJob,
+    );
+    const finalDay = findBloodPressureJob(firstDay.scheduledJobs ?? []);
+    assert.equal(finalDay.payload?.historicalRecordsSeen, true);
+    assert.equal(finalDay.payload?.windowStart, "2026-05-13T00:00:00.000Z");
+
+    records.length = 0;
+    const requestsBeforeFinalDay = requests.length;
+    const unavailableSource = createSourceSummary("omron", NOW, status);
+    const unavailable = await executor.executeJob(
+      createJobContext({
+        listConnectionSources: async () =>
+          requests.length > requestsBeforeFinalDay
+            ? [unavailableSource]
+            : [admittedSource],
+      }),
+      toJobRecord(finalDay, status === "error" ? 92 : 93),
+    );
+    const continuation = findBloodPressureJob(unavailable.scheduledJobs ?? []);
+
+    assert.equal(unavailable.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(continuation.dedupeKey, twoDayJob.dedupeKey);
+    assert.equal(continuation.payload?.historicalRecordsSeen, true);
+    assert.equal(
+      continuation.payload?.historicalWindowStart,
+      "2026-05-12T00:00:00.000Z",
+    );
+    assert.equal(continuation.payload?.windowStart, "2026-05-13T00:00:00.000Z");
+
+    const repaired = await executor.executeJob(
+      createJobContext({
         listConnectionSources: async () => [admittedSource],
         now: "2026-06-12T12:00:00.000Z",
       }),
-      job: toJobRecord(anchoredReplay, status === "error" ? 88 : 89),
-      provider,
-    });
+      toJobRecord(continuation, status === "error" ? 94 : 95),
+    );
     assert.equal(repaired.scheduledJobs?.length ?? 0, 0);
     assert.equal(repaired.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], "v1|omron");
+  },
+);
+
+test.each(SOURCE_DISCONNECT_FENCE_CODES)(
+  "an empty final segment observes a post-fetch %s fence without publishing coverage",
+  async (lastErrorCode) => {
+    const records: Record<string, unknown>[] = [{
+      id: `bp-before-empty-final-${lastErrorCode}`,
+      provider_connection_id: "provider-omron-1",
+      sourceProviderSlug: "omron",
+      timestamp: "2026-05-12T08:30:00.000Z",
+      systolic: 120,
+      diastolic: 78,
+    }];
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({ bloodPressureRecords: records, requests });
+    const executor = requireValue(provider.jobExecutor);
+    const scheduled = createScheduledBloodPressureJob(provider);
+    const twoDayJob = toJobRecord({
+      ...scheduled,
+      payload: {
+        ...scheduled.payload,
+        historicalWindowStart: "2026-05-12T00:00:00.000Z",
+        windowEnd: "2026-05-14T00:00:00.000Z",
+        windowStart: "2026-05-12T00:00:00.000Z",
+      },
+    }, 96);
+    const admittedSource = createSourceSummary("omron");
+    const firstDay = await executor.executeJob(
+      createJobContext({
+        importSnapshot: importWithRealJunctionNormalizer,
+        listConnectionSources: async () => [admittedSource],
+      }),
+      twoDayJob,
+    );
+    const finalDay = findBloodPressureJob(firstDay.scheduledJobs ?? []);
+
+    records.length = 0;
+    const requestsBeforeFinalDay = requests.length;
+    const fencedSource = createSourceSummary("omron");
+    fencedSource.lastErrorCode = lastErrorCode;
+    const fenced = await executor.executeJob(
+      createJobContext({
+        listConnectionSources: async () =>
+          requests.length > requestsBeforeFinalDay
+            ? [fencedSource]
+            : [admittedSource],
+      }),
+      toJobRecord(finalDay, 97),
+    );
+
+    assert.equal(fenced.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(fenced.scheduledJobs, undefined);
+  },
+);
+
+test.each(["error", "unavailable"] as const)(
+  "a first empty segment becoming %s after egress leaves coverage for scheduler recreation",
+  async (status) => {
+    const requests: TimeseriesRequest[] = [];
+    const provider = createProvider({ bloodPressureRecords: [], requests });
+    const scheduled = createScheduledBloodPressureJob(provider);
+    const singleDayJob = toJobRecord({
+      ...scheduled,
+      payload: {
+        ...scheduled.payload,
+        historicalWindowStart: "2026-05-12T00:00:00.000Z",
+        windowEnd: "2026-05-13T00:00:00.000Z",
+        windowStart: "2026-05-12T00:00:00.000Z",
+      },
+    }, status === "error" ? 98 : 99);
+    const admittedSource = createSourceSummary("omron");
+    const unavailableSource = createSourceSummary("omron", NOW, status);
+    const result = await requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        listConnectionSources: async () =>
+          requests.length > 0 ? [unavailableSource] : [admittedSource],
+      }),
+      singleDayJob,
+    );
+
+    assert.equal(requests.length, 1);
+    assert.equal(result.metadataPatch?.[BP_HISTORY_COVERAGE_KEY], undefined);
+    assert.equal(result.scheduledJobs, undefined);
+    const recreated = createScheduledBloodPressureJob(provider);
+    assert.equal(recreated.dedupeKey, scheduled.dedupeKey);
+    assert.equal(
+      recreated.payload?.historicalWindowStart,
+      scheduled.payload?.historicalWindowStart,
+    );
   },
 );
 
