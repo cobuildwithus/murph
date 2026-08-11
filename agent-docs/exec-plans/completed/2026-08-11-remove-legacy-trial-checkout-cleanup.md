@@ -1,6 +1,6 @@
 # remove-legacy-trial-checkout-cleanup
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -48,12 +48,12 @@ Updated: 2026-08-11
 
 ## Tasks
 
-1. Obtain and inspect a ReviewGPT-authored patch artifact.
-2. Integrate the scoped deletion and update directly affected durable docs.
-3. Run focused tests, typecheck, static checks, and parent diff/privacy review.
-4. Commit and push a candidate, open the PR with its full intent contract, and
-   run preliminary specialists plus final ReviewGPT round 1 on the exact head.
-5. Resolve findings, require green exact-head CI, archive this plan in the final
+1. [x] Obtain and inspect a ReviewGPT-authored patch artifact.
+2. [x] Integrate the scoped deletion and update directly affected durable docs.
+3. [x] Run focused tests, typecheck, static checks, and parent diff/privacy review.
+4. [x] Commit and push a candidate, open the PR with its full intent contract, and
+   run preliminary specialists plus the final ReviewGPT gate on the exact head.
+5. [x] Resolve findings, require green exact-head CI, archive this plan in the final
    task commit, and prove current-base mergeability without merging.
 
 ## Progress
@@ -62,10 +62,16 @@ Updated: 2026-08-11
   were inspected, privacy-scanned, apply-checked, and integrated deliberately.
 - Durable Starter and Web documentation now distinguishes the removed checkout
   owner from retained event, Family, and account-deletion guards.
-- Focused billing/cleanup tests, Web typecheck, targeted ESLint, docs drift, and
-  diff/privacy checks pass.
-- Next: publish the candidate PR and run exact-head specialist, final-review,
-  CI, and merge-tree gates.
+- Focused billing/cleanup tests pass 132 tests; Web typecheck, targeted ESLint,
+  docs drift, and diff/privacy checks pass.
+- The first specialist pass found one test-only gap in service-level proof for
+  a persisted subscription. Its inspected coverage patch was accepted, and the
+  corrected-head specialist pass returned PASS with no findings.
+- Final ReviewGPT full-snapshot review returned PASS with no findings on the
+  corrected pushed head. All exact-head PR checks pass, including the hosted
+  Stripe boundary and repository-wide assistant coverage shards.
+- The pull request remains unmerged. Final plan archival and current-base
+  merge-tree proof complete the handoff.
 
 ## Decisions
 
@@ -73,6 +79,8 @@ Updated: 2026-08-11
   removal gate for synchronous checkout cleanup; retain the independently used
   event and account-deletion compatibility helpers.
 - Add no replacement state owner or background process.
+- Preserve the initial reviewed-head provenance and record the isolated
+  test-only remediation as a separate current-head change shape.
 
 ## Verification
 
@@ -83,3 +91,8 @@ Updated: 2026-08-11
 - Expected outcomes: zero references to the removed checkout helper, all focused
   proof passing, ReviewGPT specialist/final PASS, green required CI, and a clean
   merge-tree.
+- Observed outcomes before plan archival: zero references remain; 132 focused
+  tests, Web typecheck, exact-head CI, corrected-head specialist review, and
+  final full-snapshot review all pass. The merge-tree proof is rerun after the
+  doc-only plan-closure commit so it covers the final pushed head.
+Completed: 2026-08-11
