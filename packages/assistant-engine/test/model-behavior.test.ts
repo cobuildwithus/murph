@@ -949,7 +949,7 @@ describe('assistant execution prompt contract', () => {
       '`unchanged` means no save',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never guess voice, model, provider, or reasoning ids',
+      'Read tool schemas; never guess ids',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'use `/settings?voice=true` only for voice or sound changes',
@@ -958,7 +958,10 @@ describe('assistant execution prompt contract', () => {
       'Use `/settings` for tone, model, provider, or reasoning changes',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'never use a same-turn voice demo as activation proof',
+      'same-turn demos do not activate it',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Voice memos keep the running-turn voice unless this user names another',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'explicit user-requested model, core-reply provider, or reasoning changes',
