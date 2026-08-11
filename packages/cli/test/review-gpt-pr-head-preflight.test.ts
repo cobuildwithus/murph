@@ -143,6 +143,17 @@ describe('ReviewGPT PR context guard', () => {
     expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
   })
 
+  it('rejects mixed preliminary and final presets before invoking ReviewGPT', () => {
+    const harness = createHarness()
+    const result = runHarness(harness, ['completion-specialists,pr-review'])
+
+    expect(result.status).toBe(64)
+    expect(result.stderr).toContain(
+      'preliminary and final PR ReviewGPT presets cannot run together',
+    )
+    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
   it('rejects dirty or stale PR heads before invoking ReviewGPT', () => {
     const dirtyHarness = createHarness()
     writeFileSync(path.join(dirtyHarness.harnessRoot, 'untracked.txt'), 'dirty\n', 'utf8')
