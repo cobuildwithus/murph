@@ -879,8 +879,8 @@ export function EnvironmentVoiceRefreshNotice({
           Updating your environment report
         </AlertTitle>
         <AlertDescription>
-          Your recording is saved. This page is waiting for the newer private
-          report.
+          Murph finished processing your recording. This page is waiting for
+          the newer private report.
         </AlertDescription>
       </Alert>
     );
@@ -912,10 +912,7 @@ export function EnvironmentVoiceRefreshNotice({
       </AlertTitle>
       <AlertDescription>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <span>
-            Your recording is still safe. Check again without recording it
-            another time.
-          </span>
+          <span>You do not need to record it again. Check again to continue.</span>
           <Button size="sm" variant="outline" onClick={onCheckAgain}>
             Check again
           </Button>

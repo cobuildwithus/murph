@@ -141,6 +141,10 @@ test("requests a runtime refresh after voice processing and waits for a differen
       rendered.window.document.body.textContent ?? "",
       /Updating your environment report/,
     );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Murph finished processing your recording/,
+    );
     assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",
       /The report was not updated/,
@@ -315,6 +319,10 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
       rendered.window.document.body.textContent ?? "",
       /Murph is taking longer than usual/,
     );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /You do not need to record it again/,
+    );
     const delayedRecordingTrigger = Array.from(
       rendered.window.document.querySelectorAll("button"),
     ).find((button) => button.textContent?.includes("Processing recording"));
@@ -359,6 +367,10 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
     assert.match(
       rendered.window.document.body.textContent ?? "",
       /Murph is taking longer than usual/,
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /You do not need to record it again/,
     );
 
     const patchCallsBeforeReplicaRetry = fetchMock.mock.calls.filter(
