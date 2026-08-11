@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, health history, referrals, reminders, cards, voices, search, and a lighter homepage",
+      "Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
     );
     expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).toContain("Managed OpenAI web search works again");
