@@ -1,6 +1,6 @@
 # Codex hosted egress route conformance
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -116,17 +116,38 @@ Updated: 2026-08-10
   candidates, while the version-derived upstream tag, exact commit, and exact
   `codex-rs/codex-api/src` tree form the authoritative source identity. Native
   scanning is explicitly corroborating rather than a completeness claim.
+- Final ReviewGPT round 3 passed with no qualifying finding. Its four PR-body
+  discrepancies were accepted as documentation corrections: the required
+  source verifier is CI tooling, performs one pinned public Git fetch, and
+  corroborates unique enabled route pathnames rather than distinct source
+  records. No code or production behavior changed for those corrections.
 
 ## Verification
 
-- Passed focused Codex conformance: 8 tests, including a real pinned App Server
+- Passed focused Codex conformance: 9 tests, including a real pinned App Server
   responses/search/responses turn through `hostedRunnerIntercept`.
-- Passed focused adjacent conformance/interceptor suite: 3 files, 253 tests.
+- Passed focused adjacent conformance/interceptor suite: 3 files, 256 tests.
 - Passed `@murphai/cloudflare-runner` typecheck.
-- Passed the corrected complete Cloudflare node suite: 141 files, 2,384 tests passed and 2
-  skipped.
-- Passed `pnpm test:diff`, including the affected Cloudflare node and Workers
-  suites plus repository architecture, boundary, dependency, and log guards.
+- Passed the final complete Cloudflare suite: 141 Node files with 2,389 tests
+  passed and 2 skipped, plus 5 Worker files with 10 tests passed.
+- Passed the repository-tool suite: 34 files with 525 tests.
+- Passed the workspace typecheck and repository architecture, boundary,
+  dependency, provider-request, and log guards. The clean pushed-worktree
+  `pnpm test:diff` invocation selected its documented workspace-typecheck
+  fallback; the explicit Cloudflare and repo-tool suites cover the changed
+  verification owners.
+- Passed `pnpm --dir apps/cloudflare verify:codex-upstream-source` locally and
+  in required Ubuntu CI, proving the pinned tag, exact commit, exact API source
+  subtree, and 10 declared source paths.
+- Passed independent exact Linux x64 artifact proof: 19 candidates, all
+  classified.
 - Preliminary specialist and final ReviewGPT round 1 completed with accepted
   findings; corrections are implemented and locally verified.
-- Pending corrected exact-head CI, final ReviewGPT round 2, and plan closure.
+- Final ReviewGPT round 2's retrospective finding was accepted and redesigned;
+  final round 3 returned `ROUND_OUTCOME: PASS` with no qualifying findings.
+- All required GitHub checks passed on reviewed code candidate
+  `425730ab8fda698d7d1e7628d4ff6dba41f4358d`.
+- Merged the then-current `origin/main` after review without conflicts or task
+  behavior changes; the focused 256-test suite and upstream source verification
+  passed again before plan closure.
+Completed: 2026-08-10
