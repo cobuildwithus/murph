@@ -177,6 +177,7 @@ import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
 import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
+import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
@@ -636,6 +637,15 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Dashboard primary navigation">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Production dashboard destinations in their standard visual hierarchy.
+          </p>
+          <DashboardSidebarStudy />
+        </Section>
 
         <Separator />
 
