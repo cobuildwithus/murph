@@ -29,7 +29,6 @@ export interface CodexAppServerPreparedImageInput {
   path: string
 }
 
-const CODEX_ORIGINAL_IMAGE_DETAIL_MODEL = 'gpt-5.6-terra'
 const CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS = new Set<string>([
   HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
@@ -48,7 +47,6 @@ export function extractCodexAppServerUserMessageImages(
 
 export function normalizeCodexAppServerImageDetails(input: {
   images?: readonly CodexAppServerImageInput[] | null
-  model?: string | null
   modelProvider?: string | null
   turnKind: 'initial' | 'steer'
 }): readonly CodexAppServerImageInput[] | undefined {
@@ -60,7 +58,6 @@ export function normalizeCodexAppServerImageDetails(input: {
   const originalDetailSupported =
     input.turnKind === 'initial' &&
     images.length === 1 &&
-    normalizeNullableString(input.model) === CODEX_ORIGINAL_IMAGE_DETAIL_MODEL &&
     CODEX_ORIGINAL_IMAGE_DETAIL_PROVIDER_IDS.has(
       normalizeNullableString(input.modelProvider) ?? '',
     )

@@ -1077,9 +1077,21 @@ describe('assistant codex runtime', () => {
   it.each([
     {
       expectedImageDetail: 'original',
-      model: 'gpt-5.6-terra',
+      model: 'gpt-5.6-luna',
       modelProvider: 'openai',
       providerRequestOrdinal: 0,
+    },
+    {
+      expectedImageDetail: 'original',
+      model: 'gpt-5.6-terra',
+      modelProvider: 'openai',
+      providerRequestOrdinal: 1,
+    },
+    {
+      expectedImageDetail: 'original',
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      providerRequestOrdinal: 2,
     },
     {
       expectedImageDetail: 'high',

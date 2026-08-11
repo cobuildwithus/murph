@@ -127,7 +127,7 @@ describe('assistant codex image helpers', () => {
     })
   })
 
-  it('keeps original detail only for one initial image on a supported managed target', () => {
+  it('keeps original detail only for one initial image on a supported OpenAI route', () => {
     const image = {
       bytes: Buffer.from([0x01, 0x02, 0x03]),
       detail: 'original' as const,
@@ -137,7 +137,6 @@ describe('assistant codex image helpers', () => {
     expect(
       normalizeCodexAppServerImageDetails({
         images: [image],
-        model: 'gpt-5.6-terra',
         modelProvider: 'hosted-openai',
         turnKind: 'initial',
       }),
@@ -151,34 +150,29 @@ describe('assistant codex image helpers', () => {
         { bytes: Buffer.from([0x01]), detail: 'original' as const },
         { bytes: Buffer.from([0x02]), detail: 'original' as const },
       ],
-      model: 'gpt-5.6-terra',
       modelProvider: 'hosted-openai',
       turnKind: 'initial' as const,
     },
     {
       name: 'live steer',
       images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
-      model: 'gpt-5.6-terra',
       modelProvider: 'hosted-openai',
       turnKind: 'steer' as const,
     },
     {
       name: 'custom inference',
       images: [{ bytes: Buffer.from([0x01]), detail: 'original' as const }],
-      model: 'member-model',
       modelProvider: 'hosted-custom-inference',
       turnKind: 'initial' as const,
     },
   ])('downgrades original detail for a $name input', ({
     images,
-    model,
     modelProvider,
     turnKind,
   }) => {
     expect(
       normalizeCodexAppServerImageDetails({
         images,
-        model,
         modelProvider,
         turnKind,
       }),
