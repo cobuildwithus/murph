@@ -465,8 +465,20 @@ make that latency shortcut replay-safe; generic notifications still wait for
 the idle checkpoint. A referral celebration recomputes its current-model
 capacity label and receives only a server-resolved tone, Humor, and Unhinged
 band, never transcript history. The existing minute recovery pass
-re-signals the exact oldest unconsumed celebration mailbox items after a failed
-Temporal signal, so mailbox state remains the only durable wake owner.
+re-signals the exact oldest unconsumed celebration mailbox pointers after a
+failed Temporal signal, so mailbox state remains the only durable wake owner;
+Web does not decrypt or replace their payloads. An authority-less legacy direct
+Linq referral wake may already be persisted behind the runtime's advanced
+import watermark. The local system-mailbox boundary therefore owns the only
+compatibility action: for the exact referral event/dedupe/queue-only/required-
+send/direct-explicit shape, it asks the existing signed external-route owner to
+assert the frozen member, Linq channel, directness, and target before model
+work. Success carries authority in memory through the unchanged audience guard
+and provider-entry recheck, with no home-route fallback. A definitive stale
+route becomes a typed terminal no-send for the same pending item so lane order
+advances; authority-owner unavailability keeps the ordinary same-item retry.
+There is no payload rewrite, replacement append, cursor rewind, migration, or
+second reconciliation owner.
 
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
@@ -1177,8 +1189,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.
-  The Web-owned reply-latency monitor remains a separate Resend-email incident
-  owner and never falls back to this Linq path.
+  The Web-owned reply-latency and durable mailbox-progress monitors remain
+  separate Resend-email incident owners and never fall back to this Linq path.
+  They share one generic compare-and-set email lifecycle and the existing
+  `HostedLinqAlert` storage owner, but retain independent singleton rows so one
+  active latency incident cannot suppress a later error-code-independent
+  progress stall. The progress read is observability only: it neither advances
+  mailbox state nor signals Temporal or Cloudflare.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
   `preview` target is a separate trust boundary, not a mode inside production:
