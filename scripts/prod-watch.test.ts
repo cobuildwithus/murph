@@ -3486,7 +3486,7 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("export HOME=~;");
     expect(rendered).toContain("node_modules/tsx/dist/cli.mjs");
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
-    expect(rendered).toContain("export CODEX_HOME=&quot;$HOME/.codex-5&quot;");
+    expect(rendered).toContain("export CODEX_HOME=&quot;$HOME/.codex-6&quot;");
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_PROFILE=&quot;prod-watch&quot;");
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_BIN=&quot;$HOME/tools/codex&quot;");
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_SHA256=&quot;");
