@@ -179,6 +179,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
     name: "device-connect",
   },
   {
+    dedicatedVitestProcess: true,
     file: "apps/cloudflare/test/hosted-local-web-browser-smoke-e2e.test.ts",
     manualOnly: true,
     name: "hosted-web-browser-smoke",
