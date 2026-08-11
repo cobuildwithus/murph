@@ -1064,13 +1064,14 @@ Last verified: 2026-08-10
   work remains checkpoint-gated. Generic notifications or unrelated pending
   outbox work cannot hitchhike. Fresh conversation input retains priority.
   Referral recovery also selects each lane containing a live pending celebration
-  and re-signals only its first live item after the same effective consumption
-  cursor used by runtime projection. That item may be an earlier non-referral
-  predecessor. This preserves ordered recovery after lost post-commit signals
-  while Temporal's existing no-progress backoff coalesces repeated recovery
-  passes, without another queue or state machine. Web must not rewrite an
-  encrypted payload after the runtime may have imported it and advanced its
-  watermark. For the exact authority-less direct-Linq
+  and re-signals only its first live item above the canonical lane-consumption
+  cursor. The shared live-row predicates naturally skip retention-old or expired
+  prefixes, and the selected item may be an earlier non-referral predecessor.
+  This preserves ordered recovery after lost post-commit signals while
+  Temporal's existing no-progress backoff coalesces repeated recovery passes,
+  without another queue or state machine. Web must not rewrite an encrypted
+  payload after the runtime may have imported it and advanced its watermark. For
+  the exact authority-less direct-Linq
   usage-referral shape, the local system-mailbox owner reasserts the frozen
   member/channel/direct target before model work, adds proof only in memory on
   success, terminally records a definitive stale route without sending, and

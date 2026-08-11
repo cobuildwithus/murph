@@ -39,22 +39,29 @@ describe.skipIf(!runPostgresProof)(
       await prisma?.$disconnect();
     });
 
-    it("selects one live lane head before a pending referral and skips a retired prefix", async () => {
+    it("selects one live lane head across predecessor, retention, and advanced-cursor states", async () => {
       const client = requirePrisma(prisma);
       const now = new Date("2026-08-11T04:00:00.000Z");
       const liveCreatedAt = new Date(now.getTime() - 60_000);
       const laterLiveCreatedAt = new Date(now.getTime() - 30_000);
+      const latestLiveCreatedAt = new Date(now.getTime() - 20_000);
       const retiredCreatedAt = new Date(
         now.getTime() - 15 * 24 * 60 * 60_000,
       );
       const blockedMemberId = createId("member_referral_blocked_head");
       const retainedFloorMemberId = createId("member_referral_retained_floor");
-      memberIds.push(blockedMemberId, retainedFloorMemberId);
+      const advancedCursorMemberId = createId("member_referral_advanced_cursor");
+      memberIds.push(
+        blockedMemberId,
+        retainedFloorMemberId,
+        advancedCursorMemberId,
+      );
 
       await client.hostedMember.createMany({
         data: [
           { billingStatus: "active", id: blockedMemberId },
           { billingStatus: "active", id: retainedFloorMemberId },
+          { billingStatus: "active", id: advancedCursorMemberId },
         ],
       });
       await client.hostedMailboxLaneCounter.createMany({
@@ -71,6 +78,12 @@ describe.skipIf(!runPostgresProof)(
             nextSeq: 3n,
             userId: retainedFloorMemberId,
           },
+          {
+            consumedSeq: 1n,
+            lane: "system",
+            nextSeq: 4n,
+            userId: advancedCursorMemberId,
+          },
         ],
       });
 
@@ -78,6 +91,9 @@ describe.skipIf(!runPostgresProof)(
       const blockedReferralId = createId("mailbox_blocked_referral");
       const retiredPrefixId = createId("mailbox_retired_prefix");
       const retainedFloorReferralId = createId("mailbox_retained_floor_referral");
+      const consumedLivePrefixId = createId("mailbox_consumed_live_prefix");
+      const advancedCursorHeadId = createId("mailbox_advanced_cursor_head");
+      const advancedCursorReferralId = createId("mailbox_advanced_cursor_referral");
       await client.hostedMailboxItem.createMany({
         data: [
           mailboxItem({
@@ -112,6 +128,30 @@ describe.skipIf(!runPostgresProof)(
             laneSeq: 2n,
             userId: retainedFloorMemberId,
           }),
+          mailboxItem({
+            createdAt: liveCreatedAt,
+            dedupeKey: createId("runtime.consumed-prefix"),
+            id: consumedLivePrefixId,
+            kind: "runtime.maintenance-requested",
+            laneSeq: 1n,
+            userId: advancedCursorMemberId,
+          }),
+          mailboxItem({
+            createdAt: latestLiveCreatedAt,
+            dedupeKey: createId("runtime.next-head"),
+            id: advancedCursorHeadId,
+            kind: "runtime.browser-vault-refresh-requested",
+            laneSeq: 2n,
+            userId: advancedCursorMemberId,
+          }),
+          mailboxItem({
+            createdAt: new Date(now.getTime() - 10_000),
+            dedupeKey:
+              `assistant.notification.requested:usage-referral-reward:${createId("advanced")}`,
+            id: advancedCursorReferralId,
+            laneSeq: 3n,
+            userId: advancedCursorMemberId,
+          }),
         ],
       });
 
@@ -130,6 +170,12 @@ describe.skipIf(!runPostgresProof)(
           lane: "system",
           laneSeq: 2n,
           userId: retainedFloorMemberId,
+        },
+        {
+          id: advancedCursorHeadId,
+          lane: "system",
+          laneSeq: 2n,
+          userId: advancedCursorMemberId,
         },
       ]);
     });

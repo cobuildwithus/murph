@@ -182,25 +182,6 @@ describe("hosted usage-referral recovery", () => {
       referralId: "referral_failed",
     });
     expect(findMailboxItems).toHaveBeenCalledOnce();
-    const pendingMailboxQuery = findMailboxItems.mock.calls[0]?.[0];
-    expect(pendingMailboxQuery?.strings.join(" ")).toContain(
-      "GREATEST(",
-    );
-    expect(pendingMailboxQuery?.strings.join(" ")).toContain(
-      "referral.lane_seq > lane_cursor.consumed_seq",
-    );
-    expect(pendingMailboxQuery?.strings.join(" ")).toContain(
-      "item.lane_seq > pending_referral_lane.consumed_seq",
-    );
-    expect(pendingMailboxQuery?.values.filter(
-      (value: unknown): value is string => typeof value === "string",
-    )).toEqual([
-      "assistant.notification.requested:usage-referral-reward:%",
-      "assistant.notification.requested:usage-referral-reward:%",
-    ]);
-    expect(pendingMailboxQuery?.values.at(-1)).toBe(
-      HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
-    );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
       1,
       {

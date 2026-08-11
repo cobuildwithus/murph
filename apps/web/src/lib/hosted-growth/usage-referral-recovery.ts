@@ -169,55 +169,22 @@ export async function readHostedUsageReferralRecoveryHeads(input: {
   const limit = input.limit ?? HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE;
 
   return input.prisma.$queryRaw<HostedUsageReferralRecoveryHead[]>(Prisma.sql`
-    WITH referral_lane AS (
-      SELECT DISTINCT item.user_id, item.lane
-      FROM hosted_mailbox_item AS item
-      WHERE item.dedupe_key LIKE
-          ${`${HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX}%`}
-        AND item.kind = 'assistant.notification.requested'
-        AND item.consumed_at IS NULL
-        AND item.created_at > ${retainedAt}
-        AND (item.expires_at IS NULL OR item.expires_at > ${now})
-    ),
-    lane_cursor AS (
-      SELECT
-        referral_lane.user_id,
-        referral_lane.lane,
-        GREATEST(
-          COALESCE(counter.consumed_seq, 0::bigint),
-          COALESCE(oldest_live.lane_seq - 1::bigint, 0::bigint)
-        ) AS consumed_seq
-      FROM referral_lane
+    WITH pending_referral_lane AS (
+      SELECT DISTINCT
+        referral.user_id,
+        referral.lane,
+        COALESCE(counter.consumed_seq, 0::bigint) AS consumed_seq
+      FROM hosted_mailbox_item AS referral
       LEFT JOIN hosted_mailbox_lane_counter AS counter
-        ON counter.user_id = referral_lane.user_id
-        AND counter.lane = referral_lane.lane
-      LEFT JOIN LATERAL (
-        SELECT item.lane_seq
-        FROM hosted_mailbox_item AS item
-        WHERE item.user_id = referral_lane.user_id
-          AND item.lane = referral_lane.lane
-          AND item.created_at > ${retainedAt}
-          AND (item.expires_at IS NULL OR item.expires_at > ${now})
-        ORDER BY item.lane_seq ASC
-        LIMIT 1
-      ) AS oldest_live ON TRUE
-    ),
-    pending_referral_lane AS (
-      SELECT lane_cursor.user_id, lane_cursor.lane, lane_cursor.consumed_seq
-      FROM lane_cursor
-      WHERE EXISTS (
-        SELECT 1
-        FROM hosted_mailbox_item AS referral
-        WHERE referral.user_id = lane_cursor.user_id
-          AND referral.lane = lane_cursor.lane
-          AND referral.lane_seq > lane_cursor.consumed_seq
-          AND referral.dedupe_key LIKE
-            ${`${HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX}%`}
-          AND referral.kind = 'assistant.notification.requested'
-          AND referral.consumed_at IS NULL
-          AND referral.created_at > ${retainedAt}
-          AND (referral.expires_at IS NULL OR referral.expires_at > ${now})
-      )
+        ON counter.user_id = referral.user_id
+        AND counter.lane = referral.lane
+      WHERE referral.dedupe_key LIKE
+          ${`${HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX}%`}
+        AND referral.kind = 'assistant.notification.requested'
+        AND referral.consumed_at IS NULL
+        AND referral.lane_seq > COALESCE(counter.consumed_seq, 0::bigint)
+        AND referral.created_at > ${retainedAt}
+        AND (referral.expires_at IS NULL OR referral.expires_at > ${now})
     )
     SELECT
       head.id,

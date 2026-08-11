@@ -333,9 +333,9 @@ failure semantics remain independent. Each bounded pass:
    awaiting their source celebration, or signup-link rewards awaiting their
    personal completion notice;
 4. selects up to 50 lanes containing a live pending referral notification and
-   re-signals only each lane's first live item after the runtime projection's
-   effective consumed cursor. That head may be an earlier non-referral item;
-   ordinary lane order remains authoritative.
+   re-signals only each lane's first live item above its canonical consumed
+   cursor. Live-row filtering skips retention-old or expired prefixes. That head
+   may be an earlier non-referral item; ordinary lane order remains authoritative.
 
 Referral notification producers carry the destination owner's validated
 external-route authority. A direct Linq source conversation remains an explicit
