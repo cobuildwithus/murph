@@ -140,18 +140,14 @@ const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
   'include_only = ["HOME", "PATH", "TMPDIR", "VAULT"]',
   '',
 ] as const
-
-function enableNetworkForScriptedPermissionShellProof(
-  profileLines: readonly string[],
-): readonly string[] {
-  // GitHub's restricted Linux runner cannot configure loopback inside Codex's
-  // network-disabled bubblewrap sandbox. These app-server cases exercise the
-  // profile's filesystem rules plus shell/environment preservation; the exact
-  // production network-deny TOML remains covered by assistant-permissions tests.
-  return profileLines.map((line) =>
-    line === 'enabled = false' ? 'enabled = true' : line,
-  )
-}
+// GitHub's restricted Linux runner cannot create the uid map required by
+// Codex's named-permission bubblewrap shell. Exact-profile startup still runs
+// there below; only the shell execution proof uses a capable host.
+const scriptedPermissionShellIt =
+  process.env.GITHUB_ACTIONS === 'true'
+    && process.env.RUNNER_OS === 'Linux'
+    ? it.skip
+    : it
 
 const GROUP_CHALLENGE_DEFINITION = {
   format: {
@@ -405,15 +401,78 @@ describe('real codex app-server with scripted provider', () => {
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
-  it('attests member-memory instructions while preserving the hosted vault shell and permitted write', {
+  it.each([
+    {
+      label: 'member-memory',
+      permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
+      profileLines:
+        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
+    },
+    {
+      label: 'onboarding read-only',
+      permissionProfile: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      profileLines: buildMurphMemberReadPermissionProfileTomlLines(),
+    },
+  ])('attests exact $label instructions while preserving shell availability', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ permissionProfile, profileLines }) => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines: [
+        ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
+        ...profileLines,
+      ],
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    const operatorHome = path.join(vaultRoot, 'operator-home')
+    await mkdir(operatorHome, { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'AGENTS.md'),
+      'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue({ text: 'RESTRICTED_PROFILE_START_OK' })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      configOverrides: [
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ],
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        HOME: operatorHome,
+        VAULT: vaultRoot,
+      },
+      ephemeral: true,
+      permissions: permissionProfile,
+      processLifetime: 'one-shot',
+      prompt: 'Reply exactly RESTRICTED_PROFILE_START_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_PROFILE_START_OK')
+    const diagnostics = scenario.stub.requestSummariesSinceBaseline()[0]
+      ?.providerRequestDiagnostics
+    expect(diagnostics).toMatchObject({
+      includesExecCommand: true,
+    })
+  })
+
+  scriptedPermissionShellIt('attests member-memory instructions while preserving the hosted vault shell and permitted write', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario({
       additionalTomlLines: [
         ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
-        ...enableNetworkForScriptedPermissionShellProof(
-          buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-        ),
+        ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
       ],
     })
     const vaultRoot = scenario.turnInput.workingDirectory
@@ -503,15 +562,13 @@ text(result.output);
     ).toContain('MEMORY_SHOW_OK\nMEMORY_UPSERT_OK')
   })
 
-  it('attests onboarding instructions while preserving reads and denying mutation', {
+  scriptedPermissionShellIt('attests onboarding instructions while preserving reads and denying mutation', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario({
       additionalTomlLines: [
         ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
-        ...enableNetworkForScriptedPermissionShellProof(
-          buildMurphMemberReadPermissionProfileTomlLines(),
-        ),
+        ...buildMurphMemberReadPermissionProfileTomlLines(),
       ],
     })
     const vaultRoot = scenario.turnInput.workingDirectory
