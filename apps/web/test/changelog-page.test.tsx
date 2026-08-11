@@ -62,6 +62,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(
       "Generated group photos, Starter, patterns, referrals, reminders, cards, voices, search, faster pages, clearer reports",
     );
+    expect(markup).toContain("Response cards stay compact in Messages");
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
     expect(markup).toContain("The homepage starts lighter");

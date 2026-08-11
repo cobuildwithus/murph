@@ -107,7 +107,7 @@ const WORKOUT_CARD: HostedAssistantResponseCard = {
   kind: "compact_table",
   version: 1,
   title: "Push day",
-  subtitle: "1 of 2 sets complete",
+  subtitle: null,
   footer: null,
   tracking: {
     kind: "workout",
