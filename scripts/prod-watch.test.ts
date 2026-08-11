@@ -2737,6 +2737,9 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_BIN=&quot;$HOME/tools/codex&quot;");
     expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_SHA256=&quot;");
     expect(rendered).toContain("unset NODE_ENV NODE_OPTIONS MURPH_PROD_WATCH_TEST_RUNTIME_ROOT");
+    expect(rendered).toContain("tracked_status=&quot;$(git status --porcelain=v1 --untracked-files=no)&quot;");
+    expect(rendered).toContain("test -z &quot;$tracked_status&quot;");
+    expect(rendered).not.toContain("test -z &quot;$(git status");
     expect(rendered).not.toContain("__CODEX_EXECUTABLE__");
     expect(rendered).not.toContain("__CODEX_SHA256__");
     expect(rendered).toContain("--provider-child");
@@ -2911,6 +2914,64 @@ describe("production-watch static safety contracts", () => {
       expect(snapshot.collectorFailures.some((failure) => failure.code === "helper_not_found"))
         .toBe(false);
       expect(existsSync(startupMarkerPath)).toBe(false);
+
+      const failClosedMarkerPath = path.join(schedulerHome, "fail-closed-marker");
+      const markerNodePath = path.join(helperRoot, "marker-node");
+      writeFileSync(markerNodePath, [
+        "#!/bin/sh",
+        ": > \"$TEST_FAIL_CLOSED_MARKER\"",
+        "exit 0",
+        "",
+      ].join("\n"), { mode: 0o755 });
+      writeFileSync(path.join(helperRoot, "git"), [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"rev-parse\" ] && [ \"$2\" = \"HEAD\" ]; then",
+        "  printf '%s\\n' \"$TEST_SCHEDULER_APPROVED_HEAD\"",
+        "  exit 0",
+        "fi",
+        "if [ \"$1\" = \"status\" ]; then",
+        "  exit 73",
+        "fi",
+        "exit 74",
+        "",
+      ].join("\n"), { mode: 0o755 });
+      const failClosedPlistPath = path.join(testRoot, "scheduler-fail-closed.plist");
+      writeFileSync(
+        failClosedPlistPath,
+        renderLaunchdPlistTemplate(
+          template,
+          checkoutRoot,
+          schedulerHome,
+          markerNodePath,
+          runtimeRoot,
+          approvedHead,
+          schedulerCodexPath,
+          createHash("sha256").update(readFileSync(schedulerCodexPath)).digest("hex"),
+        ),
+      );
+      const failClosedCommandResult = spawnSync(
+        "/usr/libexec/PlistBuddy",
+        ["-c", "Print :ProgramArguments:3", failClosedPlistPath],
+        { encoding: "utf8" },
+      );
+      expect(failClosedCommandResult.status).toBe(0);
+      const failClosedRun = spawnSync(
+        "/bin/zsh",
+        ["-f", "-c", failClosedCommandResult.stdout.trim()],
+        {
+          cwd: path.parse(checkoutRoot).root,
+          encoding: "utf8",
+          env: {
+            HOME: schedulerHome,
+            PATH: "/usr/bin:/bin",
+            TEST_FAIL_CLOSED_MARKER: failClosedMarkerPath,
+            TEST_SCHEDULER_APPROVED_HEAD: approvedHead,
+          },
+          timeout: 5_000,
+        },
+      );
+      expect(failClosedRun.status).not.toBe(0);
+      expect(existsSync(failClosedMarkerPath)).toBe(false);
     },
   );
 

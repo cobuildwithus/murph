@@ -4107,7 +4107,9 @@ async function sha256File(targetPath: string): Promise<string> {
 
 async function resolveTrustedCodexExecutable(): Promise<string> {
   const testCandidate = testOverrides?.codexBin;
-  const approvedCandidate = approvedCodexExecutablePath(os.homedir());
+  const approvedCandidate = testCandidate === undefined
+    ? approvedCodexExecutablePath(os.homedir())
+    : testCandidate;
   const configured = process.env[CODEX_BIN_ENV];
   const candidate = testCandidate ?? configured ?? approvedCandidate;
   if (!path.isAbsolute(candidate) || candidate.includes("\0")) {
