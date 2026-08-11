@@ -2102,6 +2102,57 @@ test("reports empty, insufficient, and warning-rich semantic series states", () 
   );
 });
 
+test("uses canonical recording order for a non-sleep metric before opaque identity", () => {
+  const olderFact = metricPoint({
+    effectiveDate: "2026-04-29",
+    id: "metric-point:opaque-sort-last",
+    metricKey: "body-weight",
+    observedAt: "2026-04-29T12:00:00.000Z",
+    recordedAt: "2026-04-30T08:00:00.000Z",
+    recordId: "evt_older_weight",
+    sourceKind: "observation",
+    unit: "kg",
+    value: 80,
+  });
+  const newerFact = metricPoint({
+    effectiveDate: "2026-04-29",
+    id: "metric-point:opaque-sort-first",
+    metricKey: "body-weight",
+    observedAt: "2026-04-29T12:00:00.000Z",
+    recordedAt: "2026-04-30T09:00:00.000Z",
+    recordId: "evt_newer_weight",
+    sourceKind: "observation",
+    unit: "kg",
+    value: 81,
+  });
+  const unsupportedNewestFact = metricPoint({
+    effectiveDate: "2026-04-29",
+    id: "metric-point:opaque-invalid-newest",
+    metricKey: "body-weight",
+    observedAt: "2026-04-29T12:00:00.000Z",
+    recordedAt: "2026-04-30T10:00:00.000Z",
+    recordId: "evt_unsupported_weight",
+    sourceKind: "observation",
+    unit: "seconds",
+    value: 5_400,
+  });
+
+  const selected = selectMetricSeries({
+    duplicatePolicy: "selection-policy",
+    metricKey: "body-weight",
+    points: [olderFact, newerFact, unsupportedNewestFact],
+  });
+
+  assert.deepEqual(selected.rows.map((row) => row.pointIds), [[newerFact.id]]);
+  assert.ok(selected.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"));
+  const selectedValue = selectMetricValue({
+    metricKey: "body-weight",
+    points: [olderFact, newerFact, unsupportedNewestFact],
+  });
+  assert.equal(selectedValue.value, 81);
+  assert.equal(selectedValue.point?.id, newerFact.id);
+});
+
 test("formats text-only metric values and missing numeric values", () => {
   const textOnly = {
     ...metricPoint({
@@ -9470,6 +9521,7 @@ function metricPoint(input: {
   id: string;
   metricKey?: string;
   observedAt: string;
+  recordedAt?: string | null;
   recordId: string;
   sourceKind: MetricPoint["source"]["kind"];
   unit?: string | null;
@@ -9502,7 +9554,7 @@ function metricPoint(input: {
       rawRefs: [],
       sourceLabel: "Fixture",
     },
-    recordedAt: null,
+    recordedAt: input.recordedAt ?? null,
     reportedAt: null,
     schemaVersion: METRIC_POINT_SCHEMA_VERSION,
     source: {
