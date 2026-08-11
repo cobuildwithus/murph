@@ -185,12 +185,14 @@ Last verified: 2026-08-11
   draft. The parent applies implementation patches, closes plans, commits,
   pushes, publishes the immutable review baseline, runs the canonical
   preliminary and final ReviewGPT gates from a trusted parent checkout, and
-  observes CI. A review finding becomes a durable draft human handoff rather
-  than an autonomous remediation loop. Before merge it revalidates live issue
-  authority, PR head, required checks, current-base mergeability, and both old
-  and new paths of any rename or copy. Proven local agent/Codex workflow changes
-  may merge and close automatically; possible product-runtime changes remain as
-  reviewed ready PRs with open issues for human approval.
+  observes CI. A review finding or final retrospective requirement becomes the
+  same durable draft human handoff rather than an autonomous remediation loop;
+  later queue discovery skips that exact-head handoff. Before merge it
+  revalidates live issue authority, PR head, required checks, current-base
+  mergeability, and both old and new paths of any rename or copy. Proven local
+  agent/Codex workflow changes may merge and close automatically; possible
+  product-runtime changes remain as reviewed ready PRs with open issues for
+  human approval.
 - A successful pass verifies both a merged PR for the deterministic branch and
   the closed issue before attempting ordinary worktree retirement. Retirement
   still uses `scripts/retire-worktree` and silently preserves the checkout when

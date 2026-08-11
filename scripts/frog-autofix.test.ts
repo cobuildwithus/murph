@@ -32,6 +32,7 @@ import {
   renderWorkerPrompt,
   reviewOutcome,
   reviewEvidenceIsValid,
+  reviewRequiresHumanHandoff,
   safeFailureMessage,
   superviseOwnedWorker,
 } from "./frog-autofix-lib.ts";
@@ -44,6 +45,7 @@ import {
   discoverEligibleIssues,
   primaryAdvanceRequiresRestart,
   reusableRepairPhase,
+  trustedReviewControlPaths,
 } from "./frog-autofix.ts";
 import {
   branchHasMergedPullRequest,
@@ -151,7 +153,67 @@ describe("Frog autofix guards", () => {
       "SPECIALIST_OUTCOME: FINDINGS\nSPECIALIST_REVIEW_COMPLETE\n",
       "specialist",
     )).toBe("findings");
+    const retrospective = `Issue #42\nReviewed ${head.slice(0, 12)}\nROUND_OUTCOME: RETROSPECTIVE_REQUIRED\nREVIEW_COMPLETE\n`;
+    const retrospectiveHash = createHash("sha256").update(retrospective).digest("hex");
+    const retrospectiveVerification = JSON.stringify({
+      requestedModel: "gpt-5.6-sol",
+      responseModelSlug: "gpt-5-6-pro",
+      responseSha256: retrospectiveHash,
+      schemaVersion: 1,
+    });
+    const retrospectiveOutcome = reviewOutcome(retrospective, "final");
+    expect(retrospectiveOutcome).toBe("retrospective-required");
+    if (retrospectiveOutcome === "invalid") {
+      throw new Error("expected a verified retrospective outcome");
+    }
+    expect(reviewRequiresHumanHandoff(retrospectiveOutcome)).toBe(true);
+    expect(reviewEvidenceIsValid({
+      expectedHash: retrospectiveHash,
+      head,
+      issueNumber: 42,
+      kind: "final",
+      modelVerification: retrospectiveVerification,
+      response: retrospective,
+    })).toBe(true);
+    expect(reviewOutcome(
+      "SPECIALIST_OUTCOME: RETROSPECTIVE_REQUIRED\nSPECIALIST_REVIEW_COMPLETE\n",
+      "specialist",
+    )).toBe("invalid");
     expect(reviewOutcome("ROUND_OUTCOME: PASS\n", "final")).toBe("invalid");
+  });
+
+  it("keeps every ReviewGPT preset in the trusted parent control inventory", () => {
+    expect(trustedReviewControlPaths).toContain("scripts/chatgpt-review-presets");
+    const root = mkdtempSync(path.join(tmpdir(), "frog-review-controls-"));
+    const presetDirectory = path.join(root, "scripts", "chatgpt-review-presets");
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      if (result.status !== 0) {
+        throw new Error(`git command failed: ${args[0] ?? "unknown"}`);
+      }
+      return result.stdout;
+    };
+    try {
+      mkdirSync(presetDirectory, { recursive: true });
+      writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "trusted\n");
+      git("init", "--quiet");
+      git("config", "user.name", "Automation");
+      git("config", "user.email", "automation@example.invalid");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "base");
+      const base = git("rev-parse", "HEAD").trim();
+      writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "candidate\n");
+      git("add", ".");
+      git("commit", "--quiet", "-m", "candidate");
+      const head = git("rev-parse", "HEAD").trim();
+      expect(spawnSync(
+        "git",
+        ["diff", "--quiet", base, head, "--", ...trustedReviewControlPaths],
+        { cwd: root },
+      ).status).toBe(1);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
   });
 
   it("uses the production discovery path for parsing, bounds, and selection", () => {

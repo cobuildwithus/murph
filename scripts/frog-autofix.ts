@@ -39,6 +39,7 @@ import {
   renderWorkerPrompt,
   reviewOutcome,
   reviewEvidenceIsValid,
+  reviewRequiresHumanHandoff,
   safeFailureMessage,
   superviseOwnedWorker,
   type EventName,
@@ -1256,11 +1257,12 @@ function commitParentOwnedChanges(
   return requireCommand("git", ["rev-parse", "HEAD"], worktree);
 }
 
-const trustedReviewControlPaths = [
+export const trustedReviewControlPaths = [
   ".npmrc",
   ".pnpmfile.cjs",
   "package.json",
   "pnpm-workspace.yaml",
+  "scripts/chatgpt-review-presets",
   "scripts/check-no-js.ts",
   "scripts/package-audit-context-full.sh",
   "scripts/prune-generated-source-sidecars.ts",
@@ -1378,7 +1380,11 @@ function runParentReview(options: {
   prompt: string;
   transient: string;
   worktree: string;
-}): { chatUrl: string; outcome?: "findings" | "pass"; response: string } {
+}): {
+  chatUrl: string;
+  outcome?: "findings" | "pass" | "retrospective-required";
+  response: string;
+} {
   const { config, reviewRoot } = buildParentReviewArchive(
     options.primary,
     options.worktree,
@@ -1455,7 +1461,7 @@ function runCanonicalPullRequestReview(options: {
   pullRequest: number;
   transient: string;
   worktree: string;
-}): "findings" | "pass" {
+}): "findings" | "pass" | "retrospective-required" {
   const label = options.kind === "specialist" ? "specialists" : "final-round-1";
   const reviewRoot = path.join(options.transient, label);
   mkdirSync(reviewRoot, { mode: 0o700, recursive: true });
@@ -2102,7 +2108,7 @@ async function reviewPublishAndFinalize(options: {
       transient: options.transient,
       worktree: options.worktree,
     });
-    if (specialist === "findings") {
+    if (reviewRequiresHumanHandoff(specialist)) {
       handoff = "review-findings";
       persistMetadata();
       return "awaiting-human";
@@ -2122,7 +2128,7 @@ async function reviewPublishAndFinalize(options: {
       transient: options.transient,
       worktree: options.worktree,
     });
-    if (finalReview === "findings") {
+    if (reviewRequiresHumanHandoff(finalReview)) {
       handoff = "review-findings";
       persistMetadata();
       return "awaiting-human";

@@ -52,21 +52,23 @@ The parent structurally validates the diff, commits with hooks disabled, pushes
 with hooks disabled, and publishes the immutable first-reviewed head in the
 initial draft PR body. Preliminary and final ReviewGPT run through Murph's
 canonical packager and state files from a detached parent-only checkout whose
-review controls exactly match trusted `main`. Either review returning findings,
-or a candidate changing those controls, creates a durable human-review handoff;
-the automation does not ask another child to remediate review prose. After both
-reviews pass, it waits for required CI. Immediately before merge it revalidates
-App author, label, one committed binding, PR head, checks, and current-base
-mergeability. A deterministic allowlist, using both sides of detected renames
-and copies, permits automatic merge only for local agent/Codex workflow paths,
-with semantic exceptions limited to the Frog script entry in `package.json`
-and this section of `ARCHITECTURE.md`. Any possible product-runtime, deployment,
-or GitHub-workflow change stays as a reviewed ready PR with its issue open for a
-human merge decision. Exact-head handoff markers remove that issue from later
-automated scans so it cannot starve the queue. Only a newly verified parent
-merge may precede issue closure. The invocation has one eight-hour deadline;
-each model worker is bounded to two hours and every spawned command or worker
-has exact process-group ownership.
+review controls, including the complete prompt-preset directory, exactly match
+trusted `main`. Either review returning findings, a final review requiring a
+scope retrospective, or a candidate changing those controls creates the same
+durable human-review handoff; the automation does not ask another child to
+remediate review prose. After both reviews pass, it waits for required CI.
+Immediately before merge it revalidates App author, label, one committed
+binding, PR head, checks, and current-base mergeability. A deterministic
+allowlist, using both sides of detected renames and copies, permits automatic
+merge only for local agent/Codex workflow paths, with semantic exceptions
+limited to the Frog script entry in `package.json` and this section of
+`ARCHITECTURE.md`. Any possible product-runtime, deployment, or GitHub-workflow
+change stays as a reviewed ready PR with its issue open for a human merge
+decision. Exact-head handoff markers remove that issue from later automated
+scans so it cannot starve the queue. Only a newly verified parent merge may
+precede issue closure. The invocation has one eight-hour deadline; each model
+worker is bounded to two hours and every spawned command or worker has exact
+process-group ownership.
 
 ## Accepted-Message Targeting
 

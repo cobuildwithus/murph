@@ -1064,9 +1064,11 @@ Last verified: 2026-08-11
   executable proof. The initial PR mutation includes the immutable
   first-reviewed head. Preliminary and final parent ReviewGPT use Murph's
   canonical packager and canonical review state from a detached exact-head
-  checkout only when every executable review control matches trusted `main`.
-  Review findings and changed review controls produce an exact-head human
-  handoff; review prose is never delegated to another autonomous editing turn.
+  checkout only when every executable and instructional review control,
+  including the complete prompt-preset directory, matches trusted `main`.
+  Review findings, a final `RETROSPECTIVE_REQUIRED` result, and changed review
+  controls produce the same exact-head human handoff; review prose is never
+  delegated to another autonomous editing turn.
 - Automatic merge authority is narrower than change authority. The parent
   requires valid preliminary/final ReviewGPT evidence, the exact open PR,
   nonempty green required checks, and a clean current-base merge. It then

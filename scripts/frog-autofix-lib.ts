@@ -216,22 +216,42 @@ function exactLineCount(content: string, line: string): number {
   return content.split(/\r?\n/u).filter((candidate) => candidate.trim() === line).length;
 }
 
-export type ReviewOutcome = "findings" | "invalid" | "pass";
+export type ReviewOutcome =
+  | "findings"
+  | "invalid"
+  | "pass"
+  | "retrospective-required";
+
+export type VerifiedReviewOutcome = Exclude<ReviewOutcome, "invalid">;
 
 export function reviewOutcome(response: string, kind: "final" | "specialist"):
   ReviewOutcome {
   const prefix = kind === "final" ? "ROUND_OUTCOME" : "SPECIALIST_OUTCOME";
   const marker = kind === "final" ? "REVIEW_COMPLETE" : "SPECIALIST_REVIEW_COMPLETE";
   if (exactLineCount(response, marker) !== 1) return "invalid";
-  const outcomes = (["PASS", "FINDINGS", "INVALID"] as const).filter(
+  const allowedOutcomes = kind === "final"
+    ? (["PASS", "FINDINGS", "INVALID", "RETROSPECTIVE_REQUIRED"] as const)
+    : (["PASS", "FINDINGS", "INVALID"] as const);
+  const outcomes = allowedOutcomes.filter(
     (outcome) => exactLineCount(response, `${prefix}: ${outcome}`) === 1,
   );
   if (outcomes.length !== 1) return "invalid";
-  return outcomes[0] === "PASS"
-    ? "pass"
-    : outcomes[0] === "FINDINGS"
-      ? "findings"
-      : "invalid";
+  switch (outcomes[0]) {
+    case "PASS":
+      return "pass";
+    case "FINDINGS":
+      return "findings";
+    case "RETROSPECTIVE_REQUIRED":
+      return "retrospective-required";
+    case "INVALID":
+      return "invalid";
+  }
+}
+
+export function reviewRequiresHumanHandoff(
+  outcome: VerifiedReviewOutcome,
+): boolean {
+  return outcome !== "pass";
 }
 
 export function reviewEvidenceIsValid(options: {
