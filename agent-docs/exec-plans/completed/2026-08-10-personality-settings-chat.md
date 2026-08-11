@@ -1,6 +1,6 @@
 # Edit Murph personality from Settings and chat
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -92,30 +92,39 @@ Updated: 2026-08-10
 
 ## Verification
 
-- Focused package proof: 92 tests passed across Hosted Execution and Assistant
-  Engine personalization, authority, and model-behavior coverage.
-- Focused Web proof: 127 tests passed across the picker, Settings row and route,
-  settings snapshot, hosted personalization handler, and changelog surfaces.
-- Type proof: Hosted Execution, Assistant Engine, and Web typechecks passed. The
-  Web Prisma client was regenerated locally after merging current `main`; that
-  produced no repository diff.
+- Focused package proof: 10 Hosted Execution, 162 Assistant Engine, and 151
+  Cloudflare tests passed across personalization, authority, direct/group
+  planning, model behavior, and strict transport fixtures.
+- Focused Web proof: 160 tests passed across the picker, Settings rows and
+  route, settings snapshot, hosted personalization handler, and changelog
+  surfaces. This includes absent versus explicit tone/voice override coverage
+  after a persona change.
+- Type proof: Hosted Execution, Assistant Engine, Cloudflare, and Web
+  typechecks passed. Web generation produced no repository diff.
 - Static proof: focused ESLint and `git diff --check` passed.
 - Responsive proof: the real design-catalog component was exercised at 1440
   CSS pixels / 2x and 390 CSS pixels / 3x. The resulting desktop main step and
   mobile supporting step were inspected locally and after hosted upload.
-- Initial provider-input proof: a pinned real Codex App Server request capture
+- Provider-input proof: a pinned real Codex App Server request capture
   against the candidate and its `main` base was repeated twice with identical
-  normalized results. The direct-chat request grew from 29,984 to 30,037 tokens
-  (+53, +0.1768%); the group-chat request grew from 23,038 to 23,073 tokens
-  (+35, +0.1519%). No database, network, provider-call, or awaited-latency step
-  was added or moved.
+  normalized results. The direct-chat request grew from 29,975 to 30,026 tokens
+  (+51, +0.1701%); the group-chat request grew from 23,028 to 23,083 tokens
+  (+55, +0.2388%). No database, network, provider-call, or awaited-latency step
+  was added or moved. The later Settings-only derivation does not touch the
+  measured provider path.
 - Claude UI review: attempted with the required Fable model and review-only
   packet, but the account returned an explicit out-of-usage-credits response.
   Per repository policy, this is recorded as a non-blocking unavailable review,
   not as a pass; no further Claude request was made.
-- Exact-head preliminary and final ReviewGPT both returned actionable findings.
-  Remediation preserves style levels, applies room-owned personas to later
-  group turns, closes scheduled persona authority, requires complete persona
-  pairs, and removes pointer mutation while saving. Focused proof, provider
-  measurement, the final remediation review round, exact-head CI, mergeability,
-  plan archival, and marking the draft PR ready remain.
+- Exact-head preliminary and final ReviewGPT rounds returned actionable
+  findings that were remediated through existing owners. Final round 3 audited
+  `49845ce7a53315d574ce8c33e3832889123b051b` and returned `PASS` with
+  `REVIEW_COMPLETE` and no qualifying findings after verifying the completed
+  retrospective and every prior disposition.
+- GitHub's complete exact-head suite passed on that reviewed behavior head,
+  including release build/typecheck, all package coverage shards, release app
+  verification, design proof, viewport, sandbox, billing, and hygiene gates.
+  Current `origin/main` then merged without conflict while preserving the
+  reviewed head as an ancestor; the final base-plus-plan head receives one
+  fresh exact-head CI cycle before the draft PR is marked ready.
+Completed: 2026-08-10
