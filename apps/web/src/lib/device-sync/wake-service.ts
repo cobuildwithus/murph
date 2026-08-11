@@ -8,6 +8,7 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
 import type {
+  DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
   DeviceSyncRegistry,
@@ -964,6 +965,8 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
   registry: DeviceSyncRegistry;
+  revokeAccess?: DeviceConnectionHandler["revokeAccess"] | null;
+  revokeUnavailableWarning?: { code: string; message: string } | null;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<{
@@ -1020,8 +1023,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   let revokeFailure: { code: string; message: string } | undefined;
 
   if (storedAccount) {
-    const provider = input.registry.get(existing.provider);
-    const revokeAccess = provider?.connectionHandler?.revokeAccess;
+    const revokeAccess = input.revokeAccess === undefined
+      ? input.registry.get(existing.provider)?.connectionHandler?.revokeAccess
+      : input.revokeAccess ?? undefined;
 
     const shouldRevoke = revokeAccess && (
       existing.status !== "disconnected"
@@ -1042,6 +1046,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
         revokeFailure = { code, message };
       }
+    } else if (input.revokeUnavailableWarning) {
+      revokeFailure = input.revokeUnavailableWarning;
     }
   }
 
@@ -2212,6 +2218,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         select: {
           connectedAt: true,
           provider: true,
+          providerApplicationId: true,
+          providerApplicationRevision: true,
           setupPhase: true,
           status: true,
           userId: true,
@@ -2223,6 +2231,21 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         || current.provider !== input.provider
         || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
         || current.connectedAt.toISOString() !== input.expectedConnectedAt
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          wakeMailboxItemId: null,
+        };
+      }
+      // The hosted webhook endpoint authenticates only the shared/operator
+      // provider application. A provider-account row may have been rebound to
+      // a private application after the webhook's initial account lookup, so
+      // the durable admission owner must reject that stale authority while it
+      // holds the connection lock. Private connections continue through their
+      // scheduled reconciliation path until private webhook ownership exists.
+      if (
+        current.providerApplicationId !== null
+        || current.providerApplicationRevision !== null
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {

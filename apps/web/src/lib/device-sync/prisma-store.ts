@@ -20,6 +20,7 @@ import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
+import type { DeviceProviderApplicationBinding } from "./provider-applications/types";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
 import {
@@ -149,6 +150,22 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.oauthSessions.createOAuthState(input);
   }
 
+  async createOAuthStateWithProviderApplication(
+    input: OAuthStateRecord,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<OAuthStateRecord> {
+    return this.oauthSessions.createOAuthStateWithProviderApplication(input, binding);
+  }
+
+  async readOAuthStateProviderApplicationBinding(input: {
+    expectedOwnerId: string;
+    expectedProvider: string;
+    now: string;
+    state: string;
+  }): Promise<DeviceProviderApplicationBinding | null> {
+    return this.oauthSessions.readOAuthStateProviderApplicationBinding(input);
+  }
+
   async consumeOAuthState(
     state: string,
     now: string,
@@ -156,6 +173,22 @@ export class PrismaDeviceSyncControlPlaneStore
     expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
     return this.oauthSessions.consumeOAuthState(state, now, expectedProvider, expectedOwnerId);
+  }
+
+  async consumeOAuthStateWithProviderApplication(
+    state: string,
+    now: string,
+    binding: DeviceProviderApplicationBinding,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): Promise<ConsumeOAuthStateResult> {
+    return this.oauthSessions.consumeOAuthStateWithProviderApplication(
+      state,
+      now,
+      binding,
+      expectedProvider,
+      expectedOwnerId,
+    );
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -166,6 +199,13 @@ export class PrismaDeviceSyncControlPlaneStore
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     return this.connections.upsertConnectionWithPrevious(input);
+  }
+
+  async upsertConnectionWithProviderApplication(
+    input: UpsertPublicDeviceSyncConnectionInput,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    return this.connections.upsertConnectionWithProviderApplication(input, binding);
   }
 
   async markConnectionSetupFailed(
@@ -250,8 +290,12 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getConnectionOwnerId(connectionId);
   }
 
-  async getConnectionRecordForUser(userId: string, connectionId: string) {
-    return this.connections.getConnectionRecordForUser(userId, connectionId);
+  async getConnectionRecordForUser(
+    userId: string,
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ) {
+    return this.connections.getConnectionRecordForUser(userId, connectionId, tx);
   }
 
   async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {

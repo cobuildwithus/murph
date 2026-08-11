@@ -7,6 +7,13 @@ Last verified: 2026-08-10
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Member-owned device provider application ownership, exact OAuth and connection
+revision binding, invocation-scoped credential projection, exact token-return
+authority, credential-free stored-token cleanup without operator fallback, and
+permanent-versus-transient credential failure handling are jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and
+`agent-docs/RELIABILITY.md`.
+
 Hosted cold-start ownership keeps established-member startup on the ordinary
 post-Temporal direct ensure so container boot can overlap fenced invocation
 preparation. The separate first-contact shell hint is serialized by the
@@ -144,6 +151,10 @@ the rule that alerts never become billing or retry authority are jointly specifi
 `apps/web/README.md`.
 
 ## Canonical Docs
+
+Member-owned device-provider application authority, including the shared
+webhook admission fence for app-bound connections, is jointly specified by
+`ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/RELIABILITY.md`.
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |

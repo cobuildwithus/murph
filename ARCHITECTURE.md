@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-07
+Last verified: 2026-08-10
 
 ## Accepted-Message Targeting
 
@@ -880,6 +880,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   lifecycle/checkpoint state. Temporal owns execution wake orchestration, and
   the app-local Vercel OIDC adapter remains for browser/session/status/deletion
   calls into Cloudflare.
+
+  Member-owned device provider applications are also Web-owned control facts.
+  Web stores one encrypted, revisioned application per personal member and
+  provider, binds OAuth state and each resulting connection to the exact
+  application id plus revision, and supplies decrypted provider configuration
+  only in a credential-bearing hosted runtime snapshot. The runner consumes
+  that configuration for the current invocation without adding it to workspace
+  state or ambient environment configuration. Credential replacement is
+  rejected while an exact-bound connection is active; disconnected bindings
+  and stale OAuth state are cleared before the revision advances. The shared
+  provider webhook endpoint admits work only for unbound connections; an
+  app-bound connection relies on scheduled reconciliation until an explicit
+  private-application webhook authority is designed.
 
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display
