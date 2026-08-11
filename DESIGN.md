@@ -222,9 +222,9 @@ count; visible totals and goals are not repeated beneath the image. V1 renders
 an unavailable fiber dash in the image without adding a fiber caption claim.
 
 Compact-table and workout fallback images use the same provider-owned chrome
-contract: keep the bitmap rectangular and badge-free, align the header to the
-content edge without reserving an icon slot, and let Messages supply the app
-icon and outer corner mask. Keep structural rounding only where it communicates
+contract: keep the bitmap rectangular and badge-free, reserve empty upper-left
+clearance for the icon that Messages overlays, and let Messages supply that icon
+and the outer corner mask. Keep structural rounding only where it communicates
 an inner state, such as a progress track or set-status marker.
 
 ### Ops Weekly Growth Scorecard

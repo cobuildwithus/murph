@@ -14,7 +14,8 @@ export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 const CARD_HORIZONTAL_PADDING = 45;
 const CARD_CONTENT_WIDTH =
   IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH - CARD_HORIZONTAL_PADDING * 2;
-const HEADER_TEXT_WIDTH = CARD_CONTENT_WIDTH;
+const PROVIDER_ICON_CLEARANCE = 155;
+const HEADER_TEXT_WIDTH = CARD_CONTENT_WIDTH - PROVIDER_ICON_CLEARANCE;
 const GENERIC_ROW_LABEL_WIDTH = CARD_CONTENT_WIDTH * 0.38;
 const GENERIC_VALUES_WIDTH = CARD_CONTENT_WIDTH * 0.62;
 
@@ -63,7 +64,8 @@ export function getCompactTableCardImageSize(
 /**
  * Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size.
  * Messages owns the app icon and outer corner mask, so the bitmap stays
- * rectangular and badge-free.
+ * rectangular and badge-free while keeping the provider's icon footprint
+ * clear.
  */
 export function CompactTableCardImage({
   card,
@@ -87,11 +89,13 @@ export function CompactTableCardImage({
       }}
     >
       <div
+        data-provider-icon-clearance={PROVIDER_ICON_CLEARANCE}
         style={{
           display: "flex",
           height: layout.headerHeight,
           flexDirection: "column",
           justifyContent: "center",
+          marginLeft: PROVIDER_ICON_CLEARANCE,
           gap: 8,
         }}
       >

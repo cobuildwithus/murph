@@ -44,6 +44,11 @@ generic-table balloon. The provider captions independently retain every table
 cell or every workout state, set status, target, and actual value, so image
 failure does not erase the response semantics.
 
+The bitmap remains rectangular and badge-free because Messages owns the outer
+mask and app icon, but its header keeps the provider's upper-left icon footprint
+clear. Removing the image-owned logo must not move title text beneath the
+provider overlay.
+
 Shared workout footer copy must remain truthful on both projections: it may ask
 the member to reply with an exercise, set, and result, but must not promise a
 native-only tap control. The static workout summary derives `Next` from the

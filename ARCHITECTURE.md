@@ -1587,9 +1587,11 @@ Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. A short subcaption appears only
 when some totals are partial or an assessed V2 goal needs its directional
 status preserved. Compact-table images retain the table grid or workout
-progress and exercise rows, and their native captions
-independently repeat every generic table cell or every workout set status,
-target, and actual value so a missing raster never erases the useful response.
+progress and exercise rows while keeping the provider's upper-left icon
+footprint clear without drawing that icon into the bitmap, and their native
+captions independently repeat every generic table cell or every workout set
+status, target, and actual value so a missing raster never erases the useful
+response.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension

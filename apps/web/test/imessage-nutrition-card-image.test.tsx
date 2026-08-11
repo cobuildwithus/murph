@@ -357,7 +357,8 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, />16</u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.doesNotMatch(serialized, /box-shadow/u);
-  assert.doesNotMatch(serialized, /margin-left:155px/u);
+  assert.match(serialized, /data-provider-icon-clearance="155"/u);
+  assert.match(serialized, /margin-left:155px/u);
 });
 
 test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
@@ -393,7 +394,8 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
   assert.doesNotMatch(serialized, /box-shadow/u);
-  assert.doesNotMatch(serialized, /margin-left:155px/u);
+  assert.match(serialized, /data-provider-icon-clearance="155"/u);
+  assert.match(serialized, /margin-left:155px/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
 });
 
