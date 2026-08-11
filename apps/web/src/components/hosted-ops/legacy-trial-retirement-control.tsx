@@ -40,6 +40,9 @@ export function LegacyTrialRetirementControl({
   initialReport?: HostedLegacyPulseTrialRetirementReport | null;
 }) {
   const [report, setReport] = useState(initialReport);
+  const [lastApplyReport, setLastApplyReport] = useState<
+    HostedLegacyPulseTrialRetirementReport | null
+  >(null);
   const [pending, setPending] = useState<PendingOperation>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +55,7 @@ export function LegacyTrialRetirementControl({
     }
     setPending("dry-run");
     setReport(null);
+    setLastApplyReport(null);
     setError(null);
     setNotice(null);
     try {
@@ -60,6 +64,7 @@ export function LegacyTrialRetirementControl({
         throw new Error("Legacy trial check returned an unexpected response.");
       }
       setReport(response.report);
+      setLastApplyReport(null);
       setNotice(
         response.report.candidateCount === 0
           ? "No legacy Pulse trial candidates remain."
@@ -89,6 +94,7 @@ export function LegacyTrialRetirementControl({
         throw new Error("Legacy trial apply returned an unexpected response.");
       }
       setReport(response.verification);
+      setLastApplyReport(response.report);
       setConfirmationOpen(false);
       if (response.converged) {
         setNotice(
@@ -101,6 +107,7 @@ export function LegacyTrialRetirementControl({
       }
     } catch (requestError) {
       setReport(null);
+      setLastApplyReport(null);
       setError(describeApplyError(requestError));
       setConfirmationOpen(false);
     } finally {
@@ -157,7 +164,12 @@ export function LegacyTrialRetirementControl({
           </div>
         </div>
 
-        {report ? <RetirementReport report={report} /> : (
+        {report ? (
+          <RetirementReport
+            lastApplyReport={lastApplyReport}
+            report={report}
+          />
+        ) : (
           <p className="mt-5 border-t border-border/70 pt-4 text-sm text-muted-foreground">
             No provider or database changes occur until a dry-run succeeds and
             its exact candidate count is confirmed.
@@ -234,8 +246,10 @@ export function LegacyTrialRetirementControl({
 }
 
 function RetirementReport({
+  lastApplyReport,
   report,
 }: {
+  lastApplyReport: HostedLegacyPulseTrialRetirementReport | null;
   report: HostedLegacyPulseTrialRetirementReport;
 }) {
   const statusEntries = Object.entries(report.subscriptionStatusCounts);
@@ -262,14 +276,22 @@ function RetirementReport({
           label="Provider objects absent"
           value={formatInteger(report.missingProviderCount)}
         />
-        <ReportFinding
-          label="Retired in this run"
-          value={formatInteger(report.retiredCount)}
-        />
-        <ReportFinding
-          label="Already retired"
-          value={formatInteger(report.alreadyRetiredCount)}
-        />
+        {lastApplyReport ? (
+          <>
+            <ReportFinding
+              label="Retired in last apply"
+              value={formatInteger(lastApplyReport.retiredCount)}
+            />
+            <ReportFinding
+              label="Already clear in last apply"
+              value={formatInteger(lastApplyReport.alreadyRetiredCount)}
+            />
+            <ReportFinding
+              label="Remaining after verification"
+              value={formatInteger(report.candidateCount)}
+            />
+          </>
+        ) : null}
       </dl>
       <div className="mt-4 flex flex-wrap gap-2" aria-label="Stripe subscription statuses">
         {statusEntries.length === 0 ? (

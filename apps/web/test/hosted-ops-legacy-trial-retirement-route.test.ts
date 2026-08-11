@@ -40,6 +40,7 @@ import {
   HostedLegacyPulseTrialCandidateCountChangedError,
   HostedLegacyPulseTrialRetirementBlockedError,
 } from "@/src/lib/hosted-onboarding/legacy-pulse-trial-retirement";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 type RouteModule = typeof import("../app/api/ops/legacy-trial-retirement/route");
 
@@ -91,6 +92,27 @@ describe("hosted Ops legacy trial retirement route", () => {
     await expect(response.json()).resolves.toEqual({
       operation: "dry-run",
       report,
+    });
+  });
+
+  it("stops before billing work when Ops access is denied", async () => {
+    mocks.requireHostedOpsRequestAccess.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_OPS_ACCESS_DENIED",
+        httpStatus: 404,
+        message: "Hosted ops route was not found.",
+        retryable: false,
+      }),
+    );
+
+    const response = await route.POST(buildRequest({ operation: "dry-run" }));
+
+    expect(response.status).toBe(404);
+    expect(mocks.requireHostedStripeBillingPlanConfig).not.toHaveBeenCalled();
+    expect(mocks.getPrisma).not.toHaveBeenCalled();
+    expect(mocks.runHostedLegacyPulseTrialRetirement).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "HOSTED_OPS_ACCESS_DENIED" },
     });
   });
 

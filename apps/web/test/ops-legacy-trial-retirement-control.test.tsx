@@ -153,6 +153,10 @@ describe("LegacyTrialRetirementControl", () => {
       },
     );
     expect(rendered.container.textContent).toContain("0 candidates");
+    expect(getReportFinding(rendered.container, "Retired in last apply"))
+      .toBe("2");
+    expect(getReportFinding(rendered.container, "Remaining after verification"))
+      .toBe("0");
     expect(rendered.container.querySelector('[role="alert"]')?.textContent)
       .toContain("automatic verification found zero remaining candidates");
     expect([...rendered.container.querySelectorAll("button")]
@@ -221,6 +225,10 @@ describe("LegacyTrialRetirementControl", () => {
 
     expect(rendered.container.querySelector('[role="alert"]')?.textContent)
       .toContain("verification found 1 remaining candidate");
+    expect(getReportFinding(rendered.container, "Retired in last apply"))
+      .toBe("1");
+    expect(getReportFinding(rendered.container, "Remaining after verification"))
+      .toBe("1");
     expect(getButton(rendered.container, "Retire 1")).toBeTruthy();
   });
 
@@ -280,6 +288,15 @@ function getButton(container: HTMLElement, label: string): HTMLButtonElement {
     throw new Error(`Button not found: ${label}`);
   }
   return button;
+}
+
+function getReportFinding(container: HTMLElement, label: string): string | null {
+  const term = [...container.querySelectorAll("dt")]
+    .find((candidate) => candidate.textContent?.trim() === label);
+  if (!term) {
+    throw new Error(`Report finding not found: ${label}`);
+  }
+  return term.nextElementSibling?.textContent ?? null;
 }
 
 async function clickButton(
