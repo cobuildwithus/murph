@@ -167,6 +167,30 @@ describe("legacy Pulse trial retirement to Starter", () => {
     });
   });
 
+  it("preserves terminal cleanup when the provider object is genuinely absent", async () => {
+    const stripe = buildStripe("trialing");
+    stripe.subscriptions.retrieve.mockRejectedValueOnce({
+      code: "resource_missing",
+    });
+
+    await expect(retireHostedLegacyPulseTrialToStarter({
+      memberId: MEMBER_ID,
+      priceId: PRICE_ID,
+      prisma: {} as never,
+      stripe: stripe as never,
+    })).resolves.toBe(true);
+
+    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledOnce();
+    expect(stripe.subscriptions.cancel).not.toHaveBeenCalled();
+    expect(
+      mocks.clearHostedMemberLegacyTrialBillingUnderLockTx,
+    ).toHaveBeenCalledWith({
+      billingStatusAfterClear: HostedBillingStatus.active,
+      memberId: MEMBER_ID,
+      tx,
+    });
+  });
+
   it("fails closed before changing capacity when provider state may be paid", async () => {
     const stripe = buildStripe("active");
 
