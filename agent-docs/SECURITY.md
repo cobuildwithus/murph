@@ -1041,20 +1041,32 @@ Last verified: 2026-08-11
   `app/murph-frog-reconciliation`; the workflow's REST-style bot-login setting
   uses a different `[bot]` representation and is not the local admission field.
 - Parent-selected recovery mode is derived from exact clean branch ancestry,
-  deterministic PR ownership, head identity, state, and closing relationship.
+  deterministic PR ownership, head identity, and state.
   Every PR read with authority consequences must target `main`, use the exact
   deterministic branch, be non-cross-repository, report this repository as its
   head owner, and be authored by the live authenticated `gh` operator. That one
   predicate is applied before discovery/recovery cardinality and before body
   hydration, editing, publication, finalization, merged-state proof, or issue
-  closure. A fork or different operator may neither forge a PASS/handoff body
-  marker nor cause the parent to hydrate or edit that PR.
+  closure. The GraphQL connection constrains `main` plus the deterministic head
+  at the server, traverses all cursor pages, filters foreign records, and only
+  then enforces zero-or-one parent-owned PR. A fork or different operator may
+  neither hide a later qualifying record nor contaminate cardinality.
+  Mutable body text is a separate authority field: `editor` must equal the live
+  operator whenever `lastEditedAt` is present, while the PR creator is accepted
+  only for a never-edited body with no editor. Other remote text cannot supply
+  baseline, PASS, handoff, closing, hydration, merge, or closure authority. The
+  parent retains a validated local body or creates a fixed authority-free
+  recovery body, replaces the remote presentation, and reruns exact-head review.
   Only a fresh branch can authorize the implementation ReviewGPT request;
   resume omits that command entirely. An interrupted dirty diff can resume only
-  when the one open issue-closing PR, remote branch, and local committed head
-  match exactly; it returns to an edit-only child and every parent gate reruns.
+  when the one open parent-owned PR, remote branch, and local committed head
+  match exactly; mutable body text is not needed to preserve the worktree. It
+  returns to an edit-only child and every parent gate reruns.
   A merged PR with an open or reopened issue, ambiguous state, or
   multiply-owned state grants no worker mode and no automatic issue closure.
+  One exact closed-unmerged parent PR receives only the fixed recovery body and
+  parent-authored review-findings handoff; it is never reopened, reviewed, or
+  merged by that path.
 - In fresh `implement` mode, the parent ReviewGPT request must return exactly
   one latest-response patch or diff attachment. The parent rejects traversal,
   absolute and control paths, binaries, generated artifacts, and an invalid
@@ -1092,7 +1104,8 @@ Last verified: 2026-08-11
   both source and destination paths for detected renames and copies. Exact-head
   review-finding and product-runtime handoff markers are parent-owned queue
   completion state: later scans skip those still-open or exact
-  closed-unmerged issues while humans own the next decision. A descendant human
+  closed-unmerged issues only while current body provenance remains
+  parent-owned. A descendant human
   amendment preserves only the existing handoff kind and immutable first
   review baseline, re-stamped at the descendant head; it cannot create review
   evidence. Definitive failed/cancelled required checks and current-base

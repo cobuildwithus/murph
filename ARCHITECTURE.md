@@ -26,14 +26,24 @@ Recovery is a parent classification, not a prompt guess. A fresh deterministic
 branch has no commit, remote branch, or PR. Under the run lock, interrupted
 tracked, untracked, and ignored residue on only that state is reset and cleaned
 back to `origin/main`. Dirty work may resume without reset only when one open
-issue-closing PR authored by the currently authenticated `gh` operator, owned
-by this repository rather than a fork, the remote branch, and the local
+PR authored by the currently authenticated `gh` operator, owned by this
+repository rather than a fork, the remote branch, and the local
 committed head bind the same repair; the child finishes the interrupted edit
 and the parent reruns review. The same PR predicate guards discovery, body
 hydration/editing, recovery, publication, finalization, and merged-state proof.
+Its server-side `main`/head query traverses every cursor page before foreign
+records are removed and the zero-or-one parent-owned cardinality is enforced.
+Mutable remote body text supplies baseline, PASS, closing, or handoff authority
+only when `editor`/`lastEditedAt` proves the live operator made the latest edit,
+with creator fallback only for a never-edited body. Otherwise the parent keeps
+an already validated local body or writes one fixed recovery body, overwrites
+the remote presentation, and reruns exact-head reviews.
 A clean implementation commit or open PR may also resume without requesting a
 second implementation patch. Divergence, mismatched ownership, merged or
-closed-unmerged PR state, and other ambiguity fail closed. After an unrelated
+multiply-owned PR state, and other ambiguity fail closed. One exact
+closed-unmerged parent PR that lacks a trusted handoff is rewritten with the
+fixed recovery body plus a review-findings handoff, without reopening or
+reviewing it, so cancellation cannot pin later issues. After an unrelated
 clean primary fast-forward the same invocation continues discovery; it exits
 once only when a module already loaded by the launcher changed.
 
@@ -78,8 +88,8 @@ limited to the Frog script entry in `package.json` and this section of
 `ARCHITECTURE.md`. Any possible product-runtime, deployment, or GitHub-workflow
 change stays as a reviewed ready PR with its issue open for a human merge
 decision. Exact-head open or closed-unmerged handoff markers remove that issue
-from later automated scans so it cannot starve the queue. Only a newly verified parent merge may
-precede issue closure. The invocation has one eight-hour deadline; each model
+from later automated scans so it cannot starve the queue. Only a newly verified
+parent merge may precede issue closure. The invocation has one eight-hour deadline; each model
 worker is bounded to two hours and every spawned command or worker has exact
 process-group ownership.
 

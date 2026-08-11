@@ -20,9 +20,11 @@ export interface FrogIssue {
 export interface PullRequestAuthorityRecord {
   author: { login: string } | null;
   baseRefName: string;
+  editor: { login: string } | null;
   headRefName: string;
   headRepositoryOwner: { login: string } | null;
   isCrossRepository: boolean;
+  lastEditedAt: string | null;
 }
 
 export function parseAuthenticatedGitHubOperator(raw: string): string {
@@ -46,10 +48,20 @@ export function isParentOwnedPullRequest(
     && record.isCrossRepository === false;
 }
 
+export function hasParentOwnedPullRequestBody(
+  record: PullRequestAuthorityRecord,
+  authenticatedOperator: string,
+): boolean {
+  if (record.lastEditedAt === null) {
+    return record.editor === null
+      && record.author?.login.toLowerCase() === authenticatedOperator.toLowerCase();
+  }
+  return record.editor?.login.toLowerCase() === authenticatedOperator.toLowerCase();
+}
+
 export type FrogAutofixWorkerMode = "implement" | "resume";
 
 export interface BranchPullRequestState {
-  closesIssue: boolean;
   headIsAncestorOfLocal: boolean;
   headMatchesLocal: boolean;
   state: "CLOSED" | "MERGED" | "OPEN";

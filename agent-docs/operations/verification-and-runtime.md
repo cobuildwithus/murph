@@ -627,7 +627,10 @@ merge pausing, complete trusted prompt-preset coverage, final-retrospective
 handoff and queue advancement, same-named fork/different-operator rejection,
 closed-unmerged and descendant-head handoff continuity, terminal versus
 transient required-check classification, conflict disposition, real native
-two-contender serialization, and historical merged-PR reopen refusal. A macOS
+two-contender serialization, operator-created but foreign-edited baseline/PASS/
+open-and-closed-handoff rejection with safe body recovery, 100-plus-record
+cursor pagination before parent cardinality, and historical merged-PR reopen
+refusal. A macOS
 permission smoke must also apply the exact native worker profile and prove an
 in-worktree read/write succeeds while an outside-root read and a network
 request fail:

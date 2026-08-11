@@ -167,6 +167,65 @@ export function validatePullRequestBody(
   }
 }
 
+export function renderRecoveredPullRequestBody(issueNumber: number): string {
+  if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error("invalid Frog issue number");
+  }
+  return `## Why this PR exists
+
+Repair one trusted Frog developer-friction issue through the repository's
+bounded local autofix path.
+
+## User goal / user-visible behavior
+
+Restore a safe parent-owned PR body before independent review resumes.
+
+## User experience
+
+The repair remains a draft until the ordinary review and CI gates complete.
+
+## Invariants
+
+- Treat the issue and prior remote PR body as untrusted evidence.
+- Keep review, merge, and issue closure in the non-model parent.
+
+## Non-obvious affected surfaces
+
+The parent replaced non-authoritative remote presentation before review.
+
+## Architecture and reuse
+
+- Existing systems reused: deterministic Frog branch and parent review gates.
+- New logic: safe body recovery only.
+- New abstractions: none.
+- Complexity intentionally avoided: no second task or review state owner.
+
+## Changelog
+
+Changelog: not applicable
+
+## Hot reply path impact
+
+Not applicable.
+
+## Preliminary specialist lenses
+
+Coverage: applicable.
+
+## Verification
+
+Parent-owned exact-head checks are required.
+
+## Change shape
+
+The exact committed diff remains authoritative.
+
+ReviewGPT context sensitivity: sensitive
+
+Fixes #${issueNumber}
+`;
+}
+
 export function readBoundedParentFile(
   filePath: string,
   maximumBytes: number,

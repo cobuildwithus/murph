@@ -164,21 +164,28 @@ Last verified: 2026-08-11
   records both the scheduler process identity and the exact detached worker
   process identity, so an orphaned still-live child also blocks a replacement
   run after a launcher crash. PR queue and recovery records are counted only
-  after the shared current-operator, same-repository, non-fork, main-base, exact
-  deterministic-branch predicate removes foreign records.
+  after a server-filtered `main`/deterministic-head connection traverses every
+  cursor page and the shared current-operator, same-repository, non-fork
+  predicate removes foreign records. One hundred or more durable foreign
+  records therefore neither abort traversal nor hide a qualifying later page;
+  more than one qualifying parent record still fails closed.
 - Before the worker starts, the parent classifies exact clean state as fresh
   implementation or resumable implementation/open PR. Under the owner lock, a
   fresh branch with no commit, remote branch, PR, or divergence is the only
   state whose tracked, untracked, and ignored interruption residue may be reset
   and cleaned back to `origin/main`. Dirty work may instead resume only when
-  one open issue-closing PR, its remote branch, and the local committed head
-  identify the same repair; the edit-only child finishes the interrupted diff
-  and the parent reruns the review gates. Resumable runs cannot reacquire or
+  one open parent-owned PR, its remote branch, and the local committed head
+  identify the same repair; mutable remote body text is unnecessary for this
+  worktree-preservation decision. The edit-only child finishes the interrupted
+  diff and the parent reruns the review gates. Resumable runs cannot reacquire or
   reapply an implementation patch. A merged PR paired with an open or reopened
-  issue, multiple parent-owned PRs, a closed-unmerged PR without an exact
-  handoff, branch divergence, mismatched
-  ownership, head, or closing relationship, and every other dirty state fail
+  issue, multiple parent-owned PRs, branch divergence, mismatched ownership or
+  head, and every other dirty state fail
   closed rather than guessing a continuation point or closing historical state.
+  One exact closed-unmerged parent PR without a trusted handoff is a separate
+  cancellation terminal: the parent replaces its body with the fixed recovery
+  presentation plus a review-findings handoff, never reopens or merges it, and
+  lets the next interval advance.
 - The complete invocation, including parent Git, GitHub, ReviewGPT, and
   launchctl commands, has one absolute eight-hour deadline for a repair run.
   Every external command and the worker run in an exact detached process group.
@@ -200,7 +207,10 @@ Last verified: 2026-08-11
   later queue discovery skips that exact-head handoff. A human update whose new
   head descends from the marked head carries the disposition forward at the
   current head without rerunning a model; non-descendant replacement fails
-  closed. Before merge it
+  closed. That marker is effective only while the live operator is also the
+  proven latest body editor. A foreign body edit discards all remote metadata,
+  preserves a validated local body or installs one fixed recovery body, and
+  reruns the reviews rather than hydrating forged authority. Before merge it
   revalidates live issue authority, PR head, required checks, current-base
   mergeability, and both old and new paths of any rename or copy. Proven local
   agent/Codex workflow changes may merge and close automatically; possible

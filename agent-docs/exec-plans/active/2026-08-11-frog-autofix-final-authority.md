@@ -48,8 +48,12 @@ tooling automatically.
 10. [x] Serialize every mutating local invocation through one native advisory
     gate before the existing JSON parent/worker owner is inspected or replaced.
 11. [x] Convert descendant human amendments, failed/cancelled required checks,
-    current-base conflicts, and closed-unmerged handoffs into the existing
-    durable human-owned disposition without masking transient states.
+   current-base conflicts, and closed-unmerged handoffs into the existing
+   durable human-owned disposition without masking transient states.
+12. [x] Require live operator body-edit provenance before remote PR text can
+   supply review, baseline, hydration, closing, or queue-handoff authority.
+13. [x] Traverse the server-filtered deterministic-branch PR connection before
+   applying the zero-or-one parent-owned cardinality rule.
 
 ## Round-four scope retrospective
 
@@ -131,21 +135,45 @@ handoff they must share. Continue under the existing indivisible-authority
 decision, with real contention and foreign-PR regression proof required before
 another review.
 
+### Round-six continuation decision
+
+Round six found two incomplete edges of the same PR predicate. Proving the PR
+creator does not prove who last edited its mutable body, and filtering a single
+raw 100-record page does not prove that foreign durable history was removed
+before cardinality. The corrections remain inside the existing GitHub
+projection and body handoff. Add GitHub's `editor`/`lastEditedAt` provenance to
+the shared record, treat creator identity as body authority only for a
+never-edited body, and replace the bounded `gh pr list` snapshot with the
+server-filtered, fully traversed repository PR connection. Non-authoritative
+remote body text becomes presentation only: retain an already validated local
+body or use one fixed parent recovery body, then rerun exact-head reviews.
+These changes add no owner, queue, service, state machine, credential, or model
+turn. Omitting either leaves a demonstrated independent-review bypass or
+foreign-history queue denial, while splitting them would separate the query
+from the one predicate consuming its records. Continue to the seventh and
+final allowed substantive round after production-shaped provenance and
+pagination proof.
+
 ## Verification
 
 - Native Codex permission smoke: passed workspace read/write, denied an
   outside-root canary read, and denied outbound network.
-- Focused Frog autofix suite: 34 tests passed, including real two-process native
-  lock contention and foreign-PR/terminal-handoff regressions.
-- Repo-tools suite: 35 files and 559 tests passed directly and through the
+- Focused Frog autofix suite: 35 tests passed, including real two-process native
+  lock contention, forged-body authority rejection, complete cursor traversal,
+  and foreign-PR/terminal-handoff regressions.
+- Repo-tools suite: 35 files and 560 tests passed directly and through the
   repo-internal diff lane.
 - Repo TypeScript tools, shell syntax, documentation drift, dependency policy,
   hosted architecture guards, and `git diff --check`: passed.
+- A production-shaped read-only GraphQL proof returned the exact branch record
+  through the fully paginated query with current editor provenance and complete
+  connection metadata.
 - Final round four required the retrospective above and identified the prompt
   authority and terminal-outcome gaps. Round five verified those corrections
   and returned the PR-identity, atomic-lock, and terminal-handoff findings
-  captured in the continuation decision; another exact-head round remains
-  required before merge.
+  captured in the continuation decision. Round six verified those mechanisms
+  but returned body-provenance and pre-filter pagination findings captured
+  above; the seventh and final exact-head round remains required before merge.
 
 Status: active
 Updated: 2026-08-11

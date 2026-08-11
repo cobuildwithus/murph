@@ -31,6 +31,7 @@ import {
   buildCodexWorkerArguments,
   codexWorkerPermissionArguments,
   eligibleFrogIssues,
+  hasParentOwnedPullRequestBody,
   isParentOwnedPullRequest,
   isTrustedFrogIssue,
   localAgentOnlyChange,
@@ -48,11 +49,11 @@ import {
   type EventName,
   type EventRecord,
   type FrogIssue,
-  type PullRequestAuthorityRecord,
 } from "./frog-autofix-lib.ts";
 import {
   branchHasMergedPullRequest,
   branchOpenPullRequest,
+  branchPullRequests,
   resolveWorkerMode,
   type BranchPullRequestRecord,
   type RecoveryCommandAdapter,
@@ -65,6 +66,7 @@ import {
   parseSinglePatchArtifact,
   readBoundedParentFile,
   renderImplementationPrompt,
+  renderRecoveredPullRequestBody,
   validatePatchText,
   validatePullRequestBody,
 } from "./frog-autofix-parent.ts";
@@ -305,7 +307,10 @@ export interface DiscoveryDependencies {
   bindingCount: (root: string, issueNumber: number) => number;
   fetchDefaultBranch: (root: string) => void;
   listOpenIssues: (root: string) => string;
-  listIssuePullRequests: (root: string, issueNumber: number) => string;
+  listIssuePullRequests: (
+    root: string,
+    issueNumber: number,
+  ) => BranchPullRequestRecord[];
 }
 
 const defaultDiscoveryDependencies: DiscoveryDependencies = {
@@ -329,69 +334,20 @@ const defaultDiscoveryDependencies: DiscoveryDependencies = {
     ],
     root,
   ),
-  listIssuePullRequests: (root, issueNumber) => requireCommand(
-    "gh",
-    [
-      "pr",
-      "list",
-      "--repo",
-      FROG_AUTOFIX_REPOSITORY,
-      "--state",
-      "all",
-      "--head",
-      `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`,
-      "--limit",
-      "100",
-      "--json",
-      "author,baseRefName,body,headRefName,headRefOid,headRepositoryOwner,isCrossRepository,isDraft,number,state",
-    ],
+  listIssuePullRequests: (root, issueNumber) => branchPullRequests(
     root,
+    `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`,
+    recoveryCommands,
   ),
 };
 
-interface HandoffPullRequest extends PullRequestAuthorityRecord {
-  body: string;
-  headRefOid: string;
-  isDraft: boolean;
-  number: number;
-  state: "CLOSED" | "MERGED" | "OPEN";
-}
-
 export function completedHandoffIssueNumbers(
-  raw: string,
+  pullRequests: readonly BranchPullRequestRecord[],
   authenticatedOperator: string,
 ): Set<number> {
   const operator = parseAuthenticatedGitHubOperator(authenticatedOperator);
-  const value: unknown = JSON.parse(raw);
-  if (!Array.isArray(value) || value.length >= 100) {
-    throw new Error("GitHub returned an invalid or unbounded open pull request list");
-  }
   const completed = new Set<number>();
-  for (const entry of value) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new Error("GitHub returned an invalid open pull request record");
-    }
-    const record = entry as Partial<HandoffPullRequest>;
-    if (
-      !["CLOSED", "MERGED", "OPEN"].includes(record.state ?? "")
-      || typeof record.body !== "string"
-      || typeof record.headRefName !== "string"
-      || typeof record.headRefOid !== "string"
-      || !/^[0-9a-f]{40}$/u.test(record.headRefOid)
-      || typeof record.isDraft !== "boolean"
-      || typeof record.isCrossRepository !== "boolean"
-      || !Number.isSafeInteger(record.number)
-      || Number(record.number) <= 0
-      || typeof record.baseRefName !== "string"
-      || (record.author !== null
-        && (typeof record.author !== "object"
-          || typeof record.author.login !== "string"))
-      || (record.headRepositoryOwner !== null
-        && (typeof record.headRepositoryOwner !== "object"
-          || typeof record.headRepositoryOwner.login !== "string"))
-    ) {
-      throw new Error("GitHub returned an invalid open pull request record");
-    }
+  for (const record of pullRequests) {
     const branchMatch = new RegExp(
       `^${FROG_AUTOFIX_BRANCH_PREFIX.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(\\d+)$`,
       "u",
@@ -400,10 +356,11 @@ export function completedHandoffIssueNumbers(
     const issueNumber = Number(branchMatch[1]);
     if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) continue;
     if (!isParentOwnedPullRequest(
-      record as HandoffPullRequest,
+      record,
       operator,
       `${FROG_AUTOFIX_BRANCH_PREFIX}${issueNumber}`,
     )) continue;
+    if (!hasParentOwnedPullRequestBody(record, operator)) continue;
     if (record.state === "MERGED") continue;
     const relationship = new RegExp(
       `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+`
@@ -420,6 +377,31 @@ export function completedHandoffIssueNumbers(
     completed.add(issueNumber);
   }
   return completed;
+}
+
+export function closedPullRequestForHandoff(
+  pullRequests: readonly BranchPullRequestRecord[],
+): BranchPullRequestRecord | null {
+  return pullRequests.length === 1 && pullRequests[0]?.state === "CLOSED"
+    ? pullRequests[0]
+    : null;
+}
+
+export function closedPullRequestHandoffBody(
+  pullRequest: BranchPullRequestRecord,
+  issueNumber: number,
+): string {
+  if (pullRequest.state !== "CLOSED") {
+    throw new Error("closed handoff requires a closed pull request");
+  }
+  return bodyWithParentMetadata(
+    renderRecoveredPullRequestBody(issueNumber),
+    {
+      firstHead: pullRequest.headRefOid,
+      handoff: "review-findings",
+      handoffHead: pullRequest.headRefOid,
+    },
+  );
 }
 
 export function discoverEligibleIssues(
@@ -1656,20 +1638,45 @@ function validatedWorkerPrBody(worktree: string, issueNumber: number): string {
   return body;
 }
 
+export function recoverablePullRequestBody(
+  existing: BranchPullRequestRecord,
+  authenticatedOperator: string,
+  localBody: string | null,
+  issueNumber: number,
+): string {
+  if (hasParentOwnedPullRequestBody(existing, authenticatedOperator)) {
+    return existing.body;
+  }
+  return localBody ?? renderRecoveredPullRequestBody(issueNumber);
+}
+
 function preserveExistingPullRequestBody(
   worktree: string,
   issueNumber: number,
   existing: BranchPullRequestRecord,
 ) {
+  const bodyPath = path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH);
+  const operator = parseAuthenticatedGitHubOperator(
+    recoveryCommands.authenticatedOperator(worktree),
+  );
+  const localBody = existsSync(bodyPath)
+    ? validatedWorkerPrBody(worktree, issueNumber)
+    : null;
+  const recovered = recoverablePullRequestBody(
+    existing,
+    operator,
+    localBody,
+    issueNumber,
+  );
   validatePullRequestBody(
-    existing.body,
+    recovered,
     issueNumber,
     homedir(),
     userInfo().username,
   );
   writePrivateFileAtomically(
-    path.join(worktree, FROG_AUTOFIX_PR_BODY_PATH),
-    existing.body,
+    bodyPath,
+    recovered,
     0o600,
   );
 }
@@ -1769,6 +1776,50 @@ function updateParentPullRequestBody(
     ],
     primary,
   );
+}
+
+function persistClosedPullRequestHandoff(
+  primary: string,
+  pullRequest: BranchPullRequestRecord,
+  issueNumber: number,
+) {
+  const transientRoot = path.join(supportRoot, "transient");
+  mkdirSync(transientRoot, { mode: 0o700, recursive: true });
+  const transient = mkdtempSync(path.join(transientRoot, "run-"));
+  try {
+    const body = closedPullRequestHandoffBody(pullRequest, issueNumber);
+    validatePullRequestBody(body, issueNumber, homedir(), userInfo().username);
+    const bodyPath = path.join(transient, "closed-pr-body.md");
+    writePrivateFileAtomically(bodyPath, body, 0o600);
+    requireCommand(
+      "gh",
+      [
+        "pr",
+        "edit",
+        String(pullRequest.number),
+        "--repo",
+        FROG_AUTOFIX_REPOSITORY,
+        "--body-file",
+        bodyPath,
+      ],
+      primary,
+    );
+    const operator = parseAuthenticatedGitHubOperator(
+      recoveryCommands.authenticatedOperator(primary),
+    );
+    const refreshed = branchPullRequests(
+      primary,
+      pullRequest.headRefName,
+      recoveryCommands,
+    );
+    if (!completedHandoffIssueNumbers(refreshed, operator).has(issueNumber)) {
+      throw new Error("closed pull request handoff did not persist");
+    }
+  } finally {
+    if (existsSync(transient)) {
+      safeRemoveTransientDirectory(transientRoot, transient);
+    }
+  }
 }
 
 export function bodyWithParentMetadata(
@@ -2174,20 +2225,29 @@ async function reviewPublishAndFinalize(options: {
     recoveryCommands,
   );
   const head = requireCommand("git", ["rev-parse", "HEAD"], options.worktree);
+  const operator = parseAuthenticatedGitHubOperator(
+    recoveryCommands.authenticatedOperator(options.primary),
+  );
+  const existingBodyIsParentOwned = Boolean(
+    existingBeforePublish
+    && hasParentOwnedPullRequestBody(existingBeforePublish, operator),
+  );
   const firstHead = resolveFirstReviewedHead(
     options.worktree,
-    existingBeforePublish?.body ?? null,
+    existingBeforePublish && existingBodyIsParentOwned
+      ? existingBeforePublish.body
+      : null,
     head,
   );
   let specialistPassed = Boolean(
-    existingBeforePublish
+    existingBeforePublish && existingBodyIsParentOwned
     && bodyHasExactReviewPass(existingBeforePublish.body, "specialist", head),
   );
   let finalPassed = Boolean(
-    existingBeforePublish
+    existingBeforePublish && existingBodyIsParentOwned
     && bodyHasExactReviewPass(existingBeforePublish.body, "final", head),
   );
-  let handoff = existingBeforePublish
+  let handoff = existingBeforePublish && existingBodyIsParentOwned
     ? carriedForwardBodyHandoff(
       existingBeforePublish.body,
       head,
@@ -2420,6 +2480,17 @@ async function runOnce() {
     }
     verifyExactIssue(primary, issue.number);
     const branch = `${FROG_AUTOFIX_BRANCH_PREFIX}${issue.number}`;
+    const closedPullRequest = closedPullRequestForHandoff(
+      branchPullRequests(primary, branch, recoveryCommands),
+    );
+    if (closedPullRequest) {
+      persistClosedPullRequestHandoff(primary, closedPullRequest, issue.number);
+      recordEvent("awaiting_human_merge", issue.number);
+      console.log(
+        "Closed repair reached a durable human-review handoff; continuing with later issues on the next run.",
+      );
+      return;
+    }
     const codexHome = readConfiguredCodexHome();
     const worktree = prepareIssueWorktree(primary, issue.number);
     const workerMode = resolveWorkerMode(

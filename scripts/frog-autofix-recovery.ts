@@ -1,6 +1,7 @@
 import {
   FROG_AUTOFIX_REPOSITORY,
   classifyWorkerMode,
+  hasParentOwnedPullRequestBody,
   isParentOwnedPullRequest,
   parseAuthenticatedGitHubOperator,
   type BranchPullRequestState,
@@ -33,11 +34,13 @@ export function branchOpenPullRequest(
   issueNumber: number,
   commands: RecoveryCommandAdapter,
 ): BranchPullRequestRecord | null {
+  if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error("invalid Frog issue number");
+  }
   const pullRequests = branchPullRequests(root, branch, commands);
   if (
     pullRequests.length !== 1
     || pullRequests[0]?.state !== "OPEN"
-    || !issueClosingKeywordPresent(pullRequests[0].body, issueNumber)
   ) return null;
   return pullRequests[0];
 }
@@ -51,16 +54,54 @@ function issueClosingKeywordPresent(body: string, issueNumber: number): boolean 
   return relationship.test(body);
 }
 
-function parseBranchPullRequests(
+export function parseBranchPullRequestPages(
   raw: string,
   branch: string,
   authenticatedOperator: string,
 ): BranchPullRequestRecord[] {
-  const value: unknown = JSON.parse(raw);
-  if (!Array.isArray(value) || value.length >= 100) {
-    throw new Error("GitHub returned an invalid or unbounded pull request list");
+  const pages: unknown = JSON.parse(raw);
+  if (!Array.isArray(pages) || pages.length === 0) {
+    throw new Error("GitHub returned an invalid pull request page list");
   }
-  return value.map((entry) => {
+  let expectedTotal: number | null = null;
+  const entries: unknown[] = [];
+  for (const [index, pageEntry] of pages.entries()) {
+    const page = pageEntry as {
+      data?: {
+        repository?: {
+          pullRequests?: {
+            nodes?: unknown;
+            pageInfo?: { endCursor?: unknown; hasNextPage?: unknown };
+            totalCount?: unknown;
+          };
+        };
+      };
+    };
+    const connection = page?.data?.repository?.pullRequests;
+    if (
+      !connection
+      || !Array.isArray(connection.nodes)
+      || connection.nodes.length > 100
+      || !Number.isSafeInteger(connection.totalCount)
+      || Number(connection.totalCount) < 0
+      || typeof connection.pageInfo?.hasNextPage !== "boolean"
+      || (connection.pageInfo.hasNextPage
+        && (typeof connection.pageInfo.endCursor !== "string"
+          || !connection.pageInfo.endCursor))
+      || (index < pages.length - 1) !== connection.pageInfo.hasNextPage
+    ) {
+      throw new Error("GitHub returned an invalid pull request page");
+    }
+    if (expectedTotal === null) expectedTotal = Number(connection.totalCount);
+    if (connection.totalCount !== expectedTotal) {
+      throw new Error("GitHub pull request pagination changed during traversal");
+    }
+    entries.push(...connection.nodes);
+  }
+  if (entries.length !== expectedTotal) {
+    throw new Error("GitHub returned an incomplete pull request traversal");
+  }
+  const parsedRecords = entries.map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       throw new Error("GitHub returned an invalid pull request record");
     }
@@ -76,9 +117,15 @@ function parseBranchPullRequests(
       || typeof record.body !== "string"
       || typeof record.isCrossRepository !== "boolean"
       || typeof record.isDraft !== "boolean"
+      || (record.lastEditedAt !== null
+        && (typeof record.lastEditedAt !== "string"
+          || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(record.lastEditedAt)))
       || (record.author !== null
         && (typeof record.author !== "object"
           || typeof record.author.login !== "string"))
+      || (record.editor !== null
+        && (typeof record.editor !== "object"
+          || typeof record.editor.login !== "string"))
       || (record.headRepositoryOwner !== null
         && (typeof record.headRepositoryOwner !== "object"
           || typeof record.headRepositoryOwner.login !== "string"))
@@ -86,37 +133,84 @@ function parseBranchPullRequests(
       throw new Error("GitHub returned an invalid pull request record");
     }
     return record as BranchPullRequestRecord;
-  }).filter((record) => isParentOwnedPullRequest(
+  });
+  if (
+    new Set(parsedRecords.map((record) => record.number)).size
+      !== parsedRecords.length
+  ) {
+    throw new Error("GitHub returned duplicate pull requests during pagination");
+  }
+  const records = parsedRecords.filter((record) => isParentOwnedPullRequest(
     record,
     authenticatedOperator,
     branch,
   ));
+  if (records.length > 1) {
+    throw new Error("GitHub returned ambiguous parent-owned pull request history");
+  }
+  return records;
 }
 
-function branchPullRequests(
+const pullRequestPaginationQuery = `query(
+  $owner: String!,
+  $name: String!,
+  $head: String!,
+  $endCursor: String
+) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(
+      baseRefName: "main",
+      headRefName: $head,
+      states: [OPEN, CLOSED, MERGED],
+      first: 100,
+      after: $endCursor
+    ) {
+      nodes {
+        author { login }
+        baseRefName
+        body
+        editor { login }
+        headRefName
+        headRefOid
+        headRepositoryOwner { login }
+        isCrossRepository
+        isDraft
+        lastEditedAt
+        number
+        state
+      }
+      pageInfo { endCursor hasNextPage }
+      totalCount
+    }
+  }
+}`;
+
+export function branchPullRequests(
   root: string,
   branch: string,
   commands: RecoveryCommandAdapter,
 ): BranchPullRequestRecord[] {
+  const [owner, name] = FROG_AUTOFIX_REPOSITORY.split("/");
+  if (!owner || !name) throw new Error("invalid Frog autofix repository");
   const authenticatedOperator = parseAuthenticatedGitHubOperator(
     commands.authenticatedOperator(root),
   );
-  return parseBranchPullRequests(
+  return parseBranchPullRequestPages(
     commands.require(
       "gh",
       [
-        "pr",
-        "list",
-        "--repo",
-        FROG_AUTOFIX_REPOSITORY,
-        "--state",
-        "all",
-        "--head",
-        branch,
-        "--limit",
-        "100",
-        "--json",
-        "author,baseRefName,body,headRefName,headRefOid,headRepositoryOwner,isCrossRepository,isDraft,number,state",
+        "api",
+        "graphql",
+        "--paginate",
+        "--slurp",
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `name=${name}`,
+        "-F",
+        `head=${branch}`,
+        "-f",
+        `query=${pullRequestPaginationQuery}`,
       ],
       root,
     ),
@@ -221,8 +315,7 @@ export function resolveWorkerMode(
     ));
     const exactOpenPullRequest = pullRequests.length === 1
       && pullRequests[0]?.state === "OPEN"
-      && pullRequests[0].headRefOid === localHead
-      && issueClosingKeywordPresent(pullRequests[0].body, issueNumber);
+      && pullRequests[0].headRefOid === localHead;
     preserveBoundDirtyState = Boolean(
       exactOpenPullRequest
       && remoteLookup.status === 0
@@ -314,7 +407,6 @@ export function resolveWorkerMode(
       throw new Error(`git failed with status ${ancestry.status}`);
     }
     return {
-      closesIssue: issueClosingKeywordPresent(pullRequest.body, issueNumber),
       headIsAncestorOfLocal: ancestry.status === 0,
       headMatchesLocal: pullRequest.headRefOid === localHead,
       state: pullRequest.state,
@@ -338,6 +430,9 @@ export function branchHasMergedPullRequest(
   commands: RecoveryCommandAdapter,
 ): boolean {
   const pullRequests = branchPullRequests(root, branch, commands);
+  const operator = parseAuthenticatedGitHubOperator(
+    commands.authenticatedOperator(root),
+  );
   const localBranchHead = commands.require(
     "git",
     ["rev-parse", `refs/heads/${branch}`],
@@ -346,5 +441,6 @@ export function branchHasMergedPullRequest(
   return pullRequests.length === 1
     && pullRequests[0]?.state === "MERGED"
     && pullRequests[0].headRefOid === localBranchHead
+    && hasParentOwnedPullRequestBody(pullRequests[0], operator)
     && issueClosingKeywordPresent(pullRequests[0].body, issueNumber);
 }
