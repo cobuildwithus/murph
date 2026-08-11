@@ -18,6 +18,7 @@ import { buildAutomationSupportSeriesTag } from '@murphai/contracts'
 import {
   createExperiment,
   initializeVault,
+  loadVault,
   patchAutomation,
   scaffoldAutomationPayload,
   showAutomation,
@@ -44,6 +45,7 @@ import {
   resolveAssistantOnboardingStatePath,
 } from '../src/assistant/onboarding-state.ts'
 import {
+  buildOnboardingGoalCheckinSeed,
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import {
@@ -3850,31 +3852,44 @@ describe('assistant outbox runtime', () => {
 
   it('revalidates answered onboarding when a queued goal check-in reaches provider entry', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-07-20T17:31:00.000Z'))
     const { vaultRoot } = await createInitializedAssistantVault(
       'assistant-outbox-onboarding-goal-checkin-',
     )
-    await completeAssistantOnboarding({
-      completedAt: '2026-06-01T17:30:00.000Z',
+    const completedAt = '2026-07-16T17:30:00.000Z'
+    const onboardingState = await completeAssistantOnboarding({
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
+    const vault = await loadVault({ vaultRoot })
+    const seed = buildOnboardingGoalCheckinSeed({
+      now: new Date('2026-07-16T18:00:00.000Z'),
+      onboardingState,
+      stableKey: vault.metadata.vaultId,
+      timeZone: vault.metadata.timezone,
+    })
+    if (!seed || seed.schedule.kind !== 'at') {
+      throw new Error('Expected an onboarding goal check-in seed.')
+    }
+    const deliveryAt = new Date(
+      Date.parse(seed.schedule.at) + 60_000,
+    ).toISOString()
+    vi.setSystemTime(new Date(deliveryAt))
     const scaffold = scaffoldAutomationPayload()
     const automation = await upsertAutomation({
       ...scaffold,
-      activeUntil: '2026-07-27T17:30:00.000Z',
-      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-      continuityPolicy: 'preserve',
-      instructions: 'Offer one low-pressure health direction choice.',
-      now: new Date('2026-07-20T17:29:00.000Z'),
-      schedule: {
-        at: '2026-07-20T17:30:00.000Z',
-        kind: 'at',
-      },
-      slug: 'onboarding-goal-choice-point',
+      activeUntil: seed.activeUntil,
+      assistantTargetOverride: seed.assistantTargetOverride,
+      automationId: seed.automationId,
+      continuityPolicy: seed.continuityPolicy ?? 'preserve',
+      instructions: seed.instructions,
+      now: new Date(Date.parse(seed.schedule.at) - 60_000),
+      schedule: seed.schedule,
+      slug: seed.slug,
       status: 'active',
-      tags: ['assistant', 'scheduled', 'murph-managed'],
-      title: 'Onboarding goal choice point',
+      summary: seed.summary,
+      tags: [...(seed.tags ?? [])],
+      title: seed.title,
       vaultRoot,
     })
     const eligible = await deliverAssistantOutboxMessage({
@@ -3896,7 +3911,7 @@ describe('assistant outbox runtime', () => {
       delivery: createDelivery({
         idempotencyKey: eligible.intent.deliveryIdempotencyKey,
         providerMessageId: 'provider-onboarding-goal-checkin',
-        sentAt: '2026-07-20T17:31:00.000Z',
+        sentAt: deliveryAt,
         target: 'telegram-chat',
         targetKind: 'explicit',
       }),
@@ -3947,7 +3962,7 @@ describe('assistant outbox runtime', () => {
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledOnce()
 
     await completeAssistantOnboarding({
-      completedAt: '2026-06-01T17:30:00.000Z',
+      completedAt,
       reason: 'user_answered',
       vault: vaultRoot,
     })
@@ -3956,7 +3971,7 @@ describe('assistant outbox runtime', () => {
         idempotencyKey:
           temporarilyUnavailable.intent.deliveryIdempotencyKey,
         providerMessageId: 'provider-onboarding-goal-checkin-retry',
-        sentAt: '2026-07-20T17:32:00.000Z',
+        sentAt: deliveryAt,
         target: 'telegram-chat',
         targetKind: 'explicit',
       }),
@@ -3989,7 +4004,7 @@ describe('assistant outbox runtime', () => {
       vault: vaultRoot,
     })
     await reopenAssistantOnboarding({
-      reopenedAt: '2026-07-20T17:31:30.000Z',
+      reopenedAt: new Date(Date.parse(deliveryAt) + 30_000).toISOString(),
       vault: vaultRoot,
     })
     await expect(showAutomation({

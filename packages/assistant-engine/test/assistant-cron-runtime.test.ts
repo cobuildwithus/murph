@@ -6646,7 +6646,7 @@ describe('assistant cron runtime orchestration', () => {
     })
     const { claimed, paths } = await claimFirstCanonicalCronJob(vaultRoot)
     await completeAssistantOnboarding({
-      completedAt: '2026-07-01T14:00:00.000Z',
+      completedAt: '2026-07-05T14:00:00.000Z',
       reason: 'user_answered',
       vault: vaultRoot,
     })
