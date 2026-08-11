@@ -1,5 +1,7 @@
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
+import CHANGELOG_FRAGMENT_EDITIONS from "./changelog-fragments.generated";
+
 export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
@@ -61,230 +63,7 @@ export interface ChangelogPage {
   totalPages: number;
 }
 
-const RAW_CHANGELOG_EDITIONS = [
-  {
-    id: "2026-08-10",
-    publishedOn: "2026-08-10",
-    title:
-      "Group photos, Starter, patterns, personality, health history, referrals, reminders, cards, voices, and clearer pages",
-    summary:
-      "Visible Murph-made images can become group photos when explicitly asked. Starter waits until used; patterns link actions to next-day sleep; edit personality in Settings or chat; blood-pressure history survives source changes; referrals stay in their chat; reminders keep local time; cards and voices stay clear; search stays current; pages start lighter; and private reports show shape while loading.",
-    items: [
-      {
-        id: "generated-image-group-photo",
-        kind: "feature",
-        priority: 5,
-        title: "Use a generated image as your group photo",
-        summary:
-          "After Murph creates and sends an image, ask it to use that same image as the current group photo.",
-        details:
-          "Murph changes the photo only after an explicit group request and after the exact generated image is visible in the conversation. Pending or mismatched media stays blocked.",
-        relevanceTags: ["groups", "images", "assistant", "privacy"],
-        sourcePullRequests: [1533],
-      },
-      {
-        id: "non-expiring-starter-access",
-        kind: "feature",
-        priority: 5,
-        title: "Start with usage that does not expire",
-        summary:
-          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
-        details:
-          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
-        relevanceTags: ["starter", "usage", "billing", "settings"],
-        sourcePullRequests: [1464],
-        tryIt: {
-          href: "/settings#subscription",
-          label: "View Starter usage",
-        },
-      },
-      {
-        id: "cleaner-plan-and-model-settings",
-        kind: "improvement",
-        priority: 1,
-        title: "Cleaner plan and model settings",
-        summary:
-          "Settings now presents Starter usage and unavailable models more concisely while keeping relevant plan and upgrade choices visible.",
-        relevanceTags: ["settings", "plans", "models"],
-        sourcePullRequests: [1621],
-      },
-      {
-        id: "personal-patterns",
-        kind: "feature",
-        priority: 5,
-        title: "See what tends to change after repeated actions",
-        summary:
-          "Patterns compares days with and without a repeated activity or logged experiment action, then shows how next-day sleep and recovery differed.",
-        details:
-          "It uses your existing history when enough comparable days are available, requires the direction to repeat across the observation window, and shows association rather than cause. Murph's weekly health insight checks the same evidence and stays quiet when nothing clears the bar.",
-        relevanceTags: [
-          "patterns",
-          "wearables",
-          "sleep",
-          "recovery",
-          "experiments",
-        ],
-        sourcePullRequests: [1563],
-        tryIt: {
-          href: "/patterns",
-          label: "View your patterns",
-        },
-      },
-      {
-        id: "personality-settings-and-chat",
-        kind: "feature",
-        priority: 4,
-        title: "Choose how Murph shows up",
-        summary:
-          "Choose Murph's main and optional supporting personality in Settings, or ask Murph to change them in chat.",
-        details:
-          "Both paths update the same saved personality. Explicit tone, voice, Humor, Push, and Detail choices stay unchanged; where you have not customized tone or voice, Settings shows the selected personality's defaults. A group request changes only that room's Murph rather than anyone's private settings.",
-        relevanceTags: ["personality", "settings", "chat", "groups"],
-        sourcePullRequests: [1589],
-        tryIt: {
-          href: "/settings",
-          label: "Edit Murph's personality",
-        },
-      },
-      {
-        id: "referral-notification-route-recovery",
-        kind: "improvement",
-        priority: 4,
-        title: "Referral celebrations stay in the right conversation",
-        summary:
-          "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
-        details:
-          "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
-        relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
-        sourcePullRequests: [1592],
-      },
-      {
-        id: "blood-pressure-history-completion",
-        kind: "improvement",
-        priority: 4,
-        title: "Blood-pressure history waits for the whole sync",
-        summary:
-          "When Murph is recovering older blood-pressure readings, a temporary change in source access no longer lets an unfinished history import look complete.",
-        details:
-          "Murph keeps the same history window available to retry after access returns and marks it complete only after every remaining day finishes under the currently connected source.",
-        relevanceTags: ["blood-pressure", "wearables", "health-data", "reliability"],
-        sourcePullRequests: [1523, 1625],
-      },
-      {
-        id: "reminders-keep-requested-timezone",
-        kind: "improvement",
-        priority: 4,
-        title: "Reminders keep the time you asked for",
-        summary:
-          "When you schedule a recurring reminder in a named timezone, Murph now preserves that local time through saving and later edits.",
-        details:
-          "The confirmation comes from the saved schedule and scheduler's next deliverable occurrence. If timing cannot be verified, or an old one-time reminder can no longer fire, Murph says so and offers a bounded recovery instead of inventing a time.",
-        relevanceTags: ["reminders", "automations", "timezones", "reliability"],
-        sourcePullRequests: [1546],
-        tryIt: {
-          label: "Schedule a local-time reminder",
-          prompt: "Remind me every day at 9 PM Central to wind down.",
-        },
-      },
-      {
-        id: "voice-memos-use-your-voice",
-        kind: "improvement",
-        priority: 4,
-        title: "Voice memos keep your chosen voice",
-        summary:
-          "Ordinary voice memos now use the voice already selected for your Murph instead of switching voices on their own.",
-        details:
-          "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
-        relevanceTags: ["voice", "messaging", "personalization", "reliability"],
-        sourcePullRequests: [1587],
-      },
-      {
-        id: "cleaner-workout-cards-in-messages",
-        kind: "improvement",
-        priority: 4,
-        title: "Response cards stay compact in Messages",
-        summary:
-          "Workout detail and nutrition goal direction now stay inside their cards instead of repeating a long summary beneath the static image.",
-        details:
-          "Fallback cards have no duplicate badge or corner mask. Nutrition goals use short in-card direction labels without repeating target amounts, older sent workout cards remain readable, and generic tables keep their optional subtitle.",
-        relevanceTags: ["workouts", "nutrition", "imessage", "cards", "design"],
-        sourcePullRequests: [1588],
-      },
-      {
-        id: "web-search-restored",
-        kind: "improvement",
-        priority: 5,
-        title: "Managed OpenAI web search works again",
-        summary:
-          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
-        details:
-          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
-        relevanceTags: ["assistant", "search", "research", "reliability"],
-        sourcePullRequests: [1583],
-      },
-      {
-        id: "appointment-reminders-by-default",
-        kind: "improvement",
-        priority: 4,
-        title: "Confirmed appointments come with a reminder",
-        summary:
-          "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
-        details:
-          "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
-        relevanceTags: ["appointments", "reminders", "automations", "care"],
-        sourcePullRequests: [1586],
-        tryIt: {
-          label: "Tell Murph about an appointment",
-          prompt:
-            "I have a confirmed dentist appointment next Thursday at 2 PM.",
-        },
-      },
-      {
-        id: "workout-card-status-rendering",
-        kind: "improvement",
-        priority: 3,
-        title: "Completed workout rows keep their checkmark",
-        summary:
-          "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
-        details:
-          "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
-        relevanceTags: ["workouts", "imessage", "cards", "reliability"],
-        sourcePullRequests: [1599],
-      },
-      {
-        id: "lighter-accessible-homepage",
-        kind: "improvement",
-        priority: 3,
-        title: "The homepage starts lighter",
-        summary:
-          "The public homepage now uses compact avatar images while continuing to prepare secure sign-in automatically in the background.",
-        details:
-          "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
-        relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],
-        sourcePullRequests: [1573],
-        tryIt: {
-          href: "/",
-          label: "Visit the homepage",
-        },
-      },
-      {
-        id: "environment-report-loading-preview",
-        kind: "improvement",
-        priority: 3,
-        title: "Environment reports show their shape while loading",
-        summary:
-          "The private Environment report now opens with a clear preparing state and a report-shaped preview instead of a mostly empty page.",
-        details:
-          "The preview mirrors the printable report and gives immediate feedback while the existing private Browser Vault opens. The finished report, empty state, and error recovery continue unchanged.",
-        relevanceTags: ["environment", "reports", "web", "privacy"],
-        sourcePullRequests: [1617],
-        tryIt: {
-          href: "/environment/print",
-          label: "Open your Environment report",
-        },
-      },
-    ],
-  },
+const LEGACY_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-09",
     publishedOn: "2026-08-09",
@@ -7170,7 +6949,10 @@ const RAW_CHANGELOG_EDITIONS = [
 ] satisfies readonly ChangelogEdition[];
 
 export const CHANGELOG_EDITIONS: readonly ChangelogEdition[] =
-  validateChangelogEditions(RAW_CHANGELOG_EDITIONS);
+  validateChangelogEditions([
+    ...CHANGELOG_FRAGMENT_EDITIONS,
+    ...LEGACY_CHANGELOG_EDITIONS,
+  ]);
 
 export function listChangelogEditions(): readonly ChangelogEdition[] {
   return CHANGELOG_EDITIONS;
