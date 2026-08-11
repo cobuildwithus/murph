@@ -34,6 +34,7 @@ export type BrowserVaultStatus = "loading" | "ready" | "empty" | "error";
 const BROWSER_VAULT_STALE_POLL_INTERVAL_MS = 1_500;
 const BROWSER_VAULT_STALE_POLL_WINDOW_MS = 20_000;
 const BROWSER_VAULT_STALE_POLL_SLOW_INTERVAL_MS = 15_000;
+const BROWSER_VAULT_RUNTIME_REFRESH_TIMEOUT_MS = 60_000;
 const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   deviceSyncImportPending: false,
   freshness: "stale",
@@ -54,7 +55,11 @@ export interface BrowserVaultContextValue {
   freshness: BrowserVaultFreshness;
   ref: HostedBrowserVaultReplicaRef | null;
   refreshPending: boolean;
-  refresh(options?: { background?: boolean }): Promise<void>;
+  refresh(options?: {
+    background?: boolean;
+    requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
+  }): Promise<void>;
+  runtimeRefreshPending: boolean;
   status: BrowserVaultStatus;
   workspaceVersion: string | null;
 }
@@ -69,6 +74,7 @@ const DISABLED_BROWSER_VAULT_CONTEXT: BrowserVaultContextValue = {
   ref: null,
   refresh: () => Promise.resolve(),
   refreshPending: false,
+  runtimeRefreshPending: false,
   status: "empty",
   workspaceVersion: null,
 };
@@ -122,7 +128,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const [status, setStatus] = useState<BrowserVaultStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   const [freshness, setFreshness] = useState<BrowserVaultFreshness>("stale");
-  const [refreshPending, setRefreshPending] = useState(false);
+  const [sessionRefreshPending, setSessionRefreshPending] = useState(false);
+  const [runtimeRefreshPending, setRuntimeRefreshPending] = useState(false);
   const [workspaceVersion, setWorkspaceVersion] = useState<string | null>(null);
   const [client, setClient] = useState<BrowserVaultQueryClient | null>(null);
   const [deviceSyncImportPending, setDeviceSyncImportPending] = useState(false);
@@ -132,8 +139,54 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const providerStartedLoadRef = useRef(false);
+  const runtimeRefreshCompletionRef = useRef<
+    ((client: BrowserVaultQueryClient) => boolean) | null
+  >(null);
+  const runtimeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  const clearRuntimeRefreshWait = useCallback(() => {
+    runtimeRefreshCompletionRef.current = null;
+    if (runtimeRefreshTimeoutRef.current) {
+      clearTimeout(runtimeRefreshTimeoutRef.current);
+      runtimeRefreshTimeoutRef.current = null;
+    }
+    setRuntimeRefreshPending(false);
+  }, []);
+
+  const beginRuntimeRefreshWait = useCallback(
+    (isComplete: (client: BrowserVaultQueryClient) => boolean) => {
+      runtimeRefreshCompletionRef.current = isComplete;
+      if (runtimeRefreshTimeoutRef.current) {
+        clearTimeout(runtimeRefreshTimeoutRef.current);
+      }
+      setRuntimeRefreshPending(true);
+      runtimeRefreshTimeoutRef.current = setTimeout(() => {
+        runtimeRefreshCompletionRef.current = null;
+        runtimeRefreshTimeoutRef.current = null;
+        abortBrowserVaultInFlightLoad();
+        providerStartedLoadRef.current = false;
+        if (mountedRef.current) {
+          setSessionRefreshPending(false);
+          setRuntimeRefreshPending(false);
+        }
+      }, BROWSER_VAULT_RUNTIME_REFRESH_TIMEOUT_MS);
+    },
+    [],
+  );
 
   const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
+    const isRuntimeRefreshComplete = runtimeRefreshCompletionRef.current;
+    const awaitingRequestedReplacement = isRuntimeRefreshComplete !== null
+      && !isRuntimeRefreshComplete(snapshot.client);
+    if (isRuntimeRefreshComplete && !awaitingRequestedReplacement) {
+      // A stronger refresh may be queued behind the load that delivered this
+      // matching snapshot. Fence that now-redundant continuation before it can
+      // claim the shared slot without a remaining predicate or deadline.
+      abortBrowserVaultInFlightLoad();
+      clearRuntimeRefreshWait();
+    }
     clientRef.current = snapshot.client;
     setClient(snapshot.client);
     setRef(snapshot.ref);
@@ -141,9 +194,9 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     setError(null);
     setDeviceSyncImportPending(snapshot.metadata.deviceSyncImportPending);
     setFreshness(snapshot.metadata.freshness);
-    setRefreshPending(snapshot.metadata.refreshPending);
+    setSessionRefreshPending(snapshot.metadata.refreshPending);
     setWorkspaceVersion(snapshot.metadata.workspaceVersion);
-  }, []);
+  }, [clearRuntimeRefreshWait]);
 
   const commitEmpty = useCallback((metadata: BrowserVaultSessionMetadata) => {
     clientRef.current = null;
@@ -153,7 +206,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     setError(null);
     setDeviceSyncImportPending(metadata.deviceSyncImportPending);
     setFreshness(metadata.freshness);
-    setRefreshPending(metadata.refreshPending);
+    setSessionRefreshPending(metadata.refreshPending);
     setWorkspaceVersion(metadata.workspaceVersion);
   }, []);
 
@@ -161,9 +214,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     authorityGenerationRef.current += 1;
     clearBrowserVaultWarmState();
     providerStartedLoadRef.current = false;
+    clearRuntimeRefreshWait();
     commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
     setAdmittedPathname(null);
-  }, [commitEmpty]);
+  }, [clearRuntimeRefreshWait, commitEmpty]);
 
   const applyOutcome = useCallback(
     (outcome: BrowserVaultWarmLoadOutcome, options: {
@@ -175,6 +229,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         return;
       }
       if (outcome.status === "session_ending") {
+        clearRuntimeRefreshWait();
         commitEmpty(EMPTY_BROWSER_VAULT_SESSION_METADATA);
         if (authorityPathname !== undefined) {
           setAdmittedPathname(authorityPathname);
@@ -221,20 +276,37 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
       setStatus("error");
       setError(outcome.message);
     },
-    [clearDecryptedClient, commitEmpty, commitReady, initialMemberId],
+    [
+      clearDecryptedClient,
+      clearRuntimeRefreshWait,
+      commitEmpty,
+      commitReady,
+      initialMemberId,
+    ],
   );
 
   const runProviderLoad = useCallback(
     async (options: {
       authorityPathname?: string;
       background?: boolean;
+      requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
     } = {}) => {
       const background = options.background ?? false;
       const { authorityPathname } = options;
+      const runtimeRefreshCompletion = options.requestRuntimeRefreshUntil;
+      const requestRuntimeRefresh = runtimeRefreshCompletion !== undefined;
       const authorityGeneration = authorityPathname === undefined
         ? authorityGenerationRef.current
         : authorityGenerationRef.current + 1;
       if (authorityPathname !== undefined) {
+        // The provider persists across dashboard routes. Retire page-owned
+        // runtime work before the destination authority request starts so an
+        // older handoff deadline can never abort the new route's load.
+        if (runtimeRefreshCompletionRef.current) {
+          clearRuntimeRefreshWait();
+          abortBrowserVaultInFlightLoad();
+          providerStartedLoadRef.current = false;
+        }
         authorityGenerationRef.current = authorityGeneration;
         setAdmittedPathname(null);
         setStatus("loading");
@@ -266,10 +338,15 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         }
       }
 
+      if (runtimeRefreshCompletion) {
+        beginRuntimeRefreshWait(runtimeRefreshCompletion);
+      }
+
       const outcome = await startBrowserVaultWarmLoad({
         expectedMemberId: initialMemberId,
+        requestRefresh: requestRuntimeRefresh,
       });
-      if (startedLoad) {
+      if (startedLoad && !peekBrowserVaultInFlightLoad()) {
         providerStartedLoadRef.current = false;
       }
       if (
@@ -281,15 +358,29 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       applyOutcome(outcome, { authorityPathname, background });
     },
-    [applyOutcome, initialMemberId],
+    [
+      applyOutcome,
+      beginRuntimeRefreshWait,
+      clearRuntimeRefreshWait,
+      initialMemberId,
+    ],
   );
 
   const refresh = useCallback(
-    async (options: { background?: boolean } = {}) => {
+    async (options: {
+      background?: boolean;
+      requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
+    } = {}) => {
       await runProviderLoad(
         options.background
-          ? { background: true }
-          : { authorityPathname: pathname },
+          ? {
+              background: true,
+              requestRuntimeRefreshUntil: options.requestRuntimeRefreshUntil,
+            }
+          : {
+              authorityPathname: pathname,
+              requestRuntimeRefreshUntil: options.requestRuntimeRefreshUntil,
+            },
       );
     },
     [pathname, runProviderLoad],
@@ -328,7 +419,13 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      if (providerStartedLoadRef.current) {
+      const ownsRuntimeRefresh = runtimeRefreshCompletionRef.current !== null;
+      runtimeRefreshCompletionRef.current = null;
+      if (runtimeRefreshTimeoutRef.current) {
+        clearTimeout(runtimeRefreshTimeoutRef.current);
+        runtimeRefreshTimeoutRef.current = null;
+      }
+      if (ownsRuntimeRefresh || providerStartedLoadRef.current) {
         abortBrowserVaultInFlightLoad();
         providerStartedLoadRef.current = false;
       }
@@ -346,6 +443,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, [pathname, revalidateAuthority]);
 
   useEffect(() => {
+    const refreshPending = sessionRefreshPending || runtimeRefreshPending;
     if (status === "error" || !refreshPending) {
       return;
     }
@@ -377,7 +475,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         clearTimeout(timeoutId);
       }
     };
-  }, [freshness, pollStaleReplica, refreshPending, status]);
+  }, [freshness, pollStaleReplica, runtimeRefreshPending, sessionRefreshPending, status]);
 
   useEffect(() => {
     const onFocus = () => {
@@ -393,6 +491,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, [admittedPathname, pathname, pollStaleReplica, revalidateAuthority]);
 
   const authorityAdmitted = admittedPathname === pathname;
+  const refreshPending = sessionRefreshPending || runtimeRefreshPending;
   const value = useMemo<BrowserVaultContextValue>(() => ({
     client: authorityAdmitted ? client : null,
     dataVersion: authorityAdmitted ? ref?.dataVersion ?? null : null,
@@ -404,11 +503,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     ref: authorityAdmitted ? ref : null,
     refreshPending: authorityAdmitted ? refreshPending : false,
     refresh,
+    runtimeRefreshPending: authorityAdmitted ? runtimeRefreshPending : false,
     status: authorityAdmitted || status === "empty" || status === "error"
       ? status
       : "loading",
     workspaceVersion: authorityAdmitted ? workspaceVersion : null,
-  }), [authorityAdmitted, client, deviceSyncImportPending, error, freshness, ref, refresh, refreshPending, status, workspaceVersion]);
+  }), [authorityAdmitted, client, deviceSyncImportPending, error, freshness, ref, refresh, refreshPending, runtimeRefreshPending, status, workspaceVersion]);
 
   return (
     <BrowserVaultContext.Provider value={value}>
