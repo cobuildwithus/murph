@@ -50,6 +50,7 @@ import {
 import { assistantVaultImageMaxBytes } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantResponseCardJsonSchema,
+  exerciseRoutineResponseCardJsonSchema,
 } from '@murphai/operator-config/assistant-response-cards'
 import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
@@ -266,6 +267,21 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     additionalProperties: false,
     properties: {
       card: assistantResponseCardJsonSchema,
+    },
+    required: ['card'],
+  },
+} as const
+
+export const MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL = {
+  namespace: 'murph',
+  name: 'attach_exercise_routine_card',
+  description:
+    'Attach one private-direct exercise routine card when this tool is available for a movement-instruction turn or saved instructions for the exact scheduled occurrence that ask Murph to teach the routine now. The card must completely answer the request and replaces final text. First run vault-cli exercise show for each named movement. Copy each selected image URL, alt, and step exactly. Construct its source as exercise_catalog:<returned-item-id>:<1-based-position-in-returned-images>; never invent media or reorder images before assigning the position. Keep each instruction concrete and short. Use subtitle for one short orientation sentence in the user\'s language that tells them to open each exercise for instructions and images. Use footer only when it adds information that the title, exercise details, subtitle, or safety note do not already say. Estimate each exercise, transition, and total honestly. Before attaching, compare the stated total with the routine and do not claim a longer session than the content supports. The current channel renders the card with its supported native presentation. Do not repeat values in final send_message and do not combine this card with response media.',
+  inputSchema: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      card: exerciseRoutineResponseCardJsonSchema,
     },
     required: ['card'],
   },
@@ -826,13 +842,19 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. This is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for ask_current_sender, message_current_sender, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the request; this is not a provider message id.',
 } as const
+
+const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF = [
+  'ask_current_sender',
+  'message_current_sender',
+  'revoke_own_email_share',
+] as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
   'The native consent message completes the offer portion. If no other requested output remains, call murph.finish_without_reply. Otherwise answer the remaining request without adding a companion consent acknowledgment.'
 
-export const MURPH_GROUP_TOOL = {
+const MURPH_GROUP_TOOL_BASE = {
   namespace: 'murph',
   name: 'group',
   deferLoading: true,
@@ -1108,6 +1130,46 @@ export const MURPH_GROUP_TOOL = {
   },
 } as const
 
+const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
+  MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum.filter((action) =>
+    action !== 'ask_current_sender'
+    && action !== 'message_current_sender'
+    && action !== 'revoke_own_email_share')
+
+export const MURPH_GROUP_TOOL = {
+  ...MURPH_GROUP_TOOL_BASE,
+  inputSchema: {
+    allOf: [
+      MURPH_GROUP_TOOL_BASE.inputSchema,
+      {
+        oneOf: [
+          {
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF,
+              },
+              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+            },
+            required: ['action', 'message_ref'],
+          },
+          {
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF,
+              },
+            },
+            required: ['action'],
+          },
+        ],
+      },
+    ],
+  },
+} as const
+
 export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
@@ -1341,6 +1403,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
+  MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GENERATE_VOICE_MEMO_TOOL,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
@@ -1413,6 +1476,7 @@ export interface MurphDynamicToolAvailability {
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
   responseCardsAvailable?: boolean | null
+  exerciseRoutineResponseCardsAvailable?: boolean | null
   groupChallengeResponseCardsAvailable?: boolean | null
   progressUpdateMode?: 'direct' | 'group'
   physicalNotesAvailable?: boolean | null
@@ -1446,6 +1510,8 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_DEVICE_TOOL, defaultOff((a) => a.deviceAvailable)],
     [MURPH_ASSISTANT_STYLE_TOOL, defaultOff((a) => a.assistantStyleSettingsAvailable)],
     [MURPH_ATTACH_RESPONSE_CARD_TOOL, defaultOff((a) => a.responseCardsAvailable)],
+    [MURPH_ATTACH_EXERCISE_ROUTINE_CARD_TOOL, defaultOff((a) =>
+      a.exerciseRoutineResponseCardsAvailable)],
     [MURPH_FINISH_WITHOUT_REPLY_TOOL, defaultOn((a) => a.allowFinishWithoutReply)],
     [MURPH_SELECT_REPLY_TARGET_TOOL, defaultOff((a) => a.messageTargetingAvailable)],
     [MURPH_REACT_TO_MESSAGE_TOOL, defaultOff((a) => a.messageTargetingAvailable)],

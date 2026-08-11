@@ -70,6 +70,7 @@ import {
 } from "@murphai/runtime-state";
 import {
   sendTelegramImageMessage,
+  sendTelegramRichMessage,
 } from "@murphai/assistant-engine/assistant-channel-runtime";
 import type {
   AssistantDeliveryError,
@@ -3248,6 +3249,77 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             providerDispatchEntered = true;
           }
           const result = await sendTelegramMessage(request, dependencies);
+          await assertHostedDeliveryLiveNow(input);
+          return result;
+        },
+        sendTelegramRich: async (request) => {
+          await assertHostedDeliveryCanEnterProvider(input);
+          const privateCompletion = mirrorState.intent
+            && isHostedPrivateAssistantAskCompletionIntent(mirrorState.intent)
+            ? mirrorState.intent
+            : null;
+          const authorityBoundTarget =
+            await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
+              assistantDeliveryEffect: input.assistantDeliveryEffect,
+              delivery: {
+                media: [],
+                message: request.fallbackMessage,
+              },
+              effectsPort: input.effectsPort,
+              intent: mirrorState.intent,
+              signal: input.signal,
+              target: request.target,
+              userId: input.userId,
+              vaultRoot: input.vaultRoot,
+            });
+          const providerFetch = privateCompletion
+            ? createHostedProviderFetchBoundary({
+              assertProviderEntryLive: async () => {
+                try {
+                  await assertHostedDeliveryCanEnterProvider(input);
+                  await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+                    actualRoute: {
+                      actorId: input.assistantDeliveryEffect.payload.actorId,
+                      channel: "telegram",
+                      delivery: {
+                        kind: "thread",
+                        target: request.target,
+                      },
+                      identityId:
+                        input.assistantDeliveryEffect.payload.identityId,
+                      threadId: input.assistantDeliveryEffect.payload.threadId,
+                      threadIsDirect:
+                        input.assistantDeliveryEffect.payload.threadIsDirect,
+                    },
+                    effectsPort: input.effectsPort,
+                    intentId: privateCompletion.intentId,
+                    media: [],
+                    message: request.fallbackMessage,
+                    now: new Date(),
+                    signal: input.signal,
+                    vaultRoot: input.vaultRoot,
+                  });
+                } catch (error) {
+                  throw markHostedDeliveryPreProvider(error);
+                }
+              },
+              onProviderDispatchEntered: () => {
+                providerDispatchEntered = true;
+              },
+              operation: "Hosted private Assistant Ask Telegram rich delivery",
+              providerFetch: input.providerFetch,
+            })
+            : input.providerFetch;
+          const dependencies = requireHostedProviderFetchDependencies({
+            ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
+            env: input.telegramEnv,
+            fetchImplementation: providerFetch,
+            ...(input.signal ? { signal: input.signal } : {}),
+          }, "Hosted assistant Telegram rich delivery");
+          if (!privateCompletion) {
+            providerDispatchEntered = true;
+          }
+          const result = await sendTelegramRichMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
         },

@@ -180,6 +180,9 @@ describe("murph.group message_current_sender", () => {
     });
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "message_current_sender",
+    }))).toMatchObject({ kind: "invalid-group-arguments" });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "message_current_sender",
       message_ref: SELECTED_INPUT_ID,
       text: "model-authored private message",
     }))).toMatchObject({ kind: "invalid-group-arguments" });

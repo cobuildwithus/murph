@@ -234,7 +234,7 @@ function findJunctionCompactTimeseriesArtifacts(
 function assertNoFullJunctionTimeseriesArtifacts(payload: DeviceBatchImportPayload): void {
   assert.equal(
     (payload.evidenceParts ?? []).some((artifact) =>
-      /^junction-timeseries-(?!daily-|reading-blood-pressure:)/u.test(artifact.role)
+      /^junction-timeseries-(?!daily-|reading-(?:blood-pressure|note):)/u.test(artifact.role)
     ),
     false,
   );
@@ -245,11 +245,26 @@ function findJunctionBloodPressureReadingArtifacts(payload: DeviceBatchImportPay
     .filter((artifact) => artifact.role.startsWith("junction-timeseries-reading-blood-pressure:"));
 }
 
+function findJunctionNoteArtifacts(payload: DeviceBatchImportPayload) {
+  return (payload.evidenceParts ?? [])
+    .filter((artifact) => artifact.role.startsWith("junction-timeseries-reading-note:"));
+}
+
 function makeJunctionDefaultTimeseriesSample(resource: string): Record<string, unknown> {
   const base = { sourceProviderSlug: "oura", timestamp: "2026-04-22T12:00:00Z" };
 
   if (resource === "blood_pressure") {
     return { ...base, systolic: 120, diastolic: 76 };
+  }
+
+  if (resource === "note") {
+    return {
+      ...base,
+      start: base.timestamp,
+      end: base.timestamp,
+      tags: ["sauna"],
+      value: "SENSITIVE_VALUE_SENTINEL",
+    };
   }
 
   const plausibleValues: Record<string, number> = {
@@ -3331,6 +3346,65 @@ test("Junction normalizer lands sparse paired blood pressure readings as measure
   assert.doesNotMatch(artifactText, /"value":350|"systolic":350|"diastolic":95/u);
 });
 
+test("Junction normalizer lands Oura note tags without retaining note text", async () => {
+  const snapshot = {
+    importedAt: "2026-04-23T12:00:00.000Z",
+    timeseries: {
+      note: {
+        groups: {
+          oura: [{
+            data: [
+              {
+                start: "2026-04-22T18:05:00+02:00",
+                end: "2026-04-22T18:10:00+02:00",
+                tags: ["Sauna", "late meal", "Sauna"],
+                unit: "text",
+                value: "SENSITIVE_VALUE_SENTINEL_A",
+              },
+              {
+                start: "2026-04-22T18:05:00+02:00",
+                end: "2026-04-22T18:10:00+02:00",
+                tags: ["Alcohol"],
+                unit: "text",
+                value: "SENSITIVE_VALUE_SENTINEL_B",
+              },
+            ],
+            source: { provider: "oura", type: "ring" },
+          }],
+        },
+      },
+    },
+  };
+  const payload = await prepareDeviceProviderSnapshotImport({
+    provider: "junction",
+    connectionId: "conn-junction-oura",
+    sourceKind: "poll",
+    deliveryMode: "scheduled_reconcile",
+    normalizerVersion: "junction-normalizer.v1",
+    snapshot,
+  });
+  const tagEvents = (payload.events ?? []).filter((event) => event.kind === "intervention_session");
+
+  assert.deepEqual(payload.provenance?.timeseriesResources, ["note"]);
+  assert.deepEqual(
+    tagEvents.map((event) => event.fields?.interventionType).sort(),
+    ["alcohol", "late-meal", "sauna"],
+  );
+  assert.ok(tagEvents.every((event) => event.fields?.sessionStatus === "completed"));
+  assert.ok(tagEvents.every((event) => event.dayKey === "2026-04-22"));
+  assert.ok(tagEvents.every((event) => event.dataOrigin?.sourceProviderSlug === "oura"));
+  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.resourceId)).size, 2);
+  assert.equal(new Set(tagEvents.map((event) => event.externalRef?.facet)).size, 3);
+  assert.equal(findJunctionNoteArtifacts(payload).length, 2);
+  assertNoFullJunctionTimeseriesArtifacts(payload);
+  assertEventRawArtifactRolesExist(payload);
+  assert.doesNotMatch(JSON.stringify(payload.evidenceParts), /SENSITIVE_VALUE_SENTINEL/u);
+  assert.doesNotMatch(
+    JSON.stringify(payload),
+    /SENSITIVE_VALUE_SENTINEL/u,
+  );
+});
+
 test("Junction exposes repair-stable opaque identities for blood pressure provider rows", () => {
   const snapshot = (entry: Record<string, unknown>) => ({
     importedAt: "2026-04-23T12:00:00.000Z",
@@ -4114,6 +4188,7 @@ test("Junction normalizer defaults to the documented resource allowlist", () => 
     "afib_burden",
     "glucose",
     "blood_pressure",
+    "note",
   ]);
   assert.deepEqual([...JUNCTION_OPT_IN_SUMMARY_RESOURCES], []);
   assert.deepEqual([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES], []);

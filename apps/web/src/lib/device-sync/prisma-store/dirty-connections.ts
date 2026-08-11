@@ -1866,6 +1866,13 @@ function normalizeDirtyResource(
     resource: truncateDirtyKey(normalizeNullableString(resource.resource)),
     resourceCategory: truncateDirtyKey(normalizeNullableString(resource.resourceCategory)),
     sourceProviderSlug: truncateDirtyKey(normalizeNullableString(resource.sourceProviderSlug)),
+    ...(resource.timingSourceProviderSlug === undefined
+      ? {}
+      : {
+          timingSourceProviderSlug: truncateDirtyKey(
+            normalizeNullableString(resource.timingSourceProviderSlug),
+          ),
+        }),
     windowEnd: normalizeIso(resource.windowEnd),
     windowStart: normalizeIso(resource.windowStart),
   };
@@ -1876,7 +1883,10 @@ function mergeDirtyResourceTiming(
   next: HostedDeviceSyncDirtyResource,
 ): Pick<
   HostedDeviceSyncDirtyResource,
-  "eventToProviderSendBucket" | "firstWebhookReceivedAt" | "providerSendToWebhookMs"
+  | "eventToProviderSendBucket"
+  | "firstWebhookReceivedAt"
+  | "providerSendToWebhookMs"
+  | "timingSourceProviderSlug"
 > | Record<string, never> {
   const eventToProviderSendBucket = mergeHostedDeviceSyncEventToProviderSendBuckets(
     previous.eventToProviderSendBucket,
@@ -1890,13 +1900,32 @@ function mergeDirtyResourceTiming(
     previous.providerSendToWebhookMs,
     next.providerSendToWebhookMs,
   );
-  return eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
+  const timingSourceProviderSlug = mergeDirtyTimingSourceProviderSlug(
+    previous.timingSourceProviderSlug,
+    next.timingSourceProviderSlug,
+  );
+  const hasTiming = eventToProviderSendBucket
+    || firstWebhookReceivedAt
+    || providerSendToWebhookMs !== null
+    || timingSourceProviderSlug !== undefined;
+  return hasTiming
     ? {
         eventToProviderSendBucket,
         firstWebhookReceivedAt,
         providerSendToWebhookMs,
+        ...(timingSourceProviderSlug === undefined ? {} : { timingSourceProviderSlug }),
       }
     : {};
+}
+
+function mergeDirtyTimingSourceProviderSlug(
+  previous: string | null | undefined,
+  next: string | null | undefined,
+): string | null | undefined {
+  if (previous === undefined && next === undefined) {
+    return undefined;
+  }
+  return previous === next ? previous : null;
 }
 
 function buildDirtyResourceKey(resource: HostedDeviceSyncDirtyResource): string {
@@ -1984,6 +2013,13 @@ function readDirtyResourcesJson(value: Prisma.JsonValue): Record<string, HostedD
       resource: typeof record.resource === "string" ? record.resource : null,
       resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
       sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
+      ...(record.timingSourceProviderSlug === undefined
+        ? {}
+        : {
+            timingSourceProviderSlug: typeof record.timingSourceProviderSlug === "string"
+              ? record.timingSourceProviderSlug
+              : null,
+          }),
       windowEnd: typeof record.windowEnd === "string" ? record.windowEnd : null,
       windowStart: typeof record.windowStart === "string" ? record.windowStart : null,
     });
@@ -2029,6 +2065,13 @@ async function readDirtyPayloadResourceJson(input: {
     resource: typeof record.resource === "string" ? record.resource : null,
     resourceCategory: typeof record.resourceCategory === "string" ? record.resourceCategory : null,
     sourceProviderSlug: typeof record.sourceProviderSlug === "string" ? record.sourceProviderSlug : null,
+    ...(record.timingSourceProviderSlug === undefined
+      ? {}
+      : {
+          timingSourceProviderSlug: typeof record.timingSourceProviderSlug === "string"
+            ? record.timingSourceProviderSlug
+            : null,
+        }),
     windowEnd: typeof record.windowEnd === "string" ? record.windowEnd : null,
     windowStart: typeof record.windowStart === "string" ? record.windowStart : null,
   });

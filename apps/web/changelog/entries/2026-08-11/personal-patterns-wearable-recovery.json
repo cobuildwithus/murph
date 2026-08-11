@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 300,
+  "item": {
+    "id": "personal-patterns-wearable-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Patterns can use normalized recovery data",
+    "summary": "Personal Patterns can now compare repeated wearable activity with selected next-day recovery metrics when enough evidence exists.",
+    "details": "The existing matching thresholds stay unchanged, and unclear or insufficient evidence still remains labeled as such.",
+    "relevanceTags": ["patterns", "wearables", "recovery"],
+    "sourcePullRequests": [1668],
+    "tryIt": {
+      "href": "/patterns",
+      "label": "View your patterns"
+    }
+  }
+}
