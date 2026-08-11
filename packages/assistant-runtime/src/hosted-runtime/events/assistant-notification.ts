@@ -26,6 +26,7 @@ import type {
 } from "@murphai/hosted-execution";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
@@ -747,6 +748,11 @@ function buildAssistantNotificationInput(
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
 ): AssistantNotificationInput {
+  const privateAssistantAskCompletion =
+    wake.notification.privateAssistantAskCompletion ?? null;
+  if (privateAssistantAskCompletion) {
+    requireHostedPrivateAssistantAskCompletionNotification(wake);
+  }
   return buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
@@ -777,6 +783,13 @@ function buildAssistantNotificationInput(
       : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
+    ...(privateAssistantAskCompletion
+      ? {
+          answeredMailboxItemIds: [wake.eventId],
+          reviewedAssistantAskCompletionExpiresAt:
+            privateAssistantAskCompletion.expiresAt,
+        }
+      : {}),
     route: wake.notification.route,
     sourceMailboxItemId,
     turnEnvironment,
@@ -787,6 +800,7 @@ function buildAssistantNotificationInput(
 }
 
 function buildAssistantNotificationInputFromRoute(input: {
+  answeredMailboxItemIds?: AssistantNotificationInput["answeredMailboxItemIds"];
   assistantTurnOrdinal: string;
   deliveryDedupeToken: AssistantNotificationInput["deliveryDedupeToken"];
   deliveryDispatchMode: AssistantNotificationInput["deliveryDispatchMode"];
@@ -800,6 +814,8 @@ function buildAssistantNotificationInputFromRoute(input: {
   notificationPromptProfile?: AssistantNotificationInput["notificationPromptProfile"];
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void;
   responsePolicy: AssistantNotificationInput["responsePolicy"];
+  reviewedAssistantAskCompletionExpiresAt?:
+    AssistantNotificationInput["reviewedAssistantAskCompletionExpiresAt"];
   route: HostedExecutionAssistantNotificationRoute;
   sourceMailboxItemId: string | null;
   turnEnvironment: AssistantTurnEnvironment | null;
@@ -812,6 +828,9 @@ function buildAssistantNotificationInputFromRoute(input: {
 
   return {
     actorId: route.actorId,
+    ...(input.answeredMailboxItemIds
+      ? { answeredMailboxItemIds: input.answeredMailboxItemIds }
+      : {}),
     bindingDeliveryTarget: resolveAssistantNotificationBindingDeliveryTarget({
       executionContext: input.executionContext,
       externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
@@ -877,12 +896,48 @@ function buildAssistantNotificationInputFromRoute(input: {
         }
       : {}),
     responsePolicy: input.responsePolicy,
+    ...(input.reviewedAssistantAskCompletionExpiresAt
+      ? {
+          reviewedAssistantAskCompletionExpiresAt:
+            input.reviewedAssistantAskCompletionExpiresAt,
+        }
+      : {}),
     threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
     turnEnvironment: input.turnEnvironment,
     turnTrigger: input.turnTrigger,
     vault: input.vault,
   };
+}
+
+function requireHostedPrivateAssistantAskCompletionNotification(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): void {
+  const completion = wake.notification.privateAssistantAskCompletion;
+  const expectedDeliveryKey =
+    createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+      wake.eventId,
+    );
+  if (
+    !completion
+    || !Number.isFinite(Date.parse(completion.expiresAt))
+    || wake.notification.deliveryDedupeToken !== expectedDeliveryKey
+    || wake.notification.deliveryIdempotencyKey !== expectedDeliveryKey
+    || wake.notification.deliveryDispatchMode !== "queue-only"
+    || wake.notification.externalThreadRouteAuthority != null
+    || wake.notification.firstContact != null
+    || wake.notification.notificationPromptProfile != null
+    || wake.notification.route.threadIsDirect !== true
+    || (
+      wake.notification.route.channel !== "linq"
+      && wake.notification.route.channel !== "telegram"
+    )
+    || wake.notification.responsePolicy?.kind !== "require_send_exact_text"
+  ) {
+    throw new TypeError(
+      "Hosted private Assistant Ask completion notification proof is invalid.",
+    );
+  }
 }
 
 function resolveAssistantNotificationBindingDeliveryTarget(input: {

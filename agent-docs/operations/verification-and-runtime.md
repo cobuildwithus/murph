@@ -86,6 +86,20 @@ account-projection backfill, and the production migration guard. Keep the
 traffic guideline; this verification slice must not add a runtime traffic-cap
 expectation.
 
+For Hosted Assistant Ask target changes, focused proof must cover the shared
+contract and parser, exact target-adapter admission and replay, Web
+prepare/complete authority revalidation, mailbox routing, reviewed-child
+lifecycle, and Cloudflare control-port replay. A private-current-sender change
+additionally proves exact accepted group-message attribution to the canonical
+author's active personal runtime, rejection of thread-container and
+non-accepted-input contexts, conversion to one same-channel `direct-member`
+queue-only exact-text notification with no group-route authority, and rejection
+of route-changing replay. Provider-entry proof must revalidate the original
+private Assistant Ask expiry, exact reviewed-text digest, same personal member,
+and current same-channel `direct-member` route, with expiry, revocation, text
+mismatch, and route drift all terminal and unable to fall back to the group.
+Exact-head CI owns the broad app and package suites.
+
 ## Hosted Stripe Billing Verification
 
 Billing changes retain two distinct lanes. Run the focused hermetic owner proof

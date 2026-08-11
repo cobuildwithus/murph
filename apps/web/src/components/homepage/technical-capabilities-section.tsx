@@ -146,7 +146,7 @@ export function TechnicalCapabilitiesSection({
                 </p>
                 <span
                   aria-hidden="true"
-                  className="font-mono text-[10px] text-[#f5f0e8]/30"
+                  className="font-mono text-[10px] text-[#f5f0e8]/55"
                 >
                   {String(index + 1).padStart(2, "0")}
                 </span>
