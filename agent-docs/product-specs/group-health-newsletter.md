@@ -179,12 +179,10 @@ the parent sent. Each child uses the existing retry and terminal lifecycle.
 Cron records an accepted parent in its ordinary pending-delivery field and
 settles the occurrence from the parent state without another model turn. A
 restart between parent acceptance and the cron write recovers that same parent
-from the occurrence key. During the rollback window, new writes retain the
-legacy `group-newsletter:` serialized key so both old and current cron recovery
-find the same parent. Current readers also recognize `group-email-effect:` keys
-already accepted before that compatibility correction. The runtime action,
-effect type, and owner remain generic; only the bounded durable representation
-uses the legacy prefix.
+from the occurrence key. New writes use only the generic `group-email-effect:`
+key and generic authorization-proof field. Current readers also recognize the
+legacy `group-newsletter:` key and proof field solely to drain parents accepted
+before the cutover; a later write normalizes the proof to its generic name.
 
 Preparation or send unavailability before parent acceptance keeps the normal
 automation occurrence retryable. A send result of `accepted` means durable
@@ -240,43 +238,38 @@ Focused coverage must prove:
 - membership, consent, exact grant, verified-email, and proof changes fail
   closed before fanout;
 - accepted parent recovery and generic child retry settlement do not recompose;
-- legacy accepted keys/proof fields remain readable; the group-recipient
-  callback temporarily emits the legacy proof alias alongside the generic
-  field so an old Web rollback still revalidates the composition snapshot;
+- legacy accepted keys and persisted proof fields remain read-only while new
+  outbox and wire writes use only generic group-email names;
+- retired runner-to-Worker and Worker-to-Web proof aliases fail closed rather
+  than silently losing recipient revalidation;
 - no newsletter-specific tool, port, route, mailbox, cron branch, outbox type,
   authorization service, or capability flag remains in runtime code.
 
 ## Deployment Concerns
 
-This deletion changes both sides of the internal preparation call: the runner
-moves preparation onto the generic group-control port while Web removes the
-dedicated newsletter route. The old runner requires the old route, and the new
-runner requires Web's new `prepare_email` group action, so there is no safe
-long-lived sequential skew window.
+This is a hard cutover, not a mixed-version execution contract. A pre-cutover
+runner may execute only the old skill-authored recipe shape. It must never
+claim a recipe created or edited by the new skill: an untagged new
+`current_chat` recipe would be misclassified as email by that runner.
 
-Deploy the matching Vercel/Web build, Cloudflare/runner bundle, and private
-group-skill bundle as one coordinated release, with immediate container
-rollout. Pause or hold scheduled group-email occurrences during the cutover if
-the deploy system cannot make the Web and runner revisions effectively atomic.
-Current-chat automations remain on the ordinary route.
+Before deploying either new producer, suspend all hosted automation wake
+dispatch and wait for in-flight newsletter turns to finish. Do not publish the
+private skill while an old runner or Worker remains addressable. With wakes
+still suspended, deploy the matching Vercel/Web receiver, then deploy the
+Cloudflare Worker and runner bundle with immediate container rollout and prove
+the exact runner-bundle fingerprint. Treat that public runtime as the hard
+rollback floor. Only then publish the private skill bundle and resume automation
+wakes. If any step before the floor fails, roll back the still-old producer
+pair. After the skill is published, recover only with a forward fix at or above
+the floor; never restore a pre-cutover runner or the old private skill.
 
-Deploy Web before Cloudflare/runner in that coordinated window. The recipient
-callback is additive during the rollback window: current Cloudflare sends the
-same authorization proof under both the generic field and the legacy alias, so
-an already-accepted parent still fails closed if it reaches the old Web parser.
-Durable outbox JSON and the runner-to-Worker request likewise retain the legacy
-proof field on their rollback-facing representations while current code
-normalizes it to the generic internal name.
-New parent effects also retain the legacy occurrence-key prefix during this
-window so old cron recovery discovers the accepted parent instead of composing
-a second edition; current recovery continues to read either prefix.
-Until the generic Web receiver is established and recorded as the hard rollback
-floor, roll Cloudflare/runner back before rolling Web back. Remove the legacy
-proof representations only after production deployment evidence proves that no
-old runner, Worker, or Web artifact is addressable and every outbox intent
-written during the compatibility window has drained. Remove the legacy
-occurrence-key writer at that same floor, after both legacy- and generic-prefix
-parents and their children have drained.
+This gate prevents both current-chat and group-email recipes from being
+created, edited, or claimed across the version boundary. It also means new
+durable and wire writes need no legacy aliases. Current code retains only the
+readers required to finish old automation instructions, already-accepted
+outbox parents, and retired mailbox rows. Remove those readers after every old
+recipe has been rewritten through an interactive edit, all legacy-prefix
+parents and children have drained, and the retired mailbox inventory is empty.
 
 After rollout, prove one current-chat occurrence and one group-email
 prepare/send occurrence. Confirm the model receives no addresses or grant

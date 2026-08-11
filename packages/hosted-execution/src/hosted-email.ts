@@ -436,21 +436,14 @@ export function parseHostedEmailGroupRecipientsCallbackRequest(
   if (!groupId) {
     throw new TypeError("Hosted email group recipients callback request groupId must be present.");
   }
-
-  const expectedGroupEmailAuthorizationProof =
-    record.expectedGroupEmailAuthorizationProof
-      ?? record.expectedNewsletterAuthorizationProof
-      ?? null;
-  if (
-    record.expectedGroupEmailAuthorizationProof != null
-    && record.expectedNewsletterAuthorizationProof != null
-    && record.expectedGroupEmailAuthorizationProof
-      !== record.expectedNewsletterAuthorizationProof
-  ) {
+  if (record.expectedNewsletterAuthorizationProof !== undefined) {
     throw new TypeError(
-      "Hosted email group recipients callback authorization proofs must match.",
+      "Hosted email group recipients callback request uses a retired proof field.",
     );
   }
+
+  const expectedGroupEmailAuthorizationProof =
+    record.expectedGroupEmailAuthorizationProof ?? null;
   if (
     expectedGroupEmailAuthorizationProof !== null
     && !isHostedRuntimeGroupEmailAuthorizationProof(expectedGroupEmailAuthorizationProof)

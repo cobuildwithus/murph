@@ -156,6 +156,10 @@ describe("hosted execution wake builders", () => {
         markSeenOnDeliveryAccepted: true,
       },
       instructions: "Send the Murph signup welcome.",
+      privateAssistantAskCompletion: {
+        expiresAt: "2026-04-08T00:10:00.000Z",
+        requestId: `aask_req_${"a".repeat(64)}`,
+      },
       responsePolicy: {
         kind: "require_send_exact_text" as const,
         text: "Welcome to Murph, your personal health assistant.",
@@ -185,6 +189,8 @@ describe("hosted execution wake builders", () => {
 
     notification.firstContact.markSeenOnDeliveryAccepted = false;
     notification.externalThreadRouteAuthority.threadId = "mutated-thread";
+    notification.privateAssistantAskCompletion.requestId =
+      `aask_req_${"b".repeat(64)}`;
     notification.responsePolicy.text = "mutated";
     notification.route.delivery.source!.fromPhoneNumber = "+15550009999";
 
@@ -205,6 +211,10 @@ describe("hosted execution wake builders", () => {
           markSeenOnDeliveryAccepted: true,
         },
         instructions: "Send the Murph signup welcome.",
+        privateAssistantAskCompletion: {
+          expiresAt: "2026-04-08T00:10:00.000Z",
+          requestId: `aask_req_${"a".repeat(64)}`,
+        },
         responsePolicy: {
           kind: "require_send_exact_text",
           text: "Welcome to Murph, your personal health assistant.",
@@ -972,18 +982,15 @@ describe("hosted email helpers", () => {
       expectedGroupEmailAuthorizationProof: "not-a-proof",
       groupId: "group_123",
     })).toThrow(/SHA-256 hex digest/u);
-    expect(parseHostedEmailGroupRecipientsCallbackRequest({
+    expect(() => parseHostedEmailGroupRecipientsCallbackRequest({
       expectedNewsletterAuthorizationProof: authorizationProof,
       groupId: "group_legacy",
-    })).toEqual({
-      expectedGroupEmailAuthorizationProof: authorizationProof,
-      groupId: "group_legacy",
-    });
+    })).toThrow(/retired proof field/u);
     expect(() => parseHostedEmailGroupRecipientsCallbackRequest({
       expectedGroupEmailAuthorizationProof: authorizationProof,
       expectedNewsletterAuthorizationProof: "b".repeat(64),
       groupId: "group_mismatched",
-    })).toThrow(/authorization proofs must match/u);
+    })).toThrow(/retired proof field/u);
     expect(() => parseHostedEmailGroupRecipientsCallbackRequest({})).toThrow(
       /groupId must be present/u,
     );

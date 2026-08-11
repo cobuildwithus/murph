@@ -30,7 +30,7 @@ const OUTBOX_AUTOMATION_AUTHORITY = {
 }
 const AUTHORIZATION_PROOF = 'a'.repeat(64)
 const DELIVERY_KEY =
-  'group-newsletter:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
+  'group-email-effect:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
 const tempRoots: string[] = []
 
 afterEach(async () => {
@@ -116,12 +116,9 @@ describe('group email durable outbox capability', () => {
       deliveryIdempotencyKey: DELIVERY_KEY,
       emailHtml: '<p>Weekly</p>',
       message: 'Weekly',
-      newsletterAuthorizationProof: AUTHORIZATION_PROOF,
+      groupEmailAuthorizationProof: AUTHORIZATION_PROOF,
       status: 'pending',
     })
-    expect(findPreGenericNewsletterParent(intents)?.intentId).toBe(
-      intents[0]?.intentId,
-    )
     expect(recordPendingDeliveryIntentId).toHaveBeenCalledWith(
       intents[0]?.intentId,
     )
@@ -159,13 +156,13 @@ describe('group email durable outbox capability', () => {
     expect(retryPendingIntent).toHaveBeenCalledWith(intents[0]?.intentId)
   })
 
-  it('recovers a parent already accepted under the generic occurrence prefix', async () => {
-    const vault = await createVault('group-email-outbox-generic-parent-read-')
+  it('recovers a parent accepted under the retired occurrence prefix', async () => {
+    const vault = await createVault('group-email-outbox-legacy-parent-read-')
     const recordPendingDeliveryIntentId = vi.fn()
     const parent = await createAssistantOutboxIntent({
       channel: 'email',
       deliveryIdempotencyKey:
-        'group-email-effect:automation_newsletter:2026-07-12T13:00:00.000Z:group_123',
+        'group-newsletter:automation_newsletter:2026-07-12T13:00:00.000Z:group_123',
       explicitTarget: serializeHostedEmailThreadTarget({
         groupId: 'group_123',
         subject: 'Weekly',
@@ -175,7 +172,7 @@ describe('group email durable outbox capability', () => {
       message: 'Weekly',
       sessionId: 'session_generic_parent',
       threadIsDirect: false,
-      turnId: 'turn_generic_parent',
+      turnId: 'turn_legacy_parent',
       vault,
     })
 
@@ -187,7 +184,7 @@ describe('group email durable outbox capability', () => {
     const retryTool = createTool({
       recordPendingDeliveryIntentId,
       request: vi.fn(async () => preparationResponse()),
-      turnId: 'turn_generic_parent_retry',
+      turnId: 'turn_legacy_parent_retry',
       vault,
     })
     await prepare(retryTool)
@@ -289,16 +286,6 @@ function createTool(input: {
     turnId: input.turnId,
     vault: input.vault,
   })
-}
-
-function findPreGenericNewsletterParent(
-  intents: Awaited<ReturnType<typeof listAssistantOutboxIntents>>,
-) {
-  const prefix =
-    `group-newsletter:${AUTHORITY.automationId}:${AUTHORITY.occurrenceAt}:`
-  return intents.find((intent) =>
-    intent.deliveryIdempotencyKey?.startsWith(prefix)
-  )
 }
 
 function preparationResponse(input?: {

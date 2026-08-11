@@ -31,25 +31,19 @@ export interface HostedEmailSendResult {
 
 export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequest {
   const record = requireHostedEmailSendRequestObject(value, "Hosted email send request");
+  if (record.newsletterAuthorizationProof !== undefined) {
+    throw new TypeError(
+      "Hosted email send request uses a retired newsletter authorization proof field.",
+    );
+  }
   const planGroupFanout = readOptionalHostedEmailSendRequestBoolean(
     record.planGroupFanout ?? null,
     "Hosted email send request planGroupFanout",
   );
   const groupEmailAuthorizationProof =
     readOptionalHostedEmailGroupEmailAuthorizationProof(
-      record.groupEmailAuthorizationProof
-        ?? record.newsletterAuthorizationProof
-        ?? null,
+      record.groupEmailAuthorizationProof ?? null,
     );
-  if (
-    record.groupEmailAuthorizationProof != null
-    && record.newsletterAuthorizationProof != null
-    && record.groupEmailAuthorizationProof !== record.newsletterAuthorizationProof
-  ) {
-    throw new TypeError(
-      "Hosted email send request group email authorization proofs must match.",
-    );
-  }
 
   return {
     html: readOptionalHostedEmailSendRequestString(

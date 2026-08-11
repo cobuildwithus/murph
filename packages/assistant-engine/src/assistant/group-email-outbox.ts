@@ -134,8 +134,10 @@ export function createAssistantGroupEmailOutboxTool(input: {
       })
       const acceptedDeliveryIdempotencyKeys = [
         deliveryIdempotencyKey,
+        // Read-only migration support for a parent accepted before the generic
+        // effect key shipped. New writes always use deliveryIdempotencyKey.
         [
-          'group-email-effect',
+          'group-newsletter',
           prepared.authority.automationId,
           prepared.authority.occurrenceAt,
           prepared.groupId,
@@ -197,10 +199,10 @@ export async function findAssistantGroupEmailParentIntent(input: {
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   const deliveryIdempotencyPrefixes = [
-    // Bounded reader for parents already accepted under the generic prefix.
-    // Keep it until those parents and their recipient children have drained.
-    `group-email-effect:${input.authority.automationId}:${input.authority.occurrenceAt}:`,
     buildGroupEmailDeliveryIdempotencyPrefix(input.authority),
+    // Read-only migration support for parents accepted before the generic
+    // effect key shipped. Remove after those parents and children drain.
+    `group-newsletter:${input.authority.automationId}:${input.authority.occurrenceAt}:`,
   ]
   const parentIntents = (await listAssistantOutboxIntents(input.vault))
     .filter((intent) =>
@@ -226,10 +228,7 @@ function buildGroupEmailDeliveryIdempotencyKey(input: {
 function buildGroupEmailDeliveryIdempotencyPrefix(
   authority: HostedRuntimeGroupEmailScheduledAuthority,
 ): string {
-  // The pre-generic runner searches only this prefix. Keep the durable
-  // occurrence identity rollback-readable until current runner/Worker
-  // artifacts are the enforced floor and compatibility-window work drains.
-  return `group-newsletter:${authority.automationId}:${authority.occurrenceAt}:`
+  return `group-email-effect:${authority.automationId}:${authority.occurrenceAt}:`
 }
 
 function groupEmailAccepted(

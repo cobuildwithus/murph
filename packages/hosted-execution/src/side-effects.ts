@@ -692,17 +692,24 @@ function parseHostedAssistantDeliveryPayload(
     record.threadIsDirect ?? null,
     `${label}.threadIsDirect`,
   );
-  if (card !== null && threadIsDirect !== true) {
+  const channel = requireNullableString(
+    record.channel ?? null,
+    `${label}.channel`,
+  );
+  if (card?.kind === "challenge_standings") {
+    if (channel !== "linq" || threadIsDirect !== false) {
+      throw new TypeError(
+        `${label}.card requires an authenticated Linq group conversation.`,
+      );
+    }
+  } else if (card !== null && threadIsDirect !== true) {
     throw new TypeError(`${label}.card requires a private direct conversation.`);
   }
-  if (
-    record.groupEmailAuthorizationProof != null
-    && record.newsletterAuthorizationProof != null
-    && record.groupEmailAuthorizationProof !== record.newsletterAuthorizationProof
-  ) {
-    throw new TypeError(`${label}.group email authorization proofs must match.`);
+  if (record.newsletterAuthorizationProof !== undefined) {
+    throw new TypeError(
+      `${label}.newsletterAuthorizationProof belongs to a retired runner wire contract.`,
+    );
   }
-
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
     answeredMailboxItemIds: parseHostedAssistantDeliveryAnsweredMailboxItemIds(
@@ -717,7 +724,7 @@ function parseHostedAssistantDeliveryPayload(
       record.bindingDeliveryTarget ?? null,
       `${label}.bindingDeliveryTarget`,
     ),
-    channel: requireNullableString(record.channel ?? null, `${label}.channel`),
+    channel,
     ...(record.card === undefined ? {} : { card }),
     deliverySourceKey: requireNullableString(
       record.deliverySourceKey ?? null,
@@ -745,12 +752,10 @@ function parseHostedAssistantDeliveryPayload(
           ),
         }),
     ...(record.groupEmailAuthorizationProof === undefined
-      && record.newsletterAuthorizationProof === undefined
       ? {}
       : {
           groupEmailAuthorizationProof: requireNullableGroupEmailAuthorizationProof(
-            record.groupEmailAuthorizationProof
-              ?? record.newsletterAuthorizationProof,
+            record.groupEmailAuthorizationProof,
             `${label}.groupEmailAuthorizationProof`,
           ),
         }),

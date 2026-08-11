@@ -28,6 +28,28 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Generic Group-Email Cutover
+
+The newsletter deletion is a hard public-runtime and private-skill cutover.
+Old runners interpret an untagged `group-health-newsletter` record as email, so
+they must never claim an automation created or edited by the new ordinary
+recipe skill.
+
+Suspend hosted automation wake dispatch before either producer changes and let
+in-flight newsletter turns finish. Keep dispatch suspended while deploying the
+matching Web receiver, then the Cloudflare Worker and runner with
+`container_rollout=immediate`. Prove the exact runner-bundle fingerprint and
+record that public artifact as the hard rollback floor before publishing the
+private skill bundle or resuming wakes. The private skill must not deploy
+earlier. After it is published, rollback below that public floor or to the old
+skill is unsupported; use a forward fix.
+
+New outbox and HTTP writes use only generic group-email keys and proof fields.
+The current runner retains bounded readers for old persisted parents and
+instructions, but no old runner, Worker, or Web parser is part of the supported
+window. Remove the readers after legacy recipes are rewritten, legacy parents
+and children drain, and the retired mailbox inventory is empty.
+
 ## Health-Data Consent Stop-Target Rollout
 
 Deploy the Cloudflare Worker that retains an exact user-control stop target
@@ -1352,9 +1374,9 @@ The value also authorizes privacy, export, media, and account-deletion paths, so
 removing it is not a route-scoped runtime-start pause and would disable
 unrelated operations. The migrated ledger is now a forward-only floor: repair
 or redeploy a compatible current Web/runner pair. Neither pre-Starter plane is
-a resumable target against the migrated database. The remaining legacy Stripe
-object cleanup procedure is owned by
-`agent-docs/product-specs/starter-usage.md`.
+a resumable target against the migrated database. The one-time legacy Stripe
+object drain is complete; the remaining delayed-event compatibility and final
+removal gate are owned by `agent-docs/product-specs/starter-usage.md`.
 
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence

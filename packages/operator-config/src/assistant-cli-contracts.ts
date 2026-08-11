@@ -972,8 +972,8 @@ export const assistantOutboxIntentSchema = z
       .regex(/^[0-9a-f]{64}$/u)
       .nullable()
       .optional(),
-    // Bounded compatibility for the rollback-readable durable representation.
-    // Current code normalizes this to the generic internal field at dispatch.
+    // Read-only migration support for durable intents accepted before the
+    // generic group-email field shipped. New writes use the field above.
     newsletterAuthorizationProof: z
       .string()
       .regex(/^[0-9a-f]{64}$/u)
@@ -1003,7 +1003,25 @@ export const assistantOutboxIntentSchema = z
       })
     }
 
-    if (intent.card !== null && intent.threadIsDirect !== true) {
+    if (
+      intent.card?.kind === 'challenge_standings' &&
+      !(
+        intent.threadIsDirect === false &&
+        intent.channel?.trim().toLowerCase() === 'linq'
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Challenge standings response cards require an authenticated Linq group conversation.',
+        path: ['card'],
+      })
+    }
+    if (
+      intent.card !== null &&
+      intent.card.kind !== 'challenge_standings' &&
+      intent.threadIsDirect !== true
+    ) {
       context.addIssue({
         code: 'custom',
         message: 'Assistant response cards require a private direct conversation.',
