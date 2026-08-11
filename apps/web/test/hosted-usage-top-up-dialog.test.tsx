@@ -15,6 +15,12 @@ import {
 } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 
+import { HostedOnboardingApiError } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
+
 import {
   createMemoryStorage,
   renderClientComponent,
@@ -28,6 +34,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const TEST_PAYER_MEMBER_ID = "hbm_usage_top_up_payer";
+const RETIRED_USAGE_TERM_PATTERN = new RegExp(
+  ["cost", "weighted"].join("-"),
+  "iu",
+);
 
 const USAGE_TOP_UP_TARGET_CASES = [
   {
@@ -57,9 +67,18 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
-vi.mock("@/src/components/hosted-onboarding/client-api", () => ({
-  requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
-}));
+vi.mock(
+  "@/src/components/hosted-onboarding/client-api",
+  async (importOriginal) => {
+    const original = await importOriginal<
+      typeof import("@/src/components/hosted-onboarding/client-api")
+    >();
+    return {
+      ...original,
+      requestHostedOnboardingJson: mocks.requestHostedOnboardingJson,
+    };
+  },
+);
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({
   useAuth: () => ({
@@ -95,6 +114,24 @@ vi.mock("@/src/components/ui/button", () => ({
   buttonVariants: () => "",
 }));
 
+vi.mock("@/src/components/ui/checkbox", () => ({
+  Checkbox: ({
+    checked,
+    onCheckedChange,
+    ...props
+  }: ButtonHTMLAttributes<HTMLButtonElement> & {
+    checked?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+  }) =>
+    createElement("button", {
+      ...props,
+      "aria-checked": checked ? "true" : "false",
+      onClick: () => onCheckedChange?.(!checked),
+      role: "checkbox",
+      type: "button",
+    }),
+}));
+
 vi.mock("@/src/components/ui/dialog", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   const DialogContext = React.createContext<{
@@ -122,16 +159,21 @@ vi.mock("@/src/components/ui/dialog", async () => {
       ),
     DialogContent: React.forwardRef<
       HTMLDivElement,
-      HTMLAttributes<HTMLDivElement> & { showCloseButton?: boolean }
+      HTMLAttributes<HTMLDivElement> & {
+        initialFocus?: unknown;
+        showCloseButton?: boolean;
+      }
     >(function DialogContent(
       {
         children,
         className,
+        initialFocus: _initialFocus,
         showCloseButton: _showCloseButton,
         ...props
       },
       ref,
     ) {
+      void _initialFocus;
       void _showCloseButton;
       const context = React.useContext(DialogContext);
       return context.open
@@ -339,7 +381,14 @@ vi.mock("@/src/components/ui/choice-card", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.isMobile.mockReset();
   mocks.isMobile.mockReturnValue(false);
+  mocks.randomUUID.mockReset();
+  mocks.randomUUID.mockReturnValue(
+    "00000000-0000-4000-8000-000000000001",
+  );
+  mocks.requestHostedOnboardingJson.mockReset();
+  mocks.routerRefresh.mockReset();
   vi.stubGlobal("crypto", {
     randomUUID: mocks.randomUUID,
   });
@@ -534,7 +583,7 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      RETIRED_USAGE_TERM_PATTERN,
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -582,7 +631,7 @@ test("reuses the dialog state machine for a server-scoped group checkout", async
   }
 });
 
-test("freezes optional sponsorship copy with the selected group offer", async () => {
+test("keeps a customizable sponsorship quiet by default", async () => {
   const checkout = deferred<unknown>();
   mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
   const { GroupSponsorshipDialog } = await import(
@@ -601,42 +650,224 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
   );
 
   try {
-    assert.match(rendered.container.textContent ?? "", /Add a note/);
+    await clickRadio(rendered.container, rendered.window, "usage_5_usd");
+    await clickButton(rendered.container, rendered.window, "Contribute $5");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_5_usd",
+        sponsorship: {
+          publicAlias: null,
+          runningBitRequest: null,
+          sponsorMessage: null,
+        },
+        sponsorshipKind: "one_time",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    checkout.resolve({
+      purchaseId: "hucp_group_quiet_sponsorship",
+      status: "payment_pending",
+    });
+    await rendered.cleanup();
+  }
+});
+
+test("drops hidden sponsor details when their owning features are disabled", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickRadio(rendered.container, rendered.window, "usage_20_usd");
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Credit it as",
+      ),
+      rendered.window,
+      "The Group Historian",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "What should it be about?",
+      ),
+      rendered.window,
+      "Celebrate the room.",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Temporary running bit",
+      ),
+      rendered.window,
+      "Treat me like Murph’s exhausted CFO.",
+    );
+
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
+    await clickRadio(rendered.container, rendered.window, "usage_5_usd");
+
+    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    assert.equal(
+      controlByLabel(rendered.container, "Temporary running bit"),
+      null,
+    );
+    await clickButton(rendered.container, rendered.window, "Contribute $5");
+
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_5_usd",
+        sponsorship: {
+          publicAlias: null,
+          runningBitRequest: null,
+          sponsorMessage: null,
+        },
+        sponsorshipKind: "one_time",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    checkout.resolve({
+      purchaseId: "hucp_group_hidden_sponsorship_details",
+      status: "payment_pending",
+    });
+    await rendered.cleanup();
+  }
+});
+
+test("freezes an opted-in sponsorship creative request with the selected offer", async () => {
+  const checkout = deferred<unknown>();
+  mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: true,
+      initialOpen: true,
+      offers: groupSponsorshipOffers(),
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Personalize \(optional\)/u,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Otherwise the sponsorship stays quiet in the chat\./u,
+    );
     assert.ok(rendered.container.querySelector(".h-auto"));
+    assert.equal(
+      rendered.container.querySelector('[data-default-open="false"]') !== null,
+      true,
+    );
+    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    assert.equal(
+      controlByLabel(rendered.container, "Temporary running bit"),
+      null,
+    );
+
     await clickRadio(rendered.container, rendered.window, "usage_5_usd");
     assert.equal(
-      rendered.container.querySelector("#group-sponsor-bit"),
+      controlByLabel(rendered.container, "Temporary running bit"),
       null,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Lasts for/u);
 
     await clickRadio(rendered.container, rendered.window, "usage_20_usd");
-    const runningBit = rendered.container.querySelector<HTMLTextAreaElement>(
-      "#group-sponsor-bit",
+    const runningBit = requireTextControlByLabel(
+      rendered.container,
+      rendered.window,
+      "Temporary running bit",
     );
-    assert.ok(runningBit);
-    const sponsorAlias = rendered.container.querySelector<HTMLInputElement>(
-      "#group-sponsor-alias",
+    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    assert.match(rendered.container.textContent ?? "", /Lasts for 3 days\./u);
+
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
     );
-    const sponsorMessage = rendered.container.querySelector<HTMLTextAreaElement>(
-      "#group-sponsor-message",
+    await clickRadio(rendered.container, rendered.window, "song");
+
+    const sponsorAlias = requireTextControlByLabel(
+      rendered.container,
+      rendered.window,
+      "Credit it as",
     );
-    assert.ok(sponsorAlias);
-    assert.ok(sponsorMessage);
-    for (const field of [sponsorAlias, sponsorMessage, runningBit]) {
+    const creativePrompt = requireTextControlByLabel(
+      rendered.container,
+      rendered.window,
+      "What should it be about?",
+    );
+    const creativeStyle = requireTextControlByLabel(
+      rendered.container,
+      rendered.window,
+      "Genre or style reference",
+    );
+    for (const field of [
+      sponsorAlias,
+      creativePrompt,
+      creativeStyle,
+      runningBit,
+    ]) {
       assert.equal(field.classList.contains("focus-visible:ring-0"), true);
       assert.equal(field.classList.contains("focus-visible:ring-3"), false);
     }
-    assert.match(rendered.container.textContent ?? "", /Lasts for 3 days\./u);
+
     await setTextInput(
-      rendered.container.querySelector("#group-sponsor-alias"),
+      sponsorAlias,
       rendered.window,
       "The Group Historian",
     );
     await setTextInput(
-      rendered.container.querySelector("#group-sponsor-message"),
+      creativePrompt,
       rendered.window,
       "For whatever adventure comes next.",
+    );
+    await setTextInput(
+      creativeStyle,
+      rendered.window,
+      "Warm ensemble-sitcom theme with a bright acoustic intro",
     );
     await setTextInput(
       runningBit,
@@ -655,9 +886,15 @@ test("freezes optional sponsorship copy with the selected group offer", async ()
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
         offerCode: "usage_20_usd",
         sponsorship: {
+          creativeRequest: {
+            format: "song",
+            prompt: "For whatever adventure comes next.",
+            styleRequest:
+              "Warm ensemble-sitcom theme with a bright acoustic intro",
+          },
           publicAlias: "The Group Historian",
           runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-          sponsorMessage: "For whatever adventure comes next.",
+          sponsorMessage: null,
         },
         sponsorshipKind: "one_time",
       },
@@ -706,15 +943,18 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
       (button) => button.textContent?.trim() === "Sponsor this chat · $5",
     );
     assert.ok(initialChargeButton);
-    assert.match(dialogText, /Add a note/u);
+    assert.match(dialogText, /Personalize \(optional\)/u);
     assert.ok(
-      rendered.container.querySelector('[data-default-open="true"]'),
+      rendered.container.querySelector('[data-default-open="false"]'),
     );
-    const noteContent = rendered.container
-      .querySelector("#group-sponsor-message")
-      ?.closest('[data-slot="collapsible-content"]');
-    assert.ok(noteContent);
-    assert.equal(noteContent.classList.contains("max-md:pb-24"), true);
+    const personalizationContent = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="collapsible-content"]',
+    );
+    assert.ok(personalizationContent);
+    assert.equal(
+      personalizationContent.classList.contains("max-md:pb-24"),
+      true,
+    );
     const capSlider = rendered.container.querySelector<HTMLElement>(
       '[role="slider"][aria-valuetext="Up to $5 per month"]',
     );
@@ -739,17 +979,31 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
       "Up to $20 per month",
     );
     assert.equal(
-      rendered.container.querySelector("#group-sponsor-bit"),
+      controlByLabel(rendered.container, "Temporary running bit"),
       null,
     );
     assert.doesNotMatch(rendered.container.textContent ?? "", /Lasts for/u);
+
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
     await setTextInput(
-      rendered.container.querySelector("#group-sponsor-alias"),
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Credit it as",
+      ),
       rendered.window,
       "Chat sponsor",
     );
     await setTextInput(
-      rendered.container.querySelector("#group-sponsor-message"),
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "What should it be about?",
+      ),
       rendered.window,
       "Glad to keep this going.",
     );
@@ -772,8 +1026,14 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
         monthlyCapMinor: 2_000,
         offerCode: "usage_5_usd",
         sponsorship: {
+          creativeRequest: {
+            format: "message",
+            prompt: "Glad to keep this going.",
+            styleRequest: null,
+          },
           publicAlias: "Chat sponsor",
-          sponsorMessage: "Glad to keep this going.",
+          runningBitRequest: null,
+          sponsorMessage: null,
         },
         sponsorshipKind: "monthly",
       },
@@ -869,11 +1129,14 @@ test("keeps mobile monthly payment recovery below the open note fields", async (
     assert.ok(selection);
     assert.ok(details);
     assert.ok(recovery);
-    const noteContent = rendered.container
-      .querySelector("#group-sponsor-message")
-      ?.closest('[data-slot="collapsible-content"]');
-    assert.ok(noteContent);
-    assert.equal(noteContent.classList.contains("max-md:pb-24"), false);
+    const personalizationContent = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="collapsible-content"]',
+    );
+    assert.ok(personalizationContent);
+    assert.equal(
+      personalizationContent.classList.contains("max-md:pb-24"),
+      false,
+    );
     assert.equal(
       selection.classList.contains("max-md:min-h-full"),
       true,
@@ -922,18 +1185,21 @@ test("keeps the one-time contribution action reachable in the mobile drawer", as
     );
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
-      /cost-weighted usage credit/i,
+      RETIRED_USAGE_TERM_PATTERN,
     );
     const selection = rendered.container.querySelector<HTMLElement>(
       '[data-slot="usage-top-up-selection"]',
     );
     assert.ok(selection);
     assert.equal(selection.classList.contains("max-md:min-h-full"), true);
-    const noteContent = rendered.container
-      .querySelector("#group-sponsor-message")
-      ?.closest('[data-slot="collapsible-content"]');
-    assert.ok(noteContent);
-    assert.equal(noteContent.classList.contains("max-md:pb-24"), true);
+    const personalizationContent = rendered.container.querySelector<HTMLElement>(
+      '[data-slot="collapsible-content"]',
+    );
+    assert.ok(personalizationContent);
+    assert.equal(
+      personalizationContent.classList.contains("max-md:pb-24"),
+      true,
+    );
     const actions = buttonByText(
       rendered.container,
       "Choose an amount",
@@ -969,7 +1235,10 @@ test("pins the one-time contribution action in a short mobile drawer", async () 
     );
     assert.ok(selection);
     assert.equal(selection.classList.contains("max-md:min-h-full"), true);
-    assert.doesNotMatch(rendered.container.textContent ?? "", /Add a note/u);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Personalize \(optional\)|Send something to the group/u,
+    );
     const actions = buttonByText(
       rendered.container,
       "Choose an amount",
@@ -1021,10 +1290,28 @@ test("clears a lost group request after terminal recovery with a remounted spons
 
   try {
     await clickRadio(rendered.container, rendered.window, "usage_10_usd");
+    await clickCheckboxByLabel(
+      rendered.container,
+      rendered.window,
+      "Send something to the group",
+    );
     await setTextInput(
-      rendered.container.querySelector("#group-sponsor-alias"),
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "Credit it as",
+      ),
       rendered.window,
       "Original sponsor",
+    );
+    await setTextInput(
+      requireTextControlByLabel(
+        rendered.container,
+        rendered.window,
+        "What should it be about?",
+      ),
+      rendered.window,
+      "Celebrate the room’s latest running joke.",
     );
     await clickButton(
       rendered.container,
@@ -1089,9 +1376,14 @@ test("clears a lost group request after terminal recovery with a remounted spons
         clientRequestKey: firstRequestKey,
         offerCode: "usage_10_usd",
         sponsorship: {
+          creativeRequest: {
+            format: "message",
+            prompt: "Celebrate the room’s latest running joke.",
+            styleRequest: null,
+          },
           publicAlias: "Original sponsor",
-          runningBitRequest: "",
-          sponsorMessage: "",
+          runningBitRequest: null,
+          sponsorMessage: null,
         },
         sponsorshipKind: "one_time",
       },
@@ -1099,9 +1391,9 @@ test("clears a lost group request after terminal recovery with a remounted spons
         clientRequestKey: firstRequestKey,
         offerCode: "usage_10_usd",
         sponsorship: {
-          publicAlias: "",
-          runningBitRequest: "",
-          sponsorMessage: "",
+          publicAlias: null,
+          runningBitRequest: null,
+          sponsorMessage: null,
         },
         sponsorshipKind: "one_time",
       },
@@ -1109,9 +1401,9 @@ test("clears a lost group request after terminal recovery with a remounted spons
         clientRequestKey: secondRequestKey,
         offerCode: "usage_10_usd",
         sponsorship: {
-          publicAlias: "",
-          runningBitRequest: "",
-          sponsorMessage: "",
+          publicAlias: null,
+          runningBitRequest: null,
+          sponsorMessage: null,
         },
         sponsorshipKind: "one_time",
       },
@@ -1148,17 +1440,17 @@ test(
     try {
       assert.doesNotMatch(
         rendered.container.textContent ?? "",
-        /Add a note/,
+        /Personalize \(optional\)|Send something to the group/u,
       );
+      assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
       assert.equal(
-        rendered.container.querySelector("#group-sponsor-alias"),
+        controlByLabel(rendered.container, "What should it be about?"),
         null,
       );
       assert.equal(
-        rendered.container.querySelector("#group-sponsor-message"),
+        controlByLabel(rendered.container, "Temporary running bit"),
         null,
       );
-      assert.equal(rendered.container.querySelector("#group-sponsor-bit"), null);
 
       await clickRadio(rendered.container, rendered.window, "usage_20_usd");
       await clickButton(
@@ -1170,10 +1462,10 @@ test(
       expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
         method: "POST",
         payload: {
-        clientRequestKey: "00000000-0000-4000-8000-000000000001",
-        offerCode: "usage_20_usd",
-        sponsorshipKind: "one_time",
-      },
+          clientRequestKey: "00000000-0000-4000-8000-000000000001",
+          offerCode: "usage_20_usd",
+          sponsorshipKind: "one_time",
+        },
         signal: expect.any(AbortSignal),
         url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
       });
@@ -1187,11 +1479,16 @@ test(
   },
 );
 
-test("shows and preserves exact frozen sponsor details when retrying payment", async () => {
+test("shows and preserves exact modern creative details when retrying payment", async () => {
   const frozenSponsorship = {
+    creativeRequest: {
+      format: "song" as const,
+      prompt: "For whatever adventure comes next.",
+      styleRequest: "Bright acoustic ensemble theme",
+    },
     publicAlias: "The Group Historian",
     runningBitRequest: "Treat me like Murph’s exhausted CFO.",
-    sponsorMessage: "For whatever adventure comes next.",
+    sponsorMessage: null,
   };
   mocks.requestHostedOnboardingJson.mockImplementation(
     (request: { method: string }) =>
@@ -1225,23 +1522,101 @@ test("shows and preserves exact frozen sponsor details when retrying payment", a
   );
 
   try {
-    await clickButton(rendered.container, rendered.window, "Check payment");
+    await clickExactButton(
+      rendered.container,
+      rendered.window,
+      "Check payment",
+    );
     assert.match(
       rendered.container.textContent ?? "",
       /Your original sponsor details are still attached/u,
     );
     assert.match(rendered.container.textContent ?? "", /The Group Historian/u);
+    assert.equal(
+      definitionValueByTerm(rendered.container, "Creative response"),
+      "Song",
+    );
     assert.match(
       rendered.container.textContent ?? "",
       /For whatever adventure comes next\./u,
     );
     assert.match(
       rendered.container.textContent ?? "",
+      /Bright acoustic ensemble theme/u,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
       /Treat me like Murph’s exhausted CFO\./u,
     );
 
-    await clickButton(rendered.container, rendered.window, "Retry payment");
+    await clickExactButton(
+      rendered.container,
+      rendered.window,
+      "Retry payment",
+    );
 
+    expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
+      method: "POST",
+      payload: {
+        clientRequestKey: "00000000-0000-4000-8000-000000000001",
+        offerCode: "usage_10_usd",
+        recoveryOnly: true,
+        sponsorship: frozenSponsorship,
+        sponsorshipKind: "one_time",
+      },
+      signal: expect.any(AbortSignal),
+      url: "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+    });
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("keeps a legacy frozen note recoverable as a plain message", async () => {
+  const frozenSponsorship = {
+    publicAlias: "Legacy sponsor",
+    runningBitRequest: null,
+    sponsorMessage: "Keep the old note intact.",
+  };
+  mocks.requestHostedOnboardingJson.mockImplementation(
+    (request: { method: string }) =>
+      request.method === "POST"
+        ? Promise.resolve({
+            purchaseId: "hucp_group_legacy_sponsorship_recovery",
+            recovered: true,
+            status: "payment_pending",
+          })
+        : new Promise(() => undefined),
+  );
+  const { GroupSponsorshipDialog } = await import(
+    "@/src/components/hosted-groups/group-sponsorship-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(GroupSponsorshipDialog, {
+      activePurchase: {
+        offerCode: "usage_10_usd",
+        purchaseId: "hucp_group_legacy_sponsorship_recovery",
+        retryAllowed: true,
+        status: "reconciling",
+      },
+      checkoutUrl:
+        "/api/groups/fund/group_join_code_1234/usage-credit/checkout",
+      customizationAllowed: false,
+      frozenSponsorship,
+      offers: [],
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickButton(rendered.container, rendered.window, "Check payment");
+    assert.match(rendered.container.textContent ?? "", /Note/u);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Keep the old note intact\./u,
+    );
+    await clickButton(rendered.container, rendered.window, "Retry payment");
     expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith({
       method: "POST",
       payload: {
@@ -1299,7 +1674,7 @@ test("shows and preserves an intentionally empty frozen sponsor draft", async ()
     );
     assert.match(
       rendered.container.textContent ?? "",
-      /No sponsor name, note, or running bit is attached/u,
+      /No sponsor name, creative response, or running bit is attached/u,
     );
 
     await clickButton(rendered.container, rendered.window, "Retry payment");
@@ -1940,9 +2315,14 @@ test("removes frozen sponsor recovery details once group usage is fulfilled", as
       },
       customizationAllowed: false,
       frozenSponsorship: {
+        creativeRequest: {
+          format: "message",
+          prompt: "More room for the group.",
+          styleRequest: null,
+        },
         publicAlias: "Sunday sleep crew",
         runningBitRequest: "Keep the recovery jokes going.",
-        sponsorMessage: "More room for the group.",
+        sponsorMessage: null,
       },
       offers: [],
     }),
@@ -2661,6 +3041,128 @@ test("shows recovered reconciliation without offering an unsafe early cancel", a
   } finally {
     await rendered.cleanup();
     vi.useRealTimers();
+  }
+});
+
+test.each(USAGE_TOP_UP_TARGET_CASES)(
+  "maps the exact capacity conflict to truthful $scope guidance",
+  async ({ addLabel, checkoutUrl, scope }) => {
+    mocks.requestHostedOnboardingJson.mockRejectedValueOnce(
+      new HostedOnboardingApiError({
+        code: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+        message: "Server capacity response.",
+      }),
+    );
+    const { HostedUsageTopUpDialog } = await import(
+      "@/src/components/settings/hosted-usage-top-up-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedUsageTopUpDialog, {
+        checkoutUrl,
+        initialOpen: true,
+        offers: usageCreditOffers(),
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        scope,
+      }),
+      {
+        location: { href: "https://example.test/settings?addUsage=true" },
+        requireButton: false,
+      },
+    );
+
+    try {
+      await clickRadio(rendered.container, rendered.window, "usage_500");
+      await clickButton(rendered.container, rendered.window, addLabel);
+
+      assert.equal(
+        rendered.container.querySelector("h2")?.textContent,
+        "More credit can’t be added right now",
+      );
+      assert.ok(
+        (rendered.container.textContent ?? "").includes(
+          HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+        ),
+      );
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /Server capacity response|choose another amount/iu,
+      );
+      assert.ok(
+        rendered.container.querySelector(
+          '[data-slot="usage-top-up-capacity-conflict"]',
+        ),
+      );
+      assert.equal(
+        rendered.container.querySelector('input[type="radio"]'),
+        null,
+      );
+      assert.equal(hasButton(rendered.container, "Change amount"), false);
+      assert.equal(hasButton(rendered.container, "Try again"), false);
+      assert.equal(hasButton(rendered.container, "Check payment"), false);
+      assert.equal(hasButton(rendered.container, "Close"), true);
+      expect(mocks.requestHostedOnboardingJson).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ offerCode: "usage_500" }),
+          url: checkoutUrl,
+        }),
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  },
+);
+
+test("renders the exact inert capacity state without a request", async () => {
+  const { HostedUsageTopUpDialog } = await import(
+    "@/src/components/settings/hosted-usage-top-up-dialog"
+  );
+  const rendered = await renderClientComponent(
+    createElement(HostedUsageTopUpDialog, {
+      checkoutUrl: "/api/design/usage-credit-preview",
+      inert: true,
+      initialCheckoutErrorCode: HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+      initialOpen: true,
+      offers: [],
+      payerMemberId: "design_usage_top_up_payer",
+      scope: "personal",
+    }),
+    {
+      location: { href: "https://example.test/design?tab=components" },
+      requireButton: false,
+    },
+  );
+
+  try {
+    assert.equal(
+      rendered.container.querySelector("h2")?.textContent,
+      "More credit can’t be added right now",
+    );
+    assert.ok(
+      (rendered.container.textContent ?? "").includes(
+        HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+      ),
+    );
+    assert.equal(
+      rendered.container
+        .querySelector('[role="dialog"]')
+        ?.getAttribute("data-inert"),
+      "true",
+    );
+    assert.ok(
+      rendered.container.querySelector(
+        '[data-slot="usage-top-up-capacity-conflict"]',
+      ),
+    );
+    assert.equal(
+      rendered.container.querySelector('input[type="radio"]'),
+      null,
+    );
+    assert.equal(hasButton(rendered.container, "Change amount"), false);
+    assert.equal(hasButton(rendered.container, "Try again"), false);
+    assert.equal(hasButton(rendered.container, "Close"), true);
+    expect(mocks.requestHostedOnboardingJson).not.toHaveBeenCalled();
+  } finally {
+    await rendered.cleanup();
   }
 });
 
@@ -4856,6 +5358,63 @@ function groupSponsorshipMonthlyCaps() {
   ] as const;
 }
 
+function definitionValueByTerm(
+  container: HTMLElement,
+  term: string,
+): string | null {
+  const termElement = Array.from(container.querySelectorAll("dt")).find(
+    (candidate) => candidate.textContent?.trim() === term,
+  );
+  return (
+    termElement?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null
+  );
+}
+
+function controlByLabel(
+  container: HTMLElement,
+  labelText: string,
+): HTMLElement | null {
+  const label = Array.from(
+    container.querySelectorAll<HTMLLabelElement>("label"),
+  ).find((candidate) => candidate.textContent?.includes(labelText));
+  const controlId = label?.getAttribute("for");
+  if (!controlId) {
+    return null;
+  }
+  return (
+    Array.from(container.querySelectorAll<HTMLElement>("[id]")).find(
+      (candidate) => candidate.id === controlId,
+    ) ?? null
+  );
+}
+
+function requireTextControlByLabel(
+  container: HTMLElement,
+  window: Window & typeof globalThis,
+  labelText: string,
+): HTMLInputElement | HTMLTextAreaElement {
+  const control = controlByLabel(container, labelText);
+  assert.ok(
+    control instanceof window.HTMLInputElement ||
+      control instanceof window.HTMLTextAreaElement,
+  );
+  return control;
+}
+
+async function clickCheckboxByLabel(
+  container: HTMLElement,
+  window: Window & typeof globalThis,
+  labelText: string,
+) {
+  const control = controlByLabel(container, labelText);
+  assert.ok(control instanceof window.HTMLButtonElement);
+  assert.equal(control.getAttribute("role"), "checkbox");
+  await act(async () => {
+    control.dispatchEvent(new window.Event("click", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
 async function setTextInput(
   element: Element | null,
   window: Window & typeof globalThis,
@@ -4900,7 +5459,25 @@ async function clickButton(
   window: Window & typeof globalThis,
   label: string,
 ) {
-  const button = buttonByText(container, label);
+  await clickResolvedButton(buttonByText(container, label), window);
+}
+
+async function clickExactButton(
+  container: HTMLElement,
+  window: Window & typeof globalThis,
+  label: string,
+) {
+  const button = Array.from(container.querySelectorAll("button")).find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+  assert.ok(button);
+  await clickResolvedButton(button, window);
+}
+
+async function clickResolvedButton(
+  button: HTMLButtonElement,
+  window: Window & typeof globalThis,
+) {
   await act(async () => {
     button.dispatchEvent(new window.Event("click", { bubbles: true }));
     await Promise.resolve();

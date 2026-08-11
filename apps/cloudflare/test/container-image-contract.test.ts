@@ -42,8 +42,6 @@ function createDeployEnvironment() {
   return {
     allowedRunnerSecretKeys: null,
     bundlesBucketName: "bundles",
-    bundlesEnamBucketName: "bundles-enam",
-    bundlesEnamPreviewBucketName: "bundles-enam-preview",
     bundlesPreviewBucketName: "bundles-preview",
     platformEnvelopeKeyId: "v1",
     compatibilityDate: "2026-03-27",
@@ -63,9 +61,7 @@ function createDeployEnvironment() {
     webControlTimeoutMs: "30000",
     workerName: "murph-hosted",
     workerVars: {
-      HOSTED_R2_CUTOVER_PHASE: "source_active",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "bundles",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "bundles-enam",
     },
   }
 }
@@ -110,7 +106,7 @@ describe("hosted runner container image contract", () => {
       'import { runPnpmCommand } from "./runner-bundle/process.js";',
     );
     expect(bundleAssemblyScript).toContain(
-      'import {\n  pruneRunnerBundle,\n  rewriteRuntimeBinWrappers,\n  rewriteRuntimePackageManifest,\n} from "./runner-bundle/runtime-shape.js";',
+      'import {\n  pruneBundledRunnerDependencies,\n  pruneRunnerBundle,\n  rewriteRuntimeBinWrappers,\n  rewriteRuntimePackageManifest,\n} from "./runner-bundle/runtime-shape.js";',
     );
     expect(bundleAssemblyScript).toContain(
       'import {\n  buildHostedRunnerWorkspaceArtifacts,\n  packWorkspacePackageArtifacts,\n  stageHostedRunnerRuntimeArtifact,\n} from "./runner-bundle/workspace-artifacts.js";',
@@ -202,12 +198,24 @@ describe("hosted runner container image contract", () => {
     const bundleVaultCliCallIndex = bundleAssemblyScript.indexOf(
       "await bundleInstalledVaultCliBinary(stagingBundleDir);",
     );
+    const bundleEntrypointCallIndex = bundleAssemblyScript.indexOf(
+      "await bundleRunnerContainerEntrypoint(stagingBundleDir);",
+    );
+    const pruneBundledDependenciesCallIndex = bundleAssemblyScript.indexOf(
+      "await pruneBundledRunnerDependencies(stagingBundleDir);",
+    );
     const materializeFinalBundleCallIndex = bundleAssemblyScript.indexOf(
       "await materializeFinalRunnerBundle(",
     );
     expect(rewriteBinWrappersCallIndex).toBeGreaterThan(-1);
     expect(bundleVaultCliCallIndex).toBeGreaterThan(rewriteBinWrappersCallIndex);
-    expect(materializeFinalBundleCallIndex).toBeGreaterThan(bundleVaultCliCallIndex);
+    expect(bundleEntrypointCallIndex).toBeGreaterThan(bundleVaultCliCallIndex);
+    expect(pruneBundledDependenciesCallIndex).toBeGreaterThan(
+      bundleEntrypointCallIndex,
+    );
+    expect(materializeFinalBundleCallIndex).toBeGreaterThan(
+      pruneBundledDependenciesCallIndex,
+    );
     expect(runtimeShapeScript).toContain(
       'removeBundlePathIfPresent(path.join(bundleDir, "README.md"))',
     );
@@ -407,8 +415,9 @@ describe("hosted runner container image contract", () => {
       ...publishedMurphBundledWorkspacePackageNames,
       ...publishedMurphBundledExternalPackageNames,
     ].sort());
-    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur"]);
+    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur", "ink"]);
     expect(hostedRunnerBuildPackageNames).not.toContain("incur");
+    expect(hostedRunnerBuildPackageNames).not.toContain("ink");
 
     for (const dependencyName of publishedMurphBundledWorkspacePackageNames) {
       expect(hostedRunnerBuildPackageNames).toContain(dependencyName);
@@ -433,7 +442,7 @@ describe("hosted runner container image contract", () => {
       "utf8",
     );
 
-    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.145.0");
+    expect(baseDockerfile).toContain("ARG CODEX_CLI_VERSION=0.147.0");
     expect(baseDockerfile).toContain("ARG NODE_VERSION=24.14.1");
     expect(baseDockerfile).toContain(
       "ARG NODE_IMAGE_DIGEST=sha256:b506e7321f176aae77317f99d67a24b272c1f09f1d10f1761f2773447d8da26c",
@@ -519,21 +528,33 @@ describe("hosted runner container image contract", () => {
     // The base image must declare no runtime CMD at all; the final image owns it.
     expect(baseDockerfile).not.toMatch(/^CMD\b/m);
     expect(finalDockerfile).toContain(`ARG HOSTED_RUNNER_BASE_IMAGE=${hostedLocalRunnerBaseImageTag}`);
-    expect(finalDockerfile).toContain("FROM ${HOSTED_RUNNER_BASE_IMAGE}");
-    const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
+    expect(finalDockerfile).toContain(
+      "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions",
+    );
+    const finalStageIndex = finalDockerfile.indexOf(
+      "FROM ${HOSTED_RUNNER_BASE_IMAGE}",
+      finalDockerfile.indexOf("FROM ${HOSTED_RUNNER_BASE_IMAGE}") + 1,
+    );
+    const permissionStageBundleCopyIndex = finalDockerfile.indexOf(
       "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
     );
-    const finalRootUserIndex = finalDockerfile.indexOf("USER root");
+    const permissionStageRootUserIndex = finalDockerfile.indexOf("USER root");
     const finalRunnerBundleDirArgIndex = finalDockerfile.indexOf(
       "ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle",
     );
+    const permissionStageChmodIndex = finalDockerfile.indexOf(
+      "RUN chmod -R a-w /app",
+    );
+    const finalRootUserIndex = finalDockerfile.indexOf("USER root", finalStageIndex);
     const finalCodexCatalogEnvIndex = finalDockerfile.indexOf(
       'ENV MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON="/usr/local/share/murph/codex-model-catalog.openai-flex.json"',
     );
     const finalCodexCatalogPatchIndex = finalDockerfile.indexOf(
       "codex debug models --bundled",
     );
-    const finalChmodIndex = finalDockerfile.indexOf("RUN chmod -R a-w /app");
+    const finalRunnerBundleCopyIndex = finalDockerfile.indexOf(
+      "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
+    );
     const finalRunnerUserIndex = finalDockerfile.indexOf("USER runner");
     const finalLocalBuildIdArgIndex = finalDockerfile.indexOf(
       "ARG HOSTED_RUNNER_LOCAL_BUILD_ID=local",
@@ -541,14 +562,16 @@ describe("hosted runner container image contract", () => {
     const finalLocalBuildIdLabelIndex = finalDockerfile.indexOf(
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
-    expect(finalRootUserIndex).toBeGreaterThan(-1);
-    expect(finalRunnerBundleDirArgIndex).toBeGreaterThan(finalRootUserIndex);
-    expect(finalCodexCatalogEnvIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
+    expect(permissionStageRootUserIndex).toBeGreaterThan(-1);
+    expect(finalRunnerBundleDirArgIndex).toBeGreaterThan(permissionStageRootUserIndex);
+    expect(permissionStageBundleCopyIndex).toBeGreaterThan(finalRunnerBundleDirArgIndex);
+    expect(permissionStageChmodIndex).toBeGreaterThan(permissionStageBundleCopyIndex);
+    expect(finalStageIndex).toBeGreaterThan(permissionStageChmodIndex);
+    expect(finalRootUserIndex).toBeGreaterThan(finalStageIndex);
+    expect(finalCodexCatalogEnvIndex).toBeGreaterThan(finalRootUserIndex);
     expect(finalCodexCatalogPatchIndex).toBeGreaterThan(finalCodexCatalogEnvIndex);
-    expect(finalRunnerBundleCopyIndex).toBeGreaterThan(-1);
     expect(finalRunnerBundleCopyIndex).toBeGreaterThan(finalCodexCatalogPatchIndex);
-    expect(finalChmodIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
-    expect(finalRunnerUserIndex).toBeGreaterThan(finalChmodIndex);
+    expect(finalRunnerUserIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerUserIndex);
     expect(finalLocalBuildIdArgIndex).toBeGreaterThan(finalRunnerBundleCopyIndex);
     expect(finalLocalBuildIdLabelIndex).toBeGreaterThan(finalLocalBuildIdArgIndex);
@@ -567,16 +590,21 @@ describe("hosted runner container image contract", () => {
       'LABEL murph.hosted.local-build-id="${HOSTED_RUNNER_LOCAL_BUILD_ID}"',
     );
     expect(finalDockerfile).toContain(
-      "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
+      "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
     );
     expect(finalDockerfile).toContain("RUN chmod -R a-w /app");
     expect(finalDockerfile).toContain("  && chmod -R a+rX /app");
+    expect(finalDockerfile.slice(finalStageIndex)).not.toContain(
+      "RUN chmod -R",
+    );
+    expect(finalDockerfile.slice(finalStageIndex)).toContain("  && chmod a-w /app");
+    expect(finalDockerfile.slice(finalStageIndex)).toContain("  && chmod a+rX /app");
     // Measured 2026-06-10: a baked NODE_COMPILE_CACHE was a no-op for this
     // bundle (real-bundle module eval ~0.8s even under qemu; cache hits gave
     // no speedup), so the image intentionally ships no compile-cache warm step.
     expect(finalDockerfile).not.toContain("NODE_COMPILE_CACHE");
     expect(readLastDockerUser(baseDockerfile)).toBe("runner");
-    expect(readDockerUsers(finalDockerfile)).toEqual(["root", "runner"]);
+    expect(readDockerUsers(finalDockerfile)).toEqual(["root", "root", "runner"]);
     expect(finalDockerfile).toContain('ENTRYPOINT ["/usr/bin/tini", "-s", "--"]');
     // The CMD runs the esbuild-bundled entrypoint: boot evaluates ~27 chunk
     // files instead of the unbundled graph's ~960 module files, which was the
@@ -614,11 +642,19 @@ describe("hosted runner container image contract", () => {
     );
 
     const appBundleIsOwnedByRoot = finalDockerfile.includes(
-      "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
+      "COPY --from=runner-app-permissions --chown=root:root /app/ /app/",
     );
     const appBundleIsMadeNonWritable =
-      finalDockerfile.includes("RUN chmod -R a-w /app")
-      && finalDockerfile.includes("  && chmod -R a+rX /app");
+      finalDockerfile.includes(
+        "FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions",
+      )
+      && finalDockerfile.includes(
+        "COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/",
+      )
+      && finalDockerfile.includes("RUN chmod -R a-w /app")
+      && finalDockerfile.includes("  && chmod -R a+rX /app")
+      && finalDockerfile.includes("  && chmod a-w /app")
+      && finalDockerfile.includes("  && chmod a+rX /app");
     const containerReturnsToRuntimeUser =
       readLastDockerUser(baseDockerfile) === "runner"
       && readDockerUsers(finalDockerfile).at(-1) === "runner";

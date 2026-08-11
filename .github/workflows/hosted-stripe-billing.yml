@@ -1,0 +1,211 @@
+name: Hosted Stripe Billing
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || 'main-push' }}
+  cancel-in-progress: false
+
+jobs:
+  billing-hermetic:
+    name: Hermetic hosted billing proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify live-lane workflow contract
+        run: pnpm hosted-billing:ci-guard
+
+      - name: Test hosted-local authority partition
+        run: >-
+          pnpm --dir packages/hosted-local-harness exec vitest run
+          --config vitest.config.ts --no-coverage
+          test/stripe-billing-live-config.test.ts
+          test/dev-hosted-local/stack.test.ts
+
+      - name: Generate hosted web test client
+        run: pnpm --dir apps/web prisma:generate
+
+      - name: Test Starter checkout, migration, and live support
+        run: >-
+          pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage
+          apps/web/test/hosted-onboarding-billing-checkout-route.test.ts
+          apps/web/test/hosted-starter-usage-migration.test.ts
+          apps/web/test/hosted-billing-live-support.test.ts
+
+      - name: Test workflow guard mutations
+        run: >-
+          pnpm exec vitest run --config scripts/vitest.config.ts --no-coverage
+          scripts/check-hosted-stripe-billing-ci.test.ts
+
+  live-stripe-browser:
+    name: Live hosted-local Stripe browser matrix
+    needs:
+      - billing-hermetic
+    if: ${{ github.event_name == 'push' }}
+    environment: hosted-stripe-billing-sandbox
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    concurrency:
+      group: hosted-stripe-billing-sandbox
+      cancel-in-progress: false
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:17
+        env:
+          POSTGRES_DB: murph_hosted_stripe_billing
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres -d murph_hosted_stripe_billing"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Expose pinned Codex CLI
+        run: echo "$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin" >> "$GITHUB_PATH"
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+
+      - name: Install pinned Stripe CLI
+        run: pnpm stripe:cli:setup
+
+      - name: Preflight dedicated Stripe sandbox
+        env:
+          MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
+          MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
+          MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_main_${{ github.run_id }}_${{ github.run_attempt }}
+          NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_PULSE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_MAX }}
+          HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_EDGE }}
+        run: pnpm hosted-billing:live:preflight
+
+      - name: Run production-shaped hosted-local billing matrix
+        env:
+          MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
+          MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
+          MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_main_${{ github.run_id }}_${{ github.run_attempt }}
+          NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_PULSE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_MAX }}
+          HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_EDGE }}
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/murph_hosted_stripe_billing
+          MURPH_DEV_TEMPORAL: disabled
+          MURPH_E2E_BILLING_HEADLESS: "1"
+        run: pnpm hosted-local e2e stripe-billing-browser-matrix
+
+      - name: Clean up owned Stripe sandbox resources
+        if: always()
+        env:
+          MURPH_HOSTED_STRIPE_BILLING_LIVE: "1"
+          MURPH_HOSTED_STRIPE_BILLING_SECRET_KEY: ${{ secrets.HOSTED_STRIPE_BILLING_SANDBOX_SECRET_KEY }}
+          MURPH_HOSTED_STRIPE_BILLING_ACCOUNT_ID: ${{ vars.HOSTED_STRIPE_BILLING_SANDBOX_ACCOUNT_ID }}
+          MURPH_HOSTED_STRIPE_BILLING_RUN_ID: billing_main_${{ github.run_id }}_${{ github.run_attempt }}
+          NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_PULSE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_PULSE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_EDGE }}
+          HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PRICE_FAMILY_MAX }}
+          HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY: ${{ vars.HOSTED_STRIPE_BILLING_PORTAL_CONFIGURATION_EDGE }}
+        run: pnpm hosted-billing:live:cleanup
+
+      - name: Upload redacted browser diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: hosted-stripe-billing-redacted-${{ github.run_id }}
+          path: apps/web/playwright-report/hosted-stripe-billing/redacted.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  billing-required:
+    name: Required hosted Stripe billing boundary
+    needs:
+      - billing-hermetic
+      - live-stripe-browser
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Enforce hermetic proof and event-scoped live result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HERMETIC_RESULT: ${{ needs.billing-hermetic.result }}
+          LIVE_RESULT: ${{ needs.live-stripe-browser.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$HERMETIC_RESULT" != "success" ]]; then
+            echo "Hosted Stripe hermetic proof failed." >&2
+            exit 1
+          fi
+          case "$EVENT_NAME" in
+            push)
+              if [[ "$LIVE_RESULT" != "success" ]]; then
+                echo "Main merges require the live hosted-local Stripe matrix; missing or malformed sandbox configuration fails closed." >&2
+                exit 1
+              fi
+              ;;
+            pull_request)
+              if [[ "$LIVE_RESULT" != "skipped" ]]; then
+                echo "Pull requests must not start the secret-bearing live job." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unexpected event for the hosted Stripe billing boundary." >&2
+              exit 1
+              ;;
+          esac
+          echo "Hosted Stripe billing boundary satisfied."

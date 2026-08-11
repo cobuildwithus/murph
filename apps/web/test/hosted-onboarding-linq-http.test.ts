@@ -23,6 +23,7 @@ import {
   createHostedLinqChat,
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
+  sendHostedLinqReactionBoundChatMessage,
   shareHostedLinqContactCard,
   startHostedLinqChatTypingIndicator,
 } from "@/src/lib/hosted-onboarding/linq-client";
@@ -910,6 +911,38 @@ describe("sendHostedLinqChatMessage", () => {
     ]);
   });
 
+  it("keeps a reaction-bound consent prompt and its terminal link in one text message", async () => {
+    const requestBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestBodies.push(readJsonRequestBody(init));
+      return createJsonResponse({
+        chat_id: "chat_123",
+        message: { id: "msg_consent" },
+      }, 200);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(sendHostedLinqReactionBoundChatMessage({
+      chatId: "chat_123",
+      idempotencyKey: "group-offer:evt_123",
+      message: "React to share the selected data, or customize at https://app.example.test/join/code.",
+    })).resolves.toEqual({
+      chatId: "chat_123",
+      messageId: "msg_consent",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBodies).toEqual([{
+      message: {
+        idempotency_key: "group-offer:evt_123",
+        parts: [{
+          type: "text",
+          value: "React to share the selected data, or customize at https://app.example.test/join/code.",
+        }],
+      },
+    }]);
+  });
+
   it.each([
     {
       expectedMessageId: "msg_text",
@@ -1289,7 +1322,7 @@ describe("sendHostedLinqChatMessage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const message =
-      "Like or heart this message if these default sharing choices look right: your Murph profile name. Use https://www.withmurph.ai/groups/join/abc123 to choose different permissions.";
+      "Sounds good. Like or heart this message to share your Murph profile name with the group, or use https://www.withmurph.ai/groups/join/abc123 to customize what you share.";
 
     await expect(sendHostedLinqChatMessage({
       chatId: "chat_123",
@@ -1446,6 +1479,7 @@ describe("shareHostedLinqContactCard", () => {
 
 describe("updateHostedLinqChatAvatar", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     if (originalFetch) {
       vi.stubGlobal("fetch", originalFetch);
@@ -1481,6 +1515,47 @@ describe("updateHostedLinqChatAvatar", () => {
       group_chat_icon:
         `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
     });
+  });
+
+  it("can time out after Linq returns a successful response with a stalled body", async () => {
+    vi.useFakeTimers();
+    let bodyAborted = false;
+    let putStarted = false;
+    const fetchMock = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      putStarted = true;
+      const signal = readRequestSignal(init);
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener("abort", () => {
+            bodyAborted = true;
+            controller.error(signal.reason ?? new Error("aborted"));
+          }, { once: true });
+        },
+      });
+      return new Response(body, {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = updateHostedLinqChatAvatar({
+      chatId: "chat_123",
+      groupChatIconUrl:
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/group-avatar.png?exp=2000000000`,
+    });
+    const expectation = expect(result).rejects.toMatchObject({
+      code: "LINQ_SEND_FAILED",
+      httpStatus: 502,
+      message: "Linq chat avatar update timed out.",
+      retryable: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expectation;
+    expect(putStarted).toBe(true);
+    expect(bodyAborted).toBe(true);
   });
 
   it("preserves an allowlisted Linq error code without provider prose", async () => {

@@ -44,6 +44,10 @@ import type {
 import type {
   HostedRuntimeProductFeedbackRecord,
 } from '@murphai/hosted-execution/runtime-control'
+import type {
+  AssistantProviderStartCriticalPathContext,
+  AssistantProviderStartCriticalPathTiming,
+} from '../provider-start-critical-path.js'
 
 export type AssistantProviderProgressEvent = SharedAssistantProviderProgressEvent
 export type AssistantUserMessageContentType = AssistantUserMessageContentPart['type']
@@ -89,6 +93,7 @@ export interface AssistantProviderRequestStartTiming {
   codexAppServerThreadResumeMs?: number
   codexAppServerThreadStartMs?: number
   codexAppServerWarmReuseMs?: number
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathTiming
 }
 
 export interface AssistantProviderRequestStartedEvent
@@ -116,6 +121,15 @@ export interface AssistantProviderDynamicTool {
   readonly namespace: string
 }
 
+/**
+ * Trusted per-turn limits for generated songs. This is execution policy only:
+ * prompts and model-supplied tool arguments cannot relax it.
+ */
+export interface AssistantGenerateSongTurnPolicy {
+  readonly maxAttempts: number
+  readonly requiredDurationSeconds: number
+}
+
 export interface AssistantProviderTurn {
   activeTurnSteering?: AssistantActiveTurnLiveProviderSteering | null
   activeTurnId?: string | null
@@ -130,6 +144,7 @@ export interface AssistantProviderTurn {
   dynamicTools: readonly AssistantProviderDynamicTool[]
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   env?: NodeJS.ProcessEnv
+  generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
@@ -143,6 +158,7 @@ export interface AssistantProviderTurn {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerFetch?: typeof fetch | null
   providerRequestOrdinal?: number | null
+  providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   prompt?: string | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   providerThreadEphemeral?: boolean | null
@@ -161,6 +177,7 @@ export interface AssistantProviderTurn {
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
+  onboardingFirstReadCompletionTransitionAvailable?: boolean | null
   turnContextPrompt?: string | null
   userPrompt?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null

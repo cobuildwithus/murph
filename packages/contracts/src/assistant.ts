@@ -1,5 +1,9 @@
-import { z } from "zod";
+import * as z from "./zod-runtime.ts";
 
+import {
+  challengeStandingsResponseCardV1Schema,
+  type ChallengeStandingsResponseCardV1,
+} from "./challenge-standings-card.ts";
 import {
   compactTableResponseCardV1Schema,
   type CompactTableResponseCardV1,
@@ -39,6 +43,15 @@ export const nutritionCardGoalStatusValues = [
 
 export type NutritionCardGoalStatus =
   (typeof nutritionCardGoalStatusValues)[number];
+
+export const nutritionCardGoalStatusLabels = {
+  far_over_target: "far over target",
+  far_under_target: "far under target",
+  on_target: "on target",
+  over_target: "over target",
+  unavailable: "status unavailable",
+  under_target: "under target",
+} as const satisfies Record<NutritionCardGoalStatus, string>;
 
 export type NutritionCardMetric = {
   total: number | null;
@@ -89,7 +102,8 @@ export type DailyNutritionResponseCard =
 
 export type AssistantResponseCard =
   | DailyNutritionResponseCard
-  | CompactTableResponseCardV1;
+  | CompactTableResponseCardV1
+  | ChallengeStandingsResponseCardV1;
 
 const nutritionCardMealCountSchema = z
   .number()
@@ -236,9 +250,7 @@ const macroGoalSnapshotSchema = createNutritionCardGoalSnapshotSchema(
   assistantResponseCardV1Bounds.macroGrams,
 );
 
-export const dailyNutritionResponseCardV2Schema: z.ZodType<
-  DailyNutritionResponseCardV2
-> = z
+const dailyNutritionResponseCardV2BaseSchema = z
   .object({
     kind: z.literal("daily_nutrition"),
     version: z.literal(2),
@@ -268,45 +280,72 @@ export const dailyNutritionResponseCardV2Schema: z.ZodType<
       })
       .strict(),
   })
-  .strict()
-  .superRefine((card, context) => {
-    addNutritionCardMealCountIssues(card, context);
-    addNutritionCardGoalConsistencyIssue(
-      "calories",
-      card.mealCount,
-      card.totals.calories,
-      card.goals.calories,
-      context,
-    );
-    addNutritionCardGoalConsistencyIssue(
-      "proteinGrams",
-      card.mealCount,
-      card.totals.proteinGrams,
-      card.goals.proteinGrams,
-      context,
-    );
-    addNutritionCardGoalConsistencyIssue(
-      "carbsGrams",
-      card.mealCount,
-      card.totals.carbsGrams,
-      card.goals.carbsGrams,
-      context,
-    );
-    addNutritionCardGoalConsistencyIssue(
-      "fatGrams",
-      card.mealCount,
-      card.totals.fatGrams,
-      card.goals.fatGrams,
-      context,
-    );
-    addNutritionCardGoalConsistencyIssue(
-      "fiberGrams",
-      card.mealCount,
-      card.totals.fiberGrams,
-      card.goals.fiberGrams,
-      context,
-    );
-  });
+  .strict();
+
+function addDailyNutritionResponseCardV2Issues(
+  card: DailyNutritionResponseCardV2,
+  context: z.RefinementCtx,
+): void {
+  addNutritionCardMealCountIssues(card, context);
+  addNutritionCardGoalConsistencyIssue(
+    "calories",
+    card.mealCount,
+    card.totals.calories,
+    card.goals.calories,
+    context,
+  );
+  addNutritionCardGoalConsistencyIssue(
+    "proteinGrams",
+    card.mealCount,
+    card.totals.proteinGrams,
+    card.goals.proteinGrams,
+    context,
+  );
+  addNutritionCardGoalConsistencyIssue(
+    "carbsGrams",
+    card.mealCount,
+    card.totals.carbsGrams,
+    card.goals.carbsGrams,
+    context,
+  );
+  addNutritionCardGoalConsistencyIssue(
+    "fatGrams",
+    card.mealCount,
+    card.totals.fatGrams,
+    card.goals.fatGrams,
+    context,
+  );
+  addNutritionCardGoalConsistencyIssue(
+    "fiberGrams",
+    card.mealCount,
+    card.totals.fiberGrams,
+    card.goals.fiberGrams,
+    context,
+  );
+}
+
+export const dailyNutritionResponseCardV2Schema: z.ZodType<
+  DailyNutritionResponseCardV2
+> = dailyNutritionResponseCardV2BaseSchema.superRefine(
+  addDailyNutritionResponseCardV2Issues,
+);
+
+/** New tool calls require all goals; the nullable V2 schema remains replay-safe. */
+export const dailyNutritionResponseCardV2AuthoringSchema: z.ZodType<
+  DailyNutritionResponseCardV2
+> = dailyNutritionResponseCardV2BaseSchema
+  .extend({
+    goals: z
+      .object({
+        calories: calorieGoalSnapshotSchema,
+        proteinGrams: macroGoalSnapshotSchema,
+        carbsGrams: macroGoalSnapshotSchema,
+        fatGrams: macroGoalSnapshotSchema,
+        fiberGrams: macroGoalSnapshotSchema,
+      })
+      .strict(),
+  })
+  .superRefine(addDailyNutritionResponseCardV2Issues);
 
 export const dailyNutritionResponseCardSchema: z.ZodType<
   DailyNutritionResponseCard
@@ -319,6 +358,7 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
   z.union([
     dailyNutritionResponseCardSchema,
     compactTableResponseCardV1Schema,
+    challengeStandingsResponseCardV1Schema,
   ]);
 
 function isValidLocalCalendarDate(value: string): boolean {

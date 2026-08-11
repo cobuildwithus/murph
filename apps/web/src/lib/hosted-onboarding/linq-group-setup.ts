@@ -16,6 +16,47 @@ export const HOSTED_LINQ_GROUP_SETUP_TEMPLATE = "group_setup";
 export const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE =
   "group_email_recovery";
 
+const HOSTED_LINQ_GROUP_SETUP_ROOM_URL_PLACEHOLDER =
+  "{groupSetupUrl}";
+
+// This copy is posted in the shared room for both unresolved and recognized
+// inactive senders. Keep one canonical account-neutral body per group/day
+// effect; the re-attested private recovery path owns account-specific detail.
+const HOSTED_LINQ_GROUP_SETUP_ROOM_STATUS_VARIANTS = [
+  "I can't start this group from that message yet.",
+  "That message can't start this Murph group yet.",
+  "I need a different next step before I can start this group.",
+  "This group isn't ready to start from that message.",
+  "I couldn't start the group from that message.",
+  "I can't connect this group from that message yet.",
+  "Murph can't start this group from that message yet.",
+  "That message isn't enough to start this group yet.",
+  "I need one more step before I can start this group.",
+  "I can't get this group going from that message yet.",
+] as const;
+
+const HOSTED_LINQ_GROUP_SETUP_ROOM_ACTION_VARIANTS = [
+  "Someone in this chat who's active on Murph can message me here next.",
+  "A person here who's active on Murph can send me the next message.",
+  "This group can start when someone here who's active on Murph messages me.",
+  "An active Murph member in this chat can message me to continue.",
+  "Have someone in this group who's active on Murph message me here.",
+] as const;
+
+const HOSTED_LINQ_GROUP_SETUP_ROOM_RECOVERY =
+  "Otherwise, use this link to activate or finish setting up Murph, "
+  + `then message me here again: ${HOSTED_LINQ_GROUP_SETUP_ROOM_URL_PLACEHOLDER}`;
+
+const HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANTS =
+  HOSTED_LINQ_GROUP_SETUP_ROOM_STATUS_VARIANTS.flatMap((status) =>
+    HOSTED_LINQ_GROUP_SETUP_ROOM_ACTION_VARIANTS.map((action) =>
+      `${status} ${action} ${HOSTED_LINQ_GROUP_SETUP_ROOM_RECOVERY}`
+    )
+  );
+
+export const HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANT_COUNT =
+  HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANTS.length;
+
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_PREFIX =
   "murph_linq_group_email_v1.";
 const HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_DOMAIN =
@@ -114,12 +155,23 @@ export function buildHostedLinqGroupSetupUrl(): string {
   return `${requireHostedOnboardingPublicBaseUrl().replace(/\/+$/u, "")}/groups/start`;
 }
 
-export function buildHostedLinqGroupSetupMessage(): string {
-  return [
-    "I'm here — someone in this chat needs to finish setting up Murph,",
-    "then message me here again:",
+export function readHostedLinqGroupSetupRoomVariantTemplates():
+  readonly string[] {
+  return HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANTS;
+}
+
+export function buildHostedLinqGroupSetupMessage(input: {
+  seed: string;
+}): string {
+  const digest = sha256Hex(`group-setup-room-message:${input.seed}`);
+  const variantIndex = Number.parseInt(digest.slice(0, 8), 16)
+    % HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANTS.length;
+  const template = HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANTS[variantIndex];
+
+  return template.replace(
+    HOSTED_LINQ_GROUP_SETUP_ROOM_URL_PLACEHOLDER,
     buildHostedLinqGroupSetupUrl(),
-  ].join(" ");
+  );
 }
 
 export function buildHostedLinqGroupEmailRecoveryMessage(input: {

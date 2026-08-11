@@ -4,7 +4,7 @@ import {
   HOSTED_ASSISTANT_OPENAI_PROVIDER,
 } from "@murphai/hosted-execution/assistant-model";
 import { useState } from "react";
-import { CheckCircle2, ContactRound, Monitor } from "lucide-react";
+import { CheckCircle2, CheckIcon, ContactRound, Monitor } from "lucide-react";
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import {
@@ -51,7 +51,6 @@ import { HostedInferenceConnectionPane } from "@/src/components/settings/hosted-
 import { DESIGN_INFERENCE_CONNECTION } from "./design-inference-connection";
 import { HealthDomainCard } from "@/src/components/overview/health-domain-card";
 import { ActiveExperimentBanner } from "@/src/components/overview/active-experiment-banner";
-import { TrialBillingBanner } from "@/src/components/home/trial-billing-banner";
 import { ProfileStats } from "@/src/components/overview/profile-stats";
 import {
   HostedAuthPanelAlternateMethods,
@@ -129,13 +128,24 @@ import type { ExperimentLibraryCard } from "@/src/lib/experiments/library-cards"
 import type { DeviceSyncCompletionDialogModel } from "@/src/lib/device-sync/connect-completion-types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
+import {
+  CHECKOUT_CORE_FEATURES,
+  CHECKOUT_PULSE_FEATURES,
+  EDGE_ONLY_FEATURES,
+  JOIN_EDGE_FEATURES,
+  JOIN_FAMILY_FEATURES,
+  JOIN_PULSE_FEATURES,
+  SETTINGS_CORE_FEATURES,
+  SETTINGS_EDGE_FEATURES,
+  SETTINGS_FAMILY_FEATURES,
+  SETTINGS_PULSE_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import { MurphAssistantStylePicker } from "@/src/components/murph/murph-assistant-style-picker";
 import { HostedAiUsageActivity } from "@/src/components/settings/hosted-ai-usage-activity";
 import { HostedFamilyManager } from "@/src/components/settings/hosted-family-settings-actions";
 import { HostedPlanChangeConfirmationContent } from "@/src/components/settings/hosted-plan-change-button";
 import { UpgradeToEdgeButton } from "@/src/components/settings/hosted-plan-upgrade-button";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
-import { PulseTrialBillingContinuationView } from "@/src/components/settings/hosted-start-paid-pulse-button";
 import { MurphPersonalitySettingsDialog } from "@/src/components/settings/murph-personality-settings-dialog";
 import {
   DESIGN_AI_USAGE_ACTIVITY,
@@ -148,9 +158,12 @@ import {
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
 import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
-import { GarminHistoricalDataDialog } from "../(dashboard)/connect/connect-page-dialogs";
+import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
   EnvironmentEmptyState,
@@ -158,8 +171,17 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
+import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
+import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
+import { SignupReferralComponentStudy } from "./signup-referral-study";
+import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
+import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
+
+const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
+  "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
 
 const DESIGN_ENVIRONMENT_GAP_SCRIPT: EnvironmentVoiceScript = {
   dialogTitle: "Fill the gaps in your report",
@@ -197,9 +219,35 @@ function Section({
   title: string;
 }) {
   return (
-    <div id={id} className="flex flex-col gap-6">
+    <div id={id} className="flex scroll-mt-24 flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
+    </div>
+  );
+}
+
+function PlanBulletListStudy({
+  features,
+  title,
+}: {
+  features: readonly string[];
+  title: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card/80 p-4">
+      <p className="mb-2 text-sm font-medium text-foreground">{title}</p>
+      <ul className="flex flex-col gap-2 text-sm text-muted-foreground">
+        {features.map((feature) => (
+          <li key={feature} className="flex items-start gap-2">
+            <CheckIcon
+              className="mt-0.5 size-3.5 shrink-0 text-primary"
+              strokeWidth={2.5}
+              aria-hidden="true"
+            />
+            {feature}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -555,7 +603,9 @@ export function ComponentsContent() {
   const [channelPickerOpen, setChannelPickerOpen] = useState(false);
   const [contactCardPickerOpen, setContactCardPickerOpen] = useState(false);
   const [personalitySettingsOpen, setPersonalitySettingsOpen] = useState(false);
-  const [garminHistoricalDataDialogOpen, setGarminHistoricalDataDialogOpen] = useState(false);
+  const [vitalConnectionDialogSource, setVitalConnectionDialogSource] = useState<
+    Pick<ConnectSource, "id" | "logo" | "name" | "requiresReconnect"> | null
+  >(null);
   const [assistantStylePickerStep, setAssistantStylePickerStep] =
     useState<"tone" | "voice" | null>(null);
   const [segmentedControlValue, setSegmentedControlValue] =
@@ -578,6 +628,7 @@ export function ComponentsContent() {
   const [whoopCapacityPreviewOpen, setWhoopCapacityPreviewOpen] = useState(false);
   const [whoopCapacityNoContactPreviewOpen, setWhoopCapacityNoContactPreviewOpen] =
     useState(false);
+  const [usageCapacityPreviewKey, setUsageCapacityPreviewKey] = useState(0);
   const selectedPhoneInputCountry = resolveDesignPhoneCountryOption(phoneInputCountryCode);
 
   return (
@@ -590,6 +641,15 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Dashboard primary navigation">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Production dashboard destinations in their standard visual hierarchy.
+          </p>
+          <DashboardSidebarStudy />
+        </Section>
+
+        <Separator />
+
         <Section title="Home experiment history cards">
           <div
             className="grid items-start gap-5 lg:grid-cols-3"
@@ -599,20 +659,6 @@ export function ComponentsContent() {
             {DESIGN_HOME_HISTORY_CARDS.map((card) => (
               <HomeExperimentCard key={card.id} card={card} variant="history" />
             ))}
-          </div>
-        </Section>
-
-        <Separator />
-
-        <Section title="Pulse billing return confirmation">
-          <div inert>
-            <PulseTrialBillingContinuationView
-              action="start_pulse_now"
-              errorMessage={null}
-              onConfirm={() => {}}
-              onDismiss={() => {}}
-              status="confirming"
-            />
           </div>
         </Section>
 
@@ -871,6 +917,23 @@ export function ComponentsContent() {
             </div>
           </div>
         </Section>
+
+        <Separator />
+
+        <div
+          data-design-component="personal-patterns"
+          id="personal-patterns-component"
+          inert
+        >
+          <Section title="Personal patterns matrix">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production overview component. It compares repeated actions with
+              next-day outcomes and shows evidence strength without causal or
+              good-versus-bad labels.
+            </p>
+            <PersonalPatternsComponentStudy />
+          </Section>
+        </div>
 
         <Separator />
 
@@ -1263,7 +1326,7 @@ export function ComponentsContent() {
         <Section title="Setup Loader">
           <p className="text-sm text-muted-foreground">
             Full-page loader shown on <code className="font-mono text-xs">/join/[inviteCode]</code> while
-            the auto-trial is provisioned. The Murph mark fires a sonar ripple from its two
+            Starter usage is activated. The Murph mark fires a sonar ripple from its two
             largest core dots outward — each dot&apos;s delay is proportional to its distance
             from center, so the wave radiates through the constellation rather than pulsing
             uniformly. Honors <code className="font-mono text-xs">prefers-reduced-motion</code>.
@@ -1374,6 +1437,33 @@ export function ComponentsContent() {
 
         <Section title="Private experiment results share">
           <ExperimentResultsShareStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-nutrition-card"
+          title="iMessage nutrition card preview"
+        >
+          <ImessageNutritionCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-compact-table-card"
+          title="iMessage workout and compact table fallback states"
+        >
+          <ImessageCompactTableCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-challenge-standings-card"
+          title="iMessage challenge standings card"
+        >
+          <ImessageChallengeStandingsCardStudy />
         </Section>
 
         <Separator />
@@ -1513,7 +1603,7 @@ export function ComponentsContent() {
                 Add one-time usage with a saved card or continue securely in
                 Stripe when needed.
               </p>
-              <div className="mt-6">
+              <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
                   checkoutUrl="/api/design/usage-credit-preview"
                   inert
@@ -1521,6 +1611,31 @@ export function ComponentsContent() {
                   payerMemberId="design_usage_top_up_payer"
                   scope="personal"
                 />
+                <div
+                  className="contents"
+                  data-design-state="usage-top-up-capacity-conflict"
+                >
+                  <Button
+                    variant="outline"
+                    onClick={() => setUsageCapacityPreviewKey((key) => key + 1)}
+                  >
+                    Preview capacity response
+                  </Button>
+                  {usageCapacityPreviewKey > 0 ? (
+                    <HostedUsageTopUpDialog
+                      key={usageCapacityPreviewKey}
+                      checkoutUrl="/api/design/usage-credit-preview"
+                      inert
+                      initialCheckoutErrorCode={
+                        HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE
+                      }
+                      initialOpen
+                      offers={[]}
+                      payerMemberId="design_usage_top_up_payer"
+                      scope="personal"
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
             <div
@@ -1532,7 +1647,7 @@ export function ComponentsContent() {
                   <GroupUsageFundingActions
                     monthlyAction={(
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="monthly"
@@ -1544,7 +1659,7 @@ export function ComponentsContent() {
                     )}
                     oneTimeAction={(
                       <GroupSponsorshipDialog
-                        checkoutUrl="/api/design/usage-credit-preview"
+                        checkoutUrl={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/usage-credit/checkout`}
                         customizationAllowed
                         inert
                         mode="one_time"
@@ -1565,7 +1680,7 @@ export function ComponentsContent() {
               inert
             >
               <GroupSponsorshipManagementCard
-                endpoint="/api/design/group-sponsorship-management"
+                endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
                 inert
                 management={{
                   authorizationId: "hgsa_design_component",
@@ -1624,21 +1739,91 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Garmin Historical Data Preflight">
+        <Section title="Vital-backed health source handoff">
           <div className="flex flex-col items-start gap-3">
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              Provider-specific reminder shown before Murph opens Garmin&apos;s
-              authorization screen. It names the default-off permission without
-              claiming Murph can verify the external setting.
+              Reusable handoff shown before every Vital-backed authorization.
+              It leads with the connection, credits Vital underneath with a
+              link, and keeps Garmin&apos;s Historical Data reminder inside
+              the same dialog.
             </p>
-            <Button onClick={() => setGarminHistoricalDataDialogOpen(true)}>
-              Preview Garmin preflight
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {[
+                {
+                  label: "Preview standard handoff",
+                  source: {
+                    id: "fitbit",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/fitbit.svg",
+                      width: 44,
+                    },
+                    name: "Fitbit",
+                  },
+                  variant: "default" as const,
+                },
+                {
+                  label: "Preview Garmin handoff",
+                  source: {
+                    id: "garmin",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/garmin.png",
+                      width: 44,
+                    },
+                    name: "Garmin",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview wide logo",
+                  source: {
+                    id: "runkeeper",
+                    logo: {
+                      className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
+                      height: 20,
+                      src: "/brand-logos/connect/runkeeper.svg",
+                      width: 132,
+                    },
+                    name: "Runkeeper",
+                  },
+                  variant: "outline" as const,
+                },
+                {
+                  label: "Preview long label",
+                  source: {
+                    id: "dexcom-g6-and-older",
+                    logo: {
+                      className: "size-11 object-contain",
+                      height: 44,
+                      src: "/brand-logos/connect/dexcom-g6-and-older.png",
+                      width: 44,
+                    },
+                    name: "Dexcom (G6 and older)",
+                  },
+                  variant: "outline" as const,
+                },
+              ].map((preview) => (
+                <Button
+                  key={preview.source.id}
+                  variant={preview.variant}
+                  onClick={() => setVitalConnectionDialogSource(preview.source)}
+                >
+                  {preview.label}
+                </Button>
+              ))}
+            </div>
           </div>
-          <GarminHistoricalDataDialog
-            open={garminHistoricalDataDialogOpen}
-            onContinue={() => setGarminHistoricalDataDialogOpen(false)}
-            onOpenChange={setGarminHistoricalDataDialogOpen}
+          <VitalConnectionDialog
+            source={vitalConnectionDialogSource}
+            onContinue={() => setVitalConnectionDialogSource(null)}
+            onOpenChange={(open) => {
+              if (!open) {
+                setVitalConnectionDialogSource(null);
+              }
+            }}
           />
         </Section>
 
@@ -1950,10 +2135,21 @@ export function ComponentsContent() {
                 <HostedAiUsageActivity
                   activity={preview.activity}
                   missionContactOption={preview.contactOption}
+                  signupReferralUrl="https://example.com/r/design-referral"
                 />
               </div>
             ))}
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Signup referral link actions">
+          <p className="text-sm text-muted-foreground">
+            The real copy action keeps loading, clipboard, and recovery states
+            distinct without moving keyboard focus away from the control.
+          </p>
+          <SignupReferralComponentStudy />
         </Section>
 
         <Separator />
@@ -1994,7 +2190,7 @@ export function ComponentsContent() {
                   label: null,
                   memberId: "design-owner",
                   pendingPlanCode: null,
-                  planCode: "pulse",
+                  planCode: "max",
                 },
                 {
                   isOwner: false,
@@ -2004,23 +2200,48 @@ export function ComponentsContent() {
                   pendingPlanCode: null,
                   planCode: "edge",
                 },
+                {
+                  isOwner: false,
+                  joinedAtIso: "2026-07-12T00:00:00.000Z",
+                  label: "Sibling",
+                  memberId: "design-pending-member",
+                  pendingPlanCode: "max",
+                  planCode: "pulse",
+                },
               ]}
               plans={{
                 edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+                max: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
                 pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
               }}
               seats={{
-                active: 2,
-                billed: 3,
+                active: 3,
+                billed: 4,
                 invited: 1,
                 max: 6,
                 min: 2,
                 remaining: 0,
-                used: 3,
+                used: 4,
               }}
               tiers={[
-                { name: "Pulse", planCode: "pulse", priceLabel: "$7/mo" },
-                { name: "Edge", planCode: "edge", priceLabel: "$19/mo" },
+                {
+                  name: "Pulse",
+                  planCode: "pulse",
+                  priceLabel: "$7/mo",
+                  recurringAmountUsdCents: 700,
+                },
+                {
+                  name: "Edge",
+                  planCode: "edge",
+                  priceLabel: "$19/mo",
+                  recurringAmountUsdCents: 1_900,
+                },
+                {
+                  name: "Max",
+                  planCode: "max",
+                  priceLabel: "$49/mo",
+                  recurringAmountUsdCents: 4_900,
+                },
               ]}
             />
           </div>
@@ -2238,9 +2459,9 @@ export function ComponentsContent() {
         <Section title="Progress">
           <div className="flex flex-col gap-2">
             <div className="flex justify-between">
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
-              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
-              <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-primary">Baseline · 14d ✓</span>
+              <span className="font-mono text-xs font-semibold uppercase tracking-[0.08em]">Active · Day 1 of 14</span>
+              <span className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">Analysis</span>
             </div>
             <Progress value={54} className="h-1.5" />
           </div>
@@ -2339,7 +2560,7 @@ export function ComponentsContent() {
           <div className="flex items-end gap-8">
             <div className="flex flex-col items-center gap-2">
               <PlanVisual tier="free" />
-              <span className="text-xs text-muted-foreground">Free</span>
+              <span className="text-xs text-muted-foreground">Starter</span>
             </div>
             <div className="flex flex-col items-center gap-2">
               <PlanVisual tier="pulse" />
@@ -2352,13 +2573,36 @@ export function ComponentsContent() {
           </div>
         </Section>
 
-        <Section title="Trial Billing Banner">
+        <Separator />
+
+        <Section title="Plan selling points">
           <p className="-mt-3 text-xs text-muted-foreground">
-            Shown on Home when a Pulse trial is paused with billing still attached. It is the
-            dashboard&apos;s only billing-recovery action, which is why lapsed members are sent
-            to the Subscription controls rather than here.
+            Canonical bullet lists from lib/hosted-onboarding/plan-features.ts. The join page,
+            billing settings, and checkout dialogs all render from these lists, so a wording
+            change here is the wording change everywhere. Only Edge may claim the most capable
+            AI models; the top model requires an active paid Edge plan.
           </p>
-          <TrialBillingBanner />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <PlanBulletListStudy title="Pulse · join page" features={JOIN_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · join page" features={JOIN_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · join page" features={JOIN_FAMILY_FEATURES} />
+            <PlanBulletListStudy title="Core · settings" features={SETTINGS_CORE_FEATURES} />
+            <PlanBulletListStudy title="Pulse · settings" features={SETTINGS_PULSE_FEATURES} />
+            <PlanBulletListStudy title="Edge · settings" features={SETTINGS_EDGE_FEATURES} />
+            <PlanBulletListStudy title="Family · settings" features={SETTINGS_FAMILY_FEATURES} />
+            <PlanBulletListStudy
+              title="Pulse · checkout"
+              features={CHECKOUT_PULSE_FEATURES}
+            />
+            <PlanBulletListStudy
+              title="Core · checkout"
+              features={CHECKOUT_CORE_FEATURES}
+            />
+            <PlanBulletListStudy
+              title="Edge loses · downgrade dialog"
+              features={EDGE_ONLY_FEATURES}
+            />
+          </div>
         </Section>
 
         <Separator />

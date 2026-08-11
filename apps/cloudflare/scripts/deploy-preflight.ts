@@ -9,6 +9,9 @@ import {
 import {
   normalizeHostedExecutionBaseUrl,
 } from "@murphai/hosted-execution/env";
+import {
+  assertHostedCryptoStandbyKeyringJsons,
+} from "@murphai/runtime-state";
 
 import { readHostedDeployAutomationTimeouts } from "./deploy-automation/environment.ts";
 import { HOSTED_WORKER_REQUIRED_SECRET_NAMES } from "./deploy-automation/secrets.ts";
@@ -20,10 +23,10 @@ import {
   readBooleanEnv,
 } from "./deploy-automation/shared.ts";
 import {
-  assertR2FixedBucketPair,
+  assertHostedR2Bucket,
   createWranglerR2BucketInfoReader,
   type R2BucketInfo,
-} from "./r2-fixed-buckets.ts";
+} from "./r2-bucket.ts";
 
 type EnvSource = Readonly<Record<string, string | undefined>>;
 type HostedDeployContext = "development" | "preview" | "production";
@@ -56,9 +59,7 @@ const HOSTED_DEPLOY_CONTEXT_SET = new Set<string>(HOSTED_DEPLOY_CONTEXTS);
 const REQUIRED_DEPLOY_ENV_NAMES = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
-  "CF_BUNDLES_ENAM_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
-  "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
 ] as const;
 
 const REQUIRED_DEPLOY_WORKER_ENV_NAMES = [
@@ -119,9 +120,7 @@ const PREVIEW_DEPLOY_URL_INVARIANT_LABELS = [
 const PREVIEW_DEPLOY_RESOURCE_LABELS = [
   "CF_WORKER_NAME",
   "CF_BUNDLES_BUCKET",
-  "CF_BUNDLES_ENAM_BUCKET",
   "CF_BUNDLES_PREVIEW_BUCKET",
-  "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
 ] as const;
 
 const LOOPBACK_OR_PRIVATE_HOSTS = new Set([
@@ -296,61 +295,9 @@ export function listHostedDeployEnvironmentInvariantErrors(
   }
 
   const bundlesBucket = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
-  const bundlesEnamBucket = normalizeOptionalString(source.CF_BUNDLES_ENAM_BUCKET);
-  const bundlesPreviewBucket = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
-  const bundlesEnamPreviewBucket =
-    normalizeOptionalString(source.CF_BUNDLES_ENAM_PREVIEW_BUCKET);
   const presignBucket = normalizeOptionalString(source.HOSTED_R2_PRESIGN_BUCKET_NAME);
   if (bundlesBucket && presignBucket && presignBucket !== bundlesBucket) {
     errors.push("HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.");
-  }
-  const presignEnamBucket =
-    normalizeOptionalString(source.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME);
-  if (bundlesEnamBucket && presignEnamBucket && presignEnamBucket !== bundlesEnamBucket) {
-    errors.push("HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET.");
-  }
-  if (bundlesBucket && bundlesEnamBucket && bundlesBucket === bundlesEnamBucket) {
-    errors.push("CF_BUNDLES_BUCKET and CF_BUNDLES_ENAM_BUCKET must be distinct.");
-  }
-  if (
-    bundlesPreviewBucket
-    && bundlesEnamPreviewBucket
-    && bundlesPreviewBucket === bundlesEnamPreviewBucket
-  ) {
-    errors.push(
-      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_ENAM_PREVIEW_BUCKET must be distinct.",
-    );
-  }
-  const r2CutoverPhase = normalizeOptionalString(source.HOSTED_R2_CUTOVER_PHASE);
-  if (
-    r2CutoverPhase
-    && r2CutoverPhase !== "source_active"
-    && r2CutoverPhase !== "destination_active"
-  ) {
-    errors.push("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
-  }
-  const r2WriteAdmission = normalizeOptionalString(source.HOSTED_R2_WRITE_ADMISSION);
-  if (r2WriteAdmission && r2WriteAdmission !== "open" && r2WriteAdmission !== "paused") {
-    errors.push("HOSTED_R2_WRITE_ADMISSION must be open or paused.");
-  }
-  const r2PausedCanaryUserIdSha256 = normalizeOptionalString(
-    source.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256,
-  );
-  if (
-    r2PausedCanaryUserIdSha256
-    && !/^[a-f0-9]{64}$/u.test(r2PausedCanaryUserIdSha256)
-  ) {
-    errors.push(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
-    );
-  }
-  if (
-    r2PausedCanaryUserIdSha256
-    && (r2CutoverPhase !== "destination_active" || r2WriteAdmission !== "paused")
-  ) {
-    errors.push(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
-    );
   }
   const cloudflareAccountId = normalizeOptionalString(source.CLOUDFLARE_ACCOUNT_ID);
   const presignAccountId = normalizeOptionalString(source.HOSTED_R2_PRESIGN_ACCOUNT_ID);
@@ -409,6 +356,7 @@ export function listHostedDeployEnvironmentInvariantErrors(
   if (hostedCryptoEnv && hostedCryptoEnv !== deployContext) {
     errors.push(`${deployContext} deploys must set HOSTED_CRYPTO_ENV=${deployContext}.`);
   }
+  appendHostedCryptoKeyringInvariantErrors(source, errors);
 
   const oidcEnvironment = normalizeHostedOidcEnvironment(
     source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT,
@@ -521,6 +469,26 @@ export function listHostedDeployEnvironmentInvariantErrors(
   return errors;
 }
 
+function appendHostedCryptoKeyringInvariantErrors(
+  source: EnvSource,
+  errors: string[],
+): void {
+  try {
+    assertHostedCryptoStandbyKeyringJsons({
+      activeAuthorityKeyVersionName:
+        source.HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
+      activeCloudflareRecipientKeyId:
+        source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID,
+      authorityVerifyKeyringJson:
+        source.HOSTED_CRYPTO_AUTHORITY_VERIFY_KEYRING_JSON,
+      cloudflarePrivateKeyringJson:
+        source.HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_KEYRING_JSON,
+    });
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : "Hosted crypto standby keyrings are invalid.");
+  }
+}
+
 function readHostedR2PresignEndpointInvariantError(input: {
   accountId: string | null;
   endpoint: string | undefined;
@@ -593,32 +561,15 @@ async function listHostedDeployR2BucketInvariantErrors(
   source: EnvSource,
   readR2BucketInfo: R2BucketInfoReader,
 ): Promise<string[]> {
-  const runtimeSourceName = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
-  const runtimeDestinationName = normalizeOptionalString(source.CF_BUNDLES_ENAM_BUCKET);
-  const previewSourceName = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
-  const previewDestinationName = normalizeOptionalString(
-    source.CF_BUNDLES_ENAM_PREVIEW_BUCKET,
-  );
-  if (
-    !runtimeSourceName
-    || !runtimeDestinationName
-    || !previewSourceName
-    || !previewDestinationName
-  ) {
+  const runtimeName = normalizeOptionalString(source.CF_BUNDLES_BUCKET);
+  const previewName = normalizeOptionalString(source.CF_BUNDLES_PREVIEW_BUCKET);
+  if (!runtimeName || !previewName) {
     return [];
   }
 
-  const pairs = [
-    {
-      destinationName: runtimeDestinationName,
-      label: "Runtime R2",
-      sourceName: runtimeSourceName,
-    },
-    {
-      destinationName: previewDestinationName,
-      label: "Preview R2",
-      sourceName: previewSourceName,
-    },
+  const buckets = [
+    { label: "Runtime R2", location: "ENAM", name: runtimeName },
+    { label: "Preview R2", location: "ENAM", name: previewName },
   ] as const;
   const bucketInfoByName = new Map<string, Promise<R2BucketInfo>>();
   const readBucketInfo = (bucketName: string): Promise<R2BucketInfo> => {
@@ -632,23 +583,18 @@ async function listHostedDeployR2BucketInvariantErrors(
   };
 
   try {
-    await Promise.all(pairs.map(async (pair) => {
-      const [sourceInfo, destinationInfo] = await Promise.all([
-        readBucketInfo(pair.sourceName),
-        readBucketInfo(pair.destinationName),
-      ]);
-      assertR2FixedBucketPair({
-        destination: destinationInfo,
-        destinationName: pair.destinationName,
-        label: pair.label,
-        source: sourceInfo,
-        sourceName: pair.sourceName,
+    await Promise.all(buckets.map(async (bucket) => {
+      assertHostedR2Bucket({
+        bucket: await readBucketInfo(bucket.name),
+        bucketName: bucket.name,
+        label: bucket.label,
+        location: bucket.location,
       });
     }));
     return [];
   } catch (error) {
     return [
-      `R2 fixed-role bucket metadata validation failed: ${
+      `R2 bucket metadata validation failed: ${
         error instanceof Error ? error.message : "unknown bucket metadata error"
       }`,
     ];

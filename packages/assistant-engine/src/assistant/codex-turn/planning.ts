@@ -1,5 +1,6 @@
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
+import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
 import {
   resolveAssistantEffectiveStyle,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
@@ -20,6 +21,7 @@ import {
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshotBestEffort,
 } from '../context-snapshot.js'
 import {
   assistantRouteSupportsGroupRoomModel,
@@ -49,7 +51,10 @@ import {
   resolveAssistantDiagnosticsPolicy,
   type AssistantDiagnosticsPolicy,
 } from '../issue-reporting.js'
-import { resolveAssistantModelBehaviorProfile } from '../model-behavior.js'
+import {
+  buildAssistantResearchScoutCapabilityText,
+  resolveAssistantModelBehaviorProfile,
+} from '../model-behavior.js'
 import {
   resolveAssistantCodexResumeThreadId,
   resolveAssistantRouteResumeBinding,
@@ -76,6 +81,7 @@ import {
   type AssistantProgressDelivery,
 } from '../turn-progress.js'
 import {
+  resolveAssistantHostedScheduledInvocationScope,
   resolveAssistantHostedScheduledPhoneCallScope,
   type AssistantHostedToolContext,
 } from '../hosted-tool-context.js'
@@ -96,6 +102,7 @@ import type {
   AssistantProviderConversationMessage,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
 } from '../providers/types.js'
+import { getAssistantChannelAdapter } from '../channel-adapters.js'
 import {
   assistantConversationHistoryUtf8Bytes,
   limitAssistantConversationHistoryTextBytes,
@@ -113,7 +120,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   resolveMurphDynamicTools,
   type MurphDynamicTool,
-} from '../../assistant-codex/dynamic-tools.js'
+} from '../../assistant-codex/dynamic-tool-catalog.js'
 import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../../assistant-codex/dynamic-tools/phone-calls.js'
@@ -121,6 +128,8 @@ import {
   resolveAssistantVoiceMemoDeliveryChannel,
   type AssistantVoiceMemoDeliveryChannel,
 } from '../voice-memo-delivery.js'
+
+const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -456,6 +465,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   }
   const privateInteractiveAudience = conversationScope === 'direct'
+  const scheduledInvocationScope =
+    resolveAssistantHostedScheduledInvocationScope({
+      conversationScope,
+      messageInput: input.input,
+      originSessionId: input.session.sessionId,
+    })
   const scheduledPhoneCallScope =
     resolveAssistantHostedScheduledPhoneCallScope({
       channel: input.input.channel,
@@ -471,11 +486,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
       channel: resolvedChannel,
       threadIsDirect: false,
     })
-  const deliveredGroupPhoneCallPreviewAvailable =
-    authenticatedGroupChatRuntime &&
-    input.hostedToolContext?.phoneCalls != null &&
-    await input.hostedToolContext
-      .currentGroupPhoneCallPreviewAuthority?.() != null
   const hostedGroupStyleSettingsAvailable =
     hostedGroupRuntime &&
     resolvedChannel?.trim().toLowerCase() === 'linq' &&
@@ -503,10 +513,20 @@ export async function resolveAssistantRouteTurnPlan(input: {
     )
   const responseCardsAvailable =
     privateInteractiveProviderTurn &&
-    ((ordinaryInboundTurn &&
-      input.input.scheduledInvocationAuthority == null) ||
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const groupChallengeResponseCardsAvailable =
+    authenticatedGroupChatRuntime &&
+    resolvedChannel?.trim().toLowerCase() === 'linq' &&
+    input.hostedToolContext?.groupSharedReader != null &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn' &&
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null))
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
@@ -634,12 +654,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
           vaultRoot: input.input.vault,
         })
       : null
-  const assistantDynamicContextPrompts = groupRoomModelPrompt
-    ? [...hostedDynamicContextPrompts, groupRoomModelPrompt]
-    : hostedDynamicContextPrompts
   const promptCapabilityAvailability = resolveAssistantPromptCapabilityAvailability({
     executionContext: input.executionContext,
   })
+  const assistantResearchAvailable = normalizeNullableString(
+    input.sharedPlan.cliAccess.env.EXA_API_KEY,
+  ) !== null
+    && input.profile.promptProfile === 'conversation'
+    && (privateInteractiveAudience || authenticatedGroupChatRuntime)
+  const assistantDynamicContextPrompts = [
+    ...hostedDynamicContextPrompts,
+    ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...(assistantResearchAvailable
+      ? [buildAssistantResearchScoutCapabilityText({
+          progressUpdateMode: authenticatedGroupChatRuntime ? 'group' : 'direct',
+        })]
+      : []),
+  ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
     ? null
     : resolveAssistantVoiceMemoDeliveryChannel({
@@ -663,7 +694,24 @@ export async function resolveAssistantRouteTurnPlan(input: {
   const bootstrapAssistantCliContract = scopeAssistantCliSurfaceContractForAssistant({
     contract: unscopedAssistantCliContract,
     hostedRuntime: input.executionContext?.hosted != null,
+    researchAvailable: assistantResearchAvailable,
   })
+  if (privateInteractiveProviderTurn) {
+    // A small vault can repair its navigation snapshot before provider start.
+    // Larger vaults yield to the degraded prompt instead of delaying the turn.
+    let remainingRefreshSteps =
+      ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS
+    await refreshAssistantContextSnapshotBestEffort({
+      shouldYield: () => {
+        if (remainingRefreshSteps <= 0) {
+          return true
+        }
+        remainingRefreshSteps -= 1
+        return false
+      },
+      vaultRoot: input.input.vault,
+    })
+  }
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
@@ -727,6 +775,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     }
 
     return buildAssistantSystemPromptWithCacheMetadata({
+      assistantAndroidAppAvailable: isMurphAndroidAppEnabled(
+        input.sharedPlan.cliAccess.env,
+      ),
       assistantCliContract: options.assistantCliContract,
       assistantContextSnapshotPrompt,
       assistantDynamicContextPrompts: assistantDynamicContextPrompts,
@@ -800,6 +851,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
       session: input.session,
       sharedPlan: input.sharedPlan,
     })
+  const imageGenerationAvailable =
+    scheduledInvocationScope === null ||
+    getAssistantChannelAdapter(
+      currentAudienceDeliveryFields.channel,
+    )?.supportedResponseMediaKinds.includes('vault_image') === true
   const messageTargetingAvailable =
     input.messageTargetAuthorizerAvailable === true &&
     supportsAssistantAcceptedMessageTargetingRoute({
@@ -808,8 +864,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
       threadId: currentAudienceDeliveryFields.threadId,
       threadIsDirect: currentAudienceDeliveryFields.threadIsDirect,
     })
-  const productFeedbackAcceptedInputIds =
-    resolveAssistantProductFeedbackAcceptedInputIds(input.acceptedInputItems ?? [])
+  const productFeedbackAuthorized =
+    resolveAssistantProductFeedbackAcceptedInputIds(
+      input.acceptedInputItems ?? [],
+    ).length > 0
   const userActionAcceptedInputIds = resolveAssistantUserActionAcceptedInputIds({
     acceptedInputItems: input.acceptedInputItems ?? [],
     turnTrigger: input.input.turnTrigger ?? null,
@@ -829,6 +887,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
       : resolveMurphDynamicTools({
         assistantStyleSettingsAvailable,
         allowFinishWithoutReply,
+        imageGenerationAvailable,
         messageTargetingAvailable,
         assistantConfigurationAvailable:
           privateInteractiveAudience &&
@@ -851,7 +910,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
           input.hostedToolContext?.deviceTool != null,
         clinicalRecordsConnectLinkAvailable:
           privateInteractiveAudience &&
-          userActionAcceptedInputIds.length > 0 &&
+          (userActionAcceptedInputIds.length > 0 ||
+            scheduledInvocationScope !== null) &&
           input.hostedToolContext?.clinicalRecordsConnectLinkTool != null,
         familyPlanAvailable:
           privateInteractiveAudience &&
@@ -887,10 +947,11 @@ export async function resolveAssistantRouteTurnPlan(input: {
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,
         productFeedbackAvailable:
-          productFeedbackAcceptedInputIds.length > 0 &&
+          productFeedbackAuthorized &&
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        groupChallengeResponseCardsAvailable,
         physicalNotesAvailable:
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           input.hostedToolContext?.physicalNotes != null &&
@@ -900,16 +961,23 @@ export async function resolveAssistantRouteTurnPlan(input: {
           (
             scheduledPhoneCallScope !== null ||
             (
+              userActionAcceptedInputIds.length > 0 &&
               (
-                privateInteractiveAudience
-                || deliveredGroupPhoneCallPreviewAvailable
-              ) &&
-              userActionAcceptedInputIds.length > 0
+                privateInteractiveAudience ||
+                (
+                  hostedGroupRuntime &&
+                  messageTargetingAvailable
+                )
+              )
             )
           ),
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
+        pendingVaultFilesAvailable:
+          privateInteractiveAudience &&
+          userActionAcceptedInputIds.length > 0 &&
+          input.hostedToolContext?.pendingVaultFilesAvailable === true,
         vaultFileSendAvailable:
           privateInteractiveAudience &&
           input.hostedToolContext?.vaultFileSendAvailable === true,

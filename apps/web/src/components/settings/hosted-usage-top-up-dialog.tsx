@@ -37,6 +37,9 @@ import {
 } from "@/src/components/ui/field";
 import { RadioGroup } from "@/src/components/ui/radio-group";
 import { useIsMobile } from "@/src/hooks/use-mobile";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { cn } from "@/src/lib/utils";
 
 import {
@@ -63,6 +66,11 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   useEffect(() => {
     const previousScreen = previousScreenRef.current;
     previousScreenRef.current = screen;
+    const enteredCapacityConflict =
+      screen.kind === "selection" &&
+      screen.capacityConflict &&
+      (previousScreen.kind !== "selection" ||
+        !previousScreen.capacityConflict);
     const enteredSelectionRecovery =
       screen.kind === "selection" &&
       screen.attempt.kind === "locked" &&
@@ -72,7 +80,10 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
         previousScreen.attempt.kind !== "locked" ||
         previousScreen.attempt.error === null
       );
-    if (controller.state.open && enteredSelectionRecovery) {
+    if (
+      controller.state.open &&
+      (enteredCapacityConflict || enteredSelectionRecovery)
+    ) {
       if (scrollContentRef.current) {
         scrollContentRef.current.scrollTop = 0;
       }
@@ -188,6 +199,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     fulfilledConfirmation &&
     props.scope !== "group" &&
     contactOptions.length > 0;
+  const capacityConflict = selection?.capacityConflict === true;
   const hasAttempt = selection !== null && selection.attempt.kind !== "idle";
   const selectionError =
     selection?.attempt.kind === "locked" ? selection.attempt.error : null;
@@ -198,15 +210,17 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
     selectionError !== null;
   const headerTitle = statusContent
     ? `${statusContent.title}${familyTarget && !purchase?.targetConflict ? ` for ${familyTarget}` : ""}`
-    : props.offers.length === 0
-      ? "Usage unavailable"
-      : props.scope === "group"
-        ? groupPaymentMode === "monthly"
-          ? "Sponsor this chat"
-          : "Make a one-time contribution"
-        : familyTarget
-          ? `Add usage for ${familyTarget}`
-          : "Add usage";
+    : capacityConflict
+      ? "More credit can’t be added right now"
+      : props.offers.length === 0
+        ? "Usage unavailable"
+        : props.scope === "group"
+          ? groupPaymentMode === "monthly"
+            ? "Sponsor this chat"
+            : "Make a one-time contribution"
+          : familyTarget
+            ? `Add usage for ${familyTarget}`
+            : "Add usage";
   const headerDescription = purchase
     ? showGroupMessagesAction && statusContent
       ? statusContent.message
@@ -221,13 +235,15 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
             : familyTarget
               ? `We’ll update the available usage for ${familyTarget} as soon as payment is complete.`
               : "We’ll update your available usage as soon as payment is complete."
-    : props.offers.length === 0
-      ? "There isn’t more usage available for this account right now."
-      : props.scope === "group"
-        ? groupPaymentMode === "monthly"
-          ? "Choose your monthly sponsorship limit."
-          : "Choose how much usage to add to this chat."
-        : null;
+    : capacityConflict
+      ? HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE
+      : props.offers.length === 0
+        ? "There isn’t more usage available for this account right now."
+        : props.scope === "group"
+          ? groupPaymentMode === "monthly"
+            ? "Choose your monthly sponsorship limit."
+            : "Choose how much usage to add to this chat."
+          : null;
   const confirmationIndicator =
     showGroupMessagesAction && statusContent ? (
       <div
@@ -396,6 +412,18 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
                 {showGroupMessagesAction ? "Done" : "Close"}
               </Button>
             </div>
+          </div>
+        ) : capacityConflict ? (
+          <div data-slot="usage-top-up-capacity-conflict">
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="w-full"
+              onClick={() => controller.handleOpenChange(false)}
+            >
+              Close
+            </Button>
           </div>
         ) : props.offers.length === 0 ? (
           <div>

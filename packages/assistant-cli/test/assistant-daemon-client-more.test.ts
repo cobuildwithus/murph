@@ -380,6 +380,14 @@ test('daemon client serializes open-conversation, session-options, and session l
     },
     TEST_ENV,
   )
+  const localOnlyOpen = await maybeOpenAssistantConversationViaDaemon(
+    {
+      allowBindingRebind: true,
+      sessionId: TEST_SESSION.sessionId,
+      vault: '/tmp/vault',
+    },
+    TEST_ENV,
+  )
   const updatedSession = await maybeUpdateAssistantSessionOptionsViaDaemon(
     {
       providerOptions: {
@@ -402,6 +410,7 @@ test('daemon client serializes open-conversation, session-options, and session l
     created: true,
     session: TEST_SESSION,
   })
+  assert.equal(localOnlyOpen, null)
   assert.deepEqual(updatedSession, TEST_SESSION)
   assert.deepEqual(sessions, [TEST_SESSION])
 

@@ -1,11 +1,11 @@
 import { ImageResponse } from "next/og";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
 import {
   dmSans400FontPath,
   fraunces400FontPath,
   fraunces600FontPath,
+  logoSvgPath,
 } from "../../../../font-files";
 import {
   EXPERIMENT_CARD_MAX_SIGNALS,
@@ -76,7 +76,7 @@ export const POST = withJsonError(async (request: Request): Promise<Response> =>
     readFile(fraunces400FontPath).then(toArrayBuffer),
     readFile(fraunces600FontPath).then(toArrayBuffer),
     readFile(dmSans400FontPath).then(toArrayBuffer),
-    readFile(join(process.cwd(), "public", "logo.svg")).then(
+    readFile(logoSvgPath).then(
       (buffer) => `data:image/svg+xml;base64,${buffer.toString("base64")}`,
     ),
   ]);

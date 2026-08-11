@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-07-30
+Last verified: 2026-08-10
 
 ## Decision
 
@@ -37,13 +37,13 @@ The one-time group contribution catalog is:
 Group funding presents capped monthly sponsorship as the primary choice and a
 one-time contribution as the secondary choice. A monthly sponsor selects a
 $5, $10, or $20 maximum; the activation and automatic refills are ordinary
-exact $5 purchases. No public surface converts dollars or cost-weighted usage
+exact $5 purchases. No public surface converts dollars or usage credit
 into an estimated message count. `usage_25_usd` remains parseable for historical
 purchases and available only to current personal and Family surfaces.
 
 The cash subtotal and granted usage value are separate immutable purchase
 facts even when the initial offer is one-for-one. One dollar of v1 usage credit
-is one dollar of capacity under Murph's existing cost-weighted AI usage meter.
+is one dollar of capacity under Murph's existing AI usage meter.
 It is not a token count, bank balance, Stripe customer balance, subscription
 invoice credit, transferable asset, or promise of cash redemption.
 
@@ -189,65 +189,99 @@ count, or automatic refill events. The exact payer privately sees the current
 period's fulfilled and pending amounts, maximum, period end, status, and
 management controls. A near-cap notice is private and revalidated against the
 current authorization. The room is notified only when the existing usage gate
-actually pauses work, using neutral language without a funding prompt.
+actually pauses work. Every exhausted room receives the ordinary pause copy and
+the current first-party funding link. The message does not branch on or expose
+the current funding setup; the funding page separately preserves any active
+automatic sponsor and the single-sponsor billing invariant.
 
 ## Group Sponsorship Moment
 
 Every explicit one-time group contribution and monthly activation purchase has
 one purchase-linked sponsorship-moment row. Automatic $5 refills do not create
-another moment, song, group notice, or running bit. The moment is not a
-financial status or balance. It freezes an HMAC-bound request configuration
-and, only for a current owner or active participant, may encrypt an optional
-public alias, group note, and temporary running-bit request using the hosted
-member secure-box owner.
+another moment, creative response, group notice, or running bit. The moment is
+not a financial status or balance. It freezes an HMAC-bound request
+configuration and, only for a current owner or active participant, may encrypt
+an optional public alias, optional creative request, and temporary running-bit
+request using the hosted member secure-box owner.
+
+A creative request is absent by default, so funding alone is quiet in the room.
+The bounded formats are `message`, `poem`, and `song`. Every request may include
+an optional premise; a song may additionally include one genre or style
+reference. Named songs, shows, soundtracks, artists, and genres are interpreted
+only as broad traits such as mood, tempo, instrumentation, and structure. They
+never authorize copied melody, lyrics, catchphrases, vocal identity, or a
+signature arrangement. The encrypted creative envelope is versioned and exists
+only for an explicit request. A null creative-request column means quiet for
+both current and pre-feature rows. A pre-feature encrypted generic note is
+normalized only into a plain-message request; it can never be reinterpreted as
+song consent. Pre-feature rows without that note never produce a creative
+response.
 
 A valid funding locator remains sufficient to contribute anonymously. It is
 not sufficient to publish content into the room. Web checks current
 participant authority when the purchase is created and again after verified
-payment. Losing that authority suppresses the authored content without
-changing the grant.
+payment. Losing that authority suppresses the new authored creative request
+without changing the grant. A public alias is retained only when an opted-in
+response or active running-bit request can actually use it; both the client
+builder and server canonicalizer discard an alias-only quiet request, so quiet
+funding does not store an unused public identity. No expired private copy is
+read or exposed.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:
 
 1. activates a requested bit for 24 hours on a `$10` one-time contribution or
    72 hours on a `$20` one-time contribution;
-2. resolves the exact current non-direct group destination, with no personal
-   fallback; and
-3. appends one purchase-deduplicated creative notification to the existing
+2. stops without creating a public notification when no creative response was
+   explicitly requested;
+3. otherwise resolves the exact current non-direct group destination, with no
+   personal fallback; and
+4. appends one purchase-deduplicated creative notification to the existing
    mailbox.
 
-A monthly activation is the actual `$5` purchase socially acknowledged in the
-room. Its private monthly maximum never changes the public acknowledgment or
-creates a running bit.
+Permanent schema validation failure in a decrypted optional creative envelope
+projects as no creative request at this notification boundary. Activation,
+including an otherwise valid running bit, commits and Stripe receipt completion
+continues through the independent near-cap owner. Creator recovery stays strict,
+and secure-box, decryption, database, and other operational failures continue to
+propagate for ordinary retry rather than being mislabeled as quiet content.
 
-The creative turn is isolated, projects only `generate_song`, applies the
-output-only native-capability deny set, and runs as a fresh ephemeral thread on
-the resident App Server. The application-owned song tool retains the existing
-provider and authority-free public transports needed for generation and its
-validated signed upload; neither becomes native Codex browsing. The turn uses
-the ordinary delivery path. Its prompt tells the model to call that tool exactly once for one
-roughly 15-second original sponsor song. The song transforms one vivid, recent,
-non-sensitive detail, exchange, or room dynamic from the current group
-conversation into a surprising room-specific hook when one is available. A
-present sponsor message is the preferred creative seed when it blends naturally
-with the room. When neither source offers a safe, usable premise, the song
-becomes a gentle group celebration without inventing personal facts or referring
-to sensitive history.
+A monthly activation is the actual `$5` purchase eligible for the optional
+social response. Its private monthly maximum never changes the public
+acknowledgment or creates a running bit.
+
+The creative turn is isolated and runs as a fresh ephemeral thread on the
+resident App Server. Message and poem formats use an output-only turn profile,
+so they have no tools rather than relying on prompt compliance alone. Song
+format projects only `generate_song`, which is used exactly once. A song is
+exactly 15 seconds with at most four short lyric lines. The requested format
+cannot be changed by participant-authored prompt text. The response transforms
+one vivid, recent, non-sensitive detail, exchange, or room dynamic from the
+current group conversation into a room-specific hook when one is available.
+The optional premise is the preferred creative seed when it blends naturally
+with the room.
+When neither source offers a safe, usable premise, the response becomes a
+gentle group celebration in the requested format without inventing personal
+facts or referring to sensitive history.
+
 Serious, urgent, medical, sensitive, or conflict-heavy recent context makes the
-song gentle and non-comedic. A creative provider failure terminally settles
-this optional notification instead of asking the model to make another song.
-Once a delivery intent commits, the ordinary outbox retains its retry and
-deduplication behavior. There is no reservation, attempt counter, post-hoc
-media-attempt accounting, or media-specific retry state. The reconciler wakes newly paid usage work before
-attempting this optional social effect, and notification failure never rolls
-back an already committed credit grant.
+response gentle and non-comedic. A creative provider failure terminally settles
+this optional notification instead of asking the model to try another song. A
+selected song without exactly one generated voice-memo attachment fails before
+receipt, transcript persistence, or delivery and is never replaced by a
+text-only response. Once a delivery intent commits, the ordinary outbox retains
+its retry and deduplication behavior. There is no reservation, attempt counter,
+post-hoc media-attempt accounting, or media-specific retry state. The reconciler
+wakes newly paid usage work before attempting this optional social effect, and
+notification failure never rolls back an already committed credit grant.
 
 The running bit remains a Web-owned expiring product fact, not durable group
 memory. Mailbox fetch projects only the newest active bit to fresh,
-route-authorized, non-direct Linq or Telegram conversation input. The runtime
-rechecks expiry before prompt construction and quotes the alias and requested
-bit as untrusted participant-authored data. It is optional social color only:
+route-authorized, non-direct Linq or Telegram conversation input. The running-bit
+reader decrypts only the alias and bit, so an unavailable or malformed creative
+envelope cannot suppress an otherwise valid active bit. The runtime rechecks
+expiry before prompt construction and quotes the alias and requested bit as
+untrusted participant-authored data. It is optional social color only:
 facts, health and safety guidance, privacy, permissions, routing, tools,
 challenge scoring, access, and response quality are unchanged. Failure to read
 the optional bit projects no bit and never blocks ordinary mailbox work.
@@ -274,12 +308,11 @@ The first release permits purchases only when all of these are true:
   group; and
 - the selected offer is active in the server-owned catalog.
 
-Pulse Trial keeps **Start Pulse** rather than selling top-ups. Sponsored Family
+Starter keeps **Start a paid plan** rather than selling top-ups. Sponsored Family
 owners and members are excluded because their payer/beneficiary policy belongs
 with the separate Family funding rules below. An inactive, unpaid, or suspended
 group relationship does not exclude an otherwise eligible direct paid member.
-Cancellation,
-past-due, suspension, malformed billing state, and an expired trial fail closed.
+Cancellation, past-due, suspension, and malformed billing state fail closed.
 
 One read-only server projection owns these rules and returns only currently
 authorized offer codes. Settings presentation, plan-usage `add_usage`
@@ -414,8 +447,9 @@ At the cutoff, or while suspended, Settings keeps the honest reconciling state
 but withholds Retry; it never substitutes a new purchase or idempotency key.
 At the exact 90-minute frozen expiry, Settings stops projecting an unattached
 `created` row so the current amount picker is available again. The next Add
-usage request closes that old row under the payer lock before creating a fresh
-purchase; the read projection itself performs no mutation or provider I/O.
+usage request closes that old row under the beneficiary-first admission lock
+order before creating a fresh purchase; the read projection itself performs no
+mutation or provider I/O.
 Only that public reconciling state carries the derived `restartAt` capability.
 An already-open dialog uses it to clear stale local recovery state and refresh
 Settings at the exact boundary; no other general purchase timestamp is exposed.
@@ -466,13 +500,37 @@ missions. A broad request for every option or a way to earn usage reads both
 current funding and referral state. If the room already has an automatic
 sponsor, the page preserves that single-sponsor invariant and offers the
 additional payer only a one-time contribution. Murph does not imply the room
-needs funding or disclose private sponsor facts.
+needs funding when `fundingNeeded` is false or disclose private sponsor facts.
+For low capacity, Web sets that boolean only when no automatic refill is
+available or pending. An unresolved current-period refill payment remains
+pending recovery even if its authorization has since paused, entered recovery,
+or been canceled; terminal purchases do not suppress the warning. The
+assistant receives no sponsorship-status field, does not infer why a false
+signal was returned, and uses the same warning and follow-up contract for every
+room. Referral eligibility uses the ordinary runtime access gate and does not
+invoke this funding projection.
 
-Immediately before both the exhaustion crossing send and a later denied-gate
-retry, delivery re-reads the current personal usage-status projection. It
-appends the canonical first-party **Add usage** action only when the recommended
-action is currently `add_usage`; a failed projection or any ineligible state
-sends the neutral copy unchanged.
+For a group exhaustion notice, the existing claim rechecks current group usage
+and delivery always sends a first-party signed funding-only link with one
+deterministic neutral pause message. The message identifies private options and
+waiting for reset without pressuring a payer or promising instant recovery.
+The mandatory URL is derived only from the runtime member and server
+configuration; funding-page sponsor state, group display data, and join-code
+preference are not delivery dependencies. Missing or invalid mandatory action
+data fails before claim/provider work and never becomes terminal linkless copy.
+The production predeploy guard constructs and parses this exact signed URL from
+the configured HTTPS hosted origin and signing authority before serving
+traffic, and runtime validates against the same origin. A completed crossing
+has no separate replay owner, so the pre-serve invariant—not the denied-gate
+path—prevents configuration from stranding the one-shot notice. This is one
+branchless message contract; it exposes no payment setup, payer, cap, amount,
+balance, purchase, or refill facts.
+
+Immediately before a personal exhaustion crossing send and a later personal
+denied-gate retry, delivery re-reads the current personal usage-status
+projection. It appends the canonical first-party **Add usage** action only when
+the recommended action is currently `add_usage`; a failed projection or any
+ineligible state sends the neutral copy unchanged.
 
 A fulfilled grant invalidates a queued stale exhaustion notice. If credit is
 later exhausted again, at most one new reply-anchored notice is eligible for
@@ -523,8 +581,11 @@ The minimum durable v1 has three authoritative concepts:
 The member balance/version and per-purchase remaining-credit fields are bounded,
 rebuildable projections of the ledger. Settings status, polling state, usage
 notices, allowance exhaustion, and the runtime recheck are derived consumers,
-not new lifecycle owners. The beneficiary row lock is the single serialization
-boundary for grant, debit, adjustment, and projection updates.
+not new lifecycle owners. The beneficiary row lock is the sole serialization
+point for usage-credit grants, purchase reservations, debits, projection
+adjustments, and every checkout/refill admission that can occupy capacity. A
+capacity-admission path that also locks a distinct payer always locks the
+beneficiary first.
 
 Group and Family funding compose these same owners without adding a group or
 Family wallet, usage account, funding-code lifecycle, scheduler, or queue. The
@@ -539,6 +600,47 @@ For Family funding, the current group owner is the payer, one selected active
 membership identifies the beneficiary, and the active group's billing
 reference supplies the Stripe Customer. No Family identity or authorization is
 copied into the ledger.
+
+### Grant-Slot Capacity
+
+A beneficiary may occupy at most 32 grant slots. An occupied slot is either a
+positive active grant projection or an unfulfilled purchase whose
+provider-final `grantSlotReleasedAt` marker is null. Every capacity inspection
+used for admission reads at most 33 combined occupied rows. Finding a 33rd row
+is an invariant violation and fails closed; there is no second capacity owner.
+The grant projection stores immutable beneficiary and FIFO sequence copies and
+uses a partial positive-balance index, while reservations use a partial
+unfulfilled-purchase index. Historical zero-balance grants and released or
+fulfilled purchases therefore cannot turn a bounded return into an unbounded
+historical scan.
+
+New personal, Family, and group Checkout purchases, automatic group-sponsorship
+refills, explicit recovery reacquisition, and unreserved referral grants all
+use this shared contract while holding the beneficiary lock. Any distinct payer
+lock follows the beneficiary lock. Exact purchase replay observes the existing
+reservation and does not reserve again. At capacity, ordinary automatic refill
+admission returns no refill, while overflow is an invariant failure.
+
+A genuinely new personal, Family, or group checkout that sees exactly 32
+occupied slots returns `HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT` with HTTP 409.
+True eligibility errors keep `HOSTED_USAGE_CREDIT_NOT_ELIGIBLE` and HTTP 403,
+and exact request-key or matching active-purchase replay resolves before this
+admission. The shared top-up dialog maps only the capacity code to a temporary
+block explaining that existing credit must be used or a pending payment must
+resolve; it does not suggest another amount.
+
+A new purchase reserves its future grant slot before provider work by persisting
+an unfulfilled row with a null release marker. Local expiry and ambiguous
+failure do not release it. Only provider-correlated final no-payment evidence
+records `grantSlotReleasedAt`: exact expired-and-unpaid Checkout evidence from
+webhook, retrieve/expire, binding, or account-deletion finalization, or an exact
+canceled saved-card PaymentIntent from its explicit terminal owner. Saved-card
+release fallback, local expiry, and ambiguous or recoverable provider state stay
+reserved. Existing unfulfilled rows whose marker is null remain conservatively
+reserved. Explicit recovery may clear a prior release
+only after reacquiring capacity. At exactly 32 occupied slots, fulfillment is
+allowed only when the exact purchase reservation is replaced by its positive
+active grant; an unreserved grant is rejected at that boundary.
 
 ## Durable Model
 
@@ -560,6 +662,7 @@ One row represents one intentional attempt to purchase one offer.
 | `clientRequestKey` | Payer-scoped unique key that makes a lost browser response safely recoverable without granting a later create-capable retry. |
 | `checkoutRequestPolicyVersion` | Version of the fixed Checkout builder used to reconstruct provider parameters. |
 | `status` | `created`, `checkout_open`, `payment_pending`, `fulfilled`, `expired`, or `payment_failed`. Refund/dispute adjustments remain ledger entries. |
+| `grantSlotReleasedAt` | Null while an unfulfilled purchase conservatively reserves its future grant slot; set only from provider-correlated final no-payment evidence. |
 | Stripe references | Checkout Session, PaymentIntent, Charge, and Customer lookup/encrypted references using the existing hosted billing-ref pattern. |
 | Checkout fields and timestamps | Frozen Price and Customer references, success/cancel URLs, 90-minute expiry, and creation, paid, terminal, and last-reconciled times. |
 
@@ -586,8 +689,9 @@ matches the frozen offer. A different amount returns the earlier purchase's
 status/cancel-only projection instead of continuing it under new button copy;
 the rejected fresh key has no create authority. If that response is lost,
 times out, or is dismissed, **Check payment** resends the key only in
-recovery-only mode. Under the payer lock, recovery-only may continue an exact
-persisted request or return the current nonterminal purchase. When neither
+recovery-only mode. Under the beneficiary-first admission lock order,
+recovery-only may continue an exact persisted request or return the current
+nonterminal purchase. When neither
 exists, it returns a typed miss before offer authorization, Customer creation,
 purchase insertion, or Stripe I/O. The dialog returns to an unselected picker
 but retains that unresolved key in payer-and-target-scoped browser session
@@ -596,7 +700,7 @@ account switches. The authenticated server-rendered payer identity selects the
 slot, so another payer using the same target receives an independent key and
 cannot clear the first payer's unresolved identity. A remounted picker hydrates
 the key before enabling selection. The next explicit Add action reuses the key
-in normal create-capable mode, so the payer lock and request-key uniqueness
+in normal create-capable mode, so the admission locks and request-key uniqueness
 serialize it with any delayed original request. Only a durable purchase
 response with server-owned proof that the submitted selection key matched for
 that payer clears the stored key. Mounted active-purchase and return
@@ -669,6 +773,10 @@ Available credit is the sum of effective entries and has a nonnegative
 invariant. A refund or dispute can revoke only unused credit attributable to
 that purchase. Already-consumed value is not turned into negative usage credit,
 deducted from a later purchase, or used to suspend an otherwise valid plan.
+After both signed-adjustment convergence passes, one final shared capacity read
+must still observe at most 32 positive grant projections. Overflow rolls back
+the entire transition before receipt binding so the existing Stripe retry owner
+can replay it.
 
 ## Usage Settlement
 
@@ -712,6 +820,15 @@ For each newly canonical usage event, under that beneficiary-wide lock:
    and is never collected from a later purchase.
 6. Recompute effective exhaustion from base remaining plus available usage
    credit.
+
+Settlement preserves the reviewed 32-slot maximum. After the bounded replay
+check, one data-modifying SQL statement locks and inspects at most 33 positive
+grant projections in beneficiary sequence, rejects more than 32 before any
+coupled mutation, and computes FIFO allocations with window sums. The statement
+updates affected grant and purchase projections set-wise, updates the
+beneficiary balance/version projection once, and inserts every debit entry. A
+corrupt 33-grant state therefore rolls back completely. Replay reads at most 33
+debit rows and rejects more than 32 before entering its bounded validation loop.
 
 The current runtime does not transport an admission-bound credit cutoff. V1
 settles against the balance available when the canonical usage callback holds
@@ -758,16 +875,17 @@ funding route share this sequence:
 4. Continue an exact existing request-key purchase. Reuse for another target is
    a conflict; reuse for another offer returns the winning purchase's
    status/cancel-only projection.
-5. Under the payer lock, expire an unattached purchase whose frozen window
-   ended, then recover a nonterminal purchase only when its payer and
-   beneficiary match the requested target. A purchase for another target
+5. With the beneficiary lock held and any distinct payer locked second, expire
+   an unattached purchase whose frozen window ended, then recover a nonterminal
+   purchase only when its payer and beneficiary match the requested target. A
+   purchase for another target
    conflicts. Only one created, open, or payment-pending purchase may exist for
    one payer at a time. If recovery-only finds neither an exact-key purchase nor
    a current nonterminal payer purchase, return a typed miss without resolving
    a Customer, inserting a purchase, or entering Stripe. The browser retains
    that key in payer-and-target-scoped session storage for the next explicit
    normal authorization, including after remount or a same-tab account switch,
-   which serializes with any delayed original request under the same payer lock.
+   which serializes with any delayed original request under the same lock order.
    The authenticated server-rendered member ID scopes the browser slot; another
    payer using the same target in that tab receives an independent key and
    cannot clear the first payer's unresolved identity. Only a durable response
@@ -780,10 +898,17 @@ funding route share this sequence:
    exact active, nonsuspended, personal member. Active group funding does not
    require the payer to hold an individual paid plan.
 7. Resolve the canonical Stripe Customer only after authorization. Personal
-   and group funding use the payer's customer, creating it through the existing
-   owner when needed. Family funding uses the existing Family-group customer
-   and never creates a replacement member customer.
-8. Create the durable purchase for the client request key.
+   funding uses the payer's existing billing customer. Family funding uses the
+   existing Family-group customer and never creates a replacement member
+   customer. Group funding first runs exact replay and the serialized capacity
+   inspection without a Customer; only an admitted new request prepares the
+   payer's Customer through the existing owner.
+8. Under the beneficiary lock, apply or reapply the shared bounded capacity
+   inspection, then create the durable purchase for the client request key with
+   a null `grantSlotReleasedAt` marker. Group funding revalidates here after
+   Customer preparation because capacity may have changed while no beneficiary
+   lock was held. This reserves its future grant slot before later provider
+   work; exact replay continues the existing reservation.
 9. Freeze the offer, Price, Customer, return URLs, 90-minute expiry, and request
    policy in the `created` purchase before provider I/O.
 10. Recheck that the purchase has not expired, retrieve the
@@ -1060,6 +1185,15 @@ row, membership, join code, vault-share projection, or profile-name/email
 grant is created. Owner-created join codes keep funding exactly as before,
 and enrollment stays behind the owner-minted join link.
 
+An exhaustion notice may also use the signed locator for an owner-created
+group so notice construction stays database-free. After authenticating that
+locator, the funding page keeps the signed capability in its funding path,
+client endpoints, and persisted return URL; it never reveals the durable join
+code. The already-resolved synthetic runtime member is the exact group purchase
+identity, so a purchase begun through either valid funding locator resumes
+through the other. Payer, purchase kind, offer, request key, and Family group
+identity checks remain exact.
+
 The Stripe Customer belongs to the payer, never to the group owner or synthetic
 container. Fulfilled credit belongs to the beneficiary. Payer departure and
 beneficiary deletion therefore follow the separate lifecycle rules above.
@@ -1167,14 +1301,15 @@ and call the same idempotent reconciler by purchase ID.
    sponsorship producer; older Web does not read or write the additive table.
 3. Deploy the Cloudflare/runner bundle first. It parses the optional
    low-capacity and group-running-bit mailbox fields, recognizes the isolated
-   `creative-response` notification profile, and advertises `read_usage`.
-   Verify the exact runner fingerprint converges before Web can produce either
-   new sponsorship contract. Existing Web sends neither sponsorship field
-   during this compatibility window.
-4. Apply the additive capped-sponsorship authorization migration after the
-   tolerant runtime reader is live. Confirm both the migration and compatible
-   Web have converged before enabling monthly authorization creation or
-   automatic refill admission.
+   `creative-response` and `creative-response-text` notification profiles, and
+   advertises `read_usage`. Verify the exact runner fingerprint converges before
+   Web can produce either new sponsorship contract. Existing Web sends neither
+   sponsorship field during this compatibility window.
+4. Apply the additive capped-sponsorship authorization migration and
+   `20260807210000_add_group_sponsorship_creative_request` after the tolerant
+   runtime reader is live. Confirm both migrations and compatible Web have
+   converged before enabling monthly authorization creation, automatic refill
+   admission, or optional creative-request creation.
 5. Deploy Web next. It contains the group sponsorship producer, target-aware
    saved-card/Checkout flow, webhook-owned grant and moment materialization,
    bounded automatic-refill sweep, private management and notices, optional
@@ -1218,6 +1353,14 @@ Web cannot activate or safely manage it. Recover from that point with a forward
 fix on the compatible schema, Web, and runtime rather than restoring the older
 producer.
 
+The optional-creative Web producer is also an old-Web rollback floor.
+Pre-feature Web does not understand the creative envelope and unconditionally
+materializes a song for every fulfilled group contribution, including a quiet
+one. Disable new sponsorship intake before rollback and keep the compatible Web
+reader and reconciler deployed. Rolling below that floor requires proof that no
+group contribution can still be materialized or retried; otherwise
+forward-fix.
+
 ## Verification
 
 Current focused unit and component coverage exercises:
@@ -1255,9 +1398,11 @@ Current focused unit and component coverage exercises:
 - Family owner/member authorization, exact target freezing, former-member
   status/cancel-only recovery, all ordered target-conflict payment suppression,
   and payer-wide single-active purchase presentation;
-- group usage reads with only binary sponsorship/funding state, trusted
-  low-capacity next-turn context, the route-authorized unsponsored funding
-  link, and neutral sponsored pause copy with no payer or depletion detail; and
+- group usage reads with only funding urgency and the first-party URL,
+  automatic-refill suppression while low, ordinary low-capacity next-turn
+  context once automatic recovery is unavailable, and one route-authorized
+  exhaustion message with the funding link and no payer or accounting detail;
+  and
 - cross-owner deletion plus payerless terminal refund/dispute reconciliation.
 
 These suites do not prove a real Stripe test-mode webhook or deployed browser
@@ -1276,7 +1421,7 @@ group wallet, Stripe Meter reporting, or a second usage/accounting service.
 
 - **Stripe Billing Credits:** limited to eligible metered subscription items
   reported through Stripe Meters and applied when invoices finalize. It does
-  not match Murph's existing immediate cost-weighted allowance.
+  not match Murph's existing immediate usage allowance.
 - **Stripe token billing:** the current official docs label it private preview.
   The primitive must not depend on access Murph does not have.
 - **Stripe advanced usage-based billing:** its real-time credit burn and

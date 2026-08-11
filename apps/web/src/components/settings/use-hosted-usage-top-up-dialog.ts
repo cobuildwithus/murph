@@ -3,11 +3,17 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
+import {
+  HostedOnboardingApiError,
+  requestHostedOnboardingJson,
+} from "@/src/components/hosted-onboarding/client-api";
 import {
   stripSettingsQueryParams,
   toErrorMessage,
 } from "@/src/components/settings/hosted-settings-utils";
+import {
+  HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
+} from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 
 import {
   createClientRequestKey,
@@ -54,7 +60,9 @@ function useHostedUsageTopUpDialog({
   checkoutUrl = CHECKOUT_URL,
   deferTerminalRefreshUntilClose = false,
   groupPaymentMode,
+  initialCheckoutErrorCode,
   initialOpen = false,
+  inert = false,
   offers,
   payerMemberId,
   purchaseReturn = null,
@@ -64,6 +72,9 @@ function useHostedUsageTopUpDialog({
     hostedUsageTopUpReducer,
     {
       activePurchase,
+      initialCapacityConflict:
+        inert &&
+        initialCheckoutErrorCode === HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
       initialOpen,
       purchaseReturn,
     },
@@ -85,7 +96,7 @@ function useHostedUsageTopUpDialog({
   const cancelReturnPurchaseId =
     purchaseReturn?.kind === "cancel" ? purchaseReturn.purchaseId : null;
   const selectedOfferCode =
-    state.screen.kind === "selection"
+    state.screen.kind === "selection" && !state.screen.capacityConflict
       ? state.screen.selectedOfferCode ??
         (groupPaymentMode === "monthly" ? offers[0]?.offerCode ?? null : null)
       : null;
@@ -389,6 +400,7 @@ function useHostedUsageTopUpDialog({
     if (
       requestIdentityReady &&
       state.screen.kind === "selection" &&
+      !state.screen.capacityConflict &&
       state.screen.attempt.kind === "idle" &&
       offers.some((offer) => offer.offerCode === offerCode)
     ) {
@@ -405,7 +417,8 @@ function useHostedUsageTopUpDialog({
       !offerCode ||
       checkoutInFlight ||
       checkoutRequestRef.current ||
-      (state.screen.kind === "selection" && !requestIdentityReady)
+      (state.screen.kind === "selection" &&
+        (state.screen.capacityConflict || !requestIdentityReady))
     ) {
       return;
     }
@@ -591,20 +604,27 @@ function useHostedUsageTopUpDialog({
         }
       }
     } else {
-      const message = checkoutErrorMessage(outcome.error, outcome.abortReason);
-      if (sourceScreen.kind === "selection") {
-        dispatch({
-          type: "selection_checkout_failed",
-          error: message,
-          offerCode,
-          requestKey,
-        });
+      if (isHostedUsageCreditCapacityConflict(outcome.error)) {
+        dispatch({ type: "capacity_conflict" });
       } else {
-        dispatch({
-          type: "purchase_checkout_failed",
-          error: message,
-          purchaseId: sourceScreen.purchaseId,
-        });
+        const message = checkoutErrorMessage(
+          outcome.error,
+          outcome.abortReason,
+        );
+        if (sourceScreen.kind === "selection") {
+          dispatch({
+            type: "selection_checkout_failed",
+            error: message,
+            offerCode,
+            requestKey,
+          });
+        } else {
+          dispatch({
+            type: "purchase_checkout_failed",
+            error: message,
+            purchaseId: sourceScreen.purchaseId,
+          });
+        }
       }
     }
 
@@ -693,15 +713,22 @@ function useHostedUsageTopUpDialog({
 }
 
 function checkoutErrorMessage(
-  _error: unknown,
+  error: unknown,
   abortReason: CheckoutAbortReason,
 ): string {
-  if (isAbortError(_error)) {
+  if (isAbortError(error)) {
     return abortReason === "dismissed"
       ? "Checkout was interrupted. Retry to recover it."
       : "Checkout took too long to open. Try again.";
   }
   return "Try again, or choose another amount.";
+}
+
+function isHostedUsageCreditCapacityConflict(error: unknown): boolean {
+  return (
+    error instanceof HostedOnboardingApiError &&
+    error.code === HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE
+  );
 }
 
 function cancelErrorMessage(

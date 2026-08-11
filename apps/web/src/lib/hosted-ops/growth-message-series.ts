@@ -2,12 +2,16 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const MESSAGE_SERIES_DAYS = 30;
 
 export interface HostedGrowthMessageSnapshot {
+  activeUsersPriorDay: number | null;
+  activeUsersTrailing7Days: number | null;
   inboundMessagesPriorDay: number | null;
   outboundMessagesPriorDay: number | null;
   snapshotDate: Date;
 }
 
 export interface HostedGrowthMessagePoint {
+  activeUsersPerDay: number | null;
+  activeUsersTrailing7Days: number | null;
   date: string;
   messagesPerDay: number | null;
   totalMessages: number | null;
@@ -51,6 +55,9 @@ export function buildHostedGrowthMessageSeries(input: {
       }
 
       return {
+        activeUsersPerDay: snapshot?.activeUsersPriorDay ?? null,
+        activeUsersTrailing7Days:
+          snapshot?.activeUsersTrailing7Days ?? null,
         date: formatUtcDateKey(addUtcDays(snapshotDate, -1)),
         messagesPerDay: null,
         totalMessages: null,
@@ -66,6 +73,8 @@ export function buildHostedGrowthMessageSeries(input: {
     }
 
     return {
+      activeUsersPerDay: snapshot?.activeUsersPriorDay ?? null,
+      activeUsersTrailing7Days: snapshot?.activeUsersTrailing7Days ?? null,
       date: formatUtcDateKey(addUtcDays(snapshotDate, -1)),
       messagesPerDay,
       totalMessages: cumulativeAvailable ? totalMessages : null,

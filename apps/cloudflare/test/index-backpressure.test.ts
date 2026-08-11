@@ -11,6 +11,7 @@ import {
   HOSTED_RUNTIME_STATUS_PATH,
 } from "@murphai/hosted-execution/routes";
 import worker, { UserRunnerDurableObject } from "../src/index.ts";
+import { HostedUserRunner } from "../src/user-runner.ts";
 import { RunnerStateStore } from "../src/user-runner/runner-state-store.ts";
 
 import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.js";
@@ -84,11 +85,45 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
   });
 
+  it("stamps UserRunner RPC entry before delegating to the hosted runner", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-06T12:00:00.000Z"));
+    const ensure = vi.spyOn(
+      HostedUserRunner.prototype,
+      "ensureRuntimeProcessingForUser",
+    ).mockResolvedValue({
+      action: "started",
+      kind: "runtime_processing_accepted",
+      recommendedRecheckAt: "2026-08-06T12:01:00.000Z",
+      runtimeAttemptId: "runtime-attempt-test",
+    });
+    const harness = createUserRunnerDurableObject();
+
+    await harness.durableObject.ensureRuntimeProcessingForUser({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
+      },
+      orchestrationAttemptId: "rpc-entry-test",
+      userId: "member_123",
+    });
+
+    expect(ensure).toHaveBeenCalledWith({
+      orchestration: {
+        cloudflareRouteReceivedAtEpochMs: Date.parse("2026-08-06T11:59:59.900Z"),
+        userRunnerRpcStartedAtEpochMs: Date.parse("2026-08-06T12:00:00.000Z"),
+      },
+      orchestrationAttemptId: "rpc-entry-test",
+      userId: "member_123",
+    });
+  });
+
   it("keeps an active write fence in flight through the production Durable Object constructor", async () => {
+    const writeDataPoint = vi.fn();
     const harness = createUserRunnerDurableObject({
       CF_VERSION_METADATA: {
         id: "worker_version_current",
       },
+      HOSTED_RUNTIME_RETRY_ANALYTICS: { writeDataPoint },
     });
     const stateStore = new RunnerStateStore(harness.storage.state);
     await stateStore.bindUser("member_123");
@@ -139,36 +174,14 @@ describe("cloudflare worker queue backpressure routes", () => {
     expect(state.writeFence).toMatchObject({
       kind: "runtime",
     });
-  });
-
-  it("threads destination-active bridge status through the production Durable Object constructor", async () => {
-    const destination = createBucketStore();
-    const harness = createUserRunnerDurableObject({
-      BUNDLES_ENAM: destination.api,
-      HOSTED_R2_CUTOVER_PHASE: "destination_active",
-    });
-    await harness.durableObject.bindUser("member_123");
-    installOidcJwksFetch(async (input: RequestInfo | URL) => {
-      const url = new URL(String(input));
-      if (url.origin === "https://web.example.test" && url.pathname === HOSTED_RUNTIME_STATUS_PATH) {
-        return Response.json({
-          mailboxLag: [],
-          userId: "member_123",
-          workspace: null,
-        });
-      }
-      throw new Error(`Unexpected fetch during R2 bridge status test: ${url.origin}${url.pathname}`);
-    });
-
-    await expect(harness.durableObject.runnerStatus()).resolves.toMatchObject({
-      r2Cutover: {
-        coexisting: true,
-        phase: "destination_active",
-        protocolVersion: "r2-oc-enam-v2",
-      },
-      userId: "member_123",
+    expect(writeDataPoint).toHaveBeenCalledOnce();
+    expect(writeDataPoint).toHaveBeenCalledWith({
+      blobs: ["murph.hosted-runtime-retry.v1", "container_rpc_error"],
+      doubles: [1, 30_000],
+      indexes: ["container_rpc_error"],
     });
   });
+
 });
 
 function createUserRunnerDurableObject(

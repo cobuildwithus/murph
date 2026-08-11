@@ -110,7 +110,7 @@ describe('assistant dynamic context prompt blocks', () => {
         "For a personal or Family owner-self add-usage request that passes the relevant skill's authorization gates, use only that skill's selector-bearing handoff; never add or substitute the generic Settings route",
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
-        `For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\`, or \`reason\` is \`trial_conversion_pending\``,
+        `For any other explicit personal billing or unsupported Family administration, provide \`${MURPH_PRODUCT_ORIGIN}/settings#subscription\` only after \`status\` is \`active\` or \`exhausted\``,
       )
       expect(layers.stableRouteCapabilityPrompt).toContain(
         'never provide it for `group_not_supported` or `hosted_access_inactive`',
@@ -123,6 +123,34 @@ describe('assistant dynamic context prompt blocks', () => {
       )
     },
   )
+
+  it('keeps the explicit group-email usage-progress contract resident', () => {
+    const layers = buildAssistantSystemPromptLayers({
+      ...baseConversationInput,
+      channel: 'email',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    })
+
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Group email has no filesystem access. Do not try to read a usage skill.',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'call `murph.group action="read_usage"` exactly once',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'For an integer from 0 through 99, answer exactly',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'For 100, answer exactly',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'authoritative included-usage progress figure for this room is unavailable right now',
+    )
+    expect(layers.stableRouteCapabilityPrompt).not.toContain(
+      'Read `$MURPH_ASSISTANT_SKILLS_ROOT/hosted-low-usage/SKILL.md`',
+    )
+  })
 
   it('keeps selector-bearing add-usage routes exclusive in the assembled billing prompt stack', async () => {
     const layers = buildAssistantSystemPromptLayers({

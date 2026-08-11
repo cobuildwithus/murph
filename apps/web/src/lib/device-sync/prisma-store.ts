@@ -20,9 +20,14 @@ import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type { HostedDeviceSyncSecretTestCodec } from "./prisma-store/connection-secrets";
+import type { DeviceProviderApplicationBinding } from "./provider-applications/types";
 import { PrismaHostedAgentSessionStore } from "./prisma-store/agent-sessions";
 import { PrismaHostedBrowserAssertionNonceStore } from "./prisma-store/browser-assertion-nonces";
-import { PrismaHostedConnectionStore } from "./prisma-store/connections";
+import {
+  PrismaHostedConnectionStore,
+  type HostedConnectionRecord,
+  type HostedStoredDeviceSyncAccount,
+} from "./prisma-store/connections";
 import { PrismaHostedLocalHeartbeatStore } from "./prisma-store/local-heartbeats";
 import { PrismaHostedDirtyConnectionStore } from "./prisma-store/dirty-connections";
 import type { CompanionHrvNightReceiptInspection } from "./prisma-store/dirty-connections";
@@ -145,6 +150,22 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.oauthSessions.createOAuthState(input);
   }
 
+  async createOAuthStateWithProviderApplication(
+    input: OAuthStateRecord,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<OAuthStateRecord> {
+    return this.oauthSessions.createOAuthStateWithProviderApplication(input, binding);
+  }
+
+  async readOAuthStateProviderApplicationBinding(input: {
+    expectedOwnerId: string;
+    expectedProvider: string;
+    now: string;
+    state: string;
+  }): Promise<DeviceProviderApplicationBinding | null> {
+    return this.oauthSessions.readOAuthStateProviderApplicationBinding(input);
+  }
+
   async consumeOAuthState(
     state: string,
     now: string,
@@ -152,6 +173,22 @@ export class PrismaDeviceSyncControlPlaneStore
     expectedOwnerId?: string,
   ): Promise<ConsumeOAuthStateResult> {
     return this.oauthSessions.consumeOAuthState(state, now, expectedProvider, expectedOwnerId);
+  }
+
+  async consumeOAuthStateWithProviderApplication(
+    state: string,
+    now: string,
+    binding: DeviceProviderApplicationBinding,
+    expectedProvider?: string,
+    expectedOwnerId?: string,
+  ): Promise<ConsumeOAuthStateResult> {
+    return this.oauthSessions.consumeOAuthStateWithProviderApplication(
+      state,
+      now,
+      binding,
+      expectedProvider,
+      expectedOwnerId,
+    );
   }
 
   async upsertConnection(input: UpsertPublicDeviceSyncConnectionInput): Promise<PublicDeviceSyncAccount> {
@@ -162,6 +199,13 @@ export class PrismaDeviceSyncControlPlaneStore
     input: UpsertPublicDeviceSyncConnectionInput,
   ): Promise<UpsertPublicDeviceSyncConnectionResult> {
     return this.connections.upsertConnectionWithPrevious(input);
+  }
+
+  async upsertConnectionWithProviderApplication(
+    input: UpsertPublicDeviceSyncConnectionInput,
+    binding: DeviceProviderApplicationBinding,
+  ): Promise<UpsertPublicDeviceSyncConnectionResult> {
+    return this.connections.upsertConnectionWithProviderApplication(input, binding);
   }
 
   async markConnectionSetupFailed(
@@ -222,12 +266,36 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.getStoredConnectionAccountForUser(userId, connectionId, tx);
   }
 
+  async materializeDurableConnectionRecord(
+    record: HostedConnectionRecord,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<PublicDeviceSyncAccount> {
+    return this.connections.materializeDurableConnectionRecord(
+      record,
+      tx ?? this.prisma,
+    );
+  }
+
+  async materializeStoredConnectionAccount(
+    record: HostedConnectionRecord,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedStoredDeviceSyncAccount | null> {
+    return this.connections.materializeStoredConnectionAccount(
+      record,
+      tx ?? this.prisma,
+    );
+  }
+
   async getConnectionOwnerId(connectionId: string): Promise<string | null> {
     return this.connections.getConnectionOwnerId(connectionId);
   }
 
-  async getConnectionRecordForUser(userId: string, connectionId: string) {
-    return this.connections.getConnectionRecordForUser(userId, connectionId);
+  async getConnectionRecordForUser(
+    userId: string,
+    connectionId: string,
+    tx?: HostedPrismaTransactionClient,
+  ) {
+    return this.connections.getConnectionRecordForUser(userId, connectionId, tx);
   }
 
   async syncDurableConnectionState(account: PublicDeviceSyncAccount, tx?: HostedPrismaTransactionClient): Promise<void> {
@@ -407,6 +475,13 @@ export class PrismaDeviceSyncControlPlaneStore
     );
   }
 
+  async listConnectionSourcesForConnections(
+    connectionIds: readonly string[],
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedDeviceConnectionSource[]> {
+    return this.sources.listConnectionSourcesForConnections(connectionIds, tx);
+  }
+
   async listRuntimeSnapshotConnectionSources(
     input: ListHostedRuntimeSnapshotConnectionSourcesInput,
   ): Promise<HostedDeviceConnectionSource[]> {
@@ -489,11 +564,29 @@ export class PrismaDeviceSyncControlPlaneStore
     userId: string,
     connectionId: string,
     callback: (tx: HostedPrismaTransactionClient) => Promise<TResult>,
+    options: {
+      /**
+       * Bounds the member-row lock wait via a transaction-local
+       * `lock_timeout`, which also covers the advisory-lock step in the same
+       * transaction. Only callers whose failure is absorbed by an external
+       * redelivery loop (webhook acceptance) should pass this: a bounded
+       * waiter fails fast with a retryable error and the provider redelivers.
+       * Journeys without redelivery (connection establishment, companion
+       * ingestion, scheduled wakes) keep the full transaction budget.
+       */
+      memberRowLockTimeoutMs?: number;
+    } = {},
   ): Promise<TResult> {
     return this.prisma.$transaction(async (tx) => {
       // Member first is the repository-wide consent serialization order.
       // Connection state is locked only after withdrawal authority is current.
-      await lockHostedMemberRow(tx, userId);
+      await lockHostedMemberRow(
+        tx,
+        userId,
+        options.memberRowLockTimeoutMs !== undefined
+          ? { timeoutMs: options.memberRowLockTimeoutMs }
+          : {},
+      );
       if (await readHostedHealthDataConsentState({
         memberId: userId,
         prisma: tx,

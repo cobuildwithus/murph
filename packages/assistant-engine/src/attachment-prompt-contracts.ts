@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 import { routingImageEligibilityReasonValues } from './inbox-routing-vision.js'
 

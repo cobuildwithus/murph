@@ -71,10 +71,10 @@
     "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
-    "@murphai/health-metrics": "workspace:*",
-    "zod": "^4.4.3"
+    "@murphai/health-metrics": "workspace:*"
   },
   "devDependencies": {
-    "@medplum/fhirtypes": "^5.1.24"
+    "@medplum/fhirtypes": "^5.1.24",
+    "zod": "^4.4.3"
   }
 }

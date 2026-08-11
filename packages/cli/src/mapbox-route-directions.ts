@@ -1,5 +1,5 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import {
   MAPBOX_DIRECTIONS_API_VERSION,
   type MapboxDirectionsResponse,

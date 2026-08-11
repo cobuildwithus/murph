@@ -26,14 +26,20 @@ export default async function DashboardLayout({
     );
   }
 
-  const consentStatus = auth.pageAuth.authenticatedMember
-    ? await readDashboardConsentReminderStatus(auth.pageAuth.authenticatedMember.id)
+  const authenticatedMember = auth.pageAuth.authenticatedMember;
+  const consentStatus = authenticatedMember
+    ? await readDashboardConsentReminderStatus(authenticatedMember.id)
     : null;
-  const browserVaultLoadEnabled = consentStatus?.launchGranted ?? true;
+  // A signed-out visitor has no vault to load. Without this the provider would
+  // post a session request that can only be rejected, and the dashboard would
+  // tell someone who never signed in that their session expired.
+  const browserVaultLoadEnabled = authenticatedMember
+    ? consentStatus?.launchGranted ?? true
+    : false;
 
   return (
     <BrowserVaultProvider
-      initialMemberId={auth.pageAuth.authenticatedMember?.id ?? null}
+      initialMemberId={authenticatedMember?.id ?? null}
       loadEnabled={browserVaultLoadEnabled}
     >
       <DashboardShell sidebarAuth={auth.sidebarAuth}>

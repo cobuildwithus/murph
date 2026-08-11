@@ -51,6 +51,78 @@ afterEach(async () => {
 })
 
 describe('assistant vault-file send', () => {
+  it('captures exact export-pack receipts only for a generated ZIP', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-vault-file-export-packs-',
+    )
+    tempRoots.push(parentRoot)
+    const generatedDirectory = path.join(
+      vaultRoot,
+      ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
+    )
+    const packDirectory = path.join(vaultRoot, 'exports/packs/pack-one')
+    await mkdir(generatedDirectory, { recursive: true })
+    await mkdir(packDirectory, { recursive: true })
+    await writeFile(
+      path.join(packDirectory, 'manifest.json'),
+      JSON.stringify({ packId: 'pack-one' }),
+    )
+    await writeFile(path.join(generatedDirectory, 'vault.zip'), 'zip bytes')
+    const approvalPort = {
+      read: vi.fn(),
+      request: vi.fn().mockResolvedValue({
+        approvalId: `haa_${'a'.repeat(32)}`,
+        approvalUrl: 'https://murph.test/approve/haa_test',
+        expiresAt: '2026-06-24T12:15:00.000Z',
+        status: 'pending' as const,
+      }),
+    }
+
+    await requestAssistantVaultFileSend({
+      actionApprovalPort: approvalPort,
+      bindingDelivery: { kind: 'thread', target: 'chat_123' },
+      channel: 'linq',
+      ref: `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/vault.zip`,
+      retireExportPackIds: ['pack-one', 'missing-pack'],
+      sessionId: 'session_export_pack',
+      threadId: 'chat_123',
+      threadIsDirect: true,
+      toolCallId: 'call_export_pack',
+      turnId: 'turn_export_pack',
+      vault: vaultRoot,
+    })
+
+    const [intent] = await listAssistantOutboxIntents(vaultRoot)
+    expect(intent?.media).toEqual([
+      expect.objectContaining({
+        contentType: 'application/zip',
+        retireExportPacks: [{
+          manifestSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
+          packId: 'pack-one',
+        }],
+      }),
+    ])
+
+    await mkdir(path.join(vaultRoot, 'documents'), { recursive: true })
+    await writeFile(path.join(vaultRoot, 'documents/report.zip'), 'not generated')
+    await expect(requestAssistantVaultFileSend({
+      actionApprovalPort: approvalPort,
+      bindingDelivery: { kind: 'thread', target: 'chat_123' },
+      channel: 'linq',
+      ref: 'documents/report.zip',
+      retireExportPackIds: ['pack-one'],
+      sessionId: 'session_non_generated',
+      threadId: 'chat_123',
+      threadIsDirect: true,
+      toolCallId: 'call_non_generated',
+      turnId: 'turn_non_generated',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_EXPORT_PACK_RETIREMENT_INVALID',
+    })
+    expect(approvalPort.request).toHaveBeenCalledTimes(1)
+  })
+
   it('parks one durable file delivery before returning a pending approval', async () => {
     const { parentRoot, vaultRoot } = await createTempVaultContext(
       'murph-vault-file-send-',

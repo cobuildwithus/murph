@@ -1,6 +1,7 @@
 import { ChevronDown } from "lucide-react";
 
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
+import { HostedSignupReferralLinkButton } from "@/src/components/settings/hosted-signup-referral-link-button";
 import { buttonVariants } from "@/src/components/ui/button";
 import type {
   HostedAiUsageActivitySnapshot,
@@ -11,11 +12,10 @@ import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 export function HostedAiUsageActivity(props: {
   activity: HostedAiUsageActivitySnapshot;
   missionContactOption: MurphContactOption | null;
+  signupReferralUrl?: string | null;
 }) {
   const canStartMissions =
     props.activity.missionsEnabled && props.missionContactOption !== null;
-  const hasMissionSurface =
-    canStartMissions || props.activity.missions.length > 0;
   const currentMissions = props.activity.missions.filter(
     (mission) => mission.status !== "completed",
   );
@@ -24,25 +24,24 @@ export function HostedAiUsageActivity(props: {
   );
   const hasHistory =
     historicalMissions.length > 0 || props.activity.credits.length > 0;
-  const showReferralEmptyState =
-    canStartMissions &&
-    currentMissions.length === 0;
-
-  if (!hasMissionSurface && !hasHistory) {
-    return null;
-  }
 
   return (
     <div
       className="border-y border-border/80"
       data-hosted-ai-usage-activity
     >
-      {hasMissionSurface ? (
-        <section aria-label="Referrals">
-          <div className="flex min-h-14 items-center justify-between gap-4 py-3">
-            <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
-              Referrals
-            </h3>
+      <section aria-label="Referrals">
+        <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+          <h3 className="font-serif text-xl font-semibold tracking-tight text-foreground">
+            Referrals
+          </h3>
+          <div className="ml-auto flex items-center gap-4">
+            <HostedSignupReferralLinkButton
+              identityKey={
+                props.activity.referralIdentityKey ?? "referral-design-preview"
+              }
+              signupUrl={props.signupReferralUrl}
+            />
             {canStartMissions && props.missionContactOption ? (
               <MurphContactLink
                 actionLabel="Ask Murph about referrals"
@@ -57,35 +56,36 @@ export function HostedAiUsageActivity(props: {
               </MurphContactLink>
             ) : null}
           </div>
+        </div>
 
-          {currentMissions.length > 0 ? (
-            <ul
-              aria-label="Current usage referrals"
-              className="divide-y divide-border/70 border-t border-border/70"
-            >
-              {currentMissions.map((mission) => (
-                <MissionRow key={mission.id} mission={mission} />
-              ))}
-            </ul>
-          ) : null}
-          {showReferralEmptyState ? (
-            <div className="border-t border-border/70 py-5">
-              <p className="text-sm leading-6 text-muted-foreground">
-                Earn usage by inviting friends or adding Murph to a groupchat
-              </p>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+        {currentMissions.length > 0 ? (
+          <ul
+            aria-label="Current usage referrals"
+            className="divide-y divide-border/70 border-t border-border/70"
+          >
+            {currentMissions.map((mission) => (
+              <MissionRow key={mission.id} mission={mission} />
+            ))}
+          </ul>
+        ) : (
+          <div className="border-t border-border/70 py-5">
+            <p className="text-sm leading-6 text-muted-foreground">
+              {canStartMissions
+                ? "Your personal link is ready to share. Ask Murph if you want to explore a group referral option."
+                : "Your personal link is ready to share."}
+            </p>
+          </div>
+        )}
+      </section>
 
       {hasHistory ? (
         <section
-          aria-label={hasMissionSurface ? "History" : "Purchased credits"}
-          className={hasMissionSurface ? "border-t border-border/70" : undefined}
+          aria-label="History"
+          className="border-t border-border/70"
         >
           <details className="group">
             <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-sm py-3 text-sm font-medium text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-              {hasMissionSurface ? "History" : "Purchased credits"}
+              History
               <ChevronDown
                 aria-hidden="true"
                 className="size-4 text-muted-foreground transition-transform duration-200 group-open:rotate-180"
@@ -135,7 +135,7 @@ function MissionRow(props: {
 
   return (
     <li className="py-5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 sm:gap-8">
+      <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-8">
         <div className="min-w-0">
           <h4 className="text-balance font-serif text-xl font-semibold leading-snug tracking-tight text-foreground">
             {mission.title}
@@ -163,11 +163,11 @@ function MissionRow(props: {
             </summary>
             <div className="mt-3 max-w-2xl space-y-1.5 text-xs leading-5 text-muted-foreground">
               <p>{mission.requirementsLabel}</p>
-              <p>Selected {mission.selectedLabel}</p>
+              <p>Started {mission.selectedLabel}</p>
             </div>
           </details>
         </div>
-        <div className="text-right">
+        <div className="text-left sm:text-right">
           <div className="font-serif text-2xl font-semibold leading-none tabular-nums text-foreground">
             {mission.rewardLabel}
           </div>
@@ -189,7 +189,7 @@ function HistoryRow(props: {
 }) {
   return (
     <li className="py-3.5">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-5 sm:gap-8">
+      <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-8">
         <div className="min-w-0">
           <h4 className="text-balance text-sm font-medium leading-snug text-foreground">
             {props.title}
@@ -204,7 +204,7 @@ function HistoryRow(props: {
             <span>{props.secondaryMeta}</span>
           </p>
         </div>
-        <div className="text-right">
+        <div className="text-left sm:text-right">
           <div className="font-serif text-lg font-semibold tabular-nums text-foreground">
             {props.amountLabel}
           </div>

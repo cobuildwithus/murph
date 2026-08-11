@@ -15,6 +15,8 @@ const HOSTED_ASSISTANT_IDENTIFIER_BLIND_NAMESPACE =
   "murph.hosted-assistant-input.identifier-blind.v1";
 export const HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
   "reviewed-assistant-ask-completion:";
+export const HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX =
+  "assistant-ask-private:";
 export const HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE =
   "I couldn't answer that from the information available to this group.";
 
@@ -32,6 +34,18 @@ export function createHostedExecutionReviewedAssistantAskCompletionDeliveryKey(
     .digest("hex")
     .slice(0, 48);
   return `${HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX}${digest}`;
+}
+
+export function createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+  completionId: string,
+): string {
+  const normalized = completionId.trim();
+  if (!normalized || [...normalized].length > 256) {
+    throw new TypeError(
+      "Hosted private Assistant Ask completion ID is invalid.",
+    );
+  }
+  return `${HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX}${normalized}`;
 }
 
 export function createHostedAssistantConversationIdentifierBlind(input: {

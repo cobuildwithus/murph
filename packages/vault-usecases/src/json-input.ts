@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { JsonObject } from '@murphai/contracts'
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export const inputFileOptionSchema = z

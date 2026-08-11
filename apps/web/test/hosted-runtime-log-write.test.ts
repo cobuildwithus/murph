@@ -1,26 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  recordDedicatedHostedRuntimeLogs: vi.fn(),
-  recordLegacyHostedRuntimeLogs: vi.fn(),
+  recordHostedRuntimeLogs: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/store", () => ({
-  recordHostedRuntimeLogs: mocks.recordDedicatedHostedRuntimeLogs,
-}));
-
-vi.mock("@/src/lib/hosted-workspace/store", () => ({
-  recordHostedRuntimeLogs: mocks.recordLegacyHostedRuntimeLogs,
+  recordHostedRuntimeLogs: mocks.recordHostedRuntimeLogs,
 }));
 
 import {
   HOSTED_RUNTIME_LOG_DATABASE_ENDPOINTS_MUST_MATCH_MESSAGE,
   HOSTED_RUNTIME_LOG_DATABASE_MUST_NOT_ALIAS_PRIMARY_MESSAGE,
   HOSTED_RUNTIME_LOG_DATABASE_URL_REQUIRED_MESSAGE,
-  HOSTED_RUNTIME_LOG_STORAGE_MODE_REQUIRED_MESSAGE,
   getHostedRuntimeLogPool,
   isHostedRuntimeLogDatabaseConfigured,
-  readHostedRuntimeLogStorageMode,
 } from "@/src/lib/hosted-runtime-log/database";
 import {
   writeHostedRuntimeLogs,
@@ -30,18 +23,11 @@ describe("hosted runtime log write routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
-    mocks.recordDedicatedHostedRuntimeLogs.mockResolvedValue(1);
-    mocks.recordLegacyHostedRuntimeLogs.mockResolvedValue(1);
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
   });
 
-  it("requires explicit isolated storage configuration in production", () => {
-    expect(() => readHostedRuntimeLogStorageMode({
-      NODE_ENV: "test",
-      VERCEL_ENV: "production",
-    })).toThrow(HOSTED_RUNTIME_LOG_STORAGE_MODE_REQUIRED_MESSAGE);
-
+  it("requires isolated storage configuration in production", () => {
     expect(() => isHostedRuntimeLogDatabaseConfigured({
-      HOSTED_RUNTIME_LOG_STORAGE: "primary",
       NODE_ENV: "test",
       VERCEL_ENV: "production",
     })).toThrow(HOSTED_RUNTIME_LOG_DATABASE_URL_REQUIRED_MESSAGE);
@@ -64,37 +50,34 @@ describe("hosted runtime log write routing", () => {
     })).toThrow(HOSTED_RUNTIME_LOG_DATABASE_MUST_NOT_ALIAS_PRIMARY_MESSAGE);
   });
 
-  it("writes only to the selected owner", async () => {
-    vi.stubEnv("HOSTED_RUNTIME_LOG_STORAGE", "primary");
-    await expect(writeHostedRuntimeLogs(runtimeLogBatch())).resolves.toBe(1);
-    expect(mocks.recordLegacyHostedRuntimeLogs).toHaveBeenCalledOnce();
-    expect(mocks.recordDedicatedHostedRuntimeLogs).not.toHaveBeenCalled();
-
-    vi.clearAllMocks();
-    vi.stubEnv("HOSTED_RUNTIME_LOG_STORAGE", "dedicated");
-    vi.stubEnv(
-      "HOSTED_RUNTIME_LOG_DATABASE_URL",
-      "postgresql://runtime.test:5432/runtime_logs",
-    );
-    await expect(writeHostedRuntimeLogs(runtimeLogBatch())).resolves.toBe(1);
-    expect(mocks.recordDedicatedHostedRuntimeLogs).toHaveBeenCalledOnce();
-    expect(mocks.recordLegacyHostedRuntimeLogs).not.toHaveBeenCalled();
+  it("returns zero without writing when the dedicated database is unconfigured", async () => {
+    await expect(writeHostedRuntimeLogs(runtimeLogBatch())).resolves.toBe(0);
+    expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
   });
 
-  it("never falls back to primary after an isolated write failure", async () => {
-    vi.stubEnv("HOSTED_RUNTIME_LOG_STORAGE", "dedicated");
+  it("writes to the dedicated store when configured", async () => {
     vi.stubEnv(
       "HOSTED_RUNTIME_LOG_DATABASE_URL",
       "postgresql://runtime.test:5432/runtime_logs",
     );
-    mocks.recordDedicatedHostedRuntimeLogs.mockRejectedValueOnce(
+
+    const input = runtimeLogBatch();
+    await expect(writeHostedRuntimeLogs(input)).resolves.toBe(1);
+    expect(mocks.recordHostedRuntimeLogs).toHaveBeenCalledWith(input);
+  });
+
+  it("keeps dedicated write failures visible", async () => {
+    vi.stubEnv(
+      "HOSTED_RUNTIME_LOG_DATABASE_URL",
+      "postgresql://runtime.test:5432/runtime_logs",
+    );
+    mocks.recordHostedRuntimeLogs.mockRejectedValueOnce(
       new Error("isolated database unavailable"),
     );
 
     await expect(writeHostedRuntimeLogs(runtimeLogBatch())).rejects.toThrow(
       "isolated database unavailable",
     );
-    expect(mocks.recordLegacyHostedRuntimeLogs).not.toHaveBeenCalled();
   });
 
   it("keeps PgBouncer startup parameters free of statement_timeout", async () => {

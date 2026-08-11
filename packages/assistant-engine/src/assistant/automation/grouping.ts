@@ -1,4 +1,5 @@
 import type { AssistantInputCandidate } from '../input-source.js'
+import { isAssistantHostedImageCompletionEvent } from '../hosted-image-completion.js'
 import { isSameAssistantConversationRef } from '../conversation-ref.js'
 import {
   readTelegramAutoReplyMetadataFromAssistantInput,
@@ -49,7 +50,19 @@ export async function collectAssistantAutoReplyGroup(input: {
       break
     }
     const candidate = input.inputSummaries[index]
-    if (!candidate || !shouldGroupAdjacentConversationInput(first, candidate)) {
+    const firstInputCandidate = input.inputCandidatesByInputId?.get(first.inputId)
+    const candidateInputCandidate = candidate
+      ? input.inputCandidatesByInputId?.get(candidate.inputId)
+      : null
+    const shouldGroup = candidate && firstInputCandidate && candidateInputCandidate
+      ? shouldGroupAdjacentAssistantInputCandidates(
+          firstInputCandidate,
+          candidateInputCandidate,
+        )
+      : candidate
+        ? shouldGroupAdjacentConversationInput(first, candidate)
+        : false
+    if (!candidate || !shouldGroup) {
       break
     }
 
@@ -154,6 +167,16 @@ function isSameAuthenticatedGroupRoomBatch(
   first: AssistantAutomationInputSummary,
   candidate: AssistantAutomationInputSummary,
 ): boolean {
+  return isSameAuthenticatedGroupRoomRoute(first, candidate) &&
+    (first.conversation.sessionId ?? null) ===
+      (candidate.conversation.sessionId ?? null) &&
+    first.projectionReady === candidate.projectionReady
+}
+
+function isSameAuthenticatedGroupRoomRoute(
+  first: AssistantAutomationInputSummary,
+  candidate: AssistantAutomationInputSummary,
+): boolean {
   return (
     first.source === candidate.source &&
     first.conversation.source === candidate.conversation.source &&
@@ -162,17 +185,38 @@ function isSameAuthenticatedGroupRoomBatch(
     first.conversation.threadIsDirect === false &&
     candidate.conversation.threadIsDirect === false &&
     first.actorIsSelf === candidate.actorIsSelf &&
-    first.deliveryTarget === candidate.deliveryTarget &&
-    first.projectionReady === candidate.projectionReady
+    first.deliveryTarget === candidate.deliveryTarget
   )
+}
+
+export function isSameAuthenticatedAssistantGroupRoute(
+  first: AssistantInputCandidate,
+  candidate: AssistantInputCandidate,
+): boolean {
+  const firstSummary = assistantAutomationInputSummaryFromCandidate(first)
+  const candidateSummary = assistantAutomationInputSummaryFromCandidate(candidate)
+  return firstSummary.affirmativeReaction !== true &&
+    candidateSummary.affirmativeReaction !== true &&
+    firstSummary.groupRoomBatchingEligible &&
+    candidateSummary.groupRoomBatchingEligible &&
+    isSameAuthenticatedGroupRoomRoute(firstSummary, candidateSummary)
 }
 
 export function shouldGroupAdjacentAssistantInputCandidates(
   first: AssistantInputCandidate,
   candidate: AssistantInputCandidate,
 ): boolean {
-  return shouldGroupAdjacentConversationInput(
+  return (
+    isHostedImageCompletionAssistantInputCandidate(first) &&
+    isSameAuthenticatedAssistantGroupRoute(first, candidate)
+  ) || shouldGroupAdjacentConversationInput(
     assistantAutomationInputSummaryFromCandidate(first),
     assistantAutomationInputSummaryFromCandidate(candidate),
   )
+}
+
+function isHostedImageCompletionAssistantInputCandidate(
+  candidate: AssistantInputCandidate,
+): boolean {
+  return isAssistantHostedImageCompletionEvent(candidate.event)
 }

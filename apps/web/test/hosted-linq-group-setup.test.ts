@@ -4,8 +4,11 @@ import {
   buildHostedLinqGroupEmailRecoveryEffectId,
   buildHostedLinqGroupEmailRecoveryMessage,
   buildHostedLinqGroupSetupEffectId,
+  buildHostedLinqGroupSetupMessage,
+  HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANT_COUNT,
   issueHostedLinqGroupEmailRecoveryToken,
   openHostedLinqGroupEmailRecoveryToken,
+  readHostedLinqGroupSetupRoomVariantTemplates,
 } from "../src/lib/hosted-onboarding/linq-group-setup";
 
 const TEST_SESSION_KEY = Buffer.alloc(32, 7).toString("base64url");
@@ -30,6 +33,48 @@ describe("Hosted Linq group setup", () => {
     } else {
       process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = previousPublicBaseUrl;
     }
+  });
+
+  it("keeps 50 reviewed setup-room variants on one privacy-safe action contract", () => {
+    const variants = readHostedLinqGroupSetupRoomVariantTemplates();
+
+    expect(HOSTED_LINQ_GROUP_SETUP_ROOM_VARIANT_COUNT).toBe(50);
+    expect(variants).toHaveLength(50);
+    expect(new Set(variants).size).toBe(50);
+    for (const variant of variants) {
+      expect(countOccurrences(variant, "{groupSetupUrl}")).toBe(1);
+      expect(variant).toMatch(
+        /\b(?:active on Murph|active Murph member)\b/iu,
+      );
+      expect(variant).toContain("message");
+      expect(variant).toMatch(
+        /activate or finish setting up Murph, then message me here again:/u,
+      );
+      expect(variant).not.toMatch(
+        /\b(?:account|access|billing|payment|subscription|trial|you|your)\b/iu,
+      );
+      expect(variant).not.toMatch(/https?:\/\//iu);
+    }
+  });
+
+  it("selects canonical setup-room copy deterministically with broad rotation", () => {
+    const first = buildHostedLinqGroupSetupMessage({
+      seed: "linq-group-setup:stable-seed",
+    });
+    const rotated = new Set(
+      Array.from({ length: 500 }, (_, index) =>
+        buildHostedLinqGroupSetupMessage({
+          seed: `linq-group-setup:seed-${index}`,
+        })
+      ),
+    );
+
+    expect(buildHostedLinqGroupSetupMessage({
+      seed: "linq-group-setup:stable-seed",
+    })).toBe(first);
+    expect(rotated.size).toBe(50);
+    expect(countOccurrences(first, "https://murph.example/groups/start")).toBe(1);
+    expect(first).not.toContain("{groupSetupUrl}");
   });
 
   it("round-trips one private email recovery token", () => {
@@ -173,3 +218,7 @@ describe("Hosted Linq group setup", () => {
     })).toThrow(TypeError);
   });
 });
+
+function countOccurrences(value: string, needle: string): number {
+  return value.split(needle).length - 1;
+}

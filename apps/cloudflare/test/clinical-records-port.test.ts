@@ -124,7 +124,8 @@ describe("hosted clinical records runtime port", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.createConnectLink?.())
+    const requestKey = `scheduled_${"a".repeat(64)}`;
+    await expect(port.createConnectLink?.({ requestKey }))
       .resolves.toMatchObject({ ok: true });
     await expect(port.readRun({ generation: 1, runId: "run_1" }))
       .resolves.toMatchObject({ status: "ready" });
@@ -154,7 +155,7 @@ describe("hosted clinical records runtime port", () => {
 
     expect(received).toEqual([
       {
-        body: {},
+        body: { requestKey },
         path: HOSTED_CLINICAL_RECORDS_CONNECT_LINK_PATH,
       },
       {
@@ -181,6 +182,61 @@ describe("hosted clinical records runtime port", () => {
       },
     ]);
     expect(JSON.stringify(received)).not.toContain("member_1");
+  });
+
+  it("replays only deterministic scheduled connect-link requests after a retryable failure", async () => {
+    const connectLink = {
+      connectUrl: "https://web.example.test/records/connect?launch=clinical-records",
+      expiresAt: null,
+      ok: true,
+    };
+    const scheduledFetch = vi.fn()
+      .mockResolvedValueOnce(new Response("temporary failure", { status: 502 }))
+      .mockResolvedValueOnce(Response.json(connectLink));
+    const scheduledPort = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: scheduledFetch as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(scheduledPort.createConnectLink?.({
+      requestKey: `scheduled_${"a".repeat(64)}`,
+    })).resolves.toEqual(connectLink);
+    expect(scheduledFetch).toHaveBeenCalledTimes(2);
+
+    const acceptedFetch = vi.fn()
+      .mockResolvedValueOnce(new Response("temporary failure", { status: 502 }))
+      .mockResolvedValueOnce(Response.json({
+        ...connectLink,
+        expiresAt: "2026-07-10T12:15:00.000Z",
+      }));
+    const acceptedPort = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: acceptedFetch as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(acceptedPort.createConnectLink?.()).rejects.toMatchObject({
+      status: 502,
+    });
+    expect(acceptedFetch).toHaveBeenCalledOnce();
+
+    const rejectedScheduledFetch = vi.fn()
+      .mockResolvedValueOnce(new Response("invalid request", { status: 400 }))
+      .mockResolvedValueOnce(Response.json(connectLink));
+    const rejectedScheduledPort = createHostedWebClinicalRecordsPort({
+      boundUserId: "member_1",
+      fetchImpl: rejectedScheduledFetch as typeof fetch,
+      timeoutMs: 5_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(rejectedScheduledPort.createConnectLink?.({
+      requestKey: `scheduled_${"b".repeat(64)}`,
+    })).rejects.toMatchObject({ status: 400 });
+    expect(rejectedScheduledFetch).toHaveBeenCalledOnce();
   });
 
   it("transports a maximum-shape query descriptor inside the metadata envelope", async () => {

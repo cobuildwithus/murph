@@ -21,6 +21,7 @@ import {
   normalizeKnowledgeSlug,
   normalizeKnowledgeTag,
   orderedUniqueStrings,
+  parseDerivedKnowledgeNodeMarkdown,
   readDerivedKnowledgeGraph,
   readDerivedKnowledgeGraphWithIssues,
   readHealthLibraryGraphWithIssues,
@@ -58,6 +59,7 @@ const KNOWLEDGE_PROBLEM_SEVERITY_ORDER: Record<KnowledgeLintProblem['severity'],
 export interface KnowledgeUpsertInput {
   body: string
   clearLibrarySlugs?: boolean | null
+  expectedMarkdown?: string
   librarySlugs?: string[] | null
   vault: string
   title?: string | null
@@ -174,6 +176,28 @@ export async function upsertKnowledgePage(
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
+      if (input.expectedMarkdown !== undefined) {
+        if (!existingPage) {
+          throw new VaultCliError(
+            'knowledge_page_conflict',
+            `Knowledge page "${slug}" changed before the guarded update.`,
+          )
+        }
+        const absolutePath = await resolveAssistantVaultPath(
+          input.vault,
+          existingPage.relativePath,
+          'file path',
+        )
+        const currentMarkdown = await (
+          dependencies.readTextFile ?? defaultReadTextFile
+        )(absolutePath)
+        if (currentMarkdown !== input.expectedMarkdown) {
+          throw new VaultCliError(
+            'knowledge_page_conflict',
+            `Knowledge page "${slug}" changed before the guarded update.`,
+          )
+        }
+      }
       const title = deriveKnowledgeTitle({
         body: input.body,
         existingPage,
@@ -575,9 +599,16 @@ export async function getKnowledgePage(
 
   const absolutePath = await resolveAssistantVaultPath(input.vault, page.relativePath, 'file path')
   const markdown = await (dependencies.readTextFile ?? defaultReadTextFile)(absolutePath)
+  const exactPage = parseDerivedKnowledgeNodeMarkdown(page.relativePath, markdown)
+  if (exactPage.slug !== slug) {
+    throw new VaultCliError(
+      'knowledge_page_not_found',
+      `No derived knowledge page exists for slug "${input.slug}".`,
+    )
+  }
 
   return {
-    page: toKnowledgePage(page, markdown),
+    page: toKnowledgePage(exactPage, markdown),
     vault: input.vault,
   }
 }

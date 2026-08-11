@@ -13,6 +13,7 @@ import {
   parseHostedExecutionDirectRoute,
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
+  parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   parseHostedExecutionWake,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
@@ -36,6 +37,54 @@ describe("parseHostedExecutionDirectRoute", () => {
       threadId: "chat_123",
       threadIsDirect: true,
     })).toThrow(/unsupported field "threadIsDirect"/u);
+  });
+});
+
+describe("parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority", () => {
+  it("accepts one exact completion proof and rejects extra fields", () => {
+    const authority = {
+      answeredMailboxItemIds: [`aask_done_${"b".repeat(64)}`],
+      assistantAskCompletionExpiresAt: "2026-04-08T00:10:00.000Z",
+      idempotencyKey: `assistant-ask-private:aask_done_${"b".repeat(64)}`,
+      responseTextDigest: "c".repeat(64),
+      route: {
+        actorId: null,
+        channel: "telegram",
+        delivery: { kind: "thread", target: "private-thread" },
+        identityId: null,
+        threadId: "private-thread",
+        threadIsDirect: true,
+      },
+    };
+    expect(
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority(
+        authority,
+      ),
+    ).toEqual(authority);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        assistantAskFallback: false,
+      })
+    ).toThrow(/unsupported field "assistantAskFallback"/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        answeredMailboxItemIds: [""],
+      })
+    ).toThrow(/answeredMailboxItemIds\[0\] must be a non-empty string/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        idempotencyKey: "",
+      })
+    ).toThrow(/idempotencyKey must be a non-empty string/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        idempotencyKey: "assistant-ask-private:wrong-completion",
+      })
+    ).toThrow(/idempotencyKey is invalid/u);
   });
 });
 
@@ -472,6 +521,10 @@ describe("parseHostedExecutionEvent", () => {
             markSeenOnDeliveryAccepted: true,
           },
           instructions: "Send exactly the signup welcome.",
+          privateAssistantAskCompletion: {
+            expiresAt: "2026-04-08T00:10:00.000Z",
+            requestId: `aask_req_${"a".repeat(64)}`,
+          },
           responsePolicy: {
             kind: "require_send_exact_text",
             text: "Welcome to Murph, your personal health assistant.",
@@ -504,6 +557,10 @@ describe("parseHostedExecutionEvent", () => {
           markSeenOnDeliveryAccepted: true,
         },
         instructions: "Send exactly the signup welcome.",
+        privateAssistantAskCompletion: {
+          expiresAt: "2026-04-08T00:10:00.000Z",
+          requestId: `aask_req_${"a".repeat(64)}`,
+        },
         responsePolicy: {
           kind: "require_send_exact_text",
           text: "Welcome to Murph, your personal health assistant.",
@@ -526,6 +583,32 @@ describe("parseHostedExecutionEvent", () => {
       },
       userId: "user-1",
     });
+  });
+
+  it("strictly parses private Assistant Ask completion notification proof", () => {
+    const event = {
+      kind: "assistant.notification.requested",
+      notification: {
+        instructions: "Send the exact private answer.",
+        privateAssistantAskCompletion: {
+          expiresAt: "2026-04-08T00:10:00.000Z",
+          requestId: `aask_req_${"a".repeat(64)}`,
+          unsupported: true,
+        },
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: { kind: "thread", target: "private-thread" },
+          identityId: null,
+          threadId: "private-thread",
+          threadIsDirect: true,
+        },
+      },
+      userId: "user-1",
+    };
+    expect(() => parseHostedExecutionEvent(event)).toThrow(
+      "privateAssistantAskCompletion contains unsupported field",
+    );
   });
 
   it("round-trips external thread route authority for group notifications", () => {
@@ -3099,11 +3182,22 @@ describe("parseHostedRuntimeGroupTool", () => {
         usage: {
           fundingNeeded: true,
           fundingUrl: "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored" as const,
+          includedUsageUsedPercent: 64,
         },
       },
     };
     expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          fundingNeeded: true,
+          fundingUrl:
+            "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent/u);
     expect(parseHostedRuntimeGroupToolResponse({
       action: "read_usage",
       result: {
@@ -3124,7 +3218,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: true,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3147,7 +3240,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: false,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3170,7 +3262,6 @@ describe("parseHostedRuntimeGroupTool", () => {
           fundingNeeded: false,
           fundingUrl:
             "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-          sponsorshipStatus: "not_sponsored",
         },
       },
     });
@@ -3198,6 +3289,26 @@ describe("parseHostedRuntimeGroupTool", () => {
         },
       },
     })).toThrow(/remainingPercent must be at most 100/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          includedUsageUsedPercent: 101,
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent must be at most 100/u);
+    expect(() => parseHostedRuntimeGroupToolResponse({
+      ...response,
+      result: {
+        ...response.result,
+        usage: {
+          ...response.result.usage,
+          includedUsageUsedPercent: 20.5,
+        },
+      },
+    })).toThrow(/includedUsageUsedPercent/u);
     expect(() => parseHostedRuntimeGroupToolResponse({
       ...response,
       result: {
@@ -3366,6 +3477,13 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toEqual({
       action: "share_contact_card",
       result: { status: "already_shared" },
+    });
+    expect(parseHostedRuntimeGroupToolResponse({
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
+    })).toEqual({
+      action: "share_contact_card",
+      result: { status: "unconfirmed" },
     });
     expect(parseHostedRuntimeGroupToolResponse({
       action: "share_contact_card",
@@ -3746,7 +3864,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
 });
 
 describe("parseHostedRuntimeFamilyPlanTool", () => {
-  it("parses checkout and create-invite requests and rejects missing invite routes", () => {
+  it("keeps checkout invitation-free and validates create-invite routes", () => {
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "start_checkout",
     })).toEqual({
@@ -3754,24 +3872,20 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     });
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "start_checkout",
-      invite: {
-        targetLabel: "dad",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "dad_username",
-      },
+      confirmedTrialConversion: true,
     })).toEqual({
       action: "start_checkout",
-      invite: {
-        targetLabel: "dad",
-        targetPhoneNumber: null,
-        targetTelegramUsername: "dad_username",
-      },
+      confirmedTrialConversion: true,
     });
+    expect(() => parseHostedRuntimeFamilyPlanToolRequest({
+      action: "start_checkout",
+      confirmedTrialConversion: false,
+    })).toThrow(/confirmedTrialConversion must be true/u);
 
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -3780,7 +3894,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     })).toEqual({
       action: "create_invite",
       invite: {
-        planCode: "edge",
+        planCode: "max",
         targetEmail: "dad@example.com",
         targetLabel: "dad",
         targetPhoneNumber: null,
@@ -3795,7 +3909,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
           targetLabel: "dad",
         },
       })
-    ).toThrow(/phone number, Telegram username, or email/u);
+    ).toThrow(/start_checkout request\.invite is not allowed/u);
 
     expect(() =>
       parseHostedRuntimeFamilyPlanToolRequest({
@@ -3818,6 +3932,18 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
   });
 
   it("parses exact member and invite tiers with per-tier capacity", () => {
+    const maxMember = {
+      isOwner: false,
+      label: "Mom",
+      planCode: "max",
+      role: "member",
+      status: "active",
+    } as const;
+
+    expect(() => parsePreMaxHostedRuntimeFamilyPlanCode(maxMember.planCode)).toThrow(
+      /plan code is not supported/u,
+    );
+
     expect(parseHostedRuntimeFamilyPlanToolResponse({
       action: "read_status",
       result: {
@@ -3826,6 +3952,7 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         members: [
           { isOwner: true, label: null, planCode: "pulse", role: "owner", status: "active" },
           { isOwner: false, label: "Dad", planCode: "edge", role: "member", status: "active" },
+          maxMember,
         ],
         owner: true,
         pendingInvites: [
@@ -3841,16 +3968,30 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         ],
         plans: {
           edge: { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 },
+          max: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
           pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
         },
-        seats: { active: 2, billed: 3, invited: 1, max: 6, min: 2, remaining: 0, used: 3 },
+        seats: { active: 3, billed: 4, invited: 1, max: 6, min: 2, remaining: 0, used: 4 },
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
+        },
       },
     })).toMatchObject({
       result: {
-        members: [{ planCode: "pulse" }, { planCode: "edge" }],
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
+        },
+        members: [{ planCode: "pulse" }, { planCode: "edge" }, { planCode: "max" }],
         pendingInvites: [{ planCode: "edge" }],
         plans: {
           edge: { billed: 2, used: 2 },
+          max: { billed: 1, used: 1 },
           pulse: { billed: 1, used: 1 },
         },
       },
@@ -3915,15 +4056,6 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         billingStatus: "not_started",
         checkoutUrl: "https://checkout.stripe.test/family",
         owner: true,
-        preparedInvite: {
-          acceptUrl: null,
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
         seats: {
           active: 1,
           billed: 2,
@@ -3951,6 +4083,13 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
             remaining: 0,
             used: 0,
           },
+          max: {
+            active: 0,
+            billed: 0,
+            invited: 0,
+            remaining: 0,
+            used: 0,
+          },
           pulse: {
             active: 1,
             billed: 2,
@@ -3959,16 +4098,6 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
             used: 1,
           },
         },
-        preparedInvite: {
-          acceptUrl: null,
-          expiresAt: "2026-06-25T00:00:00.000Z",
-          planCode: "pulse",
-          status: "pending",
-          targetLabel: "Adam",
-          targetPhoneHint: null,
-          telegramInviteUrl: "https://t.me/murphdevbot?start=family_token",
-        },
-        preparedInviteReplyText: "Done. I prepared a Murph Family invite for Adam.",
         seats: {
           active: 1,
           billed: 2,
@@ -4009,6 +4138,19 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
         unavailableReason: "already_sponsored",
       },
     });
+
+    expect(() => parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        preparedInvite: {},
+      },
+    })).toThrow(/preparedInvite must be null/u);
+    expect(() => parseHostedRuntimeFamilyPlanToolResponse({
+      action: "start_checkout",
+      result: {
+        preparedInviteReplyText: "prepared",
+      },
+    })).toThrow(/preparedInviteReplyText must be null/u);
   });
 });
 
@@ -4167,3 +4309,11 @@ describe("parseHostedExecutionWake", () => {
     });
   });
 });
+
+function parsePreMaxHostedRuntimeFamilyPlanCode(value: unknown): "edge" | "pulse" {
+  if (value === "edge" || value === "pulse") {
+    return value;
+  }
+
+  throw new TypeError("Pre-Max hosted runtime Family plan code is not supported.");
+}

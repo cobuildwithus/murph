@@ -17,19 +17,11 @@ import {
   buildHostedExecutionRuntimeControlWake,
 } from "@murphai/hosted-execution";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
-import type {
-  AssistantOutboxIntent,
-} from "@murphai/operator-config/assistant-cli-contracts";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   ASSISTANT_USAGE_SCHEMA,
   type AssistantUsageRecord,
 } from "@murphai/hosted-execution/assistant-usage";
-import {
-  buildGroupNewsletterAutomationSaveRequest,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-  type AssistantAutomationOperationScope,
-} from "@murphai/assistant-engine";
 import {
   HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
@@ -84,6 +76,7 @@ const mocks = vi.hoisted(() => ({
   resolveHostedOldestAssistantInputOccurredAt: vi.fn(),
   resolveHostedOldestPendingAssistantInputAt: vi.fn(),
   resolveHostedPendingAssistantInputWakeAt: vi.fn(),
+  resolveAssistantCronDefaultTimeZoneProjection: vi.fn(),
   resolveHostedAssistantOutboxNextWakeAt: vi.fn(),
   resolveHostedDeviceSyncNextWakeAt: vi.fn(),
   resolveHostedSystemMailboxNextWakeCandidate: vi.fn(),
@@ -128,6 +121,8 @@ vi.mock("@murphai/assistant-engine", async (importOriginal) => {
     DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT:
       automation.DEFAULT_ASSISTANT_AUTOMATION_SCAN_LIMIT,
     getAssistantCronStatus: mocks.getAssistantCronStatus,
+    resolveAssistantCronDefaultTimeZoneProjection:
+      mocks.resolveAssistantCronDefaultTimeZoneProjection,
     readAssistantInputEvent: mocks.readAssistantInputEvent,
     readAssistantOutboxIntent: mocks.readAssistantOutboxIntent,
     refreshReminderAvailability: mocks.refreshReminderAvailability,
@@ -226,14 +221,24 @@ import {
   upsertAutomation,
 } from "@murphai/core";
 import {
+  buildGroupNewsletterAutomationSaveRequest,
+  buildOnboardingFirstPersonalReadAutomationSaveRequest,
+  completeAssistantOnboarding,
+  getAssistantCronJob,
+  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
   markAssistantContextSnapshotDirty,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+  MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   saveAssistantSession,
   upsertAssistantInputEvent,
+  type AssistantAutomationOperationScope,
+  type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import {
   parseAssistantSessionRecord,
+  type AssistantOutboxIntent,
 } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   runHostedWorkspaceAssistantPhase,
@@ -395,6 +400,14 @@ const PREPARED_HOSTED_ASSISTANT_RUNTIME_STATE = {
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.resolveAssistantCronDefaultTimeZoneProjection.mockImplementation(
+    async (vaultRoot: string) => {
+      const actual = await vi.importActual<
+        typeof import("@murphai/assistant-engine")
+      >("@murphai/assistant-engine");
+      return await actual.resolveAssistantCronDefaultTimeZoneProjection(vaultRoot);
+    },
+  );
   mocks.buildHostedLinqChannelEnv.mockImplementation((input) => {
     const env: Record<string, string> = {};
     const token = input.userEnv.LINQ_API_TOKEN ?? input.forwardedEnv.LINQ_API_TOKEN;
@@ -2320,6 +2333,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     try {
       await initializeVault({
         createdAt: "2026-04-27T00:00:00.000Z",
+        timezone: "America/New_York",
         vaultRoot,
       });
       await writeHostedPhaseExperimentSource(vaultRoot);
@@ -4216,9 +4230,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "ain_00000000000000000000000000000001",
         "ain_00000000000000000000000000000002",
       ],
-      operation: async (executionContext) => {
+      operation: async (
+        executionContext,
+        _turnEnvironment,
+        providerStartCriticalPath,
+      ) => {
         expect(executionContext.hosted?.automationTool).toBeUndefined();
         expect(executionContext.hosted?.groupSharedReader).toBeUndefined();
+        expect(providerStartCriticalPath).toEqual(expect.objectContaining({
+          automationGroupAndOperationScopeDoneAtMonotonicMs: expect.any(Number),
+          mailboxImportDoneAtMonotonicMs: 0,
+        }));
+      },
+      providerStartCriticalPath: {
+        mailboxImportDoneAtMonotonicMs: 0,
       },
       turnEnvironment: null,
     });
@@ -4411,12 +4436,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       action: "post_join_offer" as const,
       joinOffer: { projectionKinds: ["steps-days.v0" as const] },
     };
-    const runOffer = async (ids: readonly string[]) =>
+    const runOffer = async (
+      ids: readonly string[],
+      request: Extract<HostedRuntimeGroupToolRequest, {
+        action: "post_join_offer";
+      }> = offer,
+    ) =>
       await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: ids,
         operation: async (executionContext) =>
-          await executionContext.hosted?.groupTool?.request(offer),
+          await executionContext.hosted?.groupTool?.request(request),
         turnEnvironment: null,
       });
 
@@ -4438,6 +4468,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "ok",
       },
     });
+    const emptyOffer = {
+      action: "post_join_offer" as const,
+      joinOffer: { projectionScopes: [] },
+    };
+    await expect(runOffer([inputIds.sms], emptyOffer)).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
+    await expect(runOffer([inputIds.telegram], emptyOffer)).resolves.toMatchObject({
+      action: "create_join_link",
+      result: { status: "ok" },
+    });
     await expect(runOffer([inputIds.mixedSms, inputIds.mixedRcs]))
       .resolves.toMatchObject({
         action: "post_join_offer",
@@ -4456,6 +4498,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       {
         action: "create_join_link",
         joinLink: { requestedVaultShareProjectionKinds: ["steps-days.v0"] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [] },
+      },
+      {
+        action: "create_join_link",
+        joinLink: { requestedVaultShareProjectionScopes: [] },
       },
       offer,
     ]);
@@ -4641,6 +4691,171 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }
   });
 
+  it("binds a persisted direct iMessage route to generated contact cards through the real operation scope", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-contact-card-route-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const contactCardRequests: HostedRuntimeGroupToolRequest[] = [];
+    const contactCardImageUrl =
+      `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${"a".repeat(16)}.${"b".repeat(32)}/contact-card.jpg?exp=2000000000`;
+    const groupToolPort: NonNullable<
+      HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["groupToolPort"]
+    > = {
+      async request(request) {
+        contactCardRequests.push(request);
+        if (request.action === "share_contact_card") {
+          return {
+            action: "share_contact_card" as const,
+            result: { status: "sent" as const },
+          };
+        }
+        throw new Error(`Unexpected group tool request: ${request.action}`);
+      },
+    };
+    const buildContactCardEvent = (input: {
+      index: number;
+      threadIsDirect: boolean;
+    }) => ({
+      content: {
+        text: `contact card request ${input.index}`,
+        transcriptText: `contact card request ${input.index}`,
+        userMessageContent: [{
+          text: `contact card request ${input.index}`,
+          type: "text" as const,
+        }],
+      },
+      conversation: {
+        accountId: `hid_${"1".repeat(32)}`,
+        actorId: `hid_${"2".repeat(32)}`,
+        actorIsSelf: false,
+        source: "linq",
+        threadId: `hid_${"3".repeat(32)}`,
+        threadIsDirect: input.threadIsDirect,
+      },
+      occurredAt: `2026-04-27T00:00:0${input.index}.000Z`,
+      receivedAt: `2026-04-27T00:00:0${input.index}.500Z`,
+      replyTarget: {
+        channel: "linq",
+        messageId: `message_contact_card_${input.index}`,
+        threadId: input.threadIsDirect
+          ? "chat_direct_contact_card"
+          : "chat_group_contact_card",
+      },
+      sourceMetadata: {
+        // An ordinary direct wake carries no external thread-route authority:
+        // its route lives in the member's own routing record. A group wake
+        // does. This is the exact shape the production webhook persists.
+        externalThreadRouteAuthorityPresent: !input.threadIsDirect,
+        kind: "linq" as const,
+        partCount: 0,
+        reactionEligible: false,
+        replyToMessageId: null,
+        senderHandle: "+15555550123",
+        service: "iMessage",
+      },
+      sourceRef: {
+        dedupeKey: `dedupe_contact_card_${input.index}`,
+        eventId: `event_contact_card_${input.index}`,
+        itemId: `mailbox_item_contact_card_${input.index}`,
+        kind: "hosted-mailbox" as const,
+        lane: "conversation" as const,
+        laneSeq: String(input.index),
+        payloadSchema: "murph.hosted-mailbox-payload.v1",
+        payloadSource: "inline" as const,
+        source: "hosted-mailbox" as const,
+        wakeSchema: "murph.hosted-execution-wake.v1",
+      },
+    });
+
+    try {
+      await initializeVault({
+        createdAt: "2026-04-27T00:00:00.000Z",
+        vaultRoot,
+      });
+      const directInput = await upsertAssistantInputEvent({
+        event: buildContactCardEvent({ index: 0, threadIsDirect: true }),
+        vault: vaultRoot,
+      });
+      const groupInput = await upsertAssistantInputEvent({
+        event: buildContactCardEvent({ index: 1, threadIsDirect: false }),
+        vault: vaultRoot,
+      });
+      const assistantAutomation = await vi.importActual<
+        typeof import("@murphai/assistant-engine/assistant-automation")
+      >("@murphai/assistant-engine/assistant-automation");
+      mocks.readAssistantInputEvent.mockImplementation(
+        assistantAutomation.readAssistantInputEvent,
+      );
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [directInput.inputId, groupInput.inputId],
+        importedCount: 2,
+        runtimeGroupToolPort: groupToolPort,
+        vaultRoot,
+      }));
+
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      const routeStatuses: unknown[] = [];
+      const runShare = async (inputId: string) =>
+        await operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext) => {
+            const groupTool = executionContext.hosted?.groupTool;
+            if (!groupTool) {
+              throw new Error("Expected operation-scoped group tool.");
+            }
+            routeStatuses.push(groupTool.directAttachmentRouteStatus?.());
+            return await groupTool.request({
+              action: "share_contact_card",
+              contactCardImageUrl,
+              contactCardShareKey: inputId,
+            });
+          },
+          turnEnvironment: null,
+        });
+
+      await expect(runShare(directInput.inputId)).resolves.toMatchObject({
+        action: "share_contact_card",
+        result: { status: "sent" },
+      });
+      // A group input must not read as a direct attachment route or
+      // forward a partial personalized transport request.
+      await expect(runShare(groupInput.inputId)).resolves.toEqual({
+        action: "share_contact_card",
+        result: {
+          status: "unavailable",
+          unavailableReason: "direct_attachment_route_unavailable",
+        },
+      });
+
+      expect(routeStatuses).toEqual([
+        { status: "ok" },
+        {
+          status: "unavailable",
+          unavailableReason: "direct_attachment_route_unavailable",
+        },
+      ]);
+      expect(contactCardRequests).toEqual([
+        // The trusted host's exact direct chat, carried without any group
+        // thread-route authority, which a direct home chat cannot have.
+        {
+          action: "share_contact_card",
+          contactCardImageUrl,
+          contactCardShareKey: directInput.inputId,
+          directLinqChatId: "chat_direct_contact_card",
+        },
+      ]);
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
 
   it("scopes automation and group mutation authority to each durable accepted input", async () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-tool-"));
@@ -4799,7 +5014,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "save",
             activeUntil: "2099-08-01T00:00:00.000Z",
             instructions: "Ask for one lightweight group check-in.",
-            schedule: { kind: "dailyLocal", localTime: "08:30" },
+            schedule: {
+              kind: "dailyLocal",
+              localTime: "21:00",
+              timeZone: "America/Chicago",
+            },
             slug: "group-check-in",
             supportKind: "check_in",
             supportSeriesId: "habit:group-check-in",
@@ -4917,9 +5136,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect(linqResult).toEqual(expect.objectContaining({
         action: "save",
         created: true,
+        effectiveTimeZone: "America/Chicago",
         lookupId: "group-check-in",
+        nextOccurrenceAt: expect.any(String),
         routeBinding: "current_conversation",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
         status: "active",
+        timingVerified: true,
       }));
       const telegramResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
@@ -4988,6 +5215,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           threadIsDirect: false,
         }),
         supportKind: "check_in",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
         tags: expect.arrayContaining([
           "system:support-series:habit:group-check-in",
         ]),
@@ -5019,6 +5251,288 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "other-group-check-in",
         vaultRoot,
       })).resolves.toEqual(expect.objectContaining({ status: "active" }));
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("returns the scheduler's exact future occurrence after reactivation and schedule revision", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T12:00:00.000Z"));
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-timing-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_44444444444444444444444444444444";
+
+    try {
+      await initializeVault({
+        createdAt: "2026-08-01T12:00:00.000Z",
+        timezone: "America/New_York",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_timing",
+          actorId: "linq_participant_timing",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_timing",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_timing",
+          threadId: "linq_chat_timing",
+        },
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+
+      const requestAutomation = async (
+        request: Parameters<
+          NonNullable<
+            NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
+          >["request"]
+        >[0],
+      ) => await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(request);
+        },
+        turnEnvironment: null,
+      });
+
+      await expect(requestAutomation({
+        action: "save",
+        instructions: "Ask how the next workout felt.",
+        schedule: {
+          activityKind: "workout",
+          after: "2026-08-01T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+        slug: "next-workout-check-in",
+        title: "Next workout check-in",
+      })).resolves.toEqual(expect.objectContaining({
+        effectiveTimeZone: null,
+        nextOccurrenceAt: null,
+        schedule: {
+          activityKind: "workout",
+          after: "2026-08-01T12:00:00.000Z",
+          kind: "deviceActivity",
+          source: "whoop",
+        },
+        status: "active",
+        timingVerified: true,
+      }));
+      await expect(requestAutomation({
+        action: "patch",
+        instructions: "Ask briefly how the next workout felt.",
+        lookup: "next-workout-check-in",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: expect.objectContaining({ kind: "deviceActivity" }),
+        status: "active",
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "save",
+        instructions: "Send the daily evening reminder.",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "21:00",
+          timeZone: "America/Chicago",
+        },
+        slug: "daily-evening-reminder",
+        status: "paused",
+        title: "Daily evening reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "save",
+        instructions: "Send the one-time evening reminder.",
+        schedule: {
+          at: "2026-08-01T13:00:00.000Z",
+          kind: "at",
+        },
+        slug: "one-time-evening-reminder",
+        status: "paused",
+        title: "One-time evening reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "save",
+        activeUntil: "2026-08-01T12:45:00.000Z",
+        instructions: "Send the finite one-time reminder.",
+        schedule: {
+          at: "2026-08-01T12:30:00.000Z",
+          kind: "at",
+        },
+        slug: "finite-one-time-reminder",
+        status: "paused",
+        title: "Finite one-time reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "paused",
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "save",
+        instructions: "Send the recurring interval reminder.",
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        slug: "recurring-interval-reminder",
+        title: "Recurring interval reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: "2026-08-02T12:00:00.000Z",
+        status: "active",
+        timingVerified: true,
+      }));
+
+      vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "finite-one-time-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        status: "active",
+        timingVerified: true,
+      }));
+
+      vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        instructions: "Send the revised recurring interval reminder.",
+        lookup: "recurring-interval-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: {
+          everyMs: 86_400_000,
+          kind: "every",
+        },
+        status: "active",
+        timingVerified: false,
+      }));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "one-time-evening-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: null,
+        schedule: {
+          at: "2026-08-01T13:00:00.000Z",
+          kind: "at",
+        },
+        status: "active",
+        timingVerified: true,
+      }));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "daily-evening-reminder",
+        status: "active",
+      })).resolves.toEqual(expect.objectContaining({
+        effectiveTimeZone: "America/Chicago",
+        nextOccurrenceAt: "2026-08-10T02:00:00.000Z",
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T02:00:00.000Z" },
+      });
+
+      vi.setSystemTime(new Date("2026-08-10T00:28:19.000Z"));
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "daily-evening-reminder",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+      })).resolves.toEqual(expect.objectContaining({
+        nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "22:00",
+          timeZone: "America/Chicago",
+        },
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T03:00:00.000Z" },
+      });
+
+      mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
+        timeZone: "America/New_York",
+        vaultTimeZoneVerified: false,
+      });
+      await expect(requestAutomation({
+        action: "patch",
+        lookup: "daily-evening-reminder",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "23:00",
+        },
+      })).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        effectiveTimeZone: "America/Chicago",
+        nextOccurrenceAt: "2026-08-10T04:00:00.000Z",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "23:00",
+          timeZone: "America/Chicago",
+        },
+        timingVerified: true,
+      }));
+
+      await expect(requestAutomation({
+        action: "patch",
+        activeUntil: "2026-08-10T02:30:00.000Z",
+        lookup: "daily-evening-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "patch",
+        nextOccurrenceAt: null,
+        timingVerified: true,
+      }));
+      await expect(getAssistantCronJob(
+        vaultRoot,
+        "daily-evening-reminder",
+      )).resolves.toMatchObject({
+        state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
+      });
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -5397,6 +5911,242 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "Availability conflict policy: fixed",
         ].join("\n"),
       });
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("creates the first personal read only on one private answered-completion transition", async () => {
+    const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-first-read-"));
+    const vaultRoot = path.join(parentRoot, "vault");
+    const inputId = "ain_22222222222222222222222222222222";
+    try {
+      await initializeVault({
+        createdAt: "2026-08-06T20:00:00.000Z",
+        vaultRoot,
+      });
+      mocks.readAssistantInputEvent.mockResolvedValue({
+        conversation: {
+          accountId: "linq_identity_current",
+          actorId: "linq_participant_current",
+          actorIsSelf: false,
+          source: "linq",
+          threadId: "linq_thread_current",
+          threadIsDirect: true,
+        },
+        replyTarget: {
+          channel: "linq",
+          messageId: "linq_message_current",
+          threadId: "linq_chat_current",
+        },
+      });
+
+      await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        assistantInputIds: [inputId],
+        importedCount: 1,
+        vaultRoot,
+      }));
+      const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
+      const operationScope = laneInput?.operationScope as
+        | AssistantAutomationOperationScope
+        | undefined;
+      if (!laneInput?.executionContext || !operationScope) {
+        throw new Error("Expected hosted automation operation scope.");
+      }
+      const firstReadRequest =
+        buildOnboardingFirstPersonalReadAutomationSaveRequest({
+          now: new Date("2026-08-06T21:00:00.000Z"),
+        });
+      const genericFixedTargetRequests = [
+        {
+          action: "save" as const,
+          automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          title: "Replacement by identifier",
+        },
+        {
+          action: "save" as const,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+          title: "Replacement by slug",
+        },
+        {
+          action: "save" as const,
+          instructions: "Replace the fixed first-read policy.",
+          schedule: {
+            at: "2026-08-06T21:02:00.000Z",
+            kind: "at" as const,
+          },
+          title: "Onboarding___first / personal read",
+        },
+      ];
+      for (const request of genericFixedTargetRequests) {
+        await expect(operationScope.runAutoReplyGroup({
+          executionContext: laneInput.executionContext,
+          inputIds: [inputId],
+          operation: async (executionContext) => {
+            const automationTool = executionContext.hosted?.automationTool;
+            if (!automationTool) {
+              throw new Error("Expected scoped hosted automation tool.");
+            }
+            return await automationTool.request(request);
+          },
+          turnEnvironment: null,
+        })).rejects.toThrow(
+          "only once during its answered-completion transition",
+        );
+      }
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(genericFixedTargetRequests[0], {
+            onboardingFirstReadCompletionTransition: true,
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "only once during its answered-completion transition",
+      );
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        vaultRoot,
+      })).resolves.toBeNull();
+
+      const unrelated = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "save",
+            instructions: "Send the unrelated reminder.",
+            schedule: {
+              at: "2026-08-07T13:00:00.000Z",
+              kind: "at",
+            },
+            title: "Unrelated reminder",
+          });
+        },
+        turnEnvironment: null,
+      });
+      expect(unrelated).toEqual(expect.objectContaining({
+        action: "save",
+        created: true,
+      }));
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "only once during its answered-completion transition",
+      );
+      await completeAssistantOnboarding({
+        completedAt: "2026-08-06T21:00:00.000Z",
+        reason: "user_answered",
+        vault: vaultRoot,
+      });
+
+      const saved = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          await expect(automationTool.request(firstReadRequest)).rejects.toThrow(
+            "only once during its answered-completion transition",
+          );
+          const result = await automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          });
+          await expect(automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          })).rejects.toThrow(
+            "only once during its answered-completion transition",
+          );
+          return result;
+        },
+        turnEnvironment: null,
+      });
+      expect(saved).toEqual(expect.objectContaining({
+        action: "save",
+        created: true,
+        routeBinding: "current_conversation",
+        status: "active",
+      }));
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "linq_chat_current",
+          threadIsDirect: true,
+        }),
+      }));
+
+      await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request({
+            action: "patch",
+            lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+            status: "archived",
+          });
+        },
+        turnEnvironment: null,
+      });
+      await expect(operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [inputId],
+        operation: async (executionContext) => {
+          const automationTool = executionContext.hosted?.automationTool;
+          if (!automationTool) {
+            throw new Error("Expected scoped hosted automation tool.");
+          }
+          return await automationTool.request(firstReadRequest, {
+            onboardingFirstReadCompletionTransition: true,
+          });
+        },
+        turnEnvironment: null,
+      })).rejects.toThrow(
+        "only once during its answered-completion transition",
+      );
+      await expect(showAutomation({
+        slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
+        vaultRoot,
+      })).resolves.toEqual(expect.objectContaining({ status: "archived" }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
@@ -8230,6 +8980,51 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await postCheckpointPromise;
   });
 
+  it("does not record queued product feedback when the current delivery fails", async () => {
+    const deliveryEffect = createDeliveryEffect();
+    const feedback = {
+      idempotencyKey: "feedback-after-failed-delivery",
+      kind: "feature_request" as const,
+      relatedChangelogItemIds: [],
+      summary: "Speculative: support the missing Murph path.",
+    };
+    const recordProductFeedback = vi.fn();
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(
+      async (laneInput) => {
+        laneInput.executionContext.hosted?.productFeedbackCandidateSink
+          ?.acceptProductFeedbackCandidate(feedback);
+        return {
+          assistantAutomationCurrentTurnDeliveryIntentIds: [
+            deliveryEffect.effectId,
+          ],
+          assistantAutomationProgressed: true,
+          nextWakeAt: null,
+          redactedLogEntries: [],
+        };
+      },
+    );
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      deliveryEffect,
+    ]);
+    mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValueOnce({
+      preparedDispatches: createPreparedDispatchesForDeliveryEffect(deliveryEffect),
+    });
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "SYNTHETIC_DELIVERY_FAILURE",
+        effectId: deliveryEffect.effectId,
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      importedCount: 1,
+      runtimeProductFeedbackPort: { recordProductFeedback },
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(recordProductFeedback).not.toHaveBeenCalled();
+  });
+
   it("records support escalations through the port inside the turn instead of the post-delivery flush", async () => {
     const supportFeedback = {
       idempotencyKey: "support-escalation-in-turn",
@@ -9295,6 +10090,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         accountId: "identity_linq_a",
         actorId: "actor_linq_a",
         actorIsSelf: false,
+        sessionId: null,
         source: "linq",
         threadId: "thread_linq_a",
         threadIsDirect: true,
@@ -11518,6 +12314,57 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
   });
 
+  it("projects bounded Linq attachment transport fields without provider request details", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+      createDeliveryEffect(),
+    ]);
+    mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([
+      createFailedDeliveryOutcome({
+        deliveryErrorCode: "LINQ_API_REQUEST_FAILED",
+        deliveryErrorDetails: {
+          authorization: "Bearer <REDACTED_TOKEN>",
+          failureStage: "transport",
+          method: "PUT",
+          operation: "create_attachment_upload",
+          path: "https://uploads.example.test/private-object?signature=private",
+          requestOrigin: "https://uploads.example.test",
+          retryable: false,
+          timedOut: false,
+          transportErrorName: "TypeError",
+        },
+        deliveryErrorMessage: "Linq attachment upload failed before a response was returned.",
+        effectId: "effect_linq_attachment_transport",
+      }),
+    ]);
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      workspace: createDueAssistantWorkspace(),
+    }));
+    await result.afterCheckpoint?.();
+    const filteredLogRequests = withoutAssistantTurnTimingLogs(logRequests);
+    const deliveryLogRequest = filteredLogRequests[1];
+
+    expect(deliveryLogRequest?.entries[0]?.redactedJson).toEqual(expect.objectContaining({
+      deliveryErrorSummaries: [
+        expect.objectContaining({
+          deliveryErrorDetailFailureStage: "transport",
+          deliveryErrorDetailMethod: "PUT",
+          deliveryErrorDetailOperation: "create_attachment_upload",
+          deliveryErrorDetailRetryable: false,
+          deliveryErrorDetailTimedOut: false,
+          deliveryErrorDetailTransportErrorName: "TypeError",
+        }),
+      ],
+    }));
+    const serializedLog = JSON.stringify(deliveryLogRequest);
+    expect(serializedLog).not.toContain("REDACTED_TOKEN");
+    expect(serializedLog).not.toContain("private-object");
+    expect(serializedLog).not.toContain("uploads.example.test");
+    expect(() => parseHostedRuntimeLogRequest(deliveryLogRequest)).not.toThrow();
+  });
+
   it("preserves safe Telegram reaction delivery error codes", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
@@ -13337,6 +14184,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         "assistant.notification.requested:usage-referral-reward:referral_123",
       label: "usage-referral reward",
     },
+    {
+      dedupeKey: "aask_done_private_completion",
+      label: "private Assistant Ask completion",
+    },
   ])("drains an exact $label through the causal-only fixed-route outbox once", async ({
     dedupeKey,
   }) => {
@@ -13415,6 +14266,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           allowedMailboxDedupeKeyPrefixes: [
             "assistant.notification.requested:phone-call-result:",
             "assistant.notification.requested:usage-referral-reward:",
+            "aask_done_",
           ],
           allowedRouteActions: ["dispatch-assistant-notification"],
           allowedWakeKinds: ["assistant.notification.requested"],

@@ -13,10 +13,6 @@ import {
   MessageMurphContactAction,
 } from "@/src/components/home/message-murph-action";
 import { PageHeader } from "@/src/components/ui/page-header";
-import {
-  resolveHomeTrialBillingBannerVariant,
-  TrialBillingBanner,
-} from "@/src/components/home/trial-billing-banner";
 import { UsageLimitBanner } from "@/src/components/home/usage-limit-banner";
 import {
   UploadLabsActionFallback,
@@ -34,7 +30,6 @@ import { shouldShowHomeDeviceSyncStep } from "@/src/lib/device-sync/home-onboard
 import { listHealthCommonsExperimentBrowseProtocols } from "@/src/lib/health-commons/experiment-browse";
 import { readHostedAiUsageGate } from "@/src/lib/hosted-execution/usage-allowance";
 import { projectHostedPersonalAiUsageStatus } from "@/src/lib/hosted-execution/usage-status";
-import { readHostedMemberBillingEligibilityState } from "@/src/lib/hosted-onboarding/hosted-member-billing-store";
 import { readHostedMemberMessagingSetupState } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { readHostedInitialOnboardingState } from "@/src/lib/hosted-onboarding/initial-onboarding";
 import { resolveHostedMemberMessagingState } from "@/src/lib/hosted-onboarding/messaging-state";
@@ -161,32 +156,15 @@ export default async function HomePage({
           prisma,
         })
       : Promise.resolve(null),
-    !usageLimitNotice
-      && member
-      && usageGateResult.status === "fulfilled"
-      ? readHostedMemberBillingEligibilityState({
-          memberId: member.id,
-          prisma,
-        })
-      : Promise.resolve(null),
   ]);
-  const [projectedUsageStatusResult, trialBillingStateResult] =
-    dependentProjectionResults;
+  const [projectedUsageStatusResult] = dependentProjectionResults;
   const projectedUsageStatus = readSettledValue(
     projectedUsageStatusResult,
     null,
   );
-  const trialBillingState = readSettledValue(trialBillingStateResult, null);
   const hasHomeDataLoadError =
     hasRejectedProjection(homeProjectionResults)
     || hasRejectedProjection(dependentProjectionResults);
-  const trialBillingBannerVariant = usageLimitNotice
-    ? null
-    : resolveHomeTrialBillingBannerVariant({
-        billingState: trialBillingState,
-        billingStatus: member?.billingStatus,
-        suspendedAt: member?.suspendedAt,
-      });
 
   return (
     <div className="flex flex-col gap-8">
@@ -216,10 +194,6 @@ export default async function HomePage({
           recommendedAction={projectedUsageStatus?.recommendedAction ?? null}
           resetAt={usageLimitResetAt}
         />
-      ) : null}
-
-      {trialBillingBannerVariant ? (
-        <TrialBillingBanner />
       ) : null}
 
       <BrowserVaultOnboardingStepsContent

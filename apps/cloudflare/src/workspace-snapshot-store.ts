@@ -13,13 +13,12 @@ import {
   parseHostedExecutionSnapshotRef,
 } from "@murphai/hosted-execution/parsers";
 
-import type { HostedR2BucketRole } from "./r2-cutover.ts";
-
 export const HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE = "application/octet-stream";
 export const HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA =
   "murph.hosted-workspace-snapshot-upload.v1";
 export const HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA =
   "murph.hosted-workspace-snapshot-orphan.v1";
+export const HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS = 10_000;
 
 export interface WorkspaceSnapshotR2ObjectLike {
   arrayBuffer?(): Promise<ArrayBuffer>;
@@ -40,6 +39,8 @@ export interface WorkspaceSnapshotR2BucketLike {
 
 export interface HostedWorkspaceSnapshotUploadSession {
   attemptId: string;
+  checkpointHandoffCompletedAt?: string;
+  checkpointHandoffHeartbeatAt?: string;
   createdAt: string;
   encryption: {
     aad: HostedWorkspaceSnapshotV2Aad;
@@ -52,7 +53,6 @@ export interface HostedWorkspaceSnapshotUploadSession {
   expiresAt: string;
   leaseGeneration: string;
   objectKey: string;
-  r2BucketRole?: HostedR2BucketRole;
   r2PutDrainUntil?: string;
   r2PutExpiresAt?: string;
   replacedSnapshotRef?: NonNullable<HostedExecutionSnapshotRef>;
@@ -110,18 +110,24 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     }
     replacedSnapshotRef = parsedReplacedSnapshotRef;
   }
-  const r2BucketRole = record.r2BucketRole === undefined
-    ? null
-    : requireString(record.r2BucketRole, `${label}.r2BucketRole`);
-  if (r2BucketRole !== null && r2BucketRole !== "source" && r2BucketRole !== "destination") {
-    throw new TypeError(`${label}.r2BucketRole must be source or destination.`);
-  }
   const r2PutExpiresAt = record.r2PutExpiresAt === undefined
     ? null
     : requireIsoString(record.r2PutExpiresAt, `${label}.r2PutExpiresAt`);
   const r2PutDrainUntil = record.r2PutDrainUntil === undefined
     ? null
     : requireIsoString(record.r2PutDrainUntil, `${label}.r2PutDrainUntil`);
+  const checkpointHandoffCompletedAt = record.checkpointHandoffCompletedAt === undefined
+    ? null
+    : requireIsoString(
+        record.checkpointHandoffCompletedAt,
+        `${label}.checkpointHandoffCompletedAt`,
+      );
+  const checkpointHandoffHeartbeatAt = record.checkpointHandoffHeartbeatAt === undefined
+    ? null
+    : requireIsoString(
+        record.checkpointHandoffHeartbeatAt,
+        `${label}.checkpointHandoffHeartbeatAt`,
+      );
   if ((r2PutExpiresAt === null) !== (r2PutDrainUntil === null)) {
     throw new TypeError(
       `${label}.r2PutExpiresAt and ${label}.r2PutDrainUntil must be recorded together.`,
@@ -137,6 +143,12 @@ export function parseHostedWorkspaceSnapshotUploadSession(
 
   return {
     attemptId: requireString(record.attemptId, `${label}.attemptId`),
+    ...(checkpointHandoffCompletedAt === null
+      ? {}
+      : { checkpointHandoffCompletedAt }),
+    ...(checkpointHandoffHeartbeatAt === null
+      ? {}
+      : { checkpointHandoffHeartbeatAt }),
     createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
     encryption: {
       aad: parseHostedWorkspaceSnapshotAad(encryption.aad, `${label}.encryption.aad`),
@@ -149,7 +161,6 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     expiresAt: requireIsoString(record.expiresAt, `${label}.expiresAt`),
     leaseGeneration: requireString(record.leaseGeneration, `${label}.leaseGeneration`),
     objectKey: requireString(record.objectKey, `${label}.objectKey`),
-    ...(r2BucketRole === null ? {} : { r2BucketRole }),
     ...(r2PutExpiresAt === null ? {} : { r2PutExpiresAt }),
     ...(r2PutDrainUntil === null ? {} : { r2PutDrainUntil }),
     ...(replacedSnapshotRef ? { replacedSnapshotRef } : {}),
@@ -158,12 +169,6 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     userId: requireString(record.userId, `${label}.userId`),
     workspaceVersion: requireString(record.workspaceVersion, `${label}.workspaceVersion`),
   };
-}
-
-export function readHostedWorkspaceSnapshotR2BucketRole(
-  session: HostedWorkspaceSnapshotUploadSession,
-): HostedR2BucketRole {
-  return session.r2BucketRole ?? "source";
 }
 
 export function parseHostedWorkspaceSnapshotOrphanCandidate(

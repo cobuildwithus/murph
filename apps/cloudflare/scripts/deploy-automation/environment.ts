@@ -1,9 +1,14 @@
 import { Buffer } from "node:buffer";
 
 import {
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
+} from "@murphai/hosted-execution/env";
+
+import {
   HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS,
-  HOSTED_WORKER_OPTIONAL_VAR_NAMES,
   HOSTED_WORKER_REQUIRED_VAR_NAMES,
+  HOSTED_WORKER_TRIMMED_OPTIONAL_VAR_NAMES,
 } from "./worker-optional-vars.ts";
 
 import {
@@ -59,8 +64,6 @@ const SSH_ED25519_PUBLIC_KEY_LENGTH = 32;
 export interface HostedDeployAutomationEnvironment {
   allowedRunnerSecretKeys: string | null;
   bundlesBucketName: string;
-  bundlesEnamBucketName: string;
-  bundlesEnamPreviewBucketName: string;
   bundlesPreviewBucketName: string;
   compatibilityDate: string;
   containerInstanceType: HostedContainerInstanceType;
@@ -113,14 +116,6 @@ export function readHostedDeployAutomationEnvironment(
   source: EnvSource = process.env,
 ): HostedDeployAutomationEnvironment {
   const bundlesBucketName = requireConfiguredString(source.CF_BUNDLES_BUCKET, "CF_BUNDLES_BUCKET");
-  const bundlesEnamBucketName = requireConfiguredString(
-    source.CF_BUNDLES_ENAM_BUCKET,
-    "CF_BUNDLES_ENAM_BUCKET",
-  );
-  const bundlesEnamPreviewBucketName = requireConfiguredString(
-    source.CF_BUNDLES_ENAM_PREVIEW_BUCKET,
-    "CF_BUNDLES_ENAM_PREVIEW_BUCKET",
-  );
   const bundlesPreviewBucketName = requireConfiguredString(
     source.CF_BUNDLES_PREVIEW_BUCKET,
     "CF_BUNDLES_PREVIEW_BUCKET",
@@ -128,19 +123,14 @@ export function readHostedDeployAutomationEnvironment(
   const workerName = requireConfiguredString(source.CF_WORKER_NAME, "CF_WORKER_NAME");
   const timeouts = readHostedDeployAutomationTimeouts(source);
   const workerVars = readHostedWorkerVars(source);
-  assertHostedR2FixedRoleConfiguration({
+  assertHostedR2Configuration({
     bundlesBucketName,
-    bundlesEnamBucketName,
-    bundlesEnamPreviewBucketName,
-    bundlesPreviewBucketName,
     workerVars,
   });
 
   return {
     allowedRunnerSecretKeys: normalizeOptionalString(source.CF_ALLOWED_RUNNER_SECRET_KEYS),
     bundlesBucketName,
-    bundlesEnamBucketName,
-    bundlesEnamPreviewBucketName,
     bundlesPreviewBucketName,
     compatibilityDate: normalizeOptionalString(source.CF_COMPATIBILITY_DATE) ?? "2026-03-27",
     containerInstanceType: normalizeContainerInstanceType(
@@ -189,59 +179,20 @@ export function readHostedDeployAutomationEnvironment(
   };
 }
 
-function assertHostedR2FixedRoleConfiguration(input: {
+function assertHostedR2Configuration(input: {
   bundlesBucketName: string;
-  bundlesEnamBucketName: string;
-  bundlesEnamPreviewBucketName: string;
-  bundlesPreviewBucketName: string;
   workerVars: Readonly<Record<string, string>>;
 }): void {
-  if (input.bundlesBucketName === input.bundlesEnamBucketName) {
-    throw new TypeError("CF_BUNDLES_BUCKET and CF_BUNDLES_ENAM_BUCKET must be distinct.");
-  }
-  if (input.bundlesPreviewBucketName === input.bundlesEnamPreviewBucketName) {
-    throw new TypeError(
-      "CF_BUNDLES_PREVIEW_BUCKET and CF_BUNDLES_ENAM_PREVIEW_BUCKET must be distinct.",
-    );
-  }
-  const phase = input.workerVars.HOSTED_R2_CUTOVER_PHASE;
-  if (phase !== "source_active" && phase !== "destination_active") {
-    throw new TypeError("HOSTED_R2_CUTOVER_PHASE must be source_active or destination_active.");
-  }
-  const writeAdmission = input.workerVars.HOSTED_R2_WRITE_ADMISSION;
-  if (writeAdmission !== "open" && writeAdmission !== "paused") {
-    throw new TypeError("HOSTED_R2_WRITE_ADMISSION must be open or paused.");
-  }
-  const pausedCanaryUserIdSha256 = input.workerVars.HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256;
-  if (
-    pausedCanaryUserIdSha256 !== undefined
-    && !/^[a-f0-9]{64}$/u.test(pausedCanaryUserIdSha256)
-  ) {
-    throw new TypeError(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be a lowercase SHA-256 hex digest.",
-    );
-  }
-  if (
-    pausedCanaryUserIdSha256 !== undefined
-    && (phase !== "destination_active" || writeAdmission !== "paused")
-  ) {
-    throw new TypeError(
-      "HOSTED_R2_PAUSED_CANARY_USER_ID_SHA256 must be unset unless HOSTED_R2_CUTOVER_PHASE=destination_active and HOSTED_R2_WRITE_ADMISSION=paused.",
-    );
-  }
   if (input.workerVars.HOSTED_R2_PRESIGN_BUCKET_NAME !== input.bundlesBucketName) {
     throw new TypeError(
-      "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET while roles are fixed.",
-    );
-  }
-  if (input.workerVars.HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME !== input.bundlesEnamBucketName) {
-    throw new TypeError(
-      "HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME must match CF_BUNDLES_ENAM_BUCKET while roles are fixed.",
+      "HOSTED_R2_PRESIGN_BUCKET_NAME must match CF_BUNDLES_BUCKET.",
     );
   }
 }
 
 function readHostedWorkerVars(source: EnvSource): Record<string, string> {
+  const androidAppEnabled = isMurphAndroidAppEnabled(source);
+
   return {
     ...Object.fromEntries(
       HOSTED_WORKER_REQUIRED_VAR_NAMES.map((key) => [
@@ -250,11 +201,14 @@ function readHostedWorkerVars(source: EnvSource): Record<string, string> {
       ]),
     ),
     ...Object.fromEntries(
-      HOSTED_WORKER_OPTIONAL_VAR_NAMES.flatMap((key) => {
+      HOSTED_WORKER_TRIMMED_OPTIONAL_VAR_NAMES.flatMap((key) => {
         const value = resolveHostedWorkerVar(source, key);
         return value ? [[key, value] as const] : [];
       }),
     ),
+    ...(androidAppEnabled
+      ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+      : {}),
   };
 }
 
@@ -441,7 +395,7 @@ function parsePositiveInteger(value: string, label: string, description: string)
 
 function resolveHostedWorkerVar(
   source: EnvSource,
-  key: typeof HOSTED_WORKER_OPTIONAL_VAR_NAMES[number],
+  key: typeof HOSTED_WORKER_TRIMMED_OPTIONAL_VAR_NAMES[number],
 ): string | null {
   return normalizeOptionalString(source[key])
     ?? HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS[key]

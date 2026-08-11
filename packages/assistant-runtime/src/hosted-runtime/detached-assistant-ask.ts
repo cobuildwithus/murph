@@ -326,6 +326,9 @@ async function runOneHostedDetachedAssistantAsk(input: {
       }
       answer = await input.executeConsentedAsk({
         ...executionInput,
+        answerMode: claimed.wake.ask.target.kind === "group_sender_private"
+          ? "direct_recipient"
+          : "caller_handoff",
         permissionText: prepared.disclosure.permissionText,
       });
     } else {

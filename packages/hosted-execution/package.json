@@ -178,7 +178,6 @@
     "node": ">=24.14.1"
   },
   "dependencies": {
-    "@junction-api/sdk": "1.2.0",
     "@murphai/clinical-records": "workspace:*",
     "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",

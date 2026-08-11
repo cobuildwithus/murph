@@ -213,6 +213,31 @@ describe('assistant outbox retry policy', () => {
     })).toBe(true)
   })
 
+  it('forbids a fresh intent after a confirmed Linq attachment PUT is terminal', () => {
+    expect(assistantDeliveryErrorPreventsFreshIntentRetry({
+      code: 'LINQ_API_REQUEST_FAILED',
+      diagnosticContext: {
+        failureStage: 'http',
+        method: 'PUT',
+        operation: 'create_attachment_upload',
+        retryable: false,
+        status: 503,
+      },
+      message: 'The confirmed attachment upload exhausted its bounded retries.',
+    })).toBe(true)
+    expect(assistantDeliveryErrorPreventsFreshIntentRetry({
+      code: 'LINQ_API_REQUEST_FAILED',
+      diagnosticContext: {
+        failureStage: 'http',
+        method: 'POST',
+        operation: 'create_attachment_upload',
+        retryable: false,
+        status: 400,
+      },
+      message: 'The attachment reservation was rejected before confirmation.',
+    })).toBe(false)
+  })
+
   it('keeps message text from error-like objects', () => {
     expect(normalizeAssistantDeliveryError({
       code: 'WEB_SEARCH_REQUEST_FAILED',

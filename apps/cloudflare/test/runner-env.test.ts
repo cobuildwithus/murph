@@ -36,18 +36,14 @@ import {
 
 const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
   CF_PUBLIC_BASE_URL: "https://murph-hosted.cobuildwithus.workers.dev",
-  CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
-  CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam-preview",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
-  HOSTED_R2_CUTOVER_PHASE: "source_active",
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
-  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
 } as const;
 const REQUIRED_OPENAI_PROVIDER_ENV = {
   HOSTED_ASSISTANT_PROVIDER: "openai",
@@ -1117,7 +1113,7 @@ describe("buildHostedRuntimeResolvedConfig", () => {
     });
   });
 
-  it("requires both device-sync secrets and provider credentials before enabling device sync", () => {
+  it("enables device sync from trusted runtime secrets without shared provider credentials", () => {
     expect(buildHostedRuntimeResolvedConfig({
       DEVICE_SYNC_PUBLIC_BASE_URL: "https://device-sync.example.test",
       DEVICE_SYNC_SECRET: "secret_123",
@@ -1126,7 +1122,11 @@ describe("buildHostedRuntimeResolvedConfig", () => {
         emailSendReady: false,
         telegramBotConfigured: false,
       },
-      deviceSync: null,
+      deviceSync: {
+        providerConfigs: {},
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
     });
 
     expect(buildHostedRuntimeResolvedConfig({
@@ -1225,6 +1225,7 @@ describe("hosted deploy automation device-sync surface", () => {
     expect(HOSTED_WORKER_OPTIONAL_VAR_NAMES).toEqual(
       expect.arrayContaining([
         "HOSTED_ASSISTANT_PROVIDER",
+        "MURPH_ANDROID_APP_ENABLED",
         "WHOOP_SCOPES",
       ]),
     );
@@ -1294,5 +1295,18 @@ describe("hosted private-media platform env", () => {
       CF_PUBLIC_BASE_URL: "https://hosted-runner-staging.example.test",
       HOSTED_PHYSICAL_NOTES_ENABLED: "true",
     });
+  });
+
+  it("projects the Android rollout gate only from the exact enabled value", () => {
+    expect(buildHostedRunnerContainerPlatformEnv({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    })).toEqual({
+      MURPH_ANDROID_APP_ENABLED: "1",
+    });
+    for (const disabledValue of ["", "0", "true", " 1 "]) {
+      expect(buildHostedRunnerContainerPlatformEnv({
+        MURPH_ANDROID_APP_ENABLED: disabledValue,
+      })).not.toHaveProperty("MURPH_ANDROID_APP_ENABLED");
+    }
   });
 });

@@ -213,10 +213,6 @@ start another macro-step only when that state changes the next choice. Verify
 the requested result on the site; a click is not completion. Finish the run
 with the correct outcome.
 
-Be sparing with progress messages during a browser run: at most one when the
-browser work starts, and one more only if the run is dragging on. Individual
-page checks, acts, navigations, and clicks do not each need an update.
-
 Treat browser capability as something to test, not guess. For an authorized
 task, try the normal Playwright interaction and one safe locator or keyboard
 alternative before declaring an ordinary control or expected, user-requested

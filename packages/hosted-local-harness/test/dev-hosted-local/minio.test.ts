@@ -184,9 +184,6 @@ describe("hosted-local MinIO sidecar", () => {
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
-      HOSTED_R2_CUTOVER_PHASE: "source_active",
-      HOSTED_R2_WRITE_ADMISSION: "open",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-local-r2-bundles-enam",
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT:
         expect.stringMatching(new RegExp(`^http://${expectedControlHost.replace(/\./gu, "\\.")}:\\d+$`, "u")),
       HOSTED_R2_PRESIGN_ENDPOINT:
@@ -346,8 +343,6 @@ describe("hosted-local MinIO sidecar", () => {
       HOSTED_R2_PRESIGN_ACCOUNT_ID: "hosted-local-r2-account",
       HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
       HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-local-r2-bundles",
-      HOSTED_R2_CUTOVER_PHASE: "source_active",
-      HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-local-r2-bundles-enam",
       HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+$/u),
       HOSTED_R2_PRESIGN_ENDPOINT: expect.stringMatching(/^http:\/\/host\.docker\.internal:\d+$/u),
       HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: dockerEnv.MINIO_ROOT_PASSWORD,
@@ -793,8 +788,6 @@ describe("hosted-local MinIO sidecar", () => {
         HOSTED_R2_PRESIGN_ACCOUNT_ID: "explicit-account",
         HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT: "1",
         HOSTED_R2_PRESIGN_BUCKET_NAME: "explicit-bucket",
-        HOSTED_R2_CUTOVER_PHASE: "source_active",
-        HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "explicit-bucket-enam",
         HOSTED_R2_PRESIGN_CONTROL_ENDPOINT: "http://127.0.0.1:9000",
         HOSTED_R2_PRESIGN_ENDPOINT: "http://host.docker.internal:9000",
         HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY: "explicit-secret",

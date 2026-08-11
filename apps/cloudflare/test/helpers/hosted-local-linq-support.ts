@@ -33,6 +33,7 @@ export interface ObservedLinqRequest {
   body: string;
   host: string | null;
   method: string;
+  observedAtEpochMs?: number;
   url: string;
 }
 
@@ -88,6 +89,13 @@ type HostedLinqInboundPartInput =
   | {
       type: "text";
       value: string;
+    }
+  | {
+      app: Record<string, unknown>;
+      fallbackText?: string | null;
+      layout: Record<string, unknown>;
+      type: "imessage_app";
+      url: string;
     }
   | {
       attachmentId: string;
@@ -258,6 +266,7 @@ export async function startHostedLocalLinqStub(input: {
   let server: HttpServer | null = null;
 
   server = createServer(async (request, response) => {
+    const observedAtEpochMs = Date.now();
     const body = await readRequestBody(request);
     const observedRequest: ObservedLinqRequest = {
       authorizationStatus: classifyObservedLinqAuthorization(
@@ -267,6 +276,7 @@ export async function startHostedLocalLinqStub(input: {
       body,
       host: request.headers.host?.trim() || null,
       method: request.method ?? "GET",
+      observedAtEpochMs,
       url: request.url ?? "/",
     };
     observedRequests.push(observedRequest);
@@ -1189,6 +1199,16 @@ function buildHostedLinqInboundPart(part: HostedLinqInboundPartInput): Record<st
     return {
       type: "text",
       value: part.value,
+    };
+  }
+
+  if (part.type === "imessage_app") {
+    return {
+      app: part.app,
+      ...(part.fallbackText ? { fallback_text: part.fallbackText } : {}),
+      layout: part.layout,
+      type: part.type,
+      url: part.url,
     };
   }
 

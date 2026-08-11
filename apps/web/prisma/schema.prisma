@@ -17,6 +17,8 @@ model DeviceConnection {
   metadataJson               Json?                    @map("metadata_json")
   credentialKind             String                   @default("oauth_tokens") @map("credential_kind")
   providerConfigKey          String?                  @map("provider_config_key")
+  providerApplicationId      String?                  @map("provider_application_id")
+  providerApplicationRevision Int?                    @map("provider_application_revision")
   credentialMetadataJson     Json?                    @map("credential_metadata_json")
   setupPhase                 String?                  @map("setup_phase")
   setupExpiresAt             DateTime?                @map("setup_expires_at")
@@ -45,8 +47,10 @@ model DeviceConnection {
   dirtyState                 DeviceSyncDirtyConnection?
   dirtyPayloads              DeviceSyncDirtyPayload[]
   companionCaptureReceipts   DeviceSyncCompanionCaptureReceipt[]
+  providerApplication        DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Restrict)
 
   @@unique([provider, providerAccountBlindIndex])
+  @@index([providerApplicationId])
   @@index([status, nextReconcileAt, updatedAt, id], map: "device_connection_due_reconcile_sweep_idx")
   @@index([userId, provider])
   @@index([setupPhase, setupExpiresAt])
@@ -100,18 +104,38 @@ model DeviceTokenAudit {
 }
 
 model DeviceOauthSession {
-  state        String    @id
-  userId       String?   @map("user_id")
-  provider     String
-  returnTo     String?   @map("return_to")
-  metadataJson Json?     @map("metadata_json")
-  createdAt    DateTime  @map("created_at")
-  expiresAt    DateTime  @map("expires_at")
-  consumedAt   DateTime? @map("consumed_at")
+  state                       String    @id
+  userId                      String?   @map("user_id")
+  provider                    String
+  providerApplicationId       String?   @map("provider_application_id")
+  providerApplicationRevision Int?      @map("provider_application_revision")
+  returnTo                    String?   @map("return_to")
+  metadataJson                Json?     @map("metadata_json")
+  createdAt                   DateTime  @map("created_at")
+  expiresAt                   DateTime  @map("expires_at")
+  consumedAt                  DateTime? @map("consumed_at")
+  providerApplication         DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
   @@index([userId, provider])
+  @@index([providerApplicationId])
   @@map("device_oauth_session")
+}
+
+model DeviceProviderApplication {
+  id                    String    @id
+  memberId              String    @map("member_id")
+  provider              String
+  revision              Int       @default(1)
+  configEncrypted       String    @map("config_encrypted")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  connections           DeviceConnection[]
+  oauthSessions         DeviceOauthSession[]
+
+  @@unique([memberId, provider])
+  @@map("device_provider_application")
 }
 
 model DeviceConnectIntent {
@@ -202,13 +226,14 @@ model DeviceSyncDirtyConnection {
 }
 
 model DeviceSyncDirtyPayload {
-  id            String           @id
-  connectionId  String           @map("connection_id")
-  userId        String           @map("user_id")
-  provider      String
-  dirtyRevision BigInt           @map("dirty_revision")
-  resourceEncrypted String       @map("resource_encrypted")
-  createdAt     DateTime         @default(now()) @map("created_at")
+  id                    String           @id
+  connectionId          String           @map("connection_id")
+  userId                String           @map("user_id")
+  provider              String
+  dirtyRevision         BigInt           @map("dirty_revision")
+  resourceEncrypted     String           @map("resource_encrypted")
+  credentialIndependent Boolean?         @map("credential_independent")
+  createdAt             DateTime         @default(now()) @map("created_at")
   connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([connectionId, dirtyRevision])
@@ -443,6 +468,7 @@ enum HostedGroupSponsorshipAuthorizationStatus {
 }
 
 enum HostedUsageCreditEntryKind {
+  starter_grant
   purchase_grant
   referral_grant
   usage_debit
@@ -570,7 +596,6 @@ model HostedMember {
   hostedMailboxPayloads          HostedMailboxPayload[]
   hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
   hostedWorkspace                HostedWorkspace?
-  hostedRuntimeLogs              HostedRuntimeLog[]
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
@@ -589,6 +614,7 @@ model HostedMember {
   hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
   hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
   hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
+  deviceProviderApplications     DeviceProviderApplication[]
   hostedCryptoAudits             HostedUserCryptoAudit[]
   webSessions                    HostedWebSession[]
   mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
@@ -692,9 +718,11 @@ model HostedMealPhotoCaptureEnrollment {
   id                         String       @id
   memberId                   String       @map("member_id")
   installationIdHash         String       @map("installation_id_hash")
-  uploadTokenHash            String       @unique @map("upload_token_hash")
-  idempotencySecretEncrypted String       @map("idempotency_secret_encrypted")
-  expiresAt                  DateTime     @map("expires_at")
+  authorityRevision          Int          @default(0) @map("authority_revision")
+  uploadTokenHash            String?      @unique @map("upload_token_hash")
+  idempotencySecretEncrypted String?      @map("idempotency_secret_encrypted")
+  expiresAt                  DateTime?    @map("expires_at")
+  activatedAt                DateTime?    @map("activated_at")
   revokedAt                  DateTime?    @map("revoked_at")
   revokeReason               String?      @map("revoke_reason")
   createdAt                  DateTime     @default(now()) @map("created_at")
@@ -969,6 +997,7 @@ model HostedMemberBillingRef {
   scheduledBillingEffectiveAt   DateTime?    @map("scheduled_billing_effective_at")
   pulseTrialRedeemedAt          DateTime?    @map("pulse_trial_redeemed_at")
   pulseTrialPolicyVersion       String?      @map("pulse_trial_policy_version")
+  pulseTrialStartSource         String?      @map("pulse_trial_start_source")
   currentPeriodStart            DateTime?    @map("current_period_start")
   currentPeriodEnd              DateTime?    @map("current_period_end")
   currentTrialStartedAt         DateTime?    @map("current_trial_started_at")
@@ -1176,36 +1205,6 @@ model HostedWorkspace {
   @@map("hosted_workspace")
 }
 
-model HostedRuntimeLog {
-  id                String       @id
-  userId            String       @map("user_id")
-  at                DateTime
-  level             String
-  component         String
-  phase             String
-  eventCode         String       @map("event_code")
-  attemptId         String?      @map("attempt_id")
-  leaseGeneration   BigInt?      @map("lease_generation")
-  workspaceVersion  BigInt?      @map("workspace_version")
-  checkpointVersion BigInt?      @map("checkpoint_version")
-  mailboxLane       String?      @map("mailbox_lane")
-  mailboxSeqStart   BigInt?      @map("mailbox_seq_start")
-  mailboxSeqEnd     BigInt?      @map("mailbox_seq_end")
-  outboxIntentRef   String?      @map("outbox_intent_ref")
-  errorCode         String?      @map("error_code")
-  redactedJson      Json?        @map("redacted_json")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  member            HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, at])
-  @@index([userId, eventCode, createdAt])
-  @@index([attemptId, eventCode, at])
-  @@index([level, at])
-  @@index([component, at])
-  @@index([at, id])
-  @@map("hosted_runtime_log")
-}
-
 model HostedInvite {
   id                           String        @id
   memberId                     String        @map("member_id")
@@ -1357,6 +1356,15 @@ model HostedGrowthDailySnapshot {
   // because the live source rows are short-lived (mailbox TTL, delivery churn).
   inboundMessagesPriorDay  Int? @map("inbound_messages_prior_day")
   outboundMessagesPriorDay Int? @map("outbound_messages_prior_day")
+  // Unique attributable senders for the completed UTC day before
+  // snapshot_date and the seven completed UTC days ending at snapshot_date.
+  // Null means the window is unknown or incomplete, never zero.
+  activeUsersPriorDay      Int? @map("active_users_prior_day")
+  activeUsersTrailing7Days Int? @map("active_users_trailing_7_days")
+  // MRR split behind mrr_usd_cents: individual plans versus family seats.
+  // Null means the row predates split capture, never zero.
+  individualMrrUsdCents Int? @map("individual_mrr_usd_cents")
+  familyMrrUsdCents     Int? @map("family_mrr_usd_cents")
 
   @@map("hosted_growth_daily_snapshot")
 }
@@ -1499,6 +1507,7 @@ model HostedUsageCreditPurchase {
   checkoutExpiresAt                 DateTime                             @map("checkout_expires_at")
   paidAt                            DateTime?                            @map("paid_at")
   terminalAt                        DateTime?                            @map("terminal_at")
+  grantSlotReleasedAt               DateTime?                            @map("grant_slot_released_at")
   lastReconciledAt                  DateTime?                            @map("last_reconciled_at")
   reconciliationVersion             BigInt                               @default(0) @map("reconciliation_version")
   createdAt                         DateTime                             @default(now()) @map("created_at")
@@ -1551,6 +1560,7 @@ model HostedGroupSponsorshipMoment {
   beneficiaryMemberId        String   @map("beneficiary_member_id")
   creatorMemberId            String   @map("creator_member_id")
   configurationDigest        String   @map("configuration_digest")
+  creativeRequestEncrypted   String?  @map("creative_request_encrypted")
   publicAliasEncrypted       String?  @map("public_alias_encrypted")
   sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
   runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
@@ -1598,13 +1608,16 @@ model HostedUsageCreditEntry {
 }
 
 /// Mutable remaining-capacity projection for one immutable positive grant
-/// entry. The entry ledger remains the canonical accounting history.
+/// entry. Beneficiary identity and FIFO sequence are immutable canonical-entry
+/// copies; the entry ledger remains the canonical accounting history.
 model HostedUsageCreditGrant {
-  entryId            String                 @id @map("entry_id")
-  remainingUsdMicros BigInt                 @map("remaining_usd_micros")
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @updatedAt @map("updated_at")
-  entry              HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  entryId              String                 @id @map("entry_id")
+  beneficiaryMemberId  String                 @map("beneficiary_member_id")
+  beneficiarySequence  BigInt                 @map("beneficiary_sequence")
+  remainingUsdMicros   BigInt                 @map("remaining_usd_micros")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+  entry                HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
 
   @@map("hosted_usage_credit_grant")
 }

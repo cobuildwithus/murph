@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 
-import { z } from 'zod'
+import * as z from '@murphai/contracts/zod-runtime'
 import { test } from 'vitest'
 
 import {

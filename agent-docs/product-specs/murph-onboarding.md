@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-07-22
+Last verified: 2026-08-06
 
 ## Product Decision
 
@@ -14,6 +14,14 @@ does not infer it; if the member does not know or declines, the motivation
 remains explicitly unknown and onboarding continues. Murph gathers a
 finite health-context foundation over separate turns, returns to the earlier
 thread with that context, and collaborates on the first step.
+
+After answered completion, Murph starts one private first personal read without
+holding the foreground conversation open. The read spends the completed
+foundation and currently available connected evidence on one specific,
+personally useful interpretation. It may offer one lightweight optional next
+action, but it does not automatically create a habit, plan, experiment, or
+reminder. The member can keep chatting normally while the existing scheduled
+runtime owns the later analysis and delivery.
 
 The first health topic is an anchor, not a launch button. Answering Murph's
 discovery question is not a request for a plan, diagnosis, or intervention. An
@@ -36,6 +44,9 @@ By the end of onboarding, the member should understand:
 3. Murph remembers relevant context so later help can become more personal.
 4. Murph keeps important health outcomes open, learns enough context for the
    help to fit, and chooses the first step with the member rather than for them.
+5. After answered completion, Murph will take one bounded first look across the
+   context and connected evidence and return with the most useful personal read
+   it can honestly support.
 
 Do not promise that Murph can perform an action, connect a source, or access a
 record unless that path exists. Broad entry points do not weaken clinical,
@@ -47,8 +58,9 @@ privacy, authorization, or provider boundaries.
   not gate ordinary Murph use.
 - Keep the existing `finish-onboarding-followup` managed automation as the one
   finite three-day recovery and continuation mechanism. Do not add a second
-  automation for context collection or split onboarding into competing
-  lifecycle owners.
+  automation for unfinished context collection or split open onboarding into
+  competing lifecycle owners. The first personal read below is post-completion
+  value delivery, not another collection or recovery lifecycle.
   Reconciliation recognizes only the exact current seed, its immediate
   predecessor, or the bounded original legacy seed; execution remains ordinary
   scheduled send-or-skip work. One exact recognition predicate is shared by
@@ -61,9 +73,22 @@ privacy, authorization, or provider boundaries.
   queued intent remains attached, so hosted idle ordering cannot replace the
   predecessor identity before outbox settlement observes it. Editable slug,
   tags, title, and instructions confer no onboarding-state authority.
-- Keep the post-onboarding choice point separate from unfinished-onboarding
-  recovery. It is one finite managed one-shot for members who answered
-  onboarding, not another collection flow, recurring cadence, or profile.
+- Keep the 21-day post-onboarding choice point separate from unfinished-
+  onboarding recovery and from the immediate first personal read. It remains
+  one finite managed one-shot for members who answered onboarding, not another
+  collection flow, recurring cadence, or profile.
+- Create the immediate first personal read only through the structured
+  `save_onboarding_first_personal_read` action after every answered-completion
+  prerequisite is durable. The action accepts no prompt, schedule, model,
+  route, or other fields. Code owns its fixed automation identity, current-
+  conversation route binding, two-minute delay, sixty-minute execution window,
+  selected model with high reasoning, and complete selection-and-presentation
+  prompt.
+  Generic automation save or patch cannot replace that fixed definition.
+- Reuse the ordinary automation, cron, foreground-priority, and outbox owners.
+  Do not add a callback, child-result handoff, result queue, scheduler, database
+  table, onboarding step, or second delivery lifecycle. The scheduled root owns
+  the complete analysis and final send-or-skip result; it does not spawn a child.
 - Do not add persisted step state, branch state, profile completion, context
   maturity, or a data-point score. Infer progress from visible conversation,
   the existing resume snapshot, and a targeted canonical read only when the
@@ -72,6 +97,11 @@ privacy, authorization, or provider boundaries.
   literal park wording. Later foundation or contextual-return evidence after a
   saved aspiration establishes that the reflect-and-park transition already
   occurred; existing records without evidence that onboarding began do not.
+- Enforce the relationship promise and bundled minimal identity at the first
+  root-to-aspiration transition while that exchange is visible. After
+  later-stage progression is established, absence of those early messages from
+  bounded history does not prove omission; recover a root step only when the
+  current or visible conversation affirmatively says it never happened.
 - Keep member facts in their existing canonical owners: goals, memory,
   regimens, supplements, conditions, allergies, records, devices, Habitat,
   experiments, automations, and group state. Assistant runtime state is not
@@ -92,6 +122,19 @@ privacy, authorization, or provider boundaries.
 - The onboarding skill owns conversation policy. The system-prompt overlay
   routes the open lifecycle into that skill, and the managed automation resumes
   it when a useful continuation exists.
+- The skill uses one package-owned progressive-disclosure asset. Its top-level
+  `SKILL.md` is a complete router capped at 12 KiB and directly owns the goal,
+  bounded resume check, immediate-need override, relationship promise, exact
+  welcome, and minimal-identity checkpoint. Aspiration/foundation/delegation,
+  persistence/recovery/follow-up, and return/launch/completion each live in one
+  directly referenced file under the same skill asset. A rule has one owner;
+  references do not restate the top-level policy or each other.
+- A fresh greeting or vague first message reads only the compact top-level
+  skill plus the one bounded `assistant onboarding resume-context` snapshot.
+  It does not preload a later-stage reference. A later or resumed turn reads
+  only the reference that owns its current decision; a turn that genuinely
+  crosses a stage boundary may read each newly relevant owner. All reference
+  files ship with the assistant-engine skill asset.
 - Hosted activation may start the first Linq conversation only after atomically
   reserving that line's proactive-conversation capacity for the current UTC
   day. A full preferred line falls through to another healthy line; when every
@@ -536,6 +579,87 @@ decline for one skipped category.
 Onboarding may remain open indefinitely without blocking ordinary help. Do not
 claim completion until the command reports it.
 
+## First Personal Read
+
+On the ordinary foreground turn that satisfies every `user_answered` completion
+criterion, Murph first records and verifies answered completion, then asks the
+existing automation tool to create the fixed first personal read on that same
+turn and gives one truthful expectation-setting line only when that save
+succeeded. The host accepts the action only when the trusted ordinary foreground
+turn began with onboarding open, canonical state now reports answered completion,
+the route is private, and no fixed first read exists. Failure to save never
+blocks or rolls back onboarding and never produces a promise Murph cannot keep;
+an archived read cannot be reactivated. A final-turn request for no proactive
+follow-up completes onboarding without creating the read or promising outreach.
+
+The occurrence becomes due two minutes after creation and expires sixty minutes
+later. Foreground member messages retain priority through the existing runtime;
+there is no parallel resident model writer or child callback. The scheduled
+turn runs in a fresh context using the member's selected model with high
+reasoning, revalidates answered completion, reads
+the latest committed conversation before analysis and composition, and skips
+rather than interrupting a newer urgent or unresolved task or stacking another
+unanswered proactive health question.
+
+The complete prompt is code-owned. Murph supplies only the zero-argument
+structured action and cannot supply or replace instructions, timing, model, or
+route. The prompt applies the same type of interestingness bar used by the
+weekly health insight:
+
+- zero or one member-specific finding;
+- concrete recognizable evidence and exact goal congruence;
+- source-health, freshness, coverage, and sync checks before wearable use;
+- no vendor-score tautologies, proxy inferences, generic advice, data-quality
+  complaints, behavioral grading, or causality beyond the evidence;
+- bounded public research only after a personal candidate exists;
+- a useful personal interpretation, reassuring non-finding, or low-burden
+  measurement target as the only fallback; and
+- silence when nothing specific and decision-relevant clears the bar.
+
+A send is three to five natural sentences with the useful point first, the
+smallest evidence needed to trust it, calibrated uncertainty, and at most one
+optional low-burden next action or question. It never automatically creates a
+habit, plan, experiment, reminder, purchase, booking, or other effect.
+
+The turn reads the existing `weekly-health-insights` knowledge page before
+selection and best-effort records one compact semantic candidate there under a
+first-read heading keyed by the exact scheduled occurrence instant. Its body
+contains only the claim, evidence, uncertainty, and canonical source paths, not
+the outbound message or transport framing. The same occurrence may reuse that
+candidate only after rechecking current gates and canonical evidence; an
+incomplete candidate causes bounded recomputation rather than terminal skip.
+Any other first-read heading suppresses another send. The page owns semantic
+non-repeat only. The existing occurrence-scoped cron/outbox identity freezes
+exact member-facing text after an outbox intent exists, and a failed ledger
+write does not suppress an otherwise sound first read.
+
+Adding the fieldless action changes the shared `murph.automation` tool contract,
+so rollout intentionally rotates native provider threads beyond onboarding. On
+the first post-deploy turn of a pre-existing automation-capable private session
+or eligible non-email group session, the stored contract fingerprint no longer
+matches. The planner must not resume a provider thread under a different tool
+schema: it starts a fresh thread with at most 24 committed messages, 4,000 bytes
+per message, and 12,000 bytes total, then returns to native resume after that
+replacement thread succeeds. Rolling back the schema can cause the same session
+to rotate a second time. Rollout proof uses one pre-existing private session and
+one pre-existing eligible group session: each first turn starts fresh and
+replies with bounded continuity, and each second turn resumes its replacement
+thread. Do not add a compatibility flag, dual schema, migration, or session
+reconciler around this safety boundary.
+
+The completed first-read turn also has a separate, occurrence-time continuity
+effect. Its high reasoning is a turn-scoped target override on the live private
+conversation session. After either a provider-completed send or normal silent
+skip, the turn finalizer preserves the member's selected provider and model but
+clears native resume; retaining a provider thread across different target
+options would make its contract ambiguous, while persisting high reasoning as
+the member's ordinary preference would change their selected authority. The
+next ordinary turn therefore receives the same bounded committed-history
+fallback—at most 24 messages, 4,000 bytes per message, and 12,000 bytes total—
+and later turns resume the replacement thread. Cancellation or foreground
+preemption before terminal turn persistence does not rotate the session. An
+outbound delivery failure after terminal persistence does not undo the reset.
+
 ## Finite Scheduled Continuation
 
 The onboarding follow-up automation is one finite three-day recovery window,
@@ -689,9 +813,16 @@ or replaced completion state blocks a pending occurrence before delivery.
    celebration that names the next scheduled touchpoint and invites one other
    health request. The close is text-only; onboarding does not automatically
    generate, offer, or mention a song.
-10. Context continues compounding after onboarding without a second profile
-   system, automation, or completion score.
-11. A dense foundation memo starts one child for each supplied independent
+10. Answered completion creates one bounded private first personal read through
+    a code-owned action without blocking ordinary conversation or allowing the
+    model to author or replace its prompt, timing, model, or route.
+11. The first read sends at most one non-obvious, evidence-backed personal
+    interpretation with calibrated uncertainty and one optional lightweight
+    action; it suppresses generic, repetitive, data-quality, vendor-tautological,
+    or unsupported findings and never creates an action automatically.
+12. Context continues compounding after onboarding without a second profile
+    system, context-collection lifecycle, or completion score.
+13. A dense foundation memo starts one child for each supplied independent
     movement/protocol, supplement, and medical/safety family, up to three,
     from the durable accepted source. Murph replies after the spawns without
     claiming completion and confirms child-owned writes only after canonical

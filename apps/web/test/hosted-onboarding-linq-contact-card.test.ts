@@ -307,7 +307,6 @@ describe("hosted Linq contact card client", () => {
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
-      lockMode: "wait",
       observedAt: expect.any(Date),
       prisma,
     });
@@ -900,7 +899,6 @@ describe("hosted Linq contact card client", () => {
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
-      lockMode: "wait",
       observedAt: expect.any(Date),
       prisma,
     });
@@ -996,6 +994,51 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
     );
   });
 
+  it("keeps a local photo timeout when caller cancellation is supplied", async () => {
+    runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
+      publicBaseUrl: "https://www.withmurph.ai",
+    });
+    const callerSignal = new AbortController().signal;
+    const localTimeout = new AbortController();
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout")
+      .mockReturnValue(localTimeout.signal);
+    const fetchImpl = vi.fn((
+      _input: RequestInfo | URL,
+      init?: RequestInit,
+    ) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      if (!signal) {
+        reject(new Error("Expected a photo-fetch abort signal."));
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }));
+
+    try {
+      const photoPromise = fetchMurphHostedLinqContactCardVcfPhoto({
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        signal: callerSignal,
+      });
+
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+      const signal = fetchImpl.mock.calls[0]?.[1]?.signal;
+      if (!signal) {
+        throw new Error("Expected a composed photo-fetch abort signal.");
+      }
+      expect(signal).not.toBe(callerSignal);
+      expect(signal.aborted).toBe(false);
+
+      localTimeout.abort();
+
+      await expect(photoPromise).resolves.toBeNull();
+      expect(signal.aborted).toBe(true);
+      expect(callerSignal.aborted).toBe(false);
+    } finally {
+      timeoutSpy.mockRestore();
+    }
+  });
+
   it("fails soft to null on provider errors and oversized bodies", async () => {
     runtimeMocks.getHostedOnboardingEnvironment.mockReturnValue({
       publicBaseUrl: "https://www.withmurph.ai",
@@ -1020,17 +1063,6 @@ describe("fetchMurphHostedLinqContactCardVcfPhoto", () => {
 });
 
 describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
-  it("omits the backup instead of waiting when an inventory writer holds the lock", async () => {
-    // The snapshot returns null when the lock is unavailable; the member's
-    // primary card must still be served, just without the optional backup.
-    linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot.mockResolvedValue(null);
-
-    await expect(resolveMurphHostedLinqContactCardBackupPhoneNumber({
-      excludePhoneNumber: "+15550000001",
-      prisma: {} as never,
-    })).resolves.toBeNull();
-  });
-
   it("reads the existing projection and returns the first healthy alternate without provider sync", async () => {
     linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot.mockResolvedValue({
       configuredLineCount: 4,
@@ -1081,10 +1113,8 @@ describe("resolveMurphHostedLinqContactCardBackupPhoneNumber", () => {
     })).resolves.toBe("+15550000003");
 
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledOnce();
-    // Member-facing: never waits on an inventory writer.
     expect(linqLineStoreMocks.readHostedLinqContactCardCandidacySnapshot).toHaveBeenCalledWith({
       limit: 50,
-      lockMode: "skip",
       prisma,
     });
     expect(linqInventoryMocks.syncHostedLinqPhoneNumberInventory).not.toHaveBeenCalled();

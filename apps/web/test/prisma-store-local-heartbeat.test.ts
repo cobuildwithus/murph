@@ -2,6 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-syncd/public-account";
 
+const { openHostedUserSecureBoxStringMock } = vi.hoisted(() => ({
+  openHostedUserSecureBoxStringMock: vi.fn(
+    async (_input: { prisma?: unknown; value?: unknown }) => "acct_456",
+  ),
+}));
+
+// Only the secure-box open seam is mocked so the Prisma client the store hands
+// to the decrypt path stays observable.
+vi.mock("@/src/lib/hosted-crypto/secure-box", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/hosted-crypto/secure-box")>()),
+  openHostedUserSecureBoxString: openHostedUserSecureBoxStringMock,
+}));
+
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
 type StaticConnectionRecord = {
@@ -222,6 +235,74 @@ describe("PrismaDeviceSyncControlPlaneStore local heartbeat updates", () => {
         lastSyncCompletedAt: expect.any(Date),
       }),
     }));
+  });
+
+  it("decrypts heartbeat connection secrets through the mutation transaction client", async () => {
+    const record: StaticConnectionRecord = {
+      id: "dsc_123",
+      userId: "user-123",
+      provider: "oura",
+      providerAccountBlindIndex: "hbdi_test",
+      status: "active",
+      credentialKind: "oauth_tokens",
+      credentialMetadataJson: null,
+      providerConfigKey: null,
+      displayName: "Oura ring",
+      externalAccountIdEncrypted: "sealed:acct_456",
+      connectedAt: new Date("2026-03-25T00:00:00.000Z"),
+      lastWebhookAt: null,
+      lastSyncStartedAt: null,
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      metadataJson: {},
+      nextReconcileAt: null,
+      scopesJson: ["daily"],
+      setupExpiresAt: null,
+      setupPhase: null,
+      createdAt: new Date("2026-03-25T00:00:00.000Z"),
+      updatedAt: new Date("2026-03-25T00:00:00.000Z"),
+    };
+    // The heartbeat update runs inside an interactive transaction that already
+    // holds a pooled connection; a secret read that falls back to the root
+    // client would check out a second one.
+    const rootClientUse = vi.fn();
+    const failOnRootClientUse = async () => {
+      rootClientUse();
+      throw new Error("root Prisma client must not be used inside a transaction");
+    };
+    const tx = {
+      $executeRaw: vi.fn(async () => 0),
+      deviceConnection: {
+        findFirst: vi.fn(async () => ({ ...record })),
+        update: vi.fn(async () => ({ ...record })),
+      },
+    };
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {
+        deviceConnection: {
+          findFirst: failOnRootClientUse,
+          update: failOnRootClientUse,
+        },
+        $transaction: async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx),
+      } as never,
+    });
+
+    await expect(store.updateConnectionFromLocalHeartbeat("user-123", "dsc_123", {
+      lastErrorMessage: "Heartbeat failure",
+    })).resolves.toMatchObject({
+      externalAccountId: "acct_456",
+      id: "dsc_123",
+    });
+
+    // Both the pre-update read and the post-update rebuild decrypt the stored
+    // external account id; each must use the transaction client.
+    expect(openHostedUserSecureBoxStringMock).toHaveBeenCalledTimes(2);
+    for (const [input] of openHostedUserSecureBoxStringMock.mock.calls) {
+      expect(input.prisma).toBe(tx);
+    }
+    expect(rootClientUse).not.toHaveBeenCalled();
   });
 
   it("only applies the provided error fields", async () => {

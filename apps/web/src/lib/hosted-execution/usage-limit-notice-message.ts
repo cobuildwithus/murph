@@ -3,17 +3,20 @@ import "server-only";
 import type { PrismaClient } from "@prisma/client";
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
-import { readHostedGroupUsageStatus } from "../hosted-groups/group-usage-funding";
 import {
-  HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
-  renderUserFacingMessage,
-} from "../hosted-messages/user-facing-messages";
+  buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl,
+} from "../hosted-groups/group-usage-funding";
+import { resolveHostedPublicBaseUrl } from "../hosted-web/public-url";
 import type { HostedAiUsageLimitNoticeCode } from "./usage-allowance";
 import { readHostedPersonalAiUsageStatus } from "./usage-status";
 
+const HOSTED_GROUP_USAGE_LIMIT_RECOVERY_MESSAGE =
+  "Murph is paused in this chat right now. Private options to add more Murph time are here, or the room can wait for its allowance to reset:";
+
 /**
  * Adds or replaces delivery copy only from current delivery-time authority.
- * Any projection failure leaves the canonical notice unchanged.
+ * A group exhaustion notice is not sendable without its mandatory action.
  */
 export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
   memberId: string;
@@ -23,35 +26,34 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
 }): Promise<string> {
   try {
     if (input.noticeCode === "thread_usage_limit_reached") {
-      const status = await readHostedGroupUsageStatus({
-        prisma: input.prisma,
-        runtimeMemberId: input.memberId,
-      });
-      if (status?.sponsorshipStatus === "sponsored") {
-        return HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE;
+      const publicBaseUrl = resolveHostedPublicBaseUrl();
+      if (!publicBaseUrl) {
+        throw new TypeError(
+          "Hosted group usage-limit recovery URL is unavailable.",
+        );
       }
-      if (
-        !status?.fundingNeeded
-        || !status.fundingUrl
-      ) {
-        return input.message;
+      const locator = buildHostedGroupUsageFundingLocatorForRuntimeMember(
+        input.memberId,
+      );
+      const projectedUrl = locator
+        ? buildHostedGroupUsageFundingUrl({
+            joinCode: locator,
+            publicBaseUrl,
+          })
+        : null;
+      if (!projectedUrl) {
+        throw new TypeError(
+          "Hosted group usage-limit recovery URL is unavailable.",
+        );
       }
-      const fundingUrl = new URL(status.fundingUrl, `${MURPH_PRODUCT_ORIGIN}/`);
-      if (fundingUrl.origin !== MURPH_PRODUCT_ORIGIN) {
-        return input.message;
+      const trustedOrigin = new URL(publicBaseUrl).origin;
+      const fundingUrl = new URL(projectedUrl);
+      if (fundingUrl.origin !== trustedOrigin) {
+        throw new TypeError(
+          "Hosted group usage-limit recovery URL is not first-party.",
+        );
       }
-      /**
-       * Only this branch knows a public funding ask is timely right now, so it
-       * owns the ask. A live monthly sponsorship suppresses this branch,
-       * leaving only the neutral group pause notice without payer or amount
-       * details. Explicit funding capability is projected separately.
-       */
-      const funding = renderUserFacingMessage({
-        context: { fundingUrl: fundingUrl.toString() },
-        key: "linq.ai_usage.thread_limit_funding",
-        seed: input.memberId,
-      });
-      return `${input.message}\n\n${funding.text}`;
+      return `${HOSTED_GROUP_USAGE_LIMIT_RECOVERY_MESSAGE}\n${fundingUrl.toString()}`;
     }
 
     const usageStatus = await readHostedPersonalAiUsageStatus({
@@ -69,7 +71,10 @@ export async function projectHostedAiUsageLimitNoticeForDelivery(input: {
     }
 
     return `${input.message}\n\n${action.label}: ${actionUrl.toString()}`;
-  } catch {
+  } catch (cause) {
+    if (input.noticeCode === "thread_usage_limit_reached") {
+      throw cause;
+    }
     return input.message;
   }
 }

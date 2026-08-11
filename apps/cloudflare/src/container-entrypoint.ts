@@ -40,6 +40,10 @@ import {
   HOSTED_RUNNER_EXECUTABLE_PATH,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
+  HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+  readHostedRuntimeFailurePhaseCode,
+} from "@murphai/hosted-execution/runtime-control";
+import {
   drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort,
   drainHostedRuntimeLogWritesBestEffort,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
@@ -338,8 +342,9 @@ export async function startHostedContainerEntrypoint(input: {
   // port is listening and consumed by the FIRST (cold) invocation only; a warm
   // process predates its message so its startup is not attributable to that turn.
   let pendingColdNodeStartupMs: number | null = null;
-  // Deploy rollouts SIGTERM the container with a rollout grace window
-  // (wrangler `rollout_active_grace_period`, currently 300s) before SIGKILL.
+  // During gradual deploys, active grace delays eligibility for rollout
+  // replacement. Cloudflare then sends SIGTERM and allows up to 15 minutes
+  // before SIGKILL.
   // Shutdown contract: finish the in-flight invocation (which checkpoints
   // immediately via the shutdown signal), then exit 0. New work arriving after
   // exit fails over to a replacement container through the platform's normal
@@ -2554,6 +2559,11 @@ function buildHostedContainerRunnerJobErrorMetadata(
   const safeErrorName = readHostedExecutionSafeErrorName(error);
   if (safeErrorName) {
     details.errorName = safeErrorName;
+  }
+  const runtimeFailurePhaseCode = readHostedRuntimeFailurePhaseCode(error);
+  if (runtimeFailurePhaseCode) {
+    details[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY] =
+      runtimeFailurePhaseCode;
   }
   const errorCodeDetail = readHostedContainerSafeCodeProperty(error, "code")
     ?? readHostedContainerSafeCodeProperty(error, "errorCode");

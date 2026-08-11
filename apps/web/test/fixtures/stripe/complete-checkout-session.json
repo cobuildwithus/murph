@@ -1,0 +1,44 @@
+{
+  "_meta": {
+    "template_version": 0
+  },
+  "fixtures": [
+    {
+      "name": "payment_page",
+      "path": "/v1/payment_pages/${.env:MURPH_HOSTED_STRIPE_FIXTURE_SESSION_ID}",
+      "method": "get"
+    },
+    {
+      "name": "payment_method",
+      "path": "/v1/payment_methods",
+      "method": "post",
+      "params": {
+        "type": "card",
+        "card": {
+          "token": "tok_visa"
+        },
+        "billing_details": {
+          "email": "hosted-billing-fixture@example.invalid",
+          "name": "Sandbox Fixture",
+          "address": {
+            "postal_code": "10001",
+            "country": "US"
+          }
+        },
+        "metadata": {
+          "murphHostedLocalRun": "${.env:MURPH_HOSTED_STRIPE_FIXTURE_RUN_ID}",
+          "murphHostedLocalScenario": "${.env:MURPH_HOSTED_STRIPE_FIXTURE_SCENARIO}"
+        }
+      }
+    },
+    {
+      "name": "payment_page_confirm",
+      "path": "/v1/payment_pages/${.env:MURPH_HOSTED_STRIPE_FIXTURE_SESSION_ID}/confirm",
+      "method": "post",
+      "params": {
+        "payment_method": "${payment_method:id}",
+        "expected_amount": "${.env:MURPH_HOSTED_STRIPE_FIXTURE_EXPECTED_AMOUNT}"
+      }
+    }
+  ]
+}

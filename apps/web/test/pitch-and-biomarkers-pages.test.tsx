@@ -80,11 +80,11 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.equal(pitchMetadata.title, "Murph · Pitch");
   assert.equal(
     pitchMetadata.description,
-    "Murph is a private personal health assistant that helps you understand, decide, act, and follow through while remembering the context that matters over time.",
+    "Murph turns group chats into health challenges. The AI referee for step bets, sleep experiments, and friend challenges across iMessage, WhatsApp, and Telegram.",
   );
   assert.deepEqual(pitchMetadata.openGraph?.images, [
     {
-      alt: "Murph, the private personal health assistant that remembers.",
+      alt: "Murph, the AI referee for health challenges.",
       height: 630,
       type: "image/png",
       url: "/pitch/opengraph-image",
@@ -97,16 +97,17 @@ test("PitchPage metadata and route entrypoint render the deck landmark", () => {
   assert.match(markup, /<main[^>]*data-pitch-deck="true"/);
   assert.match(markup, /data-pitch-chrome="true"/);
   assert.match(markup, /aria-label="Slide 1: Title"/);
-  assert.match(markup, /The personal health assistant that remembers\./);
-  assert.match(
-    markup,
-    /One useful health thread is the wedge into a broader relationship\./,
-  );
-  assert.match(markup, /Experiments are useful when uncertainty is the problem\./);
-  assert.match(markup, /The new positioning still needs proof\./);
-  assert.match(markup, /zero organic signups/);
-  assert.match(markup, /The durable asset is useful context, not a model wrapper\./);
-  assert.match(markup, /prove pull, retention, and the context advantage\./);
+  assert.match(markup, /The social layer for health experiments\./);
+  assert.match(markup, /MRR grew 103% in the last 30 days/);
+  assert.match(markup, /18% w\/w MRR growth/);
+  assert.match(markup, /\+82% paying customers/);
+  assert.match(markup, /10 msgs \/ day \/ active user/);
+  assert.match(markup, /3,003 messages exchanged last week/);
+  assert.match(markup, /73 per weekly active user/);
+  assert.match(markup, /12 group chats active last week/);
+  assert.match(markup, /255 messages to Murph last week/);
+  assert.doesNotMatch(markup, /2,400 messages exchanged last week/);
+  assert.doesNotMatch(markup, /107 messages to Murph last week/);
   assert.match(markup, /Scroll or use arrow keys/);
   assert.match(markup, /01 \/ 13/);
 });

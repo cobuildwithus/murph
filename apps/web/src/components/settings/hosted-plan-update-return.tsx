@@ -11,6 +11,7 @@ import {
 } from "@/src/lib/hosted-onboarding/billing-plans";
 import { HOSTED_BILLING_PLAN_CHANGE_RETURN_PARAM } from "@/src/lib/hosted-onboarding/billing-plan-change-contract";
 
+import { BillingPortalButton } from "./billing-portal-button";
 import { stripSettingsQueryParam } from "./hosted-settings-utils";
 
 const PLAN_UPDATE_POLL_ATTEMPTS = 6;
@@ -21,7 +22,7 @@ export function HostedPlanUpdateReturn(props: {
   pollingEnabled?: boolean;
   targetPlanCode: Extract<
     HostedBillingPlanCode,
-    "launch_edge_monthly" | "launch_monthly"
+    "launch_edge_monthly" | "launch_max_monthly" | "launch_monthly"
   >;
 }) {
   const router = useRouter();
@@ -90,19 +91,25 @@ export function HostedPlanUpdateReturn(props: {
             : "Murph is checking the latest billing status with Stripe."}
         </p>
         {exhausted ? (
-          <Button
-            type="button"
-            variant="link"
-            size="sm"
-            className="mt-1 h-10 px-0"
-            onClick={() => {
-              attemptsRef.current = 0;
-              setAttempts(0);
-              router.refresh();
-            }}
-          >
-            Check again
-          </Button>
+          <div className="mt-1 flex flex-wrap items-center gap-x-4">
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="h-10 px-0"
+              onClick={() => {
+                attemptsRef.current = 0;
+                setAttempts(0);
+                router.refresh();
+              }}
+            >
+              Check again
+            </Button>
+            <BillingPortalButton
+              label="Manage billing"
+              variant="link"
+            />
+          </div>
         ) : null}
       </div>
     </div>

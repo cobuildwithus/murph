@@ -890,6 +890,59 @@ test("browser-vault metric selections can use old requested points while metric 
   assert.equal(Number((progress.currentValue ?? NaN).toFixed(1)), 81.6);
 });
 
+test("browser-vault series and selection normalize lean body mass from pounds and kilograms", async () => {
+  const replica = await createBrowserVaultReplicaFromVault({
+    generatedAt: "2026-05-02T12:00:00.000Z",
+    sourceBundleHash: "f".repeat(64),
+    vault: createVaultReadModel({
+      entities: [
+        createEvent("evt_lean_mass_pounds", "measurement", {
+          attributes: {
+            measurements: [
+              { metric: "lean-body-mass", unit: "lb", value: 150 },
+            ],
+            source: "manual",
+          },
+          occurredAt: "2026-04-30T07:30:00.000Z",
+          title: "Lean body mass in pounds",
+        }),
+        createEvent("evt_lean_mass_kilograms", "measurement", {
+          attributes: {
+            measurements: [
+              { metric: "lean-body-mass", unit: "kg", value: 68 },
+            ],
+            source: "manual",
+          },
+          occurredAt: "2026-05-01T07:30:00.000Z",
+          title: "Lean body mass in kilograms",
+        }),
+      ],
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+
+  const client = createBrowserVaultQueryClient(parseBrowserVaultReplica(replica));
+  const series = client.metrics.series({ metricKey: "lean-body-mass" });
+  assert.deepEqual(
+    series.map((point) => [
+      point.date,
+      Number((point.value ?? NaN).toFixed(4)),
+      point.unit,
+    ]),
+    [
+      ["2026-04-30", 68.0389, "kg"],
+      ["2026-05-01", 68, "kg"],
+    ],
+  );
+
+  const selection = client.metricSelections.get("lean-body-mass");
+  assert.ok(selection);
+  assert.equal(selection.status, "ready");
+  assert.equal(selection.unit, "kg");
+  assert.equal(selection.value, 68);
+});
+
 test("browser-vault metric rows keep old lab points when experiment measurement anchors request them", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
     generatedAt: "2026-05-02T12:00:00.000Z",

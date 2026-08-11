@@ -450,12 +450,15 @@ export function BiomarkerBoundaryResultStudy() {
           <p className="font-medium text-primary">In range</p>
           <p className="mt-1 font-serif text-4xl font-semibold tracking-tight text-foreground">&lt;10</p>
           <p className="mt-1 text-xs text-muted-foreground">Feb 17, 2026</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Published comparator — not the reporting lab&apos;s range
+          </p>
         </div>
       </header>
       <div className="grid gap-2 border-t border-border/70 px-5 py-4 text-sm sm:px-8 lg:grid-cols-[8rem_minmax(8rem,0.6fr)_minmax(12rem,1fr)_minmax(10rem,0.85fr)] lg:items-center lg:gap-4">
         <time className="text-muted-foreground" dateTime="2026-02-17">Feb 17, 2026</time>
         <span className="font-serif text-lg font-semibold text-foreground">&lt;10</span>
-        <span className="text-muted-foreground">Source range not listed</span>
+        <span className="text-muted-foreground">Published comparator — not the reporting lab&apos;s range</span>
         <span className="text-muted-foreground">Example laboratory</span>
       </div>
     </article>
@@ -505,6 +508,7 @@ export function BiomarkerReferenceContextStudy() {
             referenceRangeLabel="98 to 107 mmol/L"
             referenceRangeSourceLabel="Mayo Clinic Laboratories adult serum reference interval · not the reporting lab's range"
             referenceRangeTitle="Published adult comparator"
+            referenceRangeTone="context"
             unit="mmol/L"
           />
         </div>

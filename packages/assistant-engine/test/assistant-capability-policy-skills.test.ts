@@ -53,31 +53,28 @@ describe('assistant capability policy skills', () => {
       'ordinary shared-life logistics task',
     )
     expect(normalized).toContain(
-      'For a hosted group call, first deliver one complete canonical preview, then stop without invoking `murph.create_phone_call`.',
+      'Private and hosted-group calls use the same consent and readiness flow.',
     )
     expect(normalized).toContain(
-      'Render exactly these ten lines, with each value encoded as compact JSON',
+      'Never emit a special structured preview, or require a second turn, merely because the request came from a group.',
     )
     expect(normalized).toContain(
-      'Only a later inbound message received after that preview was successfully delivered may confirm it.',
+      'the current bounded request may authorize the call in the same provider turn',
     )
     expect(normalized).toContain(
-      'The runtime compares the entire delivered preview with this canonical rendering',
+      "Set `message_ref` to that request's visible `ain_...` reference.",
     )
     expect(normalized).toContain(
-      'Set `message_ref` to that confirming inbound message\'s visible `ain_...` reference.',
+      'It must still be the newest accepted request when the call starts.',
     )
     expect(normalized).toContain(
-      'If any term or disclosure changes, deliver the complete revised preview and stop again.',
+      "The host reloads that exact message and revalidates the provider sender's current room membership and Murph activation.",
     )
     expect(normalized).toContain(
-      'do not add an extra round trip when the existing private-call gate is already satisfied',
+      'The current requester must explicitly supply or approve any requester name or contact fact used in the call.',
     )
     expect(normalized).toContain(
-      'The current confirmation message must itself explicitly approve any requester name or contact fact used in the call',
-    )
-    expect(normalized).toContain(
-      'One participant\'s acknowledgement never authorizes a different participant\'s identity, account, contact details, or private facts',
+      "One participant's request never authorizes a different participant's identity, account, contact details, health facts, or other private facts.",
     )
     expect(normalized).toContain(
       'For a hosted-group reservation, availability check, or service call',
@@ -90,7 +87,10 @@ describe('assistant capability policy skills', () => {
       'charge, commitment, materially different booking, or failed reservation',
     )
     expect(normalized).toContain(
-      'This skill never expands the conversation\'s scope boundary or authorizes code production or work, school, or professional operations.',
+      'Do not make a purchase, payment, reservation, or other commitment unless the requester explicitly asked for it and supplied adequate bounds.',
+    )
+    expect(normalized).toContain(
+      "This skill never expands the conversation's scope boundary or authorizes code production or work, school, or professional operations.",
     )
     expect(normalized).toContain('room-visible logistical facts may be used')
     expect(normalized).toContain(
@@ -100,15 +100,17 @@ describe('assistant capability policy skills', () => {
     expect(normalized).toContain('Set `callerName`')
     expect(normalized).toContain('call-relevant, disclosable facts approved by the requester')
     expect(normalized).toContain(
-      'A requester name or contact fact may be disclosed only when the destination requires it and the current confirmation message explicitly supplies or approves it again',
+      'A requester name or contact fact may be disclosed only when the destination requires it and the current request explicitly supplies or approves it',
     )
     expect(normalized).toContain(
-      'never infer or disclose another participant\'s private identity, account, contact, or health facts',
+      "never infer or disclose another participant's private identity, account, contact, or health facts",
     )
     expect(normalized).toContain('Never include unrelated health details')
     expect(normalized).toContain('Set `allowTransferToUser: true`')
     expect(normalized).toContain('Set it to `false` for information-only calls')
     expect(normalized).toContain('Never call emergency services')
+    expect(normalized).not.toContain(['GROUP', 'CALL', 'PREVIEW'].join(' '))
+    expect(normalized).not.toContain('Render exactly these ten lines')
 
     for (const status of ['starting', 'calling', 'failed'] as const) {
       expect(skill).toContain(`\`${status}\``)
@@ -126,12 +128,48 @@ describe('assistant capability policy skills', () => {
     const skill = await readSkill('murph-family')
     const normalized = normalizeWhitespace(skill)
 
-    expect(normalized).toContain('2–6 sponsored Pulse ($7/month) or Edge ($19/month) seats')
+    // A general "Family Edge versus Max" question must be answerable from the
+    // loaded skill without an account-status tool call.
+    const generalFamilyComparisonFacts = [
+      '$15.20 on Edge',
+      '$39.20 on Max',
+      'Edge and Max share the same premium runtime/model access',
+      'Max adds included usage, not a separate model capability',
+    ]
+
+    expect(normalized).toContain(
+      '2–6 sponsored Pulse ($7/month), Edge ($19/month), or Max ($49/month) seats',
+    )
+    for (const fact of generalFamilyComparisonFacts) {
+      expect(normalized).toContain(fact)
+    }
+    expect(normalized).toContain('`planCode: "max"` for Max')
     expect(normalized).toContain('owners cannot see member conversations or health data')
     expect(normalized).toContain('`action: "read_status"`')
     expect(normalized).toContain('`action: "start_checkout"`')
     expect(normalized).toContain('`action: "create_invite"`')
-    expect(normalized).toContain('`preparedInvite`')
+    expect(normalized).toContain('before every Family invitation')
+    expect(normalized).toContain(
+      'Never pass invite context to `start_checkout`; checkout cannot create or prepare an invite.',
+    )
+    expect(normalized).toContain(
+      'If `read_status` cannot be read, say no change was attempted and that retrying the status read is safe.',
+    )
+    expect(normalized).toContain(
+      'Only call `action: "create_invite"` when the status proves all three conditions:',
+    )
+    expect(normalized).toContain('`plans.<requested plan>.remaining` is greater than zero')
+    expect(normalized).toContain(
+      'When the requested plan has no remaining paid seat, do not call `create_invite`',
+    )
+    expect(normalized).toContain('https://www.withmurph.ai/settings#family')
+    expect(normalized).toContain(
+      'The link is navigation only; never claim that opening it purchased a seat or created an invite.',
+    )
+    expect(normalized).toContain(
+      'say the request was not confirmed and ask the owner to check Family Settings before retrying',
+    )
+    expect(normalized).not.toContain('`preparedInvite`')
     expect(normalized).toContain('`already_sponsored`')
     expect(normalized).toContain('`owner: true`')
     expect(normalized).toContain('`billingActive: true`')

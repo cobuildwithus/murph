@@ -51,16 +51,36 @@ export const HOSTED_CONNECTED_APPS_SERVICE_TOOLS = {
   },
 } as const;
 
-export interface HostedConnectedAppsCalendarWritePolicy {
+export type HostedConnectedAppsWriteKind = "calendar-event" | "email";
+
+export interface HostedConnectedAppsWritePolicy {
   allowedArguments: readonly string[];
   forcedArguments?: Readonly<Record<string, unknown>>;
+  kind: HostedConnectedAppsWriteKind;
+  requiredArguments: readonly string[];
   toolkit: string;
   version: string;
 }
 
-const HOSTED_CONNECTED_APPS_CALENDAR_WRITES: Readonly<
-  Record<string, HostedConnectedAppsCalendarWritePolicy>
+const HOSTED_CONNECTED_APPS_WRITES: Readonly<
+  Record<string, HostedConnectedAppsWritePolicy>
 > = {
+  GMAIL_SEND_EMAIL: {
+    allowedArguments: [
+      "bcc",
+      "body",
+      "cc",
+      "extra_recipients",
+      "is_html",
+      "recipient_email",
+      "subject",
+    ],
+    forcedArguments: { user_id: "me" },
+    kind: "email",
+    requiredArguments: ["body", "recipient_email", "subject"],
+    toolkit: "gmail",
+    version: "20260721_00",
+  },
   GOOGLECALENDAR_CREATE_EVENT: {
     allowedArguments: [
       "description",
@@ -75,6 +95,14 @@ const HOSTED_CONNECTED_APPS_CALENDAR_WRITES: Readonly<
       calendar_id: "primary",
       create_meeting_room: false,
     },
+    kind: "calendar-event",
+    requiredArguments: [
+      "event_duration_hour",
+      "event_duration_minutes",
+      "start_datetime",
+      "summary",
+      "timezone",
+    ],
     toolkit: "googlecalendar",
     version: "20260429_00",
   },
@@ -88,8 +116,34 @@ const HOSTED_CONNECTED_APPS_CALENDAR_WRITES: Readonly<
       "time_zone",
     ],
     forcedArguments: { is_online_meeting: false },
+    kind: "calendar-event",
+    requiredArguments: [
+      "end_datetime",
+      "start_datetime",
+      "subject",
+      "time_zone",
+    ],
     toolkit: "outlook",
     version: "20260508_00",
+  },
+  OUTLOOK_SEND_EMAIL: {
+    allowedArguments: [
+      "bcc_emails",
+      "body",
+      "cc_emails",
+      "is_html",
+      "subject",
+      "to_email",
+      "to_name",
+    ],
+    forcedArguments: {
+      save_to_sent_items: true,
+      user_id: "me",
+    },
+    kind: "email",
+    requiredArguments: ["body", "subject", "to_email"],
+    toolkit: "outlook",
+    version: "20260724_00",
   },
 };
 
@@ -128,13 +182,13 @@ export function buildHostedConnectedAppsPolicyRevision(
   return stablePositiveIntHash(JSON.stringify({
     maxAccountsPerToolkit: config.maxAccountsPerToolkit,
     policyVersion: HOSTED_CONNECTED_APPS_POLICY_VERSION,
-    calendarWrites: HOSTED_CONNECTED_APPS_CALENDAR_WRITES,
     serviceTools: HOSTED_CONNECTED_APPS_SERVICE_TOOLS,
     tags: {
       disable: ["destructiveHint"],
       enable: ["readOnlyHint"],
     },
     toolkits: [...config.toolkits].sort(),
+    writes: HOSTED_CONNECTED_APPS_WRITES,
   }));
 }
 
@@ -240,10 +294,12 @@ export function readHostedOpenWeatherApiKey(
   return apiKey;
 }
 
-export function getHostedConnectedAppsCalendarWritePolicy(
+export function getHostedConnectedAppsWritePolicy(
   toolSlug: string,
-): HostedConnectedAppsCalendarWritePolicy | null {
-  return HOSTED_CONNECTED_APPS_CALENDAR_WRITES[toolSlug] ?? null;
+): HostedConnectedAppsWritePolicy | null {
+  return Object.hasOwn(HOSTED_CONNECTED_APPS_WRITES, toolSlug)
+    ? HOSTED_CONNECTED_APPS_WRITES[toolSlug]!
+    : null;
 }
 
 export function formatHostedConnectedAppToolkitLabel(toolkit: string): string {

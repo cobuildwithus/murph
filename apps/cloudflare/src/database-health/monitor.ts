@@ -1,21 +1,27 @@
 import type { DurableObjectSqlStorageLike } from "../user-runner/types.js";
 import {
   calculateDirectConnectionErrorDelta,
+  DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
   DatabaseMetricsParseError,
   evaluateDatabaseMetricSnapshot,
-  parsePlanetScaleDatabaseMetrics,
+  parsePlanetScaleDatabaseMetricObservation,
+  requireCompleteDatabaseMetricSnapshot,
   type DatabaseHealthCondition,
+  type DatabaseHealthRequiredMetricName,
+  type DatabaseMetricObservationSnapshot,
   type DatabaseMetricSnapshot,
 } from "./metrics.js";
 import {
   DatabaseHealthStore,
   type DatabaseHealthAlertState,
+  type DatabaseHealthMonitoringAlertObligation,
+  type DatabaseHealthMonitoringEvidence,
   type DatabaseHealthStoredSample,
 } from "./store.js";
 
 const PLANETSCALE_API_ORIGIN = "https://api.planetscale.com";
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
-const DATABASE_HEALTH_ALERT_INTERVAL_MS = 30 * 60 * 1_000;
+const DATABASE_HEALTH_ALERT_INTERVAL_MS = 60 * 60 * 1_000;
 const DATABASE_HEALTH_RUN_LEASE_MS = 2 * 60 * 1_000;
 const DATABASE_HEALTH_SAMPLE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 const DATABASE_HEALTH_FETCH_TIMEOUT_MS = 10_000;
@@ -32,13 +38,123 @@ const PLANETSCALE_SCRAPE_URL_LENGTH_LIMIT = 8_192;
 const MONITORING_FAILURE_ALERT_COUNT = 2;
 
 const DATABASE_ALERT_OPENINGS = [
-  "Murph database needs a look.",
-  "Database health is outside the safe range.",
-  "The production database is under pressure.",
-  "Murph's database monitor found a live issue.",
-  "Database connection health is degraded.",
-  "The database is still reporting an unsafe condition.",
+  "The database monitor recorded an alerting observation.",
+  "A database health check met the paging criteria.",
+  "The monitor captured database evidence outside safe bounds.",
+  "A recorded database check satisfied an alert rule.",
+  "The database health sample below warranted operator review.",
+  "The monitor logged an unsafe database observation.",
+  "A database check produced evidence that required attention.",
+  "The recorded database sample triggered the health monitor.",
+  "The monitor observed a database condition outside its safe range.",
+  "A database safety check produced an alert.",
+  "The included database observation met incident criteria.",
+  "The monitor recorded database evidence for operator review.",
+  "A database health sample was flagged by a configured rule.",
+  "The check below produced alert-level database evidence.",
+  "The monitor captured a database exception at check time.",
+  "A recorded database observation fell outside normal bounds.",
+  "The database check below warranted investigation.",
+  "The monitor logged a database health exception.",
+  "An observed database condition met the alert rule.",
+  "The recorded check produced a database-health page.",
+  "The monitor captured evidence that crossed a database guardrail.",
+  "A database observation triggered operator paging.",
+  "The included health check found an out-of-range database condition.",
+  "The monitor recorded a database signal that warranted review.",
+  "A database check met the configured alerting rule.",
+  "The observation below triggered a database-health incident.",
+  "The monitor logged database evidence outside the operating range.",
+  "A recorded database condition crossed its safety rule.",
+  "The database health check below was flagged for follow-up.",
+  "The monitor captured an alert-worthy database observation.",
+  "A database sample warranted operator attention.",
+  "The recorded check found a database-health exception.",
+  "The monitor logged an observation that activated a database alert.",
+  "A database condition observed at check time crossed a guardrail.",
+  "The included database sample met paging policy.",
+  "The monitor recorded an out-of-bounds database check.",
+  "A database health observation generated an operator page.",
+  "The check below matched a database alert condition.",
+  "The monitor captured a database-health rule violation.",
+  "A recorded database signal qualified for incident review.",
+  "The database observation below was flagged by the monitor.",
+  "The monitor logged alert-level evidence from a database check.",
+  "A database health rule was crossed in the recorded sample.",
+  "The included check produced an actionable database observation.",
+  "The monitor recorded a database condition that met alert criteria.",
+  "A database observation was outside the configured safety bounds.",
+  "The recorded health sample activated database paging.",
+  "The monitor captured a database check that warranted review.",
+  "A database alert rule matched the observation below.",
+  "The included database evidence crossed an operating guardrail.",
+  "The monitor logged an alert-triggering database sample.",
+  "A database-health condition was observed at the recorded check.",
+  "The recorded database check satisfied the paging rule.",
+  "The monitor captured evidence for a database incident.",
+  "A database sample was flagged outside its normal range.",
+  "The included observation met database paging criteria.",
+  "The monitor recorded an exception in the database health check.",
+  "A database condition at check time triggered the alert path.",
+  "The recorded sample produced an evidence-backed database page.",
+  "The monitor logged a database observation for operator triage.",
+  "A database-health guardrail was crossed in the included check.",
+  "The observation below matched an unsafe database rule.",
+  "The monitor captured an alert event from the database check.",
+  "A recorded database sample met the monitor's alert criteria.",
+  "The included health evidence triggered database paging.",
+  "The monitor logged a database condition beyond a configured bound.",
+  "A database check was flagged by the health monitor.",
+  "The recorded observation crossed a database alert boundary.",
+  "The monitor captured an out-of-range database sample.",
+  "A database-health exception was recorded at check time.",
+  "The included check met the database incident rule.",
+  "The monitor logged evidence for an operator database review.",
+  "A recorded database condition activated the paging path.",
+  "The database sample below crossed a configured guardrail.",
+  "The monitor captured an observation that met alert policy.",
+  "A database health check was recorded outside safe bounds.",
+  "The included database condition triggered an incident page.",
+  "The monitor logged a database sample that required review.",
+  "A database observation matched the configured alert rule.",
+  "The recorded check crossed a database safety boundary.",
+  "The monitor captured alerting evidence from the database.",
+  "A database health sample was flagged for operator attention.",
+  "The included observation produced a database alert.",
+  "The monitor logged a database exception against its guardrails.",
+  "A recorded database condition warranted investigation.",
+  "The database check below matched paging criteria.",
+  "The monitor captured an unsafe observation at check time.",
+  "A database-health rule flagged the recorded sample.",
+  "The included evidence satisfied a database paging rule.",
+  "The monitor logged a condition outside database safety bounds.",
+  "A database observation at check time triggered paging.",
+  "The recorded health check produced a database incident signal.",
+  "The monitor captured a database sample beyond its alert boundary.",
+  "A database condition in the included check warranted review.",
+  "The recorded observation matched a database-health exception.",
+  "The monitor logged an alert-triggering database check.",
+  "A database health sample activated the paging rule.",
+  "The included database evidence was flagged by the monitor.",
+  "The monitor captured a database observation for operator review.",
+  "A recorded database check met the incident criteria.",
 ] as const;
+
+const DATABASE_METRIC_ALERT_LABELS: Readonly<
+  Record<DatabaseHealthRequiredMetricName, string>
+> = {
+  planetscale_edge_postgres_connection_errors_total:
+    "direct connection errors",
+  planetscale_pgbouncer_current_connections:
+    "PgBouncer current connections",
+  planetscale_pgbouncer_pools_client: "PgBouncer client pools",
+  planetscale_pgbouncer_pools_client_maxwait_seconds:
+    "PgBouncer client wait",
+  planetscale_pgbouncer_pools_server: "PgBouncer server pools",
+  planetscale_postgres_connection_state: "Postgres connection states",
+  planetscale_postgres_settings_max_connections:
+    "Postgres max connections",
+};
 
 export interface DatabaseHealthMonitorEnvironment {
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
@@ -100,8 +216,11 @@ type DatabaseHealthCollectedSample =
   }
   | {
     conditions: DatabaseHealthCondition[];
+    directConnectionErrorDelta: number | null;
     failureCode: DatabaseHealthFailureCode;
     failures: number;
+    monitoringEvidence: DatabaseHealthMonitoringEvidence;
+    snapshot: DatabaseMetricObservationSnapshot | null;
     status: "failed";
   };
 
@@ -194,10 +313,51 @@ export class DatabaseHealthMonitor {
         config: this.config,
         fetchImplementation: this.fetchImplementation,
       });
-      const snapshot = parsePlanetScaleDatabaseMetrics(
+      const observation = parsePlanetScaleDatabaseMetricObservation(
         metricsBody,
         this.config.branchId,
       );
+      if (observation.missingMetrics.length > 0) {
+        const directConnectionErrorDelta =
+          observation.snapshot.directConnectionErrorCounters === null
+            ? null
+            : calculateDirectConnectionErrorDelta(
+              observation.snapshot.directConnectionErrorCounters,
+              this.store.readLatestDirectConnectionErrorCounters(),
+            );
+        const conditions = evaluateDatabaseMetricSnapshot(
+          observation.snapshot,
+          directConnectionErrorDelta,
+        );
+        const priorFailures =
+          this.store.readAlertState().consecutiveScrapeFailures;
+        const failures = priorFailures + 1;
+        if (failures >= MONITORING_FAILURE_ALERT_COUNT) {
+          conditions.push({
+            failures,
+            kind: "monitoring_unavailable",
+            missingMetrics: observation.missingMetrics,
+          });
+        }
+        console.warn("Database health metrics collection failed.", {
+          failureCode: "required_metrics_missing",
+          failures,
+          missingMetrics: observation.missingMetrics,
+        });
+        return {
+          conditions,
+          directConnectionErrorDelta,
+          failureCode: "required_metrics_missing",
+          failures,
+          monitoringEvidence: {
+            availability: "incomplete",
+            missingMetrics: observation.missingMetrics,
+          },
+          snapshot: observation.snapshot,
+          status: "failed",
+        };
+      }
+      const snapshot = requireCompleteDatabaseMetricSnapshot(observation);
       const directConnectionErrorDelta =
         calculateDirectConnectionErrorDelta(
           snapshot.directConnectionErrorCounters,
@@ -215,21 +375,31 @@ export class DatabaseHealthMonitor {
       };
     } catch (error) {
       const failureCode = classifyDatabaseHealthFailure(error);
+      const missingMetrics = error instanceof DatabaseMetricsParseError
+        ? error.missingMetrics
+        : [];
       const priorFailures =
         this.store.readAlertState().consecutiveScrapeFailures;
       const failures = priorFailures + 1;
       const conditions: DatabaseHealthCondition[] =
         failures >= MONITORING_FAILURE_ALERT_COUNT
-          ? [{ failures, kind: "monitoring_unavailable" }]
+          ? [{ failures, kind: "monitoring_unavailable", missingMetrics }]
           : [];
       console.warn("Database health metrics collection failed.", {
         failureCode,
         failures,
+        missingMetrics,
       });
       return {
         conditions,
+        directConnectionErrorDelta: null,
         failureCode,
         failures,
+        monitoringEvidence: {
+          availability: "unavailable",
+          missingMetrics: [],
+        },
+        snapshot: null,
         status: "failed",
       };
     }
@@ -245,6 +415,33 @@ export class DatabaseHealthMonitor {
       this.store.setConsecutiveScrapeFailures(0);
     } else {
       this.store.setConsecutiveScrapeFailures(sample.failures);
+    }
+
+    const currentMonitoringCondition = sample.conditions.find(
+      (condition) => condition.kind === "monitoring_unavailable",
+    );
+    if (
+      sample.status === "failed"
+      && sample.failures === MONITORING_FAILURE_ALERT_COUNT
+      && currentMonitoringCondition
+    ) {
+      const priorEvidence = this.store.readLatestMonitoringEvidence();
+      if (priorEvidence === null) {
+        throw new Error(
+          "Database monitoring threshold is missing prior evidence.",
+        );
+      }
+      const monitoringAlertObligation = buildMonitoringAlertObligation({
+        checkedAtMs: input.checkedAtMs,
+        failures: currentMonitoringCondition.failures,
+        observations: [priorEvidence, sample.monitoringEvidence],
+      });
+      Object.assign(currentMonitoringCondition, {
+        incompleteChecks: monitoringAlertObligation.incompleteChecks,
+        missingMetrics: monitoringAlertObligation.missingMetrics,
+        unavailableChecks: monitoringAlertObligation.unavailableChecks,
+      });
+      this.store.recordMonitoringAlertObligation(monitoringAlertObligation);
     }
 
     let alertState = this.store.readAlertState();
@@ -275,24 +472,40 @@ export class DatabaseHealthMonitor {
     if (
       sample.conditions.length > 0
       || directErrorCountAvailableForAdmission > 0
+      || alertState.monitoringAlertObligation !== null
     ) {
       const isNewIncident = !alertState.incidentOpen;
       if (isNewIncident) {
         alertState = this.store.openIncident();
       }
-      const conditionsWithDeferredDirectErrors =
-        directErrorCountAvailableForAdmission > 0
-          ? [
-            ...sample.conditions.filter(
-              (condition) =>
-                condition.kind !== "direct_migration_admission_failures",
-            ),
-            {
-              count: directErrorCountAvailableForAdmission,
-              kind: "direct_migration_admission_failures" as const,
-            },
-          ]
-          : sample.conditions;
+      const monitoringAlertObligation =
+        alertState.monitoringAlertObligation;
+      const monitoringConditionForAdmission = monitoringAlertObligation
+        ? {
+          failures: monitoringAlertObligation.failures,
+          incompleteChecks: monitoringAlertObligation.incompleteChecks,
+          kind: "monitoring_unavailable" as const,
+          missingMetrics: monitoringAlertObligation.missingMetrics,
+          unavailableChecks: monitoringAlertObligation.unavailableChecks,
+        }
+        : null;
+      const currentReplayableConditions = sample.conditions.filter(
+        (condition) =>
+          condition.kind !== "direct_migration_admission_failures"
+          && condition.kind !== "monitoring_unavailable",
+      );
+      const conditionsWithDeferredDirectErrors = [
+        ...currentReplayableConditions,
+        ...(monitoringConditionForAdmission
+          ? [monitoringConditionForAdmission]
+          : []),
+        ...(directErrorCountAvailableForAdmission > 0
+          ? [{
+            count: directErrorCountAvailableForAdmission,
+            kind: "direct_migration_admission_failures" as const,
+          }]
+          : []),
+      ];
       const hasDirectConnectionError =
         directErrorCountAvailableForAdmission > 0;
       const attemptFenceOpen =
@@ -305,30 +518,52 @@ export class DatabaseHealthMonitor {
         (
           isPromotingDeferredDirectError
           || (
-            !isNewIncident
+            alertState.alertSequence > 0
             && !attemptFenceOpen
             && hasDirectConnectionError
           )
         )
           ? conditionsWithDeferredDirectErrors.filter(
             (condition) =>
-              condition.kind === "direct_migration_admission_failures",
+              condition.kind === "direct_migration_admission_failures"
+              || condition.kind === "monitoring_unavailable",
           )
           : conditionsWithDeferredDirectErrors;
+      const shouldHoldMonitoringForFence =
+        monitoringAlertObligation !== null
+        && !attemptFenceOpen
+        && !hasDirectConnectionError
+        && (
+          alertState.alertSequence > 0
+          || currentReplayableConditions.length === 0
+        );
       const admittedCheckedAtMs =
-        admittedConditions.length === 1
-        && admittedConditions[0]?.kind
-          === "direct_migration_admission_failures"
+        isPromotingDeferredDirectError
+        && admittedConditions.some(
+          (condition) =>
+            condition.kind === "direct_migration_admission_failures",
+        )
         && currentDirectError === undefined
         && alertState.deferredDirectErrorCheckedAtMs !== null
           ? alertState.deferredDirectErrorCheckedAtMs
-          : input.checkedAtMs;
+          : admittedConditions.length === 1
+            && admittedConditions[0]?.kind === "monitoring_unavailable"
+            && monitoringAlertObligation
+              ? monitoringAlertObligation.checkedAtMs
+              : input.checkedAtMs;
       if (
         (
           !alertState.pendingAlertIdempotencyKey
           || !alertState.pendingAlertMessage
         )
-        && (isNewIncident || hasDirectConnectionError || attemptFenceOpen)
+        && admittedConditions.length > 0
+        && !shouldHoldMonitoringForFence
+        && (
+          isNewIncident
+          || hasDirectConnectionError
+          || attemptFenceOpen
+          || monitoringAlertObligation !== null
+        )
       ) {
         const nextAlertSequence = alertState.alertSequence + 1;
         const pendingState = this.store.createPendingAlert({
@@ -336,11 +571,16 @@ export class DatabaseHealthMonitor {
             alertSequence: nextAlertSequence,
             incidentSequence: alertState.incidentSequence,
           }),
+          includesMonitoring: admittedConditions.some(
+            (condition) => condition.kind === "monitoring_unavailable",
+          ),
           message: buildDatabaseAlertMessage({
             alertSequence: nextAlertSequence,
             checkedAtMs: admittedCheckedAtMs,
             conditions: admittedConditions,
             incidentSequence: alertState.incidentSequence,
+            monitoringCheckedAtMs:
+              monitoringAlertObligation?.checkedAtMs ?? null,
           }),
         });
         if (
@@ -362,8 +602,11 @@ export class DatabaseHealthMonitor {
     } else {
       this.store.recordFailedSample({
         conditions: sample.conditions,
+        directConnectionErrorDelta: sample.directConnectionErrorDelta,
         failureCode: sample.failureCode,
+        monitoringEvidence: sample.monitoringEvidence,
         observedAtMs: input.observedAtMs,
+        snapshot: sample.snapshot,
       });
     }
   }
@@ -381,6 +624,7 @@ export class DatabaseHealthMonitor {
       input.conditions.length === 0
       && !hasPendingAlert
       && alertState.deferredDirectErrorCount === 0
+      && alertState.monitoringAlertObligation === null
     ) {
       if (
         input.sampleStatus === "ok"
@@ -509,6 +753,7 @@ export class DatabaseHealthMonitor {
         input.sampleStatus === "ok"
         && input.conditions.length === 0
         && stateAfterSuccess.deferredDirectErrorCount === 0
+        && stateAfterSuccess.monitoringAlertObligation === null
       ) {
         this.store.closeIncident();
       }
@@ -550,7 +795,6 @@ async function fetchPlanetScaleMetrics(input: {
         accept: "application/json",
       },
       method: "GET",
-      redirect: "error",
     },
   ).catch(() => {
     throw new DatabaseHealthFetchError("service_discovery_failed");
@@ -582,7 +826,6 @@ async function fetchPlanetScaleMetrics(input: {
         accept: "text/plain",
       },
       method: "GET",
-      redirect: "error",
     },
   ).catch(() => {
     throw new DatabaseHealthFetchError("metrics_scrape_failed");
@@ -738,7 +981,6 @@ async function resolveDatabaseHealthLinqDestination(input: {
         {
           headers: { authorization },
           method: "GET",
-          redirect: "error",
         },
       ),
       fetchWithTimeout(
@@ -747,7 +989,6 @@ async function resolveDatabaseHealthLinqDestination(input: {
         {
           headers: { authorization },
           method: "GET",
-          redirect: "error",
         },
       ),
     ]);
@@ -821,7 +1062,6 @@ async function sendDatabaseHealthLinqAlert(input: {
         "idempotency-key": input.idempotencyKey,
       },
       method: "POST",
-      redirect: "error",
     },
   );
   if (!response.ok) {
@@ -838,19 +1078,45 @@ function buildDatabaseAlertMessage(input: {
   checkedAtMs: number;
   conditions: readonly DatabaseHealthCondition[];
   incidentSequence: number;
+  monitoringCheckedAtMs: number | null;
 }): string {
-  const openingIndex =
-    (
-      input.incidentSequence
-      + input.alertSequence
-      - 2
-    ) % DATABASE_ALERT_OPENINGS.length;
+  const checkedAt = new Date(input.checkedAtMs).toISOString().slice(11, 16);
+  if (
+    input.conditions.length > 0
+    && input.conditions.every(
+      (condition) => condition.kind === "monitoring_unavailable",
+    )
+  ) {
+    const evidence = input.conditions
+      .map((condition) => formatDatabaseHealthCondition(
+        condition,
+        input.checkedAtMs,
+        input.monitoringCheckedAtMs,
+      ))
+      .join("; ");
+    return `${evidence}. Window ended ${checkedAt} UTC.`;
+  }
+  // Both steps are coprime to the 100-item bank, so one incident traverses
+  // every reviewed opening before repeating while retries remain reproducible.
+  const openingIndex = normalizeModulo(
+    input.incidentSequence * 37 + input.alertSequence * 17,
+    DATABASE_ALERT_OPENINGS.length,
+  );
   const opening =
     DATABASE_ALERT_OPENINGS[openingIndex]
     ?? DATABASE_ALERT_OPENINGS[0];
-  const evidence = input.conditions.map(formatDatabaseHealthCondition).join("; ");
-  const checkedAt = new Date(input.checkedAtMs).toISOString().slice(11, 16);
+  const evidence = input.conditions.map((condition) =>
+    formatDatabaseHealthCondition(
+      condition,
+      input.checkedAtMs,
+      input.monitoringCheckedAtMs,
+    )
+  ).join("; ");
   return `${opening} ${evidence}. Checked ${checkedAt} UTC.`;
+}
+
+function normalizeModulo(value: number, modulus: number): number {
+  return ((value % modulus) + modulus) % modulus;
 }
 
 function resolveLinqDirectChatIdentity(
@@ -940,6 +1206,8 @@ function hasHealthyLinqSenderLine(input: {
 
 function formatDatabaseHealthCondition(
   condition: DatabaseHealthCondition,
+  checkedAtMs: number,
+  monitoringCheckedAtMs: number | null,
 ): string {
   switch (condition.kind) {
     case "client_wait":
@@ -967,10 +1235,84 @@ function formatDatabaseHealthCondition(
         condition.count === 1 ? "connection error" : "connection errors"
       }`;
     case "monitoring_unavailable":
-      return `PlanetScale metrics unavailable for ${formatCount(
-        condition.failures,
-      )} checks`;
+      return formatMonitoringUnavailableCondition(
+        condition,
+        monitoringCheckedAtMs !== null
+          && monitoringCheckedAtMs !== checkedAtMs
+          ? monitoringCheckedAtMs
+          : null,
+      );
   }
+}
+
+function formatMonitoringUnavailableCondition(
+  condition: Extract<
+    DatabaseHealthCondition,
+    { kind: "monitoring_unavailable" }
+  >,
+  observedAtMs: number | null,
+): string {
+  const incompleteChecks = condition.incompleteChecks
+    ?? (condition.missingMetrics.length > 0 ? condition.failures : 0);
+  const unavailableChecks = condition.unavailableChecks
+    ?? (condition.missingMetrics.length > 0 ? 0 : condition.failures);
+  const missingMetricLabels = condition.missingMetrics.map(
+    (name) => DATABASE_METRIC_ALERT_LABELS[name],
+  );
+  const details = [
+    observedAtMs === null
+      ? null
+      : `window ended ${
+        new Date(observedAtMs).toISOString().slice(11, 16)
+      } UTC`,
+    incompleteChecks > 0 && unavailableChecks > 0
+      ? `${formatCount(incompleteChecks)} incomplete, ${formatCount(
+        unavailableChecks,
+      )} unavailable`
+      : null,
+    missingMetricLabels.length === 0
+      ? null
+      : `missing PlanetScale ${
+        missingMetricLabels.length === 1 ? "metric" : "metrics"
+      } observed: ${missingMetricLabels.join(", ")}`,
+  ].filter((detail): detail is string => detail !== null);
+  const detailEvidence = details.length === 0
+    ? ""
+    : ` (${details.join("; ")})`;
+  const availability = incompleteChecks > 0 && unavailableChecks > 0
+    ? "impaired"
+    : incompleteChecks > 0
+      ? "incomplete"
+      : "unavailable";
+  return `Database monitor telemetry was ${availability} for ${formatCount(
+    condition.failures,
+  )} checks${detailEvidence}`;
+}
+
+function buildMonitoringAlertObligation(input: {
+  checkedAtMs: number;
+  failures: number;
+  observations: readonly DatabaseHealthMonitoringEvidence[];
+}): DatabaseHealthMonitoringAlertObligation {
+  if (input.observations.length !== input.failures) {
+    throw new Error("Database monitoring window evidence is incomplete.");
+  }
+  const incompleteChecks = input.observations.filter(
+    (observation) => observation.availability === "incomplete",
+  ).length;
+  const unavailableChecks = input.observations.length - incompleteChecks;
+  const observedMissingMetrics = new Set(
+    input.observations.flatMap((observation) => observation.missingMetrics),
+  );
+  return {
+    checkedAtMs: input.checkedAtMs,
+    failures: input.failures,
+    incompleteChecks,
+    missingMetrics: DATABASE_HEALTH_REQUIRED_METRIC_NAMES.filter(
+      (name) => observedMissingMetrics.has(name),
+    ),
+    unavailableChecks,
+  };
 }
 
 function buildDatabaseAlertIdempotencyKey(input: {
@@ -1066,6 +1408,10 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   return await fetchImplementation(input, {
     ...init,
+    // Workers fetch rejects redirect: "error" outright (TypeError before any
+    // network I/O); "manual" keeps the fail-closed intent because a 3xx
+    // response is !ok for every caller.
+    redirect: "manual",
     signal: AbortSignal.timeout(DATABASE_HEALTH_FETCH_TIMEOUT_MS),
   });
 }

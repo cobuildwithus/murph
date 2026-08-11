@@ -12,6 +12,7 @@ const serviceMocks = vi.hoisted(() => ({
   createComposioConnectedAppsClient: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
   createHostedDeviceSyncRegistry: vi.fn(),
+  createHostedDeviceSyncRegistryWithProviderConfigs: vi.fn(),
   deleteHostedPrivyUser: vi.fn(),
   deleteHostedRunnerUserDataBestEffort: vi.fn(),
   enqueueHostedMemberChannelsUpdatedForActiveMemberTx: vi.fn(),
@@ -32,6 +33,12 @@ const serviceMocks = vi.hoisted(() => ({
   deleteHostedPhoneCallsForAccountDeletion: vi.fn(),
   terminateHostedUserRuntimeWorkflowBestEffort: vi.fn(),
   prepareHostedPrivyPhoneTransferSourceRetirementTx: vi.fn(),
+  resolveDeviceProviderApplicationForConnection: vi.fn(),
+  revokeStravaDeviceSyncAccess: vi.fn(),
+}));
+
+vi.mock("@murphai/device-syncd/providers/strava", () => ({
+  revokeStravaDeviceSyncAccess: serviceMocks.revokeStravaDeviceSyncAccess,
 }));
 
 vi.mock("@/src/lib/connected-apps/composio", async (importOriginal) => ({
@@ -50,6 +57,14 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 vi.mock("@/src/lib/device-sync/providers", () => ({
   createHostedDeviceSyncRegistry: serviceMocks.createHostedDeviceSyncRegistry,
+  createHostedDeviceSyncRegistryWithProviderConfigs:
+    serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs,
+}));
+
+vi.mock("@/src/lib/device-sync/provider-applications", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/device-sync/provider-applications")>()),
+  resolveDeviceProviderApplicationForConnection:
+    serviceMocks.resolveDeviceProviderApplicationForConnection,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => ({
@@ -142,6 +157,7 @@ vi.mock("@/src/lib/phone-calls/account-deletion", () => ({
 }));
 
 import { HostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { DeviceProviderApplicationError } from "@/src/lib/device-sync/provider-applications";
 import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_RECORD_SUMMARY,
 } from "@/src/lib/hosted-execution/product-feedback";
@@ -201,11 +217,11 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_mailbox_payload",
   "prisma.hosted_mailbox_lane_counter",
   "prisma.hosted_workspace",
+  "postgres.hosted_runtime_log",
   "prisma.hosted_computer_run",
   "prisma.hosted_computer_handoff",
   "prisma.hosted_phone_call",
   "prisma.hosted_physical_note",
-  "prisma.hosted_runtime_log",
   "prisma.hosted_user_crypto_envelope",
   "prisma.hosted_user_crypto_audit",
   "prisma.hosted_ai_usage",
@@ -223,6 +239,7 @@ const REQUIRED_STORE_SLUGS = [
   "prisma.hosted_consent_grant",
   "prisma.hosted_vault_share",
   "prisma.device_connection",
+  "prisma.device_provider_application",
   "prisma.device_sync_companion_capture_receipt",
   "prisma.device_sync_dirty_connection",
   "prisma.device_sync_dirty_payload",
@@ -292,6 +309,14 @@ beforeEach(() => {
   serviceMocks.createHostedDeviceSyncRegistry.mockReturnValue({
     get: vi.fn(() => null),
   });
+  serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockReset();
+  serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockReturnValue({
+    get: vi.fn(() => null),
+  });
+  serviceMocks.resolveDeviceProviderApplicationForConnection.mockReset();
+  serviceMocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue(null);
+  serviceMocks.revokeStravaDeviceSyncAccess.mockReset();
+  serviceMocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
   serviceMocks.deleteHostedPrivyUser.mockReset();
   serviceMocks.deleteHostedPrivyUser.mockResolvedValue(true);
   serviceMocks.enqueueHostedMemberChannelsUpdatedForActiveMemberTx.mockReset();
@@ -1984,6 +2009,30 @@ describe("deleteHostedAccountData", () => {
     expect(deleteCalls.map((call) => call.model)).not.toContain("hostedMailboxItemConsume");
   });
 
+  it("deletes referral invite claims owned by the introduced member", async () => {
+    const deleteCalls: HostedAccountDeletionPrismaDeleteCall[] = [];
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deleteCalls,
+      onTransaction: () => {},
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(result.deletedCounts["prisma.hosted_invite"]).toBe(1);
+    expect(deleteCalls).toEqual(expect.arrayContaining([
+      {
+        model: "hostedInvite",
+        where: {
+          memberId: "member_123",
+        },
+      },
+    ]));
+  });
+
   it("reports vault-share rows before member-row FK cascades delete them", async () => {
     const operationOrder: string[] = [];
     const prisma = createHostedAccountDeletionPrismaForTest({
@@ -2784,6 +2833,7 @@ describe("deleteHostedAccountData", () => {
     const dirtyStateIndex = deletedModels.indexOf("deviceSyncDirtyConnection");
     const signalIndex = deletedModels.indexOf("deviceSyncSignal");
     const connectionIndex = deletedModels.indexOf("deviceConnection");
+    const providerApplicationIndex = deletedModels.indexOf("deviceProviderApplication");
 
     expect(result.deletedCounts["prisma.device_sync_companion_capture_receipt"]).toBe(1);
     expect(result.deletedCounts["prisma.device_sync_dirty_payload"]).toBe(1);
@@ -2795,6 +2845,8 @@ describe("deleteHostedAccountData", () => {
     expect(dirtyStateIndex).toBeGreaterThan(dirtyPayloadIndex);
     expect(signalIndex).toBeGreaterThan(dirtyStateIndex);
     expect(connectionIndex).toBeGreaterThan(signalIndex);
+    expect(providerApplicationIndex).toBeGreaterThan(connectionIndex);
+    expect(result.deletedCounts["prisma.device_provider_application"]).toBe(1);
   });
 
   it("deletes webhook traces for device connections visible inside the deletion transaction", async () => {
@@ -3062,6 +3114,165 @@ describe("deleteHostedAccountData", () => {
         warningCode: null,
       },
     ]);
+  });
+
+  it("revokes app-bound connections through their exact member-owned provider application", async () => {
+    const revokeAccess = vi.fn();
+    const providerConfigs = {
+      strava: {
+        clientId: "member-strava-client",
+        clientSecret: "member-strava-secret",
+      },
+    };
+    const storedAccount = {
+      accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
+      connectedAt: "2026-04-27T00:07:00.000Z",
+      createdAt: "2026-04-27T00:07:00.000Z",
+      credential: {
+        kind: "oauth_tokens" as const,
+        tokens: {
+          accessToken: "access-token",
+          accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
+          refreshToken: "refresh-token",
+        },
+      },
+      disconnectGeneration: 0,
+      displayName: "Strava",
+      externalAccountId: "strava-athlete-123",
+      id: "dsc_strava",
+      keyVersion: "key-v1",
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "strava",
+      scopes: ["read", "activity:read_all"],
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      tokenVersion: 1,
+      updatedAt: "2026-04-27T00:07:00.000Z",
+    };
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [{
+        id: "dsc_strava",
+        provider: "strava",
+        providerAccountBlindIndex: "blind-index",
+      }],
+      onTransaction: () => undefined,
+    });
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        getStoredConnectionAccountForUser: vi.fn(async () => storedAccount),
+        prisma,
+      },
+    });
+    serviceMocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue({
+      applicationId: "dpa_strava",
+      provider: "strava",
+      providerConfigs,
+      revision: 3,
+    });
+    serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockReturnValue({
+      get: vi.fn(() => ({ connectionHandler: { revokeAccess } })),
+    });
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.resolveDeviceProviderApplicationForConnection).toHaveBeenCalledWith({
+      connectionId: "dsc_strava",
+      memberId: "member_123",
+      prisma,
+    });
+    expect(serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs).toHaveBeenCalledWith({
+      providerConfigs,
+    });
+    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+    expect(revokeAccess).toHaveBeenCalledWith(storedAccount);
+    expect(result.providerRevocations).toEqual([{
+      connectionId: "dsc_strava",
+      errorCode: null,
+      providerLabel: "Strava",
+      status: "revoked",
+      warningCode: null,
+    }]);
+  });
+
+  it("uses stored Strava authority and proceeds with deletion when private credentials require repair", async () => {
+    const storedAccount = {
+      accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
+      connectedAt: "2026-04-27T00:07:00.000Z",
+      createdAt: "2026-04-27T00:07:00.000Z",
+      credential: {
+        kind: "oauth_tokens" as const,
+        tokens: {
+          accessToken: "cleanup-access-token",
+          accessTokenExpiresAt: "2026-04-27T01:07:00.000Z",
+          refreshToken: "cleanup-refresh-token",
+        },
+      },
+      disconnectGeneration: 0,
+      displayName: "Strava",
+      externalAccountId: "strava-athlete-123",
+      id: "dsc_strava",
+      keyVersion: "key-v1",
+      lastSyncCompletedAt: null,
+      lastSyncErrorAt: null,
+      lastSyncStartedAt: null,
+      lastWebhookAt: null,
+      metadata: {},
+      nextReconcileAt: null,
+      provider: "strava",
+      scopes: ["read", "activity:read_all"],
+      setupExpiresAt: null,
+      setupPhase: null,
+      status: "active" as const,
+      tokenVersion: 1,
+      updatedAt: "2026-04-27T00:07:00.000Z",
+    };
+    const prisma = createHostedAccountDeletionPrismaForTest({
+      deviceConnections: [{
+        id: "dsc_strava",
+        provider: "strava",
+        providerAccountBlindIndex: "blind-index",
+      }],
+      onTransaction: () => undefined,
+    });
+    serviceMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+      store: {
+        getStoredConnectionAccountForUser: vi.fn(async () => storedAccount),
+        prisma,
+      },
+    });
+    serviceMocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_INVALID",
+        "Private provider application credentials are invalid.",
+      ),
+    );
+
+    const result = await deleteHostedAccountData({
+      memberId: "member_123",
+      prisma,
+      request: new Request("https://join.example.test/settings"),
+    });
+
+    expect(serviceMocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedAccount);
+    expect(serviceMocks.createHostedDeviceSyncRegistry).not.toHaveBeenCalled();
+    expect(serviceMocks.createHostedDeviceSyncRegistryWithProviderConfigs).not.toHaveBeenCalled();
+    expect(result.providerRevocations).toEqual([{
+      connectionId: "dsc_strava",
+      errorCode: null,
+      providerLabel: "Strava",
+      status: "revoked",
+      warningCode: null,
+    }]);
   });
 
   it("reports provider registry failures through the account-deletion revocation policy", async () => {
@@ -3638,6 +3849,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
         return input.transactionDeviceConnections ?? input.deviceConnections ?? [];
       },
     },
+    deviceProviderApplication: makeDeleteDelegate("deviceProviderApplication"),
     hostedComputerRun: {
       ...makeDeleteDelegate("hostedComputerRun"),
       findMany: async () => {
@@ -3751,6 +3963,7 @@ function createHostedAccountDeletionPrismaForTest(input: {
     deviceConnection: {
       findMany: async () => input.deviceConnections ?? [],
     },
+    deviceProviderApplication: makeDeleteDelegate("deviceProviderApplication"),
     hostedAccountGroup: {
       findMany: async () => input.familyGroups ?? [],
     },
@@ -3987,6 +4200,7 @@ type HostedAccountDeletionPrismaTransactionFake = {
       sources?: { sourceProviderSlug: string; status: string }[];
     }>>;
   };
+  deviceProviderApplication: HostedAccountDeletionPrismaDeleteDelegate;
   hostedComputerRun: HostedAccountDeletionPrismaDeleteDelegate & {
     findMany: () => Promise<unknown[]>;
   };

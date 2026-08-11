@@ -14,6 +14,7 @@ import {
 import {
   type AssistantBindingDelivery,
   type AssistantDeliverySource,
+  type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
@@ -29,6 +30,7 @@ import {
   readDeliveredCleanupTargetAliases,
   readDeliveredIdempotencyKey,
   readDeliveredProviderMessageId,
+  readDeliveredProviderMessageEffects,
   readDeliveredProviderMessageIds,
   readDeliveredProviderThreadId,
   readDeliveredTarget,
@@ -619,6 +621,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
             message,
             ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
             replyToMessageId,
+            threadIsDirect,
           })
         : null
       if (!recovered) {
@@ -637,6 +640,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
       target: deliveredTarget ?? providerThreadId ?? candidate.target,
       targetKind: inferDeliveredLinqTargetKind(candidate.kind, delivered),
       providerMessageId: readDeliveredProviderMessageId(delivered),
+      providerMessageEffects: readDeliveredProviderMessageEffects(delivered),
       providerMessageIds: readDeliveredProviderMessageIds(delivered),
       providerThreadId: providerThreadId ?? deliveredTarget,
     }
@@ -682,6 +686,7 @@ async function sendLinqVoiceMemoDelivery(input: {
   threadIsDirect: boolean | null
 }): Promise<{
   providerMessageId?: string | null
+  providerMessageEffects?: AssistantProviderMessageEffect[] | null
   providerMessageIds?: string[] | null
   providerThreadId?: string | null
   target?: string | null
@@ -711,6 +716,7 @@ async function sendLinqVoiceMemoDelivery(input: {
   const attachmentId = voiceMemo.transport.attachmentId
 
   const providerMessageIds: string[] = []
+  const providerMessageEffects: AssistantProviderMessageEffect[] = []
   const text = messageTextOrNull(input.message)
   const fallbackText = messageTextOrNull(voiceMemo.transcript ?? '')
   if (input.nativeReplyRequested === true && !text) {
@@ -790,16 +796,18 @@ async function sendLinqVoiceMemoDelivery(input: {
         message: text,
         ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
         replyToMessageId: input.replyToMessageId,
+        threadIsDirect: input.threadIsDirect,
       })
       if (!recovered) {
         throw error
       }
       deliveredText = recovered
     }
-    const textMessageId = readDeliveredProviderMessageId(deliveredText)
-    if (textMessageId) {
-      providerMessageIds.push(textMessageId)
-    }
+    appendDeliveredProviderMessageIds(providerMessageIds, deliveredText)
+    appendDeliveredProviderMessageEffects(
+      providerMessageEffects,
+      deliveredText,
+    )
   }
 
   const deliveredTextTarget =
@@ -856,11 +864,17 @@ async function sendLinqVoiceMemoDelivery(input: {
           targetKind: voiceMemoTargetKind,
         })
         appendDeliveredProviderMessageIds(providerMessageIds, deliveredFallback)
+        appendDeliveredProviderMessageEffects(
+          providerMessageEffects,
+          deliveredFallback,
+        )
         return {
           target: readDeliveredTarget(deliveredFallback) ?? voiceMemoTarget,
           targetKind:
             readDeliveredTargetKind(deliveredFallback) ?? voiceMemoTargetKind,
           providerMessageId: readDeliveredProviderMessageId(deliveredFallback),
+          providerMessageEffects:
+            providerMessageEffects.length > 0 ? providerMessageEffects : null,
           providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
           providerThreadId:
             readDeliveredProviderThreadId(deliveredFallback) ??
@@ -894,15 +908,19 @@ async function sendLinqVoiceMemoDelivery(input: {
       targetKind: voiceMemoTargetKind,
     })
   }
+  appendDeliveredProviderMessageIds(providerMessageIds, deliveredVoiceMemo)
+  appendDeliveredProviderMediaEffects(
+    providerMessageEffects,
+    deliveredVoiceMemo,
+  )
   const voiceMessageId = readDeliveredProviderMessageId(deliveredVoiceMemo)
-  if (voiceMessageId) {
-    providerMessageIds.push(voiceMessageId)
-  }
 
   return {
     target: readDeliveredTarget(deliveredVoiceMemo) ?? voiceMemoTarget,
     targetKind: readDeliveredTargetKind(deliveredVoiceMemo) ?? voiceMemoTargetKind,
     providerMessageId: voiceMessageId,
+    providerMessageEffects:
+      providerMessageEffects.length > 0 ? providerMessageEffects : null,
     providerMessageIds: providerMessageIds.length > 0 ? providerMessageIds : null,
     providerThreadId:
       readDeliveredProviderThreadId(deliveredVoiceMemo) ?? voiceMemoTarget,
@@ -1086,6 +1104,49 @@ function appendDeliveredProviderMessageIds(
   }
 }
 
+function appendDeliveredProviderMessageEffects(
+  output: AssistantProviderMessageEffect[],
+  delivered:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
+      }
+    | void,
+): void {
+  const deliveredEffects = readDeliveredProviderMessageEffects(delivered)
+  if (deliveredEffects) {
+    output.push(...deliveredEffects)
+  }
+}
+
+function appendDeliveredProviderMediaEffects(
+  output: AssistantProviderMessageEffect[],
+  delivered:
+    | {
+        providerMessageId?: string | null
+        providerMessageIds?: string[] | null
+        providerMessageEffects?: AssistantProviderMessageEffect[] | null
+      }
+    | void,
+): void {
+  const deliveredEffects = readDeliveredProviderMessageEffects(delivered)
+  if (deliveredEffects) {
+    output.push(...deliveredEffects)
+    return
+  }
+
+  const providerMessageIds =
+    readDeliveredProviderMessageIds(delivered) ??
+    [readDeliveredProviderMessageId(delivered)].filter(
+      (providerMessageId): providerMessageId is string =>
+        providerMessageId !== null,
+    )
+  for (const providerMessageId of providerMessageIds) {
+    output.push({ message: null, providerMessageId })
+  }
+}
+
 function normalizeDeliveryFailureCode(error: unknown): string | null {
   return error instanceof VaultCliError && error.code
     ? error.code
@@ -1264,6 +1325,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   message: string
   nativeReplyRequested?: true
   replyToMessageId?: string | null
+  threadIsDirect: boolean | null
 }): Promise<
   | {
       providerMessageId?: string | null
@@ -1273,6 +1335,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   | null
 > {
   if (
+    input.threadIsDirect !== true ||
     input.dependencies.sendLinq ||
     input.nativeReplyRequested === true ||
     !looksLikeMissingLinqChatError(input.error)

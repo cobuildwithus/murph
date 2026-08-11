@@ -2,7 +2,7 @@
 
 **Effective Date:** April 29, 2026
 
-**Last Updated:** July 23, 2026
+**Last Updated:** August 9, 2026
 
 This page collects the current Murph legal documents for the hosted service. The latest PDFs are available under `/legal/`, versioned PDFs are retained for auditability, and `/legal/manifest.json` lists the current document versions without timestamp churn.
 
@@ -14,7 +14,7 @@ This page collects the current Murph legal documents for the hosted service. The
 | Privacy Policy | 2026-07-23 | [/legal/privacy](/legal/privacy) | [/legal/privacy.pdf](/legal/privacy.pdf) |
 | Consumer Health Data Notice | 2026-07-23 | [/consumer-health-data-privacy-policy](/consumer-health-data-privacy-policy) | [/legal/consumer-health-data-notice.pdf](/legal/consumer-health-data-notice.pdf) |
 | Health AI Safety Disclosure | 2026-07-23 | [/legal/health-ai-safety-disclosure](/legal/health-ai-safety-disclosure) | [/legal/health-ai-safety-disclosure.pdf](/legal/health-ai-safety-disclosure.pdf) |
-| Subprocessors, Model Providers, and Connected Services | 2026-07-23 | [/subprocessors](/subprocessors) | [/legal/subprocessors.pdf](/legal/subprocessors.pdf) |
+| Subprocessors, Model Providers, and Connected Services | 2026-08-09 | [/subprocessors](/subprocessors) | [/legal/subprocessors.pdf](/legal/subprocessors.pdf) |
 
 ## Consent records
 

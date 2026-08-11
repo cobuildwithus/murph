@@ -87,15 +87,18 @@ import {
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeAssistantExecutionContext,
+  resolveAssistantExecutionDefaultTarget,
+  resolveAssistantExecutionOperatorDefaults,
   type AssistantHostedProgressDeliveryDependencies,
   type AssistantExecutionContext,
 } from './execution-context.js'
-import { resolveAssistantExecutionDefaultTarget } from './execution-context.js'
-import { resolveAssistantExecutionOperatorDefaults } from './execution-context.js'
 import {
   executeCodexTurnWithRecovery,
   resolveAssistantCodexThreadScope,
 } from './codex-turn-runner.js'
+import {
+  stampAssistantProviderStartCriticalPath,
+} from './provider-start-critical-path.js'
 import {
   readCodexThreadCompatibilityFingerprint,
   readCodexThreadRouteFingerprint,
@@ -136,14 +139,12 @@ import {
   requestAssistantVaultFileSend,
   resolveAssistantVaultFileSendTargetFingerprint,
 } from './vault-file-send.js'
-import type {
-  AssistantAcceptedTurnInputJournal,
-  AssistantAcceptedTurnInputItemInput,
-  AssistantAcceptedTurnInputTranscriptRef,
-} from './active-turn-input-journal.js'
 import {
   assertAssistantAcceptedTurnInputAssistantInputEventsExist,
   assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist,
+  type AssistantAcceptedTurnInputJournal,
+  type AssistantAcceptedTurnInputItemInput,
+  type AssistantAcceptedTurnInputTranscriptRef,
 } from './active-turn-input-journal.js'
 import {
   createAssistantActiveTurnNotActiveError,
@@ -466,6 +467,11 @@ export async function openAssistantConversationLocal(
 export async function sendAssistantMessageLocal(
   input: AssistantMessageInput,
 ): Promise<AssistantAskResult> {
+  const providerStartAtAssistantService =
+    stampAssistantProviderStartCriticalPath(
+      input.providerStartCriticalPath,
+      'assistantServiceStartedAtMonotonicMs',
+    )
   await assertAssistantAcceptedTurnInputItemInputsAssistantInputEventsExist({
     inputs: input.acceptedTurnInput?.initialInputs ?? [],
     vault: input.vault,
@@ -499,11 +505,21 @@ export async function sendAssistantMessageLocal(
     defaults: await resolveAssistantOperatorDefaults(),
     executionContext,
   })
+  const providerStartAtTurnLockWait =
+    stampAssistantProviderStartCriticalPath(
+      providerStartAtAssistantService,
+      'assistantTurnLockWaitStartedAtMonotonicMs',
+    )
   const turnLockWaitStartedAt = Date.now()
   const runLockedTurn = () => withAssistantTurnLock({
     abortSignal: input.abortSignal,
     vault: input.vault,
     run: async () => {
+      const providerStartAtTurnLockAcquired =
+        stampAssistantProviderStartCriticalPath(
+          providerStartAtTurnLockWait,
+          'assistantTurnLockAcquiredAtMonotonicMs',
+        )
       const lockAcquiredAt = Date.now()
       const turnLockWaitMs = elapsedSince(turnLockWaitStartedAt)
       emitHostedAssistantContextTimingTrace({
@@ -764,6 +780,10 @@ export async function sendAssistantMessageLocal(
           && actionApprovalPort != null
           && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
           && vaultFileSendTargetFingerprint !== null
+        const pendingVaultFilesAvailable =
+          input.deliverResponse === true
+          && currentAudienceReplyDeliveryAvailable
+          && currentDeliveryFields.channel?.trim().toLowerCase() === 'linq'
         const hostedToolContext = hostedExecutionContext
           ? createAssistantHostedToolContext({
               computerToolsAvailable: hostedComputerToolsAvailable,
@@ -788,12 +808,14 @@ export async function sendAssistantMessageLocal(
                   acceptedInputItemsForProviderRequest,
                 ),
               messageInput: input,
+              pendingVaultFilesAvailable,
               route,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
                     sendVaultFile: async (
                       ref: string,
                       toolCallId?: string | null,
+                      retireExportPackIds?: readonly string[],
                     ) => {
                       const deliveryFields = resolveAssistantCurrentAudienceDeliveryFields({
                         input: currentInput,
@@ -831,6 +853,7 @@ export async function sendAssistantMessageLocal(
                         explicitTarget: deliveryFields.explicitTarget,
                         identityId: deliveryFields.identityId,
                         ref,
+                        retireExportPackIds,
                         replyToMessageId: deliveryFields.replyToMessageId,
                         sessionId: currentSession.sessionId,
                         threadId: deliveryFields.threadId,
@@ -1088,6 +1111,11 @@ export async function sendAssistantMessageLocal(
         // effects may reference any input already admitted into the provider
         // turn. Native replies and reactions remain exact to one ordinal.
         const admissionMs = elapsedSince(admissionStartedAt)
+        const providerStartAtPreProviderSetupDone =
+          stampAssistantProviderStartCriticalPath(
+            providerStartAtTurnLockAcquired,
+            'preProviderSetupDoneAtMonotonicMs',
+          )
         const preProviderSetupMs = elapsedSince(lockAcquiredAt)
         emitHostedAssistantContextTimingTrace({
           message: input,
@@ -1267,6 +1295,12 @@ export async function sendAssistantMessageLocal(
             threadScope,
           },
           providerRequestOrdinal,
+          ...(providerStartAtPreProviderSetupDone
+            ? {
+                providerStartCriticalPath:
+                  providerStartAtPreProviderSetupDone,
+              }
+            : {}),
           resolvedSession: currentSession,
           turnCreatedAt: currentUserTurn.turnCreatedAt,
           progressDelivery,
@@ -2027,7 +2061,10 @@ export async function sendAssistantMessageLocal(
           providerResult.productFeedbackCandidate ?? null
         const productFeedbackCandidateSink =
           executionContext?.hosted?.productFeedbackCandidateSink ?? null
-        if (productFeedbackCandidate && productFeedbackCandidateSink) {
+        if (
+          productFeedbackCandidate &&
+          productFeedbackCandidateSink
+        ) {
           try {
             productFeedbackCandidateSink.acceptProductFeedbackCandidate(
               productFeedbackCandidate,

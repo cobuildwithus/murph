@@ -19,6 +19,7 @@ import {
   markAssistantOutboxIntentSent,
   markAssistantOutboxIntentMirrorRetryable,
   markAssistantOutboxIntentMirrorTerminal,
+  persistAssistantOutboxIntentLinqAppCardTextFallback,
   resetAssistantOutboxPreparedDispatch,
   updateAssistantOutboxAfterDispatchFailure,
 } from '../src/assistant/outbox/dispatch-state.ts'
@@ -35,6 +36,18 @@ type AssistantMessageChannelDelivery = Extract<
   AssistantChannelDelivery,
   { kind?: 'message' }
 >
+
+const OUTBOX_RESPONSE_CARD = {
+  kind: 'daily_nutrition',
+  localDate: '2030-04-13',
+  mealCount: 1,
+  totals: {
+    calories: { mealCount: 1, total: 520 },
+    carbsGrams: { mealCount: 1, total: 48 },
+    fatGrams: { mealCount: 1, total: 20 },
+    proteinGrams: { mealCount: 1, total: 42 },
+  },
+} as const
 
 function expectMessageDelivery(
   delivery: AssistantChannelDelivery | null | undefined,
@@ -775,7 +788,6 @@ describe('assistant outbox dispatch-state', () => {
       const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
       const resetAt = new Date('2030-04-13T00:10:03.000Z')
       const reset = await resetAssistantOutboxPreparedDispatch({
-        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_reset',
         deliveryTransportIdempotent: false,
         intent: prepared!.intent,
         intentPath,
@@ -840,7 +852,6 @@ describe('assistant outbox dispatch-state', () => {
       const paths = resolveAssistantStatePaths(vault)
       const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
       const reset = await resetAssistantOutboxPreparedDispatch({
-        deliveryIdempotencyKey: retryable.deliveryIdempotencyKey,
         deliveryTransportIdempotent: retryable.deliveryTransportIdempotent,
         intent: prepared!.intent,
         intentPath,
@@ -862,6 +873,66 @@ describe('assistant outbox dispatch-state', () => {
       expect(persisted?.lastAttemptAt).toBe('2030-04-13T00:05:00.000Z')
       expect(persisted?.nextAttemptAt).toBe('2030-04-13T00:10:00.000Z')
       expect(persisted?.lastError?.code).toBe('TELEGRAM_TEMPORARY_FAILURE')
+    })
+  })
+
+  it('preserves the durable current delivery identity while restoring prepared metadata', async () => {
+    await withTempVault(async (vault) => {
+      await createAssistantTurnReceipt({
+        deliveryRequested: true,
+        prompt: 'hello from the outbox seam',
+        provider: 'codex-cli',
+        providerModel: 'gpt-5.4',
+        sessionId: 'asst_outbox_test',
+        turnId: 'turn_outbox_prepared_identity_transition',
+        vault,
+      })
+      const created = await createAssistantOutboxIntent({
+        card: OUTBOX_RESPONSE_CARD,
+        channel: 'linq',
+        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_identity_transition',
+        message: 'hello from the outbox seam',
+        sessionId: 'asst_outbox_test',
+        threadId: 'thread_prepared_identity_transition',
+        threadIsDirect: true,
+        turnId: 'turn_outbox_prepared_identity_transition',
+        vault,
+      })
+      const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+        deliveryIdempotencyKey: created.deliveryIdempotencyKey,
+        deliveryTransportIdempotent: created.deliveryTransportIdempotent,
+        intentId: created.intentId,
+        startedAt: '2030-04-13T00:10:00.000Z',
+        vault,
+      })
+      const paths = resolveAssistantStatePaths(vault)
+      const intentPath = resolveAssistantOutboxIntentPath(
+        paths.outboxDirectory,
+        created.intentId,
+      )
+      await persistAssistantOutboxIntentLinqAppCardTextFallback({
+        idempotencyKey: `${created.deliveryIdempotencyKey}:fallback`,
+        intentPath,
+        persistedAt: new Date('2030-04-13T00:10:01.000Z'),
+        sending: prepared!.intent,
+        vault,
+      })
+
+      const reset = await resetAssistantOutboxPreparedDispatch({
+        deliveryTransportIdempotent: created.deliveryTransportIdempotent,
+        intent: prepared!.intent,
+        intentPath,
+        preparedDispatchToken: prepared!.preparedDispatchToken,
+        resetAt: new Date('2030-04-13T00:10:03.000Z'),
+        restoreDispatchState: prepared!.previousDispatchState,
+        vault,
+      })
+
+      expect(reset?.status).toBe('pending')
+      expect(reset?.attemptCount).toBe(0)
+      expect(reset?.card).toBeNull()
+      expect(reset?.deliveryIdempotencyKey)
+        .toBe(`${created.deliveryIdempotencyKey}:fallback`)
     })
   })
 
@@ -897,7 +968,6 @@ describe('assistant outbox dispatch-state', () => {
       const paths = resolveAssistantStatePaths(vault)
       const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
       const reset = await resetAssistantOutboxPreparedDispatch({
-        deliveryIdempotencyKey: created.deliveryIdempotencyKey,
         deliveryTransportIdempotent: created.deliveryTransportIdempotent,
         intent: prepared!.intent,
         intentPath,
@@ -946,7 +1016,6 @@ describe('assistant outbox dispatch-state', () => {
       const paths = resolveAssistantStatePaths(vault)
       const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
       const reset = await resetAssistantOutboxPreparedDispatch({
-        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_mismatch',
         deliveryTransportIdempotent: false,
         intent: sending!,
         intentPath,
@@ -1003,7 +1072,6 @@ describe('assistant outbox dispatch-state', () => {
       const intentPath = resolveAssistantOutboxIntentPath(paths.outboxDirectory, created.intentId)
       const resetAt = new Date('2030-04-13T00:10:03.000Z')
       const reset = await resetAssistantOutboxPreparedDispatch({
-        deliveryIdempotencyKey: 'assistant-outbox:intent_prepared_failed_reset',
         deliveryTransportIdempotent: false,
         intent: failed,
         intentPath,

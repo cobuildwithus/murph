@@ -20,8 +20,6 @@ import {
   HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS,
   HOSTED_RETENTION_BATCH_SIZE,
   HOSTED_RETENTION_MAX_BATCHES,
-  HOSTED_RUN_LOG_RETENTION_MS,
-  HOSTED_RUN_LOG_VERBOSE_RETENTION_MS,
   HOSTED_WEB_SESSION_RETENTION_MS,
   runHostedRetentionCleanup,
 } from "@/src/lib/hosted-retention/cleanup";
@@ -116,7 +114,6 @@ describe("hosted retention cleanup", () => {
   it("prunes every high-volume diagnostic table before signaling runtimes", async () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const countsByStatement = new Map<string, number>([
-      ['DELETE FROM "hosted_runtime_log"', 8],
       ['DELETE FROM "hosted_ingress_latency_trace"', 1],
       ['DELETE FROM "hosted_assistant_runtime_issue"', 2],
       ['DELETE FROM "device_webhook_trace"', 4],
@@ -169,7 +166,7 @@ describe("hosted retention cleanup", () => {
       expiredMailboxTombstonesDeleted: 3,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
-      oldRuntimeLogsDeleted: 8,
+      oldRuntimeLogsDeleted: 0,
       staleWebSessionsDeleted: 9,
     });
     expect(
@@ -208,16 +205,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(7);
-
-    // Verbose levels expire first; warn and error keep the longer window.
-    const runtimeLogCall = findRetentionCall(executeRaw, 'DELETE FROM "hosted_runtime_log"');
-    expect(sqlOf(runtimeLogCall)).toContain(`"level" NOT IN ('warn', 'error')`);
-    expect(runtimeLogCall.slice(1)).toEqual([
-      new Date(now.getTime() - HOSTED_RUN_LOG_VERBOSE_RETENTION_MS),
-      new Date(now.getTime() - HOSTED_RUN_LOG_RETENTION_MS),
-      HOSTED_RETENTION_BATCH_SIZE,
-    ]);
+    expect(executeRaw).toHaveBeenCalledTimes(6);
 
     const latencyTraceCall = findRetentionCall(
       executeRaw,
@@ -359,6 +347,9 @@ describe("hosted retention cleanup", () => {
     expect(sql).toContain('"payload_inline_ciphertext" = NULL');
     expect(sql).toContain('"payload_ref" = NULL');
     expect(sql).toContain('"consumed_at" = CASE');
+    expect(sql).toContain('FROM "hosted_member" AS member');
+    expect(sql).toContain('member."assistant_tone_causal_seq"');
+    expect(sql).toContain('member."assistant_unhinged_causal_seq"');
   });
 
   it("bounds mailbox retirement and structural pruning to the per-run ceiling", async () => {
@@ -451,26 +442,6 @@ describe("hosted retention cleanup", () => {
     expect(startedStatements).toBeGreaterThan(1);
   });
 
-  it("reports the summed count of the batches a category actually ran", async () => {
-    let runtimeLogBatches = 0;
-    const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
-      if (!strings.join("?").includes('DELETE FROM "hosted_runtime_log"')) {
-        return 0;
-      }
-      runtimeLogBatches += 1;
-      return runtimeLogBatches < 3 ? HOSTED_RETENTION_BATCH_SIZE : 2;
-    });
-    const prisma = createRetentionPrisma({ executeRaw });
-
-    await expect(runHostedRetentionCleanup({
-      now: "2026-04-25T12:00:00.000Z",
-      prisma: prisma as never,
-    })).resolves.toMatchObject({
-      oldRuntimeLogsDeleted: HOSTED_RETENTION_BATCH_SIZE * 2 + 2,
-    });
-    expect(runtimeLogBatches).toBe(3);
-  });
-
   it("finishes database cleanup before timing out stuck media-retention signals", async () => {
     vi.useFakeTimers();
     try {
@@ -526,7 +497,7 @@ describe("hosted retention cleanup", () => {
         expiredMailboxTombstonesDeleted: 0,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
-        oldRuntimeLogsDeleted: 1,
+        oldRuntimeLogsDeleted: 0,
         staleWebSessionsDeleted: 2,
       });
       expect(queryRaw.mock.invocationCallOrder[0]).toBeLessThan(

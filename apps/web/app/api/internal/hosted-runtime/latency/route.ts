@@ -80,14 +80,22 @@ export const POST = withJsonError(async (request: Request) => {
           source: traceRequest.event.source,
         });
 
-  if (result.unmatchedCount > 0) {
+  // Assistant inputs the runtime created without an inbound messaging wake never
+  // get an ingress trace row, so reporting them is noise. Warn only when a row
+  // existed and the guarded write still declined it, which is the case an
+  // operator can act on.
+  const untracedCount = result.untracedCount ?? 0;
+  const rejectedCount = result.unmatchedCount - untracedCount;
+  if (rejectedCount > 0) {
     const eventType = traceRequest.event.type;
     const source = traceRequest.event.source;
-    console.warn("Hosted runtime latency trace callback had unmatched rows.", {
+    console.warn("Hosted runtime latency trace callback had rejected rows.", {
       eventType,
       matchedCount: result.matchedCount,
+      rejectedCount,
+      runtimeAttemptId,
       source,
-      unmatchedCount: result.unmatchedCount,
+      untracedCount,
     });
   }
 

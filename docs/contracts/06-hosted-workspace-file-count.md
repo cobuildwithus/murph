@@ -181,6 +181,12 @@ landing; record the chosen posture here so the decision is reviewable.
   complete direct inventory and outbox state before removing any terminal,
   changed, or orphaned regular file; an untrusted inventory, nested entry,
   unsafe name, symlink, special entry, or unreadable path retains everything.
+  A current-user cancellation may compare-and-set an awaiting-approval
+  generated delivery to terminal but never removes its bytes directly. The
+  existing quiescent cleanup remains the sole deletion owner and applies the
+  same complete-directory inventory, active-descriptor agreement, fingerprint,
+  and unchanged-file checks to that newly terminal residue. Canonical and
+  user-owned vault files remain outside this cleanup authority.
   Steady state is therefore one staged file per exact active descriptor and zero
   terminal, changed, or unclaimed staged files.
 

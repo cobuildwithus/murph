@@ -112,18 +112,14 @@ const extraProtocolSummary = {
   title: "Extra Protocol",
 } as const;
 const requiredHostedCryptoWorkerVars = {
-  CF_BUNDLES_ENAM_BUCKET: "hosted-bundles-enam",
-  CF_BUNDLES_ENAM_PREVIEW_BUCKET: "hosted-bundles-enam-preview",
   HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION:
     "projects/test/locations/global/keyRings/ring/cryptoKeys/sign/cryptoKeyVersions/1",
   HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM:
     "-----BEGIN PUBLIC KEY-----\\n...\\n-----END PUBLIC KEY-----",
   HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "cloudflare-automation:v1",
   HOSTED_CRYPTO_ENV: "production",
-  HOSTED_R2_CUTOVER_PHASE: "source_active",
   HOSTED_R2_PRESIGN_ACCOUNT_ID: "r2-account-test",
   HOSTED_R2_PRESIGN_BUCKET_NAME: "hosted-bundles",
-  HOSTED_R2_PRESIGN_ENAM_BUCKET_NAME: "hosted-bundles-enam",
 } as const;
 
 describe("deploy artifact validation", () => {
@@ -283,6 +279,25 @@ describe("deploy artifact validation", () => {
 
     await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
       "Missing Health Commons protocol run specs.",
+    );
+  });
+
+  it("rejects a runner bundle missing the Health Commons knowledge index", async () => {
+    const fixture = await createDeployArtifactFixture();
+
+    await rm(
+      path.join(
+        fixture.runnerBundleDir,
+        "node_modules",
+        "@murphai",
+        "health-commons",
+        "generated",
+        "knowledge.sqlite",
+      ),
+    );
+
+    await expect(assertPreparedDeployArtifacts(fixture)).rejects.toThrow(
+      "Missing Health Commons knowledge index.",
     );
   });
 
@@ -1356,6 +1371,10 @@ async function writeHealthCommonsRuntimeArtifacts(
   const artifacts = createHealthCommonsRuntimeArtifacts(input);
 
   await mkdir(generatedDir, { recursive: true });
+  await writeFile(
+    path.join(generatedDir, "knowledge.sqlite"),
+    Buffer.from("SQLite format 3\0fixture"),
+  );
   await writeFile(
     path.join(generatedDir, "biomarker-desired-directions.json"),
     `${JSON.stringify(artifacts.biomarkerDesiredDirections, null, 2)}\n`,

@@ -54,7 +54,7 @@ Apply only modifiers that change the plan:
 - `references/coaching.md` — adherence friction, habits, reminders, missed sessions, motivation, or reducing dependence on Murph
 - `references/safety.md` — pain, symptoms, health uncertainty, maximal or high-skill work, special populations, competition, or body-composition risk
 - `references/evidence.md` — source-level justification, disputed claims, confidence calibration, or maintenance of defaults
-- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any request to put a workout log in a table, preserve set-by-set notation, or refresh a live workout table. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
+- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any private messaging request to start or resume a canonical live workout, put a workout log in a table, preserve set-by-set notation, or refresh its workout card. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
 
 When presenting a named exercise, unfamiliar variation, or movement walkthrough, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns exercise choice, programming, dose, progression, substitutions, and safety. If catalog media is unavailable, give compact form cues rather than inventing an image workflow.
 
@@ -81,6 +81,12 @@ Preserve useful stable elements. Identify the bottleneck—progression, dose, te
 Planning is not activation. Do not silently create a protocol, reminder, check-in, or persisted record. Obtain explicit consent for side effects and keep them bounded to the chosen block.
 
 Treat physique photos, body measurements, pain and symptom notes, training logs, and competition health data as private by default. Sharing requires explicit user intent.
+
+### Repeated-set logs and cumulative totals
+
+For several small sets spread across a day, read `$MURPH_ASSISTANT_SKILLS_ROOT/experiment-onboarding/SKILL.md` when an experiment owns the schedule or records. Treat each completion reply to one reminder as one occurrence, not as confirmation of an entire day.
+
+An actual cumulative repetition total must come from explicit canonical per-session or per-set quantities. Never derive it from elapsed days, the planned rotation, assumed adherence, expected occurrences, or the current per-set standard. Keep the recorded total, theoretical full-compliance total, and any unknown historical quantity visibly separate. When old logs contain completed sets but not repetitions, give the exact known set count and an honest known subtotal or lower bound instead of fabricating precision.
 
 ## Build the smallest complete answer
 

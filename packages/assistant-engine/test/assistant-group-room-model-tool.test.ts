@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -7,7 +8,6 @@ import { resolveAssistantVaultPath } from '@murphai/vault-usecases/assistant-vau
 import {
   executeMurphDynamicToolRequest,
   MURPH_GROUP_ROOM_MODEL_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
@@ -19,7 +19,6 @@ import type {
   AssistantHostedUserActionScope,
 } from '../src/assistant/hosted-tool-context.js'
 import {
-  ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES,
   ASSISTANT_GROUP_ROOM_MODEL_PAGE_TYPE,
   ASSISTANT_GROUP_ROOM_MODEL_SLUG,
   assistantRouteSupportsGroupRoomModel,
@@ -353,18 +352,21 @@ describe('authenticated group room-model tool', () => {
     }
   })
 
-  it('rejects oversized and selector-bearing arguments', () => {
+  it('accepts large bodies and rejects selector-bearing arguments', () => {
     expect(readRequest({
       action: 'upsert',
-      body: 'x'.repeat(ASSISTANT_GROUP_ROOM_MODEL_PAGE_MAX_BYTES + 1),
+      body: 'x'.repeat(8 * 1024 + 1),
       expectedDigest: 'a'.repeat(64),
-    })?.kind).toBe('invalid-group-room-model-arguments')
+    })?.kind).toBe('group-room-model')
     expect(readRequest({
       action: 'show',
       participantId: 'participant:other',
     })?.kind).toBe('invalid-group-room-model-arguments')
     expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
       'If show fails or a write reports stale state, stop.',
+    )
+    expect(MURPH_GROUP_ROOM_MODEL_TOOL.description).toContain(
+      'defensive 64 KiB file-read ceiling',
     )
   })
 
@@ -545,7 +547,7 @@ function requireGroupRoomModelRequest(args: unknown) {
 }
 
 function readRequest(args: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: args,

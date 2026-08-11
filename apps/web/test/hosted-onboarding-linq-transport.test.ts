@@ -3184,7 +3184,7 @@ describe("hosted Linq webhook transport", () => {
       claimToken: null,
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "trial_conversion_pending",
+      noticeCode: "billing_inactive",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-unclaimed",
@@ -3212,13 +3212,13 @@ describe("hosted Linq webhook transport", () => {
     expect(releaseHostedLinqQuotaReplyNoticeClaim).not.toHaveBeenCalled();
   });
 
-  it("replays trial-conversion notices through provider idempotency", async () => {
+  it("replays billing-inactive notices through provider idempotency", async () => {
     const effect = createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: null,
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "trial_conversion_pending",
+      noticeCode: "billing_inactive",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-unclaimed",
@@ -3256,7 +3256,7 @@ describe("hosted Linq webhook transport", () => {
     } as never)).toThrow("require AI usage claim metadata");
   });
 
-  it("rejects claim tokens when constructing trial conversion quota side effects", () => {
+  it("rejects claim tokens when constructing billing-inactive quota side effects", () => {
     expect(() => createHostedWebhookLinqMessageSideEffect({
       chatId: "chat-1",
       claimToken: {
@@ -3266,7 +3266,7 @@ describe("hosted Linq webhook transport", () => {
       },
       memberId: "member-1",
       message: "usage-limit",
-      noticeCode: "trial_conversion_pending",
+      noticeCode: "billing_inactive",
       occurredAt: "2026-03-26T12:00:00.000Z",
       replyToMessageId: "message-1",
       sourceEventId: "event-ai-usage-extra-claim",
@@ -4067,6 +4067,54 @@ describe("hosted Linq webhook transport", () => {
         expect(createHostedLinqChat).not.toHaveBeenCalled();
         expect(prisma.hostedLinqLine.updateMany).not.toHaveBeenCalled();
         expect(line.proactiveConversationCount).toBe(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("renders canonical privacy-safe rotating group setup copy", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(dispatchNow);
+      const lookupKey = arrangeAssignableRecoveryLine();
+      const { prisma } = createHostedLinqLineCapacityPrisma({
+        maxNewConversationsPerDay: 3,
+        phoneNumberLookupKey: lookupKey,
+        proactiveConversationCount: 0,
+        proactiveConversationDayUtc: dispatchDayUtc,
+      });
+      const effect = createHostedWebhookLinqMessageSideEffect({
+        chatId: "chat-group-inactive-sender",
+        occurredAt: "2026-03-27T11:59:00.000Z",
+        replyToMessageId: "message-group-inactive-sender",
+        sourceEventId: "event-group-inactive-sender",
+        template: "group_setup",
+      });
+
+      try {
+        await expect(drainHostedLinqSideEffectsDirect({
+          prisma: prisma as never,
+          sideEffects: [effect],
+        })).resolves.toEqual({ sentCount: 1, skipped: [] });
+
+        expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            chatId: "chat-group-inactive-sender",
+            idempotencyKey: effect.effectId,
+            message: expect.stringMatching(
+              /(?:active on Murph|active Murph member)/iu,
+            ),
+            replyToMessageId: "message-group-inactive-sender",
+          }),
+        );
+        const sentMessage = vi.mocked(sendHostedLinqChatMessage).mock.calls[0]?.[0]
+          .message;
+        expect(sentMessage).toContain("https://join.test/groups/start");
+        expect(sentMessage).not.toContain(
+          "someone in this chat needs to finish setting up Murph",
+        );
+        expect(sentMessage).not.toMatch(
+          /\b(?:account|access|billing|payment|subscription|trial|you|your)\b/iu,
+        );
       } finally {
         vi.useRealTimers();
       }

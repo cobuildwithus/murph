@@ -57,6 +57,7 @@ export interface AssistantInputConversationRef {
   actorId: string | null
   actorIsSelf: boolean
   source: string | null
+  sessionId?: string | null
   threadId: string | null
   threadIsDirect: boolean | null
 }
@@ -196,6 +197,7 @@ export function conversationRefFromAssistantInputConversation(
   input: AssistantInputConversationRef,
 ): ConversationRef {
   return normalizeConversationRef({
+    sessionId: input.sessionId,
     channel: input.source,
     identityId:
       input.source === 'email' || input.source === 'linq'
@@ -239,6 +241,7 @@ export function isSameAssistantConversationRef(
     left.actorId === right.actorId &&
     left.actorIsSelf === right.actorIsSelf &&
     left.source === right.source &&
+    (left.sessionId ?? null) === (right.sessionId ?? null) &&
     left.threadId === right.threadId &&
     left.threadIsDirect === right.threadIsDirect
   )

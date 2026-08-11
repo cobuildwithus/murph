@@ -35,7 +35,14 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
+import {
+  lockHostedUsageCreditPurchaseReservationOwnersTx,
+} from "./usage-credit-purchase-reservation-lock";
 import { logHostedStripeFailure } from "./stripe-error-log";
+import {
+  cancelHostedUsageCreditDirectPayment,
+  canCancelHostedUsageCreditDirectPayment,
+} from "./usage-credit-saved-card-payment";
 import { getPrisma } from "../prisma";
 
 export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
@@ -69,7 +76,39 @@ export async function closeHostedUsageCreditPurchasesForAccountDeletion(input: {
       continue;
     }
     if (purchase.status === HostedUsageCreditPurchaseStatus.payment_pending) {
-      throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      if (!canCancelHostedUsageCreditDirectPayment(purchase)) {
+        throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      }
+      const { stripe, stripeLiveMode } = requireHostedStripeApiMode();
+      if (stripeLiveMode !== purchase.stripeLiveMode) {
+        throw hostedOnboardingError({
+          code: "HOSTED_USAGE_CREDIT_STRIPE_MODE_MISMATCH",
+          httpStatus: 500,
+          message: "Usage-credit checkout is temporarily unavailable.",
+        });
+      }
+      const reconciledDirectPayment =
+        await cancelHostedUsageCreditDirectPayment({
+          ...(purchase.beneficiaryMemberId !== purchase.payerMemberId
+            ? { groupBeneficiaryMemberId: purchase.beneficiaryMemberId }
+            : {}),
+          now,
+          prisma,
+          purchase,
+          stripe,
+        });
+      if (isHostedUsageCreditPurchaseSafeForAccountDeletion(
+        reconciledDirectPayment,
+      )) {
+        continue;
+      }
+      if (
+        reconciledDirectPayment.status ===
+        HostedUsageCreditPurchaseStatus.payment_pending
+      ) {
+        throw buildHostedUsageCreditAccountDeletionPaymentPendingError();
+      }
+      throw buildHostedUsageCreditAccountDeletionUnresolvedError();
     }
 
     const resolution = await resolveHostedUsageCreditStripeSessionForAccountDeletion({
@@ -117,6 +156,7 @@ export async function assertHostedUsageCreditPurchasesReadyForAccountDeletionTx(
       beneficiaryMemberId: true,
       groupSponsorshipAuthorizationId: true,
       groupSponsorshipChargeOrdinal: true,
+      grantSlotReleasedAt: true,
       id: true,
       lastReconciledAt: true,
       paidAt: true,
@@ -295,7 +335,7 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
   while (true) {
     let page: Stripe.ApiList<Stripe.Checkout.Session>;
     try {
-      page = await input.stripe.checkout.sessions.list({
+      const listParams: Stripe.Checkout.SessionListParams = {
         created: {
           gte: Math.max(
             0,
@@ -305,8 +345,11 @@ async function findHostedUsageCreditStripeSessionForExpiredAttempt(input: {
         },
         customer: customerId,
         limit: 100,
-        ...(startingAfter ? { starting_after: startingAfter } : {}),
-      });
+      };
+      if (startingAfter) {
+        listParams.starting_after = startingAfter;
+      }
+      page = await input.stripe.checkout.sessions.list(listParams);
     } catch (error) {
       throw buildHostedUsageCreditStripeUnavailableError(
         error,
@@ -429,17 +472,51 @@ async function persistHostedUsageCreditAccountDeletionSessionState(input: {
     ? HostedUsageCreditPurchaseStatus.expired
     : HostedUsageCreditPurchaseStatus.payment_pending;
   return input.prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, payerMemberId);
+    if (providerState === "expired") {
+      await lockHostedUsageCreditPurchaseReservationOwnersTx({
+        beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+        payerMemberId,
+        tx,
+      });
+    } else {
+      await lockHostedMemberRow(tx, payerMemberId);
+    }
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });
-    if (!current || current.payerMemberId !== payerMemberId) {
+    if (
+      !current ||
+      current.payerMemberId !== payerMemberId ||
+      current.beneficiaryMemberId !== input.purchase.beneficiaryMemberId
+    ) {
       throw buildHostedUsageCreditAccountDeletionUnresolvedError();
     }
-    if (isHostedUsageCreditPurchaseSafeForAccountDeletion(current)) {
+    if (
+      current.grantSlotReleasedAt !== null &&
+      (
+        current.status !== HostedUsageCreditPurchaseStatus.expired ||
+        current.paidAt !== null ||
+        providerState !== "expired"
+      )
+    ) {
+      throw buildHostedUsageCreditInvariantError(
+        "checkout_release_state_invalid",
+      );
+    }
+    const providerFinalReleaseRequired =
+      providerState === "expired" &&
+      current.grantSlotReleasedAt === null &&
+      current.status !== HostedUsageCreditPurchaseStatus.fulfilled;
+    if (
+      isHostedUsageCreditPurchaseSafeForAccountDeletion(current) &&
+      !providerFinalReleaseRequired
+    ) {
       return current;
     }
-    if (current.status === HostedUsageCreditPurchaseStatus.payment_pending) {
+    if (
+      current.status === HostedUsageCreditPurchaseStatus.payment_pending &&
+      !providerFinalReleaseRequired
+    ) {
       return current;
     }
     if (current.reconciliationVersion !== input.purchase.reconciliationVersion) {
@@ -456,6 +533,9 @@ async function persistHostedUsageCreditAccountDeletionSessionState(input: {
 
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
+        ...(providerState === "expired"
+          ? { grantSlotReleasedAt: input.now }
+          : {}),
         lastReconciledAt: input.now,
         reconciliationVersion: { increment: 1n },
         status: nextStatus,
@@ -470,13 +550,18 @@ async function persistHostedUsageCreditAccountDeletionSessionState(input: {
       },
       where: {
         id: current.id,
+        ...(providerState === "expired"
+          ? { grantSlotReleasedAt: null, paidAt: null }
+          : {}),
         payerMemberId: current.payerMemberId,
         reconciliationVersion: input.purchase.reconciliationVersion,
         status: {
           in: [
             HostedUsageCreditPurchaseStatus.created,
             HostedUsageCreditPurchaseStatus.checkout_open,
+            HostedUsageCreditPurchaseStatus.payment_pending,
             HostedUsageCreditPurchaseStatus.expired,
+            HostedUsageCreditPurchaseStatus.payment_failed,
           ],
         },
       },
@@ -510,11 +595,19 @@ async function persistHostedUsageCreditAccountDeletionNoSessionProof(input: {
     const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
       input.purchase,
     );
-    await lockHostedMemberRow(tx, payerMemberId);
+    await lockHostedUsageCreditPurchaseReservationOwnersTx({
+      beneficiaryMemberId: input.purchase.beneficiaryMemberId,
+      payerMemberId,
+      tx,
+    });
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchase.id },
     });
-    if (!current || current.payerMemberId !== payerMemberId) {
+    if (
+      !current ||
+      current.payerMemberId !== payerMemberId ||
+      current.beneficiaryMemberId !== input.purchase.beneficiaryMemberId
+    ) {
       throw buildHostedUsageCreditAccountDeletionUnresolvedError();
     }
     if (isHostedUsageCreditPurchaseSafeForAccountDeletion(current)) {
@@ -533,6 +626,7 @@ async function persistHostedUsageCreditAccountDeletionNoSessionProof(input: {
 
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
+        grantSlotReleasedAt: input.now,
         lastReconciledAt: input.now,
         reconciliationVersion: { increment: 1n },
         status: HostedUsageCreditPurchaseStatus.expired,
@@ -542,6 +636,8 @@ async function persistHostedUsageCreditAccountDeletionNoSessionProof(input: {
       },
       where: {
         id: current.id,
+        grantSlotReleasedAt: null,
+        paidAt: null,
         payerMemberId: current.payerMemberId,
         reconciliationVersion: input.purchase.reconciliationVersion,
         status: {
@@ -600,6 +696,7 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
   HostedUsageCreditPurchase,
   | "groupSponsorshipAuthorizationId"
   | "groupSponsorshipChargeOrdinal"
+  | "grantSlotReleasedAt"
   | "lastReconciledAt"
   | "paidAt"
   | "payerMemberId"
@@ -646,7 +743,7 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
     }
     switch (input.status) {
       case HostedUsageCreditPurchaseStatus.expired:
-        return true;
+        return input.grantSlotReleasedAt !== null && input.paidAt === null;
       case HostedUsageCreditPurchaseStatus.payment_failed:
         return isTerminalUnboundAutomaticRefillFailure ||
           input.stripeCheckoutSessionLookupKey !== null;
@@ -676,7 +773,7 @@ function isHostedUsageCreditPurchaseSafeForAccountDeletion(input: Pick<
 
   switch (input.status) {
     case HostedUsageCreditPurchaseStatus.expired:
-      return true;
+      return input.grantSlotReleasedAt !== null && input.paidAt === null;
     case HostedUsageCreditPurchaseStatus.payment_failed:
       return hasSessionProof || isTerminalUnboundAutomaticRefillFailure;
     case HostedUsageCreditPurchaseStatus.fulfilled:

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { HistoricalPullCompleted as JunctionHistoricalPullCompletedSchema } from "@junction-api/sdk/serialization";
 import {
   JUNCTION_DEFAULT_SUMMARY_RESOURCES,
   JUNCTION_DEFAULT_TIMESERIES_RESOURCES,
@@ -16,6 +17,10 @@ import { normalizeConfiguredDeviceSyncJobInput } from "../src/provider-job-defin
 
 import { DeviceSyncError } from "../src/errors.ts";
 import { mergeStoredDeviceSyncMetadataPatch } from "../src/metadata.ts";
+import {
+  DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "../src/public-account.ts";
 import {
   buildJunctionClientUserId,
   createJunctionDeviceSyncProvider,
@@ -3376,7 +3381,7 @@ test("Junction unproven historical coverage saturates at a daily retry without a
   );
 });
 
-test("Junction account jobs keep a concurrently disconnected source out of projection and import", async () => {
+test("Junction account jobs keep a concurrently fenced connected source out of projection and import", async () => {
   const provider = createJunctionProvider(async (input) => {
     const url = readUrl(input);
 
@@ -3474,7 +3479,9 @@ test("Junction account jobs keep a concurrently disconnected source out of proje
       sourceProviderSlug: "fitbit",
     }), "Fitbit source key should be available."),
     sourceProviderSlug: "fitbit",
-    status: "disconnected",
+    status: "connected",
+    lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+    lastErrorMessage: "Source disconnect is in progress.",
   });
   let liveSources = [garminSource, fitbitSource];
   const importedSnapshots: Array<{
@@ -3535,7 +3542,7 @@ test("Junction account jobs keep a concurrently disconnected source out of proje
   );
   assert.equal(
     liveSources.find((source) => source.sourceProviderSlug === "fitbit")?.status,
-    "disconnected",
+    "connected",
   );
   assert.deepEqual(
     importedSnapshots.flatMap((snapshot) => snapshot.summaries?.activity ?? [])
@@ -4416,10 +4423,42 @@ test("Junction direct Apple Health canonical delivery records history despite th
 });
 
 test("Junction data webhooks name the delivering source and lifecycle events do not", async () => {
+  const requests: string[] = [];
   const provider = createJunctionProvider(async (input) => {
-    throw new Error(`Unexpected request: ${readUrl(input)}`);
+    const url = new URL(readUrl(input));
+    requests.push(url.toString());
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-garmin-1",
+          slug: "garmin",
+          name: "Garmin",
+          status: "connected",
+          resource_availability: { blood_pressure: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/blood_pressure/grouped") {
+      const timestamp = url.searchParams.get("start_date")
+        ?? "2026-03-18T00:00:00.000Z";
+      return createJsonResponse({
+        groups: {
+          garmin: [{
+            data: [{
+              id: `bp-${timestamp}`,
+              timestamp,
+              systolic: 120,
+              diastolic: 80,
+            }],
+            source: { provider: "garmin", type: "cuff" },
+          }],
+        },
+      });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
   }, {
     providerFilter: ["garmin"],
+    timeseriesResources: ["blood_pressure"],
     webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
   });
   const parseWebhook = async (input: {
@@ -4487,6 +4526,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
       event_type: "provider.connection.created",
       user_id: "junction-user-1",
       data: {
+        created_at: "2026-03-20T14:30:00.000Z",
         provider: "garmin",
       },
     },
@@ -4495,7 +4535,137 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
 
   assert.equal(lifecycle.dataSourceProviderSlug, null);
   assert.equal(lifecycle.sourceProviderSlug, "garmin");
-  assert.equal(lifecycle.occurredAt, "2026-04-03T00:00:00.000Z");
+  assert.equal(lifecycle.occurredAt, "2026-03-20T14:30:00.000Z");
+  assert.deepEqual(lifecycle.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
+  const garminSource = {
+    displayName: "Garmin",
+    firstSeenAt: "2026-03-20T14:30:00.000Z",
+    lastDataAt: null,
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T00:00:00.000Z",
+    resourceCount: 1,
+    resourceAvailabilitySummary: { blood_pressure: true },
+    sourceProviderSlug: "garmin",
+    status: "connected" as const,
+  };
+  const schedulerAccount = createStoredAccount({
+    metadata: {
+      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+    },
+    nextReconcileAt: "2026-04-03T00:00:00.000Z",
+    sources: [garminSource],
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const findScheduledHistoryJob = (now: string) => requireValue(
+    executor.createScheduledJobs?.(
+      schedulerAccount,
+      now,
+    ).jobs.find((job) =>
+      job.kind === "resource"
+      && job.payload?.resource === "blood_pressure"
+      && job.payload?.sourceProviderSlug === "garmin"
+    ),
+  );
+  const schedulerJob = findScheduledHistoryJob("2026-04-03T00:00:00.000Z");
+  assert.deepEqual(schedulerJob.payload, {
+    historicalBackfill: true,
+    historicalWindowStart: "2026-03-18T00:00:00.000Z",
+    resource: "blood_pressure",
+    resourceCategory: "timeseries",
+    sourceProviderSlug: "garmin",
+    windowEnd: "2026-03-20T00:00:00.000Z",
+    windowStart: "2026-03-18T00:00:00.000Z",
+  });
+  assert.equal(
+    findScheduledHistoryJob("2026-04-04T00:00:00.000Z").dedupeKey,
+    schedulerJob.dedupeKey,
+  );
+
+  const updateCases = [
+    {
+      data: {
+        provider: "garmin",
+        updated_at: "2026-04-03T00:00:00.000Z",
+      },
+      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      messageId: "msg_lifecycle_update_timestamp",
+    },
+    {
+      data: { provider: "garmin" },
+      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      messageId: "msg_lifecycle_update_now_fallback",
+    },
+  ] as const;
+
+  for (const updateCase of updateCases) {
+    const update = await parseWebhook({
+      body: {
+        event_type: "provider.connection.updated",
+        user_id: "junction-user-1",
+        data: updateCase.data,
+      },
+      messageId: updateCase.messageId,
+    });
+    assert.equal(update.occurredAt, updateCase.expectedOccurredAt);
+    assert.deepEqual(update.jobs.map((job) => job.kind), ["backfill", "reconcile"]);
+  }
+
+  requests.length = 0;
+  let scheduledResult = await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      account: createAccount({
+        metadata: {
+          junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        },
+        sources: [garminSource],
+      }),
+      importSnapshot: async () => ({
+        canonicalEventCount: 2,
+        durableDeliveryAccepted: true,
+      }),
+    }),
+    {
+      ...createJob("resource", schedulerJob.payload ?? {}),
+      dedupeKey: schedulerJob.dedupeKey ?? null,
+    },
+  );
+  const scheduledFollowUp = scheduledResult.scheduledJobs?.find((job) =>
+    job.kind === "resource" && job.payload?.resource === "blood_pressure"
+  );
+  if (scheduledFollowUp) {
+    scheduledResult = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+          },
+          sources: [garminSource],
+        }),
+        importSnapshot: async () => ({
+          canonicalEventCount: 2,
+          durableDeliveryAccepted: true,
+        }),
+      }),
+      {
+        ...createJob(scheduledFollowUp.kind, scheduledFollowUp.payload ?? {}),
+        dedupeKey: scheduledFollowUp.dedupeKey ?? null,
+      },
+    );
+  }
+
+  assert.equal(
+    requests.some((request) =>
+      new URL(request).searchParams.get("start_date") === "2026-03-18T00:00:00.000Z"
+    ),
+    true,
+  );
+  assert.equal(
+    scheduledResult.metadataPatch?.junctionBloodPressureHistoryBackfillCoverage,
+    "v1|garmin,omron",
+  );
 });
 
 test("Junction connection-day direct pushes do not prove older historical coverage", async () => {
@@ -7941,6 +8111,101 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
   }
 });
 
+test("Junction completion classification matches the pinned SDK serializer", async () => {
+  const provider = createJunctionProvider(
+    async (input) => {
+      throw new Error(`Unexpected request: ${readUrl(input)}`);
+    },
+    {
+      summaryResources: ["sleep"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+
+  const baseData: Record<string, unknown> = {
+    user_id: "junction-user-1",
+    start_date: "2026-04-01",
+    end_date: "2026-04-02",
+    is_final: true,
+    provider: "garmin",
+    resource: "sleep",
+    id: "inline-record-if-not-completion",
+  };
+  const testCases: readonly {
+    label: string;
+    omit?: readonly string[];
+    overrides?: Readonly<Record<string, unknown>>;
+  }[] = [
+    { label: "calendar-date" },
+    {
+      label: "week-date",
+      overrides: { start_date: "2026-W14-3", end_date: "2026-W14-4" },
+    },
+    {
+      label: "ordinal-date",
+      overrides: { start_date: "2026-091", end_date: "2026-092" },
+    },
+    {
+      label: "date-time",
+      overrides: {
+        start_date: "2026-04-01T12:30:00Z",
+        end_date: "2026-04-02T12:30:00+00:00",
+      },
+    },
+    { label: "passthrough-field", overrides: { future_field: "retained" } },
+    { label: "malformed-date", overrides: { start_date: "2026-13-40" } },
+    { label: "missing-start-date", omit: ["start_date"] },
+    { label: "wrong-end-date-type", overrides: { end_date: 17 } },
+    { label: "non-final", overrides: { is_final: false } },
+    { label: "wrong-final-type", overrides: { is_final: "true" } },
+    { label: "missing-provider", omit: ["provider"] },
+    { label: "wrong-provider-type", overrides: { provider: 17 } },
+    { label: "missing-data-user-id", omit: ["user_id"] },
+    { label: "wrong-data-user-id-type", overrides: { user_id: 17 } },
+  ];
+
+  for (const testCase of testCases) {
+    const data = { ...baseData, ...testCase.overrides };
+    for (const field of testCase.omit ?? []) {
+      delete data[field];
+    }
+
+    const sdkUserId = typeof data.user_id === "string" && data.user_id.trim().length > 0
+      ? data.user_id.trim()
+      : "junction-user-1";
+    const sdkParsed = JunctionHistoricalPullCompletedSchema.parse(
+      { ...data, user_id: sdkUserId },
+      { unrecognizedObjectKeys: "passthrough" },
+    );
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "historical.data.sleep.created",
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data,
+      },
+      messageId: `msg_historical_completion_oracle_${testCase.label}`,
+      timestamp: "1775260800",
+    });
+
+    const parsed = await requireJunctionWebhookHandler(provider).verifyAndParseWebhook({
+      headers: webhook.headers,
+      rawBody: webhook.rawBody,
+      now: "2026-04-04T00:00:00.000Z",
+    });
+    const job = parsed.jobs[0];
+
+    assert.equal(parsed.jobs.length, 1, testCase.label);
+    assert.equal(job?.kind, "resource", testCase.label);
+    assert.equal(
+      "webhookDataJson" in (job?.payload ?? {}),
+      !sdkParsed.ok,
+      `${testCase.label} should match the pinned SDK completion classification`,
+    );
+  }
+});
+
 test("Junction rejects webhooks with only a client_user_id and no Junction user_id", async () => {
   const provider = createJunctionProvider(
     async (input) => {
@@ -8653,7 +8918,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
     junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
   });
-  assert.equal(sources.length, 1);
+  assert.equal(sources.length, 2);
   assert.equal(sources[0]?.sourceProviderSlug, "oura");
   assert.equal(sources[0]?.status, "connected");
   assert.equal(
@@ -8673,6 +8938,8 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(sources[0]?.resourceAvailabilitySummary.provider_connection_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.provider_name, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.device_id, undefined);
+  assert.equal(sources[1]?.sourceProviderSlug, "fitbit");
+  assert.equal(sources[1]?.status, "connected");
   assert.equal(sources[0]?.resourceAvailabilitySummary.deviceName, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_id, undefined);
   assert.equal(sources[0]?.resourceAvailabilitySummary.app_name, undefined);

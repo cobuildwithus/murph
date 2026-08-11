@@ -35,12 +35,6 @@ import {
   type WorkerRouteContext,
 } from "../../worker-routes/shared.ts";
 import {
-  createHostedR2WriteAdmissionPausedResponse,
-  isHostedR2PausedCanaryUser,
-  readHostedR2PausedCanaryConfigured,
-  readHostedR2WriteAdmission,
-} from "../../r2-cutover.ts";
-import {
   readPresentedWorkerRouteAuthorization,
   requireBoundInternalRouteUser,
 } from "../auth.ts";
@@ -104,6 +98,25 @@ const runtimeHealthDataConsentRoute = {
   wrongMethodResponse: "method-not-allowed",
 } satisfies DeclarativeRoute<WorkerRouteContext>;
 
+const runtimeShellPrewarmRoute = {
+  authorizeBeforeMethod: true,
+  authorization: "vercel-oidc",
+  beforeMethod(context, params) {
+    return requireBoundInternalRouteUser(context, params, "runtime-shell-prewarm");
+  },
+  async handle(context, params) {
+    return handleRuntimeShellPrewarmRoute(context, params.userId);
+  },
+  match: (pathname) => matchCloudflareHostedControlUserRoutePath(
+    "runtimeShellPrewarm",
+    pathname,
+  ),
+  methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS.runtimeShellPrewarm.method],
+  name: "runtime-shell-prewarm",
+  signatureBodyLimitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  wrongMethodResponse: "method-not-allowed",
+} satisfies DeclarativeRoute<WorkerRouteContext>;
+
 const userStatusRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -121,6 +134,7 @@ const userStatusRoute = {
 
 export const runtimeProcessingRoutes = [
   runtimeEnsureProcessingRoute,
+  runtimeShellPrewarmRoute,
   runtimeHealthDataConsentRoute,
 ] as const;
 
@@ -135,18 +149,7 @@ export async function handleStatusRoute(
   const userId = decodeRouteParam(encodedUserId);
   const stub = await resolveUserRunnerStub(context.env, userId);
   const status = await stub.runnerStatus(readHostedStatusRouteOptions(context.url));
-  return json({
-    ...status,
-    ...(status.r2Cutover
-      ? {
-          r2Cutover: {
-            ...status.r2Cutover,
-            pausedCanaryConfigured: readHostedR2PausedCanaryConfigured(context.env),
-            writeAdmission: readHostedR2WriteAdmission(context.env),
-          },
-        }
-      : {}),
-  });
+  return json(status);
 }
 
 function readHostedStatusRouteOptions(url: URL): { logLimit?: number } | undefined {
@@ -198,12 +201,6 @@ export async function handleRuntimeEnsureProcessingRoute(
       // caller-supplied body fields.
       authorizationKind === "vercel-oidc",
     );
-    const writeAdmission = readHostedR2WriteAdmission(context.env);
-    const admitPausedCanary = authorizationKind === "web-callback-signature"
-      && await isHostedR2PausedCanaryUser(context.env, userId);
-    if (writeAdmission === "paused" && !admitPausedCanary) {
-      return json(createHostedR2WriteAdmissionPausedResponse());
-    }
     if (authorizationKind === "vercel-oidc") {
       const executionCtx = context.executionCtx;
       if (!executionCtx) {
@@ -284,6 +281,55 @@ export async function handleRuntimeHealthDataConsentRoute(
     );
   }
   return json(await stub.reconcileRuntimeHealthDataConsentForUser(userId));
+}
+
+async function handleRuntimeShellPrewarmRoute(
+  context: WorkerRouteContext,
+  encodedUserId: string,
+): Promise<Response> {
+  const userId = decodeRouteParam(encodedUserId);
+  try {
+    const payload = await readCachedRequestText(context, {
+      limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+    });
+    const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
+    if (Object.keys(body).some((key) => key !== "source")) {
+      throw new TypeError("Hosted runtime shell prewarm request has unknown fields.");
+    }
+    const source = body.source;
+    if (
+      source !== undefined
+      && source !== "linq-instant-start"
+      && source !== "linq-typing-started"
+    ) {
+      throw new TypeError("Hosted runtime shell prewarm source is invalid.");
+    }
+
+    const stub = context.env.USER_RUNNER.getByName(userId);
+    if (!stub.prewarmRuntimeShellForUser) {
+      throw new Error("User runner shell-prewarm RPC is unavailable.");
+    }
+    await stub.prewarmRuntimeShellForUser(userId, source);
+    return json({ accepted: true }, 202);
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "worker",
+      details: buildWorkerRouteLogDetails({
+        reason: "runtime-shell-prewarm-request-failed",
+        routeName: "runtime-shell-prewarm",
+      }, context.request, userId),
+      error,
+      level: "warn",
+      message: "Hosted worker runtime shell prewarm request failed.",
+      phase: "failed",
+      userId,
+    });
+    const classified = classifyPublicRouteError(error);
+    return json({
+      code: "invalid_request",
+      error: classified.error,
+    }, classified.status);
+  }
 }
 
 function runRuntimeEnsureProcessingForUser(input: {

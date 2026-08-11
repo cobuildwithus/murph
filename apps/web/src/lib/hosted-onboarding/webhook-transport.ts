@@ -169,10 +169,7 @@ type HostedLinqPersistedAiUsageQuotaClaimToken =
     usageCreditLedgerVersion?: string;
   };
 
-type HostedLinqUsageLimitNoticeCode = Exclude<
-  HostedAiUsageGateNoticeCode,
-  "trial_conversion_pending"
->;
+type HostedLinqUsageLimitNoticeCode = HostedAiUsageGateNoticeCode;
 
 type HostedLinqAiUsageQuotaBasePayload = {
   chatId: string;
@@ -2142,7 +2139,7 @@ async function buildHostedLinqSideEffectMessage(
 ): Promise<string> {
   switch (effect.payload.template) {
     case HOSTED_LINQ_GROUP_SETUP_TEMPLATE:
-      return buildHostedLinqGroupSetupMessage();
+      return buildHostedLinqGroupSetupMessage({ seed: effect.effectId });
     case HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TEMPLATE:
       return buildHostedLinqGroupEmailRecoveryMessage({
         recoveryToken: effect.payload.recoveryToken,

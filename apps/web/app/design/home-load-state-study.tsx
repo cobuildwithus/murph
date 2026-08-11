@@ -1,4 +1,7 @@
+"use client";
+
 import { DashboardCriticalLoadError } from "@/src/components/dashboard/dashboard-critical-load-error";
+import { BrowserVaultUnavailableAlert } from "@/src/components/home/browser-vault-unavailable-alert";
 import { HomeDataLoadAlert } from "@/src/components/home/home-data-load-alert";
 import { PageHeader } from "@/src/components/ui/page-header";
 
@@ -38,6 +41,22 @@ export function HomeLoadStateStudy() {
         id="home-critical-load-section"
       >
         <DashboardCriticalLoadError />
+      </div>
+      {/*
+        Only a signed-in member whose vault load failed sees this. A signed-out
+        visitor gets the onboarding steps above instead, because the dashboard
+        layout never starts a vault load without a member to load.
+      */}
+      <div
+        className="rounded-2xl border border-border bg-background p-5 sm:p-8"
+        data-design-section="home-browser-vault-unavailable"
+        id="home-browser-vault-unavailable-section"
+        inert
+      >
+        <BrowserVaultUnavailableAlert
+          message="Your dashboard data is not available right now."
+          onRetry={() => {}}
+        />
       </div>
     </div>
   );

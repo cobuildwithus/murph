@@ -1,6 +1,10 @@
 import { Container, type StopParams } from "@cloudflare/containers";
+import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
+  deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   sanitizeHostedExecutionStructuredLogDetails,
   sanitizeHostedExecutionStructuredLogText,
@@ -8,8 +12,11 @@ import {
   type HostedExecutionStructuredLogDetails,
   type HostedExecutionStructuredLogDetailValue,
 } from "@murphai/hosted-execution";
-import type {
-  HostedWorkspaceInvocationProcessingMode,
+import {
+  HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY,
+  isHostedRuntimeFailurePhaseCode,
+  type HostedRuntimeFailurePhaseCode,
+  type HostedWorkspaceInvocationProcessingMode,
 } from "@murphai/hosted-execution/runtime-control";
 import { methodNotAllowed } from "./json.ts";
 import {
@@ -44,6 +51,7 @@ import {
 } from "./orchestration-latency-diagnostics.ts";
 import type {
   WorkerActiveRuntimeUserFenceResult,
+  WorkerUserRunnerNamespaceLike,
 } from "./worker-contracts.ts";
 
 const RUNNER_PORT = 8080;
@@ -68,6 +76,7 @@ const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
 const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
+const RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS = 1_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
 const RUNNER_METADATA_RESPONSE_BODY_DRAIN_TIMEOUT_MS = 5_000;
@@ -177,6 +186,13 @@ class HostedRunnerContainerShuttingDownError extends Error {
   }
 }
 
+class RunnerContainerShellPrewarmSupersededError extends Error {
+  constructor() {
+    super("Hosted runner shell prewarm was superseded by authoritative readiness.");
+    this.name = "RunnerContainerShellPrewarmSupersededError";
+  }
+}
+
 interface HostedExecutionContainerInvokeRequest {
   job: HostedExecutionRunnerJobInput;
   orchestration?: HostedRuntimeOrchestrationLatencyDiagnostics | null;
@@ -194,6 +210,41 @@ export interface RunnerContainerEnsureReadyForProcessingInput {
 export interface RunnerContainerEnsureReadyForProcessingResult {
   action?: "already_warm" | "started";
   kind: "ready";
+  shellPrewarmObservation?: RunnerContainerShellPrewarmObservation;
+}
+
+export interface RunnerContainerShellPrewarmObservation {
+  firstHintAtEpochMs: number;
+  hintCount: number;
+  finishedAtEpochMs?: number;
+  operationElapsedMs?: number;
+  outcome?: RunnerContainerShellPrewarmOutcome;
+  source: CloudflareHostedControlRuntimeShellPrewarmSource | "unknown";
+}
+
+export type RunnerContainerShellPrewarmOutcome =
+  | "cold_start_observed"
+  | "failed"
+  | "start_issued_warm"
+  | "superseded";
+
+export interface RunnerContainerBeginShellPrewarmInput
+  extends RunnerContainerEnsureReadyForProcessingInput {
+  source?: CloudflareHostedControlRuntimeShellPrewarmSource;
+}
+
+export type RunnerContainerPrewarmShellResult =
+  | {
+      action: "start_issued";
+      kind: "started";
+    }
+  | {
+      action: "superseded";
+      kind: "superseded";
+    };
+
+export interface RunnerContainerBeginShellPrewarmResult {
+  accepted: true;
 }
 
 interface HostedExecutionContainerRunnerInput {
@@ -216,6 +267,12 @@ export interface HostedExecutionContainerStubLike {
   ensureReadyForProcessing?(
     input: RunnerContainerEnsureReadyForProcessingInput,
   ): Promise<RunnerContainerEnsureReadyForProcessingResult>;
+  beginShellPrewarm?(
+    input: RunnerContainerBeginShellPrewarmInput,
+  ): Promise<RunnerContainerBeginShellPrewarmResult>;
+  prewarmShell?(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmShellResult>;
   ensureProcessing?(input: RunnerContainerEnsureProcessingInput): Promise<RunnerContainerEnsureProcessingResult>;
   invoke(input: HostedExecutionContainerInvokeRequest): Promise<HostedExecutionRunnerJobResult>;
   readActiveRuntimeUserFence?(): Promise<WorkerActiveRuntimeUserFenceResult>;
@@ -229,11 +286,21 @@ export interface HostedExecutionContainerNamespaceLike {
   idFromString?(id: string): unknown;
 }
 
-type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>>;
+type RunnerContainerEnvironmentSource = Readonly<Record<string, unknown>> & {
+  USER_RUNNER?: WorkerUserRunnerNamespaceLike;
+};
 type RunnerContainerNameSource = HostedRunnerContainerIdentitySource;
 
 interface RunnerContainerLogContext {
   userId: string;
+}
+
+interface RunnerContainerShellPrewarmOperation {
+  abortController: AbortController;
+  coldStartAlreadyObserved: boolean;
+  observed: boolean;
+  result: Promise<RunnerContainerPrewarmShellResult>;
+  startedAtMs: number;
 }
 
 interface RunnerContainerReadinessProof {
@@ -436,11 +503,23 @@ export interface RunnerContainerEnsureProcessingInput {
   userId: string;
 }
 
+// Durable Object RPC does not preserve custom own properties on thrown Errors,
+// so phase-bearing generic failures cross this seam as an explicitly bounded value.
+export interface RunnerContainerProcessingFailure {
+  errorCodeDetail: string | null;
+  runtimeFailurePhaseCode: HostedRuntimeFailurePhaseCode;
+  status: number | null;
+}
+
 export type RunnerContainerEnsureProcessingResult =
   | {
       action: "already_running" | "restarted" | "started" | "woken";
       kind: "accepted";
       result?: HostedExecutionRunnerJobResult;
+    }
+  | {
+      failure: RunnerContainerProcessingFailure;
+      kind: "failed";
     }
   | {
       kind: "start-required";
@@ -471,6 +550,8 @@ export class RunnerContainer extends Container {
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
+  private shellPrewarmObservation: RunnerContainerShellPrewarmObservation | null = null;
+  private shellPrewarmOperation: RunnerContainerShellPrewarmOperation | null = null;
   private stopGeneration = 0;
   private stopObservers = new Set<() => void>();
   private warmShellInvalidatedByUnsettledDestroy = false;
@@ -550,11 +631,73 @@ export class RunnerContainer extends Container {
     });
     operation.result = result;
     this.workspaceInvocationOperations.push(operation);
-    return await result;
+    const completedResult = await result;
+    if (this.readWorkspaceInvocationOperation() !== operation) {
+      await this.recordRuntimeCompletionBestEffort({
+        attemptId: input.job.request.attemptId,
+        generation: input.job.request.leaseGeneration,
+        result: completedResult,
+        userId: routeUserId,
+      });
+    }
+    return completedResult;
+  }
+
+  private async recordRuntimeCompletionBestEffort(input: {
+    attemptId: string;
+    generation: string;
+    result: HostedExecutionRunnerJobResult;
+    userId: string;
+  }): Promise<void> {
+    try {
+      const userRunner = this.environment.USER_RUNNER?.getByName(input.userId);
+      if (!userRunner?.recordRuntimeCompletionFromContainer) {
+        return;
+      }
+      const receipt = userRunner.recordRuntimeCompletionFromContainer(input).then(
+        () => ({ kind: "completed" as const }),
+        (error: unknown) => ({ error, kind: "failed" as const }),
+      );
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const outcome = await Promise.race([
+        receipt,
+        new Promise<{ kind: "timed_out" }>((resolve) => {
+          timeoutId = setTimeout(
+            () => resolve({ kind: "timed_out" }),
+            RUNNER_RUNTIME_COMPLETION_RECEIPT_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      if (outcome.kind === "completed") {
+        return;
+      }
+      const error = outcome.kind === "failed"
+        ? outcome.error
+        : new Error("Hosted runner container completion receipt timed out.");
+      throw error;
+    } catch (error) {
+      emitHostedExecutionStructuredLog({
+        component: "runner.container",
+        details: {
+          ...buildHostedExecutionSafeErrorDiagnostics(error),
+          workspaceAttemptId: input.attemptId,
+        },
+        level: "warn",
+        message:
+          "Hosted runner container completion receipt failed; preserving completed result.",
+        phase: "checkpoint",
+        userId: input.userId,
+      });
+    }
   }
 
   async destroyInstance(): Promise<void> {
     this.noteContainerInteraction();
+    this.shellPrewarmObservation = null;
+    this.supersedeShellPrewarm();
     const operationsAtDestroy = [...this.workspaceInvocationOperations];
     for (const operation of operationsAtDestroy) {
       if (!operation.abortController.signal.aborted) {
@@ -646,6 +789,9 @@ export class RunnerContainer extends Container {
   ): Promise<RunnerContainerEnsureReadyForProcessingResult> {
     this.noteContainerInteraction();
     const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    const shellPrewarmObservation = this.shellPrewarmObservation;
+    this.shellPrewarmObservation = null;
+    const supersededShellPrewarm = this.supersedeShellPrewarm();
     return await this.withLifecycleLock(async () => {
       const logContext: RunnerContainerLogContext = {
         userId: input.userId,
@@ -655,14 +801,129 @@ export class RunnerContainer extends Container {
         const action = await this.ensureContainerReady(
           input,
           AbortSignal.timeout(input.timeoutMs),
+          { completeSupersededShellPrewarm: supersededShellPrewarm },
         );
-        return { action, kind: "ready" };
+        return {
+          action,
+          kind: "ready",
+          ...(shellPrewarmObservation === null
+            ? {}
+            : { shellPrewarmObservation: { ...shellPrewarmObservation } }),
+        };
       } finally {
         if (this.currentLogContext === logContext) {
           this.currentLogContext = null;
         }
       }
     });
+  }
+
+  /**
+   * Issues only the platform container start command. The ordinary processing
+   * owner later performs port and health readiness before invoking workspace
+   * work; this hint never reads a workspace or creates a runtime fence.
+   */
+  async beginShellPrewarm(
+    payload: RunnerContainerBeginShellPrewarmInput,
+  ): Promise<RunnerContainerBeginShellPrewarmResult> {
+    this.noteContainerInteraction();
+    const input = parseRunnerContainerBeginShellPrewarmInput(payload);
+    const existingObservation = this.shellPrewarmObservation;
+    if (existingObservation) {
+      existingObservation.hintCount = Math.min(
+        Number.MAX_SAFE_INTEGER,
+        existingObservation.hintCount + 1,
+      );
+      return { accepted: true };
+    }
+    const observation = this.recordShellPrewarmHint(input.source);
+    const operation = this.getOrBeginShellPrewarm(input);
+    this.observeShellPrewarmOperation({
+      observation,
+      operation,
+      userId: input.userId,
+    });
+    return { accepted: true };
+  }
+
+  async prewarmShell(
+    payload: RunnerContainerEnsureReadyForProcessingInput,
+  ): Promise<RunnerContainerPrewarmShellResult> {
+    this.noteContainerInteraction();
+    const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+    return await this.getOrBeginShellPrewarm(input).result;
+  }
+
+  private getOrBeginShellPrewarm(
+    input: RunnerContainerEnsureReadyForProcessingInput,
+  ): RunnerContainerShellPrewarmOperation {
+    const existing = this.shellPrewarmOperation;
+    if (existing) {
+      return existing;
+    }
+
+    const abortController = new AbortController();
+    const startedAtMs = Date.now();
+    const coldStartAlreadyObserved = this.containerStartedAtMs !== null;
+    let retainForAuthoritativeReadiness = false;
+    const result = this.withLifecycleLock(
+      async (): Promise<RunnerContainerPrewarmShellResult> => {
+        const signal = combineRunnerContainerAbortSignals(
+          abortController.signal,
+          AbortSignal.timeout(input.timeoutMs),
+        );
+        try {
+          throwIfRunnerContainerOperationAborted(signal);
+          const logContext: RunnerContainerLogContext = {
+            userId: input.userId,
+          };
+          this.currentLogContext = logContext;
+          try {
+            await this.start(undefined, {
+              portToCheck: RUNNER_PORT,
+              signal,
+            });
+            return { action: "start_issued", kind: "started" };
+          } finally {
+            if (this.currentLogContext === logContext) {
+              this.currentLogContext = null;
+            }
+          }
+        } catch (error) {
+          if (
+            abortController.signal.reason
+              instanceof RunnerContainerShellPrewarmSupersededError
+          ) {
+            return { action: "superseded", kind: "superseded" };
+          }
+          // start() can issue the platform command before a later wait fails.
+          // Preserve that uncertain attempt so authoritative readiness finishes
+          // the canonical lifecycle path instead of trusting warm health alone.
+          retainForAuthoritativeReadiness = true;
+          throw error;
+        }
+      },
+      {
+        blockPointerlessWake: false,
+      },
+    );
+    const operation: RunnerContainerShellPrewarmOperation = {
+      abortController,
+      coldStartAlreadyObserved,
+      observed: false,
+      result,
+      startedAtMs,
+    };
+    this.shellPrewarmOperation = operation;
+    void result.finally(() => {
+      if (
+        this.shellPrewarmOperation === operation
+        && !retainForAuthoritativeReadiness
+      ) {
+        this.shellPrewarmOperation = null;
+      }
+    }).catch(() => undefined);
+    return operation;
   }
 
   async abortWorkspaceInvocation(input: {
@@ -830,6 +1091,13 @@ export class RunnerContainer extends Container {
         return {
           kind: "start-required",
           reason: "no-active-child",
+        };
+      }
+      const failure = buildRunnerContainerProcessingFailure(error);
+      if (failure) {
+        return {
+          failure,
+          kind: "failed",
         };
       }
       throw error;
@@ -1426,6 +1694,7 @@ export class RunnerContainer extends Container {
     });
     this.containerStartedAtMs = null;
     this.containerStartObservedBy = null;
+    this.shellPrewarmObservation = null;
     this.lastActivityExpiryAtMs = null;
     this.lastActivityObservedAtMs = null;
     this.lastActivityObservedStage = null;
@@ -1870,6 +2139,9 @@ export class RunnerContainer extends Container {
   private async ensureContainerReady(
     input: Pick<HostedExecutionContainerInvokeInput, "timeoutMs" | "userId">,
     operationAbortSignal: AbortSignal,
+    options: {
+      completeSupersededShellPrewarm?: boolean;
+    } = {},
   ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
     const status = readContainerStatus(await this.getState());
@@ -1898,7 +2170,10 @@ export class RunnerContainer extends Container {
         failClosed: true,
         reason: "warm-invalidated",
       });
-    } else if (!isRunnerContainerStopped(status)) {
+    } else if (
+      !isRunnerContainerStopped(status)
+      && !options.completeSupersededShellPrewarm
+    ) {
       if (isRunnerContainerRunning(status)) {
         const recentReadinessProof = this.readRecentReadinessProof(
           Date.now(),
@@ -2528,6 +2803,105 @@ export class RunnerContainer extends Container {
     return next;
   }
 
+  private supersedeShellPrewarm(): boolean {
+    const operation = this.shellPrewarmOperation;
+    if (!operation) {
+      return false;
+    }
+    this.shellPrewarmOperation = null;
+    if (!operation.abortController.signal.aborted) {
+      operation.abortController.abort(
+        new RunnerContainerShellPrewarmSupersededError(),
+      );
+    }
+    return true;
+  }
+
+  private recordShellPrewarmHint(
+    source: CloudflareHostedControlRuntimeShellPrewarmSource | undefined,
+  ): RunnerContainerShellPrewarmObservation {
+    const hintedAtMs = Date.now();
+    const observation: RunnerContainerShellPrewarmObservation = {
+      firstHintAtEpochMs: hintedAtMs,
+      hintCount: 1,
+      source: source ?? "unknown",
+    };
+    this.shellPrewarmObservation = observation;
+    return observation;
+  }
+
+  private observeShellPrewarmOperation(input: {
+    observation: RunnerContainerShellPrewarmObservation;
+    operation: RunnerContainerShellPrewarmOperation;
+    userId: string;
+  }): void {
+    if (input.operation.observed) {
+      return;
+    }
+    input.operation.observed = true;
+    void input.operation.result.then(
+      (result) => {
+        const finishedAtMs = Date.now();
+        const coldStartObserved = result.action === "start_issued"
+          && !input.operation.coldStartAlreadyObserved
+          && this.containerStartedAtMs !== null;
+        input.observation.outcome = result.action === "superseded"
+          ? "superseded"
+          : coldStartObserved
+          ? "cold_start_observed"
+          : "start_issued_warm";
+        input.observation.finishedAtEpochMs = finishedAtMs;
+        const elapsedMs = Math.max(
+          0,
+          finishedAtMs - input.operation.startedAtMs,
+        );
+        input.observation.operationElapsedMs = elapsedMs;
+        queueMicrotask(() => {
+          emitHostedExecutionStructuredLog({
+            component: "runner.container",
+            details: {
+              shellPrewarmColdStartObserved: coldStartObserved,
+              shellPrewarmElapsedMs: elapsedMs,
+              shellPrewarmHintCountAtCompletion: input.observation.hintCount,
+              shellPrewarmOutcome: result.action,
+              shellPrewarmSource: input.observation.source,
+            },
+            message: "Hosted runner shell prewarm operation completed.",
+            phase: "container.starting",
+            userId: input.userId,
+          });
+        });
+      },
+      (error: unknown) => {
+        const finishedAtMs = Date.now();
+        input.observation.outcome = "failed";
+        input.observation.finishedAtEpochMs = finishedAtMs;
+        const elapsedMs = Math.max(
+          0,
+          finishedAtMs - input.operation.startedAtMs,
+        );
+        input.observation.operationElapsedMs = elapsedMs;
+        queueMicrotask(() => {
+          emitHostedExecutionStructuredLog({
+            component: "runner.container",
+            details: {
+              ...buildHostedExecutionSafeErrorDiagnostics(error),
+              shellPrewarmElapsedMs: elapsedMs,
+              shellPrewarmHintCountAtCompletion: input.observation.hintCount,
+              shellPrewarmOutcome: "failed",
+              shellPrewarmSource: input.observation.source,
+            },
+            error,
+            level: "warn",
+            message: "Hosted runner shell prewarm failed after acceptance.",
+            phase: "failed",
+            userId: input.userId,
+          });
+        });
+      },
+    );
+  }
+
   private recordRecentReadinessProof(userId: string): void {
     this.recentReadinessProof = {
       checkedAtMs: Date.now(),
@@ -2980,6 +3354,12 @@ function buildHostedRunnerContainerPayloadDetailsMetadata(
   if (errorCodeDetail) {
     metadata.errorCodeDetail = errorCodeDetail;
   }
+  const runtimeFailurePhaseCode =
+    record[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
+  if (isHostedRuntimeFailurePhaseCode(runtimeFailurePhaseCode)) {
+    metadata[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY] =
+      runtimeFailurePhaseCode;
+  }
   if (hasNonEmptyHostedRunnerContainerString(record.errorDetail)) {
     metadata.errorDetailPresent = true;
   }
@@ -3128,8 +3508,11 @@ function formatHostedRunnerContainerErrorMessage(input: {
   const cause = readHostedRunnerContainerDiagnosticFragment(input.details?.errorCause, {
     redactEnvKeys: true,
   });
+  const transportedCodeDetail = input.details?.errorCodeDetail;
   const code = readHostedRunnerContainerDiagnosticFragment(
-    input.details?.errorCodeDetail ?? input.code,
+    isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
+      ? input.code ?? undefined
+      : transportedCodeDetail ?? input.code ?? undefined,
     { redactEnvKeys: false },
   );
 
@@ -3261,10 +3644,16 @@ async function invokeRunnerContainerProcessing(
   if (ensured.kind === "accepted" && ensured.result) {
     return ensured.result;
   }
+  if (ensured.kind === "failed") {
+    throw createRunnerContainerProcessingFailureError(ensured.failure);
+  }
   if (ensured.kind === "start-required" && ensured.reason === "no-active-child") {
     const retried = await ensure();
     if (retried.kind === "accepted" && retried.result) {
       return retried.result;
+    }
+    if (retried.kind === "failed") {
+      throw createRunnerContainerProcessingFailureError(retried.failure);
     }
     throw new Error(
       `Hosted runner container replacement retry returned ${retried.kind} without invoking work.`,
@@ -3357,6 +3746,23 @@ function parseRunnerContainerEnsureReadyForProcessingInput(
   return {
     timeoutMs: readTimeoutMs(payload.timeoutMs, DEFAULT_RUNNER_READY_TIMEOUT_MS),
     userId: requireString(payload.userId, "payload.userId"),
+  };
+}
+
+function parseRunnerContainerBeginShellPrewarmInput(
+  payload: RunnerContainerBeginShellPrewarmInput,
+): RunnerContainerBeginShellPrewarmInput {
+  const input = parseRunnerContainerEnsureReadyForProcessingInput(payload);
+  if (
+    payload.source !== undefined
+    && payload.source !== "linq-instant-start"
+    && payload.source !== "linq-typing-started"
+  ) {
+    throw new TypeError("payload.source must be a supported shell-prewarm source.");
+  }
+  return {
+    ...input,
+    ...(payload.source === undefined ? {} : { source: payload.source }),
   };
 }
 
@@ -3856,6 +4262,83 @@ function readRunnerContainerErrorDetails(error: unknown): HostedExecutionStructu
   return sanitizeHostedExecutionStructuredLogDetails(
     (error as { details?: unknown }).details as HostedExecutionStructuredLogDetails | null | undefined,
   );
+}
+
+function buildRunnerContainerProcessingFailure(
+  error: unknown,
+): RunnerContainerProcessingFailure | null {
+  const code = deriveHostedExecutionErrorCode(error);
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  const details = readRunnerContainerErrorDetails(error);
+  const transportedCodeDetail = readHostedRunnerContainerSafeCode(
+    details?.errorCodeDetail,
+  );
+  const explicitPhase =
+    details?.[HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY];
+  const runtimeFailurePhaseCode = isHostedRuntimeFailurePhaseCode(explicitPhase)
+    ? explicitPhase
+    : isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
+    ? transportedCodeDetail
+    : null;
+  if (code !== "runtime_error" || !runtimeFailurePhaseCode) {
+    return null;
+  }
+  const errorCodeDetail = transportedCodeDetail
+    && !isHostedRuntimeFailurePhaseCode(transportedCodeDetail)
+    ? transportedCodeDetail
+    : null;
+  return {
+    errorCodeDetail,
+    runtimeFailurePhaseCode,
+    status: readHostedRunnerContainerDiagnosticStatus(diagnostics),
+  };
+}
+
+function createRunnerContainerProcessingFailureError(
+  failure: RunnerContainerProcessingFailure,
+): Error {
+  const errorCodeDetail = readHostedRunnerContainerSafeCode(
+    failure.errorCodeDetail,
+  );
+  const runtimeFailurePhaseCode = isHostedRuntimeFailurePhaseCode(
+    failure.runtimeFailurePhaseCode,
+  )
+    ? failure.runtimeFailurePhaseCode
+    : null;
+  const status = typeof failure.status === "number"
+    && Number.isInteger(failure.status)
+    && failure.status >= 100
+    && failure.status <= 599
+    ? failure.status
+    : null;
+  const details = sanitizeHostedExecutionStructuredLogDetails({
+    ...(errorCodeDetail
+      ? { errorCodeDetail }
+      : {}),
+    ...(runtimeFailurePhaseCode
+      ? {
+          [HOSTED_RUNTIME_FAILURE_PHASE_CODE_DETAIL_KEY]:
+            runtimeFailurePhaseCode,
+        }
+      : {}),
+  });
+  const message = joinHostedRunnerContainerErrorFragments([
+    summarizeHostedExecutionErrorCode("runtime_error")
+      ?? "Hosted execution runtime failed.",
+    `Code: ${errorCodeDetail ?? "runtime_error"}`,
+    ...(status === null ? [] : [`Status: ${status}`]),
+  ]);
+  const error = Object.assign(new Error(message), {
+    code: "runtime_error",
+    ...(details ? { details } : {}),
+    ...(status === null
+      ? {}
+      : {
+          status,
+          statusCode: status,
+        }),
+  });
+  return error;
 }
 
 function buildRunnerContainerEnvVars(): Record<string, string> {

@@ -277,17 +277,20 @@ function buildRetellCreatePhoneCallRequest(call: HostedPhoneCallRuntimeRecord): 
   const publicBaseOrigin = readRetellPublicBaseOrigin();
   const agentOverride = buildRetellAgentOverride(publicBaseOrigin);
 
-  return {
+  const params: CallCreatePhoneCallParams = {
     from_number: requireEnv("RETELL_FROM_NUMBER"),
     to_number: call.brief.to.phoneNumber,
     override_agent_id: requireEnv("RETELL_AGENT_ID"),
     override_agent_version: process.env.RETELL_AGENT_VERSION?.trim() || "prod",
-    ...(agentOverride ? { agent_override: agentOverride } : {}),
     metadata: {
       murph_phone_call_id: call.id,
     },
     retell_llm_dynamic_variables: buildRetellDynamicVariables(call, publicBaseOrigin),
   };
+  if (agentOverride) {
+    params.agent_override = agentOverride;
+  }
+  return params;
 }
 
 type RetellAgentOverride = NonNullable<CallCreatePhoneCallParams["agent_override"]>;

@@ -1,14 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  appendHostedSignupReferralRewardNotice: vi.fn(),
   getPrisma: vi.fn(),
   reconcileHostedUsageReferralRewardAfterCommit: vi.fn(),
+  recoverPendingHostedSignupReferralRewards: vi.fn(),
   requireVercelCronRequest: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
+}));
+
+vi.mock("@/src/lib/hosted-growth/signup-referral-notification", () => ({
+  appendHostedSignupReferralRewardNotice:
+    mocks.appendHostedSignupReferralRewardNotice,
+}));
+
+vi.mock("@/src/lib/hosted-growth/signup-referral-reward", () => ({
+  recoverPendingHostedSignupReferralRewards:
+    mocks.recoverPendingHostedSignupReferralRewards,
 }));
 
 vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
@@ -30,34 +42,75 @@ import {
   recoverPendingHostedUsageReferrals,
 } from "@/src/lib/hosted-growth/usage-referral-recovery";
 
+const ORDINARY_POLICY_VERSION = "hosted-usage-referral-2026-07-v1";
+const SIGNUP_POLICY_VERSION =
+  "hosted-signup-referral-activation-2026-08-v1";
+
 describe("hosted usage-referral recovery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.appendHostedSignupReferralRewardNotice.mockResolvedValue(null);
+    mocks.recoverPendingHostedSignupReferralRewards.mockResolvedValue({
+      failed: 0,
+      rewarded: 0,
+      scanned: 0,
+    });
     mocks.requireVercelCronRequest.mockReturnValue(undefined);
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
 
-  it("bounds retries and keeps a durable celebration when its wake fails", async () => {
+  it("settles signup rewards, queues both notice kinds, and preserves durable wakes", async () => {
     const findReferrals = vi.fn().mockResolvedValue([
-      { id: "referral_pending" },
-      { id: "referral_queued" },
-      { id: "referral_failed" },
+      {
+        id: "referral_signup_queued",
+        policyVersion: SIGNUP_POLICY_VERSION,
+      },
+      {
+        id: "referral_pending",
+        policyVersion: ORDINARY_POLICY_VERSION,
+      },
+      {
+        id: "referral_queued",
+        policyVersion: ORDINARY_POLICY_VERSION,
+      },
+      {
+        id: "referral_failed",
+        policyVersion: ORDINARY_POLICY_VERSION,
+      },
     ]);
     const findMailboxItems = vi.fn().mockResolvedValue([
       {
-        id: "mailbox_referral_existing",
+        id: "mailbox_generic_predecessor",
+        lane: "conversation",
         laneSeq: 11n,
         userId: "member_existing_source",
       },
     ]);
     const prisma = {
-      hostedMailboxItem: { findMany: findMailboxItems },
+      $queryRaw: findMailboxItems,
       hostedUsageReferral: { findMany: findReferrals },
     };
+    mocks.recoverPendingHostedSignupReferralRewards.mockResolvedValue({
+      failed: 1,
+      rewarded: 2,
+      scanned: 3,
+    });
+    mocks.appendHostedSignupReferralRewardNotice.mockResolvedValueOnce({
+      eventId:
+        "assistant.notification.requested:usage-referral-reward:referral_signup_queued",
+      mailboxItemId: "mailbox_referral_signup_queued",
+      source: "linq",
+      userId: "member_referrer",
+      wakeMailboxCheckpoint: {
+        lane: "system",
+        laneSeq: 5n,
+      },
+    });
     mocks.reconcileHostedUsageReferralRewardAfterCommit
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
-        eventId: "assistant.notification.requested:usage-referral-reward:referral_queued",
+        eventId:
+          "assistant.notification.requested:usage-referral-reward:referral_queued",
         mailboxItemId: "mailbox_referral_queued",
         source: "telegram",
         userId: "member_source_group",
@@ -69,21 +122,27 @@ describe("hosted usage-referral recovery", () => {
       .mockRejectedValueOnce(new Error("temporary route failure"));
     mocks.signalHostedMailboxAppendRuntime
       .mockRejectedValueOnce(new Error("temporary wake failure"))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValue(undefined);
 
     await expect(recoverPendingHostedUsageReferrals({
       prisma: prisma as never,
     })).resolves.toEqual({
-      failed: 1,
+      failed: 2,
       pending: 1,
-      queued: 1,
+      queued: 2,
       resignaled: 1,
-      scanned: 4,
+      scanned: 8,
     });
 
+    expect(
+      mocks.recoverPendingHostedSignupReferralRewards,
+    ).toHaveBeenCalledExactlyOnceWith({ prisma });
     expect(findReferrals).toHaveBeenCalledExactlyOnceWith({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-      select: { id: true },
+      select: {
+        id: true,
+        policyVersion: true,
+      },
       take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
       where: {
         OR: [
@@ -98,26 +157,46 @@ describe("hosted usage-referral recovery", () => {
         ],
       },
     });
-    expect(findMailboxItems).toHaveBeenCalledExactlyOnceWith({
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: {
-        id: true,
-        laneSeq: true,
-        userId: true,
-      },
-      take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
-      where: {
-        consumedAt: null,
-        dedupeKey: {
-          startsWith:
-            "assistant.notification.requested:usage-referral-reward:",
-        },
-        kind: "assistant.notification.requested",
-        lane: "system",
-      },
+    expect(
+      mocks.appendHostedSignupReferralRewardNotice,
+    ).toHaveBeenCalledExactlyOnceWith({
+      prisma,
+      referralId: "referral_signup_queued",
     });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(1, {
+      prisma,
+      referralId: "referral_pending",
+    });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(2, {
+      prisma,
+      referralId: "referral_queued",
+    });
+    expect(
+      mocks.reconcileHostedUsageReferralRewardAfterCommit,
+    ).toHaveBeenNthCalledWith(3, {
+      prisma,
+      referralId: "referral_failed",
+    });
+    expect(findMailboxItems).toHaveBeenCalledOnce();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
       1,
+      {
+        expectedUserId: "member_referrer",
+        knownCheckpoint: {
+          lane: "system",
+          laneSeq: 5n,
+          userId: "member_referrer",
+        },
+        mailboxItemId: "mailbox_referral_signup_queued",
+        prisma,
+      },
+    );
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
+      2,
       {
         expectedUserId: "member_source_group",
         knownCheckpoint: {
@@ -130,25 +209,87 @@ describe("hosted usage-referral recovery", () => {
       },
     );
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
-      2,
+      3,
       {
         expectedUserId: "member_existing_source",
         knownCheckpoint: {
-          lane: "system",
+          lane: "conversation",
           laneSeq: "11",
           userId: "member_existing_source",
         },
-        mailboxItemId: "mailbox_referral_existing",
+        mailboxItemId: "mailbox_generic_predecessor",
         prisma,
       },
     );
   });
 
+  it("re-signals a legacy mailbox pointer without reading or rewriting its payload", async () => {
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{
+        id: "mailbox_legacy_direct",
+        lane: "system",
+        laneSeq: 11n,
+        userId: "member_legacy_direct",
+      }]),
+      hostedUsageReferral: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    await expect(recoverPendingHostedUsageReferrals({
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      failed: 0,
+      pending: 0,
+      queued: 0,
+      resignaled: 1,
+      scanned: 1,
+    });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+      expectedUserId: "member_legacy_direct",
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: "11",
+        userId: "member_legacy_direct",
+      },
+      mailboxItemId: "mailbox_legacy_direct",
+      prisma,
+    });
+  });
+
+  it("continues ordinary recovery when the gated signup scan throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const findReferrals = vi.fn().mockResolvedValue([]);
+    const findMailboxItems = vi.fn().mockResolvedValue([]);
+    const prisma = {
+      $queryRaw: findMailboxItems,
+      hostedUsageReferral: { findMany: findReferrals },
+    };
+    mocks.recoverPendingHostedSignupReferralRewards.mockRejectedValue(
+      new TypeError("invalid signup reward query"),
+    );
+
+    await expect(recoverPendingHostedUsageReferrals({
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      failed: 1,
+      pending: 0,
+      queued: 0,
+      resignaled: 0,
+      scanned: 0,
+    });
+
+    expect(findReferrals).toHaveBeenCalledOnce();
+    expect(findMailboxItems).toHaveBeenCalledOnce();
+    expect(consoleError).toHaveBeenCalledExactlyOnceWith(
+      "Hosted signup referral recovery failed.",
+      { errorName: "TypeError" },
+    );
+    consoleError.mockRestore();
+  });
+
   it("authenticates the cron before running an empty recovery pass", async () => {
     const prisma = {
-      hostedMailboxItem: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedUsageReferral: {
         findMany: vi.fn().mockResolvedValue([]),
       },

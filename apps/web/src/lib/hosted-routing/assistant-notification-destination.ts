@@ -45,6 +45,11 @@ export interface HostedAssistantNotificationDestination {
   route: HostedExecutionAssistantNotificationRoute;
 }
 
+export interface HostedAssistantNotificationBoundDestination {
+  externalThreadRouteAuthority: HostedExecutionExternalThreadRouteAuthority | null;
+  route: HostedExecutionAssistantNotificationRoute;
+}
+
 export async function resolveHostedAssistantNotificationDestination(input: {
   directChannel?: "linq" | "telegram";
   memberId: string;
@@ -140,6 +145,21 @@ export async function assertHostedAssistantNotificationRouteAuthority(input: {
     });
     return;
   }
+  await assertHostedDirectAssistantNotificationRouteAuthority({
+    authority: input.authority,
+    prisma,
+    signal: input.signal,
+  });
+}
+
+export async function assertHostedDirectAssistantNotificationRouteAuthority(
+  input: {
+    authority: HostedExecutionExternalThreadRouteAuthority;
+    prisma?: HostedOnboardingReadClient;
+    requireThreadDelivery?: boolean;
+    signal?: AbortSignal;
+  },
+): Promise<void> {
   if (
     input.authority.channel !== "linq"
     && input.authority.channel !== "telegram"
@@ -150,7 +170,7 @@ export async function assertHostedAssistantNotificationRouteAuthority(input: {
   const destination = await resolveHostedAssistantNotificationDestination({
     directChannel: input.authority.channel,
     memberId: input.authority.containerMemberId,
-    prisma,
+    prisma: input.prisma,
     signal: input.signal,
   });
   if (
@@ -158,6 +178,10 @@ export async function assertHostedAssistantNotificationRouteAuthority(input: {
     && destination.externalThreadRouteAuthority === null
     && destination.route.channel === input.authority.channel
     && destination.route.threadIsDirect === true
+    && (
+      input.requireThreadDelivery !== true
+      || destination.route.delivery.kind === "thread"
+    )
     && destination.route.delivery.target === input.authority.threadId
   ) {
     return;
@@ -196,6 +220,63 @@ export function isHostedThreadContainerNotificationDestination(
     throw new Error("Hosted direct notification destination is inconsistent.");
   }
   return false;
+}
+
+export function bindHostedAssistantNotificationDestination(input: {
+  destination: HostedAssistantNotificationDestination;
+  memberId: string;
+}): HostedAssistantNotificationBoundDestination {
+  const { destination, memberId } = input;
+  const route = destination.route;
+
+  if (isHostedThreadContainerNotificationDestination(destination)) {
+    const authority = destination.externalThreadRouteAuthority;
+    if (
+      authority === null
+      || authority.containerMemberId !== memberId
+      || authority.channel !== route.channel
+      || route.delivery.kind !== "thread"
+      || authority.threadId !== route.delivery.target
+    ) {
+      throw new Error(
+        "Hosted thread-container notification destination is inconsistent.",
+      );
+    }
+    return {
+      externalThreadRouteAuthority: authority,
+      route,
+    };
+  }
+
+  if (route.delivery.kind === "explicit") {
+    throw new Error("Hosted direct notification destination is inconsistent.");
+  }
+  if (
+    (route.channel !== "linq" && route.channel !== "telegram")
+    || route.delivery.kind !== "thread"
+  ) {
+    return {
+      externalThreadRouteAuthority: null,
+      route,
+    };
+  }
+
+  return {
+    externalThreadRouteAuthority: {
+      channel: route.channel,
+      containerMemberId: memberId,
+      threadId: route.delivery.target,
+    },
+    route: route.channel === "linq"
+      ? {
+          ...route,
+          delivery: {
+            ...route.delivery,
+            kind: "explicit",
+          },
+        }
+      : route,
+  };
 }
 
 async function resolveHostedThreadContainerNotificationDestination(input: {

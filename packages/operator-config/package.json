@@ -186,11 +186,11 @@
     "@murphai/gateway-core": "workspace:*",
     "@murphai/messaging-ingress": "workspace:*",
     "@murphai/query": "workspace:*",
-    "@murphai/runtime-state": "workspace:*",
-    "zod": "^4.4.3"
+    "@murphai/runtime-state": "workspace:*"
   },
   "devDependencies": {
-    "@linqapp/sdk": "0.28.0"
+    "@linqapp/sdk": "0.34.0",
+    "zod": "^4.4.3"
   },
   "engines": {
     "node": ">=24.14.1"

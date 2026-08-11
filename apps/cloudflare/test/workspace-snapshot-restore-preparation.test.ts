@@ -86,32 +86,6 @@ describe("workspace snapshot restore preparation", () => {
     }
   });
 
-  it.each(["source_active", "destination_active"] as const)(
-    "leaves %s cutover cold restore to the role-aware fenced control plane",
-    async (cutoverPhase) => {
-      const fixture = await createSnapshotFixture();
-      try {
-        const onPreparationUnavailable = vi.fn();
-
-        await expect(prepareHostedWorkspaceSnapshotRestore({
-          configSource: {
-            ...createPresignConfig(),
-            HOSTED_R2_CUTOVER_PHASE: cutoverPhase,
-          },
-          crypto: fixture.cryptoContext,
-          onPreparationUnavailable,
-          userId: TEST_USER_ID,
-          workspace: fixture.workspace,
-        })).resolves.toBeNull();
-
-        expect(onPreparationUnavailable).not.toHaveBeenCalled();
-      } finally {
-        fixture.dataKey.fill(0);
-        fixture.rootKey.fill(0);
-      }
-    },
-  );
-
   it("carries prepared restore data through the existing runner job transport", async () => {
     const fixture = await createSnapshotFixture();
     try {

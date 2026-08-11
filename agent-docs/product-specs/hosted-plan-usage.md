@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-05
+Last verified: 2026-08-10
 Status: Implemented current-state contract
 
 ## Goal
@@ -71,7 +71,7 @@ The available projection keeps these access states distinct:
 
 | Access | Display plan | Period | Thresholded recommendation |
 | --- | --- | --- | --- |
-| Direct trial | Pulse Trial | Trial | Continue with Group when eligible, otherwise Pulse |
+| Direct starter | Starter | Lifetime | Start Core when eligible, otherwise Pulse |
 | Direct paid Group | Group | Monthly | Upgrade to Pulse |
 | Direct paid Pulse | Pulse | Monthly | Add usage when configured and eligible |
 | Direct paid Edge | Edge | Monthly | Add usage when configured and eligible |
@@ -86,14 +86,15 @@ usage is not moved between periods later.
 
 Synthetic group-thread allowance is not personal plan usage. It returns the
 unavailable reason `group_not_supported` before exposing personal usage facts.
-Inactive hosted access and a trial awaiting conversion also return explicit
-unavailable states.
+Inactive hosted access returns an explicit unavailable state. Starter access is
+available or exhausted solely from its lifetime credit balance; account age and
+historical trial timestamps are not availability inputs.
 
 Every newly created Linq or Telegram group thread starts with a persisted $7.50
 included-usage limit. This is prospective: existing group-thread rows keep
 their stored limit.
 
-Usage is cost-weighted capacity across models and modalities. It is not a token
+Usage is normalized capacity across models and modalities. It is not a token
 count or cash balance. Used and remaining percentages are bounded integers that
 sum to 100. The display window starts at the current allowance period or, when
 later, the beneficiary's latest fulfilled purchase grant in that period. Its
@@ -108,7 +109,8 @@ but subsequent usage-bearing work blocks and accepted conversation input
 remains pending.
 
 An automatic same-period increase in included allowance, including trial to
-paid Pulse, Group to Pulse or Edge, Pulse to Edge, and Family Pulse to Edge,
+paid Pulse, Group to Pulse or Edge, direct Pulse or Edge to Max, and lower
+Family tiers to Edge or Max,
 starts a new capacity epoch at zero included spend. The canonical period stores
 that cutover and the highest plan tier already granted during the period.
 Consequently a downgrade followed by a re-upgrade cannot mint the same reset
@@ -118,15 +120,19 @@ marked uncounted and cannot consume the new included allowance or purchased
 usage credit. Provider work that starts after the cutover counts normally. The
 meter uses the later of this cutover and the latest fulfilled purchase grant,
 so it displays the fresh capacity immediately and does not forecast from
-pre-reset work.
+pre-reset work. A committed direct or Family capacity increase carries only the
+affected member identities to the existing post-commit runtime-recheck owner.
+A failed wake leaves the Stripe receipt retryable; replay re-proves the exact
+billing transition, preserves the idempotent reset, and retries the wake rather
+than waiting for the former period end.
 
 For paid access, the included monthly usage value is exactly 80% of the
 server-owned recurring amount for that member's billing mode and tier. Direct
 Group, Pulse, and Edge therefore include $2.80, $6.40, and $16.00 from their
-$3.50, $8, and $20 prices. Family-sponsored Pulse and Edge members separately
-receive $5.60 and $15.20 from their $7 and $19 seat prices. Discounts, taxes,
-prorations, trials, and usage credit do not redefine this catalog-owned
-allowance.
+$3.50, $8, and $20 prices; direct Max includes $40.00 from its $50 price.
+Family-sponsored Pulse, Edge, and Max members separately receive $5.60, $15.20,
+and $39.20 from their $7, $19, and $49 seat prices. Discounts, taxes, prorations,
+trials, and usage credit do not redefine this catalog-owned allowance.
 An authoritative paid billing period that is already open keeps the higher
 included limit granted before this policy change. The price-derived allowance
 starts on its next paid period; an actual plan, Family tier, or
@@ -139,18 +145,17 @@ spend, and future periods remain untouched.
 
 A forecast requires at least 24 hours of counted usage in the current display
 window. It uses the same overall effective capacity as the percentage and is
-shown only when that window's observed pace projects exhaustion before the
-current period ends. The forecast is conservative and optional; the product
-must not invent one when the
-projection omits it.
+available only when that window's observed pace projects exhaustion before the
+current period ends. The forecast is conservative and optional. It may inform
+`recommendedAction`, but Settings does not display an estimated number of days
+remaining.
 
 ## Actions
 
 `apps/web` may return `recommendedAction` only when all available usage is
 exhausted, the forecast projects exhaustion, or at least 80% of overall
-available usage is used. Trial access may recommend continuing with Group at
-trial end when current membership makes that plan eligible; otherwise it may
-recommend **Start Pulse now**. Paid Group may recommend Pulse. An eligible
+available usage is used. Starter access may recommend beginning the current eligible paid plan. Paid
+Group may recommend Pulse. An eligible
 direct paid Pulse or Edge member may receive **Add usage**, which opens the
 authenticated fixed-pack Settings dialog. Group does not expose personal
 top-ups. Plan changes remain on the plan card. Family and group contexts do not
@@ -190,30 +195,29 @@ An explicit request in a private conversation to manage billing, or to perform
 a Family account change outside `murph.family_plan`'s status, checkout, invite,
 and member-usage navigation rules, may receive the canonical
 `/settings#subscription` handoff
-after `murph.plan_usage` returns `active`, `exhausted`, or
-`trial_conversion_pending`. This is neutral browser navigation, not a projected
+after `murph.plan_usage` returns `active` or `exhausted`. This is neutral
+browser navigation, not a projected
 billing action or recommendation. The assistant must say that no billing or
 Family change happened. It must not provide the private management handoff for
 `group_not_supported` or `hosted_access_inactive`, or offer it proactively.
 
 ### Private Conversation Actions
 
-`murph.subscription` is a narrow mutation surface for:
+`murph.subscription` exposes one signed `change_plan` action to the model. It
+supports:
 
-- keeping an active Pulse trial scheduled to continue as Pulse;
-- ending the trial and starting Pulse now;
-- scheduling an eligible active trial to continue as Group;
+- a Starter member beginning an eligible paid direct plan through ordinary
+  Stripe Checkout;
 - immediately upgrading Group to Pulse or Edge, or Pulse to Edge; and
-- scheduling Pulse or Edge to change to an eligible lower direct plan at
+- scheduling paid Pulse or Edge to change to an eligible lower direct plan at
   renewal.
 
 These are member-directed actions, not extensions of the read projection's
-`recommendedAction`. A recommendation is never consent. Before `change_plan`,
-the assistant needs a current `subscriptionActionQuote` whose target and timing
-match the proposed choice, states the returned exact-price label, and then gets
-explicit confirmation. When that quote is absent, the assistant does not guess
-and uses the neutral Settings handoff. The legacy Pulse actions remain bounded
-compatibility entrypoints.
+`recommendedAction`. A recommendation is never consent. The assistant needs a
+current `subscriptionActionQuote` whose target and timing match the proposed
+choice, states the returned exact-price label, and then gets explicit
+confirmation. When that quote is absent, the assistant does not guess and uses
+the neutral Settings handoff.
 
 The tool is available only in a private personal conversation with current
 eligible accepted member input. Assistant policy permits a call only after the
@@ -227,64 +231,24 @@ removed with the mailbox row under existing retention. The backend does not
 claim to prove the meaning of the message. Family and group contexts are
 outside this surface.
 
-Continuing an active trial with a configured default payment method is already
-represented by the existing Stripe subscription. Nothing is needed right now:
-the choice requires no charge, subscription update, payment link, or
-unsolicited explanation. A configured method does not guarantee that a future
-renewal will succeed. If the payment method is missing, web may return a Stripe
-Customer Portal payment-method-update URL. A paused-trial state race remains
-recoverable only through a fresh start-now choice in the existing Pulse
-activation service rather than through the old continue-at-trial-end claim or a
-second resume path. Assistant policy treats an already ended or
-conversion-pending trial as a start-now choice, discloses the current terms,
-and asks for explicit confirmation instead of presenting it as non-charging
-continuation.
-
-After a signed-in member completes a payment-method-update link returned by
-private-chat `continue_pulse` or `start_pulse_now`, the authenticated browser
-return recovers that exact claimed action. The
-short-lived signed return contains no member identifier, and the resulting
-HttpOnly claim is bound to the current member, app session, and action.
-`start_pulse_now` discloses that paid billing begins now and requires fresh
-confirmation. An active `continue_pulse` return performs a mutation-free state
-check and shows a receipt that the existing trial remains scheduled to
-continue. If the trial reconciled to paid before the browser return, the same
-read-only path shows the active paid plan without contacting Stripe. If Stripe
-has already paused the trial, the old continue claim fails closed, keeps its
-explanation visible until dismissal, and ordinary Settings requires a fresh
-start-now confirmation before any resume or immediate invoice. Dismissing,
-canceling, copying to another member, and expired, tampered, or marker-only
-returns remain inert. The browser never upgrades a continue-at-trial-end choice
-into an immediate start. Each continuation POST carries the server-rendered
-action as compare-only metadata; the route rejects any mismatch with the
-member/session/action-bound cookie before billing dispatch and still derives
-the operation only from that cookie. Successful responses leave the bounded
-cookie untouched so an older in-flight response cannot clear a newer return
-from another tab. The public marker removal keeps completed or dismissed
-returns inert, and the existing short expiry bounds any surviving claim.
-
-Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
-Edge uses the existing plan-change admission service, which validates the
+For quote timing `now`, Web creates an ordinary checkout for the exact quoted
+plan. For `immediate`, the existing plan-change admission service validates the
 current member, billing owner, exact Customer and Subscription, one licensed
 monthly Subscription Item, target Price, and absence of a schedule or pending
 update before creating a Customer Portal `subscription_update_confirm` deep
-link. Stripe then owns the exact proration, payment collection, payment-method
-recovery, and required authentication. Its successful redirect returns to
-Settings, where a bounded status surface waits for the webhook-owned Postgres
-projection instead of claiming entitlement from the redirect itself. The
-allowlisted success target or cancellation marker stays in the Settings query
-so a Stripe link opened outside the member's signed-in browser can show the
-existing neutral sign-in handoff and resume the exact return URL afterward.
-An authenticated cancellation removes that marker and returns quietly to the
-Subscription section. Unknown, repeated, and Group values do not receive this
-auth-resume behavior. The
-return hint is presentation-only, but while it differs from the authoritative
-projection Settings suppresses every plan-changing control, including usage and
-model upsells, so the member cannot start the same commercial change again.
-Once the projection matches, normal plan controls resume and the return hint is
-removed. The
-assistant sends the Portal URL only after the member's explicit choice. A
-no-action result carries no URL.
+link. For `at_period_end`, the existing switch service creates the narrow
+Stripe-owned schedule. Stripe owns exact proration, payment collection,
+payment-method recovery, required authentication, and the future phase. Its
+successful redirect returns to Settings, where a bounded status surface waits
+for the webhook-owned Postgres projection instead of claiming entitlement from
+the redirect itself.
+
+The hosted-execution wire decoder temporarily accepts the retired
+`continue_pulse`, `start_pulse_now`, and `upgrade_edge` action names from already
+deployed runtimes. They are not advertised to the model, do not restore trial
+semantics, and delegate to the same quoted checkout/upgrade owners. Remove that
+reader compatibility only after every preceding runtime is drained and cannot
+be rolled back.
 
 The retired Stripe hosted-AI meter is not part of current allowance accounting
 or billing. A dry-run-first operator migration removes only explicitly marked
@@ -297,7 +261,7 @@ fallback.
 
 The assistant may discuss plan and usage options before a choice, but the first
 assistant-initiated commercial mention is one short, reply-oriented question
-with no link. A trial off-ramp may naturally ask “should we part ways?”; this is
+with no link. A starter exhaustion off-ramp may naturally ask “should we part ways?”; this is
 optional language, not a fixed script or pressure tactic. If a trusted manual
 check finds no action is needed and the member did not ask about billing, the
 assistant says nothing unless trusted low-usage context calls for the generic,
@@ -314,9 +278,8 @@ Sol; name a model only if they ask. Never switch models automatically.
 The web-owned allowance gate is the single model-work admission owner. It
 combines current included capacity with the compact usage-credit
 projection. When both reach zero, subsequent assistant or eligible system work
-is denied with `ai_usage_limit_exceeded`; inactive, suspended, malformed or
-expired trial entitlement, and existing abuse controls remain separate
-fail-closed reasons. The read-only plan-usage projection presents that combined
+is denied with `ai_usage_limit_exceeded`; inactive, suspended, or malformed entitlement and existing abuse controls
+remain separate fail-closed reasons. The read-only plan-usage projection presents that combined
 capacity as one overall available-usage view; it remains a projection and must
 not be treated as the gate result.
 
@@ -422,40 +385,54 @@ requests one manual private check. A trusted check authorizes the read only; it
 does not authorize a billing action or a proactive payment link.
 
 Do not turn this read into onboarding automation, a recurring threshold
-watcher, or a group-chat money prompt. Do not name a group payer, invent a
-balance, or use guilt, urgency, or scarcity language.
+watcher, or a group-chat billing report. Do not name a group payer, invent a
+balance, use guilt, or manufacture urgency or scarcity beyond the current
+coarse capacity state.
 
 The low-usage skill may use the trusted bit for one manual private
 `murph.plan_usage` check. It follows the current Web-owned state rather than
 inventing a billing menu:
 
-- a direct Pulse Trial may offer help starting Pulse now only from the current
-  thresholded recommendation, with the existing quote and confirmation rules;
+- a direct Starter member may offer help starting the current eligible paid
+  plan only from the current thresholded recommendation, with the existing
+  quote and confirmation rules;
 - a direct paid Pulse or Edge plan may offer the authorized one-time Add usage
   handoff, while Edge is discussed as a recurring Pulse alternative only after
   the member asks and a current quote exists;
 - a Family-sponsored member is never offered a personal top-up; a Family Pulse
-  seat may be moved to Edge by the plan owner, but the assistant verifies
+  or Edge seat may be moved to a higher Family tier by the plan owner, but the
+  assistant verifies
   `owner: true` through the Family status read before offering that owner a
   private Settings handoff; a sponsored non-owner is told that the Family
-  owner must make the change, while Family Edge has no higher current tier; and
+  owner must make the change, while Family Max has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
   low-usage turn the assistant calls `murph.group action="read_usage"` once.
-  A sponsored group receives only the binary acknowledgment that Murph is
-  sponsored in the chat; payer identity, cap, charges, balance, percentages,
-  message counts, and refill events stay private. For an unsponsored group with
-  `fundingNeeded: false`, the heads-up is suppressed. When funding is needed,
-  the segment stays conversational, link-free, and route-neutral: it calls the
-  shared capacity "Murph time," says Murph may pause for the room, and asks
-  whether they want Murph to check the options without naming or counting any
-  path. It never frames each text as a unit being purchased or spent. After
+  `fundingNeeded` is the only assistant-facing urgency signal. It is false when
+  capacity is healthy and while a low room has an automatic refill available
+  or already pending, including a current-period payment already bound before
+  an authorization pause; it is true when a low room has no automatic recovery
+  and whenever the room is exhausted. When false, the heads-up is suppressed
+  without the assistant inferring or explaining why. When true, the segment
+  stays conversational, link-free, and option-neutral: it
+  calls the shared capacity "Murph time," says Murph may pause for the room,
+  and asks whether they want Murph to check the options without naming or
+  counting any path. The assistant receives no current sponsorship-status
+  field. Payer identity, payment setup, cap, charges, credit balance or source,
+  remaining capacity, period dates, message counts, and refill events stay
+  private. The required current-response `includedUsageUsedPercent` is separate from urgency and
+  may be stated only when a participant explicitly asks how much AI usage the
+  room has consumed or asks for the room's current usage status. It never
+  appears in this proactive heads-up or in a general funding-options answer.
+  Murph never frames each text as a unit being purchased or spent. After
   someone asks for the options, asks for more Murph time, asks how to keep the
   room going, or accepts the quick path, the assistant reads the options for
   that responding sender, using the exact accepted request-bearing message as
   participant authority rather than inferring one sender from the whole grouped
   turn. It refreshes current usage as needed, presents every returned earned
-  and sponsored path, and includes a returned first-party funding URL only when
-  `fundingNeeded` is true, after the sponsored path instead of leading with it.
+  and group-funding path, and may include a returned first-party funding URL
+  after the funding path instead of leading with it. `fundingNeeded` controls
+  whether the assistant says the room currently needs more Murph time, not
+  whether an explicitly requested funding capability exists.
   Playful payer nomination is allowed, but who actually paid, purchase status,
   and amounts stay private, and the assistant never promises a URL the read did
   not return. For a group without an owner-created join code, the funding URL
@@ -482,28 +459,83 @@ Classify a group-thread allowance from its source, never by comparing its
 numeric cap with a trial cap. `murph.plan_usage` still returns
 `group_not_supported`; group capacity is not projected as a personal plan or a
 synthetic personal allowance. The existing `murph.group` tool's `read_usage`
-action reports `healthy`, `low`, or `exhausted`, the current period end, the
-first-party funding URL, and the current period's usage remaining as an
-integer percentage. Web rounds the percentage down and clamps it to 0–100.
-The action never exposes internal USD-micro accounting, contributors, receipts,
-or payer identity.
+action reports `fundingNeeded`, the current first-party funding URL, and an
+integer `includedUsageUsedPercent` on every successful current response.
+
+Web owns the aggregate. The successful thread-container usage gate already
+proves that the included limit is positive; an inactive or malformed limit
+makes the read unavailable. With current-period counted included spend `spent`
+and included limit `limit`, Web returns `0` when `spent <= 0`, `100` when
+`spent >= limit`, and `max(1, floor(spent * 100 / limit))` in between. This is
+the percentage of the room's included usage for the current period that has
+been used. It excludes purchased, referral, carryover, and automatic-refill
+credit. Credit changes therefore cannot lower or reset it; a new included
+period can. A value of `100` means at least all included usage has been used,
+not that effective capacity is exhausted, because credit may remain.
+
+The assistant may disclose the aggregate only after a participant explicitly
+asks how much AI usage the room has consumed or asks for the room's current
+usage status. It says, in substance, "About X% of this room's included usage
+for the current period has been used." For `100`, it says at least all included
+usage has been used and does not say the room is exhausted unless an
+authoritative capacity result separately says so. The transport returns the
+field on every successful current response and does not infer intent. A
+funding-only current response is schema-invalid by design; during accepted
+mixed-version skew Murph says the quantitative status is unavailable instead
+of estimating it from funding urgency, sponsorship, messages, or history.
+Filesystem-capable group-chat turns load the detailed hosted-low-usage skill.
+Because group-email turns deliberately have no filesystem or shell access, the
+stable group-email prompt carries the same compact one-read, bounded-answer,
+100-is-not-exhaustion, and unavailable-result contract. That room-public read
+does not authenticate the email sender or authorize a mutation.
+
+Web derives `fundingNeeded` from current capacity plus automatic-refill
+availability. It keeps the underlying healthy/low/exhausted state, raw spend
+and limit, remaining capacity, funding setup, internal USD-micro accounting,
+credit amount or source, contributors, receipts, payer identity, sponsor cap,
+charges, pending payments, refill state and events, period dates, and message
+counts out of the assistant projection.
+The recovery projection does not read the page-only sponsorship projection,
+so a private sponsor-state failure cannot remove the exhausted-room action.
 
 Group low usage follows the same next-turn context path as personal usage: it
 never creates a standalone message, and the prompt asks Murph to finish the
 current request before mentioning the low capacity casually as "Murph time"
 and without a link. After someone asks for options, asks for more Murph time,
 or asks how to keep the room going, a current read may supply the funding link
-as part of the sponsored path; the assistant does not lead with it. Message
+as part of the group-funding path; the assistant does not lead with it. Message
 counts stay out of unsolicited and general-options copy; Murph gives the exact
 server-returned approximate count only when someone asks how much a path adds
 or a post-action confirmation requires it. A deterministic group exhaustion
 notice may use only the exact originating external-thread target after Web
 re-authorizes its persisted thread authority; no personal-home fallback is
-valid for an accepted group conversation. At delivery time Web rechecks the exhausted state and may append
-the group's funding link, using the owner join code when one exists or the
-signed funding-only locator when none does. The notice does not name a payer,
-claim that payment occurred, or add a separate scheduler or money-prompt
-lifecycle.
+valid for an accepted group conversation. At delivery time Web rechecks the
+exhausted state in the existing notice claim and sends the group's funding link
+with one neutral group pause contract. The mandatory action URL uses a signed
+funding-only locator derived from the runtime member, so private sponsor state,
+group display data, join-code preference, and access lookups cannot remove it
+before the claim. The funding page keeps an authenticated signed locator in its
+funding path, client endpoints, and purchase return URL; it never exchanges the
+funding-only capability for an owner-created enrollment code. After target
+authorization, group purchases identify the exact destination by the resolved
+beneficiary runtime member rather than by the route locator, so either valid
+funding entry point resumes the same purchase without exposing join authority.
+This notice has one behavior regardless of current
+funding setup: it says Murph is paused, identifies the link as private options
+to add more time, and says the room may instead wait for reset. It does not use
+rotating payer-pressure copy or promise immediate restoration. The funding page
+separately preserves any active automatic
+sponsor and the single-sponsor billing invariant. The notice does not expose
+payment setup, name a payer, amount, cap, balance, or refill, claim that payment
+occurred, or add a separate scheduler or money-prompt lifecycle. If the
+mandatory locator, first-party origin, or signing configuration is unavailable,
+delivery fails before the capacity-epoch claim/provider path instead of sending
+linkless fallback copy. The existing production predeploy guard must construct
+and parse this same signed URL from the configured HTTPS hosted origin and
+signing authority before serving traffic. Runtime validates against that same
+configured origin. A completed crossing has no separate replay owner, so this
+pre-serve invariant—not the denied-gate path—guarantees configuration cannot
+strand the one-shot notice.
 
 ## Non-Goals
 
@@ -519,6 +551,24 @@ through an authenticated fixed-pack page; anonymous funding remains
 unimplemented.
 
 ## Deployment
+
+The non-expiring Starter contract was a strict Web/runtime schema hard cut. The
+production rollout is complete: compatible Web and Cloudflare code from the
+same current public `main` deployed without intentionally pausing Render or
+hosted execution, managed-container and live-model smoke proved the runner, and
+the post-deploy contract-migration workflow applied the migration after its
+declared drain.
+
+Do not remove `HOSTED_EXECUTION_CONTROL_URL` for a future plan-usage rollout.
+It is shared by runtime starts, privacy actions, export, media, and account
+deletion, so removing it would disable unrelated operations rather than provide
+a route-scoped pause. The current rollback floor is forward-only: repair or
+redeploy a compatible current Web/runner pair; the prior Web or runner is not a
+resumable target against the migrated ledger.
+
+The one-time legacy Stripe object drain is complete. The bounded delayed-event
+compatibility contract and its final removal gate live in
+`agent-docs/product-specs/starter-usage.md`.
 
 For the capacity-epoch change, deploy the assistant runtime that timestamps
 every provider operation at its own request start, then wait for work accepted
@@ -545,8 +595,27 @@ claim. Roll back Cloudflare before Web; the nullable column may remain. This
 order also preserves the originating-notice-target compatibility contract
 described in `hosted-plan-downgrades.md`.
 
+For a new personal billing-plan code added to the strict plan-usage and
+subscription response schemas, deploy Cloudflare hosted execution and roll the
+runner bundle out immediately before deploying Web. The new runtime remains
+compatible with old Web responses, while an old runtime rejects a Web response
+that names the new plan code. Verify the serving runner fingerprint and a
+controlled plan-usage read before promoting Web. Configure the new Stripe price
+and Portal transition before the Web deploy exposes the plan, then verify its
+Settings card and conversational quote/confirmation boundary. Roll back Web
+before rolling back Cloudflare so Web stops producing the new code before an
+old strict consumer returns to service.
+
+Ship the `includedUsageUsedPercent` Web producer, strict runtime reader, and
+assistant policy as one product change. There is no strip-only reader phase or
+rollout-only feature flag. A mixed-version Web/runner window may temporarily
+make the strict group usage read fail; that availability tradeoff is accepted.
+After Web and Cloudflare converge, prove the serving runner fingerprint and run
+one controlled explicit group usage-status question. Roll back both sides to a
+schema-compatible pair if rollback is required.
+
 Existing billing mechanics remain in:
 
-- `agent-docs/product-specs/pulse-trial-start-paid-pulse.md`
+- `agent-docs/product-specs/starter-usage.md`
 - `agent-docs/product-specs/hosted-plan-downgrades.md`
 - `agent-docs/product-specs/hosted-family-plan.md`

@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  requestHostedOnboardingJson,
-} from "@/src/components/hosted-onboarding/client-api";
+import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
 import { useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
@@ -24,7 +22,7 @@ import {
   ConnectDisconnectDialog,
   ConnectIntentRecoveryDialog,
   ConnectRedirectDialog,
-  GarminHistoricalDataDialog,
+  VitalConnectionDialog,
 } from "./connect-page-dialogs";
 import {
   createConnectCallbackNotice,
@@ -59,16 +57,19 @@ interface HostedDeviceSyncDisconnectResponse {
 }
 
 type ConnectStartOptions = {
-  garminHistoricalDataConfirmed?: boolean;
+  vitalDisclosureConfirmed?: boolean;
   intentClaim?: string;
 };
 
-type GarminHistoricalDataRequest = {
+type VitalConnectionRequest = {
   intentClaim?: string;
   source: ConnectSource;
 };
 
-export type { ConnectCallbackInput, InitialDeviceConnectIntent } from "./connect-page-types";
+export type {
+  ConnectCallbackInput,
+  InitialDeviceConnectIntent,
+} from "./connect-page-types";
 export { filterConnectSourcesForSearch } from "./connect-page-helpers";
 
 export function ConnectSourcesGrid({
@@ -86,7 +87,10 @@ export function ConnectSourcesGrid({
 }: {
   authenticated?: boolean;
   appleHealthRelaySyncContactActions?: Partial<
-    Record<AppleHealthRelaySetupGuideId, DeviceSyncCompletionContactAction | null>
+    Record<
+      AppleHealthRelaySetupGuideId,
+      DeviceSyncCompletionContactAction | null
+    >
   >;
   deviceConnectRecoveryContactAction?: MurphContactOption | null;
   garminHistoricalDataVoiceMemoSrc?: string | null;
@@ -103,51 +107,65 @@ export function ConnectSourcesGrid({
   );
   const [search, setSearch] = useState("");
   const [pendingSourceId, setPendingSourceId] = useState<string | null>(null);
-  const [pendingDisconnectSourceId, setPendingDisconnectSourceId] = useState<string | null>(null);
+  const [pendingDisconnectSourceId, setPendingDisconnectSourceId] = useState<
+    string | null
+  >(null);
   const [actionError, setActionError] = useState<{
     message: string;
     sourceId: string;
   } | null>(null);
   const [connectIntentRecovery, setConnectIntentRecovery] =
     useState<ConnectIntentRecoveryRequest | null>(null);
-  const [garminHistoricalDataRequest, setGarminHistoricalDataRequest] =
-    useState<GarminHistoricalDataRequest | null>(null);
-  const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] = useState(false);
+  const [vitalConnectionRequest, setVitalConnectionRequest] =
+    useState<VitalConnectionRequest | null>(null);
+  const [showWhoopAppleHealthSetupDialog, setShowWhoopAppleHealthSetupDialog] =
+    useState(false);
   const [activeSetupGuideId, setActiveSetupGuideId] =
     useState<ConnectSourceSetupGuideId | null>(null);
-  const [disconnectSource, setDisconnectSource] = useState<ConnectSource | null>(null);
-  const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  const [disconnectSource, setDisconnectSource] =
+    useState<ConnectSource | null>(null);
+  const [disconnectedConnectionIds, setDisconnectedConnectionIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const [disconnectedSourceIds, setDisconnectedSourceIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
+  const [locationConnectIntent] = useState<InitialDeviceConnectIntent>(() =>
+    initialConnectIntent ? null : readDeviceConnectIntentFromCurrentLocation(),
   );
-  const [disconnectedSourceIds, setDisconnectedSourceIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const [locationConnectIntent] = useState<InitialDeviceConnectIntent>(() => (
-    initialConnectIntent ? null : readDeviceConnectIntentFromCurrentLocation()
-  ));
-  const [initialConnectIntentDismissed, setInitialConnectIntentDismissed] = useState(false);
+  const [initialConnectIntentDismissed, setInitialConnectIntentDismissed] =
+    useState(false);
   const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
   const { openAuthDialog } = useAuth();
-  const callbackConnectedSourceId = initialCallback?.status === "connected"
-    ? resolveCallbackSourceId(initialCallback, sources)
-    : null;
+  const callbackConnectedSourceId =
+    initialCallback?.status === "connected"
+      ? resolveCallbackSourceId(initialCallback, sources)
+      : null;
   const displaySources = useMemo(
-    () => sortConnectSourcesByConnectionState(
-      markLocallyDisconnectedSources(
-        markCallbackConnectedSource(sources, callbackConnectedSourceId),
-        disconnectedConnectionIds,
-        disconnectedSourceIds,
-      ).filter((source) =>
-        source.connectionAvailable !== false
-        || Boolean(source.setupGuideId)
-        || source.connected === true
-        || source.requiresReconnect === true
-        || Boolean(source.recoveryKind)
-        || source.historicalResetIncomplete === true
+    () =>
+      sortConnectSourcesByConnectionState(
+        markLocallyDisconnectedSources(
+          markCallbackConnectedSource(sources, callbackConnectedSourceId),
+          disconnectedConnectionIds,
+          disconnectedSourceIds,
+        ).filter(
+          (source) =>
+            source.connectionAvailable !== false ||
+            Boolean(source.setupGuideId) ||
+            Boolean(source.unavailableActionUrl) ||
+            source.connected === true ||
+            source.requiresReconnect === true ||
+            Boolean(source.recoveryKind) ||
+            source.historicalResetIncomplete === true,
+        ),
       ),
-    ),
-    [callbackConnectedSourceId, disconnectedConnectionIds, disconnectedSourceIds, sources],
+    [
+      callbackConnectedSourceId,
+      disconnectedConnectionIds,
+      disconnectedSourceIds,
+      sources,
+    ],
   );
   const filteredSources = useMemo(
     () => filterConnectSourcesForSearch(displaySources, search),
@@ -156,31 +174,51 @@ export function ConnectSourcesGrid({
   const hasInitialCallback = Boolean(initialCallback);
   const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
   const initialConnectIntentPresentation = useMemo(
-    () => initialConnectIntentDismissed || !authenticated
-      ? null
-      : resolveInitialConnectIntentPresentation(activeConnectIntent, displaySources),
-    [activeConnectIntent, authenticated, displaySources, initialConnectIntentDismissed],
+    () =>
+      initialConnectIntentDismissed || !authenticated
+        ? null
+        : resolveInitialConnectIntentPresentation(
+            activeConnectIntent,
+            displaySources,
+          ),
+    [
+      activeConnectIntent,
+      authenticated,
+      displaySources,
+      initialConnectIntentDismissed,
+    ],
   );
-  const visibleNotice = notice ?? initialConnectIntentPresentation?.notice ?? null;
-  const visibleActionError = actionError ?? initialConnectIntentPresentation?.actionError ?? null;
-  const activeAppleHealthRelaySetupGuide = isAppleHealthRelaySetupGuideId(activeSetupGuideId)
+  const visibleNotice =
+    notice ?? initialConnectIntentPresentation?.notice ?? null;
+  const visibleActionError =
+    actionError ?? initialConnectIntentPresentation?.actionError ?? null;
+  const activeAppleHealthRelaySetupGuide = isAppleHealthRelaySetupGuideId(
+    activeSetupGuideId,
+  )
     ? buildAppleHealthRelaySetupGuide(activeSetupGuideId)
     : null;
-  const activeAppleHealthRelayContactAction = isAppleHealthRelaySetupGuideId(activeSetupGuideId)
-    ? appleHealthRelaySyncContactActions[activeSetupGuideId] ?? null
+  const activeAppleHealthRelayContactAction = isAppleHealthRelaySetupGuideId(
+    activeSetupGuideId,
+  )
+    ? (appleHealthRelaySyncContactActions[activeSetupGuideId] ?? null)
     : null;
   // When this load carries a connect intent that the effect below will auto-redirect, show a
   // pending-redirect dialog. Seeded on mount and cleared only if that redirect attempt fails.
-  const [connectIntentRedirectName, setConnectIntentRedirectName] = useState<string | null>(
-    () => {
-      const source = resolveConnectIntentRedirectSource(
-        activeConnectIntent,
-        displaySources,
-        authenticated,
-      );
-      return source && !requiresGarminHistoricalDataPreflight(source) ? source.name : null;
-    },
-  );
+  const [connectIntentRedirectName, setConnectIntentRedirectName] = useState<
+    string | null
+  >(() => {
+    const source = resolveConnectIntentRedirectSource(
+      activeConnectIntent,
+      displaySources,
+      authenticated,
+    );
+    return source && !requiresVitalConnectionPreflight(
+      source,
+      activeConnectIntent?.connectProvider,
+    )
+      ? source.name
+      : null;
+  });
 
   useEffect(() => {
     if (hasInitialCallback) {
@@ -190,14 +228,17 @@ export function ConnectSourcesGrid({
 
   useEffect(() => {
     if (
-      authenticated
-      || initialConnectIntentAuthOpenedRef.current
-      || !activeConnectIntent?.claim
+      authenticated ||
+      initialConnectIntentAuthOpenedRef.current ||
+      !activeConnectIntent?.claim
     ) {
       return;
     }
 
-    const source = resolveConnectIntentStartSource(activeConnectIntent, displaySources);
+    const source = resolveConnectIntentStartSource(
+      activeConnectIntent,
+      displaySources,
+    );
     if (!source) {
       return;
     }
@@ -206,76 +247,98 @@ export function ConnectSourcesGrid({
     openAuthDialog();
   }, [activeConnectIntent, authenticated, displaySources, openAuthDialog]);
 
-  const startConnection = useCallback(async (
-    source: ConnectSource,
-    options: ConnectStartOptions = {},
-  ) => {
-    if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
-      return;
-    }
+  const startConnection = useCallback(
+    async (source: ConnectSource, options: ConnectStartOptions = {}) => {
+      if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
+        return;
+      }
 
-    setInitialConnectIntentDismissed(true);
-    setActionError(null);
-    setNotice(null);
-    setConnectIntentRecovery(null);
-    setShowWhoopAppleHealthSetupDialog(false);
-    setActiveSetupGuideId(null);
+      setInitialConnectIntentDismissed(true);
+      setActionError(null);
+      setNotice(null);
+      setConnectIntentRecovery(null);
+      setShowWhoopAppleHealthSetupDialog(false);
+      setActiveSetupGuideId(null);
 
-    if (
-      requiresGarminHistoricalDataPreflight(source)
-      && !options.garminHistoricalDataConfirmed
-    ) {
-      setPendingSourceId(null);
-      setGarminHistoricalDataRequest({
-        ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
-        source,
-      });
-      return;
-    }
+      if (
+        requiresVitalConnectionPreflight(source) &&
+        !options.vitalDisclosureConfirmed
+      ) {
+        setPendingSourceId(null);
+        setVitalConnectionRequest({
+          ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
+          source,
+        });
+        return;
+      }
 
-    setGarminHistoricalDataRequest(null);
-    setPendingSourceId(source.id);
+      setVitalConnectionRequest(null);
+      setPendingSourceId(source.id);
+      if (options.intentClaim) {
+        setConnectIntentRedirectName(source.name);
+      }
 
-    try {
-      const authorizationUrl = await requestConnectionAuthorizationUrl(source, {
-        ...(options.intentClaim ? { intentClaim: options.intentClaim } : {}),
-      });
-      window.location.assign(authorizationUrl);
-    } catch (error) {
-      if (options.intentClaim && isHostedDeviceConnectIntentUnavailableError(error)) {
-        setConnectIntentRecovery({
-          message: error.message,
-          sourceName: source.name,
+      try {
+        const authorizationUrl = await requestConnectionAuthorizationUrl(
+          source,
+          {
+            ...(options.intentClaim
+              ? { intentClaim: options.intentClaim }
+              : {}),
+          },
+        );
+        window.location.assign(authorizationUrl);
+      } catch (error) {
+        if (options.intentClaim) {
+          setConnectIntentRedirectName(null);
+        }
+
+        if (
+          options.intentClaim &&
+          isHostedDeviceConnectIntentUnavailableError(error)
+        ) {
+          setConnectIntentRecovery({
+            message: error.message,
+            sourceName: source.name,
+          });
+          setPendingSourceId(null);
+          return;
+        }
+
+        if (isHostedWhoopDirectConnectCapReachedError(error)) {
+          setShowWhoopAppleHealthSetupDialog(true);
+          setPendingSourceId(null);
+          return;
+        }
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Connection could not be started.";
+        setActionError({
+          message,
+          sourceId: source.id,
         });
         setPendingSourceId(null);
-        return;
       }
-
-      if (isHostedWhoopDirectConnectCapReachedError(error)) {
-        setShowWhoopAppleHealthSetupDialog(true);
-        setPendingSourceId(null);
-        return;
-      }
-
-      const message = error instanceof Error ? error.message : "Connection could not be started.";
-      setActionError({
-        message,
-        sourceId: source.id,
-      });
-      setPendingSourceId(null);
-    }
-  }, [authenticated]);
+    },
+    [authenticated],
+  );
 
   useEffect(() => {
     if (
-      initialConnectIntentAttemptedRef.current
-      || !authenticated
-      || !activeConnectIntent?.claim
+      initialConnectIntentAttemptedRef.current ||
+      !authenticated ||
+      !activeConnectIntent?.claim
     ) {
       return;
     }
 
-    const source = resolveConnectIntentRedirectSource(activeConnectIntent, displaySources, authenticated);
+    const source = resolveConnectIntentRedirectSource(
+      activeConnectIntent,
+      displaySources,
+      authenticated,
+    );
     if (!source) {
       initialConnectIntentAttemptedRef.current = true;
       stripDeviceConnectIntentParams();
@@ -283,7 +346,10 @@ export function ConnectSourcesGrid({
     }
 
     let cancelled = false;
-    if (requiresGarminHistoricalDataPreflight(source)) {
+    if (requiresVitalConnectionPreflight(
+      source,
+      activeConnectIntent.connectProvider,
+    )) {
       void Promise.resolve().then(() => {
         if (cancelled || initialConnectIntentAttemptedRef.current) {
           return;
@@ -293,7 +359,7 @@ export function ConnectSourcesGrid({
         stripDeviceConnectIntentParams();
         setConnectIntentRedirectName(null);
         setInitialConnectIntentDismissed(true);
-        setGarminHistoricalDataRequest({
+        setVitalConnectionRequest({
           intentClaim: activeConnectIntent.claim,
           source,
         });
@@ -305,7 +371,9 @@ export function ConnectSourcesGrid({
 
     initialConnectIntentAttemptedRef.current = true;
     stripDeviceConnectIntentParams();
-    void requestConnectionAuthorizationUrl(source, { intentClaim: activeConnectIntent.claim })
+    void requestConnectionAuthorizationUrl(source, {
+      intentClaim: activeConnectIntent.claim,
+    })
       .then((authorizationUrl) => {
         if (cancelled) {
           return;
@@ -334,7 +402,10 @@ export function ConnectSourcesGrid({
           return;
         }
 
-        const message = error instanceof Error ? error.message : "Connection could not be started.";
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Connection could not be started.";
         setActionError({
           message,
           sourceId: source.id,
@@ -348,7 +419,11 @@ export function ConnectSourcesGrid({
 
   async function disconnectConnection(source: ConnectSource) {
     const connectionId = source.disconnectConnectionId?.trim();
-    if (!connectionId || pendingDisconnectSourceId || pendingSourceId === source.id) {
+    if (
+      !connectionId ||
+      pendingDisconnectSourceId ||
+      pendingSourceId === source.id
+    ) {
       return;
     }
 
@@ -361,15 +436,18 @@ export function ConnectSourcesGrid({
       const disconnectUrl = sourceProviderSlug
         ? `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/sources/${encodeURIComponent(sourceProviderSlug)}/disconnect`
         : `/api/settings/device-sync/connections/${encodeURIComponent(connectionId)}/disconnect`;
-      const result = await requestHostedOnboardingJson<HostedDeviceSyncDisconnectResponse>({
-        method: "POST",
-        url: disconnectUrl,
-      });
+      const result =
+        await requestHostedOnboardingJson<HostedDeviceSyncDisconnectResponse>({
+          method: "POST",
+          url: disconnectUrl,
+        });
       setDisconnectSource(null);
       if (sourceProviderSlug) {
         setDisconnectedSourceIds((current) => new Set([...current, source.id]));
       } else {
-        setDisconnectedConnectionIds((current) => new Set([...current, connectionId]));
+        setDisconnectedConnectionIds(
+          (current) => new Set([...current, connectionId]),
+        );
       }
       setNotice({
         kind: result.warning?.message ? "warning" : "success",
@@ -379,9 +457,10 @@ export function ConnectSourcesGrid({
           : resolveDisconnectSuccessMessage(source),
       });
     } catch (error) {
-      const message = error instanceof Error
-        ? error.message
-        : resolveDisconnectFailureMessage(source);
+      const message =
+        error instanceof Error
+          ? error.message
+          : resolveDisconnectFailureMessage(source);
       setActionError({
         message,
         sourceId: source.id,
@@ -416,7 +495,8 @@ export function ConnectSourcesGrid({
             errorCode={visibleNotice.errorCode}
             message={visibleNotice.message}
             onSignIn={
-              !authenticated && visibleNotice.errorCode === "CALLBACK_SESSION_REQUIRED"
+              !authenticated &&
+              visibleNotice.errorCode === "CALLBACK_SESSION_REQUIRED"
                 ? openAuthDialog
                 : null
             }
@@ -457,7 +537,11 @@ export function ConnectSourcesGrid({
             <SourceCard
               key={source.id}
               authenticated={authenticated}
-              errorMessage={visibleActionError?.sourceId === source.id ? visibleActionError.message : null}
+              errorMessage={
+                visibleActionError?.sourceId === source.id
+                  ? visibleActionError.message
+                  : null
+              }
               pending={pendingSourceId === source.id}
               pendingDisconnect={pendingDisconnectSourceId === source.id}
               source={source}
@@ -500,33 +584,39 @@ export function ConnectSourcesGrid({
         />
       ) : null}
 
-      <GarminHistoricalDataDialog
-        open={Boolean(garminHistoricalDataRequest)}
+      <VitalConnectionDialog
+        source={vitalConnectionRequest?.source ?? null}
         voiceMemoSrc={garminHistoricalDataVoiceMemoSrc}
         onOpenChange={(open) => {
           if (!open) {
-            setGarminHistoricalDataRequest(null);
+            setVitalConnectionRequest(null);
           }
         }}
         onContinue={() => {
-          const request = garminHistoricalDataRequest;
+          const request = vitalConnectionRequest;
           if (!request) {
             return;
           }
 
-          setGarminHistoricalDataRequest(null);
+          setVitalConnectionRequest(null);
           void startConnection(request.source, {
-            garminHistoricalDataConfirmed: true,
-            ...(request.intentClaim ? { intentClaim: request.intentClaim } : {}),
+            vitalDisclosureConfirmed: true,
+            ...(request.intentClaim
+              ? { intentClaim: request.intentClaim }
+              : {}),
           });
         }}
       />
 
       <ConnectDisconnectDialog
-        errorMessage={disconnectSource && actionError?.sourceId === disconnectSource.id
-          ? actionError.message
-          : null}
-        pending={Boolean(disconnectSource && pendingDisconnectSourceId === disconnectSource.id)}
+        errorMessage={
+          disconnectSource && actionError?.sourceId === disconnectSource.id
+            ? actionError.message
+            : null
+        }
+        pending={Boolean(
+          disconnectSource && pendingDisconnectSourceId === disconnectSource.id,
+        )}
         source={disconnectSource}
         onConfirm={disconnectConnection}
         onOpenChange={(open) => {
@@ -547,13 +637,23 @@ export function ConnectSourcesGrid({
           }
         }}
       />
-
     </section>
   );
 }
 
-export function requiresGarminHistoricalDataPreflight(source: ConnectSource): boolean {
-  return source.id === "garmin" && source.requiresReconnect !== true;
+export function requiresVitalConnectionPreflight(
+  source: ConnectSource,
+  connectIntentProvider?: string | null,
+): boolean {
+  if (connectIntentProvider) {
+    return connectIntentProvider === "junction";
+  }
+
+  if (source.requiresReconnect) {
+    return source.connectProvider === "junction";
+  }
+
+  return source.requiresVitalDisclosure === true;
 }
 
 function resolveDisconnectSuccessMessage(source: ConnectSource): string {
@@ -570,7 +670,9 @@ function resolveDisconnectFailureMessage(source: ConnectSource): string {
 
 // Keyed off the response semantic, not the clicked card: a shared connection can be
 // disconnected from a healthy sibling card while the historical reset lives elsewhere.
-function resolveDisconnectWarningDetail(warning: { historicalResetIncomplete?: boolean }): string {
+function resolveDisconnectWarningDetail(warning: {
+  historicalResetIncomplete?: boolean;
+}): string {
   return warning.historicalResetIncomplete
     ? "The historical reset did not finish. Remove the old connection in your wearable provider account before reconnecting here."
     : "The provider did not fully confirm, so check that account if you want access removed there too.";

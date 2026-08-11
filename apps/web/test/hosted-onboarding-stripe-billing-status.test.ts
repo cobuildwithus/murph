@@ -66,6 +66,26 @@ describe("resolveHostedStripeBillingStatusForWrite", () => {
     ).toBe(HostedBillingStatus.active);
   });
 
+  it("treats trial_will_end as a canonical subscription event", () => {
+    expect(
+      resolveHostedStripeBillingStatusForWrite({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: HostedBillingStatus.paused,
+        currentBillingStatus: HostedBillingStatus.active,
+        sourceType: "stripe.customer.subscription.trial_will_end",
+      }),
+    ).toBe(HostedBillingStatus.paused);
+
+    expect(() =>
+      resolveHostedStripeBillingStatusForWrite({
+        billingStatus: HostedBillingStatus.active,
+        canonicalBillingStatus: null,
+        currentBillingStatus: HostedBillingStatus.active,
+        sourceType: "stripe.customer.subscription.trial_will_end",
+      })
+    ).toThrow("Canonical Stripe subscription state is required");
+  });
+
   it("keeps a resumed expired Pulse Trial incomplete until invoice.paid confirms conversion", () => {
     expect(
       resolveHostedStripeBillingStatusForWrite({
@@ -99,6 +119,17 @@ describe("resolveHostedStripeBillingStatusForWrite", () => {
         canonicalBillingStatus: HostedBillingStatus.active,
         currentBillingStatus: HostedBillingStatus.active,
         sourceType: "stripe.refund.created",
+      }),
+    ).toBe(HostedBillingStatus.unpaid);
+  });
+
+  it("lets successful refund updates write the explicit reversal status", () => {
+    expect(
+      resolveHostedStripeBillingStatusForWrite({
+        billingStatus: HostedBillingStatus.unpaid,
+        canonicalBillingStatus: HostedBillingStatus.active,
+        currentBillingStatus: HostedBillingStatus.active,
+        sourceType: "stripe.refund.updated",
       }),
     ).toBe(HostedBillingStatus.unpaid);
   });

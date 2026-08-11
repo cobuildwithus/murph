@@ -146,10 +146,25 @@ registration-only until that bounded traversal owner lands.
 ## Retrieval contract and limits
 
 Assistant link creation reuses the same signed Web control boundary through
-`/api/internal/clinical-records/connect-link`. It accepts only an empty object,
-derives the member from the active runtime fence, and returns the existing
-short-lived first-party connect URL. Once an import is queued, the retrieval
-runtime uses three signed POST operations:
+`/api/internal/clinical-records/connect-link`. Message-authorized calls use an
+empty object; the route derives the member from the active runtime fence and
+returns the existing short-lived first-party connect URL. Scheduled calls may add only a typed
+`scheduled_<sha256>` request key derived from the exact occurrence. That form returns
+one stable authenticated browser launcher without creating an intent, rotating the
+member's current intent, or starting the 15-minute claim TTL. After the member opens
+the launcher and authenticates, the existing browser POST creates the ordinary
+single-use intent as current human action. Queued delivery and same-occurrence retry
+therefore cannot invalidate a newer human link, resurrect a started or completed
+OAuth flow, or expire the scheduled link before delivery. A verified private current
+request or exact scheduled automation occurrence may invoke that same owner; neither
+path can choose a member, provider, or destination in tool arguments.
+
+The scheduled request-key branch permits one bounded exact transport replay after a
+retryable failure because it is deterministic and non-mutating. The turn shares one
+in-flight or successful launcher request and clears only an exact rejected request so
+a later explicit invocation can retry. Message-authorized link creation does not use
+automatic transport replay because it creates the live single-use claim.
+Once an import is queued, the retrieval runtime uses three signed POST operations:
 
 - `/api/internal/clinical-records/runtime/read-run`
 - `/api/internal/clinical-records/runtime/fetch-page`

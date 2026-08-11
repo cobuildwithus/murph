@@ -396,6 +396,10 @@ describe("hosted provider effects", () => {
       },
       fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
+      providerMessageEffects: [{
+        message: "hello\n\nDead bug setup",
+        providerMessageId: "recovered-message",
+      }],
       providerMessageId: "recovered-message",
       providerThreadId: "recovered-chat",
       target: "recovered-chat",
@@ -413,6 +417,7 @@ describe("hosted provider effects", () => {
   });
 
   it("persists hosted app-card text fallback before its provider send", async () => {
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
       const url = String(input);
@@ -449,6 +454,7 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toMatchObject({
       idempotencyKey: "hosted-card-fallback",
@@ -461,9 +467,11 @@ describe("hosted provider effects", () => {
     expect(persistAppCardTextFallback.mock.invocationCallOrder[0]).toBeLessThan(
       fetchMock.mock.invocationCallOrder[1]!,
     );
+    expect(onAppCardFallbackError).not.toHaveBeenCalled();
   });
 
   it("returns the promoted identity after a direct app-card text fallback", async () => {
+    const onAppCardFallbackError = vi.fn();
     const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = String(input);
@@ -511,9 +519,14 @@ describe("hosted provider effects", () => {
     }, {
       env: { LINQ_API_TOKEN: "linq-token" },
       fetchImplementation: fetchMock,
+      onAppCardFallbackError,
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: "hosted-card-rejected:fallback",
+      providerMessageEffects: [{
+        message: "Nutrition summary",
+        providerMessageId: "direct-fallback-message",
+      }],
       providerMessageId: "direct-fallback-message",
       providerThreadId: null,
       target: "direct-chat",
@@ -521,6 +534,114 @@ describe("hosted provider effects", () => {
 
     expect(persistAppCardTextFallback).toHaveBeenCalledWith({
       idempotencyKey: "hosted-card-rejected:fallback",
+    });
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+      }),
+      reason: "app_card_rejected",
+    });
+  });
+
+  it("observes a hosted capability error before selecting text recovery", async () => {
+    const onAppCardFallbackError = vi.fn();
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/capability/check_imessage")) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-08-05",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-capability-error",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      onAppCardFallbackError,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: "fallback-message",
+    });
+
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.objectContaining({
+        code: "LINQ_API_REQUEST_FAILED",
+      }),
+      reason: "capability_check_failed",
+    });
+  });
+
+  it("observes a malformed capability response error before selecting text recovery", async () => {
+    const onAppCardFallbackError = vi.fn();
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith("/capability/check_imessage")) {
+        return new Response("LEAKMARKER private provider prose", {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({
+        message: { id: "fallback-message" },
+      }), {
+        headers: { "content-type": "application/json" },
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      card: {
+        kind: "daily_nutrition",
+        localDate: "2026-08-05",
+        mealCount: 1,
+        totals: {
+          calories: { mealCount: 1, total: 500 },
+          carbsGrams: { mealCount: 1, total: 55 },
+          fatGrams: { mealCount: 1, total: 18 },
+          proteinGrams: { mealCount: 1, total: 35 },
+        },
+      },
+      directRecipientPhoneNumber: "+15550001",
+      idempotencyKey: "hosted-card-malformed-json",
+      message: "Nutrition summary",
+      target: "direct-chat",
+      targetKind: "thread",
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: "linq-token" },
+      fetchImplementation: fetchMock,
+      onAppCardFallbackError,
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: "fallback-message",
+    });
+
+    expect(onAppCardFallbackError).toHaveBeenCalledOnce();
+    expect(onAppCardFallbackError).toHaveBeenCalledWith({
+      error: expect.any(SyntaxError),
+      reason: "capability_check_failed",
     });
   });
 
@@ -612,6 +733,10 @@ describe("hosted provider effects", () => {
       persistAppCardTextFallback,
     })).resolves.toEqual({
       idempotencyKey: expectedIdempotencyKey,
+      providerMessageEffects: [{
+        message: "Nutrition summary",
+        providerMessageId: "recovered-card-message",
+      }],
       providerMessageId: "recovered-card-message",
       providerThreadId: "recovered-card-chat",
       target: "recovered-card-chat",
@@ -741,6 +866,10 @@ describe("hosted provider effects", () => {
       },
       fetchImplementation,
     })).resolves.toEqual({
+      providerMessageEffects: [{
+        message: "hello\n\nDead bug setup",
+        providerMessageId: "recovered-message",
+      }],
       providerMessageId: "recovered-message",
       providerThreadId: "recovered-chat",
       target: "recovered-chat",
@@ -830,6 +959,95 @@ describe("hosted provider effects", () => {
       String(input).endsWith("/chats")
     );
     expect(createChatCalls).toHaveLength(1);
+  });
+
+  it("preserves provider-skipped provenance through direct-thread materialization", async () => {
+    const providerSkippedError = Object.assign(
+      new Error("Fresh input preempted the attachment reservation."),
+      {
+        assistantDeliveryFailureClass: "transient" as const,
+        assistantDeliveryResumeTrigger: "fresh_foreground_input" as const,
+        deliveryMayHaveSucceeded: false as const,
+        retryable: true as const,
+      },
+    );
+    const fetchImplementation = vi.fn<typeof fetch>(async () => {
+      throw providerSkippedError;
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      media: [{
+        alt: "Private generated image",
+        contentType: "image/png",
+        filename: "generated.png",
+        kind: "vault_image",
+        ref: "raw/captures/generated.png",
+        sha256: "a".repeat(64),
+        sizeBytes: 12,
+        source: "gpt-image-2",
+      }],
+      message: "hello",
+      target: "h1_111111111111111111111111",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+      loadVaultImage: async () => new Uint8Array(12),
+    })).rejects.toBe(providerSkippedError);
+
+    expect(providerSkippedError).toMatchObject({
+      assistantDeliveryFailureClass: "transient",
+      assistantDeliveryResumeTrigger: "fresh_foreground_input",
+      deliveryMayHaveSucceeded: false,
+      retryable: true,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    assert.equal(
+      String(fetchImplementation.mock.calls[0]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/attachments",
+    );
+  });
+
+  it("preserves attachment-reservation ambiguity through direct-thread materialization", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () => {
+      throw Object.assign(new Error("Fresh input preempted the final Linq request."), {
+        linqAttachmentReservationMayHaveSucceeded: true as const,
+      });
+    });
+
+    await expect(sendHostedProviderLinqMessage({
+      directRecipientPhoneNumber: "+15550001",
+      fromPhoneNumber: "+15550000",
+      homeRouteFallbackAllowed: true,
+      message: "hello",
+      target: "h1_111111111111111111111111",
+      targetKind: "thread",
+    }, {
+      env: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      fetchImplementation,
+    })).rejects.toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      context: expect.objectContaining({
+        failureStage: "transport",
+        operation: "create_chat",
+        retryable: false,
+      }),
+      linqAttachmentReservationMayHaveSucceeded: true,
+    });
+
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+    assert.equal(
+      String(fetchImplementation.mock.calls[0]?.[0]),
+      "https://api.linqapp.com/api/partner/v3/chats",
+    );
   });
 
   it("does not materialize or send redacted Linq direct targets without an explicit sender", async () => {
@@ -1026,6 +1244,10 @@ describe("hosted provider effects", () => {
       fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
       idempotencyKey: "assistant-outbox:intent_1",
+      providerMessageEffects: [{
+        message: "hello",
+        providerMessageId: "materialized-message",
+      }],
       providerMessageId: "materialized-message",
       providerThreadId: "materialized-chat",
       target: "materialized-chat",

@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  readHostedGroupUsageStatus: vi.fn(),
+  buildHostedGroupUsageFundingLocatorForRuntimeMember: vi.fn(),
+  buildHostedGroupUsageFundingUrl: vi.fn(),
   readHostedPersonalAiUsageStatus: vi.fn(),
+  resolveHostedPublicBaseUrl: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -12,28 +14,33 @@ vi.mock("@/src/lib/hosted-execution/usage-status", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-usage-funding", () => ({
-  readHostedGroupUsageStatus: mocks.readHostedGroupUsageStatus,
+  buildHostedGroupUsageFundingLocatorForRuntimeMember:
+    mocks.buildHostedGroupUsageFundingLocatorForRuntimeMember,
+  buildHostedGroupUsageFundingUrl: mocks.buildHostedGroupUsageFundingUrl,
+}));
+
+vi.mock("@/src/lib/hosted-web/public-url", () => ({
+  resolveHostedPublicBaseUrl: mocks.resolveHostedPublicBaseUrl,
 }));
 
 import { projectHostedAiUsageLimitNoticeForDelivery } from "@/src/lib/hosted-execution/usage-limit-notice-message";
-import {
-  HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE,
-  renderUserFacingMessage,
-} from "@/src/lib/hosted-messages/user-facing-messages";
 
 describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.buildHostedGroupUsageFundingLocatorForRuntimeMember.mockReturnValue(
+      "gf1.member_group_runtime.signature",
+    );
+    mocks.buildHostedGroupUsageFundingUrl.mockReturnValue(
+      "https://www.withmurph.ai/groups/fund/group_join_code_1234",
+    );
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue(
+      "https://www.withmurph.ai",
+    );
   });
 
-  it("asks the room to fund the group while it is exhausted", async () => {
+  it("always gives an exhausted room a neutral private recovery link", async () => {
     const prisma = { kind: "prisma" } as never;
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: true,
-      fundingUrl:
-        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "not_sponsored",
-    });
 
     const projected = await projectHostedAiUsageLimitNoticeForDelivery({
       memberId: "member_group_runtime",
@@ -42,75 +49,93 @@ describe("projectHostedAiUsageLimitNoticeForDelivery", () => {
       prisma,
     });
 
-    expect(projected.startsWith("Murph usage is paused for this chat.\n\n")).toBe(true);
-    expect(projected.endsWith(
-      "\nhttps://www.withmurph.ai/groups/fund/group_join_code_1234",
-    )).toBe(true);
-    expect(projected).toMatch(
-      /anyone|anybody|any one|any of you|one of you|someone|somebody|whoever|whichever|which of you|one person/iu,
+    expect(projected).toBe(
+      "Murph is paused in this chat right now. "
+      + "Private options to add more Murph time are here, or the room can wait "
+      + "for its allowance to reset:\n"
+      + "https://www.withmurph.ai/groups/fund/group_join_code_1234",
     );
+    expect(projected).not.toMatch(/one tap|turn me back on|bring me back|volunteer/iu);
+    expect(mocks.buildHostedGroupUsageFundingLocatorForRuntimeMember)
+      .toHaveBeenCalledWith("member_group_runtime");
+    expect(mocks.buildHostedGroupUsageFundingUrl).toHaveBeenCalledWith({
+      joinCode: "gf1.member_group_runtime.signature",
+      publicBaseUrl: "https://www.withmurph.ai",
+    });
     expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
   });
 
-  it("keeps the group funding ask deterministic without exposing a period", async () => {
-    const message = "I'm out for the whole room until my time resets.";
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: true,
-      fundingUrl:
-        "https://www.withmurph.ai/groups/fund/group_join_code_1234",
-      sponsorshipStatus: "not_sponsored",
-    });
-
-    const project = async () => projectHostedAiUsageLimitNoticeForDelivery({
-      memberId: "member_group_runtime",
-      message,
-      noticeCode: "thread_usage_limit_reached",
-      prisma: {} as never,
-    });
-
-    expect(await project()).toBe(await project());
-  });
-
-  it("replaces the real production reset notice with one neutral sponsored pause", async () => {
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: false,
-      fundingUrl: null,
-      sponsorshipStatus: "sponsored",
-    });
-    const productionNotice = renderUserFacingMessage({
-      context: {},
-      key: "linq.ai_usage.thread_limit_reached",
-      seed: "member_group_runtime",
-    }).text;
-
-    const projected = await projectHostedAiUsageLimitNoticeForDelivery({
-      memberId: "member_group_runtime",
-      message: productionNotice,
-      noticeCode: "thread_usage_limit_reached",
-      prisma: {} as never,
-    });
-
-    expect(projected).toBe(HOSTED_SPONSORED_GROUP_PAUSE_MESSAGE);
-    expect(projected).not.toBe(productionNotice);
-    expect(projected).not.toMatch(
-      /payer|sponsor|\$|percent|remaining|message|conserve|reset|month|fund/iu,
+  it("uses the configured first-party origin for an exhausted room", async () => {
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue(
+      "https://join.example.test",
     );
-  });
-
-  it("leaves a stale group notice unchanged after capacity recovers", async () => {
-    mocks.readHostedGroupUsageStatus.mockResolvedValue({
-      fundingNeeded: false,
-      fundingUrl: null,
-      sponsorshipStatus: "not_sponsored",
-    });
+    mocks.buildHostedGroupUsageFundingUrl.mockReturnValue(
+      "https://join.example.test/groups/fund/group_join_code_1234",
+    );
 
     await expect(projectHostedAiUsageLimitNoticeForDelivery({
       memberId: "member_group_runtime",
       message: "Murph usage is paused for this chat.",
       noticeCode: "thread_usage_limit_reached",
       prisma: {} as never,
-    })).resolves.toBe("Murph usage is paused for this chat.");
+    })).resolves.toContain(
+      "https://join.example.test/groups/fund/group_join_code_1234",
+    );
+    expect(mocks.buildHostedGroupUsageFundingUrl).toHaveBeenCalledWith({
+      joinCode: "gf1.member_group_runtime.signature",
+      publicBaseUrl: "https://join.example.test",
+    });
+  });
+
+  it.each([
+    "https://checkout.stripe.test/session",
+    "https://[invalid",
+  ])("rejects a non-canonical group funding URL: %s", async (fundingUrl) => {
+    mocks.buildHostedGroupUsageFundingUrl.mockReturnValue(fundingUrl);
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "I'm out for the whole room until my time resets.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    })).rejects.toThrow();
+  });
+
+  it("refuses to produce linkless copy when the mandatory locator is unavailable", async () => {
+    mocks.buildHostedGroupUsageFundingLocatorForRuntimeMember.mockReturnValue(null);
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "Murph usage is paused for this chat.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    })).rejects.toThrow("Hosted group usage-limit recovery URL is unavailable.");
     expect(mocks.readHostedPersonalAiUsageStatus).not.toHaveBeenCalled();
+  });
+
+  it("refuses to produce linkless copy without a trusted public origin", async () => {
+    mocks.resolveHostedPublicBaseUrl.mockReturnValue(null);
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "Murph usage is paused for this chat.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    })).rejects.toThrow("Hosted group usage-limit recovery URL is unavailable.");
+    expect(mocks.buildHostedGroupUsageFundingLocatorForRuntimeMember)
+      .not.toHaveBeenCalled();
+    expect(mocks.buildHostedGroupUsageFundingUrl).not.toHaveBeenCalled();
+  });
+
+  it("refuses to produce linkless copy when the mandatory URL is unavailable", async () => {
+    mocks.buildHostedGroupUsageFundingUrl.mockReturnValue(null);
+
+    await expect(projectHostedAiUsageLimitNoticeForDelivery({
+      memberId: "member_group_runtime",
+      message: "Murph usage is paused for this chat.",
+      noticeCode: "thread_usage_limit_reached",
+      prisma: {} as never,
+    })).rejects.toThrow("Hosted group usage-limit recovery URL is unavailable.");
   });
 
   it("appends the canonical first-party action only for current add-usage authority", async () => {
