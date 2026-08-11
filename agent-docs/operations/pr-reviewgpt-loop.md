@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -568,16 +568,31 @@ contract, fix a review finding, or include feature work or unrelated
 behavior/test/config/doc edits. Conflict count is orientation only and does not
 decide eligibility.
 
-When an authorized merge is blocked by strict up-to-date checks, use the merge
-queue when available or perform one normal base update at the merge boundary.
-Record any conflict paths and preservation reasons, run focused verification
-for affected surfaces, and let required PR CI gate the new head. Merge promptly
-when it clears instead of starting a repeated pre-merge refresh loop. Do not
-rerun ReviewGPT solely for that update. If any resolution
-authors behavior not already represented by the reviewed PR or current base,
-materially changes the implemented contract, includes another branch-authored
-change, or cannot be confidently classified as mechanical, use the ordinary
-next-substantive-round rule.
+At an authorized merge boundary, wait only for the routed review gates and
+required GitHub checks. Do not wait for optional or non-required status checks
+after those gates are green unless a failing check is relevant to the changed
+surface or the user explicitly requested it.
+
+When strict up-to-date checks block the merge, prefer the merge queue. If no
+queue is available, the unchanged reviewed patch has a one-update budget for
+this completion attempt: perform one normal base update, record any conflict
+paths and preservation reasons, run focused verification for affected surfaces,
+and let required PR CI gate that head. The budget remains consumed until merge
+or handoff; a later base advance, CI retry, or agent turn does not reset it. Do
+not rerun ReviewGPT solely for that update. If any resolution authors behavior
+not already represented by the reviewed PR or current base, materially changes
+the implemented contract, includes another branch-authored change, or cannot be
+confidently classified as mechanical, use the ordinary next-substantive-round
+rule instead of the base-only budget.
+
+If the base advances again after required CI is green on that one updated head,
+do not update the branch or restart CI. Fetch the current base and rerun
+`git merge-tree --write-tree`. When it is clean, use only an already-authorized
+non-refresh merge path: the merge queue or an explicit stale-head/admin bypass.
+Such a bypass may relax only strict-current status; it never bypasses required
+CI or routed review gates. If the merge-tree conflicts, or no non-refresh path
+is both available and authorized, report `moving-base race`, leave the PR and
+worktree active, and stop. Do not poll for a quiet base.
 
 ## Stop Condition
 
