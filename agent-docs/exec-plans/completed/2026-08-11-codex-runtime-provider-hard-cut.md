@@ -1,6 +1,6 @@
 # Collapse assistant runtime provider abstraction to Codex
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -90,7 +90,7 @@ Updated: 2026-08-11
    materially changes.
 5. [x] Run diff-aware or package-local coverage-bearing tests plus root typecheck and
    inspect the final diff for identifiers, secrets, scope, and line shape.
-6. [ ] Commit and push the exact candidate, open a draft PR with the required intent
+6. [x] Commit and push the exact candidate, open a draft PR with the required intent
    contract, run preliminary and final ReviewGPT gates with CI, remediate accepted
    findings, and finish the plan on the approved final head.
 
@@ -160,3 +160,32 @@ Updated: 2026-08-11
 - Final base-to-head shape before PR packaging is net deletion in executable
   source and tests; the only additional files are the active execution plan and
   two required developer-friction records.
+- Draft PR #1651 opened against the exact pushed candidate with the immutable
+  first-review baseline and required intent contract.
+- The first simultaneous specialist/final packaging attempt hit the existing
+  timestamped audit-ZIP collision recorded by Frog. The affected jobs were
+  retried on isolated managed lanes after inspecting the invalid result; no
+  review prompt was duplicated in an active thread.
+- The substantive preliminary specialist pass returned one low-severity
+  coverage finding. Its attached 20-line patch was read in full, confirmed to
+  touch only one assistant-engine test, apply-checked, applied deliberately,
+  and proven by the direct `codex-runtime-helpers.test.ts` lane: 1 file and 72
+  tests passed.
+- The package wrapper ignored that focused filename and ran the full
+  assistant-engine suite, where one unrelated outbox timing assertion failed.
+  Exact-head GitHub assistant coverage subsequently passed with the accepted
+  capability assertion, proving the PR-owned lane on the final implementation
+  head.
+- Final ReviewGPT round 1 returned `ROUND_OUTCOME: PASS` with no qualifying
+  findings on the immutable first-reviewed production patch. The accepted
+  specialist remediation added only regression proof, so it did not create a
+  new substantive final-review round.
+- Parent final review re-read the complete current source diff, walked the
+  normalization, hosted handoff, session continuity, setup, execution, resume,
+  and fail-closed paths, and found no remaining actionable gap.
+- All required GitHub checks passed on corrected implementation head
+  `32b623970abec92de941dc935f731ddcae3bc5ab`, including release app
+  verification, build/typecheck, assistant/CLI/platform coverage, both CLI host
+  matrices, fixture coverage, frontend metadata proof, billing proof, private
+  artifact checks, and the aggregate release gate.
+Completed: 2026-08-11
