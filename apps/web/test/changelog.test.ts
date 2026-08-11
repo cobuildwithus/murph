@@ -505,10 +505,15 @@ describe("changelog registry", () => {
 
   it("preserves the frozen July 20 through August 9 shipment set", () => {
     expect(
-      listChangelogEditions().slice(1, 22).map((edition) => ({
-        id: edition.id,
-        itemIds: edition.items.map((item) => item.id),
-      })),
+      listChangelogEditions()
+        .filter(
+          (edition) =>
+            edition.id >= "2026-07-20" && edition.id <= "2026-08-09",
+        )
+        .map((edition) => ({
+          id: edition.id,
+          itemIds: edition.items.map((item) => item.id),
+        })),
     ).toEqual([
       {
         id: "2026-08-09",
