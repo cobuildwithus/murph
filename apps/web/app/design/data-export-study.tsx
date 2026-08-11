@@ -45,7 +45,7 @@ function DataExportStudyContent() {
         <HostedDataExportSuccess
           message={formatVaultExportSuccess({
             deviceSyncImportPending: true,
-            freshness: "stale",
+            freshness: "fresh",
             refreshPending: true,
           })}
         />
