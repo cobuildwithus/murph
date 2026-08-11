@@ -1,17 +1,15 @@
-import type { AssistantChatProvider } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   assistantModelTargetToProviderConfigInput,
   type AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   normalizeAssistantProviderConfig,
-  resolveAssistantChatProviderFromConfig,
-  supportsAssistantNativeResume,
-  supportsAssistantReasoningEffort,
-  type AssistantProviderConfig,
   type AssistantProviderConfigLike,
 } from '@murphai/operator-config/assistant/provider-config'
+import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+  resolveStrictAssistantCodexModelProvider,
+} from '@murphai/operator-config/assistant/target-runtime'
 import {
   mergeAssistantProviderActivityLabels,
   type AssistantProviderProgressEvent,
@@ -62,9 +60,6 @@ export async function prepareHostedCodexAssistantProcess(
   const providerConfig = normalizeAssistantProviderConfig(
     assistantModelTargetToProviderConfigInput(input.target),
   )
-  assertCodexAssistantProvider(
-    resolveAssistantChatProviderFromConfig(providerConfig),
-  )
   return await preinitializeCodexAssistantProcessUnchecked({
     codexConfigOverrides: null,
     env: input.env,
@@ -79,34 +74,29 @@ export function resolveCodexAssistantTargetCapabilities(
   input: AssistantProviderConfigLike | null | undefined,
 ): AssistantProviderCapabilities {
   const normalized = normalizeAssistantProviderConfig(input)
-  assertCodexAssistantProvider(resolveAssistantChatProviderFromConfig(normalized))
+  const modelProvider = resolveStrictAssistantCodexModelProvider(
+    normalized.target.modelProvider,
+  ).id
 
   return cloneAssistantProviderCapabilities({
     ...CODEX_ASSISTANT_CAPABILITIES,
-    supportsNativeResume: shouldCodexAssistantUseNativeResume(normalized),
-    supportsReasoningEffort: supportsAssistantReasoningEffort(normalized),
+    supportsNativeResume: true,
+    supportsReasoningEffort:
+      modelProvider !== HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   })
-}
-
-function shouldCodexAssistantUseNativeResume(
-  config: AssistantProviderConfig,
-): boolean {
-  return supportsAssistantNativeResume(config)
 }
 
 export function resolveCodexAssistantLabel(
   input: AssistantProviderConfigLike | null | undefined,
 ): string {
   const normalized = normalizeAssistantProviderConfig(input)
-  assertCodexAssistantProvider(resolveAssistantChatProviderFromConfig(normalized))
   return resolveCodexAssistantConfigLabel(normalized)
 }
 
 export function resolveCodexStaticModels(
   input: AssistantProviderConfigLike | null | undefined,
 ): readonly AssistantCatalogModel[] {
-  const normalized = normalizeAssistantProviderConfig(input)
-  assertCodexAssistantProvider(resolveAssistantChatProviderFromConfig(normalized))
+  normalizeAssistantProviderConfig(input)
   return resolveCodexStaticModelCatalog()
 }
 
@@ -134,9 +124,6 @@ export async function executeCodexAssistantTurnAttempt(
   }
 
   try {
-    assertCodexAssistantProvider(
-      resolveAssistantChatProviderFromConfig(input.providerConfig),
-    )
     const result = await executeCodexAssistantTurnAttemptUnchecked(executionInput)
     return finalizeAssistantProviderAttemptResult(result, progressEvents)
   } catch (error) {
@@ -233,15 +220,4 @@ function cloneAssistantProviderCapabilities(
     supportsReasoningEffort: capabilities.supportsReasoningEffort,
     supportsRichUserMessageContent: capabilities.supportsRichUserMessageContent,
   }
-}
-
-function assertCodexAssistantProvider(provider: AssistantChatProvider): void {
-  if (provider === 'codex-cli') {
-    return
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_PROVIDER_UNSUPPORTED',
-    `Assistant provider "${provider}" is not available in the Codex-only runtime.`,
-  )
 }

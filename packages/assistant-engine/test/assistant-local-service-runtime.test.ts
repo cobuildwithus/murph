@@ -9241,7 +9241,6 @@ async function loadLocalServiceModule(input?: {
       reasoningEffort?: CodexAssistantTarget['reasoningEffort']
       sandbox?: CodexAssistantTarget['sandbox']
       target?: {
-        kind: 'codex-cli' | 'responses'
         codexCommand?: string | null
         codexHome?: string | null
         model?: string | null
@@ -9250,12 +9249,7 @@ async function loadLocalServiceModule(input?: {
         profile?: string | null
       } | null
     }) => {
-      const provider =
-        input.target?.kind === 'codex-cli'
-          ? 'codex-cli'
-          : input.target
-            ? null
-            : input.provider
+      const provider = input.target ? 'codex-cli' : input.provider
 
       if (provider === 'codex-cli') {
         return createCodexTarget({
