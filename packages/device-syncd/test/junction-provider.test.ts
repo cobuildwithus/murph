@@ -4593,7 +4593,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     },
     {
       data: { provider: "garmin" },
-      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      expectedOccurredAt: undefined,
       messageId: "msg_lifecycle_update_now_fallback",
     },
   ] as const;
@@ -12993,6 +12993,7 @@ test("Junction nested compact timeseries webhooks use sample timestamps for stab
   });
 
   assert.equal(firstParse.jobs[0]?.dedupeKey, secondParse.jobs[0]?.dedupeKey);
+  assert.equal(firstParse.providerSentAt, "2026-04-03T00:00:00.000Z");
   assert.equal(firstParse.jobs[0]?.payload?.occurredAt, "2026-04-02T14:30:00.000Z");
   assert.equal(firstParse.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
   assert.equal(firstParse.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");

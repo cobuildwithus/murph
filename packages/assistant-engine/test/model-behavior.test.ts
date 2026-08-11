@@ -91,7 +91,7 @@ describe('assistant execution prompt contract', () => {
     })
 
     expect(prompt).toContain(
-      'Murph progress-delivery and browser-action rules:',
+      'Murph progress-delivery, browser-action, and appointment-reminder rules:',
     )
     expect(prompt).toContain('Turn priority order:')
     expect(prompt).not.toContain('GPT-5 execution bias:')
@@ -1212,7 +1212,9 @@ describe('assistant execution prompt contract', () => {
       profile: 'default',
     })
 
-    expect(text).toContain('Murph progress-delivery and browser-action rules:')
+    expect(text).toContain(
+      'Murph progress-delivery, browser-action, and appointment-reminder rules:',
+    )
     expect(text).toContain('murph.send_progress_update')
     expect(text).toContain('For browser-backed real-world action requests')
     expect(text).not.toContain('GPT-5 execution bias:')
@@ -2035,6 +2037,9 @@ describe('assistant system prompt cache stability', () => {
 
     expect(layers.threadContextPrompt).toContain(
       "The user's canonical timezone for this vault is Asia/Kuala_Lumpur.",
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'never relabel the raw UTC clock as local time',
     )
     expect(layers.threadContextPrompt).toContain(
       'In user-facing prose, refer to dates with a month name and day',

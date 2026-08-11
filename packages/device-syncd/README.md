@@ -53,6 +53,17 @@ The shared ingress owns:
 - provider-owned webhook preflight plus webhook parsing
 - webhook dedupe and account lookup hooks
 
+When a provider's verified webhook envelope includes a signed send timestamp,
+the provider parser exposes it as `providerSentAt`. This is distinct from the
+provider event's `occurredAt` and the shared ingress receipt time. Generic
+ingress carries only those typed timestamps and the stripped webhook summary;
+it never forwards signature headers or raw provider payloads as observability
+metadata. Junction, Oura, WHOOP, and Strava currently expose verified send
+times. Provider adapters likewise omit top-level `occurredAt` when the signed
+payload does not identify the event time, even if an import window needs a
+receipt-time fallback internally. A missing timestamp means the provider did
+not supply a verified one, not that Murph should infer it.
+
 It does **not** own canonical health-data import. The local data plane should still be the only component that normalizes provider payloads and writes them into the Murph vault.
 It also does **not** own provider-specific webhook-admin secrets. If a provider
 needs verification or subscription credentials, keep them on that provider's

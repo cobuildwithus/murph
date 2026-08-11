@@ -56,8 +56,6 @@ const CHALLENGE_POINTS_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
   useGrouping: true,
 })
-export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
-  'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
 
 export type AppCardEnvelopeV1 = {
@@ -190,6 +188,31 @@ export function renderAssistantResponseCardTranscriptText(
       return renderCompactTableResponseCardText(parsed, true)
     case 'challenge_standings':
       return renderChallengeStandingsResponseCardText(parsed)
+  }
+}
+
+export function buildLinqIMessageAppFallbackText(
+  card: AssistantResponseCard,
+):
+  | 'Challenge standings. Ask Murph for this card in text'
+  | 'Your daily nutrition. Ask Murph for this card in text'
+  | 'Your Murph summary. Ask Murph for this card in text'
+  | 'Your workout. Ask Murph for this card in text' {
+  const parsed = assistantResponseCardSchema.parse(card)
+  switch (parsed.kind) {
+    case 'daily_nutrition':
+      return 'Your daily nutrition. Ask Murph for this card in text'
+    case 'compact_table': {
+      if (parsed.tracking === null) {
+        return 'Your Murph summary. Ask Murph for this card in text'
+      }
+      switch (parsed.tracking.kind) {
+        case 'workout':
+          return 'Your workout. Ask Murph for this card in text'
+      }
+    }
+    case 'challenge_standings':
+      return 'Challenge standings. Ask Murph for this card in text'
   }
 }
 

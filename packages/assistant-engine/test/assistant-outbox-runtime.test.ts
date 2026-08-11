@@ -31,6 +31,7 @@ import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
+import { resolveAssistantGeneratedImageDelivery } from '../src/assistant/response-media.ts'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -2366,6 +2367,36 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-03-01T00:05:00.000Z',
     })
 
+    const generatedRef = 'raw/captures/2026/04/generated/generated.webp'
+    const generatedDelivery = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-18T00:00:00.000Z',
+      media: [{
+        alt: 'Visible generated image',
+        contentType: 'image/webp',
+        filename: 'generated.webp',
+        kind: 'vault_image',
+        ref: generatedRef,
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+        source: 'gpt-image-2',
+      }],
+      message: 'visible generated image',
+      sessionId: 'session-generated-delivery',
+      turnId: 'turn-generated-delivery',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...generatedDelivery,
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'generated-delivery-message',
+        sentAt: '2026-04-18T00:05:00.000Z',
+      }),
+      sentAt: '2026-04-18T00:05:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-18T00:05:00.000Z',
+    })
+
     const recentTerminalIntents = Array.from({ length: 101 }, (_, index) => {
       const createdAt = new Date(Date.UTC(2026, 3, 19, 0, index, 0)).toISOString()
       const message = `terminal-${index}`
@@ -2432,12 +2463,51 @@ describe('assistant outbox runtime', () => {
     ).resolves.toBe(2)
 
     const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
-    expect(retained).toHaveLength(101)
+    expect(retained).toHaveLength(102)
     expect(retained.filter((intent) => intent.status === 'retryable')).toHaveLength(1)
     expect(
       retained.some((intent) => intent.message === 'old terminal intent'),
     ).toBe(false)
-    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
+    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(101)
+    expect(retained.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(true)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retained,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(true)
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-05-02T00:06:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(1)
+    const retainedAfterAgeCutoff = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retainedAfterAgeCutoff.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(false)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retainedAfterAgeCutoff,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(false)
   })
 
   it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {
