@@ -421,7 +421,7 @@ describe("changelog registry", () => {
       tryIt: { href: "/", label: "Visit the homepage" },
     });
     expect(items.get("referral-notification-route-recovery")).toMatchObject({
-      sourcePullRequests: [1592],
+      sourcePullRequests: [1592, 1622, 1648],
       summary: expect.stringContaining("intended direct conversation"),
       details: expect.stringContaining(
         "ends without sending so later notifications can continue",
