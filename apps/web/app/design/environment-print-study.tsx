@@ -1,5 +1,8 @@
 import { deriveCategoryNote, overallGrade } from "../(dashboard)/environment/category-notes";
-import { EnvironmentPrintReport } from "../(dashboard)/environment/environment-print-report";
+import {
+  EnvironmentPrintLoading,
+  EnvironmentPrintReport,
+} from "../(dashboard)/environment/environment-print-report";
 import {
   type HabitatValues,
   resolveEnvironmentCoverage,
@@ -46,18 +49,31 @@ export function EnvironmentPrintStudy() {
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-border bg-background"
+      className="space-y-10"
       data-design-section="environment-private-print"
       id="environment-private-print"
       inert
     >
-      <EnvironmentPrintReport
-        context={{ areaType: "urban center", location: "Warsaw" }}
-        coverage={resolveEnvironmentCoverage(scene)}
-        generatedOn="July 31, 2026"
-        grade={overallGrade(notes)}
-        notes={notes}
-      />
+      <div className="space-y-3" data-design-state="loading">
+        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+          Loading
+        </p>
+        <EnvironmentPrintLoading />
+      </div>
+      <div className="space-y-3" data-design-state="ready">
+        <p className="font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+          Ready
+        </p>
+        <div className="overflow-hidden rounded-xl border border-border bg-background">
+          <EnvironmentPrintReport
+            context={{ areaType: "urban center", location: "Warsaw" }}
+            coverage={resolveEnvironmentCoverage(scene)}
+            generatedOn="July 31, 2026"
+            grade={overallGrade(notes)}
+            notes={notes}
+          />
+        </div>
+      </div>
     </div>
   );
 }
