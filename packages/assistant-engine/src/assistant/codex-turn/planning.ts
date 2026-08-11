@@ -21,6 +21,7 @@ import {
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshotBestEffort,
 } from '../context-snapshot.js'
 import {
   assistantRouteSupportsGroupRoomModel,
@@ -127,6 +128,8 @@ import {
   resolveAssistantVoiceMemoDeliveryChannel,
   type AssistantVoiceMemoDeliveryChannel,
 } from '../voice-memo-delivery.js'
+
+const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -557,7 +560,8 @@ export async function resolveAssistantRouteTurnPlan(input: {
     input.profile.toolProfile === 'provider-turn'
   const assistantVoicePreferenceApplies =
     privateInteractiveAudience || hostedGroupRuntime
-  const explicitAssistantPersona = privateInteractiveProviderTurn
+  const explicitAssistantPersona =
+    privateInteractiveProviderTurn || groupAssistantStylePreferencesApply
     ? preferenceContext.assistantPersona ?? null
     : null
   const effectiveAssistantStyle = explicitAssistantPersona
@@ -693,6 +697,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
     hostedRuntime: input.executionContext?.hosted != null,
     researchAvailable: assistantResearchAvailable,
   })
+  if (privateInteractiveProviderTurn) {
+    // A small vault can repair its navigation snapshot before provider start.
+    // Larger vaults yield to the degraded prompt instead of delaying the turn.
+    let remainingRefreshSteps =
+      ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS
+    await refreshAssistantContextSnapshotBestEffort({
+      shouldYield: () => {
+        if (remainingRefreshSteps <= 0) {
+          return true
+        }
+        remainingRefreshSteps -= 1
+        return false
+      },
+      vaultRoot: input.input.vault,
+    })
+  }
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience

@@ -93,9 +93,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, reliable referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
+      "Starter access, patterns, personality, health history, referrals, reminders, cards, voices, search, and clearer pages",
     summary:
-      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, referral celebrations stay in the intended conversation, reminders keep local time, workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, the homepage starts lighter, and private Environment reports show their shape while loading.",
+      "Starter usage waits until used; patterns connect actions with next-day sleep; personality is editable in Settings or chat; blood-pressure history remains through source changes; referrals stay in the intended chat; reminders keep local time; workout rows and voice choices stay clear; managed search is current; the homepage starts lighter; and private Environment reports show shape while loading.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -146,6 +146,22 @@ const RAW_CHANGELOG_EDITIONS = [
         },
       },
       {
+        id: "personality-settings-and-chat",
+        kind: "feature",
+        priority: 4,
+        title: "Choose how Murph shows up",
+        summary:
+          "Choose Murph's main and optional supporting personality in Settings, or ask Murph to change them in chat.",
+        details:
+          "Both paths update the same saved personality. Explicit tone, voice, Humor, Push, and Detail choices stay unchanged; where you have not customized tone or voice, Settings shows the selected personality's defaults. A group request changes only that room's Murph rather than anyone's private settings.",
+        relevanceTags: ["personality", "settings", "chat", "groups"],
+        sourcePullRequests: [1589],
+        tryIt: {
+          href: "/settings",
+          label: "Edit Murph's personality",
+        },
+      },
+      {
         id: "referral-notification-route-recovery",
         kind: "improvement",
         priority: 4,
@@ -156,6 +172,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
         relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
         sourcePullRequests: [1592],
+      },
+      {
+        id: "blood-pressure-history-completion",
+        kind: "improvement",
+        priority: 4,
+        title: "Blood-pressure history waits for the whole sync",
+        summary:
+          "When Murph is recovering older blood-pressure readings, a temporary change in source access no longer lets an unfinished history import look complete.",
+        details:
+          "Murph keeps the same history window available to retry after access returns and marks it complete only after every remaining day finishes under the currently connected source.",
+        relevanceTags: ["blood-pressure", "wearables", "health-data", "reliability"],
+        sourcePullRequests: [1523, 1625],
       },
       {
         id: "reminders-keep-requested-timezone",
