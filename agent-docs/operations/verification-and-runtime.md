@@ -846,11 +846,14 @@ the advisory budget.
 
 Use `TELEGRAM_PREVIEW_CHAT_ID` as the opt-in target for manual Telegram UI
 previews. Keep its value in an ignored local env file, never in source, docs,
-fixtures, logs, or PR artifacts. Load it together with `TELEGRAM_BOT_TOKEN`, send
-only after the target owner asks for a preview, and report provider message IDs
-without printing either environment value. Preview the current branch renderer,
-not hand-written provider markup. A preview send is product evidence, not a test
-replacement and not permission to deploy or change the webhook.
+fixtures, logs, or PR artifacts. When that variable exists, a user-facing
+Telegram presentation change must send representative live samples after
+focused local proof and before final review. Backend-only Telegram changes do
+not send a preview. Load the target together with `TELEGRAM_BOT_TOKEN`, and
+report provider message IDs without printing either environment value. Preview
+the current branch renderer, not hand-written provider markup. This standing
+preview consent covers only product evidence for the configured private target;
+it is not permission to send unrelated messages, deploy, or change the webhook.
 - Codex App Server assistant turns now default to `danger-full-access` plus `never` approvals. Murph still owns the shared prompt, transcript, tool/runtime planning, and session continuity, but Codex is treated as a privileged local adapter rather than a sandboxed authority boundary.
 - When the built CLI artifact is present, canonical `memory` and runtime-safe assistant operations are exposed to Codex through the bounded local tool surface rooted at the active vault/session context; CLI fallback remains available for direct operator use, and the live provider path should use that tool surface rather than a separate localhost bridge.
 - `vault-cli` and `murph` load local `.env.local` first and then `.env` from the launch cwd before command dispatch, while preserving already-exported shell variables as higher precedence. This keeps repo-local operator credentials out of the canonical vault without requiring manual `export` commands each shell session.

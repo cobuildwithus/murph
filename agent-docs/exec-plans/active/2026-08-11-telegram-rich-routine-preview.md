@@ -79,7 +79,9 @@ Updated: 2026-08-11
 - Present nutrition goals as one compact table with short semantic statuses.
   Keep the image and goals useful without repeating sentence-shaped labels.
 - Keep the local manual-preview recipient in ignored environment state. Commit
-  only the variable name and the safe opt-in preview procedure.
+  only the variable name and the safe opt-in preview procedure. When configured,
+  user-facing Telegram presentation work sends representative live samples
+  before final review; backend-only work does not.
 
 ## Verification
 
