@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   acceptHostedGroupJoinCodeTx: vi.fn(),
   assertHostedMemberNotSuspended: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   getPrisma: vi.fn(),
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
   requireHostedInviteForAuthentication: vi.fn(),
@@ -16,11 +15,6 @@ const mocks = vi.hoisted(() => ({
   resolveHostedPublicBaseUrl: vi.fn(),
   signalHostedGroupJoinConfirmationRuntimeBestEffort: vi.fn(),
   signalHostedRuntimeMaintenanceRuntime: vi.fn(),
-}));
-
-vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({
@@ -88,9 +82,6 @@ beforeEach(async () => {
     membershipId: "membership_existing",
     revokedVaultShareProjectionKinds: ["sleep-times.v0"],
   });
-  mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
-    undefined,
-  );
   mocks.signalHostedGroupJoinConfirmationRuntimeBestEffort.mockResolvedValue(undefined);
   mocks.signalHostedRuntimeMaintenanceRuntime.mockResolvedValue(undefined);
   mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mockResolvedValue(undefined);
@@ -194,8 +185,6 @@ test("returns a group permission revocation without exposing internal metadata",
     tx: { tx: true },
   });
   expect(mocks.signalHostedRuntimeMaintenanceRuntime).not.toHaveBeenCalled();
-  expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-    .not.toHaveBeenCalled();
 });
 
 test("signals a first-join confirmation without exposing mailbox metadata", async () => {
@@ -290,7 +279,7 @@ test("bounds a stalled maintenance wake after confirmation recovery", async () =
   }
 });
 
-test("enqueues a private missing-email nudge after accepting an email-sharing grant", async () => {
+test("accepts an email-sharing grant without a private mailbox lifecycle", async () => {
   mocks.acceptHostedGroupJoinCodeTx.mockResolvedValueOnce({
     alreadyMember: false,
     grantedVaultShareProjectionKinds: ["profile-name.v0", "group-email.v0"],
@@ -315,12 +304,6 @@ test("enqueues a private missing-email nudge after accepting an email-sharing gr
   });
 
   expect(response.status).toBe(200);
-  expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-    .toHaveBeenCalledWith({
-      groupId: "group_1",
-      memberId: "member_grantor",
-      prisma: expect.any(Object),
-    });
 });
 
 test("accepts the full closed set of selectable vault-share permissions", async () => {

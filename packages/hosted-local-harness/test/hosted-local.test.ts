@@ -112,6 +112,11 @@ describe("hosted-local harness", () => {
     ).toBe(
       "apps/cloudflare/test/hosted-local-family-sponsored-group-roundtrip-e2e.test.ts",
     );
+    expect(resolveHostedLocalE2eScenarios("group-email-newsletter")[0]).toEqual({
+      dedicatedVitestProcess: true,
+      file: "apps/cloudflare/test/hosted-local-group-email-newsletter-e2e.test.ts",
+      name: "group-email-newsletter",
+    });
     expect(
       resolveHostedLocalE2eScenarios("group-sleep-source-sharing")[0]?.file,
     ).toBe(

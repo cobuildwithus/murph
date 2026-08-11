@@ -1064,6 +1064,13 @@ Callback auth contract:
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
   boundary; the isolated execution child talks back through the worker-owned
   `web-control.worker` proxy instead of receiving the signing key directly
+- after signature, key-id, timestamp/freshness, method/path/search/member, and
+  payload binding succeed, `apps/web` consumes the SHA-256 nonce with one
+  primary-Postgres insert; the `nonce_hash` primary-key conflict rejects a
+  replay, and callback admission never sweeps expired rows
+- the existing hourly hosted-retention cron removes only strictly expired nonce
+  rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
+  account deletion still independently deletes the member's nonce rows
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.

@@ -2053,6 +2053,13 @@ describe('assistant system prompt cache stability', () => {
     expect(layers.threadContextPrompt).toContain(
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
+    expect(layers.threadContextPrompt).toContain('Private Training page:')
+    expect(layers.threadContextPrompt).toContain(
+      'the signed-in Training page is available at http://localhost:3000/training',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'read-only and intentionally absent from the Home sidebar',
+    )
     expect(layers.threadContextPrompt).not.toContain(
       'Layer partition assistant context snapshot.',
     )
@@ -2897,6 +2904,8 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Assistant tone preference:')
     expect(prompt).not.toContain('Murph onboarding:')
     expect(prompt).not.toContain('/settings?voice=true')
+    expect(prompt).not.toContain('Private Training page:')
+    expect(prompt).not.toContain('/training')
     expect(prompt).not.toContain('vault-cli assistant style set')
     expect(prompt).not.toContain('vault-cli device connect <provider>')
     expect(prompt).not.toContain('Never invent invite/share/auth/wearable URLs')
@@ -2983,9 +2992,9 @@ describe('assistant conversation scope', () => {
       'Never describe the group funding link as a personal billing or account-management page.',
     )
 
-    // This is a private, explicitly per-person enrollment reminder owned by
-    // the group newsletter workflow, not a room-settings destination.
-    expect(prompt).toContain(
+    // Missing-email recovery belongs to the private newsletter skill's
+    // aggregate no-recipient branch, not every hosted group system prompt.
+    expect(prompt).not.toContain(
       `${MURPH_PRODUCT_ORIGIN}/settings?addEmail=true`,
     )
     expect(prompt).not.toContain('`/settings?addEmail=true`')

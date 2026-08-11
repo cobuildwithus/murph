@@ -1,4 +1,4 @@
-import { isHostedRuntimeNewsletterAuthorizationProof } from "@murphai/hosted-execution/runtime-control";
+import { isHostedRuntimeGroupEmailAuthorizationProof } from "@murphai/hosted-execution/runtime-control";
 
 export const hostedEmailSendTargetKindValues = ["explicit", "group", "thread"] as const;
 
@@ -8,7 +8,7 @@ export interface HostedEmailSendRequest {
   html?: string | null;
   idempotencyKey?: string | null;
   message: string;
-  newsletterAuthorizationProof?: string | null;
+  groupEmailAuthorizationProof?: string | null;
   planGroupFanout?: boolean | null;
   replyToMessageId?: string | null;
   subject?: string | null;
@@ -31,13 +31,18 @@ export interface HostedEmailSendResult {
 
 export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequest {
   const record = requireHostedEmailSendRequestObject(value, "Hosted email send request");
+  if (record.newsletterAuthorizationProof !== undefined) {
+    throw new TypeError(
+      "Hosted email send request uses a retired newsletter authorization proof field.",
+    );
+  }
   const planGroupFanout = readOptionalHostedEmailSendRequestBoolean(
     record.planGroupFanout ?? null,
     "Hosted email send request planGroupFanout",
   );
-  const newsletterAuthorizationProof =
-    readOptionalHostedEmailNewsletterAuthorizationProof(
-      record.newsletterAuthorizationProof ?? null,
+  const groupEmailAuthorizationProof =
+    readOptionalHostedEmailGroupEmailAuthorizationProof(
+      record.groupEmailAuthorizationProof ?? null,
     );
 
   return {
@@ -53,9 +58,9 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
       record.message,
       "Hosted email send request message",
     ),
-    ...(newsletterAuthorizationProof === null
+    ...(groupEmailAuthorizationProof === null
       ? {}
-      : { newsletterAuthorizationProof }),
+      : { groupEmailAuthorizationProof }),
     ...(planGroupFanout === null ? {} : { planGroupFanout }),
     replyToMessageId: readOptionalHostedEmailSendRequestString(
       record.replyToMessageId ?? null,
@@ -76,15 +81,15 @@ export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequ
   };
 }
 
-function readOptionalHostedEmailNewsletterAuthorizationProof(
+function readOptionalHostedEmailGroupEmailAuthorizationProof(
   value: unknown,
 ): string | null {
   if (value === null || value === undefined) {
     return null;
   }
-  if (!isHostedRuntimeNewsletterAuthorizationProof(value)) {
+  if (!isHostedRuntimeGroupEmailAuthorizationProof(value)) {
     throw new TypeError(
-      "Hosted email send request newsletterAuthorizationProof must be a SHA-256 hex digest.",
+      "Hosted email send request groupEmailAuthorizationProof must be a SHA-256 hex digest.",
     );
   }
   return value;

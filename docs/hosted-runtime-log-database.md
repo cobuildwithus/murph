@@ -12,7 +12,7 @@ The existing signed callback remains the only ingestion boundary:
 ```text
 Cloudflare runtime
   -> POST /api/internal/hosted-runtime/log
-  -> ECDSA verification + primary anti-replay nonce
+  -> ECDSA verification + one primary anti-replay nonce insert
   -> accepted-attempt recovery claim, when present
   -> isolated runtime-log Postgres append
 ```
@@ -20,8 +20,10 @@ Cloudflare runtime
 The callback stays in `apps/web`; Cloudflare receives no database credential and
 there is no new service or queue. The anti-replay nonce remains in the primary
 control database because `runner.accepted_attempt_failed` recovery shares this
-callback. A runtime-log database outage must not prevent a valid recovery claim
-from being authenticated and signaled.
+callback. Admission performs one insert keyed by the nonce hash; primary-key
+uniqueness rejects a replay, and the callback performs no expiry sweep. A
+runtime-log database outage must not prevent a valid recovery claim from being
+authenticated and signaled.
 
 The isolated database is the only runtime-log owner. Production fails closed
 when its URL is missing. Local development may leave it unconfigured; runtime
@@ -173,8 +175,12 @@ The dedicated store keeps the existing policy:
 - warn/error: 14 days
 - ordered batches of 5,000, at most four batches per hourly cleanup
 
-The normal retention cron runs isolated cleanup serially through the diagnostic
-pool after the primary control-database cleanup completes.
+The normal retention cron first removes strictly expired callback nonces from
+the primary control database under the shared 5,000-row and four-batch ceilings.
+Each statement orders candidates by expiry and nonce hash, locks only that
+bounded set with `FOR UPDATE SKIP LOCKED`, and deletes those exact rows. It then
+runs isolated runtime-log cleanup serially through the diagnostic pool after the
+primary control-database cleanup completes.
 
 ## Configuration
 

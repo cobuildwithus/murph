@@ -6,8 +6,8 @@ import {
   requireHostedCloudflareCallbackJsonRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
-  readHostedGroupNewsletterEmailRecipients,
-} from "@/src/lib/hosted-groups/group-newsletter";
+  readHostedGroupEmailRecipients,
+} from "@/src/lib/hosted-groups/group-email";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -22,11 +22,11 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
   const body = parseHostedEmailGroupRecipientsCallbackRequest(payload);
-  const resolved = await readHostedGroupNewsletterEmailRecipients({
-    ...(body.expectedNewsletterAuthorizationProof
+  const resolved = await readHostedGroupEmailRecipients({
+    ...(body.expectedGroupEmailAuthorizationProof
       ? {
-          expectedNewsletterAuthorizationProof:
-            body.expectedNewsletterAuthorizationProof,
+          expectedGroupEmailAuthorizationProof:
+            body.expectedGroupEmailAuthorizationProof,
         }
       : {}),
     groupId: body.groupId,
@@ -36,22 +36,22 @@ export const POST = withJsonError(async (request: Request) => {
   if (resolved.status !== "ok") {
     if (resolved.unavailableReason === "group_not_found") {
       throw hostedOnboardingError({
-        code: "HOSTED_GROUP_NEWSLETTER_GROUP_NOT_FOUND",
+        code: "HOSTED_GROUP_EMAIL_GROUP_NOT_FOUND",
         httpStatus: 410,
-        message: "Hosted group newsletter no longer exists.",
+        message: "Hosted group email target no longer exists.",
       });
     }
-    if (resolved.unavailableReason === "newsletter_authorization_changed") {
+    if (resolved.unavailableReason === "group_email_authorization_changed") {
       throw hostedOnboardingError({
-        code: "HOSTED_GROUP_NEWSLETTER_AUTHORIZATION_CHANGED",
+        code: "HOSTED_GROUP_EMAIL_AUTHORIZATION_CHANGED",
         httpStatus: 410,
-        message: "Hosted group newsletter authorization changed.",
+        message: "Hosted group email authorization changed.",
       });
     }
     throw hostedOnboardingError({
-      code: "HOSTED_GROUP_NEWSLETTER_RECIPIENTS_UNAVAILABLE",
+      code: "HOSTED_GROUP_EMAIL_RECIPIENTS_UNAVAILABLE",
       httpStatus: 409,
-      message: "Hosted group newsletter recipients are unavailable.",
+      message: "Hosted group email recipients are unavailable.",
     });
   }
 

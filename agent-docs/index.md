@@ -7,6 +7,13 @@ Last verified: 2026-08-11
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+Direct-insert hosted callback nonce replay convergence through the
+`nonce_hash` primary key, database-clock refusal after the inclusive callback
+expiry boundary, plus bounded background retention and its opt-in PostgreSQL
+concurrency proof, are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/references/hosted-temporal-orchestration.md`, and
+`agent-docs/references/testing-ci-map.md`.
+
 Member-owned device provider application ownership, exact OAuth and connection
 revision binding, invocation-scoped credential projection, exact token-return
 authority, credential-free stored-token cleanup without operator fallback, and
@@ -228,7 +235,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/product-specs/shared-message-targeting.md` | Shared opaque accepted-message reference, authority resolver, native-reply marker, reaction reuse, provider behavior, and immediate runner rollout contract. | Assistant messaging behavior | High | 2026-07-16 |
 | `agent-docs/product-specs/group-chat-social-dynamics.md` | Human-first group-chat psychology, conversational-floor ownership, prompt-owned 8+6-second reply cadence with mid-pause safety/floor re-evaluation, one-bubble interactive replies, setup-to-human handoff, arrival-to-resident tapering, participation boundaries, comedy authority, and brief public-reference grounding for earned playful turns. | Group conversation behavior | High | 2026-08-09 |
 | `agent-docs/product-specs/group-managed-automations.md` | Implemented member/group managed-owner isolation, execution checks, and retirement behavior; no member-facing group social automation currently ships. | Managed group automation behavior | High | 2026-07-26 |
-| `agent-docs/product-specs/group-health-newsletter.md` | Implemented recurring group health newsletter: seven completed local days from an eight-date, timezone-safe projection read over exact grants; immediate or restart-recovered propagation of one accepted parent into canonical cron pending-delivery state; Web-owned recipient fanout with generic outbox retries; group-chosen setup; consent grants; and Web-side address resolution for Cloudflare `HOSTED_EMAIL` delivery. | Group newsletter behavior | Medium | 2026-07-29 |
+| `agent-docs/product-specs/group-health-newsletter.md` | Newsletter as a private skill recipe over an ordinary wall-clock-aware group automation, consent-aware shared reads, normal current-chat delivery, and an optional generic group-email effect with Web-owned recipient revalidation and existing-outbox durability. | Group newsletter behavior | Medium | 2026-08-10 |
 | `agent-docs/product-specs/group-challenge-formats-and-scorecards.md` | Individual, team, and collective challenge formats plus one-to-five model-interpreted additive components with deterministic point arithmetic and aggregation. | Group challenge scorecards | High | 2026-07-29 |
 | `agent-docs/product-specs/group-challenge-data-diagnostics.md` | Truthful complete or partial group-challenge standings, evidence-ordered missing-data guidance, group-authorized fresh exact-scope reads for ordinary and privately requested visibility checks, immediately scoreable reported Deep/REM values with member-local future-date rejection, source-aware sleep permissions with rollback-readable compatibility, and connection/source-epoch-coherent privacy-bounded `device-sync-status.v0` observations. | Group challenge diagnostics | High | 2026-08-10 |
 | `agent-docs/product-specs/challenge-standings-card.md` | Native Messages presentation contract for individual, team, and collective challenge standings with truthful partial and unscored states, authenticated Linq group-only delivery, complete semantic captions, and an identity-free badge-free static-image projection. | Group challenge standings response card | High | 2026-08-10 |
