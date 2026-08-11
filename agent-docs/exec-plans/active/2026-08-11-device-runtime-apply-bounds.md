@@ -14,9 +14,10 @@ application authority checks.
 
 - Each runtime apply entry admits an explicit, protocol-owned maximum number of
   source updates and rejects overflow before opening a transaction.
-- Candidate connection, source, and crypto material is prepared outside the
-  per-connection mutation transaction with set-based reads and existing bounded
-  secure-box primitives.
+- Candidate connection and crypto material is prepared outside the
+  per-connection mutation transaction with one owner-filtered set read and
+  existing bounded secure-box primitives; source authority is read only at the
+  live transactional fence.
 - The existing advisory-lock transaction remains the linearization point and
   revalidates every live ownership, epoch, version, lease, disconnect, source,
   ciphertext, and root fence before writing.
@@ -77,6 +78,20 @@ application authority checks.
   composed 100-by-64 source-write shape, and the prepared-token store owner.
   Reused the existing transaction spy, fanout harness, and Prisma store
   fixtures; no production or generic test abstraction changed.
+- The original-head final ReviewGPT audit found two architecture collapses at
+  `c6da9526edd3`: the prepared source snapshot had no semantic consumer and
+  duplicated the live transactional source read, while runtime apply had
+  reimplemented active-root SQL already owned by hosted crypto. Accepted both.
+  Deleted the source set read/grouping/prepared field, retained every live
+  source fence, and replaced the feature-local SQL with
+  `lockAndReadActiveHostedDomainRootKeyIdTx`. The canonical owner now takes the
+  same authority lock as provisioning before token persistence. Review thread:
+  `https://chatgpt.com/c/6a7b1deb-1a20-83ea-ba41-ad88073d5764`.
+- The concurrent corrected-head final accepted its prompt but failed response
+  capture at `c6da9526edd3` in thread
+  `https://chatgpt.com/c/6a7b2545-9cd4-83ea-aa7b-f9d900b07b05`. That stale
+  snapshot is non-terminal after the accepted production remediation; a fresh
+  exact-head full audit owns the final verdict.
 
 ## Verification
 
@@ -95,10 +110,11 @@ application authority checks.
 - Runtime protocol: 95 focused tests pass on the current merged base, including
   the 64-source rejection before any control-plane work.
 - Runtime authority and prepared-secret owners: 68 focused tests pass. The
-  deterministic 100-update cases prove two set reads, one batched secret read,
+  deterministic 100-update cases prove one owner-filtered connection set read,
+  no prepared source hydration, one batched secret read,
   one optional batched preseal, serial transaction concurrency of one, no
   post-write hydration, and no KMS/provider work inside a transaction. The
-  composed maximum proves 6,400 serial source upserts, 6,702 modeled database-
+  composed maximum proves 6,400 serial source upserts, 6,701 modeled database-
   owner operations, and transaction concurrency of one.
 - Shared crypto-root owner and adjacent connection-lock/source coverage pass 44
   current-base tests, including root-reference
@@ -115,11 +131,18 @@ application authority checks.
 - A fresh, fully migrated local PostgreSQL cluster passed both proofs: the
   1,641-receipt, 31-wide incident replay stayed within the 15-connection pool,
   and a 100-update no-op apply plus 40 foreground reads stayed within a
-  two-connection pool with one set connection read, one set source read, 100
-  serial live connection/source reads, and zero writes. A transaction barrier
-  now holds the first advisory-lock transaction open while all 40 foreground
-  reads finish through the other pooled connection and proves that no second
-  apply transaction enters before release.
+  two-connection pool with one set connection read, 100 serial live
+  connection/source reads, no prepared source hydration, and zero writes. A
+  transaction barrier now holds the first advisory-lock transaction open while
+  all 40 foreground reads finish through the other pooled connection and
+  proves that no second apply transaction enters before release.
+- After the final-audit architecture remediation, 120 affected runtime
+  authority, secret-preparation, Prisma token-store, and canonical root-owner
+  tests pass; Hosted Web typecheck and scoped lint pass. The matching-root proof
+  asserts canonical root lock/read before token persistence, while stale and
+  absent roots remain fail closed. A new fully migrated PostgreSQL cluster
+  again passed both incident replays with the reduced 100-live-source-read
+  shape and released its two-connection proof pool and local server cleanly.
 - Broad diff verification passed repository guards, all affected typechecks,
   and the full assistant-engine (3,468), assistant-cli (128),
   assistant-runtime (2,165), and assistantd (40) test inventories before stale

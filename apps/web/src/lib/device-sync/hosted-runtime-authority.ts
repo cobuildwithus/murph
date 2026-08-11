@@ -46,6 +46,7 @@ import {
   type HostedRuntimeRedactedJson,
 } from "@murphai/hosted-execution/runtime-control";
 
+import { lockAndReadActiveHostedDomainRootKeyIdTx } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   formatHostedExecutionSafeLogErrorDetails,
@@ -91,7 +92,6 @@ interface HostedRuntimeFailureApplyResult {
 interface HostedRuntimePreparedApplyConnection {
   record: HostedConnectionRecord;
   secretMaterial: HostedRuntimeApplyConnectionSecretMaterial;
-  sources: HostedDeviceConnectionSource[];
   tokenWrite: HostedRuntimeApplyPreparedTokenWrite | null;
 }
 
@@ -300,11 +300,11 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           });
         const preparedTokenRootCurrent = secretAuthorityCurrent
           && preparedConnection.tokenWrite?.rootKeyId
-          ? await isHostedRuntimeApplyPreparedRootCurrent({
-              rootKeyId: preparedConnection.tokenWrite.rootKeyId,
+          ? await lockAndReadActiveHostedDomainRootKeyIdTx({
+              domain: "device",
               tx,
               userId: input.trustedUserId,
-            })
+            }) === preparedConnection.tokenWrite.rootKeyId
           : true;
         const baseline = buildHostedRuntimeConnectionSnapshot(
           record,
@@ -615,14 +615,7 @@ async function prepareHostedRuntimeApplyConnections(input: {
       },
       ...hostedConnectionRecordArgs,
     });
-    const sources = await input.store.listConnectionSourcesForConnections(connectionIds);
     const secretMaterial = await input.store.readRuntimeApplyConnectionSecretMaterial(records);
-    const sourcesByConnectionId = new Map<string, HostedDeviceConnectionSource[]>();
-    for (const source of sources) {
-      const connectionSources = sourcesByConnectionId.get(source.connectionId) ?? [];
-      connectionSources.push(source);
-      sourcesByConnectionId.set(source.connectionId, connectionSources);
-    }
 
     const prepared = new Map<string, HostedRuntimePreparedApplyConnection>();
     for (const record of records) {
@@ -633,7 +626,6 @@ async function prepareHostedRuntimeApplyConnections(input: {
       prepared.set(record.id, {
         record,
         secretMaterial: material,
-        sources: sourcesByConnectionId.get(record.id) ?? [],
         tokenWrite: null,
       });
     }
@@ -654,7 +646,7 @@ async function prepareHostedRuntimeApplyConnections(input: {
         connection.record,
         storedAccount,
         connection.secretMaterial.externalAccountId,
-        connection.sources.map(toHostedRuntimeConnectionSourceSnapshot),
+        [],
         { includeCredentialMaterial: true },
       );
       const credential = resolveHostedRuntimeCredentialUpdate(update.credential);
@@ -810,24 +802,6 @@ function canonicalizeHostedRuntimeApplyJson(value: unknown): unknown {
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, entry]) => [key, canonicalizeHostedRuntimeApplyJson(entry)]),
   );
-}
-
-async function isHostedRuntimeApplyPreparedRootCurrent(input: {
-  rootKeyId: string;
-  tx: HostedPrismaTransactionClient;
-  userId: string;
-}): Promise<boolean> {
-  const rows = await input.tx.$queryRaw<Array<{ rootKeyId: string }>>`
-    SELECT root_key_id AS "rootKeyId"
-    FROM hosted_user_crypto_envelope
-    WHERE user_id = ${input.userId}
-      AND domain = 'device'::hosted_crypto_domain
-      AND status = 'active'::hosted_crypto_envelope_status
-    ORDER BY created_at DESC
-    LIMIT 1
-    FOR SHARE
-  `;
-  return rows[0]?.rootKeyId === input.rootKeyId;
 }
 
 function assertHostedRuntimePreparedTokenWriteMatches(input: {

@@ -518,7 +518,7 @@ describe.skipIf(!runPostgresProof)(
           RUNTIME_APPLY_CONNECTIONS,
         );
         expect(operationCounts.get("DeviceConnectionSource.findMany") ?? 0).toBe(
-          RUNTIME_APPLY_CONNECTIONS + 1,
+          RUNTIME_APPLY_CONNECTIONS,
         );
         expect(operationCounts.get("DeviceConnection.update") ?? 0).toBe(0);
         expect(operationCounts.get("DeviceConnectionSource.upsert") ?? 0).toBe(0);
