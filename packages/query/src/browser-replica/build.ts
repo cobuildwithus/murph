@@ -1,7 +1,7 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
-import { buildPersonalPatternReport } from "../personal-patterns.ts";
+import { buildPersonalPatternReportFromWearableBundleAndMetricPoints } from "../personal-patterns.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -10,6 +10,7 @@ import { createVaultReadModel, type VaultReadModel } from "../read-model.ts";
 import { resolveAdherenceObservationActivityKind } from "../experiment-adherence.ts";
 import {
   buildWearableAssistantSummary,
+  buildWearableSummaryBundle,
   summarizeWearableSourceHealth,
   type WearableAssistantSummary,
   type WearableSourceHealthSummary,
@@ -97,6 +98,7 @@ export async function createBrowserVaultReplica(
   });
   const sourceHealthRows = summarizeWearableSourceHealth(defaultProjectedVault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
+  const wearableSummaryBundle = buildWearableSummaryBundle(input.vault);
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
@@ -109,7 +111,12 @@ export async function createBrowserVaultReplica(
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
-    personalPatterns: buildPersonalPatternReport(input.vault, { asOf: generatedAt }),
+    personalPatterns: buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+      input.vault,
+      wearableSummaryBundle,
+      allMetricPoints,
+      { asOf: generatedAt },
+    ),
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectSearchRow),

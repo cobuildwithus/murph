@@ -3,6 +3,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type {
   HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLinqExternalThreadRouteAuthority,
+  HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
@@ -18,8 +19,12 @@ import {
   type HostedLinqEgressPolicyResult,
 } from "./linq-egress-policy";
 import {
+  readHostedMemberIdentityPhoneNumber,
   readHostedMemberRoutingPrivateState,
 } from "./member-private-codecs";
+import {
+  decryptHostedLinqLinePhoneNumber,
+} from "./linq-line-phone-codec";
 import {
   normalizeHostedLinqParticipantContactKind,
 } from "./linq-participant-contact";
@@ -45,15 +50,9 @@ import {
 } from "../hosted-mailbox/store";
 
 type HostedLinqEngagementClient = PrismaClient | Prisma.TransactionClient;
-export type HostedLinqRuntimeEgressTargetOverride = {
-  conversationThreadId?: string;
-  target: string;
-  targetKind: "thread";
-};
 export type HostedLinqRuntimeEgressAssertionResult = {
   linePhoneNumberLookupKey?: string;
-  threadIsDirect: boolean;
-  targetOverride: HostedLinqRuntimeEgressTargetOverride | null;
+  resolvedRoute: HostedExecutionResolvedLinqDeliveryRoute;
 };
 
 const HOSTED_LINQ_SIGNUP_WELCOME_IDEMPOTENCY_PREFIX = "signup-welcome:";
@@ -163,6 +162,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   authorityCheckOnly: boolean;
   directRecipientPhoneNumber?: string | null;
+  expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
   fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
   idempotencyKey?: string | null;
@@ -173,7 +173,7 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   targetKind?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
   if (normalizeNullable(input.targetKind) === "participant") {
-    await assertHostedLinqSignupWelcomeParticipantEgressAuthority({
+    return await assertHostedLinqSignupWelcomeParticipantEgressAuthority({
       directRecipientPhoneNumber: input.directRecipientPhoneNumber,
       fromPhoneNumber: input.fromPhoneNumber,
       idempotencyKey: input.idempotencyKey,
@@ -182,7 +182,6 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       target: input.target,
       targetKind: input.targetKind,
     });
-    return { targetOverride: null, threadIsDirect: true };
   }
 
   await assertActiveHostedThreadRouteContainerAccess({
@@ -205,30 +204,69 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
       throwHostedLinqRouteAuthorityMismatch();
     }
 
+    const target = normalizeNullable(input.target);
+    if (!target) {
+      throwHostedLinqRouteAuthorityMismatch();
+    }
+    const fromPhoneNumber = await resolveHostedLinqLinePhoneNumberByLookupKey({
+      linePhoneNumberLookupKey: targetThreadRoute.accountLookupKey,
+      prisma: input.prisma,
+    });
+
     return {
       ...(targetThreadRoute.accountLookupKey
         ? { linePhoneNumberLookupKey: targetThreadRoute.accountLookupKey }
         : {}),
-      targetOverride: null,
-      threadIsDirect: false,
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber: null,
+        fromPhoneNumber,
+        target,
+        targetKind: "thread",
+        threadIsDirect: false,
+      },
     };
   }
 
-  if (await matchesPersistedHostedLinqDirectInbound({
+  const persistedDirectInbound = await readMatchingPersistedHostedLinqDirectInbound({
     answeredMailboxItemIds: input.answeredMailboxItemIds ?? [],
     memberId: input.memberId,
     prisma: input.prisma,
     replyToMessageId: input.replyToMessageId,
     target: input.target,
-  })) {
-    return { targetOverride: null, threadIsDirect: true };
+  });
+  if (persistedDirectInbound) {
+    const linePhoneNumberLookupKey =
+      persistedDirectInbound.accountLookupKey
+      ?? (await readHostedLinqChatHealth({
+        chatId: persistedDirectInbound.target,
+        prisma: input.prisma,
+      }))?.phoneNumberLookupKey
+      ?? null;
+    return {
+      ...(linePhoneNumberLookupKey ? { linePhoneNumberLookupKey } : {}),
+      resolvedRoute: {
+        conversationThreadId: null,
+        directRecipientPhoneNumber:
+          normalizePhoneNumber(persistedDirectInbound.directRecipient),
+        fromPhoneNumber: await resolveHostedLinqLinePhoneNumberByLookupKey({
+          linePhoneNumberLookupKey,
+          prisma: input.prisma,
+        }),
+        target: persistedDirectInbound.target,
+        targetKind: "thread",
+        threadIsDirect: true,
+      },
+    };
   }
 
   return await assertHostedMemberLinqRouteMatchesEgressTarget({
     chatId: input.target,
+    directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+    expectedResolvedRoute: input.expectedResolvedRoute,
+    fromPhoneNumber: input.fromPhoneNumber,
     memberId: input.memberId,
     prisma: input.prisma,
-    recipientPhone: input.directRecipientPhoneNumber,
     replyToMessageId: input.replyToMessageId,
     targetKind: input.targetKind,
     homeRouteFallbackAllowed:
@@ -236,17 +274,23 @@ export async function assertHostedLinqRecentInboundEngagementForRuntime(input: {
   });
 }
 
-async function matchesPersistedHostedLinqDirectInbound(input: {
+interface MatchingPersistedHostedLinqDirectInbound {
+  accountLookupKey: string | null;
+  directRecipient: string;
+  target: string;
+}
+
+async function readMatchingPersistedHostedLinqDirectInbound(input: {
   answeredMailboxItemIds: readonly string[];
   memberId: string;
   prisma: HostedLinqEngagementClient;
   replyToMessageId?: string | null;
   target: string | null;
-}): Promise<boolean> {
+}): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
   const target = normalizeNullable(input.target);
   const requestReplyToMessageId = normalizeNullable(input.replyToMessageId);
   if (!target || !requestReplyToMessageId) {
-    return false;
+    return null;
   }
 
   return runWithHostedDomainRootUnwrapCache(async () => {
@@ -265,40 +309,39 @@ async function matchesPersistedHostedLinqDirectInbound(input: {
     });
 
     for (const item of candidates) {
-      if (
-        await matchesPersistedHostedLinqDirectInboundMailboxItem({
-          item,
-          memberId: input.memberId,
-          payloadCiphertext:
-            payloadsByMailboxItemId.get(item.id)?.payloadCiphertext ?? null,
-          prisma: input.prisma,
-          replyToMessageId: requestReplyToMessageId,
-          target,
-        })
-      ) {
-        return true;
+      const matched = await readMatchingPersistedHostedLinqDirectInboundMailboxItem({
+        item,
+        memberId: input.memberId,
+        payloadCiphertext:
+          payloadsByMailboxItemId.get(item.id)?.payloadCiphertext ?? null,
+        prisma: input.prisma,
+        replyToMessageId: requestReplyToMessageId,
+        target,
+      });
+      if (matched) {
+        return matched;
       }
     }
 
-    return false;
+    return null;
   });
 }
 
-async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
+async function readMatchingPersistedHostedLinqDirectInboundMailboxItem(input: {
   item: HostedLinqDirectInboundMailboxItem;
   memberId: string;
   payloadCiphertext: string | null;
   prisma: HostedLinqEngagementClient;
   replyToMessageId: string;
   target: string;
-}): Promise<boolean> {
+}): Promise<MatchingPersistedHostedLinqDirectInbound | null> {
   const item = input.item;
   if (
     item.userId !== input.memberId
     || item.kind !== "conversation.message"
     || item.lane !== "conversation"
   ) {
-    return false;
+    return null;
   }
 
   const decoded = await decodeHostedMailboxStoredPayload({
@@ -315,21 +358,29 @@ async function matchesPersistedHostedLinqDirectInboundMailboxItem(input: {
     userId: item.userId,
   });
   if (!decoded) {
-    return false;
+    return null;
   }
 
   const wake = parseHostedExecutionWake(decoded);
-  return (
-    wake.kind === "conversation.message"
-    && wake.userId === input.memberId
-    && wake.eventId === item.dedupeKey
-    && wake.occurredAt === item.occurredAt.toISOString()
-    && wake.message.channel === "linq"
-    && wake.message.linqMessage.isFromMe === false
-    && wake.message.linqMessage.threadIsDirect === true
-    && wake.message.linqMessage.chatId === input.target
-    && wake.message.linqMessage.messageId === input.replyToMessageId
-  );
+  if (
+    wake.kind !== "conversation.message"
+    || wake.userId !== input.memberId
+    || wake.eventId !== item.dedupeKey
+    || wake.occurredAt !== item.occurredAt.toISOString()
+    || wake.message.channel !== "linq"
+    || wake.message.linqMessage.isFromMe !== false
+    || wake.message.linqMessage.threadIsDirect !== true
+    || wake.message.linqMessage.chatId !== input.target
+    || wake.message.linqMessage.messageId !== input.replyToMessageId
+  ) {
+    return null;
+  }
+
+  return {
+    accountLookupKey: normalizeNullable(wake.message.accountLookupKey),
+    directRecipient: wake.message.linqMessage.from,
+    target: wake.message.linqMessage.chatId,
+  };
 }
 
 async function readHostedLinqDirectInboundCandidates(input: {
@@ -412,22 +463,27 @@ async function readHostedLinqDirectInboundPayloads(input: {
       userId: input.memberId,
     },
   });
-  return new Map(payloads.map((payload) => [payload.mailboxItemId, payload]));
+  return new Map<string, { payloadCiphertext: string }>(
+    payloads.map((payload) => [
+      payload.mailboxItemId,
+      { payloadCiphertext: payload.payloadCiphertext },
+    ]),
+  );
 }
 
 async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   chatId?: string | null;
+  directRecipientPhoneNumber?: string | null;
+  expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
+  fromPhoneNumber?: string | null;
   homeRouteFallbackAllowed: boolean;
   memberId: string;
   prisma: HostedLinqEngagementClient;
-  recipientPhone?: string | null;
   replyToMessageId?: string | null;
   targetKind?: string | null;
 }): Promise<HostedLinqRuntimeEgressAssertionResult> {
   const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.chatId);
-  const recipientPhoneLookupKeys =
-    createHostedPhoneLookupKeyReadCandidates(input.recipientPhone);
-  if (chatLookupKeys.length === 0 && recipientPhoneLookupKeys.length === 0) {
+  if (chatLookupKeys.length === 0 && !canResolveHostedLinqHomeRouteOverride(input)) {
     throwHostedLinqRouteAuthorityMismatch();
   }
 
@@ -444,6 +500,8 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
       pendingLinqChatIdEncrypted: true,
       pendingLinqChatLookupKey: true,
       pendingLinqParticipantContactEncrypted: true,
+      pendingLinqParticipantContactKind: true,
+      pendingLinqParticipantContactLookupKey: true,
       pendingLinqRecipientPhoneEncrypted: true,
       pendingLinqRecipientPhoneLookupKey: true,
       telegramUserIdEncrypted: true,
@@ -453,102 +511,394 @@ async function assertHostedMemberLinqRouteMatchesEgressTarget(input: {
   if (!routing) {
     throwHostedLinqRouteAuthorityMismatch();
   }
-  if (
+
+  const exactRouteKind =
     routing.linqChatLookupKey
     && chatLookupKeys.includes(routing.linqChatLookupKey)
-  ) {
-    return {
-      ...(routing.linqRecipientPhoneLookupKey
-        ? {
-            linePhoneNumberLookupKey:
-              routing.linqRecipientPhoneLookupKey,
-          }
-        : {}),
-      targetOverride: null,
-      threadIsDirect: true,
-    };
-  }
-  if (
-    routing.pendingLinqChatLookupKey
-    && chatLookupKeys.includes(routing.pendingLinqChatLookupKey)
-  ) {
-    return {
-      ...(routing.pendingLinqRecipientPhoneLookupKey
-        ? {
-            linePhoneNumberLookupKey:
-              routing.pendingLinqRecipientPhoneLookupKey,
-          }
-        : {}),
-      targetOverride: null,
-      threadIsDirect: true,
-    };
-  }
-  if (
-    routing.linqRecipientPhoneLookupKey
-    && recipientPhoneLookupKeys.includes(routing.linqRecipientPhoneLookupKey)
-  ) {
-    return {
-      linePhoneNumberLookupKey: routing.linqRecipientPhoneLookupKey,
-      targetOverride: null,
-      threadIsDirect: true,
-    };
-  }
-  if (
-    routing.pendingLinqRecipientPhoneLookupKey
-    && recipientPhoneLookupKeys.includes(routing.pendingLinqRecipientPhoneLookupKey)
-  ) {
-    return {
-      linePhoneNumberLookupKey:
-        routing.pendingLinqRecipientPhoneLookupKey,
-      targetOverride: null,
-      threadIsDirect: true,
-    };
+      ? "current"
+      : routing.pendingLinqChatLookupKey
+        && chatLookupKeys.includes(routing.pendingLinqChatLookupKey)
+        ? "pending"
+        : null;
+  const routeKind = exactRouteKind
+    ?? (canResolveHostedLinqHomeRouteOverride(input) ? "current" : null);
+  if (!routeKind) {
+    throwHostedLinqRouteAuthorityMismatch();
   }
 
-  if (canResolveHostedLinqHomeRouteOverride(input)) {
-    const privateState = await readHostedMemberRoutingPrivateState(routing, input.prisma);
-    const homeChatId = normalizeNullable(privateState.linqChatId);
-    if (homeChatId) {
-      // Session identity follows the member/contact blind used by ordinary
-      // direct inbound and notification routing, not the assigned Murph line.
-      const canonicalParticipantKind =
-        normalizeHostedLinqParticipantContactKind(
-          routing.linqParticipantContactKind,
-        );
-      const canonicalContactLookupKey = canonicalParticipantKind
-        ? normalizeNullable(routing.linqParticipantContactLookupKey)
-        : null;
-      const legacyIdentity = canonicalContactLookupKey
-        ? null
-        : await input.prisma.hostedMemberIdentity.findUnique({
-            select: { phoneLookupKey: true },
-            where: { memberId: input.memberId },
-          });
-      const conversationThreadId =
-        resolveHostedLinqConversationThreadId({
-          linqContactLookupKey:
-            canonicalContactLookupKey ?? legacyIdentity?.phoneLookupKey,
-          memberId: input.memberId,
-          threadId: homeChatId,
-        });
-      return {
-        ...(routing.linqRecipientPhoneLookupKey
-          ? {
-              linePhoneNumberLookupKey:
-                routing.linqRecipientPhoneLookupKey,
-            }
-          : {}),
-        targetOverride: {
-          ...(conversationThreadId ? { conversationThreadId } : {}),
-          target: homeChatId,
-          targetKind: "thread",
-        },
-        threadIsDirect: true,
-      };
+  if (exactRouteKind) {
+    const hintedRoute = await resolveHostedMemberDirectLinqRouteFromAuthorityHints({
+      directRecipientPhoneNumber: input.directRecipientPhoneNumber,
+      expectedResolvedRoute: input.expectedResolvedRoute,
+      fromPhoneNumber: input.fromPhoneNumber,
+      memberId: input.memberId,
+      prisma: input.prisma,
+      routeKind: exactRouteKind,
+      routing,
+      target: input.chatId,
+    });
+    if (hintedRoute) {
+      return hintedRoute;
     }
   }
 
-  throwHostedLinqRouteAuthorityMismatch();
+  const privateState = await readHostedMemberRoutingPrivateState(routing, input.prisma);
+  return await resolveHostedMemberDirectLinqRoute({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    privateState,
+    routeKind,
+    routing,
+  });
+}
+
+interface HostedLinqMemberRoutingAuthority {
+  linqChatLookupKey: string | null;
+  linqParticipantContactKind: string | null;
+  linqParticipantContactLookupKey: string | null;
+  linqRecipientPhoneLookupKey: string | null;
+  pendingLinqChatLookupKey: string | null;
+  pendingLinqParticipantContactKind: string | null;
+  pendingLinqParticipantContactLookupKey: string | null;
+  pendingLinqRecipientPhoneLookupKey: string | null;
+}
+
+async function resolveHostedMemberDirectLinqRouteFromAuthorityHints(input: {
+  directRecipientPhoneNumber?: string | null;
+  expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
+  fromPhoneNumber?: string | null;
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  routeKind: "current" | "pending";
+  routing: HostedLinqMemberRoutingAuthority;
+  target?: string | null;
+}): Promise<HostedLinqRuntimeEgressAssertionResult | null> {
+  const current = input.routeKind === "current";
+  const target = normalizeNullable(input.target);
+  const targetLookupKey = normalizeNullable(
+    current
+      ? input.routing.linqChatLookupKey
+      : input.routing.pendingLinqChatLookupKey,
+  );
+  if (
+    !target
+    || !targetLookupKey
+    || !createHostedLinqChatLookupKeyReadCandidates(target).includes(targetLookupKey)
+  ) {
+    return null;
+  }
+
+  const expectedRoute = input.expectedResolvedRoute ?? null;
+  if (
+    expectedRoute
+    && (
+      expectedRoute.target !== target
+      || expectedRoute.targetKind !== "thread"
+      || expectedRoute.threadIsDirect !== true
+    )
+  ) {
+    return null;
+  }
+
+  const linePhoneNumberLookupKey = normalizeNullable(
+    current
+      ? input.routing.linqRecipientPhoneLookupKey
+      : input.routing.pendingLinqRecipientPhoneLookupKey,
+  );
+  const fromPhoneNumberInput = expectedRoute
+    ? expectedRoute.fromPhoneNumber
+    : input.fromPhoneNumber;
+  const fromPhoneNumber = normalizePhoneNumber(fromPhoneNumberInput);
+  if (
+    (fromPhoneNumberInput !== null && fromPhoneNumberInput !== undefined)
+    && !fromPhoneNumber
+  ) {
+    return null;
+  }
+  if (
+    linePhoneNumberLookupKey !== null
+    && (
+      !fromPhoneNumber
+      || !createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber)
+        .includes(linePhoneNumberLookupKey)
+    )
+  ) {
+    return null;
+  }
+  if (linePhoneNumberLookupKey === null && fromPhoneNumber !== null) {
+    // A raw sender hint is not authority without the persisted route blind.
+    return null;
+  }
+
+  const contactKind = normalizeHostedLinqParticipantContactKind(
+    current
+      ? input.routing.linqParticipantContactKind
+      : input.routing.pendingLinqParticipantContactKind,
+  );
+  const routeContactLookupKey = normalizeNullable(
+    current
+      ? input.routing.linqParticipantContactLookupKey
+      : input.routing.pendingLinqParticipantContactLookupKey,
+  );
+  const directRecipientInput = expectedRoute
+    ? expectedRoute.directRecipientPhoneNumber
+    : input.directRecipientPhoneNumber;
+  const directRecipientPhoneNumber = normalizePhoneNumber(directRecipientInput);
+  if (
+    (directRecipientInput !== null && directRecipientInput !== undefined)
+    && !directRecipientPhoneNumber
+  ) {
+    return null;
+  }
+
+  let contactLookupKey: string | null;
+  if (contactKind === "email") {
+    if (directRecipientPhoneNumber !== null) {
+      return null;
+    }
+    contactLookupKey = routeContactLookupKey;
+  } else if (current) {
+    const identity = await input.prisma.hostedMemberIdentity.findUnique({
+      select: { phoneLookupKey: true },
+      where: { memberId: input.memberId },
+    });
+    const identityLookupKey = normalizeNullable(identity?.phoneLookupKey);
+    const expectedContactLookupKey = routeContactLookupKey ?? identityLookupKey;
+    const recipientLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+      directRecipientPhoneNumber,
+    );
+    if (
+      (contactKind !== null && contactKind !== "phone")
+      || !directRecipientPhoneNumber
+      || !identityLookupKey
+      || !expectedContactLookupKey
+      || !recipientLookupKeys.includes(identityLookupKey)
+      || !recipientLookupKeys.includes(expectedContactLookupKey)
+    ) {
+      return null;
+    }
+    contactLookupKey = expectedContactLookupKey;
+  } else {
+    const recipientLookupKeys = createHostedPhoneLookupKeyReadCandidates(
+      directRecipientPhoneNumber,
+    );
+    if (
+      contactKind !== "phone"
+      || !directRecipientPhoneNumber
+      || !routeContactLookupKey
+      || !recipientLookupKeys.includes(routeContactLookupKey)
+    ) {
+      return null;
+    }
+    contactLookupKey = routeContactLookupKey;
+  }
+
+  const conversationThreadId = resolveHostedLinqConversationThreadId({
+    linqContactLookupKey: contactLookupKey,
+    memberId: input.memberId,
+    threadId: target,
+  });
+  if (
+    expectedRoute
+    && expectedRoute.conversationThreadId !== conversationThreadId
+  ) {
+    return null;
+  }
+
+  return {
+    ...(linePhoneNumberLookupKey ? { linePhoneNumberLookupKey } : {}),
+    resolvedRoute: {
+      conversationThreadId,
+      directRecipientPhoneNumber,
+      fromPhoneNumber,
+      target,
+      targetKind: "thread",
+      threadIsDirect: true,
+    },
+  };
+}
+
+async function resolveHostedMemberDirectLinqRoute(input: {
+  memberId: string;
+  prisma: HostedLinqEngagementClient;
+  privateState: Awaited<ReturnType<typeof readHostedMemberRoutingPrivateState>>;
+  routeKind: "current" | "pending";
+  routing: Pick<
+    HostedLinqMemberRoutingAuthority,
+    | "linqChatLookupKey"
+    | "linqParticipantContactKind"
+    | "linqParticipantContactLookupKey"
+    | "linqRecipientPhoneLookupKey"
+    | "pendingLinqChatLookupKey"
+    | "pendingLinqParticipantContactKind"
+    | "pendingLinqParticipantContactLookupKey"
+    | "pendingLinqRecipientPhoneLookupKey"
+  >;
+}): Promise<HostedLinqRuntimeEgressAssertionResult> {
+  const current = input.routeKind === "current";
+  const target = normalizeNullable(
+    current
+      ? input.privateState.linqChatId
+      : input.privateState.pendingLinqChatId,
+  );
+  const targetLookupKey = normalizeNullable(
+    current
+      ? input.routing.linqChatLookupKey
+      : input.routing.pendingLinqChatLookupKey,
+  );
+  const linePhoneNumberLookupKey = normalizeNullable(
+    current
+      ? input.routing.linqRecipientPhoneLookupKey
+      : input.routing.pendingLinqRecipientPhoneLookupKey,
+  );
+  const fromPhoneNumber = normalizePhoneNumber(
+    current
+      ? input.privateState.linqRecipientPhone
+      : input.privateState.pendingLinqRecipientPhone,
+  );
+  if (
+    !target
+    || !targetLookupKey
+    || !createHostedLinqChatLookupKeyReadCandidates(target).includes(targetLookupKey)
+    || (
+      linePhoneNumberLookupKey !== null
+      && (
+        fromPhoneNumber === null
+        || !createHostedPhoneLookupKeyReadCandidates(fromPhoneNumber)
+          .includes(linePhoneNumberLookupKey)
+      )
+    )
+  ) {
+    throwHostedLinqRouteAuthorityMismatch();
+  }
+
+  const contactKind = normalizeHostedLinqParticipantContactKind(
+    current
+      ? input.routing.linqParticipantContactKind
+      : input.routing.pendingLinqParticipantContactKind,
+  );
+  const contactLookupKey = normalizeNullable(
+    current
+      ? input.routing.linqParticipantContactLookupKey
+      : input.routing.pendingLinqParticipantContactLookupKey,
+  );
+  const contact = await resolveHostedMemberDirectLinqParticipant({
+    contactKind,
+    contactLookupKey,
+    memberId: input.memberId,
+    pendingParticipantContact: current
+      ? null
+      : input.privateState.pendingLinqParticipantContact,
+    prisma: input.prisma,
+  });
+  const conversationThreadId = resolveHostedLinqConversationThreadId({
+    linqContactLookupKey: contact.lookupKey,
+    memberId: input.memberId,
+    threadId: target,
+  });
+
+  return {
+    ...(linePhoneNumberLookupKey ? { linePhoneNumberLookupKey } : {}),
+    resolvedRoute: {
+      conversationThreadId,
+      directRecipientPhoneNumber: contact.phoneNumber,
+      fromPhoneNumber,
+      target,
+      targetKind: "thread",
+      threadIsDirect: true,
+    },
+  };
+}
+
+async function resolveHostedMemberDirectLinqParticipant(input: {
+  contactKind: "email" | "phone" | null;
+  contactLookupKey: string | null;
+  memberId: string;
+  pendingParticipantContact: string | null;
+  prisma: HostedLinqEngagementClient;
+}): Promise<{ lookupKey: string | null; phoneNumber: string | null }> {
+  if (input.contactKind === "email") {
+    return {
+      lookupKey: input.contactLookupKey,
+      phoneNumber: null,
+    };
+  }
+
+  if (input.pendingParticipantContact !== null) {
+    const phoneNumber = normalizePhoneNumber(input.pendingParticipantContact);
+    if (
+      input.contactKind !== "phone"
+      || !phoneNumber
+      || !input.contactLookupKey
+      || !createHostedPhoneLookupKeyReadCandidates(phoneNumber)
+        .includes(input.contactLookupKey)
+    ) {
+      throwHostedLinqRouteAuthorityMismatch();
+    }
+    return {
+      lookupKey: input.contactLookupKey,
+      phoneNumber,
+    };
+  }
+
+  const identity = await input.prisma.hostedMemberIdentity.findUnique({
+    select: {
+      memberId: true,
+      phoneLookupKey: true,
+      phoneNumberEncrypted: true,
+    },
+    where: { memberId: input.memberId },
+  });
+  if (!identity) {
+    throwHostedLinqRouteAuthorityMismatch();
+  }
+  const phoneNumber = normalizePhoneNumber(
+    await readHostedMemberIdentityPhoneNumber(identity, input.prisma),
+  );
+  const identityLookupKey = normalizeNullable(identity.phoneLookupKey);
+  const expectedLookupKey = input.contactLookupKey ?? identityLookupKey;
+  const phoneLookupKeys = createHostedPhoneLookupKeyReadCandidates(phoneNumber);
+  if (
+    (input.contactKind !== null && input.contactKind !== "phone")
+    || !phoneNumber
+    || !expectedLookupKey
+    || !identityLookupKey
+    || !phoneLookupKeys.includes(identityLookupKey)
+    || !phoneLookupKeys.includes(expectedLookupKey)
+  ) {
+    throwHostedLinqRouteAuthorityMismatch();
+  }
+  return {
+    lookupKey: expectedLookupKey,
+    phoneNumber,
+  };
+}
+
+async function resolveHostedLinqLinePhoneNumberByLookupKey(input: {
+  linePhoneNumberLookupKey: string | null | undefined;
+  prisma: HostedLinqEngagementClient;
+}): Promise<string | null> {
+  const linePhoneNumberLookupKey = normalizeNullable(
+    input.linePhoneNumberLookupKey,
+  );
+  if (!linePhoneNumberLookupKey) {
+    return null;
+  }
+  const line = await input.prisma.hostedLinqLine.findUnique({
+    select: { phoneNumberEncrypted: true },
+    where: { phoneNumberLookupKey: linePhoneNumberLookupKey },
+  });
+  const phoneNumber = normalizePhoneNumber(
+    decryptHostedLinqLinePhoneNumber(line?.phoneNumberEncrypted),
+  );
+  if (
+    phoneNumber
+    && createHostedPhoneLookupKeyReadCandidates(phoneNumber)
+      .includes(linePhoneNumberLookupKey)
+  ) {
+    return phoneNumber;
+  }
+  return null;
 }
 
 function resolveHostedLinqConversationThreadId(input: {
@@ -583,7 +933,6 @@ function resolveHostedLinqConversationThreadId(input: {
 function canResolveHostedLinqHomeRouteOverride(input: {
   chatId?: string | null;
   homeRouteFallbackAllowed?: boolean | null;
-  recipientPhone?: string | null;
   replyToMessageId?: string | null;
   targetKind?: string | null;
 }): boolean {
@@ -591,7 +940,6 @@ function canResolveHostedLinqHomeRouteOverride(input: {
   return (
     input.homeRouteFallbackAllowed === true
     && normalizeNullable(input.chatId) !== null
-    && normalizeNullable(input.recipientPhone) === null
     && normalizeNullable(input.replyToMessageId) === null
     && (targetKind === null || targetKind === "explicit" || targetKind === "thread")
   );
@@ -614,7 +962,7 @@ async function assertHostedLinqSignupWelcomeParticipantEgressAuthority(input: {
   prisma: HostedLinqEngagementClient;
   target: string | null;
   targetKind?: string | null;
-}): Promise<void> {
+}): Promise<HostedLinqRuntimeEgressAssertionResult> {
   if (!isHostedLinqSignupWelcomeFirstContact(input)) {
     throwHostedLinqParticipantEgressAuthorityMismatch();
   }
@@ -655,6 +1003,18 @@ async function assertHostedLinqSignupWelcomeParticipantEgressAuthority(input: {
   ) {
     throwHostedLinqParticipantEgressAuthorityMismatch();
   }
+
+  return {
+    linePhoneNumberLookupKey: routing.linqRecipientPhoneLookupKey,
+    resolvedRoute: {
+      conversationThreadId: null,
+      directRecipientPhoneNumber: recipientPhone,
+      fromPhoneNumber,
+      target: recipientPhone,
+      targetKind: "participant",
+      threadIsDirect: true,
+    },
+  };
 }
 
 function throwHostedLinqParticipantEgressAuthorityMismatch(): never {

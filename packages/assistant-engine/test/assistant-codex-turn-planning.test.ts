@@ -1111,7 +1111,10 @@ describe('assistant Codex turn planning', () => {
       resolveAssistantVoiceOptionElevenLabsVoiceId('drill-sergeant'),
     )
     expect(scheduledNewsletterPlan.dynamicTools.map((tool) => tool.name)).toEqual(
-      ordinaryToolNames.filter((name) => name !== 'attach_response_card'),
+      ordinaryToolNames.filter((name) =>
+        name !== 'attach_response_card' &&
+        name !== 'attach_exercise_routine_card'
+      ),
     )
 
     const onboardingGoalCheckinPlan = await resolveAssistantRouteTurnPlan({
@@ -2555,6 +2558,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: first.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: false,
@@ -2582,7 +2586,7 @@ describe('assistant Codex turn planning', () => {
       route: createRoute(),
       session: createSession(),
     }
-    const cardTool = async (options: {
+    const dynamicToolsFor = async (options: {
       executionContext?: Parameters<typeof resolveAssistantRouteTurnPlan>[0]['executionContext']
       hostedToolContext?: AssistantHostedToolContext | null
       input: AssistantMessageInput
@@ -2595,17 +2599,45 @@ describe('assistant Codex turn planning', () => {
         input: options.input,
         sharedPlan: options.sharedPlan ?? createSharedPlan(),
       })
-      return plan.dynamicTools.find(
+      return plan.dynamicTools
+    }
+    const cardTool = async (options: Parameters<typeof dynamicToolsFor>[0]) => {
+      const dynamicTools = await dynamicToolsFor(options)
+      return dynamicTools.find(
         (tool) => tool.name === 'attach_response_card',
       )
     }
 
-    const privateTool = await cardTool({ input: createMessageInput() })
+    const privateTools = await dynamicToolsFor({ input: createMessageInput() })
+    const privateTool = privateTools.find(
+      (tool) => tool.name === 'attach_response_card',
+    )
     expect(privateTool).toBeDefined()
+    expect(privateTools.map((tool) => tool.name)).toContain(
+      'attach_exercise_routine_card',
+    )
     const privateSchema = JSON.stringify(privateTool!.inputSchema)
     expect(privateSchema).toContain('daily_nutrition')
     expect(privateSchema).toContain('compact_table')
     expect(privateSchema).not.toContain('challenge_standings')
+
+    const linqPrivateTools = await dynamicToolsFor({
+      input: {
+        ...createMessageInput(),
+        channel: 'linq',
+        threadId: 'linq-private-routine-card',
+        threadIsDirect: true,
+      },
+      sharedPlan: createSharedPlan({}, {
+        channel: 'linq',
+        effectiveThreadIsDirect: true,
+        threadId: 'linq-private-routine-card',
+        threadIsDirect: true,
+      }),
+    })
+    expect(linqPrivateTools.map((tool) => tool.name)).not.toContain(
+      'attach_exercise_routine_card',
+    )
 
     await expect(cardTool({
       input: {
@@ -3023,7 +3055,10 @@ describe('assistant Codex turn planning', () => {
     expect(scheduled.dynamicTools.map((tool) => tool.name)).toEqual(
       direct.dynamicTools
         .map((tool) => tool.name)
-        .filter((name) => name !== 'attach_response_card'),
+        .filter((name) =>
+          name !== 'attach_response_card' &&
+          name !== 'attach_exercise_routine_card'
+        ),
     )
     expect(scheduled.systemPrompt).toContain('Lab test discovery:')
     expect(outputOnly.dynamicTools.map((tool) => tool.name)).not.toContain('labs')
@@ -3105,6 +3140,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
@@ -3280,6 +3316,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramBusinessReplyPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3305,6 +3342,7 @@ describe('assistant Codex turn planning', () => {
         developerInstructions: telegramInferredBindingPlan.developerInstructions,
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
           messageTargetingAvailable: true,
           voiceMemoGenerationAvailable: false,
           progressUpdatesAvailable: false,
@@ -3383,6 +3421,7 @@ describe('assistant Codex turn planning', () => {
         dynamicTools: resolveMurphDynamicTools({
           assistantStyleSettingsAvailable: true,
           computerToolsAvailable: true,
+          exerciseRoutineResponseCardsAvailable: true,
           progressUpdatesAvailable: false,
           responseCardsAvailable: true,
           voiceMemoGenerationAvailable: plan.voiceMemoDeliveryChannel !== null,
