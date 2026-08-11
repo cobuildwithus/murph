@@ -3,6 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
+  abandonHostedFamilyDraftForOwner: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  abandonHostedFamilyDraftForOwner: mocks.abandonHostedFamilyDraftForOwner,
   createHostedFamilyBillingCheckout: mocks.createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
 }));
@@ -53,6 +55,7 @@ beforeEach(async () => {
     alreadyActive: false,
     url: "https://checkout.stripe.test/family",
   });
+  mocks.abandonHostedFamilyDraftForOwner.mockResolvedValue({ abandoned: true });
 
   billingFamilyCheckoutRoute = await import("../app/api/settings/billing/family/checkout/route");
 });
@@ -128,6 +131,82 @@ test("forwards one exact Family invite return", async () => {
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
     expect.objectContaining({ familyInviteReturnPath }),
   );
+});
+
+test("resolves a starting Checkout and abandons it before returning to the invite", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath,
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyActive: false,
+    url: familyInviteReturnPath,
+  });
+  expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
+    expect.objectContaining({ familyInviteReturnPath }),
+  );
+  expect(mocks.abandonHostedFamilyDraftForOwner).toHaveBeenCalledWith({
+    ownerMemberId: "member_owner",
+    prisma: expect.any(Object),
+  });
+  expect(
+    mocks.createHostedFamilyBillingCheckout.mock.invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.abandonHostedFamilyDraftForOwner.mock.invocationCallOrder[0] ?? 0,
+  );
+});
+
+test("requires an exact invite return before resolving a starting Checkout", async () => {
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({ abandonForInvite: true }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not abandon when Checkout becomes active during invite recovery", async () => {
+  mocks.createHostedFamilyBillingCheckout.mockResolvedValueOnce({
+    alreadyActive: false,
+    url: null,
+  });
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
 });
 
 test.each([

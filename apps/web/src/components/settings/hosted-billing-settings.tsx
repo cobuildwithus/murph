@@ -502,6 +502,11 @@ export function HostedBillingSettings(props: {
                         ? "Continue your Family setup"
                         : "Start your own Family plan"}
                       ownershipConfirmation
+                      resolveCheckoutForInvite={
+                        familyDraftRecoveryState === "checkout_starting"
+                        && props.familyInviteReturnPath !== null
+                        && props.familyInviteReturnPath !== undefined
+                      }
                     />
                   )}
                   {familyDraftRecoveryState === "abandonable" ? (

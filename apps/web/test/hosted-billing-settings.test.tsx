@@ -1407,6 +1407,64 @@ describe("HostedBillingSettings", () => {
     }
   });
 
+  test("resolves a starting checkout from the use-invite action", async () => {
+    const familyInviteReturnPath = "/family/accept/invite_return_target";
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: familyInviteReturnPath,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecoveryState: "checkout_starting",
+        familyInviteReturnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const continueButton = findButtonByText(
+        rendered.window.document,
+        "Continue your Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        continueButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const useInviteButton = findButtonByText(
+        rendered.window.document,
+        "I'll use an invite",
+        rendered.window,
+      );
+      await act(async () => {
+        useInviteButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        payload: {
+          abandonForInvite: true,
+          familyInviteReturnPath,
+        },
+        url: "/api/settings/billing/family/checkout",
+      });
+      assert.deepEqual(rendered.assign.mock.calls, [[familyInviteReturnPath]]);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("routes a current Max member through the canonical Family owner", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       alreadyActive: false,

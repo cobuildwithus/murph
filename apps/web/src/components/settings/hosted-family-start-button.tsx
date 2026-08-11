@@ -34,6 +34,7 @@ export function HostedFamilyStartButton(props: {
   familyInviteReturnPath?: string | null;
   label: string;
   ownershipConfirmation?: boolean;
+  resolveCheckoutForInvite?: boolean;
   trialConversionConfirmation?: Omit<HostedFamilyCheckoutConfirmation, "description"> & {
     description: string;
   };
@@ -92,6 +93,41 @@ export function HostedFamilyStartButton(props: {
     } catch (error) {
       setIsSubmitting(false);
       setErrorMessage(toErrorMessage(error, "Could not start the Family plan right now."));
+    }
+  }
+
+  async function resolveCheckoutForInvite() {
+    if (!props.familyInviteReturnPath) {
+      setConfirmationOpen(false);
+      return;
+    }
+    setErrorMessage(null);
+    setStatusMessage(null);
+    setIsSubmitting(true);
+    try {
+      const response = await requestHostedOnboardingJson<{
+        alreadyActive: boolean;
+        url: string | null;
+      }>({
+        method: "POST",
+        payload: {
+          abandonForInvite: true,
+          familyInviteReturnPath: props.familyInviteReturnPath,
+        },
+        url: "/api/settings/billing/family/checkout",
+      });
+      if (!response.url) {
+        throw new Error(
+          "Family billing changed before the invite recovery completed.",
+        );
+      }
+      window.location.assign(response.url);
+    } catch (error) {
+      setIsSubmitting(false);
+      setErrorMessage(toErrorMessage(
+        error,
+        "Could not resolve the unfinished Family checkout right now.",
+      ));
     }
   }
 
@@ -166,11 +202,19 @@ export function HostedFamilyStartButton(props: {
                 type="button"
                 size="xl"
                 variant="ghost"
-                onClick={() => setConfirmationOpen(false)}
+                onClick={() => {
+                  if (props.resolveCheckoutForInvite) {
+                    void resolveCheckoutForInvite();
+                    return;
+                  }
+                  setConfirmationOpen(false);
+                }}
                 disabled={isSubmitting}
                 className="w-full"
               >
-                {confirmation.cancelLabel}
+                {isSubmitting && props.resolveCheckoutForInvite
+                  ? "Resolving setup..."
+                  : confirmation.cancelLabel}
               </Button>
             </DialogFooter>
           </DialogContent>

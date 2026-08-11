@@ -2,6 +2,7 @@ import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboardin
 import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
+  abandonHostedFamilyDraftForOwner,
   createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx,
 } from "@/src/lib/hosted-onboarding/family-plan";
@@ -31,6 +32,13 @@ export const POST = withJsonError(async (request: Request) => {
       message: "Family invite return path is invalid.",
     });
   }
+  if (body.abandonForInvite === true && !familyInviteReturnPath) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_INVITE_RETURN_REQUIRED",
+      httpStatus: 400,
+      message: "Family invite return path is required for invite recovery.",
+    });
+  }
 
   const group = await prisma.$transaction((tx) =>
     ensureHostedAccountGroupForOwnerTx({
@@ -46,6 +54,32 @@ export const POST = withJsonError(async (request: Request) => {
     prisma,
     seatCount: body.seatCount,
   });
+  if (body.abandonForInvite === true) {
+    if (checkout.alreadyActive || !checkout.url) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_DRAFT_BILLING_SYNCING",
+        httpStatus: 409,
+        message: "Family billing changed while restoring the invite. Try again shortly.",
+        retryable: true,
+      });
+    }
+    const abandonment = await abandonHostedFamilyDraftForOwner({
+      ownerMemberId: auth.member.id,
+      prisma,
+    });
+    if (!abandonment.abandoned) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_DRAFT_CHANGED",
+        httpStatus: 409,
+        message: "Family setup changed before invite recovery completed. Try again.",
+        retryable: true,
+      });
+    }
+    return jsonOk({
+      alreadyActive: false,
+      url: familyInviteReturnPath,
+    });
+  }
 
   return jsonOk(checkout);
 });
