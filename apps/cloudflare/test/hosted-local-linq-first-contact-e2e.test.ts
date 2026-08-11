@@ -1102,6 +1102,7 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       pendingVaultFilesAvailable: true,
       phoneCallsAvailable: true,
       progressUpdatesAvailable: true,
+      responseCardAvailable: true,
       vaultFileSendAvailable: true,
     });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
