@@ -5720,6 +5720,52 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(headers.get("x-hosted-execution-signature")).toMatch(/^[A-Za-z0-9\-_]+$/u);
   });
 
+  it("forwards cancellation into hosted device-sync dirty acknowledgement", async () => {
+    const requestStarted = createDeferred<void>();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      requestStarted.resolve();
+      return await new Promise<Response>((_resolve, reject) => {
+        const abort = () => reject(
+          request.signal.reason instanceof Error
+            ? request.signal.reason
+            : new DOMException("Synthetic dirty acknowledgement aborted.", "AbortError"),
+        );
+        if (request.signal.aborted) {
+          abort();
+          return;
+        }
+        request.signal.addEventListener("abort", abort, { once: true });
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const abortController = new AbortController();
+    const acknowledgement = platform.deviceSyncPort!.ackDirtyStateProcessed({
+      connectionId: "dsc_abort",
+      processedRevision: "22",
+      signal: abortController.signal,
+    });
+
+    await requestStarted.promise;
+    const abortReason = new Error("synthetic exact wake");
+    abortController.abort(abortReason);
+
+    await expect(acknowledgement).rejects.toMatchObject({
+      hostedRuntimeFetchCallerSignalAborted: true,
+      hostedRuntimeFetchCauseKind: "abort",
+      hostedRuntimeFetchRequestSignalAborted: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("forces hosted device-sync connect-link creation through the signed POST callback route", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: "https://sync.example.test/oauth",

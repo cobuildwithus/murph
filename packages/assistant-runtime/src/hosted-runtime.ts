@@ -2082,6 +2082,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       const checkpointSystemMailboxMode = async (
         systemMailboxCheckpointStage: string,
         extraCandidates: readonly HostedRuntimeWakeCandidate[] = [],
+        checkpointSignal: AbortSignal | null = null,
       ): Promise<HostedWorkspaceCheckpointResponse> => {
         const checkpointWake = await resolveCurrentSystemMailboxModeWake(extraCandidates);
         emitPhaseLog({
@@ -2099,6 +2100,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         const checkpoint = await checkpointHostedRuntimeDirtyWorkspace({
           assertRuntimeNotAborted,
           checkpointRequestBuilder,
+          checkpointSignal,
           expectedUserId: input.request.userId,
           inboxMediaRetentionWakeAt: activeWorkspace?.inboxMediaRetentionWakeAt ?? null,
           issueExportPort: runtime.platform.issueExportPort ?? null,
@@ -2237,23 +2239,47 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (!recordItem?.postCheckpointRecord) {
             return { preempted: false, prepared: preparation !== null };
           }
-          const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
-            item: recordItem,
-            operatorHomeRoot: restored.operatorHomeRoot,
-            runtime: foregroundRuntime,
-            signal: runtimeAbortController.signal,
-            vaultRoot: restored.vaultRoot,
+          const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
+            enabled: true,
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
           });
-          const recordWake = createHostedRuntimeWakeCandidate(
-            recordResult.nextWakeAt,
-            recordResult.nextWakeReason ?? null,
-          );
-          rememberSystemMailboxPostRecordWake(recordWake);
-          await checkpointSystemMailboxMode(
-            `${inputItem.stagePrefix}.checkpoint.record`,
-            recordWake.at ? [recordWake] : [],
-          );
-          return { preempted: consumeForegroundWake(), prepared: true };
+          const recordSignal = recordWakeInterruption.signal
+            ? AbortSignal.any([
+                runtimeAbortController.signal,
+                recordWakeInterruption.signal,
+              ])
+            : runtimeAbortController.signal;
+          try {
+            const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
+              item: recordItem,
+              operatorHomeRoot: restored.operatorHomeRoot,
+              runtime: foregroundRuntime,
+              signal: recordSignal,
+              vaultRoot: restored.vaultRoot,
+            });
+            const recordWake = createHostedRuntimeWakeCandidate(
+              recordResult.nextWakeAt,
+              recordResult.nextWakeReason ?? null,
+            );
+            rememberSystemMailboxPostRecordWake(recordWake);
+            await checkpointSystemMailboxMode(
+              `${inputItem.stagePrefix}.checkpoint.record`,
+              recordWake.at ? [recordWake] : [],
+              recordWakeInterruption.signal,
+            );
+          } catch (error) {
+            await recordWakeInterruption.dispose();
+            if (recordWakeInterruption.takeNotification()) {
+              foregroundWakeObserved = true;
+              return { preempted: true, prepared: true };
+            }
+            throw error;
+          }
+          await recordWakeInterruption.dispose();
+          if (recordWakeInterruption.takeNotification()) {
+            foregroundWakeObserved = true;
+          }
+          return { preempted: foregroundWakeObserved, prepared: true };
         });
       };
 

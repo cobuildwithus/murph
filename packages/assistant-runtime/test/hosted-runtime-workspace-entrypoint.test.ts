@@ -9950,11 +9950,14 @@ describe("hosted workspace runtime entrypoint", () => {
       ...baseDeviceSyncPort,
       async ackDirtyStateProcessed(request) {
         dirtyAckCalls += 1;
-        assert.deepEqual(request, {
+        const { signal, ...record } = request;
+        assert.deepEqual(record, {
           connectionId: "device_sync_connection_synthetic",
           processedDirtyPayloadIds: ["dirty_payload_synthetic"],
           processedRevision: "7",
         });
+        assert.ok(signal);
+        assert.equal(signal.aborted, false);
         return {
           connectionId: request.connectionId,
           dirtyRevision: "8",
@@ -10622,6 +10625,187 @@ describe("hosted workspace runtime entrypoint", () => {
       ));
     } finally {
       vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("exact wake interrupts dirty acknowledgement and a later system pass resumes it", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const acknowledgementStarted = createDeferred<void>();
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:interrupt-recording",
+      id: "mailbox_item_system_mailbox_device_interrupt_recording",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const followUpWakeAt = "2026-04-27T00:03:00.000Z";
+    const baseDeviceSyncPort = createEmptyDeviceSyncPort();
+    let dirtyAckCalls = 0;
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...baseDeviceSyncPort,
+      async ackDirtyStateProcessed(request) {
+        dirtyAckCalls += 1;
+        if (dirtyAckCalls === 1) {
+          const signal = request.signal;
+          assert.ok(signal);
+          acknowledgementStarted.resolve();
+          await new Promise<void>((_resolve, reject) => {
+            const abort = () => reject(
+              signal.reason instanceof Error
+                ? signal.reason
+                : new DOMException("Synthetic dirty acknowledgement aborted.", "AbortError"),
+            );
+            if (signal.aborted) {
+              abort();
+              return;
+            }
+            signal.addEventListener("abort", abort, { once: true });
+          });
+          throw new Error("Interrupted dirty acknowledgement unexpectedly continued.");
+        }
+        return {
+          connectionId: request.connectionId,
+          dirtyRevision: "9",
+          nextWakeAt: followUpWakeAt,
+          processedRevision: request.processedRevision,
+          recorded: true,
+          stillDirty: true,
+          userId: TEST_USER_ID,
+        };
+      },
+    };
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === deviceItem.id
+            ? {
+                ...item,
+                postCheckpointRecord: {
+                  connectionId: "device_sync_connection_interrupt_recording",
+                  kind: "device-sync.dirty-processed" as const,
+                  processedDirtyPayloadIds: ["dirty_payload_interrupt_recording"],
+                  processedRevision: "8",
+                },
+                status: "recording" as const,
+              }
+            : item
+        ),
+      }));
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-device-interrupt-recording.bundle.json",
+        vaultRoot,
+      });
+      const artifactBytesByHash = new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]);
+      let snapshotIndex = 0;
+      const createRunOptions = (
+        wakeSignal: RuntimeWakeSignal,
+        workspace: HostedWorkspaceState,
+      ) => ({
+        async createCheckpointSnapshot() {
+          snapshotIndex += 1;
+          const snapshot = await createVaultSnapshotBundle({
+            key: `users/bundles/member-synthetic/system-mailbox-device-interrupt-recording-after-${snapshotIndex}.bundle.json`,
+            vaultRoot,
+          });
+          artifactBytesByHash.set(snapshot.hash, snapshot.bytes);
+          return { snapshotRef: snapshot.snapshotRef };
+        },
+        async importItem() {
+          throw new Error("Already-imported recording work should not import a new row.");
+        },
+        platform: createPlatform({
+          artifactBytesByHash,
+          deviceSyncPort,
+          mailboxPort: createMailboxPort({ events, items: [] }),
+          workspacePort: createWorkspacePort({
+            checkpointRequests,
+            events,
+            workspace,
+          }),
+        }),
+        runtimeWakeSignal: wakeSignal,
+        async runAssistantPhase() {
+          throw new Error("System mailbox recording must not enter assistant phase.");
+        },
+        vaultRoot,
+      });
+      const createRuntimeInput = (attemptId: string, workspaceVersion: string) =>
+        createWorkspaceRuntimeJobInput({
+        request: {
+          attemptId,
+          processingMode: "system_mailbox",
+          workspaceVersion,
+        },
+        resolvedConfig: createDeviceSyncResolvedConfig(),
+      });
+      const initialWorkspace = createWorkspaceState({
+        snapshotRef: restoredWorkspace.snapshotRef,
+        version: "0",
+      });
+
+      const interruptedRun = runHostedWorkspaceRuntimeJobInProcess(
+        createRuntimeInput(
+          "attempt_synthetic_system_mailbox_device_interrupt_recording",
+          "0",
+        ),
+        createRunOptions(runtimeWakeSignal, initialWorkspace),
+      );
+      await acknowledgementStarted.promise;
+      runtimeWakeSignal.notify();
+      const interruptedResult = await withRealTimeout(
+        interruptedRun,
+        1_000,
+        () => "System mailbox did not release promptly after an exact wake interrupted dirty acknowledgement.",
+      );
+
+      assert.equal(interruptedResult.immediateRecheckRequested, true);
+      assert.equal(dirtyAckCalls, 1);
+      const interruptedState = await readHostedSystemMailboxState(vaultRoot);
+      const retainedItem = interruptedState.pending.find((item) => item.itemId === deviceItem.id);
+      assert.equal(retainedItem?.status, "recording");
+      assert.equal(retainedItem?.nextAttemptAt, null);
+      assert.ok(retainedItem?.postCheckpointRecord);
+      assert.equal(checkpointRequests.length, 1);
+      const durableRecordingCheckpoint = checkpointRequests[0];
+      assert.ok(durableRecordingCheckpoint);
+      const resumedWorkspace = createWorkspaceState({
+        inboxMediaRetentionWakeAt:
+          durableRecordingCheckpoint.inboxMediaRetentionWakeAt ?? null,
+        nextWakeAt: durableRecordingCheckpoint.nextWakeAt ?? null,
+        nextWakeReason: durableRecordingCheckpoint.nextWakeReason ?? null,
+        redactedStatus: durableRecordingCheckpoint.redactedStatus ?? null,
+        snapshotRef: durableRecordingCheckpoint.snapshotRef,
+        version: "1",
+      });
+
+      const resumedResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createRuntimeInput(
+          "attempt_synthetic_system_mailbox_device_resume_recording",
+          "1",
+        ),
+        createRunOptions(createCoalescingRuntimeWakeSignal(), resumedWorkspace),
+      );
+
+      assert.equal(dirtyAckCalls, 2);
+      assert.equal(resumedResult.nextWakeAt, followUpWakeAt);
+      assert.equal(resumedResult.nextWakeReason, "device-sync.reconcile");
+      assert.equal(checkpointRequests.at(-1)?.nextWakeAt, followUpWakeAt);
+      assert.equal(checkpointRequests.at(-1)?.nextWakeReason, "device-sync.reconcile");
+      assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });

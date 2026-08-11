@@ -551,6 +551,9 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       recorded: recordResult.recorded,
     };
   } catch (error) {
+    if (input.signal?.aborted) {
+      throw input.signal.reason instanceof Error ? input.signal.reason : error;
+    }
     const normalized = normalizeHostedSystemMailboxError(error);
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     await updateHostedSystemMailboxPendingItem({
@@ -774,12 +777,14 @@ async function recordHostedSystemMailboxPostCheckpointRecord(input: {
       return await recordHostedDeviceSyncDirtyProcessedRecords({
         records: [input.record],
         runtime: input.runtime,
+        signal: input.signal ?? null,
       });
     case "device-sync.dirty-processed-batch":
       return await recordHostedDeviceSyncDirtyProcessedRecords({
         nextWakeAt: input.record.nextWakeAt ?? null,
         records: input.record.records,
         runtime: input.runtime,
+        signal: input.signal ?? null,
       });
   }
 }
@@ -800,6 +805,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
   nextWakeAt?: string | null;
   records: readonly HostedDeviceSyncDirtyProcessedPostCheckpointRecord[];
   runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
 }): Promise<HostedSystemMailboxPostCheckpointRecordResult> {
   const port = input.runtime.platform.deviceSyncPort;
   if (!port) {
@@ -820,6 +826,7 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
         ? { processedDirtyPayloadIds: record.processedDirtyPayloadIds }
         : {}),
       processedRevision: record.processedRevision,
+      ...(input.signal ? { signal: input.signal } : {}),
       ...(stagedDirtyAcks.length > 0 ? { stagedDirtyAcks } : {}),
     });
     if (response.recorded) {

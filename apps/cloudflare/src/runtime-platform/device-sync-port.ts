@@ -153,6 +153,7 @@ export function createHostedWebDeviceSyncPort(input: {
       connectionId: string;
       processedDirtyPayloadIds?: string[];
       processedRevision: string;
+      signal?: AbortSignal | null;
       stagedDirtyAcks?: Array<{
         connectionId: string;
         processedDirtyPayloadIds?: string[];
@@ -175,6 +176,7 @@ export function createHostedWebDeviceSyncPort(input: {
         description: "Hosted device-sync dirty ack",
         fetchImpl: input.fetchImpl,
         path: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
+        signal: runtimeInput.signal ?? null,
         timeoutMs: input.timeoutMs,
         transport: input.transport,
       });
