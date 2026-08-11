@@ -63,10 +63,14 @@ describe("hosted assistant personalization contract", () => {
     })).toEqual({ action: "read" });
     expect(parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
+      mainPersona: "scientist",
+      supportingPersona: "classic",
       tone: "casual",
       voice: "warm",
     })).toEqual({
       action: "update",
+      mainPersona: "scientist",
+      supportingPersona: "classic",
       tone: "casual",
       voice: "warm",
     });
@@ -97,7 +101,20 @@ describe("hosted assistant personalization contract", () => {
   it("rejects empty, unknown, and out-of-domain updates", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-    })).toThrow("requires a tone or voice");
+    })).toThrow("requires a main persona, supporting persona, tone, or voice");
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: "update",
+      mainPersona: "scientist",
+    })).toThrow("require both main and supporting persona fields");
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: "update",
+      supportingPersona: null,
+    })).toThrow("require both main and supporting persona fields");
+    expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
+      action: "update",
+      mainPersona: "scientist",
+      supportingPersona: "scientist",
+    })).toThrow("Supporting persona must differ");
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "read",
       tone: "casual",
@@ -133,22 +150,26 @@ describe("hosted assistant personalization contract", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "update",
       result: {
+        mainPersona: "scientist",
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
         status: "saved",
+        supportingPersona: "classic",
         tone: "formal",
         voice: "warm",
       },
     })).toEqual({
       action: "update",
       result: {
+        mainPersona: "scientist",
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
         status: "saved",
+        supportingPersona: "classic",
         tone: "formal",
         voice: "warm",
       },
@@ -156,11 +177,13 @@ describe("hosted assistant personalization contract", () => {
     expect(parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "update",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: true,
         status: "unchanged",
+        supportingPersona: null,
         tone: "formal",
         voice: "warm",
       },
@@ -175,8 +198,10 @@ describe("hosted assistant personalization contract", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "read",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         solAvailable: false,
+        supportingPersona: null,
         tone: null,
         voice: "upbeat",
       },
@@ -184,8 +209,10 @@ describe("hosted assistant personalization contract", () => {
     expect(() => parseHostedRuntimeAssistantPersonalizationToolResponse({
       action: "read",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         solAvailable: false,
+        supportingPersona: null,
         tone: "formal",
         voice: null,
       },
@@ -282,11 +309,13 @@ describe("hosted assistant personalization contract", () => {
 
   it("rejects impossible model, rejection, and duplicate update states", () => {
     const validResult = {
+      mainPersona: "classic",
       model: "gpt-5.6-terra",
       modelChangeAppliesNextRun: false,
       modelUpdated: false,
       solAvailable: true,
       status: "saved",
+      supportingPersona: null,
       tone: "formal",
       voice: "warm",
     } as const;

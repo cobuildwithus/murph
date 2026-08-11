@@ -170,6 +170,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // on 2026-08-09; startup entry and static closure are unchanged, so ratchet
 // only the total ceiling and keep both startup baselines and all tolerances.
 //
+// Generated-image delivery continuity adds runtime-owned transcript provenance,
+// exact sent-media reply binding, and provider-resume fallback handling to the
+// existing assistant chunks without adding a forbidden boot input. Exact macOS
+// full hosted-local assembly measured a 8,016,324B static closure and
+// 9,994,142B total on 2026-08-09. Ratchet both measurements while retaining
+// the established cross-platform tolerances and reviewed-addition allowance.
 // Adding the single-message group offer, exact reply ownership, and weekly
 // contextualization instructions grows only that lazy assistant output. Exact
 // ubuntu assembly measured a 9,933,709B total on 2026-08-10; retain the startup
@@ -221,7 +227,12 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // 9,770,208B total on 2026-08-10. No forbidden subsystem entered the boot graph,
 // so ratchet all three measurements and retain the established narrow
 // cross-platform tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_770_208 + 32_768;
+//
+// Generated-avatar exact-byte binding plus the subsequent mainline health-
+// history and provider additions extend existing lazy outputs without adding a
+// forbidden boot input. Exact merged local assembly measured 9,808,583B total
+// on 2026-08-11, so ratchet the total only and retain the 32KB allowance.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_808_583 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;

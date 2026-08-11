@@ -118,6 +118,8 @@ export class HostedUserRunner {
     ).runnerContainerNamespace ?? null,
     runtimeRetryAnalytics: WorkerAnalyticsEngineDatasetLike | null = null,
   ) {
+    // Keep this first. The schema floor must reject an older Worker before it
+    // can construct any service capable of waking a runner or reading a workspace.
     this.stateStore = new RunnerStateStore(state);
     this.privateMediaBucket = bucket;
     this.privateMediaCapabilitySecret =

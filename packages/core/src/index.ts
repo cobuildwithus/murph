@@ -94,11 +94,11 @@ export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 export { loadVault } from "./vault.ts";
 export {
-  readLatestBloodTestHistorySummaryInterruptible,
+  readCanonicalEventAvailabilityInterruptible,
 } from "./history/api.ts";
 export type {
-  LatestBloodTestHistorySummary,
-  ReadLatestBloodTestHistorySummaryInput,
+  CanonicalEventAvailabilitySummary,
+  ReadCanonicalEventAvailabilityInput,
 } from "./history/api.ts";
 export {
   MAX_EXPERIMENT_LIFECYCLE_DOCUMENTS,
@@ -326,6 +326,7 @@ export {
   GENERATED_IMAGE_CAPTURE_TAGS,
   findCaptureByLookup,
   findEventByExternalRef,
+  readStoredCaptureLookupIndex,
   runGeneratedImageCaptureRetention,
   buildSleepSessionEventDraft,
   buildSupplementIntakeEventDraft,
@@ -351,6 +352,8 @@ export type {
   RemoveAutomaticMealPhotoResult,
   RunGeneratedImageCaptureRetentionInput,
   RunGeneratedImageCaptureRetentionResult,
+  StoredCaptureLookup,
+  StoredCaptureLookupIndex,
   UpsertEventDraftInput,
   UpsertEventInput,
   UpsertEventPayloadInput,

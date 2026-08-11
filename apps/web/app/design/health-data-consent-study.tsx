@@ -66,7 +66,10 @@ export function HealthDataConsentControlStudy() {
       data-design-component="health-data-consent-settings"
       inert
     >
-      <ConsentStateFrame label="Active source and consent controls">
+      <ConsentStateFrame
+        className="lg:col-span-2"
+        label="Active source and consent controls"
+      >
         <HostedHealthDataConsentSettings
           authenticated
           initialStatus={DESIGN_ACTIVE_HEALTH_DATA_CONSENT_STATUS}
@@ -188,14 +191,19 @@ export function HealthDataConsentWithdrawalFlowStudy() {
 
 function ConsentStateFrame({
   children,
+  className,
   label,
 }: {
   children: React.ReactNode;
+  className?: string;
   label: string;
 }) {
   return (
     <div
-      className="min-w-0 rounded-2xl border border-border bg-background p-5"
+      className={cn(
+        "min-w-0 rounded-2xl border border-border bg-background p-5",
+        className,
+      )}
       data-design-state={label.toLowerCase().replaceAll(" ", "-")}
     >
       <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">

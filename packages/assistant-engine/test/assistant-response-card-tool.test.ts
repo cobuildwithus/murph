@@ -143,7 +143,7 @@ const REALISTIC_LATE_WORKOUT_CARD: AssistantResponseCard = {
   version: 1,
   title: 'Lower body strength',
   subtitle: null,
-  footer: 'Tap an exercise to log or correct a set.',
+  footer: 'Reply with the exercise, set, and result to log or correct it.',
   tracking: {
     kind: 'workout',
     entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
@@ -502,6 +502,9 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'never calculate or reuse totals',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Workout footers span native and static cards; never promise native-only taps',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
