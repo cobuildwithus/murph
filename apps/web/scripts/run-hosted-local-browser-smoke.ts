@@ -24,6 +24,17 @@ const MOTION_FREEZE_INIT_SCRIPT = String.raw`
 })();
 `;
 
+const SETTLED_HORIZONTAL_OVERFLOW_EXPRESSION = String.raw`
+(async () => {
+  await document.fonts?.ready;
+  await new Promise((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve)),
+  );
+  return document.documentElement.scrollWidth
+    - document.documentElement.clientWidth;
+})()
+`;
+
 const browserCases = [
   {
     contextOptions: {
@@ -203,15 +214,8 @@ async function assertConnectPage(input: {
     );
   }
 
-  await input.page.evaluate(async () => {
-    await document.fonts?.ready;
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)),
-    );
-  });
-  const horizontalOverflow = await input.page.evaluate(() =>
-    document.documentElement.scrollWidth
-      - document.documentElement.clientWidth
+  const horizontalOverflow = Number(
+    await input.page.evaluate(SETTLED_HORIZONTAL_OVERFLOW_EXPRESSION),
   );
   if (horizontalOverflow > 1) {
     throw new Error(
