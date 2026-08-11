@@ -240,6 +240,41 @@ describe("hosted usage-referral recovery", () => {
     );
   });
 
+  it("re-signals a legacy mailbox pointer without reading or rewriting its payload", async () => {
+    const prisma = {
+      hostedMailboxItem: {
+        findMany: vi.fn().mockResolvedValue([{
+          id: "mailbox_legacy_direct",
+          lane: "system",
+          laneSeq: 11n,
+          userId: "member_legacy_direct",
+        }]),
+      },
+      hostedUsageReferral: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    await expect(recoverPendingHostedUsageReferrals({
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      failed: 0,
+      pending: 0,
+      queued: 0,
+      resignaled: 1,
+      scanned: 1,
+    });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+      expectedUserId: "member_legacy_direct",
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: "11",
+        userId: "member_legacy_direct",
+      },
+      mailboxItemId: "mailbox_legacy_direct",
+      prisma,
+    });
+  });
+
   it("continues ordinary recovery when the gated signup scan throws", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const findReferrals = vi.fn().mockResolvedValue([]);

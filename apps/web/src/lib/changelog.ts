@@ -65,9 +65,10 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Starter access, patterns, reminders, cards, voices, and web search",
+    title:
+      "Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations stay with their intended conversation, reminders keep the local time you asked for, completed workout rows stay clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -106,6 +107,18 @@ const RAW_CHANGELOG_EDITIONS = [
           href: "/patterns",
           label: "View your patterns",
         },
+      },
+      {
+        id: "referral-notification-route-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Referral celebrations stay in the right conversation",
+        summary:
+          "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
+        details:
+          "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
+        relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
+        sourcePullRequests: [1592],
       },
       {
         id: "reminders-keep-requested-timezone",
@@ -191,11 +204,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Group sleep checks use fresh shared data",
         summary:
-          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+          "Murph now checks the current shared sleep record before answering, counts reported Deep and REM sleep as soon as those values are shared, and includes explicit manual corrections.",
         details:
-          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+          "The latest manual correction for a sleep date wins and is labeled Manual instead of a connected source. Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
         relevanceTags: ["groups", "sleep", "health-data", "connections"],
-        sourcePullRequests: [1565],
+        sourcePullRequests: [1565, 1593],
       },
       {
         id: "public-referral-home",
