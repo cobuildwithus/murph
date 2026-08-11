@@ -1239,6 +1239,14 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
     readNumberAtPath(redactedStatus, ["hostedSystemMailboxRetryableFailed"]) ?? 0;
   const recordFailed =
     readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecordFailed"]) ?? 0;
+  const systemImportedSeq = readStringAtPath(
+    redactedStatus,
+    ["hostedMailboxSystemImportedSeq"],
+  );
+  const systemHandledThroughSeq = readStringAtPath(
+    redactedStatus,
+    ["hostedMailboxSystemHandledThroughSeq"],
+  );
   const systemMailboxLogs = collectHostedSystemMailboxLogSummaries(receiptStatus);
   const retryableLog = systemMailboxLogs.find((entry) => entry.status === "retryable_failed");
   const recordedDeviceSyncLog = systemMailboxLogs.find((entry) =>
@@ -1247,7 +1255,14 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
     && (entry.status === "processed" || entry.status === "recorded")
     && (entry.recordFailed ?? 0) === 0
   );
-  const receiptObserved = recordedDeviceSyncLog !== undefined
+  const durableSystemLaneSettled = systemImportedSeq !== null
+    && systemImportedSeq !== "0"
+    && systemImportedSeq === systemHandledThroughSeq
+    && receiptStatus.mailboxLag.some((lane) =>
+      lane.lane === "system" && lane.lag === "0"
+    );
+  const receiptObserved = durableSystemLaneSettled
+    || recordedDeviceSyncLog !== undefined
     || recorded > 0
     || prepared > 0;
 
@@ -1267,6 +1282,8 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
         recordFailed,
         recorded,
         retryableFailed,
+        systemHandledThroughSeq,
+        systemImportedSeq,
       })}`,
       ...(safeErrors.length > 0
         ? [`system mailbox safe errors: ${JSON.stringify(safeErrors)}`]
@@ -1657,6 +1674,18 @@ function readNumberAtPath(value: unknown, keys: readonly string[]): number | nul
   }
 
   return typeof current === "number" ? current : null;
+}
+
+function readStringAtPath(value: unknown, keys: readonly string[]): string | null {
+  let current = value;
+  for (const key of keys) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return typeof current === "string" ? current : null;
 }
 
 function collectUnsafeHostedStatusFailureKeys(value: unknown): string[] {
