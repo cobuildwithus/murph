@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  challengeStandingsResponseCardV1Schema,
+} from '@murphai/contracts'
+
+import {
+  buildGroupChallengeResponseCard,
+} from '../src/assistant/group-challenge-response-card.js'
+import {
   GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS,
   scoreGroupChallenge,
   type GroupChallengeParticipantObservation,
@@ -52,6 +59,40 @@ const weightedParticipants = [
   },
 ] as const satisfies readonly GroupChallengeParticipantObservation[]
 
+const zeroTieScorecard = {
+  components: [{
+    id: 'steps',
+    label: 'Steps',
+    perQuantity: 1,
+    points: 1,
+    quantityUnit: 'steps',
+  }],
+} as const satisfies GroupChallengeScorecard
+
+const zeroTieParticipants = [
+  {
+    participantId: 'participant_alpha_unscored',
+    components: [{ componentId: 'steps', status: 'missing' }],
+  },
+  {
+    participantId: 'participant_zulu_zero',
+    components: [{ componentId: 'steps', quantity: 0, status: 'available' }],
+  },
+] as const satisfies readonly GroupChallengeParticipantObservation[]
+
+function buildCard(
+  scoreInput: Parameters<typeof scoreGroupChallenge>[0],
+  participantLabels: readonly { label: string; participantId: string }[] = [],
+) {
+  return buildGroupChallengeResponseCard({
+    footer: null,
+    participantLabels,
+    scoreInput,
+    subtitle: null,
+    title: 'Canonical challenge title',
+  })
+}
+
 describe('group challenge additive scorecards', () => {
   it('scores model-normalized quantities while keeping missing components explicit', () => {
     const result = scoreGroupChallenge({
@@ -96,6 +137,39 @@ describe('group challenge additive scorecards', () => {
         { participantId: 'participant_beta', verifiedPoints: 455 },
       ],
     })
+  })
+
+  it('orders a verified zero before an unscored zero for a valid standings card', () => {
+    const scoreInput = {
+      format: { kind: 'individual', objective: { kind: 'ranking' } },
+      participants: zeroTieParticipants,
+      scorecard: zeroTieScorecard,
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
+
+    expect(result.scoreboard).toMatchObject({
+      kind: 'individual',
+      entries: [
+        {
+          participantId: 'participant_zulu_zero',
+          coverage: 'complete',
+          verifiedPoints: 0,
+        },
+        {
+          participantId: 'participant_alpha_unscored',
+          coverage: 'unscored',
+          verifiedPoints: 0,
+        },
+      ],
+    })
+    if (result.scoreboard.kind !== 'individual') {
+      throw new TypeError('Expected an individual challenge scoreboard.')
+    }
+    const card = buildCard(scoreInput, [
+      { label: 'Alpha', participantId: 'participant_alpha_unscored' },
+      { label: 'Zulu', participantId: 'participant_zulu_zero' },
+    ])
+    expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
   })
 
   it('accepts five components, floors exact integer rates, and applies caps', () => {
@@ -293,8 +367,61 @@ describe('group challenge additive scorecards', () => {
     })
   })
 
+  it('orders a verified-zero team before an unscored-zero team', () => {
+    const scoreInput = {
+      format: {
+        aggregation: 'sum',
+        kind: 'teams',
+        objective: { kind: 'ranking' },
+        teams: [
+          {
+            id: 'alpha-unscored',
+            name: 'Alpha unscored',
+            participantIds: ['participant_alpha_unscored'],
+          },
+          {
+            id: 'zulu-zero',
+            name: 'Zulu zero',
+            participantIds: ['participant_zulu_zero'],
+          },
+        ],
+      },
+      participants: zeroTieParticipants,
+      scorecard: zeroTieScorecard,
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
+
+    expect(result.scoreboard).toMatchObject({
+      kind: 'teams',
+      entries: [
+        {
+          teamId: 'zulu-zero',
+          verifiedPoints: 0,
+          coverage: { completeParticipants: 1, totalParticipants: 1 },
+        },
+        {
+          teamId: 'alpha-unscored',
+          verifiedPoints: 0,
+          coverage: { unscoredParticipants: 1, totalParticipants: 1 },
+        },
+      ],
+    })
+    if (result.scoreboard.kind !== 'teams') {
+      throw new TypeError('Expected a team challenge scoreboard.')
+    }
+    const card = buildCard(scoreInput)
+    expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
+    if (card.format !== 'teams') {
+      throw new TypeError('Expected a team challenge card.')
+    }
+    expect(card.entries).toMatchObject([
+      { label: 'Zulu zero', points: 0, coverage: 'complete' },
+      { label: 'Alpha unscored', points: null, coverage: 'unscored' },
+    ])
+  })
+
   it('withholds an unequal-team average until every included score is complete', () => {
-    const result = scoreGroupChallenge({
+    const scoreInput = {
       format: {
         aggregation: 'average',
         kind: 'teams',
@@ -306,7 +433,8 @@ describe('group challenge additive scorecards', () => {
       },
       participants: weightedParticipants,
       scorecard: weightedScorecard,
-    })
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
 
     expect(result.scoreboard).toMatchObject({
       kind: 'teams',
@@ -316,17 +444,28 @@ describe('group challenge additive scorecards', () => {
         { teamId: 'south', verifiedPoints: null, verifiedSubtotalPoints: 455 },
       ],
     })
+    const card = buildCard(scoreInput)
+    expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
+    if (card.format !== 'teams') {
+      throw new TypeError('Expected a team challenge card.')
+    }
+    expect(card.entries[1]).toMatchObject({
+      label: 'South',
+      points: null,
+      coverage: 'unscored',
+    })
   })
 
   it('turns the same participant scores into conservative collective target progress', () => {
-    const result = scoreGroupChallenge({
+    const scoreInput = {
       format: {
         kind: 'collective',
         objective: { kind: 'target', targetPoints: 2_000 },
       },
       participants: weightedParticipants,
       scorecard: weightedScorecard,
-    })
+    } as const
+    const result = scoreGroupChallenge(scoreInput)
 
     expect(result.scoreboard).toEqual({
       coverage: {
@@ -343,6 +482,37 @@ describe('group challenge additive scorecards', () => {
         verifiedProgressBasisPoints: 9_275,
       },
       verifiedPoints: 1_855,
+    })
+    if (result.scoreboard.kind !== 'collective') {
+      throw new TypeError('Expected a collective challenge scoreboard.')
+    }
+    const card = buildCard(scoreInput)
+    expect(challengeStandingsResponseCardV1Schema.parse(card)).toEqual(card)
+
+    const unscoredScoreInput = {
+      format: {
+        kind: 'collective',
+        objective: { kind: 'target', targetPoints: 2_000 },
+      },
+      participants: zeroTieParticipants.map((participant) => ({
+        ...participant,
+        components: [{ componentId: 'steps', status: 'missing' as const }],
+      })),
+      scorecard: zeroTieScorecard,
+    } as const
+    const unscoredCard = buildCard(unscoredScoreInput)
+    expect(challengeStandingsResponseCardV1Schema.parse(unscoredCard)).toEqual(
+      unscoredCard,
+    )
+    expect(unscoredCard).toMatchObject({
+      collectivePoints: null,
+      coverage: 'unscored',
+      coverageCounts: {
+        completeParticipants: 0,
+        partialParticipants: 0,
+        totalParticipants: 2,
+        unscoredParticipants: 2,
+      },
     })
   })
 })
