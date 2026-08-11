@@ -43,8 +43,8 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
     prisma,
   });
-  let allowLatestAvailableReplica = healthDataConsentState === "revoked";
-  if (!allowLatestAvailableReplica) {
+  let healthDataProcessingRevoked = healthDataConsentState === "revoked";
+  if (!healthDataProcessingRevoked) {
     await assertHostedLaunchRequiredConsentGranted({
       memberId: auth.member.id,
       prisma,
@@ -83,22 +83,23 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: auth.member.id,
     prisma,
   });
-  allowLatestAvailableReplica = latestHealthDataConsentState === "revoked";
-  if (!allowLatestAvailableReplica) {
+  healthDataProcessingRevoked = latestHealthDataConsentState === "revoked";
+  if (!healthDataProcessingRevoked) {
     await assertHostedLaunchRequiredConsentGranted({
       memberId: auth.member.id,
       prisma,
     });
   }
 
-  // Re-read the workspace AFTER the slow Privy/signature path. Active
-  // processing still requires a complete, fresh export; withdrawn members get
-  // the newest retained replica without restarting processing.
+  // Re-read the workspace AFTER the slow Privy/signature path. Export the
+  // newest retained replica even when newer source changes are still being
+  // processed. Active members also request a refresh; withdrawn members never
+  // restart processing.
   let workspace: Awaited<ReturnType<typeof readHostedWorkspace>>;
   try {
     workspace = await readHostedWorkspace({ userId: auth.member.id });
   } catch {
-    if (allowLatestAvailableReplica) {
+    if (healthDataProcessingRevoked) {
       throw browserVaultRetainedReplicaUnavailableError();
     }
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -111,10 +112,8 @@ export const POST = withJsonError(async (request: Request) => {
       await new PrismaHostedDirtyConnectionStore(prisma)
         .hasPendingDirtyConnectionForUser(auth.member.id);
   } catch {
-    if (!allowLatestAvailableReplica) {
-      scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
-      throw browserVaultSessionNotFreshError();
-    }
+    // Keep the conservative pending state. A retained export remains useful
+    // and already declares that recent unprocessed changes may be absent.
   }
 
   const replicaRef = parseHostedBrowserVaultReplicaRef(
@@ -129,19 +128,10 @@ export const POST = withJsonError(async (request: Request) => {
     now: new Date().toISOString(),
     replicaRef,
   });
+  const refreshPending = freshness.shouldRefresh || deviceSyncImportPending;
 
-  if (
-    !replicaRef
-    || (
-      !allowLatestAvailableReplica
-      && (
-        freshness.freshness !== "fresh"
-        || freshness.shouldRefresh
-        || deviceSyncImportPending
-      )
-    )
-  ) {
-    if (allowLatestAvailableReplica) {
+  if (!replicaRef) {
+    if (healthDataProcessingRevoked) {
       throw browserVaultRetainedReplicaUnavailableError();
     }
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -166,7 +156,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
   } catch (error) {
     if (error instanceof Error && error.message === "Hosted execution browser vault replica was not found.") {
-      if (allowLatestAvailableReplica) {
+      if (healthDataProcessingRevoked) {
         throw browserVaultRetainedReplicaUnavailableError();
       }
       scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
@@ -184,6 +174,10 @@ export const POST = withJsonError(async (request: Request) => {
     throw error;
   }
 
+  if (!healthDataProcessingRevoked && refreshPending) {
+    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
+  }
+
   // Consume the challenge atomically only once the encrypted replica is in
   // hand. A failure here aborts the response without releasing the session.
   await consumeSensitiveActionChallenge({ challenge, prisma });
@@ -192,7 +186,7 @@ export const POST = withJsonError(async (request: Request) => {
     ...session,
     deviceSyncImportPending,
     freshness: freshness.freshness,
-    refreshPending: freshness.shouldRefresh,
+    refreshPending,
     workspaceVersion: workspace?.version ?? null,
   });
 });

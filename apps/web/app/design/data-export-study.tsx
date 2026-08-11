@@ -44,9 +44,9 @@ function DataExportStudyContent() {
         </p>
         <HostedDataExportSuccess
           message={formatVaultExportSuccess({
-            deviceSyncImportPending: false,
+            deviceSyncImportPending: true,
             freshness: "stale",
-            refreshPending: false,
+            refreshPending: true,
           })}
         />
       </div>

@@ -470,7 +470,7 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("refuses Settings vault export sessions without consuming the challenge when the replica source state has moved", async () => {
+  it("exports the retained replica and schedules refresh when the source state has moved", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -486,7 +486,13 @@ describe("browser vault session route", () => {
       version: "1",
     });
     mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue("c".repeat(64));
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
 
     const response = await settingsVaultExportSessionRoute.POST(
@@ -499,13 +505,77 @@ describe("browser vault session route", () => {
       }),
     );
 
-    expect(response.status).toBe(409);
+    expect(response.status).toBe(200);
     expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
-    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultSession).toHaveBeenCalledWith({
+      browserPublicKeyJwk: browser.publicKeyJwk,
+      replicaRef,
+      userId: "member_123",
+    });
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: false,
+      freshness: "stale",
+      refreshPending: true,
+      state: "ready",
+    });
   });
 
-  it("refuses Settings vault export sessions without consuming the challenge when dirty-state lookup fails", async () => {
+  it("exports the retained replica and schedules refresh when device import is pending", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const replicaRef = createReplicaRef();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: replicaRef,
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    mocks.readHostedWorkspaceBrowserVaultSourceStateHash.mockReturnValue(replicaRef.sourceBundleHash);
+    mocks.hasPendingDirtyConnectionForUser.mockResolvedValueOnce(true);
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
+
+    const response = await settingsVaultExportSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+        authorization: {
+          signature: `0x${"11".repeat(65)}`,
+          token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+        },
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: true,
+      freshness: "fresh",
+      refreshPending: true,
+      state: "ready",
+    });
+  });
+
+  it("exports the retained replica conservatively when dirty-state lookup fails", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const replicaRef = createReplicaRef();
     mocks.readHostedWorkspace.mockResolvedValue({
@@ -524,7 +594,13 @@ describe("browser vault session route", () => {
     mocks.hasPendingDirtyConnectionForUser.mockRejectedValueOnce(
       new Error("dirty connection lookup failed"),
     );
-    const createBrowserVaultSession = vi.fn();
+    const createBrowserVaultSession = vi.fn().mockResolvedValue({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef,
+      state: "ready",
+    });
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({ createBrowserVaultSession });
 
     const response = await settingsVaultExportSessionRoute.POST(
@@ -537,10 +613,18 @@ describe("browser vault session route", () => {
       }),
     );
 
-    expect(response.status).toBe(409);
-    expect(mocks.verifySensitiveActionChallenge).toHaveBeenCalledTimes(1);
-    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
-    expect(createBrowserVaultSession).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.consumeSensitiveActionChallenge).toHaveBeenCalledTimes(1);
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedBrowserVaultRefreshRuntime).toHaveBeenCalledWith({
+      userId: "member_123",
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      deviceSyncImportPending: true,
+      freshness: "fresh",
+      refreshPending: true,
+      state: "ready",
+    });
   });
 
   it("rejects disallowed browser vault origins before reading app session state", async () => {

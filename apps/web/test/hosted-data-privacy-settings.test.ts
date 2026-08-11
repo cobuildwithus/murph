@@ -390,7 +390,7 @@ describe("HostedDataPrivacySettings", () => {
       freshness: "stale",
       refreshPending: true,
     })).toContain(
-      "Changes Murph had not processed before you withdrew consent may be absent.",
+      "Recent changes Murph had not finished processing may be absent.",
     );
   });
 
