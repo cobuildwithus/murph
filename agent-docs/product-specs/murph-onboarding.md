@@ -1,6 +1,6 @@
 # Murph New-Member Onboarding
 
-Last verified: 2026-08-06
+Last verified: 2026-08-11
 
 ## Product Decision
 
@@ -22,6 +22,13 @@ personally useful interpretation. It may offer one lightweight optional next
 action, but it does not automatically create a habit, plan, experiment, or
 reminder. The member can keep chatting normally while the existing scheduled
 runtime owns the later analysis and delivery.
+
+Separately, on the third local day after answered completion, Murph gets one
+bounded chance to notice whether a current user-chosen goal or accepted plan
+lacks useful support. That support-gap check proposes zero or one exact finite
+reminder, check-in, or review package and never performs another broad health
+analysis. It stays read-only; any accepted support is created only in the later
+attended reply.
 
 The first health topic is an anchor, not a launch button. Answering Murph's
 discovery question is not a request for a plan, diagnosis, or intervention. An
@@ -47,6 +54,8 @@ By the end of onboarding, the member should understand:
 5. After answered completion, Murph will take one bounded first look across the
    context and connected evidence and return with the most useful personal read
    it can honestly support.
+6. A later practical support offer is separate from that personal read, is
+   optional and finite, and never silently creates reminders or other support.
 
 Do not promise that Murph can perform an action, connect a source, or access a
 record unless that path exists. Broad entry points do not weaken clinical,
@@ -73,10 +82,12 @@ privacy, authorization, or provider boundaries.
   queued intent remains attached, so hosted idle ordering cannot replace the
   predecessor identity before outbox settlement observes it. Editable slug,
   tags, title, and instructions confer no onboarding-state authority.
-- Keep the 21-day post-onboarding choice point separate from unfinished-
+- Keep the post-onboarding support-gap check separate from unfinished-
   onboarding recovery and from the immediate first personal read. It remains
-  one finite managed one-shot for members who answered onboarding, not another
-  collection flow, recurring cadence, or profile.
+  one finite managed one-shot for members who answered onboarding, scheduled
+  on the third local day in a stable per-member 1:30–2:29 PM window, not
+  another collection flow, recurring cadence, profile, or health-analysis
+  pass.
 - Create the immediate first personal read only through the structured
   `save_onboarding_first_personal_read` action after every answered-completion
   prerequisite is durable. The action accepts no prompt, schedule, model,
@@ -749,30 +760,37 @@ decision, delivery outcome, and run outcome. They never contain conversation
 text, vault content, or direct member
 identifiers and never become a second correctness owner.
 
-## Post-Onboarding Choice Point
+## Post-Onboarding Support Gap
 
-After answered onboarding, Murph gets one low-pressure chance to ask what
-deserves attention now. The one-shot is scheduled 21 local-calendar days after
-completion and expires seven days later. Existing eligible members receive one
-future same-weekday catch-up rather than an immediate late message; once
-installed, its occurrence does not drift. A quiet rollout wake may reuse the
-route of an active immutable member-owned managed automation, so an existing
-member does not need to send another message before the catch-up is installed.
+After answered onboarding, Murph gets one low-pressure chance to notice
+whether a currently chosen goal or accepted plan lacks useful support. The
+one-shot is scheduled on the third local-calendar day after completion in a
+stable per-member window from 1:30 PM through 2:29 PM and expires at the same
+staggered time on the seventh local day. A bounded daytime catch-up may use the
+next stable slot before that boundary; no stale rollout outreach is created
+later. Once installed, the occurrence and private route do not drift.
 
-This is an ordinary member-owned managed automation in the current private
-conversation. Murph uses recent conversation and targeted canonical vault
-reads to understand current goals or open threads, relevant progress, and
-whether another review already owns the moment. If the goal was unclear,
-unshared, deliberately open, or exploratory, Murph must not pretend one exists
-or manufacture a problem; keeping the thread open is a valid answer. Murph
-sends two to four short sentences with one easy question or skips quietly.
-Missing or messy data is not failure, and praise requires specific evidence.
-The scheduled turn does not create or change goals, plans, experiments,
-regimens, memories, or automations; normal conversation owns any change after
-the member replies. That boundary is immutable rather than relying on editable
-task wording: this exact managed identity suspends ordinary save/ingestion
-guidance, removes hosted mutation tools and external network access, and keeps
-only read access to the current private vault.
+This check is distinct from the first personal read. It does not search for an
+interesting health finding, recap the deeper analysis, or trawl unrelated
+health or wearable history. It reads only recent private conversation, current
+user-chosen goals, the directly relevant full plan, regimen, or experiment,
+exact matching support automations, and exact durable support boundaries.
+
+The scheduled turn selects zero or one support gap. When one clears the bar,
+Murph proposes one exact finite reminder, check-in, or review package naming
+the behavior or observation, editable local time or real cue, what Murph will
+send or ask, and the finite end or early review point. A later clear yes
+authorizes only that package in the attended reply; editing changes only the
+proposed scope. Existing useful support, an unanswered similar proposal,
+declined outreach, urgent context, stale goals, or insufficient evidence
+produces a quiet skip.
+
+The turn is an ordinary member-owned managed automation in the current private
+conversation and remains read-only. It never creates or changes goals, plans,
+experiments, regimens, memories, preferences, health records, or automations.
+Missing or messy data is unknown, never evidence that a behavior failed. Exact
+topic-specific no-proactive-support boundaries veto matching offers until the
+member explicitly reopens them.
 
 If live Linq authority replaces an older personal route with the member's
 current home chat, that same authority supplies the raw delivery target and its
@@ -781,8 +799,11 @@ conversation rather than reasoning in the old chat and delivering in the new
 one.
 
 Canonical onboarding state remains the scheduling and execution authority.
-Open, declined, and manual completion do not create the one-shot, and reopened
-or replaced completion state blocks a pending occurrence before delivery.
+Open, declined, and manual completion do not create the one-shot. Reopened
+state blocks a pending occurrence before delivery. A completion newer than the
+managed automation's last reconciliation also invalidates that occurrence; the
+existing managed owner must reseed it before support can run. Canonical active
+status, revision, and `activeUntil` remain the upper delivery boundary.
 
 ## Success Criteria
 
@@ -820,9 +841,13 @@ or replaced completion state blocks a pending occurrence before delivery.
     interpretation with calibrated uncertainty and one optional lightweight
     action; it suppresses generic, repetitive, data-quality, vendor-tautological,
     or unsupported findings and never creates an action automatically.
-12. Context continues compounding after onboarding without a second profile
+12. The separate post-onboarding support check runs once in the stable
+    1:30–2:29 PM third-day window, remains read-only, and offers zero or one
+    exact finite support package only when a current user-chosen goal or
+    accepted plan has a real uncovered support gap.
+13. Context continues compounding after onboarding without a second profile
     system, context-collection lifecycle, or completion score.
-13. A dense foundation memo starts one child for each supplied independent
+14. A dense foundation memo starts one child for each supplied independent
     movement/protocol, supplement, and medical/safety family, up to three,
     from the durable accepted source. Murph replies after the spawns without
     claiming completion and confirms child-owned writes only after canonical
