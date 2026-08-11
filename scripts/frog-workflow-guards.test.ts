@@ -327,6 +327,54 @@ fi
     expect(workflow).not.toMatch(/^\s+token:\s*\$\{\{\s*github\.token\s*\}\}/mu);
     expect(workflow).not.toContain("secrets.GITHUB_TOKEN");
     expect(workflow).not.toMatch(/^\s+version:/mu);
+    expect(workflow).toContain(
+      "GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}",
+    );
+    expect(workflow).toContain("--head \"$FROG_PR_BRANCH\"");
+    expect(workflow).toContain("gh pr edit \"$frog_pr_number\"");
+
+    const footerMarker = "          FROG_PR_BODY_FOOTER: |-\n";
+    const footerStart = workflow.indexOf(footerMarker);
+    const footerEnd = workflow.indexOf(
+      "          FROG_PR_BRANCH: frog/sync",
+      footerStart,
+    );
+    expect(footerStart).toBeGreaterThanOrEqual(0);
+    expect(footerEnd).toBeGreaterThan(footerStart);
+    const footer = workflow
+      .slice(footerStart + footerMarker.length, footerEnd)
+      .split("\n")
+      .map((line) => line.replace(/^ {12}/u, ""))
+      .join("\n")
+      .trim();
+    const architectureValidation = spawnSync(
+      process.execPath,
+      [path.join(repoRoot, "scripts", "check-pr-architecture-summary.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, MURPH_PR_BODY: footer },
+      },
+    );
+    expect(
+      architectureValidation.status,
+      architectureValidation.stderr,
+    ).toBe(0);
+    const changelogValidation = spawnSync(
+      process.execPath,
+      [path.join(repoRoot, "scripts", "check-pr-changelog.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MURPH_PR_BASE_SHA: "HEAD",
+          MURPH_PR_BODY: footer,
+          MURPH_PR_HEAD_SHA: "HEAD",
+        },
+      },
+    );
+    expect(changelogValidation.status, changelogValidation.stderr).toBe(0);
 
     const readme = readRepoFile(".agents", "friction-log", "README.md");
     expect(readme).toContain("FROG_APP_CLIENT_ID");

@@ -71,3 +71,50 @@ jobs:
           issue-author: ${{ vars.FROG_APP_BOT_LOGIN }}
           push: pull-request
           token: ${{ steps.frog-app-token.outputs.token }}
+
+      - name: Add required Murph PR context
+        env:
+          FROG_BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          FROG_PR_BODY_FOOTER: |-
+            ## Architecture and reuse
+
+            - **Existing systems reused:** The existing Frog reconciliation workflow, linked issues, and `frog/sync` branch remain the owners.
+            - **New logic:** This pull request only reconciles committed developer-friction metadata with its linked GitHub issues.
+            - **New abstractions:** None; the existing Frog workflow remains the sole synchronization owner.
+            - **Complexity intentionally avoided:** No product runtime, second reconciliation system, direct-main write, approval, or merge automation is added.
+
+            ## Changelog
+
+            - Changelog: not applicable
+            - Reason: This pull request only reconciles internal developer-friction bookkeeping and has no member-visible product behavior.
+          FROG_PR_BRANCH: frog/sync
+          GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          frog_pr_number="$(
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --base "$FROG_BASE_BRANCH" \
+              --head "$FROG_PR_BRANCH" \
+              --state open \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          if [[ -z "$frog_pr_number" ]]; then
+            echo "No open Frog reconciliation pull request requires Murph context."
+            exit 0
+          fi
+
+          frog_body_file="$(mktemp "${RUNNER_TEMP%/}/frog-pr-body.XXXXXX")"
+          {
+            gh pr view "$frog_pr_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json body \
+              --jq .body
+            printf '\n\n%s\n' "$FROG_PR_BODY_FOOTER"
+          } > "$frog_body_file"
+
+          gh pr edit "$frog_pr_number" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file "$frog_body_file"
