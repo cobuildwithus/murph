@@ -2051,6 +2051,11 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
         path.join(tmpdir(), 'murph-ordinary-text-fallback-e2e-'),
       )
       const generations: unknown[] = []
+      const privateContextMarker = 'PRIVATE_ACCOUNT_MARKER_M9'
+      const privateContextSnapshot = [
+        'Private assistant context snapshot:',
+        `- Unrelated account reconciliation reference: ${privateContextMarker}.`,
+      ].join('\n')
 
       try {
         const explicitSkillsRoot = path.join(explicitDirectory, 'skills')
@@ -2066,7 +2071,10 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions:
-            buildDirectConversationDeveloperInstructions(),
+            buildDirectConversationDeveloperInstructions(
+              false,
+              privateContextSnapshot,
+            ),
           dynamicTools: [MURPH_GENERATE_SONG_TOOL],
           env: {
             ...config.env,
@@ -2079,7 +2087,6 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
             'Generate one original instrumental track, exactly 12 seconds long.',
             'Make it bright synth-pop at about 118 BPM with glockenspiel and crisp handclaps, with no vocals.',
             'Send only the song.',
-            'PRIVATE_ACCOUNT_MARKER_M9 is an unrelated reasoning-only account marker and is not authorized for provider disclosure.',
           ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
@@ -2129,13 +2136,13 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
         expect(providerPrompt).toMatch(/118\s*BPM/iu)
         expect(providerPrompt).toMatch(/glockenspiel/iu)
         expect(providerPrompt).toMatch(/handclap/iu)
-        expect(providerPrompt).not.toContain('PRIVATE_ACCOUNT_MARKER_M9')
+        expect(providerPrompt).not.toContain(privateContextMarker)
         expect(generations).toEqual([
           expect.objectContaining({
             durationMs: 12_000,
             forceInstrumental: true,
             kind: 'elevenlabs_music',
-            prompt: expect.not.stringContaining('PRIVATE_ACCOUNT_MARKER_M9'),
+            prompt: expect.not.stringContaining(privateContextMarker),
           }),
         ])
         expect(explicit.responseMedia).toEqual([
@@ -2164,7 +2171,10 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
             ?? undefined,
           codexHome: config.codexHome,
           developerInstructions:
-            buildDirectConversationDeveloperInstructions(),
+            buildDirectConversationDeveloperInstructions(
+              false,
+              privateContextSnapshot,
+            ),
           dynamicTools: [MURPH_GENERATE_SONG_TOOL],
           env: {
             ...config.env,
@@ -2173,8 +2183,11 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
           excludeResumeTurns: true,
           model: config.model,
           modelProvider: config.modelProvider,
-          prompt:
-            'Give me a concise two-line bedtime wind-down reminder for 10:30 tonight.',
+          prompt: [
+            'Read your active music-generation skill.',
+            'Then give me a concise two-line bedtime wind-down reminder for 10:30 tonight.',
+            'Do not generate or attach music.',
+          ].join(' '),
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
           voiceMemoRuntime: {
@@ -2194,17 +2207,28 @@ describeRealCodex('real Codex generated-music fallback e2e', () => {
           },
           workingDirectory: ordinaryDirectory,
         })
-        const ordinarySongCalls = readCapabilityRoutingActions(
+        const ordinaryActions = readCapabilityRoutingActions(
           ordinary.jsonEvents,
-        ).filter((action) =>
+        )
+        const ordinarySkillRead = ordinaryActions.find((action) =>
+          action.kind === 'command'
+          && action.command.includes('music-generation/SKILL.md')
+          && action.output.includes('# Music generation')
+        )
+        const ordinarySongCalls = ordinaryActions.filter((action) =>
           action.kind === 'dynamic'
           && action.tool === MURPH_GENERATE_SONG_TOOL.name
         )
 
+        expect(
+          ordinarySkillRead,
+          'loaded skill without authorization',
+        ).toBeDefined()
         expect(ordinarySongCalls).toHaveLength(0)
         expect(generations).toHaveLength(1)
         expect(ordinary.responseMedia).toHaveLength(0)
         expect(ordinary.finalMessage.trim().length).toBeGreaterThan(0)
+        expect(ordinary.finalMessage).not.toContain(privateContextMarker)
       } finally {
         await removeRealCodexTemporaryPaths([
           explicitDirectory,
@@ -7090,10 +7114,11 @@ function buildHostedUsageProgressDeveloperInstructions(
 
 function buildDirectConversationDeveloperInstructions(
   onboardingGuidance = false,
+  assistantContextSnapshotPrompt: string | null = null,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: null,
-    assistantContextSnapshotPrompt: null,
+    assistantContextSnapshotPrompt,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: false,
