@@ -572,13 +572,14 @@ Last verified: 2026-08-10
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
-- Hosted device-sync dirty payloads use an explicit prepare-then-commit
-  boundary. Web derives the credential-independence authority bit, compresses,
-  and secure-box seals each payload before opening a caller-owned admission
-  transaction. After entry, the dirty-payload store validates the prepared
-  revision and performs only its database mutations; other owners in the same
-  admission commit retain their existing bounded work. The steady-state
-  connection-replacement path reads no payload and uses set-based writes only.
+- Store-owned device-sync dirty writes use an explicit prepare-then-commit
+  boundary: Web derives the credential-independence authority bit, compresses,
+  and secure-box seals each payload before opening the store transaction.
+  Consent-gated webhook and companion admissions instead perform that
+  preparation inside the existing member-row transaction, after the consent
+  re-read and before the dirty-marker lock or mutation. This keeps completed
+  withdrawal authoritative without adding another fence or state owner. The
+  steady-state connection-replacement path reads no payload and uses set-based writes only.
   Nullable rows from mixed-version writers are the bounded transitional
   exception: replacement classifies at most 800 rows after taking the existing
   member lock and re-reading health-data consent, then compare-and-sets the

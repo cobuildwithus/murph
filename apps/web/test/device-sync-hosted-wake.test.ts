@@ -4016,12 +4016,6 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("resolves the companion lane, stages a compact RMSSD job, and wakes the runtime", async () => {
-    const preparedPayloads = {
-      dirtyRevision: 1n,
-      resources: [],
-      rows: [],
-    };
-    mocks.prepareDirtyPayloads.mockResolvedValueOnce(preparedPayloads);
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
       provider: "junction",
@@ -4049,7 +4043,6 @@ describe("hosted device-sync wakes", () => {
       dirtyAt: "2026-07-10T13:46:00.000Z",
       eventType: "companion.hrv-rmssd.created",
       provider: "junction",
-      preparedPayloads,
       resourceCategory: "derived",
       userId: "user-123",
       resources: [{
@@ -4069,8 +4062,11 @@ describe("hosted device-sync wakes", () => {
         windowStart: null,
       }],
     }));
-    expect(mocks.prepareDirtyPayloads.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0] ?? 0,
+    expect(mocks.upsertDirtyConnection.mock.calls[0]?.[0])
+      .not.toHaveProperty("preparedPayloads");
+    expect(mocks.prepareDirtyPayloads).not.toHaveBeenCalled();
+    expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
     );
     const stagedPayload = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources?.[0]?.payload;
     const staged = stagedPayload?.companionObservationJson;
@@ -5163,12 +5159,6 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("accepts durable Junction payload webhooks under the connection acceptance lock", async () => {
-    const preparedPayloads = {
-      dirtyRevision: 1n,
-      resources: [],
-      rows: [],
-    };
-    mocks.prepareDirtyPayloads.mockResolvedValueOnce(preparedPayloads);
     const webhookDataJson = JSON.stringify({
       data: [
         {
@@ -5250,19 +5240,14 @@ describe("hosted device-sync wakes", () => {
 
     const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
 
-    expect(mocks.prepareDirtyPayloads).toHaveBeenCalledWith({
-      connectionId: "dsc_123",
-      provider: "junction",
-      resources: dirtyResources,
-      traceId: "trace_junction_payload_busy",
-      userId: "user-123",
-    });
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
-      preparedPayloads,
       resources: dirtyResources,
     }));
-    expect(mocks.prepareDirtyPayloads.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0] ?? 0,
+    expect(mocks.upsertDirtyConnection.mock.calls[0]?.[0])
+      .not.toHaveProperty("preparedPayloads");
+    expect(mocks.prepareDirtyPayloads).not.toHaveBeenCalled();
+    expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
     );
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);

@@ -1782,15 +1782,8 @@ async function persistHostedDeviceSyncCompanionResource(input: {
   userId: string;
   wakeReason: string;
 }): Promise<void> {
-  const result = await retryHostedDirtyStateContention(async () => {
-    const preparedPayloads = await input.store.prepareDirtyPayloads({
-      connectionId: input.connectionId,
-      provider: "junction",
-      resources: [input.resource],
-      userId: input.userId,
-    });
-
-    return input.store.withHealthDataAdmissionLock(
+  const result = await retryHostedDirtyStateContention(async () =>
+    input.store.withHealthDataAdmissionLock(
       input.userId,
       input.connectionId,
       async (tx) => {
@@ -1839,7 +1832,6 @@ async function persistHostedDeviceSyncCompanionResource(input: {
           dirtyAt: input.occurredAt,
           eventType: input.eventType,
           provider: connection.provider,
-          ...(preparedPayloads ? { preparedPayloads } : {}),
           resourceCategory: input.resourceCategory,
           resources: [input.resource],
           tx,
@@ -1901,8 +1893,8 @@ async function persistHostedDeviceSyncCompanionResource(input: {
 
         return { wakeMailboxItemId: mailboxAppend.item.id };
       },
-    );
-  });
+    ),
+  );
 
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {
@@ -2204,16 +2196,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
   traceId: string | null;
   userId: string;
 }): Promise<void> {
-  const result = await retryHostedDirtyStateContention(async () => {
-    const preparedPayloads = await input.store.prepareDirtyPayloads({
-      connectionId: input.connectionId,
-      provider: input.provider,
-      resources: input.dirtyResources,
-      traceId: input.traceId,
-      userId: input.userId,
-    });
-
-    return input.store.withHealthDataAdmissionLock(
+  const result = await retryHostedDirtyStateContention(async () =>
+    input.store.withHealthDataAdmissionLock(
       input.userId,
       input.connectionId,
       async (tx) => {
@@ -2274,7 +2258,6 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         connectionId: input.connectionId,
         dirtyAt: input.occurredAt,
         eventType: input.eventType,
-        ...(preparedPayloads ? { preparedPayloads } : {}),
         provider: input.provider,
         resourceCategory: input.resourceCategory ?? null,
         resources: input.dirtyResources,
@@ -2347,8 +2330,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       {
         memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
       },
-    );
-  });
+    ),
+  );
 
   if (result.wakeMailboxItemId) {
     await startHostedDeviceSyncWakeWorkflow(result.wakeMailboxItemId, {

@@ -358,14 +358,16 @@ export class PrismaHostedDirtyConnectionStore {
   ): Promise<UpsertHostedDeviceSyncDirtyConnectionResult> {
     const resourceBatch = buildDirtyResourceBatch(input.resources ?? []);
     if (input.tx) {
-      assertPreparedDirtyPayloads({
-        connectionId: input.connectionId,
-        preparedPayloads: input.preparedPayloads,
-        provider: input.provider,
-        resources: resourceBatch.payloadResources,
-        traceId: input.traceId,
-        userId: input.userId,
-      });
+      if (input.preparedPayloads) {
+        assertPreparedDirtyPayloads({
+          connectionId: input.connectionId,
+          preparedPayloads: input.preparedPayloads,
+          provider: input.provider,
+          resources: resourceBatch.payloadResources,
+          traceId: input.traceId,
+          userId: input.userId,
+        });
+      }
       return this.upsertDirtyConnectionOnce({
         ...input,
         resourceBatch,
@@ -418,7 +420,24 @@ export class PrismaHostedDirtyConnectionStore {
     const hasCompanionNightResource = input.resourceBatch.payloadResources.some(
       (resource) => readCompanionHrvDirtyResourceNightDate(resource) !== null,
     );
-    const preparedDirtyPayloadRows = input.preparedPayloads;
+    let preparedDirtyPayloadRows = input.preparedPayloads;
+    if (
+      input.resourceBatch.payloadResources.length > 0
+      && !preparedDirtyPayloadRows
+    ) {
+      preparedDirtyPayloadRows = await prepareDirtyPayloadRows({
+        connectionId: input.connectionId,
+        dirtyRevision: resolveDirtyPayloadRevision({
+          existing,
+          resourceBatch: input.resourceBatch,
+        }),
+        provider: input.provider,
+        resources: input.resourceBatch.payloadResources,
+        traceId: input.traceId,
+        userId: input.userId,
+        prisma,
+      });
+    }
     if (hasCompanionNightResource && existing) {
       // Companion replay receipts reference the parent connection. Lock the
       // dirty marker first so account deletion and ingress retain one lock
@@ -580,7 +599,15 @@ export class PrismaHostedDirtyConnectionStore {
     // lock order.
     const payloadRowsForCreate = resourceBatch.payloadResources.length === 0
       ? undefined
-      : preparedPayloads;
+      : preparedPayloads ?? (await prepareDirtyPayloadRows({
+          connectionId: input.connectionId,
+          dirtyRevision: nextDirtyRevision,
+          provider: input.provider,
+          resources: resourceBatch.payloadResources,
+          traceId: input.traceId,
+          userId: input.userId,
+          prisma,
+        }));
     if (
       payloadRowsForCreate
       && payloadRowsForCreate.dirtyRevision !== nextDirtyRevision
@@ -982,12 +1009,15 @@ async function createDirtyPayloadRows(input: {
     };
   }
 
-  const prepared = input.precomputed;
-  if (!prepared) {
-    throw new TypeError(
-      "Dirty payloads must be prepared before the database transaction begins.",
-    );
-  }
+  const prepared = input.precomputed ?? (await prepareDirtyPayloadRows({
+    connectionId: input.connectionId,
+    dirtyRevision: input.dirtyRevision,
+    provider: input.provider,
+    resources: input.resources,
+    traceId: input.traceId,
+    userId: input.userId,
+    prisma: input.tx,
+  }));
   if (prepared.dirtyRevision !== input.dirtyRevision) {
     throw createDirtyStateContentionError("update");
   }

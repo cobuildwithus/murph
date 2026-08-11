@@ -817,7 +817,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     expect(receiptRows).toEqual([]);
   });
 
-  it("requires caller-owned transactions to receive payloads prepared before the dirty-state CAS", async () => {
+  it("prepares caller-owned payloads inside the consent transaction before the dirty-state CAS", async () => {
     let insideCallerOwnedTransaction = false;
     const encryptInsideCallerOwnedTransaction: boolean[] = [];
     const operationOrder: string[] = [];
@@ -903,24 +903,21 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         traceId: "trace_caller_owned_1",
         userId: existing.userId,
       } as const;
-      const preparedPayloads = await store.prepareDirtyPayloads(input);
-
       insideCallerOwnedTransaction = true;
       const result = await store.upsertDirtyConnection({
         ...input,
-        preparedPayloads,
         tx: tx as never,
       });
       insideCallerOwnedTransaction = false;
 
-      expect(encryptInsideCallerOwnedTransaction).toEqual([false]);
+      expect(encryptInsideCallerOwnedTransaction).toEqual([true]);
       expect(operationOrder).toEqual([
         "encrypt-payload",
         "update-dirty-marker",
         "insert-durable-payload",
       ]);
       expect(rootPrisma.$transaction).not.toHaveBeenCalled();
-      expect(rootPrisma.deviceSyncDirtyConnection.findUnique).toHaveBeenCalledOnce();
+      expect(rootPrisma.deviceSyncDirtyConnection.findUnique).not.toHaveBeenCalled();
       expect(tx.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
       const payloadRow = expectFirstPayloadCreateRow(payloadCreateData);
       expect(payloadRow.credentialIndependent).toBe(false);
@@ -932,7 +929,7 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     }
   });
 
-  it("rejects caller-owned payload writes that were not prepared before the transaction", async () => {
+  it("rejects mismatched prepared payloads passed into a caller-owned transaction", async () => {
     const store = new PrismaHostedDirtyConnectionStore({} as never);
 
     await expect(store.upsertDirtyConnection({
@@ -950,6 +947,11 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
         windowEnd: null,
         windowStart: null,
       }],
+      preparedPayloads: {
+        dirtyRevision: 1n,
+        resources: [],
+        rows: [],
+      },
       tx: {} as never,
       userId: "member_unprepared_1",
     })).rejects.toThrow(

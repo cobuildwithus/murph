@@ -228,9 +228,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    remain connection-epoch scoped. Junction owns that exact inline predicate
    beside its importer-backed executor. Web derives the same authority while
    preparing each encrypted dirty payload and persists only the resulting
-   boolean beside the ciphertext. Compression, secure-box sealing, and any lazy
-   Junction classifier load complete before the admission transaction. On a
-   replacement epoch, the ordinary non-null path uses only a marker
+   boolean beside the ciphertext. Store-owned writes complete compression,
+   secure-box sealing, and any lazy Junction classifier load before their
+   transaction. Consent-gated webhook and companion admissions do that work
+   only after the member lock and consent re-read, but before the dirty-marker
+   lock or mutation. On a replacement epoch, the ordinary non-null path uses only a marker
    compare-and-set plus set-based deletion of rows classified as
    credential-scoped. Nullable rows left by mixed-version writers are the one
    transitional exception: Web classifies at most 800 of them inside the
