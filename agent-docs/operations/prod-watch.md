@@ -4,20 +4,20 @@ Last verified: 2026-08-10
 
 ## Decision
 
-Use **macOS `launchd` as the authoritative five-minute scheduler**, a deterministic local collector as the evidence boundary, and a **new `codex exec --ephemeral` process only for bounded provider MCP collection and gated incident remediation**. Do not use a Codex desktop scheduled task as the production scheduler.
+Use **macOS `launchd` as the authoritative five-minute scheduler**, deterministic local collectors as the evidence boundary, and a **new shell-disabled `codex exec --ephemeral` process only for bounded advisory Cloudflare collection**. The installed watcher is monitor-only; automatic diagnosis dispatch and remediation are disabled. Do not use a Codex desktop scheduled task as the production scheduler.
 
 The target lifecycle is hybrid:
 
 1. `launchd` starts one local supervisor every 300 seconds.
-2. The supervisor acquires a non-waiting run lock and gathers the deterministic database/repository snapshot.
-3. Once noninteractive MCP behavior is proven in shadow mode, the supervisor starts a new ephemeral, read-only Codex process to gather provider aggregates into `prod-watch.provider-evidence.v1`.
+2. The supervisor acquires a non-waiting run lock and gathers deterministic database, repository, Vercel, and Stripe aggregates.
+3. The supervisor starts a new ephemeral, read-only Codex process to gather advisory Cloudflare Observability aggregates into `prod-watch.provider-evidence.v1`. This model-mediated evidence never enters production scoring or authorizes incident transitions.
 4. Local code validates, merges, scores, deduplicates, and persists the result. Codex does not own thresholds, leases, state transitions, or file formats.
-5. Only a promoted incident gets a separate fresh worker session. Database incidents support incident-scoped drill-down; provider, sensitive, incomplete-evidence, and otherwise alert-only incidents are claim-and-escalate only.
-6. The worker may edit only after the local state owner grants the single global remediation lease. ReviewGPT approval for the exact patch head is required before draft PR metadata can be recorded.
+5. A promoted incident is recorded in the private ledger. An operator may later claim it and use database-only scoped drill-down; the scheduler does not launch an agent worker.
+6. The launchable CLI rejects worker/remediation commands, and the scheduler never dispatches them. No automatic edit, ReviewGPT, GitHub, merge, deployment, or production mutation path is active.
 
-Phase 2 implements provider-child collection, the remediation coordination ledger, scheduler shadow dispatch, and a manual/non-shadow worker path. It still never labels missing MCP coverage healthy: Vercel, Cloudflare, and Stripe appear as `not_collected` or source failures, and incomplete runs stay `partial` or `degraded`.
+The launchable phase implements all-source collection and the private incident ledger. Experimental remediation code remains dormant for follow-up work and is not part of the production authority path. Missing coverage is never labeled healthy: unavailable sources remain explicit failures, and incomplete runs stay `partial` or `degraded`.
 
-A strict “fresh Codex plus all MCPs every five minutes” mode can follow the same supervisor contract, but it is not cheap: it creates 288 sessions per day. Keep that mode shadow-only until cost, duration, rate-limit behavior, and evidence precision are measured. The durable end state should replace any provider MCP that gains a safe noninteractive API credential with deterministic local adapter code.
+The scheduler creates up to 288 fresh Cloudflare collection sessions per day. Vercel and Stripe stay deterministic to reduce latency, session cost, and MCP failure surface; add another MCP only when no safe deterministic aggregate adapter is available.
 
 ## Why not the alternatives
 
@@ -32,14 +32,14 @@ A strict “fresh Codex plus all MCPs every five minutes” mode can follow the 
 
 The scheduled interval is 300 seconds. One run has a 240-second deadline, leaving 60 seconds for process teardown and the next tick.
 
-1. `launchd` invokes the current verified Node executable directly with the repository-local `tsx` entrypoint and `prod-watch.ts run --scheduled --provider-child --dispatch-workers --remediation-shadow`. It exports one fixed, bounded PATH containing `$HOME/.local/bin` plus standard Homebrew/system directories, so the Keychain-backed database helper is reachable without inheriting an interactive shell environment; it does not depend on launchd finding a shell-only pnpm/Corepack shim.
+1. `launchd` invokes the verified Node executable directly with an exact-head-pinned owner-only runtime's `tsx` entrypoint and `prod-watch.ts run --scheduled --provider-child`. It exports the dedicated Codex home/profile, the shared private state root, the approved head, and one fixed bounded PATH containing `$HOME/.local/bin` plus standard Homebrew/system directories. The command verifies the pinned head and clean tracked tree before collection and never enables worker dispatch.
 2. The command creates one contender claim in `.runtime/tmp/prod-watch/run.lock`; the oldest live claim wins. A dead PID is recoverable, and claims older than 10 minutes are stale even if the PID was reused. `launchd` itself skips an interval that fires while the job is still running; the lock additionally protects manual runs, duplicate installations, and other launchers. Any losing invocation records one bounded overlap marker and exits successfully without starting another collector.
 3. The collection window ends 60 seconds before collection time to tolerate ingestion lag. It compares adjacent 15-minute windows, so every event is seen in multiple scheduled runs without becoming duplicate incident state.
 4. The database adapter sends fixed SQL to `murph-prod-psql-ro` on stdin. The helper remains the only PostgreSQL entry point. The child has a 30-second deadline and bounded stdout/stderr capture. Only stdout is parsed; stderr contents are discarded and reduced to a redacted error code. A stdin failure enters the same terminate-then-force-terminate lifecycle as timeout or abort, and the parent does not settle until the child exits.
-5. A new `codex exec --ephemeral` process receives only the bounded database snapshot, the production-watch skill, and a JSON output schema. It uses read-only sandboxing, queries aggregate MCP surfaces, writes one temporary provider envelope, and exits. The file is validated locally and deleted after merge. `--provider-shadow` exercises the same child but does not merge evidence or advance provider health.
-6. Local code evaluates fixed rules, advances consecutive-source-observation streaks, deduplicates by stable fingerprint, and writes state/projections under a separate state lock. Only fresh, complete, authenticated, successful evidence contributes production counters, latency, fingerprints, or provider release context. Degraded, partial, stale, failed, or unauthenticated evidence contributes monitor-health incidents only. One observation rule governs every source-owned state slice: evidence in any status uses its source `collectedAt`; a fresh deterministic collection/admission failure without evidence uses its attempt time; and absence is no observation. Replays and unrelated-source ticks preserve state. A newer non-scorable observation may advance monitor recurrence while preserving production streaks and trusted cumulative baselines; a newer scorable clean observation resets source streaks and updates any supplied cumulative totals.
+5. Deterministic adapters read Vercel request-log aggregates through the existing CLI authorization and Stripe live event aggregates through the Stripe CLI. A new `codex exec --ephemeral` process receives only bounded aggregate context and a JSON output schema, uses read-only sandboxing with only Cloudflare Observability enabled, writes one temporary provider envelope, and exits. The file is validated locally and deleted after merge. `--provider-shadow` exercises the same path but does not merge evidence or advance provider health.
+6. Local code evaluates fixed rules, advances consecutive-source-observation streaks, deduplicates by stable fingerprint, and writes state/projections under a separate state lock. Only fresh, complete, authenticated, successful evidence from deterministic adapters contributes production counters, latency, fingerprints, provider release context, or terminal-transition authority. Cloudflare's model-mediated collection remains advisory and non-scorable until a deterministic adapter replaces it. Degraded, partial, stale, failed, unauthenticated, or advisory evidence contributes monitor-health status only. One observation rule governs every source-owned state slice: evidence in any status uses its source `collectedAt`; a fresh deterministic collection/admission failure without evidence uses its attempt time; and absence is no observation. Replays and unrelated-source ticks preserve state. A newer non-scorable observation may advance monitor recurrence while preserving production streaks and trusted cumulative baselines; a newer scorable clean observation resets source streaks and updates any supplied cumulative totals.
 7. Files are written to a same-directory temporary file, synced, chmod `0600`, and renamed. Directories use `0700`.
-8. If `--dispatch-workers` is enabled, promoted incidents are queued under the state lock and launched as detached workers. The default scheduler template adds `--remediation-shadow`, so workers record a shadow session and stop before claim/edit while Phase 2 proves cadence, duration, and false-positive behavior.
+8. Production parsing ignores `--dispatch-workers`, and direct worker/remediation commands fail closed with `automatic_remediation_not_enabled`. Promoted incidents remain in the private Markdown/JSON ledger for operator handling without blocking later five-minute collection passes.
 9. Healthy scheduled runs produce no terminal output. New incidents, degraded monitor health, manual runs, and dry runs return a small summary.
 10. A normal exit removes its contender claim. If the process crashes or is force-killed, a later tick removes the claim when its recorded PID is no longer alive or when it is older than the 10-minute PID-reuse fence. `launchd` does not use `KeepAlive`, so it does not create a crash loop; the next 300-second tick retries.
 11. Missed ticks are not replayed in a burst after sleep. Scheduler lag and the last successful collection are explicit monitor-health fields.
@@ -88,7 +88,7 @@ pnpm --silent prod-watch scheduler status
 pnpm --silent prod-watch scheduler uninstall
 ```
 
-`preflight` and `install` verify the current Node executable, repository-local `tsx`, tools tsconfig, production-watch entrypoint, executable `murph-prod-psql-ro`, Codex `exec`, the configured Codex profile, live aggregate provider coverage, GitHub CLI auth, and ReviewGPT availability. Verification happens before an existing managed job is stopped. The command writes the plist under the current user's LaunchAgents directory and uses `launchctl bootstrap`. It refuses repositories outside the current home directory, unsafe paths, or an unavailable executable/helper/provider/review chain. Neither the checked-in template nor the rendered plist contains a concrete home directory, account name, or secret. Install, replacement, and uninstall verify the label with `launchctl print`; an unknown service state is an error, and uninstall preserves the managed plist until absence is proven. Status reports `launchdState` as `loaded`, `absent`, or `unknown` and uses `loaded: null` for the unknown case. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
+`preflight` verifies the current Node executable, repository-local `tsx`, tools tsconfig, production-watch entrypoint, executable `murph-prod-psql-ro`, trusted Codex executable, configured Codex profile, and live aggregate provider coverage. `install` additionally requires the exact ReviewGPT-approved Git head, creates a dedicated owner-only detached worktree at that commit with hooks disabled, installs locked dependencies offline with scripts disabled, and renders the job against that pinned runtime. Verification happens before an existing managed job is stopped. The command writes the plist under the current user's LaunchAgents directory and uses `launchctl bootstrap`. It refuses unsafe paths or an unavailable executable/helper/provider chain. Neither the checked-in template nor rendered plist contains a concrete home directory, account name, or secret. Install, replacement, and uninstall verify the label with `launchctl print`; an unknown service state is an error, and uninstall preserves the managed plist until absence is proven. Status reports `launchdState` as `loaded`, `absent`, or `unknown` and uses `loaded: null` for the unknown case. Routine stdout/stderr goes to `/dev/null`; monitor state plus `launchctl` status are the diagnostic surface.
 
 ### Incident coordination and drill-down
 
@@ -109,7 +109,7 @@ The provider-child command shape is:
 
 ```sh
 codex exec --ephemeral --sandbox read-only --json \
-  --output-schema scripts/prod-watch/schemas/provider-evidence.v1.schema.json \
+  --output-schema scripts/prod-watch/schemas/provider-evidence.codex-output.v1.schema.json \
   --output-last-message "$PROVIDER_EVIDENCE_FILE" -
 ```
 
@@ -118,19 +118,11 @@ The prompt is supplied on stdin and tells Codex to use the production-watch skil
 ### Remediation
 
 ```sh
-pnpm --silent prod-watch worker "$INCIDENT" --session-id "$SESSION" --shadow
+# Automatic worker/remediation commands are intentionally unavailable.
 pnpm --silent prod-watch remediate "$INCIDENT" --session-id "$SESSION"
-pnpm --silent prod-watch remediate review "$INCIDENT" \
-  --session-id "$SESSION" \
-  --patch-head "$PATCH_HEAD" \
-  --outcome approved
-pnpm --silent prod-watch remediate pr-opened "$INCIDENT" \
-  --session-id "$SESSION" \
-  --patch-head "$PATCH_HEAD" \
-  --pr-ref "owner/repo/pull/number"
 ```
 
-Scheduler-installed workers run with `--remediation-shadow` by default. Shadow workers record a bounded remediation session and stop before claiming the incident or editing. Non-shadow workers are manual until shadow metrics are acceptable. A non-shadow worker claims the incident, rejects or escalates ineligible incidents, acquires the global remediation lease for eligible database remediation candidates, collects an incident-scoped drill-down, and launches a fresh workspace-write Codex child. If the child does not record an approved ReviewGPT result and draft PR metadata for the exact patch head, the session is blocked. Production-watch never merges, enables auto-merge, deploys, mutates production state, or declares resolution merely because a PR exists.
+The installed scheduler runs from a dedicated owner-only worktree pinned to the exact reviewed commit and installed offline with dependency scripts disabled. Every tick verifies that pinned Git head and its tracked tree before collection. It never passes `--dispatch-workers`. Direct worker and remediation commands fail closed. The only Codex child in the launch path has shell tooling disabled, an isolated HOME and minimal environment, access only to the Cloudflare Observability MCP, and receives no database, Vercel, or Stripe evidence. Production-watch never invokes GitHub, ReviewGPT, merge, auto-merge, deploy, or production/provider mutations in this phase.
 
 ## Snapshot schema
 
@@ -149,7 +141,7 @@ Scheduler-installed workers run with `--remediation-shadow` by default. Shadow w
 | `collectorFailures` | Source, failure class, redacted code, retryability. |
 | `redaction` | Policy version and assertions that raw text/direct identifiers are absent. |
 
-Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. The production source universe is always database, Vercel, Cloudflare, and Stripe; callers cannot narrow it. Complete provider `ok` coverage requires `auth: ok` and a provider-wide request/error/timeout triple whose exact dimensions are only `{source}`. Surface-specific counters are supplementary, and every emitted exact-dimension triple must still be complete. Measured zero numerators are valid, but missing numerators are unknown. Provider producers cannot supply `sampleCount` fields: the matching exact-dimension request counter is the only rate denominator and the local scorer owns that relation. A source failure never becomes a zero counter. Evidence that is degraded, partial, stale, failed, or unauthenticated is excluded from production scoring and provider release correlation; its health/failure metadata still drives monitor incidents.
+Unknown fields, overlong arrays, arbitrary dimensions, free-form text, invalid timestamps, and malformed tokens fail closed. The local parser also rejects absolute/local paths, URLs, UUIDs, common provider/direct-ID shapes, credential-shaped values, JWTs, and long numeric identifiers before evidence can enter state or a projection. The production source universe is always database, Vercel, Cloudflare, and Stripe; callers cannot narrow it. Complete provider `ok` coverage requires `auth: ok` and a provider-wide request/error/timeout triple whose exact dimensions are only `{source}`. Surface-specific counters are supplementary, and every emitted exact-dimension triple must still be complete. Measured zero numerators are valid, but missing numerators are unknown. Provider producers cannot supply `sampleCount` fields: the matching exact-dimension request counter is the only rate denominator and the local scorer owns that relation. Vercel's request count is a bounded sample-based estimate, so it proves collection health but is deliberately excluded from provider/deployment error-rate and timeout-rate scoring; full-window error fingerprints remain scorable. A source failure never becomes a zero counter. Evidence that is degraded, partial, stale, failed, or unauthenticated is excluded from production scoring and provider release correlation; its health/failure metadata still drives monitor incidents.
 
 The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eight from each provider. Sensitive and critical fingerprints are ranked before ordinary volume at collection time and are retained before presentation capacity is filled. The anomaly bound is the derived worst-case 245 candidates across failures, source health, counters, latency, and fingerprints, so mandatory sensitive, critical, and alert-only candidates cannot be removed by a display limit.
 
@@ -159,9 +151,9 @@ The serialized fingerprint bound is 37: 13 ranked database fingerprints plus eig
 | --- | --- | --- | --- |
 | PostgreSQL | Deterministic local SQL | Same | Fixed query on stdin through `murph-prod-psql-ro`; read-only transaction; no connection string. |
 | Repository SHA | Deterministic local Git read | Same | Context only; never production truth by itself. |
-| Vercel | Fresh read-only Codex provider child | Deterministic adapter when noninteractive auth is available; otherwise fresh Codex MCP | Aggregate deployment, error count/rate, and latency only. |
-| Cloudflare Observability | Fresh read-only Codex provider child | Same transition rule | Aggregate Worker/runtime errors, timeouts, and latency only. |
-| Stripe | Fresh read-only Codex provider child | Same transition rule | Aggregate API/webhook health only; never customer, charge, invoice, or payment-method records. |
+| Vercel | Deterministic local API adapter using existing CLI authorization | Same | Full-window filtered error/warning/timeout aggregates start as sequential five-minute partitions. Only an overflowing partition is bisected down to a 15-second floor; every partition retains a fail-closed 20-page/2,000-row ceiling, and each detail query has explicit total partition and normalized-row budgets. Pagination stops on an empty page even if the API leaves a stale continuation flag. Raw message text is discarded immediately after deriving error/timeout/warning flags. Two all-request collection-health samples begin at 10 seconds and shrink to a 100ms floor when traffic would overflow the page budget; each estimate scales by its actual complete sample duration and is never used for rate anomalies. Full-window fingerprints remain scorable. No raw rows persist. |
+| Cloudflare Observability | Fresh read-only Codex provider child with only the observability MCP enabled | Same | Aggregate Worker/runtime errors, timeouts, and latency only. Model-mediated output is advisory, non-scorable, and cannot authorize terminal transitions. |
+| Stripe | Deterministic local Stripe CLI adapter | Same | Bounded live event and failed-delivery aggregates only; never customer, charge, invoice, or payment-method records. |
 
 MCP calls are isolated by provider. One failure is represented for that source and does not erase successful evidence from other sources. Provider rate-limit and auth failures are monitor incidents, not production-zero evidence.
 
@@ -184,7 +176,7 @@ The first database query deliberately omits full workspace/checkpoint scans: the
     state.lock/
 ```
 
-`state.v1.json` is durable machine-local coordination state. It stores monitor health, the latest observation identity/classification per source, anomaly streaks, cumulative-counter baselines, the incident lifecycle, triage lease metadata, remediation sessions, the global remediation lease, review cooldowns, and draft PR references. It contains no raw snapshots, production bodies, provider payloads, diffs, or ReviewGPT transcripts. Active projections expose the source, short incident ID, and canonical redacted Signal accepted by claim, heartbeat, and transition commands; database incidents also accept the ID for drill-down. Metric signals have the form `metric|key=value|key=value` with sorted exact dimensions, so simultaneous provider/database surfaces remain distinguishable. A rate incident's drill-down retains only its matching numerator and denominator at those exact dimensions; latency and fingerprint drill-downs are equally exact. The fingerprint prefix is diagnostic only.
+`state.v1.json` is durable machine-local coordination state. It stores monitor health, the latest observation identity/classification per source, anomaly streaks, cumulative-counter baselines, the incident lifecycle, and triage lease metadata. Its schema retains dormant remediation fields for compatibility, but the launchable CLI never populates them. It contains no raw snapshots, production bodies, provider payloads, diffs, or ReviewGPT transcripts. Active projections expose the source, short incident ID, and canonical redacted Signal accepted by claim, heartbeat, and transition commands; database incidents also accept the ID for drill-down. Metric signals have the form `metric|key=value|key=value` with sorted exact dimensions, so simultaneous provider/database surfaces remain distinguishable. A rate incident's drill-down retains only its matching numerator and denominator at those exact dimensions; latency and fingerprint drill-downs are equally exact. The fingerprint prefix is diagnostic only.
 
 The Markdown files are rebuildable atomic projections. They are ignored by Git and must never be edited as inputs. `ACTIVE_INCIDENTS.md` shows nonterminal incidents and current lease ownership. `INCIDENT_HISTORY.md` shows terminal and active history without private production data. `MONITOR_STATUS.md` shows scheduler/coverage health.
 
@@ -198,8 +190,7 @@ JSON is sufficient for Phase 2 because state is small, single-host, and serializ
 - Cumulative totals retain their last trusted value across absent, failed, degraded, stale, unavailable, or unauthenticated ticks. A newer scorable value replaces that baseline, so a recovery observation detects a positive delta across the collection gap instead of silently losing it.
 - Repeated occurrences update `lastSeenAt`, count, evidence, and release context on the same incident.
 - Incidents retain at most 32 transitions. Terminal incidents retain 180 days, with a hard cap of 2,000 records.
-- Triage leases are per incident. Remediation has a separate session ledger plus one global remediation lease for any edit-capable worker.
-- Leases have owner session and acquired/heartbeat/expiry times. A different session cannot claim before expiry. Stale triage and remediation leases are recovered on state read.
+- Triage leases are per incident, with acquired/heartbeat/expiry times. A different session cannot claim before expiry. Stale triage leases are recovered on state read. Dormant remediation lease fields are not production authority.
 
 ## Incident state machine
 
@@ -216,7 +207,7 @@ monitor_incomplete ─> investigating | escalated | false_positive
 confirmed/escalated ─> resolved                         (external fix observed)
 ```
 
-A lease claim records the handling session. State transitions require that same owner while the lease is live. Provider incidents reject every target except `escalated` in the state authority; the broader diagnostic and terminal graph is database-only. `false_positive` and `resolved` are terminal. Every observation of an existing nonterminal incident updates its last-detected evidence before the new-incident streak gate, so a current recurrence cannot be mistaken for a later clean pass. Automatic remediation eligibility is narrower than incident diagnosis: database source, nonsensitive category, remediation-candidate policy, noncritical severity, complete evidence, global remediation lease, exact patch-head review approval, and draft PR only.
+A lease claim records the handling session. State transitions require that same owner while the lease is live. Provider incidents reject every target except `escalated` in the state authority; the broader diagnostic and terminal graph is database-only. `false_positive` and `resolved` are terminal. A database terminal transition requires fresh, complete evidence from the incident's authoritative deterministic source; advisory Cloudflare evidence and aggregate monitor status cannot grant that authority. Every observation of an existing nonterminal incident updates its last-detected evidence before the new-incident streak gate, so a current recurrence cannot be mistaken for a later clean pass. No incident is eligible for automatic repository remediation in the launchable phase.
 
 ## First-release anomaly rules
 
@@ -228,9 +219,9 @@ Adjacent 15-minute windows are the initial baseline. Fixed ceilings remain as a 
 | Other source collection failure | N/A | Timeout, rate limit, schema, unavailable, internal | 2 runs | Alert only; never infer source health. |
 | Degraded source | N/A | Adapter explicitly reports partial/degraded evidence | 2 runs | Alert only. |
 | Stale source | N/A | Evidence freshness >30 minutes | 2 runs | Alert only. |
-| Provider/deployment error-rate regression | 50 requests/deployments and 10 errors | Current rate >=2%, at least 3x prior rate, and +1 percentage point; or fixed >=5% when no baseline exists | 2 runs | Diagnosis only unless deployment-correlated and nonsensitive. Stripe remains alert-only. |
+| Provider/deployment error-rate regression | 50 requests/deployments and 10 errors | Current rate >=2%, at least 3x prior rate, and +1 percentage point; or fixed >=5% when no baseline exists | 2 runs | Diagnosis only unless deployment-correlated and nonsensitive. Stripe remains alert-only; sampled Vercel request estimates are excluded. |
 | Runtime/assistant error-count regression | 10 errors/issues | At least 3x prior count and +10; prior window required | 2 runs | Diagnosis only unless deployment-correlated and nonsensitive. |
-| Provider/ingress timeout-rate regression | 50 requests/accepted ingress items and 5 timeouts/incomplete items | Current rate >=1%, at least 3x prior rate, and +0.5 percentage point; or fixed >=2% when no baseline exists | 2 runs | Diagnosis only unless deployment-correlated and nonsensitive. Stripe remains alert-only. |
+| Provider/ingress timeout-rate regression | 50 requests/accepted ingress items and 5 timeouts/incomplete items | Current rate >=1%, at least 3x prior rate, and +0.5 percentage point; or fixed >=2% when no baseline exists | 2 runs | Diagnosis only unless deployment-correlated and nonsensitive. Stripe remains alert-only; sampled Vercel request estimates are excluded. |
 | Runtime timeout-count regression | 5 timeouts | At least 3x prior count and +5; prior window required | 2 runs | Diagnosis only unless deployment-correlated and nonsensitive. |
 | p95 latency | 30 samples | >=2x prior p95 and +2 seconds; or fixed >=15 seconds | 2 runs | Diagnosis only unless deployment-correlated and nonsensitive. |
 | p99 latency | 30 samples | >=2x prior p99 and +5 seconds; or fixed >=60 seconds | 2 runs | Same. |
@@ -270,22 +261,9 @@ All must hold:
 6. Repository search identifies a narrow reachable path; no raw production data is needed.
 7. The incident is not sensitive or otherwise alert-only.
 
-### Worktree/edit gate
+### Deferred edit, ReviewGPT, and PR gate
 
-Non-shadow remediation may create an isolated worktree only after the global remediation lease is held, the diagnosis gate passes, the base branch/head is recorded, and the patch fits the low-risk allowlist. Initial limits are no dependency changes, migrations, data repair, auth/billing/privacy/health handling, deployment config, or application state-machine changes; at most five files and 300 changed lines; and a deterministic regression test must fail before and pass after the patch.
-
-### ReviewGPT and PR gate
-
-Use existing `pnpm review:gpt` once per incident fingerprint **and exact patch head**, with only:
-
-- the redacted incident snapshot/drill-down;
-- a concise causal-chain statement;
-- the minimal diff;
-- directly relevant source and tests.
-
-Never send raw logs. Do not invoke ReviewGPT on each five-minute recurrence. The state owner records only the patch head, review fingerprint, outcome, PR reference, and cooldown metadata. Retry at most twice for invalid/tool failures. An unchanged fingerprint-and-patch-head pair has a six-hour cooldown. A substantive rejection requires a changed patch or new evidence, not a retry.
-
-Only an approved, verified low-risk patch may become a **draft** PR. Production-watch never merges, enables auto-merge, deploys, mutates production state, or declares resolution merely because a PR exists.
+The launchable CLI rejects worker/remediation commands before any worktree, model, review, Git, GitHub, or network effect. The scheduler never supplies the dispatch flag. Experimental code is retained only as non-authoritative follow-up material. A future activation must add deterministic deployment identity, an editor-only tool boundary with no production evidence, queue-owned attempt fencing, current-evidence revalidation, and crash-idempotent review/publication reconciliation, then pass a new exact-head launch gate.
 
 ## Self-monitoring
 
@@ -293,7 +271,7 @@ The monitor projection exposes:
 
 - last scheduled run;
 - last successful deterministic collection;
-- last complete all-source evidence time;
+- last deterministic source-complete evidence time and advisory-source status;
 - last run duration and scheduler lag;
 - configured and collected source coverage;
 - source failure streaks and stale/auth state;
@@ -318,8 +296,8 @@ Alert suppression rules:
 | Private production data leakage | Aggregate-only fixed SQL; strict allowlists; hashed fingerprints; unknown-field rejection; no raw text fields; latest snapshot only. |
 | Prompt injection in logs/provider output | Raw text is never ingested; tokens are allowlisted/normalized; evidence is data under a strict JSON schema; fresh read-only sessions; skill explicitly rejects embedded instructions. |
 | Compromised/malformed provider evidence | Strict schema, source uniqueness, bounded arrays, token/timestamp checks, local anomaly code; failure becomes monitor-degraded, not zero evidence. |
-| Runaway automation | 240-second run deadline, 30-second adapter deadline, output limits, scheduler shadow remediation by default, global remediation lease for edit-capable workers, ReviewGPT approval before draft PR metadata, and no merge/deploy command. |
-| Overlapping agents/split ownership | Non-waiting run lock, serialized state lock, per-incident triage leases, one global remediation lease, heartbeat/expiry, handling-session checks, and cooldowns per incident fingerprint plus patch head. |
+| Runaway automation | 240-second collection deadline, bounded child output, shell-disabled advisory Cloudflare child, and no automatic worker/edit/review/GitHub/merge/deploy path. |
+| Overlapping collectors/split ownership | Non-waiting run lock, serialized state lock, per-incident operator triage leases, heartbeat/expiry, and handling-session checks. |
 | Provider outage/rate limit | Isolated source failure, deduplicated alert, partial/degraded status, no incident closure or remediation based on missing evidence. |
 | State corruption or final-path symlink | Private directories, exact schema parsing, final-directory checks, atomic same-directory rename, fail-closed reads, ignored machine-local paths. |
 | Laptop sleep/offline | Scheduler lag and stale success metadata; no catch-up storm. External metadata-only dead-man is required for true 24/7 assurance. |
@@ -341,45 +319,16 @@ Alert suppression rules:
 | Dry run | Live-helper dry run produces a snapshot without state or Markdown projection files. |
 | Database boundary | Static proof requires a read-only transaction, bounded timeouts, and no private columns. The opt-in `scripts/prod-watch.database.integration.test.ts` lane runs the exact CLI query through `murph-prod-psql-ro`, retains the aggregate snapshot only in memory, and validates the strict snapshot contract without printing the payload. |
 | Database fingerprint identity | Static writer/importer/SQL proof and behavioral parsing prove allowlisted operation/surface propagation, sensitive classification, and exact source-fingerprint drill-down matching. |
-| Scheduler | Template proof requires a 300-second interval, `KeepAlive=false`, placeholders, a fixed helper PATH, provider child collection, dispatch workers, shadow remediation, and no machine path. Rendered output retains literal `$HOME` paths and rejects unsafe repository paths. A macOS-only command smoke starts from a minimal launchd environment, makes `murph-prod-psql-ro` and fake Codex available only through the scheduler PATH, runs the exact rendered Node/tsx chain, and proves collection. A separate disposable-home/fake-`launchctl` lifecycle test proves preflight before replacement, unmanaged-file refusal, managed replacement, failed-enable cleanup, and uninstall behavior; an operator smoke remains required before activation. |
-| Remediation gate | Core tests prove queued/dispatched sessions, global remediation lease ownership, ReviewGPT outcome recording, six-hour patch-head cooldown, draft PR metadata only after approved review, alert escalation for ineligible incidents, and CLI shadow workers that do not claim incidents. |
+| Scheduler | Template proof requires a 300-second interval, `KeepAlive=false`, exact-head/runtime placeholders, a fixed helper PATH, the dedicated Codex home/profile, provider collection, no worker dispatch, and no concrete machine path. Rendered output retains literal `$HOME` paths and rejects unsafe repository/runtime paths. A macOS-only command smoke starts from a minimal launchd environment, makes `murph-prod-psql-ro` and fake Codex available only through the scheduler PATH, runs the exact rendered Node/tsx chain, and proves collection. A separate disposable-home/fake-`launchctl` lifecycle test proves unmanaged-file refusal, preflight before managed replacement, pinned runtime setup, failed-enable cleanup, and uninstall behavior; an operator smoke remains required before activation. |
+| Remediation gate | Production CLI tests prove worker and remediation commands fail before state or external effects; the launchd template contains no dispatch flag. Dormant core state tests remain compatibility-only. |
 | JSON contracts | All checked-in schemas parse; fixture evidence passes the runtime's strict parsers and produces the documented `snapshot.v1` shape. |
 | Repo gates | `pnpm test:repo-tools -- scripts/prod-watch.test.ts`, tools typecheck, `git diff --check`, and relevant docs checks. |
 
-## Rollout and rollback
+## Activation and rollback
 
-### Stage 0 — local scaffold
+The local activation enables monitor-only all-source collection from a pinned reviewed runtime. The collection supervisor has a 240-second deadline and never starts detached diagnosis/remediation workers. Every incident remains ledger-only until an operator explicitly investigates it outside the scheduler. Automatic editing and publication require a future separately reviewed activation.
 
-- Run read-only fixture collection and tests; fixtures are never state-writing run or drill-down inputs.
-- Inspect generated Markdown projections.
-- Validate the SQL against a disposable/local production-shaped schema with the read-only role.
-- Do not install the scheduler.
-
-### Stage 1 — database collection
-
-- Install `launchd` with database-only collection for at least two weeks.
-- No external alerts, Codex MCP loop, edits, or PRs.
-- Review monitor duration, missed/overlap ticks, query cost, incident precision, and redaction assertions daily.
-- Treat status as `partial`, never healthy.
-
-### Stage 2 — provider MCP and remediation shadow
-
-- Run fresh ephemeral read-only Codex provider collection manually, then on a limited cadence.
-- Compare MCP aggregate results with provider dashboards.
-- Measure session cost, p95 duration, auth/rate-limit failure rate, and false-positive contribution.
-- Enable every-five-minute provider coverage and shadow worker dispatch only when p99 completes comfortably inside the 240-second budget and output validation is consistently clean.
-
-### Stage 3 — alert and human triage
-
-- Enable deduplicated local/external notification for promoted incidents.
-- Require manual claim and diagnosis.
-- Target at least 20 reviewed incidents, at least 90% actionable precision for remediation-candidate rules, and zero sensitive-domain automation mistakes before any edit phase.
-
-### Stage 4 — manual non-shadow draft-PR automation for a tiny allowlist
-
-- Hold the global remediation lease before any edit path.
-- Isolated worktree, deterministic regression test, patch budget, repo gates, ReviewGPT approval, and recorded draft PR metadata.
-- Draft PR only. No merge or deployment.
+Review duration, overlap count, source failure streaks, incident precision, and retained worktrees daily during the first week. Disable the scheduler if collection repeatedly exceeds its deadline, auth fails persistently, or incident quality is poor.
 
 Rollback is immediate and application-independent:
 
@@ -387,7 +336,7 @@ Rollback is immediate and application-independent:
 pnpm --silent prod-watch scheduler uninstall
 ```
 
-This stops future runs. Local aggregate state remains for audit until intentionally removed. No application runtime, database schema, or production provider state is changed by Phase 2.
+This stops future runs. The monitor-only scheduler has no detached diagnosis/remediation workers. Local aggregate state and pinned runtime remain for audit until intentionally removed. No application runtime, database schema, GitHub repository, or production provider state is changed merely by installing or uninstalling the watcher.
 
 ## Repository layout
 

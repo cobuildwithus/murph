@@ -9,7 +9,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <string>export PATH=&quot;__SCHEDULER_PATH__&quot;; exec &quot;__NODE_EXECUTABLE__&quot; &quot;$HOME/__REPO_HOME_RELATIVE__/node_modules/tsx/dist/cli.mjs&quot; --tsconfig &quot;$HOME/__REPO_HOME_RELATIVE__/tsconfig.tools.json&quot; &quot;$HOME/__REPO_HOME_RELATIVE__/scripts/prod-watch.ts&quot; run --scheduled --provider-child --dispatch-workers --remediation-shadow</string>
+    <string>export PATH=&quot;__SCHEDULER_PATH__&quot;; export CODEX_HOME=&quot;$HOME/.codex-5&quot;; export MURPH_PROD_WATCH_CODEX_PROFILE=&quot;prod-watch&quot;; export MURPH_PROD_WATCH_RUNTIME_ROOT=&quot;$HOME/__RUNTIME_HOME_RELATIVE__&quot;; export MURPH_PROD_WATCH_APPROVED_HEAD=&quot;__APPROVED_HEAD__&quot;; cd &quot;$HOME/__REPO_HOME_RELATIVE__&quot; &amp;&amp; test &quot;$(git rev-parse HEAD)&quot; = &quot;$MURPH_PROD_WATCH_APPROVED_HEAD&quot; &amp;&amp; test -z &quot;$(git status --porcelain=v1 --untracked-files=no)&quot; &amp;&amp; exec &quot;__NODE_EXECUTABLE__&quot; &quot;$HOME/__REPO_HOME_RELATIVE__/node_modules/tsx/dist/cli.mjs&quot; --tsconfig &quot;$HOME/__REPO_HOME_RELATIVE__/tsconfig.tools.json&quot; &quot;$HOME/__REPO_HOME_RELATIVE__/scripts/prod-watch.ts&quot; run --scheduled --provider-child</string>
   </array>
   <key>StartInterval</key>
   <integer>300</integer>

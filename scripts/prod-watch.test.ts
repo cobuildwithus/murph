@@ -43,12 +43,25 @@ import {
   recordRemediationReview,
   safeErrorCode,
   transitionIncident,
+  updateStateAndQueueRemediation,
   updateStateFromSnapshot,
   type AdapterEvidence,
   type ProductionWatchSnapshot,
+  type ProductionWatchState,
 } from "./prod-watch/core.ts";
 import {
+  assertSafeRemediationDiff,
+  bisectVercelWindow,
+  buildImmutableRemediationPushArgs,
+  buildRemediationChildEnv,
+  buildRemediationReviewRequest,
+  nextVercelSampleDuration,
+  parseReviewGptTerminalBlock,
   renderLaunchdPlistTemplate,
+  renderVerificationSandboxConfig,
+  shouldContinueVercelPagination,
+  splitVercelWindow,
+  validateRemediationPatch,
   verifySchedulerExecutableChain,
 } from "./prod-watch.ts";
 
@@ -65,6 +78,126 @@ afterEach(() => {
 });
 
 describe("production-watch snapshot contract", () => {
+  it("accepts only one exact terminal ReviewGPT authority block", () => {
+    const patchHead = "a".repeat(40);
+    const terminal = [
+      "MODEL_CONFIRMATION: gpt-5.6-sol",
+      `PROD_WATCH_REVIEW_PATCH_HEAD: ${patchHead}`,
+      "PROD_WATCH_REVIEW_OUTCOME: APPROVED",
+      "PROD_WATCH_REVIEW_COMPLETE",
+    ].join("\n");
+    expect(parseReviewGptTerminalBlock(`Review complete.\n${terminal}\n`, patchHead)).toBe("approved");
+    expect(parseReviewGptTerminalBlock([
+      "PROD_WATCH_REVIEW_OUTCOME: APPROVED",
+      terminal.replace("APPROVED", "REJECTED"),
+    ].join("\n"), patchHead)).toBe("invalid");
+    expect(parseReviewGptTerminalBlock(`> ${terminal}\n${terminal}`, patchHead)).toBe("invalid");
+    expect(parseReviewGptTerminalBlock(
+      terminal.replace("gpt-5.6-sol", "UNKNOWN"),
+      patchHead,
+    )).toBe("invalid");
+    expect(parseReviewGptTerminalBlock(
+      terminal.replace(patchHead, "b".repeat(40)),
+      patchHead,
+    )).toBe("invalid");
+    expect(parseReviewGptTerminalBlock(
+      terminal.replace("APPROVED", "INVALID"),
+      patchHead,
+    )).toBe("invalid");
+  });
+
+  it("keeps the remediation child environment minimal and blocks sensitive additions", () => {
+    const childEnv = buildRemediationChildEnv({
+      CODEX_HOME: "<HOME_DIR>/.codex",
+      SECRET_CANARY: "must-not-cross-boundary",
+      DATABASE_URL: "must-not-cross-boundary",
+    });
+    expect(childEnv).toMatchObject({
+      CODEX_HOME: "<HOME_DIR>/.codex",
+      CI: "1",
+      NO_COLOR: "1",
+    });
+    expect(childEnv.SECRET_CANARY).toBeUndefined();
+    expect(childEnv.DATABASE_URL).toBeUndefined();
+    expect(Object.keys(childEnv).sort()).toEqual([
+      "CI", "CODEX_HOME", "HOME", "LANG", "LC_ALL", "NO_COLOR", "PATH",
+    ]);
+
+    const privatePath = ["", "Users", "<REDACTED_USER>", "private.txt"].join("/");
+    const liveSecret = ["sk", "live", "1234567890abcdef"].join("_");
+    expect(() => assertSafeRemediationDiff(`diff --git a/a.ts b/a.ts\n+export const value = ${JSON.stringify(privatePath)};`))
+      .toThrow("remediation_patch_sensitive_content");
+    expect(() => assertSafeRemediationDiff(`diff --git a/a.ts b/a.ts\n+export const value = ${JSON.stringify(liveSecret)};`))
+      .toThrow("remediation_patch_sensitive_content");
+    expect(() => assertSafeRemediationDiff("diff --git a/a.ts b/a.ts\n+export const value = 2;"))
+      .not.toThrow();
+  });
+
+  it("keeps ReviewGPT material static and verification network-denied", () => {
+    const patchHead = "d".repeat(40);
+    const request = buildRemediationReviewRequest({
+      patchHead,
+      paths: ["apps/demo/src/service.test.ts", "apps/demo/src/service.ts"],
+      diff: "diff --git a/apps/demo/src/service.ts b/apps/demo/src/service.ts\n+export const value = 2;",
+    });
+    for (const forbiddenField of [
+      "snapshot", "sourceHealth", "releaseContext", "collectorFailures", "fingerprints", "counters",
+    ]) {
+      expect(request).not.toContain(forbiddenField);
+    }
+    expect(request).toContain(`The exact patch head is ${patchHead}.`);
+
+    const config = renderVerificationSandboxConfig({
+      home: "/private/tmp/prod-watch-verification/home",
+      temp: "/private/tmp/prod-watch-verification/tmp",
+    });
+    expect(config).toContain("[permissions.prod-watch-verification.network]\nenabled = false");
+    expect(config).toContain('[shell_environment_policy]\ninherit = "none"');
+    expect(config).toContain("include_only = []");
+  });
+
+  it("publishes only an immutable reviewed SHA to a collision-free remote ref", () => {
+    const patchHead = "c".repeat(40);
+    const branch = "codex/prod-watch/inc-123-safe";
+    expect(buildImmutableRemediationPushArgs(patchHead, branch)).toEqual([
+      "-c",
+      "core.hooksPath=/dev/null",
+      "push",
+      `--force-with-lease=refs/heads/${branch}:`,
+      "origin",
+      `${patchHead}:refs/heads/${branch}`,
+    ]);
+    expect(() => buildImmutableRemediationPushArgs(patchHead, `${branch}..moved`))
+      .toThrow("remediation_publication_ref_invalid");
+    expect(() => buildImmutableRemediationPushArgs("not-a-head", branch))
+      .toThrow("remediation_publication_ref_invalid");
+  });
+
+  it("stops Vercel pagination when an empty page reports a stale continuation flag", () => {
+    expect(shouldContinueVercelPagination(0, true)).toBe(false);
+    expect(shouldContinueVercelPagination(100, true)).toBe(true);
+    expect(shouldContinueVercelPagination(100, false)).toBe(false);
+  });
+
+  it("partitions Vercel detail coverage into contiguous bounded windows", () => {
+    const start = new Date("2026-08-09T20:00:00.000Z");
+    const end = new Date("2026-08-09T20:12:00.000Z");
+    expect(splitVercelWindow(start, end)).toEqual([
+      { start, end: new Date("2026-08-09T20:05:00.000Z") },
+      { start: new Date("2026-08-09T20:05:00.000Z"), end: new Date("2026-08-09T20:10:00.000Z") },
+      { start: new Date("2026-08-09T20:10:00.000Z"), end },
+    ]);
+    expect(() => splitVercelWindow(end, start)).toThrow("vercel_window_invalid");
+    expect(bisectVercelWindow(start, new Date("2026-08-09T20:05:00.000Z"))).toEqual([
+      { start, end: new Date("2026-08-09T20:02:30.000Z") },
+      { start: new Date("2026-08-09T20:02:30.000Z"), end: new Date("2026-08-09T20:05:00.000Z") },
+    ]);
+    expect(bisectVercelWindow(start, new Date("2026-08-09T20:00:15.000Z"))).toBeUndefined();
+    expect(nextVercelSampleDuration(10_000)).toBe(5_000);
+    expect(nextVercelSampleDuration(101)).toBe(100);
+    expect(nextVercelSampleDuration(100)).toBeUndefined();
+  });
+
   it("keeps a healthy fixture bounded, aggregate-only, and quiet", () => {
     const snapshot = buildFixtureSnapshot("healthy", new Date("2026-08-09T20:00:00.000Z"));
 
@@ -83,7 +216,7 @@ describe("production-watch snapshot contract", () => {
     expect(serialized).not.toContain("transcript");
   });
 
-  it("marks a complete fresh database and provider envelope healthy", () => {
+  it("keeps a fresh model-authored Cloudflare envelope advisory", () => {
     const now = new Date("2026-08-09T20:00:00.000Z");
     const provider = parseProviderEvidence(JSON.parse(
       readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
@@ -109,8 +242,12 @@ describe("production-watch snapshot contract", () => {
       failures: [],
     });
 
-    expect(snapshot.monitor).toMatchObject({ status: "healthy", evidenceComplete: true });
-    expect(snapshot.sourceHealth.every((source) => source.coverage === "complete")).toBe(true);
+    expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
+    expect(snapshot.sourceHealth.find((source) => source.source === "cloudflare")?.coverage)
+      .toBe("on_demand");
+    expect(snapshot.sourceHealth
+      .filter((source) => source.source !== "cloudflare")
+      .every((source) => source.coverage === "complete")).toBe(true);
     expect(snapshot.anomalyCandidates).toEqual([]);
   });
 
@@ -299,9 +436,9 @@ describe("production-watch snapshot contract", () => {
       failures: [],
     });
 
-    expect(snapshot.fingerprints).toHaveLength(37);
+    expect(snapshot.fingerprints).toHaveLength(29);
     expect(snapshot.anomalyCandidates.filter((candidate) => candidate.category === "sensitive"))
-      .toHaveLength(37);
+      .toHaveLength(29);
     expect(snapshot.redaction).toMatchObject({ maxFingerprints: 37, maxAnomalyCandidates: 245 });
   });
 
@@ -347,144 +484,40 @@ describe("production-watch snapshot contract", () => {
     });
   });
 
-  it("keeps provider metric and exact dimensions in anomaly and streak identity", () => {
-    const makeSnapshot = (surface: string, now: Date): ProductionWatchSnapshot => {
-      const provider = parseProviderEvidence(JSON.parse(
-        readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
-      ) as unknown);
-      const vercel = provider.sources.find((source) => source.source === "vercel")!;
-      for (const counter of vercel.counters) {
-        if (counter.dimensions.surface !== undefined) {
-          counter.dimensions.surface = surface;
-        }
-      }
-      const errors = vercel.counters.find((counter) => (
-        counter.metric === "provider_error_count" && counter.dimensions.surface === surface
-      ))!;
-      errors.current = 20;
-      errors.previous = 1;
-      return buildSnapshot({
-        now,
-        runId: `provider-surface-${surface}`,
-        mode: "collect",
-        dryRun: true,
-        startedAt: new Date(now.getTime() - 100),
-        timeoutMs: 240000,
-        skippedOverlap: false,
-        previousStart: new Date(now.getTime() - 30 * 60 * 1000),
-        currentStart: new Date(now.getTime() - 15 * 60 * 1000),
-        end: now,
-        lookbackMinutes: 15,
-        settlingDelaySeconds: 0,
-        configuredSources: ["database", "vercel", "cloudflare", "stripe"],
-        evidences: [
-          rebaseEvidence(readFixture("healthy"), now),
-          ...provider.sources.map((source) => rebaseEvidence(source, now)),
-        ],
-        failures: [],
-      });
-    };
-
-    const api = makeSnapshot("api", new Date("2026-08-09T20:00:00.000Z"));
-    const hosted = makeSnapshot("hosted_web", new Date("2026-08-09T20:05:00.000Z"));
-    const apiAnomaly = api.anomalyCandidates.find((candidate) => candidate.source === "vercel")!;
-    const hostedAnomaly = hosted.anomalyCandidates.find((candidate) => candidate.source === "vercel")!;
-    expect(apiAnomaly.fingerprint).not.toBe(hostedAnomaly.fingerprint);
-
-    let state = createInitialState(
-      new Date("2026-08-09T19:55:00.000Z"),
-      ["database", "vercel", "cloudflare", "stripe"],
-    );
-    state = updateStateFromSnapshot(state, api).state;
-    state = updateStateFromSnapshot(state, hosted).state;
-    expect(state.incidents.filter((incident) => incident.source === "vercel")).toHaveLength(0);
-    state = updateStateFromSnapshot(
-      state,
-      makeSnapshot("hosted_web", new Date("2026-08-09T20:10:00.000Z")),
-    ).state;
-    expect(state.incidents.filter((incident) => incident.source === "vercel")).toHaveLength(1);
-
-    const simultaneous = makeSnapshot("hosted_web", new Date("2026-08-09T20:15:00.000Z"));
-    const vercelCounters = simultaneous.counters.filter((counter) => counter.dimensions.source === "vercel");
-    vercelCounters.push(
-      {
-        metric: "provider_request_count",
-        dimensions: { source: "vercel", surface: "api" },
-        unit: "count",
-        current: 240,
-        previous: 230,
-      },
-      {
-        metric: "provider_error_count",
-        dimensions: { source: "vercel", surface: "api" },
-        unit: "count",
-        current: 20,
-        previous: 1,
-      },
-      {
-        metric: "provider_timeout_count",
-        dimensions: { source: "vercel", surface: "api" },
-        unit: "count",
-        current: 0,
-        previous: 0,
-      },
-      {
-        metric: "deployment_error_count",
-        dimensions: { source: "vercel", surface: "hosted_web" },
-        unit: "count",
-        current: 20,
-        previous: 1,
-      },
-    );
-    simultaneous.counters = [
-      ...simultaneous.counters.filter((counter) => counter.dimensions.source !== "vercel"),
-      ...vercelCounters,
-    ];
-    simultaneous.anomalyCandidates = evaluateAnomalies({
-      now: new Date(simultaneous.generatedAt),
-      sourceHealth: simultaneous.sourceHealth,
-      releaseContext: simultaneous.releaseContext,
-      counters: simultaneous.counters,
-      latency: simultaneous.latency,
-      fingerprints: simultaneous.fingerprints,
-      failures: simultaneous.collectorFailures,
+  it("keeps model-authored Cloudflare evidence advisory and non-scorable", () => {
+    const now = new Date("2026-08-09T20:00:00.000Z");
+    const provider = parseProviderEvidence(JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as unknown);
+    const cloudflare = provider.sources.find((source) => source.source === "cloudflare")!;
+    const errors = cloudflare.counters.find((counter) => counter.metric === "provider_error_count")!;
+    errors.current = 20;
+    errors.previous = 1;
+    const snapshot = buildSnapshot({
+      now,
+      runId: "cloudflare-advisory",
+      mode: "collect",
+      dryRun: true,
+      startedAt: new Date(now.getTime() - 100),
+      timeoutMs: 240000,
+      skippedOverlap: false,
+      previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+      currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+      end: now,
+      lookbackMinutes: 15,
+      settlingDelaySeconds: 0,
+      configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+      evidences: [
+        rebaseEvidence(readFixture("healthy"), now),
+        ...provider.sources.map((source) => rebaseEvidence(source, now)),
+      ],
+      failures: [],
     });
-    const simultaneousVercel = simultaneous.anomalyCandidates.filter((candidate) => (
-      candidate.source === "vercel" && candidate.ruleId === "error_rate_regression"
-    ));
-    expect(simultaneousVercel).toHaveLength(3);
-    expect(new Set(simultaneousVercel.map((candidate) => candidate.fingerprint)).size).toBe(3);
-    expect(simultaneousVercel.map((candidate) => candidate.signalCode)).toEqual(expect.arrayContaining([
-      "deployment_error_count|source=vercel|surface=hosted_web",
-      "provider_error_count|source=vercel|surface=api",
-      "provider_error_count|source=vercel|surface=hosted_web",
-    ]));
-
-    let simultaneousState = createInitialState(
-      new Date("2026-08-09T20:10:00.000Z"),
-      ["database", "vercel", "cloudflare", "stripe"],
-    );
-    simultaneousState = updateStateFromSnapshot(simultaneousState, simultaneous).state;
-    const repeated = structuredClone(simultaneous) as ProductionWatchSnapshot;
-    repeated.generatedAt = "2026-08-09T20:20:00.000Z";
-    repeated.run.runId = "provider-surface-repeat";
-    repeated.run.startedAt = "2026-08-09T20:19:59.900Z";
-    repeated.run.finishedAt = repeated.generatedAt;
-    simultaneousState = updateStateFromSnapshot(simultaneousState, repeated).state;
-    expect(simultaneousState.incidents.filter((incident) => incident.source === "vercel"))
-      .toHaveLength(0);
-    const newerObservation = structuredClone(repeated) as ProductionWatchSnapshot;
-    newerObservation.generatedAt = "2026-08-09T20:25:00.000Z";
-    newerObservation.run.runId = "provider-surface-new-observation";
-    newerObservation.run.startedAt = "2026-08-09T20:24:59.900Z";
-    newerObservation.run.finishedAt = newerObservation.generatedAt;
-    const vercelHealth = newerObservation.sourceHealth.find((health) => health.source === "vercel")!;
-    vercelHealth.collectedAt = "2026-08-09T20:23:00.000Z";
-    vercelHealth.freshnessSeconds = 120;
-    simultaneousState = updateStateFromSnapshot(simultaneousState, newerObservation).state;
-    const rendered = renderActiveIncidents(simultaneousState);
-    expect(rendered).toContain("surface=api");
-    expect(rendered).toContain("surface=hosted_web");
+    expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
+    expect(snapshot.sourceHealth.find((source) => source.source === "cloudflare"))
+      .toMatchObject({ status: "ok", coverage: "on_demand", access: "mcp_on_demand" });
+    expect(snapshot.counters.some((counter) => counter.dimensions.source === "cloudflare")).toBe(false);
+    expect(snapshot.anomalyCandidates.some((candidate) => candidate.source === "cloudflare")).toBe(false);
   });
 
   it("advances provider streaks only for newer source observations", () => {
@@ -493,10 +526,10 @@ describe("production-watch snapshot contract", () => {
         readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
       ) as unknown);
       if (anomalous) {
-        const vercel = provider.sources.find((source) => source.source === "vercel")!;
-        const errors = vercel.counters.find((counter) => (
+        const stripe = provider.sources.find((source) => source.source === "stripe")!;
+        const errors = stripe.counters.find((counter) => (
           counter.metric === "provider_error_count"
-          && counter.dimensions.surface === "hosted_web"
+          && counter.dimensions.surface === "webhook_delivery"
         ))!;
         errors.current = 20;
         errors.previous = 1;
@@ -524,7 +557,7 @@ describe("production-watch snapshot contract", () => {
     };
 
     const first = makeProviderSnapshot(new Date("2026-08-09T20:00:00.000Z"), true);
-    const fingerprint = first.anomalyCandidates.find((candidate) => candidate.source === "vercel")!
+    const fingerprint = first.anomalyCandidates.find((candidate) => candidate.source === "stripe")!
       .fingerprint;
     let state = createInitialState(
       new Date("2026-08-09T19:55:00.000Z"),
@@ -567,6 +600,60 @@ describe("production-watch snapshot contract", () => {
       buildFixtureSnapshot("healthy", new Date("2026-08-09T22:01:00.000Z")),
     ).state;
     expect(expired.anomalyStreaks[fingerprint]).toBeUndefined();
+  });
+
+  it("does not score sampled Vercel request estimates as full-window rates", () => {
+    const now = new Date("2026-08-09T20:00:00.000Z");
+    const provider = parseProviderEvidence(JSON.parse(
+      readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
+    ) as unknown);
+    const vercel = provider.sources.find((source) => source.source === "vercel")!;
+    for (const counter of vercel.counters) {
+      if (counter.metric === "provider_error_count" || counter.metric === "provider_timeout_count") {
+        counter.current = 100;
+        counter.previous = 0;
+      }
+    }
+    vercel.fingerprints.push({
+      rawFingerprint: "sampled-rate-independent-spike",
+      source: "vercel",
+      component: "hosted_runtime",
+      phase: "request",
+      severity: "medium",
+      count: 10,
+      previousCount: 0,
+      firstSeenAt: now.toISOString(),
+      lastSeenAt: now.toISOString(),
+    });
+    const snapshot = buildSnapshot({
+      now,
+      runId: "vercel-sampled-rate",
+      mode: "collect",
+      dryRun: true,
+      startedAt: new Date(now.getTime() - 100),
+      timeoutMs: 240000,
+      skippedOverlap: false,
+      previousStart: new Date(now.getTime() - 30 * 60 * 1000),
+      currentStart: new Date(now.getTime() - 15 * 60 * 1000),
+      end: now,
+      lookbackMinutes: 15,
+      settlingDelaySeconds: 0,
+      configuredSources: ["database", "vercel", "cloudflare", "stripe"],
+      evidences: [
+        rebaseEvidence(readFixture("healthy"), now),
+        ...provider.sources.map((source) => rebaseEvidence(source, now)),
+      ],
+      failures: [],
+    });
+
+    expect(snapshot.anomalyCandidates.some((candidate) => (
+      candidate.source === "vercel"
+      && (candidate.ruleId === "error_rate_regression" || candidate.ruleId === "timeout_rate_regression")
+    ))).toBe(false);
+    expect(snapshot.anomalyCandidates).toContainEqual(expect.objectContaining({
+      source: "vercel",
+      ruleId: "fingerprint_spike",
+    }));
   });
 
   it("uses the same source observation identity for failed-provider monitor streaks", () => {
@@ -758,36 +845,36 @@ describe("production-watch snapshot contract", () => {
         readFileSync(path.join(fixtureRoot, "healthy.providers.json"), "utf8"),
       ) as unknown);
       const evidences = provider.sources.map((source) => rebaseEvidence(source, now));
-      const vercel = evidences.find((source) => source.source === "vercel")!;
-      const errors = vercel.counters.find((counter) => (
+      const cloudflare = evidences.find((source) => source.source === "cloudflare")!;
+      const errors = cloudflare.counters.find((counter) => (
         counter.metric === "provider_error_count"
-        && counter.dimensions.surface === "hosted_web"
+        && counter.dimensions.surface === "hosted_runner"
       ))!;
       errors.current = 20;
       errors.previous = 1;
       const failures = [] as Array<{
-        source: "vercel";
+        source: "cloudflare";
         class: "rate_limit";
         code: string;
         retryable: boolean;
       }>;
       if (mode === "degraded") {
-        vercel.status = "degraded";
-        failures.push({ source: "vercel", class: "rate_limit", code: "rate_limited", retryable: true });
+        cloudflare.status = "degraded";
+        failures.push({ source: "cloudflare", class: "rate_limit", code: "rate_limited", retryable: true });
       } else if (mode === "failed") {
-        failures.push({ source: "vercel", class: "rate_limit", code: "rate_limited", retryable: true });
+        failures.push({ source: "cloudflare", class: "rate_limit", code: "rate_limited", retryable: true });
       } else if (mode === "stale") {
-        vercel.collectedAt = new Date(now.getTime() - 1_901_000).toISOString();
-        vercel.freshnessSeconds = 1_901;
+        cloudflare.collectedAt = new Date(now.getTime() - 1_901_000).toISOString();
+        cloudflare.freshnessSeconds = 1_901;
       } else if (mode === "unauthenticated") {
-        vercel.auth = "failed";
+        cloudflare.auth = "failed";
       } else if (mode === "unavailable") {
-        vercel.status = "unavailable";
-        vercel.auth = "unknown";
-        vercel.releaseContext = [];
-        vercel.counters = [];
-        vercel.latency = [];
-        vercel.fingerprints = [];
+        cloudflare.status = "unavailable";
+        cloudflare.auth = "unknown";
+        cloudflare.releaseContext = [];
+        cloudflare.counters = [];
+        cloudflare.latency = [];
+        cloudflare.fingerprints = [];
       }
       return buildSnapshot({
         now,
@@ -811,41 +898,37 @@ describe("production-watch snapshot contract", () => {
     for (const mode of ["degraded", "failed", "stale", "unauthenticated", "unavailable"] as const) {
       const first = makeSnapshot(mode, new Date("2026-08-09T20:00:00.000Z"));
       const second = makeSnapshot(mode, new Date("2026-08-09T20:05:00.000Z"));
-      const vercelCandidates = first.anomalyCandidates.filter((candidate) => candidate.source === "vercel");
-      expect(vercelCandidates.length).toBeGreaterThan(0);
-      expect(vercelCandidates.every((candidate) => candidate.category === "monitor")).toBe(true);
-      expect(first.counters.some((counter) => counter.dimensions.source === "vercel")).toBe(false);
-      expect(first.latency.some((summary) => summary.dimensions.source === "vercel")).toBe(false);
-      expect(first.fingerprints.some((fingerprint) => fingerprint.source === "vercel")).toBe(false);
-      expect(first.releaseContext.some((release) => release.source === "vercel")).toBe(false);
+      const cloudflareCandidates = first.anomalyCandidates.filter((candidate) => candidate.source === "cloudflare");
+      expect(cloudflareCandidates.length).toBeGreaterThan(0);
+      expect(cloudflareCandidates.every((candidate) => candidate.category === "monitor")).toBe(true);
+      expect(first.counters.some((counter) => counter.dimensions.source === "cloudflare")).toBe(false);
+      expect(first.latency.some((summary) => summary.dimensions.source === "cloudflare")).toBe(false);
+      expect(first.fingerprints.some((fingerprint) => fingerprint.source === "cloudflare")).toBe(false);
+      expect(first.releaseContext.some((release) => release.source === "cloudflare")).toBe(false);
       let state = createInitialState(
         new Date("2026-08-09T19:55:00.000Z"),
         ["database", "vercel", "cloudflare", "stripe"],
       );
       state = updateStateFromSnapshot(state, first).state;
       state = updateStateFromSnapshot(state, second).state;
-      const vercelIncidents = state.incidents.filter((incident) => incident.source === "vercel");
-      expect(vercelIncidents.length).toBeGreaterThan(0);
-      expect(vercelIncidents.every((incident) => incident.category === "monitor")).toBe(true);
+      const cloudflareIncidents = state.incidents.filter((incident) => incident.source === "cloudflare");
+      expect(cloudflareIncidents.length).toBeGreaterThan(0);
+      expect(cloudflareIncidents.every((incident) => incident.category === "monitor")).toBe(true);
     }
 
     const firstFresh = makeSnapshot("fresh", new Date("2026-08-09T20:00:00.000Z"));
     const secondFresh = makeSnapshot("fresh", new Date("2026-08-09T20:05:00.000Z"));
-    expect(firstFresh.anomalyCandidates).toContainEqual(expect.objectContaining({
-      source: "vercel",
-      ruleId: "error_rate_regression",
-      signalCode: "provider_error_count|source=vercel|surface=hosted_web",
-    }));
+    expect(firstFresh.sourceHealth.find((source) => source.source === "cloudflare")?.coverage)
+      .toBe("on_demand");
+    expect(firstFresh.anomalyCandidates.some((candidate) => candidate.source === "cloudflare"))
+      .toBe(false);
     let freshState = createInitialState(
       new Date("2026-08-09T19:55:00.000Z"),
       ["database", "vercel", "cloudflare", "stripe"],
     );
     freshState = updateStateFromSnapshot(freshState, firstFresh).state;
     freshState = updateStateFromSnapshot(freshState, secondFresh).state;
-    expect(freshState.incidents).toContainEqual(expect.objectContaining({
-      source: "vercel",
-      ruleId: "error_rate_regression",
-    }));
+    expect(freshState.incidents.some((incident) => incident.source === "cloudflare")).toBe(false);
   });
 
   it("treats clinical, consent, and integrity code paths as sensitive", () => {
@@ -1238,7 +1321,7 @@ describe("production-watch incident coordination", () => {
       "session-a",
       "resolved",
       new Date("2026-08-09T20:08:00.000Z"),
-    )).toThrow("incident_terminal_evidence_incomplete");
+    )).toThrow("incident_resolution_requires_later_clean_evidence");
 
     const cleanSnapshot = buildCompleteSnapshot(new Date("2026-08-09T20:10:00.000Z"));
     const afterCleanEvidence = updateStateFromSnapshot(confirmed, cleanSnapshot).state;
@@ -1382,7 +1465,7 @@ describe("production-watch incident coordination", () => {
     )).toThrow("incident_terminal_evidence_stale");
   });
 
-  it("allows false-positive classification only from complete current nonsensitive evidence", () => {
+  it("allows false-positive classification only from complete current incident-source evidence", () => {
     const promoted = buildPromotedSuspiciousState();
     const nonsensitive = promoted.incidents.find((candidate) => candidate.category !== "sensitive")!;
     const claimed = claimIncident(
@@ -1392,8 +1475,11 @@ describe("production-watch incident coordination", () => {
       new Date("2026-08-09T20:06:00.000Z"),
       15,
     );
+    const incompleteSource = structuredClone(claimed);
+    const databaseHealth = incompleteSource.monitor.lastSourceHealth.find((health) => health.source === "database")!;
+    databaseHealth.coverage = "partial";
     expect(() => transitionIncident(
-      claimed,
+      incompleteSource,
       nonsensitive.fingerprint,
       "session-false-positive",
       "false_positive",
@@ -1407,13 +1493,14 @@ describe("production-watch incident coordination", () => {
     const degraded = structuredClone(complete);
     degraded.monitor.lastMonitorStatus = "degraded";
     degraded.monitor.lastEvidenceComplete = false;
-    expect(() => transitionIncident(
+    expect(transitionIncident(
       degraded,
       nonsensitive.fingerprint,
       "session-false-positive",
       "false_positive",
       new Date("2026-08-09T20:11:00.000Z"),
-    )).toThrow("incident_terminal_evidence_incomplete");
+    ).incidents.find((candidate) => candidate.fingerprint === nonsensitive.fingerprint)?.state)
+      .toBe("false_positive");
     expect(transitionIncident(
       complete,
       nonsensitive.fingerprint,
@@ -1469,6 +1556,12 @@ describe("production-watch incident coordination", () => {
       new Date("2026-08-09T20:06:01.000Z"),
       15,
     );
+    expect(() => markRemediationDispatched(
+      state,
+      queued.dispatches[0]!.sessionId,
+      new Date("2026-08-09T20:06:01.500Z"),
+      15,
+    )).toThrow("remediation_session_not_queued");
     state = claimGlobalRemediationLease(
       state,
       queued.dispatches[0]!.sessionId,
@@ -1506,6 +1599,86 @@ describe("production-watch incident coordination", () => {
     expect(state.remediation.globalLease).toBeUndefined();
     expect(parseState(JSON.parse(JSON.stringify(state)) as unknown).remediation.sessions[0]?.state)
       .toBe("draft_pr_opened");
+  });
+
+  it("redelivers queued sessions and fences stale workers with a new session identity", () => {
+    const promoted = buildPromotedSuspiciousState();
+    const incident = promoted.incidents.find((candidate) => (
+      candidate.source === "database" && candidate.automationClass === "remediation_candidate"
+    ));
+    expect(incident).toBeDefined();
+    const queuedAt = new Date("2026-08-09T20:06:00.000Z");
+    const queued = queueRemediationDispatches(promoted, [incident!.id], queuedAt, { maxConcurrency: 1 });
+    const initialDispatch = queued.dispatches[0]!;
+
+    const redelivered = queueRemediationDispatches(
+      queued.state,
+      [],
+      new Date("2026-08-09T20:11:00.000Z"),
+      { maxConcurrency: 1 },
+    );
+    expect(redelivered.dispatches).toEqual([initialDispatch]);
+    expect(redelivered.state.remediation.sessions).toHaveLength(1);
+
+    const dispatched = markRemediationDispatched(
+      redelivered.state,
+      initialDispatch.sessionId,
+      new Date("2026-08-09T20:11:01.000Z"),
+      15,
+    );
+    const recovered = queueRemediationDispatches(
+      dispatched,
+      [incident!.id],
+      new Date("2026-08-09T20:26:02.000Z"),
+      { maxConcurrency: 1 },
+    );
+    expect(recovered.dispatches).toHaveLength(1);
+    expect(recovered.dispatches[0]?.sessionId).not.toBe(initialDispatch.sessionId);
+    expect(recovered.state.remediation.sessions.find((session) => (
+      session.sessionId === initialDispatch.sessionId
+    ))).toMatchObject({
+      sessionId: initialDispatch.sessionId,
+      state: "blocked",
+      lastErrorCode: "remediation_session_superseded",
+    });
+    expect(recovered.state.remediation.sessions.find((session) => (
+      session.sessionId === recovered.dispatches[0]?.sessionId
+    ))?.state).toBe("queued");
+  });
+
+  it("persists promotion and dispatch intent in one canonical state transition", () => {
+    const initial = createInitialState(
+      new Date("2026-08-09T19:55:00.000Z"),
+      ["database", "vercel", "cloudflare", "stripe"],
+    );
+    const first = updateStateAndQueueRemediation(
+      initial,
+      buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:00:00.000Z")),
+      { maxConcurrency: 2 },
+    );
+    const second = updateStateAndQueueRemediation(
+      first.state,
+      buildFixtureSnapshot("suspicious", new Date("2026-08-09T20:05:00.000Z")),
+      { maxConcurrency: 2 },
+    );
+    expect(second.promotedIncidentIds.length).toBeGreaterThan(0);
+    expect(second.dispatches.length).toBeGreaterThan(0);
+    for (const dispatch of second.dispatches) {
+      expect(second.state.remediation.sessions).toContainEqual(expect.objectContaining({
+        sessionId: dispatch.sessionId,
+        incidentId: dispatch.incidentId,
+        state: "queued",
+      }));
+    }
+
+    const recovered = updateStateAndQueueRemediation(
+      second.state,
+      buildFixtureSnapshot("healthy", new Date("2026-08-09T20:10:00.000Z")),
+      { maxConcurrency: 2 },
+    );
+    expect(recovered.promotedIncidentIds).toEqual([]);
+    expect(recovered.dispatches.map((dispatch) => dispatch.sessionId))
+      .toEqual(second.dispatches.map((dispatch) => dispatch.sessionId));
   });
 
   it("records alert-escalated remediation sessions without opening an edit lane", () => {
@@ -1814,9 +1987,11 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(accepted.status, "private_provider_collect_failed").toBe(0);
     const acceptedSnapshot = JSON.parse(accepted.stdout) as ProductionWatchSnapshot;
     expect(acceptedSnapshot.sourceHealth
-      .filter((source) => source.source !== "database")
+      .filter((source) => source.source === "vercel" || source.source === "stripe")
       .every((source) => source.status === "ok" && source.coverage === "complete"))
       .toBe(true);
+    expect(acceptedSnapshot.sourceHealth.find((source) => source.source === "cloudflare")?.coverage)
+      .toBe("on_demand");
     expect(acceptedSnapshot.collectorFailures.filter((failure) => failure.source !== "database"))
       .toEqual([]);
 
@@ -1882,7 +2057,9 @@ describe("production-watch locking and dry-run behavior", () => {
 
     expect(result.status).toBe(0);
     const snapshot = JSON.parse(result.stdout) as ProductionWatchSnapshot;
-    expect(snapshot.monitor).toMatchObject({ status: "healthy", evidenceComplete: true });
+    expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
+    expect(snapshot.sourceHealth.find((source) => source.source === "cloudflare")?.coverage)
+      .toBe("on_demand");
     expect(snapshot.anomalyCandidates).toEqual([]);
   });
 
@@ -1903,11 +2080,141 @@ describe("production-watch locking and dry-run behavior", () => {
 
     expect(result.status, result.stderr).toBe(0);
     const snapshot = JSON.parse(result.stdout) as ProductionWatchSnapshot;
-    expect(snapshot.monitor).toMatchObject({ status: "healthy", evidenceComplete: true });
+    expect(snapshot.monitor).toMatchObject({ status: "partial", evidenceComplete: false });
     expect(snapshot.sourceHealth
       .filter((source) => source.source !== "database")
       .every((source) => source.status === "ok" && source.auth === "ok"))
       .toBe(true);
+    expect(snapshot.sourceHealth.find((source) => source.source === "cloudflare")?.coverage)
+      .toBe("on_demand");
+  });
+
+  it("runs a read-only diagnosis worker before escalating a provider incident", () => {
+    const runtimeRoot = makeTempRoot();
+    const codexEnv = installFakeCodex(runtimeRoot);
+    const sourceFingerprint = "b".repeat(64);
+    const incidentFingerprint = "a".repeat(64);
+    const buildSnapshot = (now: Date): ProductionWatchSnapshot => {
+      const snapshot = buildCompleteSnapshot(now);
+      snapshot.fingerprints.push({
+        fingerprint: sourceFingerprint,
+        source: "vercel",
+        component: "production",
+        phase: "request",
+        severity: "high",
+        count: 30,
+        previousCount: 1,
+        firstSeenAt: new Date(now.getTime() - 10 * 60_000).toISOString(),
+        lastSeenAt: new Date(now.getTime() - 2 * 60_000).toISOString(),
+      });
+      snapshot.anomalyCandidates.push({
+        fingerprint: incidentFingerprint,
+        ruleId: "fingerprint_spike",
+        severity: "high",
+        category: "availability",
+        source: "vercel",
+        signalCode: "fingerprint_spike",
+        observedAt: now.toISOString(),
+        component: "production",
+        phase: "request",
+        sourceFingerprint,
+        evidence: [{
+          metric: "fingerprint_count",
+          current: 30,
+          baseline: 1,
+          threshold: 3,
+          unit: "count",
+        }],
+        deploymentCorrelated: false,
+        minimumConsecutiveRuns: 2,
+        automationClass: "diagnosis_only",
+      });
+      return snapshot;
+    };
+    const first = buildSnapshot(new Date("2026-08-10T20:00:00.000Z"));
+    const latest = buildSnapshot(new Date("2026-08-10T20:05:00.000Z"));
+    let state = createInitialState(
+      new Date("2026-08-10T19:55:00.000Z"),
+      ["database", "vercel", "cloudflare", "stripe"],
+    );
+    state = updateStateFromSnapshot(state, first).state;
+    state = updateStateFromSnapshot(state, latest).state;
+    const statePath = path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json");
+    const latestSnapshotPath = path.join(
+      runtimeRoot,
+      "projections",
+      "prod-watch",
+      "latest.snapshot.v1.json",
+    );
+    mkdirSync(path.dirname(statePath), { recursive: true });
+    mkdirSync(path.dirname(latestSnapshotPath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify(state), { mode: 0o600 });
+    writeFileSync(latestSnapshotPath, JSON.stringify(latest), { mode: 0o600 });
+    const incident = state.incidents.find((candidate) => candidate.source === "vercel");
+    expect(incident).toBeDefined();
+
+    const worker = runProdWatch([
+      "worker",
+      incident!.id,
+      "--session-id",
+      "provider-diagnosis-session",
+      "--worker-timeout-ms",
+      "30000",
+    ], runtimeRoot, codexEnv);
+    expect(worker.status).toBe(1);
+    expect(worker.stderr).toContain("automatic_remediation_not_enabled");
+    const diagnosed = JSON.parse(readFileSync(statePath, "utf8")) as ProductionWatchState;
+    expect(diagnosed.incidents.find((candidate) => candidate.id === incident!.id)?.state).toBe("candidate");
+    expect(diagnosed.remediation.sessions).toEqual([]);
+  });
+
+  it("admits only a bounded nonsensitive source-and-regression-test remediation patch", async () => {
+    const workspaceRoot = makeTempRoot();
+    const sourcePath = path.join(workspaceRoot, "apps", "demo", "src", "service.ts");
+    const testPath = path.join(workspaceRoot, "apps", "demo", "src", "service.test.ts");
+    mkdirSync(path.dirname(sourcePath), { recursive: true });
+    writeFileSync(sourcePath, "export const value = 1;\n");
+    writeFileSync(testPath, "test('value', () => expect(1).toBe(1));\n");
+    writeFileSync(path.join(workspaceRoot, ".gitignore"), "node_modules/\n");
+    const git = (...args: string[]) => spawnSync("git", args, {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+    });
+    expect(git("init").status).toBe(0);
+    expect(git("config", "user.name", "Production Watch").status).toBe(0);
+    expect(git("config", "user.email", "prod-watch@example.invalid").status).toBe(0);
+    expect(git("add", "--", ".gitignore", "apps/demo/src/service.ts", "apps/demo/src/service.test.ts").status).toBe(0);
+    expect(git("commit", "-m", "test fixture").status).toBe(0);
+    const baseHead = git("rev-parse", "HEAD").stdout.trim();
+    writeFileSync(sourcePath, "export const value = 2;\n");
+    writeFileSync(testPath, "test('value', () => expect(2).toBe(2));\n");
+
+    await expect(validateRemediationPatch({
+      root: workspaceRoot,
+      branch: "codex/prod-watch/test",
+      baseHead,
+    })).resolves.toMatchObject({
+      paths: ["apps/demo/src/service.test.ts", "apps/demo/src/service.ts"],
+    });
+
+    const ignoredTool = path.join(workspaceRoot, "node_modules", ".bin", "cobuild-review-gpt");
+    mkdirSync(path.dirname(ignoredTool), { recursive: true });
+    writeFileSync(ignoredTool, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await expect(validateRemediationPatch({
+      root: workspaceRoot,
+      branch: "codex/prod-watch/test",
+      baseHead,
+    })).rejects.toThrow("remediation_patch_ignored_mutation");
+    rmSync(path.join(workspaceRoot, "node_modules"), { recursive: true, force: true });
+
+    const forbiddenPath = path.join(workspaceRoot, "apps", "demo", "src", "auth", "token.ts");
+    mkdirSync(path.dirname(forbiddenPath), { recursive: true });
+    writeFileSync(forbiddenPath, "export const forbidden = true;\n");
+    await expect(validateRemediationPatch({
+      root: workspaceRoot,
+      branch: "codex/prod-watch/test",
+      baseHead,
+    })).rejects.toThrow("remediation_patch_path_forbidden");
   });
 
   it("keeps fixture collection read-only without state or Markdown projections", () => {
@@ -1994,6 +2301,17 @@ describe("production-watch locking and dry-run behavior", () => {
       const errors = vercel.counters.find((counter) => counter.metric === "provider_error_count")!;
       errors.current = 20;
       errors.previous = 1;
+      vercel.fingerprints.push({
+        rawFingerprint: "provider-policy-vercel-spike",
+        source: "vercel",
+        component: "hosted_runtime",
+        phase: "request",
+        severity: "medium",
+        count: 10,
+        previousCount: 0,
+        firstSeenAt: vercel.collectedAt,
+        lastSeenAt: vercel.collectedAt,
+      });
       const cloudflare = provider.sources.find((source) => source.source === "cloudflare")!;
       const timeouts = cloudflare.counters.find((counter) => counter.metric === "provider_timeout_count")!;
       timeouts.current = 10;
@@ -2032,7 +2350,8 @@ describe("production-watch locking and dry-run behavior", () => {
       }>;
     };
     const promoted = JSON.parse(readFileSync(statePath, "utf8")) as ProviderState;
-    for (const source of ["vercel", "cloudflare", "stripe"]) {
+    expect(promoted.incidents.some((incident) => incident.source === "cloudflare")).toBe(false);
+    for (const source of ["vercel", "stripe"]) {
       expect(listing.stdout).toContain(`| ${source} |`);
       const incidentId = promoted.incidents.find((incident) => incident.source === source)?.id;
       expect(incidentId).toBeDefined();
@@ -2111,12 +2430,8 @@ describe("production-watch locking and dry-run behavior", () => {
       "session-shadow",
       "--shadow",
     ], runtimeRoot);
-    expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      status: "shadow_skipped",
-      incidentId: incident!.id,
-      sessionId: "session-shadow",
-    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("automatic_remediation_not_enabled");
 
     const after = JSON.parse(readFileSync(statePath, "utf8")) as {
       incidents: Array<{ id: string; owner?: unknown }>;
@@ -2125,12 +2440,7 @@ describe("production-watch locking and dry-run behavior", () => {
       };
     };
     expect(after.incidents.find((candidate) => candidate.id === incident!.id)?.owner).toBeUndefined();
-    expect(after.remediation.sessions).toContainEqual(expect.objectContaining({
-      incidentId: incident!.id,
-      lastErrorCode: "shadow_mode",
-      sessionId: "session-shadow",
-      state: "blocked",
-    }));
+    expect(after.remediation.sessions).toEqual([]);
   });
 
   it("rejects ambiguous database helper stdout instead of selecting one JSON-looking line", () => {
@@ -2325,7 +2635,11 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
     expect(rendered).toContain("node_modules/tsx/dist/cli.mjs");
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
-    expect(rendered).toContain("--provider-child --dispatch-workers --remediation-shadow");
+    expect(rendered).toContain("export CODEX_HOME=&quot;$HOME/.codex-5&quot;");
+    expect(rendered).toContain("export MURPH_PROD_WATCH_CODEX_PROFILE=&quot;prod-watch&quot;");
+    expect(rendered).toContain("--provider-child");
+    expect(rendered).not.toContain("--dispatch-workers");
+    expect(rendered).not.toContain("--remediation-shadow");
     expect(rendered).not.toContain("exec pnpm");
     expect(rendered).not.toContain(fakeHome);
     expect(() => renderLaunchdPlistTemplate(template, path.join(fakeHome, "..", "project"), fakeHome))
@@ -2342,7 +2656,7 @@ describe("production-watch static safety contracts", () => {
       const testRoot = realpathSync(makeTempRoot());
       const schedulerHome = path.join(testRoot, "home");
       const checkoutRoot = path.join(schedulerHome, "project");
-      const runtimeRoot = path.join(testRoot, "runtime");
+      const runtimeRoot = path.join(schedulerHome, "runtime");
       const plistPath = path.join(testRoot, "scheduler.plist");
       const helperRoot = path.join(schedulerHome, ".local", "bin");
       mkdirSync(path.join(checkoutRoot, "scripts", "prod-watch"), { recursive: true });
@@ -2358,6 +2672,16 @@ describe("production-watch static safety contracts", () => {
       ]) {
         copyFileSync(path.join(repoRoot, relativePath), path.join(checkoutRoot, relativePath));
       }
+      const checkoutGit = (...args: string[]) => spawnSync("git", args, {
+        cwd: checkoutRoot,
+        encoding: "utf8",
+      });
+      expect(checkoutGit("init").status).toBe(0);
+      expect(checkoutGit("config", "user.name", "Production Watch").status).toBe(0);
+      expect(checkoutGit("config", "user.email", "prod-watch@example.invalid").status).toBe(0);
+      expect(checkoutGit("add", ".").status).toBe(0);
+      expect(checkoutGit("commit", "-m", "scheduler fixture").status).toBe(0);
+      const approvedHead = checkoutGit("rev-parse", "HEAD").stdout.trim();
       cpSync(
         path.join(repoRoot, "node_modules", "tsx"),
         path.join(checkoutRoot, "node_modules", "tsx"),
@@ -2394,13 +2718,21 @@ describe("production-watch static safety contracts", () => {
       ].join("\n"), { mode: 0o755 });
       chmodSync(helperPath, 0o755);
       writeFakeCodexExecutable(path.join(helperRoot, "codex"));
+      writeFakeProviderCliExecutables(helperRoot);
       const template = readFileSync(
         path.join(repoRoot, "scripts", "prod-watch", "com.murph.prod-watch.plist.template"),
         "utf8",
       );
       writeFileSync(
         plistPath,
-        renderLaunchdPlistTemplate(template, checkoutRoot, schedulerHome, process.execPath),
+        renderLaunchdPlistTemplate(
+          template,
+          checkoutRoot,
+          schedulerHome,
+          process.execPath,
+          runtimeRoot,
+          approvedHead,
+        ),
       );
       await expect(verifySchedulerExecutableChain(checkoutRoot, process.execPath, schedulerHome))
         .resolves.toBeUndefined();
@@ -2452,7 +2784,7 @@ describe("production-watch static safety contracts", () => {
       const fakeHome = path.join(testRoot, "home");
       const checkoutRoot = path.join(fakeHome, "project");
       const binRoot = path.join(testRoot, "bin");
-      const runtimeRoot = path.join(testRoot, "runtime");
+      const runtimeRoot = path.join(fakeHome, "runtime");
       const launchctlLog = path.join(testRoot, "launchctl.log");
       const launchctlState = path.join(testRoot, "launchctl.state");
       const launchAgentsRoot = path.join(fakeHome, "Library", "LaunchAgents");
@@ -2502,8 +2834,15 @@ describe("production-watch static safety contracts", () => {
         HOME: fakeHome,
         LAUNCHCTL_LOG: launchctlLog,
         LAUNCHCTL_STATE: launchctlState,
+        MURPH_PROD_WATCH_CODEX_BIN: path.join(binRoot, "codex"),
         MURPH_PROD_WATCH_CODEX_PROFILE: "test-profile",
+        MURPH_PROD_WATCH_APPROVED_HEAD: spawnSync(
+          "git",
+          ["rev-parse", "HEAD"],
+          { cwd: repoRoot, encoding: "utf8" },
+        ).stdout.trim(),
         PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+        TEST_NODE_MODULES_SOURCE: path.join(repoRoot, "node_modules"),
         TEST_PROVIDER_FIXTURE: path.join(fixtureRoot, "healthy.providers.json"),
       };
 
@@ -2540,7 +2879,7 @@ describe("production-watch static safety contracts", () => {
         checkoutRoot,
         sharedEnv,
       );
-      expect(replacement.status).toBe(0);
+      expect(replacement.status, replacement.stderr).toBe(0);
       const replacementCalls = readFileSync(launchctlLog, "utf8").trim().split("\n");
       expect(replacementCalls).toHaveLength(5);
       expect(replacementCalls[0]).toContain("bootout");
@@ -2659,26 +2998,36 @@ describe("production-watch static safety contracts", () => {
       path.join(repoRoot, ".agents", "skills", "production-watch", "SKILL.md"),
       "utf8",
     );
-    expect(skill).toContain("Phase 2 scheduler automation is shadow by default.");
+    expect(skill).toContain("The installed scheduler is monitor-only.");
     expect(skill).toContain("do not run `pnpm --silent prod-watch` recursively");
     expect(skill).toContain(
-      "A `resolved` transition is record-only and is allowed only after a fresh, complete aggregate evidence pass independently observes an externally applied fix.",
+      "A `resolved` transition is record-only and is allowed only after fresh, complete evidence from the incident's authoritative deterministic source independently observes an externally applied fix.",
     );
     expect(skill).toContain(
-      "Missing, partial, stale, or failed evidence must lead to `monitor_incomplete` or `escalated`, never `resolved`.",
+      "Missing, partial, stale, or failed evidence from the incident's authoritative source must lead to `monitor_incomplete` or `escalated`, never `resolved`.",
     );
     expect(skill).toContain("Provider and other sensitive incidents permit only `escalated`");
-    expect(skill).toContain("Record the result with `pnpm --silent prod-watch remediate review");
+    expect(skill).toContain("The installed monitor never invokes ReviewGPT or GitHub.");
   });
 
   it("keeps strict JSON schemas executable and fixtures conformant", () => {
     const schemaRoot = path.join(repoRoot, "scripts", "prod-watch", "schemas");
     const snapshotSchema = JSON.parse(readFileSync(path.join(schemaRoot, "snapshot.v1.schema.json"), "utf8")) as object;
     const providerSchema = JSON.parse(readFileSync(path.join(schemaRoot, "provider-evidence.v1.schema.json"), "utf8")) as object;
+    const providerCodexSchema = JSON.parse(readFileSync(
+      path.join(schemaRoot, "provider-evidence.codex-output.v1.schema.json"),
+      "utf8",
+    )) as object;
+    const diagnosisCodexSchema = JSON.parse(readFileSync(
+      path.join(schemaRoot, "diagnosis.codex-output.v1.schema.json"),
+      "utf8",
+    )) as object;
     const ajv = new Ajv2020({ allErrors: true, strict: true });
     addFormats(ajv);
     const validateSnapshot = ajv.compile(snapshotSchema);
     const validateProvider = ajv.compile(providerSchema);
+    expect(providerCodexSchema).toMatchObject({ type: "object" });
+    expect(diagnosisCodexSchema).toMatchObject({ type: "object" });
 
     expect(validateSnapshot(buildFixtureSnapshot("healthy", new Date("2026-08-09T20:00:00.000Z"))))
       .toBe(true);
@@ -2830,25 +3179,37 @@ function installFakeCodex(runtimeRoot: string): Record<string, string> {
   const binRoot = path.join(runtimeRoot, "codex-bin");
   mkdirSync(binRoot, { recursive: true });
   writeFakeCodexExecutable(path.join(binRoot, "codex"));
+  writeFakeProviderCliExecutables(binRoot);
   const providerPath = path.join(runtimeRoot, "healthy.providers.current.json");
   writeCurrentProviderFixture(providerPath);
+  const diagnosisPath = path.join(runtimeRoot, "diagnosis.current.json");
+  writeFileSync(diagnosisPath, JSON.stringify({
+    outcome: "likely_repo_issue",
+    causeCode: "provider_error_spike",
+    component: "provider_runtime",
+    confidence: "medium",
+  }), { mode: 0o600 });
   return {
     PATH: `${binRoot}:${process.env.PATH ?? ""}`,
+    MURPH_PROD_WATCH_CODEX_BIN: path.join(binRoot, "codex"),
     MURPH_PROD_WATCH_CODEX_PROFILE: "test-profile",
     TEST_PROVIDER_FIXTURE: providerPath,
+    TEST_DIAGNOSIS_FIXTURE: diagnosisPath,
   };
 }
 
 function writeFakeCodexExecutable(targetPath: string): void {
   writeFileSync(targetPath, [
     "#!/bin/sh",
+    "if [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'codex-cli 0.144.4'; exit 0; fi",
     "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then exit 0; fi",
     "output=''",
+    "schema=''",
     "while [ \"$#\" -gt 0 ]; do",
-    "  if [ \"$1\" = \"--output-last-message\" ]; then output=\"$2\"; shift 2; else shift; fi",
+    "  if [ \"$1\" = \"--output-last-message\" ]; then output=\"$2\"; shift 2; elif [ \"$1\" = \"--output-schema\" ]; then schema=\"$2\"; shift 2; else shift; fi",
     "done",
     "cat >/dev/null",
-    "if [ -n \"$output\" ]; then cp \"$TEST_PROVIDER_FIXTURE\" \"$output\"; fi",
+    "if [ -n \"$output\" ]; then case \"$schema\" in *diagnosis*) cp \"$TEST_DIAGNOSIS_FIXTURE\" \"$output\" ;; *) cp \"$TEST_PROVIDER_FIXTURE\" \"$output\" ;; esac; fi",
     "printf '%s\\n' '{\"type\":\"session\",\"session_id\":\"codex-test-session\"}'",
     "printf '%s\\n' '{\"type\":\"turn.completed\",\"status\":\"completed\"}'",
     "",
@@ -2858,6 +3219,7 @@ function writeFakeCodexExecutable(targetPath: string): void {
 
 function writeFakeSchedulerPreflightTools(binRoot: string): void {
   writeFakeCodexExecutable(path.join(binRoot, "codex"));
+  writeFakeProviderCliExecutables(binRoot);
   const ghPath = path.join(binRoot, "gh");
   writeFileSync(ghPath, [
     "#!/bin/sh",
@@ -2869,11 +3231,36 @@ function writeFakeSchedulerPreflightTools(binRoot: string): void {
   const pnpmPath = path.join(binRoot, "pnpm");
   writeFileSync(pnpmPath, [
     "#!/bin/sh",
+    "if [ \"$1\" = \"install\" ]; then ln -s \"$TEST_NODE_MODULES_SOURCE\" node_modules 2>/dev/null || true; exit 0; fi",
     "if [ \"$1\" = \"review:gpt\" ] && [ \"$2\" = \"--help\" ]; then exit 0; fi",
     "exit 1",
     "",
   ].join("\n"), { mode: 0o755 });
   chmodSync(pnpmPath, 0o755);
+}
+
+function writeFakeProviderCliExecutables(binRoot: string): void {
+  const vercelPath = path.join(binRoot, "vercel");
+  writeFileSync(vercelPath, [
+    "#!/usr/bin/env node",
+    "const args = process.argv.slice(2);",
+    "if (args[0] !== 'logs') process.exit(1);",
+    "const sinceIndex = args.indexOf('--since');",
+    "const untilIndex = args.indexOf('--until');",
+    "const start = Date.parse(args[sinceIndex + 1]);",
+    "const end = Date.parse(args[untilIndex + 1]);",
+    "if (!Number.isFinite(start) || !Number.isFinite(end)) process.exit(1);",
+    "process.stdout.write(`${JSON.stringify({ id: `fake-${start}`, timestamp: Math.floor((start + end) / 2), responseStatusCode: 200, level: 'info', source: 'serverless', logs: [] })}\\n`);",
+    "",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(vercelPath, 0o755);
+  const stripePath = path.join(binRoot, "stripe");
+  writeFileSync(stripePath, [
+    "#!/usr/bin/env node",
+    "process.stdout.write(`${JSON.stringify({ object: 'list', data: [], has_more: false })}\\n`);",
+    "",
+  ].join("\n"), { mode: 0o755 });
+  chmodSync(stripePath, 0o755);
 }
 
 function writeCurrentProviderFixture(

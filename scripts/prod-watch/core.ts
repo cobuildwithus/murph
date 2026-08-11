@@ -659,27 +659,30 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
     const evidence = evidenceBySource.get(source);
     const failure = input.failures.find((candidate) => candidate.source === source);
     if (evidence === undefined) {
-      const mcpSource = source !== "database";
+      const mcpSource = source === "cloudflare";
       return {
         source,
         status: failure === undefined ? "not_collected" : "unavailable",
         auth: failure?.class === "auth" ? "failed" : "unknown",
         coverage: mcpSource && failure === undefined ? "on_demand" : "none",
-        access: mcpSource ? "mcp_on_demand" : "deterministic",
+        access: sourceAccess(source),
         ...(failure === undefined ? {} : { errorCode: failure.code }),
       };
     }
-    const providerCollectionProven = source === "database" || providerRateEvidenceComplete(evidence);
+    const providerCollectionProven = source === "database"
+      || (source !== "cloudflare" && providerRateEvidenceComplete(evidence));
     return {
       source,
       status: evidence.status,
       auth: evidence.auth,
-      coverage: evidence.status === "ok" && providerCollectionProven
-        ? "complete"
-        : evidence.status === "unavailable"
-          ? "none"
-          : "partial",
-      access: source === "database" ? "deterministic" : "mcp_on_demand",
+      coverage: source === "cloudflare" && evidence.status !== "unavailable"
+        ? "on_demand"
+        : evidence.status === "ok" && providerCollectionProven
+          ? "complete"
+          : evidence.status === "unavailable"
+            ? "none"
+            : "partial",
+      access: sourceAccess(source),
       collectedAt: evidence.collectedAt,
       freshnessSeconds: Math.max(
         evidence.freshnessSeconds,
@@ -806,6 +809,10 @@ export function buildSnapshot(input: BuildSnapshotInput): ProductionWatchSnapsho
       maxAnomalyCandidates: MAX_ANOMALIES,
     },
   };
+}
+
+function sourceAccess(source: WatchSource): SourceHealth["access"] {
+  return source === "cloudflare" ? "mcp_on_demand" : "deterministic";
 }
 
 function isMandatoryAnomaly(candidate: AnomalyCandidate): boolean {
@@ -937,7 +944,10 @@ export function evaluateAnomalies(input: {
   }
 
   for (const counter of input.counters) {
-    if (["provider_error_count", "deployment_error_count"].includes(counter.metric)) {
+    const source = readSourceFromDimensions(counter.dimensions) ?? "database";
+    const hasReliableProviderRateDenominator = source !== "vercel";
+    if (hasReliableProviderRateDenominator
+      && ["provider_error_count", "deployment_error_count"].includes(counter.metric)) {
       const candidate = evaluateRateCounter(withProviderRateDenominator(counter, input.counters), {
         ruleId: "error_rate_regression",
         signalCode: "error_rate_regression",
@@ -953,7 +963,8 @@ export function evaluateAnomalies(input: {
       }
     }
 
-    if (["provider_timeout_count", "ingress_incomplete_count"].includes(counter.metric)) {
+    if (hasReliableProviderRateDenominator
+      && ["provider_timeout_count", "ingress_incomplete_count"].includes(counter.metric)) {
       const candidate = evaluateRateCounter(withProviderRateDenominator(counter, input.counters), {
         ruleId: "timeout_rate_regression",
         signalCode: "timeout_rate_regression",
@@ -982,7 +993,6 @@ export function evaluateAnomalies(input: {
       }
     }
 
-    const source = readSourceFromDimensions(counter.dimensions) ?? "database";
     if (counter.metric === "db_connection_ratio" && counter.current >= 0.9) {
       anomalies.push(makeAnomaly({
         fingerprintMetric: counter.metric,
@@ -1597,6 +1607,35 @@ export interface RemediationDispatch {
   sessionId: string;
 }
 
+export function remediationDispatchTargets(state: ProductionWatchState): string[] {
+  return state.incidents
+    .filter((incident) => !TERMINAL_INCIDENT_STATES.has(incident.state))
+    .map((incident) => incident.id);
+}
+
+export function updateStateAndQueueRemediation(
+  state: ProductionWatchState,
+  snapshot: ProductionWatchSnapshot,
+  options: { maxConcurrency: number },
+): {
+  state: ProductionWatchState;
+  promotedIncidentIds: string[];
+  dispatches: RemediationDispatch[];
+} {
+  const updated = updateStateFromSnapshot(state, snapshot);
+  const queued = queueRemediationDispatches(
+    updated.state,
+    remediationDispatchTargets(updated.state),
+    new Date(snapshot.generatedAt),
+    options,
+  );
+  return {
+    state: queued.state,
+    promotedIncidentIds: updated.promotedIncidentIds,
+    dispatches: queued.dispatches,
+  };
+}
+
 export function queueRemediationDispatches(
   state: ProductionWatchState,
   incidentTargets: string[],
@@ -1613,7 +1652,18 @@ export function queueRemediationDispatches(
   const next = structuredClone(state) as ProductionWatchState;
   recoverExpiredLeases(next, now);
   pruneRemediationState(next, now);
-  const dispatches: RemediationDispatch[] = [];
+  const activeNonQueuedCount = next.remediation.sessions.filter((session) => (
+    ACTIVE_REMEDIATION_STATES.has(session.state) && session.state !== "queued"
+  )).length;
+  const dispatches: RemediationDispatch[] = next.remediation.sessions
+    .filter((session) => session.state === "queued")
+    .sort((left, right) => Date.parse(left.startedAt) - Date.parse(right.startedAt))
+    .slice(0, Math.max(0, options.maxConcurrency - activeNonQueuedCount))
+    .map((session) => ({
+      incidentId: session.incidentId,
+      incidentFingerprint: session.incidentFingerprint,
+      sessionId: session.sessionId,
+    }));
   const activeCount = () => next.remediation.sessions.filter((session) =>
     ACTIVE_REMEDIATION_STATES.has(session.state)
   ).length;
@@ -1636,6 +1686,7 @@ export function queueRemediationDispatches(
       .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))[0];
     if (
       lastSession !== undefined
+      && lastSession.lastErrorCode !== "remediation_session_superseded"
       && now.getTime() - Date.parse(lastSession.updatedAt) < REMEDIATION_DISPATCH_COOLDOWN_MS
     ) {
       continue;
@@ -1715,6 +1766,29 @@ export function markRemediationDispatched(
   session.updatedAt = now.toISOString();
   session.heartbeatAt = now.toISOString();
   session.expiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1_000).toISOString();
+  next.updatedAt = now.toISOString();
+  return next;
+}
+
+export function heartbeatRemediationSession(
+  state: ProductionWatchState,
+  sessionId: string,
+  now: Date,
+  leaseMinutes: number,
+): ProductionWatchState {
+  assertSessionId(sessionId);
+  if (!Number.isInteger(leaseMinutes) || leaseMinutes < 5 || leaseMinutes > 60) {
+    throw new Error("lease_minutes_out_of_range");
+  }
+  const next = structuredClone(state) as ProductionWatchState;
+  recoverExpiredLeases(next, now);
+  const session = requireRemediationSession(next, sessionId);
+  if (session.state !== "dispatched") {
+    throw new Error("remediation_session_not_dispatched");
+  }
+  session.heartbeatAt = now.toISOString();
+  session.expiresAt = new Date(now.getTime() + leaseMinutes * 60 * 1_000).toISOString();
+  session.updatedAt = now.toISOString();
   next.updatedAt = now.toISOString();
   return next;
 }
@@ -1936,12 +2010,12 @@ function assertTerminalTransitionAuthority(
     throw new Error("incident_terminal_escalation_only");
   }
   const { monitor } = state;
+  const sourceHealth = monitor.lastSourceHealth.find((health) => health.source === incident.source);
   if (
-    monitor.lastMonitorStatus !== "healthy"
-    || monitor.lastEvidenceComplete !== true
-    || monitor.lastRunAt === undefined
-    || monitor.lastCompleteEvidenceAt === undefined
-    || monitor.lastRunAt !== monitor.lastCompleteEvidenceAt
+    monitor.lastRunAt === undefined
+    || sourceHealth?.status !== "ok"
+    || sourceHealth.coverage !== "complete"
+    || (sourceHealth.auth !== "ok" && sourceHealth.auth !== "not_required")
   ) {
     throw new Error("incident_terminal_evidence_incomplete");
   }
@@ -1951,7 +2025,7 @@ function assertTerminalTransitionAuthority(
   }
   if (
     target === "resolved"
-    && Date.parse(monitor.lastCompleteEvidenceAt) <= Date.parse(incident.lastDetectedAt)
+    && Date.parse(monitor.lastRunAt) <= Date.parse(incident.lastDetectedAt)
   ) {
     throw new Error("incident_resolution_requires_later_clean_evidence");
   }
@@ -2820,9 +2894,12 @@ function recoverExpiredLeases(state: ProductionWatchState, now: Date): void {
     delete state.remediation.globalLease;
     const session = state.remediation.sessions.find((candidate) => candidate.sessionId === sessionId);
     if (session !== undefined && ACTIVE_REMEDIATION_STATES.has(session.state)) {
+      const superseded = session.state === "dispatched";
       session.state = "blocked";
       session.updatedAt = now.toISOString();
-      session.lastErrorCode = "remediation_lease_expired";
+      session.lastErrorCode = superseded
+        ? "remediation_session_superseded"
+        : "remediation_lease_expired";
       delete session.heartbeatAt;
       delete session.expiresAt;
     }
@@ -2833,9 +2910,12 @@ function recoverExpiredLeases(state: ProductionWatchState, now: Date): void {
       && Date.parse(session.expiresAt) <= now.getTime()
       && ACTIVE_REMEDIATION_STATES.has(session.state)
     ) {
+      const superseded = session.state === "dispatched";
       session.state = "blocked";
       session.updatedAt = now.toISOString();
-      session.lastErrorCode = "remediation_lease_expired";
+      session.lastErrorCode = superseded
+        ? "remediation_session_superseded"
+        : "remediation_lease_expired";
       delete session.heartbeatAt;
       delete session.expiresAt;
     }
