@@ -129,6 +129,20 @@ test("design page routes the biomarker studies through the dedicated sections ta
     "Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status",
   );
   expect(sectionsMarkup).toContain(
+    'data-design-variant="venice-terra-sol-locked"',
+  );
+  expect(sectionsMarkup).toContain("High usage · Edge required");
+  expect(sectionsMarkup).toContain(">Upgrade to Edge</button>");
+  expect(sectionsMarkup).not.toContain("Sol requires an active Edge plan.");
+  expect(sectionsMarkup).toContain(
+    'data-design-state="active-lifetime-starter-usage"',
+  );
+  expect(sectionsMarkup).toContain('aria-label="Starter AI usage"');
+  expect(sectionsMarkup).not.toContain(
+    "Your non-expiring starter usage is active. Choose a monthly plan whenever you want recurring included usage.",
+  );
+  expect(sectionsMarkup).not.toContain("Starter · Does not expire");
+  expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
   );
   expect(sectionsMarkup).toContain(

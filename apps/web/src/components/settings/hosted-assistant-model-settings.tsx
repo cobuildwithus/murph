@@ -796,20 +796,17 @@ function HostedAssistantModelSettingsForm(
           />
         ) : null}
 
-        {props.configurationAvailable && !solAvailable ? (
-          <div className="flex w-full flex-col items-start gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-pretty text-muted-foreground">
-              Sol requires an active Edge plan.
-            </p>
-            {props.canUpgradeToEdge ? (
-              <UpgradeToEdgeButton
-                expectedCurrentPlanCode={
-                  props.expectedCurrentPlanCode ?? "launch_monthly"
-                }
-              >
-                Upgrade to Edge
-              </UpgradeToEdgeButton>
-            ) : null}
+        {props.configurationAvailable
+          && !solAvailable
+          && props.canUpgradeToEdge ? (
+          <div className="flex w-full justify-end px-1">
+            <UpgradeToEdgeButton
+              expectedCurrentPlanCode={
+                props.expectedCurrentPlanCode ?? "launch_monthly"
+              }
+            >
+              Upgrade to Edge
+            </UpgradeToEdgeButton>
           </div>
         ) : null}
 
