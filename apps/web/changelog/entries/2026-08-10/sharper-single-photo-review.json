@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 340,
+  "item": {
+    "id": "sharper-single-photo-review",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Terra keeps lone first photos at original detail",
+    "summary": "When Murph uses Terra, one initial photo is now sent at its original detail for closer visual review.",
+    "details": "Requests that start with multiple photos, use another model, add follow-up photos while Murph is working, or use custom inference stay at high detail to keep visual input cost and compatibility bounded.",
+    "relevanceTags": ["assistant", "images", "messaging", "reliability"],
+    "sourcePullRequests": [1616]
+  }
+}
