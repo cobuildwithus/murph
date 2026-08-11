@@ -11,6 +11,7 @@ import type {
   AssistantWorkspaceArtifactMaterializer,
 } from './execution-context.js'
 import {
+  type AssistantModelImageDetail,
   type AssistantUserMessageContentPart,
 } from './content-types.js'
 import {
@@ -259,6 +260,9 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
     }
   }
 
+  // Preserve fine visual evidence for one image without multiplying gallery cost.
+  const imageDetail: AssistantModelImageDetail =
+    routingEvidence.evidence.length === 1 ? 'original' : 'high'
   const content: AssistantUserMessageContentPart[] = [
     {
       type: 'text',
@@ -282,6 +286,7 @@ export async function prepareAssistantInputMultimodalUserMessageContent(input: {
     })
     content.push({
       type: 'image',
+      detail: imageDetail,
       image: item.bytes,
       ...(item.mediaType
         ? {

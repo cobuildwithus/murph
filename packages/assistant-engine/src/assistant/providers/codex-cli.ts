@@ -51,19 +51,14 @@ import {
   redactAssistantStateString,
   sanitizeAssistantPortableStateString,
 } from '../redaction.js'
-import type {
-  AssistantModelImagePart,
-  AssistantUserMessageContentPart,
-} from '../content-types.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type {
-  CodexAppServerImageInput,
   CodexAppServerPreinitialization,
   CodexAppServerTurnInput,
   CodexAppServerTurnFailureContext,
   CodexAppServerLiveTurn,
 } from '../../assistant-codex.js'
-import { fileURLToPath } from 'node:url'
+import { extractCodexAppServerUserMessageImages } from '../../assistant-codex/images.js'
 
 const CODEX_INVALID_OUTPUT_TRACE_SCHEMA =
   'murph.assistant-codex-invalid-output-diagnostics.v1'
@@ -1356,103 +1351,4 @@ export function resolveCodexAssistantLabel(
 
 export function resolveCodexStaticModels(): typeof DEFAULT_CODEX_MODELS {
   return DEFAULT_CODEX_MODELS
-}
-
-function extractCodexAppServerUserMessageImages(
-  userMessageContent: readonly AssistantUserMessageContentPart[] | null | undefined,
-): readonly CodexAppServerImageInput[] | undefined {
-  const images: CodexAppServerImageInput[] = []
-
-  for (const part of userMessageContent ?? []) {
-    if (part.type !== 'image') {
-      continue
-    }
-
-    images.push(
-      toCodexAppServerImageInput({
-        image: part.image,
-        mimeType: part.mimeType ?? part.mediaType ?? null,
-      }),
-    )
-  }
-
-  return images.length > 0 ? images : undefined
-}
-
-function toCodexAppServerImageInput(input: {
-  image: AssistantModelImagePart['image']
-  mimeType: string | null
-}): CodexAppServerImageInput {
-  if (typeof input.image === 'string') {
-    if (input.image.startsWith('data:')) {
-      return {
-        bytes: decodeCodexDataUrlToBytes(input.image),
-        mimeType: input.mimeType,
-      }
-    }
-
-    return {
-      path: input.image,
-      mimeType: input.mimeType,
-    }
-  }
-
-  if (input.image instanceof URL) {
-    if (input.image.protocol === 'data:') {
-      return {
-        bytes: decodeCodexDataUrlToBytes(input.image.href),
-        mimeType: input.mimeType,
-      }
-    }
-
-    if (input.image.protocol === 'file:') {
-      return {
-        path: fileURLToPath(input.image),
-        mimeType: input.mimeType,
-      }
-    }
-
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_IMAGE_INVALID',
-      `Codex app-server image input does not support URL scheme "${input.image.protocol}".`,
-    )
-  }
-
-  if (input.image instanceof ArrayBuffer) {
-    return {
-      bytes: new Uint8Array(input.image),
-      mimeType: input.mimeType,
-    }
-  }
-
-  return {
-    bytes: input.image,
-    mimeType: input.mimeType,
-  }
-}
-
-function decodeCodexDataUrlToBytes(dataUrl: string): Uint8Array {
-  const match = /^data:([^,]*?),(.*)$/su.exec(dataUrl)
-  if (!match) {
-    throw new VaultCliError(
-      'ASSISTANT_CODEX_IMAGE_INVALID',
-      'Codex app-server image input data URL is malformed.',
-    )
-  }
-
-  const metadata = match[1] ?? ''
-  const payload = match[2] ?? ''
-  const metadataParts = metadata
-    .split(';')
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0)
-
-  if (metadataParts.includes('base64')) {
-    return Uint8Array.from(Buffer.from(payload, 'base64'))
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CODEX_IMAGE_INVALID',
-    'Codex app-server image input data URLs must use base64 encoding.',
-  )
 }

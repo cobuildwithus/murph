@@ -764,7 +764,7 @@ describe('assistant codex runtime', () => {
   it('builds typed Codex app-server turn steer requests for live turns', () => {
     expect(
       buildCodexAppServerSteerRequest({
-        imagePaths: ['/tmp/steer-image.png'],
+        images: [{ path: '/tmp/steer-image.png' }],
         prompt: 'Add this context',
         threadId: ' thread-steer ',
         turnId: ' turn-steer ',
@@ -921,7 +921,7 @@ describe('assistant codex runtime', () => {
     })
 
     const turnStart = buildCodexTurnStartParams({
-      imagePaths: [],
+      images: [],
       input: baseInput,
       codexThreadId: 'thread-1',
     })
@@ -943,7 +943,7 @@ describe('assistant codex runtime', () => {
     )
     expect(
       buildCodexTurnStartParams({
-        imagePaths: [],
+        images: [],
         input: {
           ...baseInput,
           serviceTier: 'flex',
@@ -957,7 +957,7 @@ describe('assistant codex runtime', () => {
 
     expect(
       buildCodexTurnStartParams({
-        imagePaths: [],
+        images: [],
         input: baseInput,
         codexThreadId: 'thread-1',
       }),
@@ -1003,7 +1003,7 @@ describe('assistant codex runtime', () => {
     })
     expect(
       buildCodexTurnStartParams({
-        imagePaths: [],
+        images: [],
         input: {
           ...baseInput,
           outputSchema,
@@ -1159,6 +1159,7 @@ describe('assistant codex runtime', () => {
             text: 'Explain this',
           })
           expect(inputItems[1]).toMatchObject({
+            detail: 'original',
             type: 'localImage',
           })
           const imagePath = readLocalImagePath(inputItems[1])
@@ -1369,6 +1370,7 @@ describe('assistant codex runtime', () => {
         images: [
           {
             bytes: imageBytes,
+            detail: 'original',
             mimeType: 'image/jpeg',
           },
         ],

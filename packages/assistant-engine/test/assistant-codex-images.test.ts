@@ -4,7 +4,14 @@ import path from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { materializeCodexImagePaths } from '../src/assistant-codex/images.ts'
+import {
+  buildCodexTurnStartParams,
+  buildCodexTurnSteerParams,
+} from '../src/assistant-codex/app-server-requests.ts'
+import {
+  extractCodexAppServerUserMessageImages,
+  materializeCodexImages,
+} from '../src/assistant-codex/images.ts'
 
 const tempRoots: string[] = []
 
@@ -26,6 +33,99 @@ async function createTempDir(prefix: string): Promise<string> {
 }
 
 describe('assistant codex image helpers', () => {
+  it('preserves requested image detail at the provider boundary', () => {
+    const bytes = Buffer.from([0x01, 0x02, 0x03])
+
+    expect(
+      extractCodexAppServerUserMessageImages([
+        {
+          type: 'text',
+          text: 'Inspect the image.',
+        },
+        {
+          detail: 'original',
+          image: bytes,
+          mediaType: 'image/webp',
+          type: 'image',
+        },
+      ]),
+    ).toEqual([
+      {
+        bytes,
+        detail: 'original',
+        mimeType: 'image/webp',
+      },
+    ])
+  })
+
+  it('emits per-image detail on initial and steered Codex inputs', () => {
+    expect(
+      buildCodexTurnStartParams({
+        codexThreadId: 'thread-detail',
+        images: [
+          {
+            detail: 'original',
+            path: '/tmp/first.webp',
+          },
+          {
+            path: '/tmp/second.webp',
+          },
+        ],
+        input: {
+          dynamicTools: [],
+          prompt: 'Inspect these images.',
+          workingDirectory: '/tmp/vault',
+        },
+      }),
+    ).toEqual({
+      input: [
+        {
+          type: 'text',
+          text: 'Inspect these images.',
+        },
+        {
+          detail: 'original',
+          path: '/tmp/first.webp',
+          type: 'localImage',
+        },
+        {
+          path: '/tmp/second.webp',
+          type: 'localImage',
+        },
+      ],
+      serviceTier: null,
+      threadId: 'thread-detail',
+    })
+
+    expect(
+      buildCodexTurnSteerParams({
+        images: [
+          {
+            detail: 'high',
+            path: '/tmp/follow-up.webp',
+          },
+        ],
+        prompt: 'Inspect the follow-up.',
+        threadId: 'thread-detail',
+        turnId: 'turn-detail',
+      }),
+    ).toEqual({
+      expectedTurnId: 'turn-detail',
+      input: [
+        {
+          type: 'text',
+          text: 'Inspect the follow-up.',
+        },
+        {
+          detail: 'high',
+          path: '/tmp/follow-up.webp',
+          type: 'localImage',
+        },
+      ],
+      threadId: 'thread-detail',
+    })
+  })
+
   it.each([
     ['image/png', '.png'],
     ['image/webp', '.webp'],
@@ -41,7 +141,7 @@ describe('assistant codex image helpers', () => {
       const tempRoot = await createTempDir('assistant-codex-images-')
       const bytes = Buffer.from([0x01, 0x02, 0x03, 0x04])
 
-      const [imagePath] = await materializeCodexImagePaths({
+      const [image] = await materializeCodexImages({
         images: [
           {
             bytes,
@@ -50,9 +150,12 @@ describe('assistant codex image helpers', () => {
         ],
         tempRoot,
       })
+      if (!image) {
+        throw new Error('Expected one materialized Codex image.')
+      }
 
-      expect(imagePath).toBe(path.join(tempRoot, `image-1${expectedExtension}`))
-      await expect(readFile(imagePath)).resolves.toEqual(bytes)
+      expect(image.path).toBe(path.join(tempRoot, `image-1${expectedExtension}`))
+      await expect(readFile(image.path)).resolves.toEqual(bytes)
     },
   )
 
@@ -63,7 +166,7 @@ describe('assistant codex image helpers', () => {
     await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
 
     await expect(
-      materializeCodexImagePaths({
+      materializeCodexImages({
         images: [
           {
             path: imagePath,
@@ -71,14 +174,14 @@ describe('assistant codex image helpers', () => {
         ],
         tempRoot,
       }),
-    ).resolves.toEqual([imagePath])
+    ).resolves.toEqual([{ path: imagePath }])
   })
 
   it('rejects image inputs that provide neither bytes nor a readable path', async () => {
     const tempRoot = await createTempDir('assistant-codex-images-invalid-')
 
     await expect(
-      materializeCodexImagePaths({
+      materializeCodexImages({
         images: [{}],
         tempRoot,
       }),
