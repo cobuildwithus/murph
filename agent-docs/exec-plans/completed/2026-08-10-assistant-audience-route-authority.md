@@ -43,9 +43,14 @@ Allow validated direct Linq assistant notifications to pass the existing audienc
 - ReviewGPT's preliminary and final first-round reviews independently found that replacing the remote encrypted payload could not repair a runtime-local head already persisted beyond the import watermark. The parent verified that mechanism in the pointer import, watermark, and retry paths.
 - ReviewGPT returned a runtime-owned replacement patch. The parent inspected every hunk, proved the permanent route error preserves `retryable: false` across the Web-to-runtime transport, confirmed privacy and whitespace cleanliness, and verified exact reverse-apply equivalence after application.
 - The corrected runtime suite passed 326 tests across the system mailbox, warm/restored legacy recovery, events, and callbacks. It proves exact provider target delivery once, no home-route fallback, stale-route terminal progress, authority-outage retry, and lookalike rejection.
-- The focused Web suite passed 126 tests across both referral producers, pointer-only recovery, mailbox storage, and changelog behavior.
+- The base-reconciled Web suite passed 139 tests across both referral producers, pointer-only recovery, mailbox storage, and changelog behavior.
 - The assistant-engine audience-authority integration suite passed 8 tests through the real guard.
 - Web, assistant-runtime, and assistant-engine typechecks passed.
 - The public changelog describes the member-visible referral recovery without exposing incident details.
-- `git diff --check` passed; documentation drift will be rerun with this corrected active-plan declaration.
-- Corrected-head CI and final ReviewGPT round 2 remain pending; the preliminary specialist pass is not rerun after substantive remediation.
+- The parent's corrected-head product-experience review found the smallest complete journey intact with no remaining finding: pointer re-signal, exact runtime validation, fixed-target delivery or safe terminal progress, and no new user action.
+- Final ReviewGPT round 2 returned `ROUND_OUTCOME: PASS` on behavior head `a6eb85c836f0`, using the existing review thread and a fresh sensitive full snapshot; model metadata matched the requested compatible Pro model and no qualifying code, complexity, purpose, or product-experience finding remained.
+- Current `origin/main` was merged through ordinary history as `8eec37634d`; the only manual resolution combined both changelog entry sets, and its 43-test focused suite passed.
+- Exact-head PR CI is fully green, the PR is mergeable, `pnpm docs:drift` and `git diff --check` pass, and the PR deployment text now correctly requires runtime-first rollout because an old runtime rejects new explicit direct wakes.
+Status: completed
+Updated: 2026-08-10
+Completed: 2026-08-10
