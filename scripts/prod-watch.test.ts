@@ -2707,6 +2707,7 @@ describe("production-watch static safety contracts", () => {
     expect(template).toContain("__SCHEDULER_PATH__");
     expect(template).toContain("<string>-f</string>\n    <string>-c</string>");
     expect(template).toContain("<string>-c</string>");
+    expect(template).toContain("export HOME=~;");
     expect(template).not.toContain("<string>-lc</string>");
     expect(template).not.toContain("exec pnpm");
     expect(template).not.toContain(os.homedir());
@@ -2722,6 +2723,7 @@ describe("production-watch static safety contracts", () => {
     expect(rendered).toContain("$HOME/project");
     expect(rendered).toContain("$HOME/tools/node");
     expect(rendered).toContain("$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
+    expect(rendered).toContain("export HOME=~;");
     expect(rendered).toContain("node_modules/tsx/dist/cli.mjs");
     expect(rendered).toContain("scripts/prod-watch.ts&quot; run --scheduled");
     expect(rendered).toContain("export CODEX_HOME=&quot;$HOME/.codex-5&quot;");
@@ -2742,6 +2744,13 @@ describe("production-watch static safety contracts", () => {
       .rejects.toThrow("scheduler_executable_chain_unavailable");
     await expect(verifySchedulerExecutableChain(repoRoot, process.execPath, fakeHome))
       .rejects.toThrow("scheduler_executable_chain_unavailable");
+
+    const homeProbe = spawnSync(
+      "/bin/zsh",
+      ["-f", "-c", 'export HOME=~; test "$HOME" = "$1"', "prod-watch", os.homedir()],
+      { env: {}, encoding: "utf8" },
+    );
+    expect(homeProbe.status, homeProbe.stderr).toBe(0);
   });
 
   it.runIf(process.platform === "darwin")(
