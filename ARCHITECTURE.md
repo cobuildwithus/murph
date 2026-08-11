@@ -1673,13 +1673,15 @@ array, so it is stable and directly constructible from `exercise show`. Timing
 remains model-authored presentation. Shared agent guidance requires the stated
 total to match the visible work without adding a second runtime truth owner.
 Telegram projects any response-card kind into one Bot API rich message. Routine
-cards use a table, collapsed exercise details, and a
-slideshow when catalog images exist. A definitive pre-acceptance rich-message
-rejection falls back to the deterministic card text, which must fit one 4,096-
-character Telegram message before rich provider entry. Timeout, transport, and
-retryable failures never start a second send because Telegram acceptance is
-then ambiguous. Linq keeps its existing native nutrition and compact-table
-cards. New Linq/iMessage exercise turns use the existing response-media path;
+cards use collapsed exercise details with a per-exercise slideshow when catalog
+images exist. A definitive non-retryable rich-message rejection in a valid
+Telegram `ok: false` response can fall back to the deterministic card text,
+which must fit one 4,096-character Telegram message before rich provider entry.
+A valid retryable Telegram rejection proves non-acceptance and returns to the
+existing outbox retry owner. A transport failure or response without a valid
+Telegram success or rejection envelope is ambiguous, becomes terminal, and
+cannot release the effect for replay. Linq keeps its existing native nutrition
+and compact-table cards. New Linq/iMessage exercise turns use the existing response-media path;
 the deterministic routine text remains only compatibility behavior for retained
 card state. The card still cannot coexist with response media, and no new queue,
 persisted state owner, callback action, or mutable message state exists.

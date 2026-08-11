@@ -82,6 +82,17 @@ Updated: 2026-08-11
   only the variable name and the safe opt-in preview procedure. When configured,
   user-facing Telegram presentation work sends representative live samples
   before final review; backend-only work does not.
+- Keep the product owner's approved prompt-authored timing model. Do not restore
+  a runtime arithmetic validator. The prompt compares the stated duration with
+  the visible work before attachment.
+- Keep the approved compact routine layout without a visible shared slideshow
+  caption. Telegram supports one caption for the whole slideshow, not a caption
+  that changes with each image. General movement instructions remain text, while
+  exact catalog alt and step data stay frozen for provenance and future native
+  presentation work.
+- Treat only a valid Telegram `ok: false` envelope as proven non-acceptance.
+  Transport failure or any response without a valid success or rejection
+  envelope is terminal ambiguity and must not release the effect for replay.
 
 ## Verification
 
@@ -106,3 +117,6 @@ Updated: 2026-08-11
 - `git diff --check` passes.
 - The user approved the final live Telegram routine, nutrition, and compact
   table presentation after two focused iteration rounds.
+- Final ReviewGPT round 4 found that the rich adapter preserved the wrong error
+  code after an ambiguous provider response. Focused correction tests prove 79
+  channel-runtime cases and the later outbox drain makes no second request.

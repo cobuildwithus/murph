@@ -294,7 +294,7 @@ export async function sendTelegramRichMessage(
         if (providerRequestWasSkipped(error)) {
           throw error
         }
-        throw markTelegramRichDeliveryAmbiguous(error, targetLabel)
+        throw markTelegramDeliveryAmbiguous(error, targetLabel)
       }
       const fallbackAliases = new Set([
         ...cleanupTargetAliases,
@@ -308,7 +308,10 @@ export async function sendTelegramRichMessage(
       }
     }
 
-    throw markTelegramRichDeliveryAmbiguous(outcome.failure, targetLabel)
+    if (providerRequestWasSkipped(outcome.failure)) {
+      throw outcome.failure
+    }
+    throw markTelegramDeliveryAmbiguous(outcome.failure, targetLabel)
   }
 }
 
@@ -2002,6 +2005,19 @@ function isTelegramSuccessResponse(
   )
 }
 
+function isTelegramFailureResponse(
+  value: unknown,
+): value is {
+  ok: false
+} {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'ok' in value &&
+      (value as { ok?: unknown }).ok === false,
+  )
+}
+
 function extractTelegramErrorContext(value: unknown): {
   description: string | null
   errorCode: number | null
@@ -2371,18 +2387,19 @@ async function sendTelegramRichMessageOnce(input: {
   }
 }
 
-function markTelegramRichDeliveryAmbiguous(
+function markTelegramDeliveryAmbiguous(
   error: unknown,
   target: string,
-): Error & {
+): VaultCliError & {
   deliveryMayHaveSucceeded: true
   retryable: false
 } {
-  const marked = error instanceof Error
+  const marked = error instanceof VaultCliError &&
+      error.code === 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS'
     ? error
     : new VaultCliError(
       'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
-      'Outbound Telegram rich-message delivery could not be confirmed.',
+      'Outbound Telegram delivery could not be confirmed.',
       { error: describeUnknownError(error), target },
     )
   return Object.assign(marked, {
@@ -2673,6 +2690,24 @@ function resolveTelegramSendAttemptOutcome(input: {
     }
   }
 
+  if (!isTelegramFailureResponse(input.result.payload)) {
+    return {
+      kind: 'failed',
+      failure: markTelegramDeliveryAmbiguous(
+        new VaultCliError(
+          'ASSISTANT_TELEGRAM_INVALID_RESPONSE',
+          `Telegram Bot API ${input.operation} returned a response without a valid success or rejection envelope.`,
+          {
+            operation: input.operation,
+            status: input.result.response.status,
+            target: input.targetLabel,
+          },
+        ),
+        input.targetLabel,
+      ),
+    }
+  }
+
   const errorContext = extractTelegramErrorContext(input.result.payload)
   if (
     errorContext.migrateToChatId &&
@@ -2715,6 +2750,7 @@ function resolveTelegramSendAttemptOutcome(input: {
       failureMessage,
       failureContext,
     )
+  Object.assign(failure, { deliveryMayHaveSucceeded: false as const })
 
   if (retryable) {
     return {

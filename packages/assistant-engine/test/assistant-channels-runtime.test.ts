@@ -338,6 +338,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -345,6 +346,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(429, {
         description: 'retry later',
         error_code: 429,
+        ok: false,
         parameters: {
           retry_after: 0.001,
         },
@@ -477,6 +479,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -676,10 +679,12 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'later chunk failed',
         error_code: 400,
+        ok: false,
       }),
       createTelegramResponse(502, {
         description: 'rollback failed',
         error_code: 502,
+        ok: false,
       }),
     ])
 
@@ -865,6 +870,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -878,10 +884,12 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'later chunk failed',
         error_code: 400,
+        ok: false,
       }),
       createTelegramResponse(502, {
         description: 'rollback failed',
         error_code: 502,
+        ok: false,
       }),
     ])
 
@@ -936,6 +944,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -1074,7 +1083,7 @@ describe('assistant channels runtime seam', () => {
     expect(LONG_ROUTINE_CARD_TEXT.length).toBeLessThanOrEqual(4_096)
   })
 
-  it('keeps a failed definitive-rejection fallback terminal and single-attempt', async () => {
+  it('keeps an ambiguous definitive-rejection fallback terminal and single-attempt', async () => {
     const fetchImplementation = createQueuedFetch([
       createTelegramResponse(400, {
         description: 'Bad Request: rich messages are not supported',
@@ -1082,9 +1091,7 @@ describe('assistant channels runtime seam', () => {
         ok: false,
       }),
       createTelegramResponse(500, {
-        description: 'fallback unavailable',
-        error_code: 500,
-        ok: false,
+        message: 'upstream response without a Bot API envelope',
       }),
     ])
 
@@ -1102,6 +1109,7 @@ describe('assistant channels runtime seam', () => {
         fetchImplementation,
       },
     )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
       deliveryMayHaveSucceeded: true,
       retryable: false,
     })
@@ -1160,7 +1168,7 @@ describe('assistant channels runtime seam', () => {
   })
 
   it.each([408, 409, 425, 429, 500])(
-    'makes one rich request and no fallback for ambiguous HTTP %s',
+    'preserves proven Bot API rejection for existing retry ownership after HTTP %s',
     async (status) => {
       const fetchImplementation = createQueuedFetch([
         createTelegramResponse(status, {
@@ -1184,13 +1192,42 @@ describe('assistant channels runtime seam', () => {
           fetchImplementation,
         },
       )).rejects.toMatchObject({
-        deliveryMayHaveSucceeded: true,
-        retryable: false,
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+        deliveryMayHaveSucceeded: false,
       })
 
       expect(fetchImplementation).toHaveBeenCalledTimes(1)
     },
   )
+
+  it('treats an HTTP response without a Bot API rejection envelope as ambiguous', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(500, {
+        message: 'upstream gateway failure',
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Do not duplicate this',
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
 
   it('preserves a proven pre-provider rich-message rejection', async () => {
     const providerEntryError = Object.assign(
@@ -1386,6 +1423,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -1505,6 +1543,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(429, {
         description: 'retry later',
         error_code: 429,
+        ok: false,
         parameters: {
           retry_after: 0.001,
         },
@@ -1561,6 +1600,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -1659,6 +1699,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(502, {
         description: 'bad gateway',
         error_code: 502,
+        ok: false,
       }),
       createTelegramResponse(200, {
         ok: true,
@@ -1766,6 +1807,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
