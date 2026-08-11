@@ -28,8 +28,8 @@ describe('assistant proactive follow-through', () => {
     expect(direct).toContain(
       'proactively offer one best-fit finite reminder, check-in, or review package',
     )
-    expect(direct).toContain('weekly managed goal-support check')
-    expect(direct).toContain('Execute those writes now')
+    expect(direct).toContain('post-onboarding support-gap check')
+    expect(direct).toContain('Apply the accepted package now')
     expect(direct).toContain(
       'Do not call the plan set, started, or locked in',
     )
@@ -37,11 +37,11 @@ describe('assistant proactive follow-through', () => {
     expect(direct).toContain('preserve unrelated support')
     expect(direct).toContain('exact durable support boundary')
     expect(direct).toContain('existing canonical memory or preference surface')
-    expect(direct).toContain('pause the weekly managed goal-support check too')
+    expect(direct).not.toContain('weekly managed goal-support check')
     expect(group).not.toContain('Direct proactive follow-through:')
   })
 
-  it('makes the managed goal-support audit recurring, concrete, and easy to stop', () => {
+  it('keeps the first health read separate from one finite three-day support check', () => {
     const completedAt = '2026-06-01T18:15:00.000Z'
     const seed = buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-02T12:00:00.000Z'),
@@ -57,14 +57,15 @@ describe('assistant proactive follow-through', () => {
     })
 
     expect(seed).toMatchObject({
-      activeUntil: null,
+      activeUntil: '2026-06-08T13:30:00.000Z',
       schedule: {
-        expression: '30 13 * * 2',
-        kind: 'cron',
+        at: '2026-06-04T13:30:00.000Z',
+        kind: 'at',
       },
-      title: 'Weekly goal support check-in',
+      title: 'Initial goal support check-in',
     })
-    expect(seed?.instructions).toContain('weekly support-gap check')
+    expect(seed?.instructions).toContain('about three days after answered onboarding')
+    expect(seed?.instructions).toContain('This is not the first personal health read')
     expect(seed?.instructions).toContain('one exact finite package')
     expect(seed?.instructions).toContain('meal notes or photos')
     expect(seed?.instructions).toContain('later clear yes')
@@ -79,5 +80,6 @@ describe('assistant proactive follow-through', () => {
     expect(seed?.instructions).toContain(
       'Do not create, update, complete, or archive goals',
     )
+    expect(seed?.instructions).not.toContain('weekly support-gap check')
   })
 })
