@@ -363,6 +363,18 @@ describe('assistant physical notes', () => {
       expect(result.rpcResult.contentItems[0]?.text).toMatch(
         /do not .*retry automatically/iu,
       )
+      if (
+        failureReason === 'service_unavailable'
+        || failureReason === 'request_invalid'
+        || failureReason === 'unknown'
+      ) {
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'No automatic retry or follow-up is running',
+        )
+        expect(result.rpcResult.contentItems[0]?.text).toContain(
+          'new explicit send request later',
+        )
+      }
     },
   )
 })

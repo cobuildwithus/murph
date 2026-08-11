@@ -232,18 +232,10 @@ async function readLobFailureReason(
     case "address_length_exceeds_limit":
     case "failed_deliverability_strictness":
       return "recipient_address";
-    case "file_pages_below_min":
-    case "file_pages_exceed_max":
     case "file_size_exceeds_limit":
-    case "inconsistent_page_dimensions":
-    case "invalid_file":
-    case "invalid_file_dimensions":
     case "invalid_file_download_time":
     case "invalid_file_url":
     case "invalid_image_dpi":
-    case "invalid_template_html":
-    case "pdf_encrypted":
-    case "unembedded_fonts":
       return "artwork";
     case "billing_address_required":
     case "custom_envelope_inventory_depleted":
@@ -261,13 +253,21 @@ async function readLobFailureReason(
       return "service_unavailable";
     case "bad_request":
     case "conflict":
+    case "file_pages_below_min":
+    case "file_pages_exceed_max":
+    case "inconsistent_page_dimensions":
     case "invalid":
+    case "invalid_file":
+    case "invalid_file_dimensions":
     case "invalid_international_feature":
     case "invalid_perforation_return_envelope":
+    case "invalid_template_html":
     case "mail_use_type_can_not_be_null":
     case "merge_variable_required":
     case "merge_variable_whitespace":
+    case "pdf_encrypted":
     case "special_characters_restricted":
+    case "unembedded_fonts":
     case "unrecognized_endpoint":
     case "unsupported_lob_version":
       return "request_invalid";

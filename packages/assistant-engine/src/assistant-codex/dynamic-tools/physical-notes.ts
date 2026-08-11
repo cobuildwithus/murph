@@ -229,12 +229,12 @@ export function buildPhysicalNoteFailureInstruction(
     case 'artwork':
       return 'The printer could not render the generated artwork. Nothing was sent. Explain that Murph needs to regenerate the image, and require a new explicit send request before trying again. Do not retry automatically.'
     case 'service_unavailable':
-      return 'Murph\'s printing service or account setup was unavailable. Nothing was sent. Explain that the problem is on Murph\'s side, not the recipient address, and record product feedback if available. Do not retry automatically.'
+      return 'Murph\'s printing service or account setup was unavailable. Nothing was sent. Explain that the problem is on Murph\'s side, not the recipient address, and record product feedback if available. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
     case 'request_invalid':
-      return 'The printer rejected Murph\'s print request. Nothing was sent. Explain that Murph needs to correct the printing request and record product feedback if available. Do not ask the person to change a confirmed address or retry automatically.'
+      return 'The printer rejected Murph\'s print request. Nothing was sent. Explain that Murph needs to correct the printing request and record product feedback if available. Do not ask the person to change a confirmed address. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
     case 'unknown':
     case null:
     case undefined:
-      return 'The printer rejected the physical note without a recognized safe correction. Nothing was sent. Do not guess that the address or artwork was wrong. Explain that Murph needs to investigate and record product feedback if available; do not retry automatically.'
+      return 'The printer rejected the physical note without a recognized safe correction. Nothing was sent. Do not guess that the address or artwork was wrong. Explain that Murph needs to investigate and record product feedback if available. No automatic retry or follow-up is running; another attempt requires a new explicit send request later. Do not retry automatically.'
   }
 }
