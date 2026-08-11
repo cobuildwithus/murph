@@ -19,6 +19,7 @@ export * from "./scheduled-log.ts";
 export * from "./assistant.ts";
 export * from "./assistant-personas.ts";
 export * from "./activity-kind.ts";
+export * from "./challenge-standings-card.ts";
 export * from "./compact-table-card.ts";
 export * from "./workout-session-card.ts";
 export * from "./memory.ts";

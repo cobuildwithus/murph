@@ -83,6 +83,7 @@ describe("knowledge contracts", () => {
       ...reference,
       body: "Example body.",
       markdown: "# Example page\n\nExample body.",
+      pageRevisionDigest: "0".repeat(64),
     };
 
     expect(

@@ -1,4 +1,4 @@
-# iMessage static nutrition preview
+# iMessage static response-card previews
 
 Status: active
 Created: 2026-08-09
@@ -11,6 +11,8 @@ Updated: 2026-08-09
   generated image that mirrors the native card instead of a separate dashboard.
 - Preserve the existing App Store affordance, one-send outbox ownership, and
   immutable offline card snapshot.
+- Give schema-V5 challenge standings the same stateless image fallback while
+  preserving their native title-first ranked and collective hierarchy.
 
 ## Scope
 
@@ -20,6 +22,8 @@ Updated: 2026-08-09
 - The Linq static layout's `image_url` plus one-column semantic captions beneath
   the image for totals, partial state, and V2 goals.
 - A reusable nutrition image component and synthetic design-catalog study.
+- A reusable challenge-standings image component and synthetic design-catalog
+  study that omit format and per-row coverage labels.
 - Focused route, rendering, provider-request, hosted-egress, asset-trace, and
   rollout documentation.
 
@@ -50,9 +54,9 @@ Updated: 2026-08-09
    before rollout completion.
 4. Risk: an independently styled static renderer can drift from the shipping
    Messages extension, while raster content has no Linq alt-text field.
-   Mitigation: mirror the SwiftUI card's default cream balloon, calorie ring,
-   and four-metric row; keep the complete immutable snapshot in Linq's supported
-   native caption fields because the static image has no tap-to-reveal state.
+   Mitigation: mirror each SwiftUI card's native hierarchy; keep the complete
+   immutable snapshot in Linq's supported native caption fields because the
+   image is never the sole semantic fallback.
 
 ## Tasks
 
@@ -61,7 +65,9 @@ Updated: 2026-08-09
 3. [x] Add catalog, route, provider, egress, and asset-trace proof.
 4. [x] Update security, reliability, architecture, UX, and deploy guidance.
 5. [x] Push the updated PR candidate and complete ReviewGPT plus exact-head CI.
-6. [ ] Capture one macOS static card and one no-app iPhone static card, then
+6. [x] Add the schema-V5 challenge-standings image, Linq URL, strict parser,
+   catalog study, and focused tests.
+7. [ ] Capture one macOS static card and one no-app iPhone static card, then
    close the plan.
 
 ## Existing App Store contract

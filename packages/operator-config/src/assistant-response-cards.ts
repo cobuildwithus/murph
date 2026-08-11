@@ -10,6 +10,7 @@ import {
   assistantResponseCardV1Bounds,
   assistantResponseCardSchema,
   buildWorkoutSessionAppCardEnvelopeV4,
+  challengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
   dailyNutritionResponseCardV2AuthoringSchema,
@@ -20,6 +21,8 @@ import {
   workoutSessionCardV1Bounds,
   workoutSessionSetStatusValues,
   type AssistantResponseCard,
+  type ChallengeStandingsEntryV1,
+  type ChallengeStandingsResponseCardV1,
   type CompactTableGenericResponseCardV1,
   type CompactTableResponseCardV1,
   type DailyNutritionResponseCard,
@@ -49,6 +52,10 @@ const NUTRITION_CARD_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 3,
   useGrouping: true,
 })
+const CHALLENGE_POINTS_NUMBER_FORMATTER = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0,
+  useGrouping: true,
+})
 export const LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT =
   'Ask Murph for this card in text'
 export const LINQ_IMESSAGE_APP_CARD_ORIGIN = MURPH_PRODUCT_ORIGIN
@@ -68,6 +75,11 @@ export type AppCardEnvelopeV3 = {
   card: Omit<CompactTableGenericResponseCardV1, 'tracking'>
 }
 
+export type AppCardEnvelopeV5 = {
+  schemaVersion: 5
+  card: ChallengeStandingsResponseCardV1
+}
+
 export type LinqIMessageAppLayout = {
   caption: string
   image_url?: string
@@ -80,6 +92,15 @@ export {
   assistantResponseCardSchema,
   assistantResponseCardV1Bounds,
   buildWorkoutSessionAppCardEnvelopeV4,
+  challengeStandingsCardV1Bounds,
+  challengeStandingsCoverageCountsV1Schema,
+  challengeStandingsCoverageValues,
+  challengeStandingsEntryV1Schema,
+  challengeStandingsObjectiveV1Schema,
+  challengeStandingsRankingObjectiveV1Schema,
+  challengeStandingsResponseCardV1Schema,
+  challengeStandingsTargetObjectiveV1Schema,
+  collectiveChallengeStandingsResponseCardV1Schema,
   compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
   compactTableRowV1Schema,
@@ -89,6 +110,13 @@ export {
   dailyNutritionResponseCardV2Schema,
   dailyNutritionResponseCardSchema,
   nutritionCardGoalStatusValues,
+  rankedChallengeStandingsResponseCardV1Schema,
+  type ChallengeStandingsCoverage,
+  type ChallengeStandingsCoverageCountsV1,
+  type ChallengeStandingsEntryV1,
+  type ChallengeStandingsObjectiveV1,
+  type ChallengeStandingsResponseCardV1,
+  type CollectiveChallengeStandingsResponseCardV1,
   workoutSessionCardStateValues,
   workoutSessionCardV1Bounds,
   workoutSessionDetailV1Schema,
@@ -107,6 +135,7 @@ export {
   type NutritionCardGoalSnapshot,
   type NutritionCardGoalStatus,
   type NutritionCardMetric,
+  type RankedChallengeStandingsResponseCardV1,
   type WorkoutSessionAppCardEnvelopeV4,
   type WorkoutSessionCardState,
   type WorkoutSessionDetailV1,
@@ -124,6 +153,8 @@ export const assistantResponseCardAuthoringSchema: z.ZodType<
 
 export const assistantResponseCardJsonSchema =
   createAssistantResponseCardJsonSchema()
+export const challengeStandingsResponseCardJsonSchema =
+  createChallengeStandingsResponseCardJsonSchema()
 
 /**
  * User-visible semantic text used by non-native routes and definitive native
@@ -138,6 +169,8 @@ export function renderAssistantResponseCardText(
       return renderDailyNutritionResponseCardText(parsed)
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, false)
+    case 'challenge_standings':
+      return renderChallengeStandingsResponseCardText(parsed)
   }
 }
 
@@ -155,6 +188,8 @@ export function renderAssistantResponseCardTranscriptText(
       return renderDailyNutritionResponseCardText(parsed)
     case 'compact_table':
       return renderCompactTableResponseCardText(parsed, true)
+    case 'challenge_standings':
+      return renderChallengeStandingsResponseCardText(parsed)
   }
 }
 
@@ -182,6 +217,12 @@ export function buildLinqIMessageAppLayout(
         : { trailing_caption: semantic.footer }),
     }
   }
+  if (parsed.kind === 'challenge_standings') {
+    return {
+      ...buildChallengeStandingsLinqLayout(parsed),
+      image_url: buildLinqIMessageAppCardImageUrl(parsed),
+    }
+  }
 
   const mealLabel = parsed.mealCount === 1 ? 'meal' : 'meals'
   const partialLabel = renderPartialNutritionLabel(parsed)
@@ -200,7 +241,11 @@ export function buildLinqIMessageAppCardImageUrl(
   const parsed = assistantResponseCardSchema.parse(card)
   const encoded = parsed.kind === 'daily_nutrition'
     ? encodeDailyNutritionAppCardPayload(parsed)
-    : encodeCompactTableAppCardPayload(parsed)
+    : parsed.kind === 'compact_table'
+      ? encodeCompactTableAppCardPayload(parsed)
+      : encodeChallengeStandingsAppCardPayload(
+          buildIdentityFreeChallengeStandingsImageCard(parsed),
+        )
   if (encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
     throw new TypeError('The encoded app card image payload is too large.')
   }
@@ -222,6 +267,8 @@ export function buildLinqIMessageAppCardUrl(
       return encodeDailyNutritionAppCardUrl(parsed)
     case 'compact_table':
       return encodeCompactTableAppCardUrl(parsed)
+    case 'challenge_standings':
+      return encodeChallengeStandingsAppCardUrl(parsed)
   }
 }
 
@@ -279,6 +326,54 @@ function encodeCompactTableAppCardPayload(
   return encodeAppCardEnvelopePayload(envelope)
 }
 
+export function encodeChallengeStandingsAppCardUrl(
+  card: ChallengeStandingsResponseCardV1,
+): string {
+  const parsed = assistantResponseCardSchema.parse(card)
+  if (parsed.kind !== 'challenge_standings') {
+    throw new TypeError('Expected a challenge standings response card.')
+  }
+  return encodeAppCardEnvelopeUrl(
+    encodeChallengeStandingsAppCardPayload(parsed),
+  )
+}
+
+function encodeChallengeStandingsAppCardPayload(
+  card: ChallengeStandingsResponseCardV1,
+): string {
+  const parsed = challengeStandingsResponseCardV1Schema.parse(card)
+  const envelope: AppCardEnvelopeV5 = {
+    schemaVersion: 5,
+    card: parsed,
+  }
+  return encodeAppCardEnvelopePayload(envelope)
+}
+
+function buildIdentityFreeChallengeStandingsImageCard(
+  card: ChallengeStandingsResponseCardV1,
+): ChallengeStandingsResponseCardV1 {
+  if (card.format === 'collective') {
+    return {
+      ...card,
+      title: 'Challenge standings',
+      subtitle: null,
+      footer: null,
+    }
+  }
+
+  const labelPrefix = card.format === 'teams' ? 'Team' : 'Participant'
+  return {
+    ...card,
+    title: 'Challenge standings',
+    subtitle: null,
+    footer: null,
+    entries: card.entries.map((entry, index) => ({
+      ...entry,
+      label: `${labelPrefix} ${index + 1}`,
+    })),
+  }
+}
+
 function encodeWorkoutSessionAppCardPayload(
   card: Extract<CompactTableResponseCardV1, { workout: unknown }>,
 ): string {
@@ -297,6 +392,7 @@ function encodeAppCardEnvelopePayload(
     | AppCardEnvelopeV1
     | AppCardEnvelopeV2
     | AppCardEnvelopeV3
+    | AppCardEnvelopeV5
     | ReturnType<typeof buildWorkoutSessionAppCardEnvelopeV4>,
 ): string {
   return Buffer.from(JSON.stringify(envelope), 'utf8')
@@ -412,6 +508,187 @@ function countWorkoutSessionSets(
     }),
     { completed: 0, total: 0 },
   )
+}
+
+function renderChallengeStandingsResponseCardText(
+  card: ChallengeStandingsResponseCardV1,
+): string {
+  const heading = card.subtitle === null
+    ? card.title
+    : `${card.title} — ${card.subtitle}`
+
+  if (card.format === 'collective') {
+    const points = card.collectivePoints
+    const scoreLine = points === null
+      ? `No verified score yet / ${formatChallengePoints(
+          card.objective.targetPoints,
+        )} points`
+      : `${formatChallengePoints(points)}${
+          card.coverage === 'partial' ? '+' : ''
+        } / ${formatChallengePoints(card.objective.targetPoints)} points`
+    const status = points === null
+      ? 'Waiting for shared data.'
+      : points >= card.objective.targetPoints
+        ? 'Goal reached.'
+        : card.coverage === 'partial'
+          ? 'More progress may be pending.'
+        : `${formatChallengePoints(
+            card.objective.targetPoints - points,
+          )} points to go.`
+    const coverage = card.coverage === 'partial'
+      ? ['Verified lower-bound progress.']
+      : []
+    const coverageCounts = card.coverageCounts
+    const coverageLine = `Coverage: ${coverageCounts.completeParticipants} complete, ${
+      coverageCounts.partialParticipants
+    } partial, ${coverageCounts.unscoredParticipants} unscored (${
+      coverageCounts.totalParticipants
+    } total).`
+    const footer = card.footer === null ? [] : ['', card.footer]
+    return [
+      heading,
+      '',
+      scoreLine,
+      status,
+      coverageLine,
+      ...coverage,
+      ...footer,
+    ].join('\n')
+  }
+
+  const rows = card.entries.map((entry, index) => {
+    const rank = challengeRankingComplete(card.entries)
+      ? challengeRank(card.entries, index)
+      : null
+    const prefix = rank === null ? '—' : `${rank}.`
+    const score = renderChallengeEntryScore(entry, card.objective)
+    return `${prefix} ${entry.label}: ${score}`
+  })
+  const partial = card.entries.some((entry) => entry.coverage === 'partial')
+    ? ['', 'Scores marked + are verified lower bounds.']
+    : []
+  const ranking = challengeRankingComplete(card.entries)
+    ? []
+    : ['', 'Ranks are withheld until every score is complete.']
+  const footer = card.footer === null ? [] : ['', card.footer]
+  return [heading, '', ...rows, ...partial, ...ranking, ...footer].join('\n')
+}
+
+function renderChallengeEntryScore(
+  entry: ChallengeStandingsEntryV1,
+  objective: Extract<
+    ChallengeStandingsResponseCardV1,
+    { format: 'individual' | 'teams' }
+  >['objective'],
+): string {
+  if (entry.points === null) {
+    return 'unscored'
+  }
+  const points = `${formatChallengePoints(entry.points)}${
+    entry.coverage === 'partial' ? '+' : ''
+  }`
+  return objective.kind === 'target'
+    ? `${points} / ${formatChallengePoints(objective.targetPoints)} points`
+    : `${points} points`
+}
+
+function challengeRank(
+  entries: readonly ChallengeStandingsEntryV1[],
+  index: number,
+): number | null {
+  const entry = entries[index]
+  if (entry?.points === null || entry === undefined) {
+    return null
+  }
+  const firstMatchingIndex = entries.findIndex(
+    (candidate) => candidate.points === entry.points,
+  )
+  return firstMatchingIndex + 1
+}
+
+function challengeRankingComplete(
+  entries: readonly ChallengeStandingsEntryV1[],
+): boolean {
+  return entries.every((entry) => entry.coverage === 'complete')
+}
+
+function buildChallengeStandingsLinqLayout(
+  card: ChallengeStandingsResponseCardV1,
+): LinqIMessageAppLayout {
+  const heading = card.subtitle === null
+    ? card.title
+    : `${card.title} — ${card.subtitle}`
+  if (card.format === 'collective') {
+    const score = card.collectivePoints === null
+      ? 'Waiting for score'
+      : `${formatChallengePoints(card.collectivePoints)}${
+          card.coverage === 'partial' ? '+' : ''
+        } / ${formatChallengePoints(card.objective.targetPoints)} pts`
+    const status = card.collectivePoints === null
+      ? 'Waiting for shared data.'
+      : card.collectivePoints >= card.objective.targetPoints
+        ? 'Goal reached.'
+        : card.coverage === 'partial'
+          ? 'More progress may be pending.'
+          : `${formatChallengePoints(
+              card.objective.targetPoints - card.collectivePoints,
+            )} points to go.`
+    const counts = card.coverageCounts
+    const notes = [
+      ...(card.coverage === 'partial'
+        ? ['Verified lower-bound progress.']
+        : []),
+      ...(card.footer === null ? [] : [card.footer]),
+    ]
+    return {
+      caption: heading,
+      subcaption: `${score}\n${status}`,
+      trailing_caption: `Coverage · ${counts.completeParticipants} complete · ${
+        counts.partialParticipants
+      } partial · ${counts.unscoredParticipants} unscored · ${
+        counts.totalParticipants
+      } total`,
+      ...(notes.length === 0
+        ? {}
+        : { trailing_subcaption: notes.join(' · ') }),
+    }
+  }
+
+  const rankingComplete = challengeRankingComplete(card.entries)
+  const rows = card.entries.map((entry, index) => {
+    const rank = rankingComplete ? challengeRank(card.entries, index) : null
+    const prefix = rank === null ? '—' : `${rank}.`
+    return `${prefix} ${entry.label}: ${renderChallengeEntryScore(
+      entry,
+      card.objective,
+    )}`
+  })
+  const splitAt = Math.ceil(rows.length / 2)
+  const firstRows = rows.slice(0, splitAt).join('\n')
+  const remainingRows = rows.slice(splitAt).join('\n')
+  const notes = [
+    ...(card.entries.some((entry) => entry.coverage === 'partial')
+      ? ['Scores marked + are verified lower bounds.']
+      : []),
+    ...(rankingComplete
+      ? []
+      : ['Ranks are withheld until every score is complete.']),
+    ...(card.footer === null ? [] : [card.footer]),
+  ]
+  return {
+    caption: heading,
+    subcaption: firstRows,
+    ...(remainingRows.length === 0
+      ? {}
+      : { trailing_caption: remainingRows }),
+    ...(notes.length === 0
+      ? {}
+      : { trailing_subcaption: notes.join(' · ') }),
+  }
+}
+
+function formatChallengePoints(points: number): string {
+  return CHALLENGE_POINTS_NUMBER_FORMATTER.format(points)
 }
 
 function renderDailyNutritionResponseCardText(
@@ -542,6 +819,18 @@ function isDailyNutritionResponseCardV2(
   card: DailyNutritionResponseCard,
 ): card is DailyNutritionResponseCardV2 {
   return 'version' in card && card.version === 2
+}
+
+function createChallengeStandingsResponseCardJsonSchema() {
+  const {
+    $schema: _dialect,
+    ...portableSchema
+  } = z.toJSONSchema(challengeStandingsResponseCardV1Schema)
+  return {
+    ...portableSchema,
+    description:
+      'Current group challenge card authoring contract: challenge_standings V1.',
+  }
 }
 
 function responseCardTextSchema(maxLength: number) {
