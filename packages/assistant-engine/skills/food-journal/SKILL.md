@@ -39,6 +39,31 @@ Ask at most one question, and only when the missing detail materially changes sa
 - Do not estimate or surface calories or macros for intuitive-eating contexts, eating-disorder risk, or number-sensitive users. In symptom or digestion work, keep numbers secondary to the focus rather than leading with them.
 - Structured label facts may remain available when useful; surface the details relevant to the user's request alongside the default totals.
 
+Before every requested daily nutrition card, read and apply
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`,
+even when all five goals already appear to exist. Its complete active-condition
+and active-regimen discovery is mandatory before numeric target derivation as
+well as before a card; the five-record context projection is not completeness
+proof. Its complete `vault-cli memory show --format json` read is also mandatory
+because the snapshot does not inject the canonical Identity, Preferences,
+Instructions, and Context memory document; a failed or unreadable memory read
+fails closed, while missing or ambiguous age alone is not a universal block.
+Its lifetime canonical procedure-event and encounter-diagnosis discovery,
+bounded body-measurement read, separate `pregnancy-test` measurement read, and
+bounded canonical test-event list plus required detail reads are likewise
+mandatory before deriving, saving, or surfacing a proposal and again before
+activating one. Also read and follow the
+target-authority and complete active-Goal discovery contract in
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
+before deciding that the five canonical daily goals are complete. Use its
+proposal workflow only if a target is genuinely missing after that read.
+The first setup response explains a paused canonical proposal in ordinary text;
+it does not attach a goal-less card. An unambiguous acceptance may complete the
+pending explicit card request in that next response after the complete safety
+recheck passes, activation and readback succeed, and a fresh same-date totals
+read completes. Other later eligible responses may
+use the accepted active goals in a card.
+
 ## Ground numeric estimates in label and USDA data
 
 Treat every calorie or macro estimate as two separate questions:

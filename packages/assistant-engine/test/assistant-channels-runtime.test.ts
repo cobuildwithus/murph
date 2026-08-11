@@ -28,6 +28,7 @@ const mp3Bytes = new Uint8Array([0xff, 0xfb, 0x90, 0x64])
 
 const NUTRITION_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
+  version: 2,
   localDate: '2026-07-28',
   mealCount: 3,
   totals: {
@@ -35,6 +36,14 @@ const NUTRITION_CARD: AssistantResponseCard = {
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: 193.125, mealCount: 3 },
     fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: { target: 2_100, status: 'under_target' },
+    proteinGrams: { target: 100, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'on_target' },
+    fatGrams: { target: 40, status: 'on_target' },
+    fiberGrams: { target: 30, status: 'under_target' },
   },
 }
 
@@ -413,6 +422,38 @@ describe('assistant channels runtime seam', () => {
       ],
       text: 'This is bold and short aside. gone',
     })
+  })
+
+  it('preserves all V2 nutrition targets and statuses in Telegram text delivery', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 124 },
+      }),
+    ])
+
+    await sendTelegramMessage(
+      { message: NUTRITION_CARD_TEXT, target: '123' },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )
+
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body))
+      .toMatchObject({ chat_id: '123', text: NUTRITION_CARD_TEXT })
+    for (const target of [
+      '2,100 calories (under target)',
+      '100g protein (on target)',
+      '220g carbs (on target)',
+      '40g fat (on target)',
+      '30g fiber (under target)',
+    ]) {
+      expect(NUTRITION_CARD_TEXT).toContain(target)
+    }
   })
 
   it('preserves exact underscore-delimited Telegram text without entities', async () => {
@@ -3112,7 +3153,7 @@ describe('assistant channels runtime seam', () => {
       sendEmailMessage(
         {
           identityId: ' identity-1 ',
-          message: 'direct hello',
+          message: NUTRITION_CARD_TEXT,
           subject: '   ',
           target: ' friend@example.com ',
           targetKind: 'explicit',
@@ -3139,7 +3180,7 @@ describe('assistant channels runtime seam', () => {
     expect(directClient.sendMessage).toHaveBeenCalledWith({
       inboxId: 'identity-1',
       subject: 'Murph update',
-      text: 'direct hello',
+      text: NUTRITION_CARD_TEXT,
       to: 'friend@example.com',
     })
 
