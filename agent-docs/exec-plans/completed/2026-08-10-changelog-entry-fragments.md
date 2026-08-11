@@ -1,8 +1,8 @@
 # Eliminate changelog merge-conflict hotspots
 
-Status: active
+Status: completed
 Created: 2026-08-10
-Updated: 2026-08-10
+Updated: 2026-08-11
 
 ## Goal
 
@@ -81,10 +81,27 @@ Updated: 2026-08-10
 
 ## Verification
 
-- Commands to run: focused changelog and guard tests; web typecheck; production
-  web build and emitted-bundle inspection; exact-head GitHub Actions;
-  preliminary specialist and final ReviewGPT gates; non-mutating merge-tree proof.
-- Expected outcomes: migrated public data is byte-for-byte equivalent at the
-  object level; malformed fragments fail with actionable errors; no normal entry
-  addition requires editing the legacy registry or its test inventory; all gates
-  pass on the pushed PR head.
+- Focused changelog integration suite: 104 tests passed after every substantive
+  remediation and current-base reconciliation.
+- PR declaration guard: 13 tests passed, including exceptional historical-owner
+  acceptance and false `not applicable` rejection.
+- Web typecheck and cold production build passed; 271 emitted app traces contained
+  no raw changelog JSON, loader, or generator runtime dependency.
+- Temporary one-date and two-date future fragment scenarios passed all eight page
+  tests after pagination-sensitive assertions moved to their owning items.
+- The current August 10 metadata, all eleven item objects, and deterministic order
+  match the reconciled base representation.
+- Preliminary specialist review findings were resolved. Final ReviewGPT round 6
+  returned `PASS` with no findings after verifying every prior correction.
+- All exact-head GitHub Actions and Vercel passed on the mergeable implementation
+  head; non-mutating merge-tree proof succeeded against the reconciled base.
+
+## Outcome
+
+- Normal feature work now adds one independently named JSON fragment instead of
+  prepending a shared registry or extending a shared latest-page inventory.
+- Build-time generation retains the existing runtime API without filesystem reads
+  or committed generated output.
+- The frozen legacy owner remains available only for declared historical public
+  corrections; normal current items stay isolated.
+Completed: 2026-08-11
