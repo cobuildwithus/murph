@@ -1,6 +1,6 @@
 # Legacy trial retirement Ops control
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -86,3 +86,14 @@ Updated: 2026-08-10
 - The terminal cleanup removes the now-obsolete one-time surface while leaving
   the existing per-member Stripe event and Family-conversion guards intact
   until the delayed-event and manual-replay horizon has passed.
+- Terminal cleanup verification passed: 39 focused retained-owner and Usage
+  tests, Web typecheck, scoped ESLint, docs drift, design-proof policy, and
+  exact-head desktop/mobile rendering of the remaining production Usage
+  component with synthetic inert data.
+- PR #1613 exact head `b6937c8f7b88` passed every required GitHub check. Its
+  corrected preliminary specialist review passed all applicable lenses with no
+  findings and no patch artifact; final ReviewGPT round 2 passed with no
+  qualifying findings.
+- A current-`main` merge-tree completed without conflict before the terminal
+  cleanup plan was archived.
+Completed: 2026-08-10
