@@ -641,7 +641,7 @@ test("Training treats less assistance as stronger progress", async () => {
 });
 
 
-test("Training ranks only explicitly unit-bearing weights as best sets", async () => {
+test("Training ranks only successful comparable sets as best sets", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-08-09T18:00:00.000Z",
     metricPoints: [],
@@ -664,7 +664,7 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
                 {
                   name: "Shoulder press",
                   order: 2,
-                  sets: [{ order: 1, reps: 8, weight: 150, weightUnit: "lb" }],
+                  sets: [{ order: 1, reps: 5, weight: 100, weightUnit: "kg" }],
                   sourceExerciseId: "EX_PRESS",
                 },
                 {
@@ -702,7 +702,7 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
                 {
                   name: "Shoulder press",
                   order: 2,
-                  sets: [{ order: 1, reps: 8, weight: 70, weightUnit: "kg" }],
+                  sets: [{ order: 1, reps: 0, weight: 110, weightUnit: "kg" }],
                   sourceExerciseId: "EX_PRESS",
                 },
                 {
@@ -732,7 +732,10 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
                 {
                   name: "Push-up",
                   order: 7,
-                  sets: [{ note: "Strong lockout", order: 1, reps: 12 }],
+                  sets: [
+                    { note: "Strong lockout", order: 1, reps: 12 },
+                    { order: 2, reps: 0 },
+                  ],
                   sourceExerciseId: "EX_MEASURABLE_NOTE",
                 },
               ],
@@ -755,8 +758,11 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
 
   assert.equal(progress.get("EX_BENCH")?.bestSet?.weight, 155);
   assert.equal(progress.get("EX_BENCH")?.bestSet?.weightUnit, "lb");
-  assert.equal(progress.get("EX_PRESS")?.bestSet?.weight, 70);
+  assert.equal(progress.get("EX_PRESS")?.bestSet?.weight, 100);
   assert.equal(progress.get("EX_PRESS")?.bestSet?.weightUnit, "kg");
+  assert.equal(progress.get("EX_PRESS")?.bestSet?.reps, 5);
+  assert.equal(progress.get("EX_PRESS")?.lastSet?.weight, 110);
+  assert.equal(progress.get("EX_PRESS")?.lastSet?.reps, 0);
   assert.equal(progress.get("EX_OVERRIDE")?.bestSet?.weight, 60);
   assert.equal(progress.get("EX_OVERRIDE")?.bestSet?.weightUnit, "kg");
   assert.equal(progress.get("EX_AMBIGUOUS")?.bestSet, null);
@@ -773,6 +779,7 @@ test("Training ranks only explicitly unit-bearing weights as best sets", async (
     progress.get("EX_MEASURABLE_NOTE")?.bestSet?.note,
     "Strong lockout",
   );
+  assert.equal(progress.get("EX_MEASURABLE_NOTE")?.lastSet?.reps, 0);
 
   const latest = view.recentSessions.find(
     (session) => session.id === "comparable_loads_latest",

@@ -587,7 +587,11 @@ function normalizedLoadKg(set: TrainingSetView): number {
 }
 
 function hasComparableBestMeasurement(set: TrainingSetView): boolean {
-  if (set.durationSeconds !== null || set.distanceMeters !== null) {
+  if (
+    set.reps === 0
+    || set.durationSeconds !== null
+    || set.distanceMeters !== null
+  ) {
     return false;
   }
 
