@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 
+import {
+  buildHostedDeviceSyncStatusPrompt,
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+  type HostedDeviceSyncRuntimeSnapshotReader,
+} from "@murphai/assistant-runtime/hosted-device-sync-status";
 import { describe, expect, it, vi } from "vitest";
 import { listJunctionDeviceConnectRouteEntries } from "@murphai/device-syncd/connect-config";
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "@murphai/device-syncd/hosted-runtime";
@@ -22,11 +27,6 @@ import {
   runWithPrismaOperationTimings,
   type PrismaOperationTiming,
 } from "@/src/lib/prisma-operation-timing";
-import { buildHostedDeviceSyncStatusPrompt } from "../../../packages/assistant-runtime/src/hosted-runtime/device-sync-status-prompt.ts";
-import {
-  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
-  type HostedDeviceSyncRuntimeSnapshotReader,
-} from "../../../packages/assistant-runtime/src/hosted-runtime/device-sync-snapshot-pagination.ts";
 
 type HostedDeviceSyncStatusSnapshotReader = NonNullable<
   Parameters<typeof buildHostedDeviceSyncStatusPrompt>[0]["deviceSyncPort"]
