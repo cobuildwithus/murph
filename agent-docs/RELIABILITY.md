@@ -420,6 +420,32 @@ Last verified: 2026-08-10
   one-invoice/one-payment refund; partial refunds, balance credit, credit notes,
   pagination, or multiple allocations remain support-required rather than
   guessed.
+- A never-paid Family owner draft is recoverable without a repair queue or new
+  status. Invite acceptance may treat only an exact inert owner-only group as
+  removable, then claim the invite, write the destination membership, and
+  delete that draft in one transaction so a later validation failure cannot
+  strand or consume the invite. An authenticated manual abandonment first
+  retrieves and, when needed, expires the exact bound Checkout outside the
+  transaction. The owner lock then rechecks every draft relation, billing
+  authority field, and Checkout claim. A completed or replacement Checkout,
+  another member or invite, paid capacity, direct paid conversion, or any
+  inconsistent billing shape wins and leaves the group intact. An unbound
+  Checkout claim becomes removable only after the existing 24-hour stale-claim
+  boundary. A delayed duplicate binder first retrieves the exact Session and
+  preserves or applies any subscription already accepted by the group; it may
+  expire an open Session, but may destructively close a completed Session only
+  after the owner boundary proves the original group no longer exists. The
+  explicit use-invite response is idempotent after cleanup commits, so response
+  loss returns the already-validated invite without recreating billing state.
+  Before cleanup, the recovery projection owns the exact group and nullable
+  Checkout attempt. Both the explicit use-invite flow and the rendered manual
+  abandonment action carry that pair into the route; every abandonment call
+  requires it and rejects a changed group or attempt before provider cleanup or
+  a transaction can affect the replacement. The proved browser action uses the
+  versioned `/api/settings/billing/family/draft/claim` route while the legacy
+  route also requires proof: a new browser on an old instance receives 404, and
+  an old browser on a new instance receives 400, so mixed-version traffic fails
+  safely during convergence.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a

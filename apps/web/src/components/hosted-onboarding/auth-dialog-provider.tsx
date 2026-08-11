@@ -11,7 +11,11 @@ import {
 } from "react";
 
 import { AuthDialog } from "@/src/components/hosted-onboarding/auth-dialog";
-import { HOSTED_APP_HOME_PATH } from "@/src/lib/hosted-onboarding/app-routes";
+import {
+  HOSTED_APP_HOME_PATH,
+  HOSTED_FAMILY_INVITE_RETURN_PARAM,
+  parseHostedFamilyInviteReturnPath,
+} from "@/src/lib/hosted-onboarding/app-routes";
 import {
   HOSTED_START_PAID_GROUP_RETURN_PARAM,
   HOSTED_START_PAID_GROUP_RETURN_VALUE,
@@ -135,10 +139,29 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentComputerHandoffUrl(payload)
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl(payload)
+    || shouldResumeCurrentSettingsFamilyInviteReturnUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsUsageCreditReturnUrl(payload)
   );
+}
+
+function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const returnValues = new URLSearchParams(window.location.search).getAll(
+    HOSTED_FAMILY_INVITE_RETURN_PARAM,
+  );
+  return returnValues.length === 1
+    && parseHostedFamilyInviteReturnPath(returnValues[0]) !== null;
 }
 
 function shouldResumeCurrentSettingsUsageCreditReturnUrl(

@@ -121,6 +121,12 @@ default destination for every goal or the definition of activation.
   purchased capacity as `usage`, present one-time contribution in a bottom
   drawer on phones and a centered dialog on larger screens, and leave payment
   confirmation to Stripe.
+- Starting a Family plan and joining someone else's Family are distinct choices.
+  Settings must say that starting creates a plan the member owns and pays for,
+  while joining uses the other owner's invite. A never-paid owner-only draft
+  must not strand a later invite: remove an inert draft as part of successful
+  acceptance, and give a member with a live Checkout one clear Settings action
+  to expire and abandon that exact unpaid setup before trying the invite again.
 - Wearable-provider authorization uses that exception narrowly. A provider
   callback completes automatically only for the browser that can prove it
   started the connection for the signed-in member; that proof-bound return is
