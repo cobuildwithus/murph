@@ -854,15 +854,6 @@ Core execution tuning:
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
-- `CF_CONTAINER_SSH_PUBLIC_KEY` optionally adds one `ssh-ed25519` public key to
-  both runner Container `authorized_keys` entries for Wrangler SSH debugging.
-  The deploy renderer keeps only the key type and key body, so local key
-  comments are not copied into the generated Wrangler config. When this is set,
-  deploy automation also adds the `containers_pid_namespace` compatibility flag
-  so SSH debug sessions do not see unrelated VM processes.
-- `CF_CONTAINER_SSH_KEY_NAME` optionally sets the displayed key name for
-  `CF_CONTAINER_SSH_PUBLIC_KEY`; use a neutral lowercase slug. Defaults to
-  `local-debug`.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -1278,6 +1269,13 @@ pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:artifacts
 ```
 
+To inspect the runner bundle and generated Wrangler config independently:
+
+```bash
+pnpm --dir apps/cloudflare runner:bundle
+pnpm --dir apps/cloudflare deploy:config:render
+```
+
 Local deploys and Docker smoke checks also prepare the stable native base image:
 
 ```bash
@@ -1521,39 +1519,19 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Wrangler SSH Debugging
+## Container Operator Access
 
-Wrangler SSH for Cloudflare Containers is an operator debug path only. It does
-not expose a public port, but it does let Cloudflare account writers connect to
-running Container instances when their local private key matches a public key in
-the rendered Container `authorized_keys`.
+Wrangler SSH is intentionally disabled for both runner Container classes. The
+checked-in scaffold and generated deploy config must set `ssh.enabled` to
+`false`, contain no `authorized_keys`, and expose no environment input that can
+re-enable the capability. This explicit setting is required because Cloudflare
+enables Wrangler SSH by default.
 
-Use a local `ssh-ed25519` key. If you create a dedicated key, use a neutral
-comment and keep the private key outside source control:
+Keep `containers_pid_namespace` enabled independently of SSH. Murph's current
+compatibility date predates Cloudflare's default for isolated Container PID
+namespaces, and removing the flag would change process topology and widen
+`/proc` visibility rather than merely remove operator access.
 
-```bash
-ssh-keygen -t ed25519 -C murph-cloudflare-containers -f <SSH_PRIVATE_KEY>
-ssh-add <SSH_PRIVATE_KEY>
-```
-
-Before rendering or deploying, export the public key without the local comment:
-
-```bash
-export CF_CONTAINER_SSH_PUBLIC_KEY="$(awk '{print $1 \" \" $2}' < <SSH_PUBLIC_KEY>)"
-export CF_CONTAINER_SSH_KEY_NAME=local-debug
-pnpm --dir apps/cloudflare runner:bundle
-pnpm --dir apps/cloudflare deploy:config:render
-```
-
-`pnpm --dir apps/cloudflare deploy:worker` also renders the config, so keep
-those env vars present for the deploy that should carry the debug key. After
-deploying, find a running instance and connect:
-
-```bash
-pnpm --dir apps/cloudflare exec wrangler containers instances <APPLICATION>
-pnpm --dir apps/cloudflare exec wrangler containers ssh <INSTANCE_ID>
-```
-
-SSH does not wake stopped Containers and does not keep an otherwise idle
-Container alive. Unset `CF_CONTAINER_SSH_PUBLIC_KEY` and redeploy when the debug
-window is over.
+Use bounded structured runtime logs, Durable Object status, Container
+application and instance inventory, and the managed deploy smoke for production
+diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.
