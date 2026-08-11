@@ -9835,6 +9835,7 @@ describe("hosted runtime callbacks", () => {
 
   it("routes persisted Linq reaction intents without payload operations", async () => {
     const effect = createEffect({
+      answeredMailboxItemIds: ["mailbox_item_1"],
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
       message: "",
@@ -9846,24 +9847,47 @@ describe("hosted runtime callbacks", () => {
       reaction: "heart",
       targetMessageId: "linq_message_1",
     });
-    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({
+      dependencies,
+      dispatchHooks,
+    }) => {
       const delivery = await dependencies.setLinqMessageReaction({
         reaction: "heart",
         target: "linq_chat_123",
         targetMessageId: "linq_message_1",
       });
-
+      const acceptedDelivery = {
+        channel: "linq" as const,
+        idempotencyKey: "assistant-outbox:intent_123",
+        kind: "message-reaction" as const,
+        reaction: delivery.reaction,
+        sentAt: "2026-04-08T00:01:00.000Z",
+        target: delivery.target,
+        targetKind: "thread" as const,
+        targetMessageId: delivery.targetMessageId,
+      };
+      const durableIntent = createPendingHostedDeliveryIntent({
+        answeredMailboxItemIds: ["mailbox_item_1"],
+        bindingDelivery: { kind: "thread", target: "linq_chat_123" },
+        channel: "linq",
+        delivery: acceptedDelivery,
+        deliveryIdempotencyKey: "assistant-outbox:intent_123",
+        explicitTarget: null,
+        intentId: effect.effectId,
+        message: "",
+        operation: { kind: "message-reaction", reaction: "heart" },
+        replyToMessageId: "linq_message_1",
+        status: "sending",
+      }) as AssistantOutboxIntent;
+      await dispatchHooks?.persistDeliveredIntent?.({
+        delivery: acceptedDelivery,
+        intent: durableIntent,
+        vault: HOSTED_WAKE.vaultRoot,
+      });
       return createDispatchResult({
-        delivery: {
-          channel: "linq",
-          idempotencyKey: "assistant-outbox:intent_123",
-          kind: "message-reaction",
-          reaction: delivery.reaction,
-          sentAt: "2026-04-08T00:01:00.000Z",
-          target: delivery.target,
-          targetKind: "thread",
-          targetMessageId: delivery.targetMessageId,
-        },
+        ...durableIntent,
+        delivery: acceptedDelivery,
         status: "sent",
       });
     });
@@ -9871,7 +9895,9 @@ describe("hosted runtime callbacks", () => {
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
       assistantDeliveryEffects: [effect],
-      effectsPort: createHostedRuntimeEffectsPortStub(),
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
       forwardedEnv: {
         LINQ_API_TOKEN: "linq-token",
         OPENAI_API_KEY: "sk-runtime",
@@ -9881,6 +9907,7 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
     expect(mocks.setLinqMessageReaction).toHaveBeenCalledWith({
       reaction: "heart",
@@ -9898,6 +9925,225 @@ describe("hosted runtime callbacks", () => {
         retryable: false,
       }),
     ]);
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.any(String),
+        answeredMailboxItemIds: ["mailbox_item_1"],
+        attemptedAt: expect.any(String),
+        idempotencyKey: "assistant-outbox:intent_123",
+        intentId: effect.effectId,
+        providerMessageId: null,
+        providerTarget: "linq_chat_123",
+        target: "linq_chat_123",
+        targetKind: "thread",
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("keeps an accepted Linq reaction receipt retryable when exact-consume confirmation fails", async () => {
+    const effect = createEffect({
+      answeredMailboxItemIds: ["mailbox_item_retryable"],
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_retryable",
+      message: "",
+      replyToMessageId: "linq_message_retryable",
+      transportIdempotent: false,
+    });
+    mocks.setLinqMessageReaction.mockResolvedValueOnce({
+      reaction: "heart",
+      targetMessageId: "linq_message_retryable",
+    });
+    const recordDeliveryOutcome = vi.fn(async () => {
+      throw new Error("Web confirmation unavailable");
+    });
+    let confirmationError: unknown = null;
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({
+      dependencies,
+      dispatchHooks,
+    }) => {
+      const delivery = await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_retryable",
+        targetMessageId: "linq_message_retryable",
+      });
+      const acceptedDelivery = {
+        channel: "linq" as const,
+        idempotencyKey: "assistant-outbox:intent_123",
+        kind: "message-reaction" as const,
+        reaction: delivery.reaction,
+        sentAt: "2026-04-08T00:01:00.000Z",
+        target: delivery.target,
+        targetKind: "thread" as const,
+        targetMessageId: delivery.targetMessageId,
+      };
+      const durableIntent = createPendingHostedDeliveryIntent({
+        answeredMailboxItemIds: ["mailbox_item_retryable"],
+        bindingDelivery: { kind: "thread", target: "linq_chat_retryable" },
+        channel: "linq",
+        delivery: acceptedDelivery,
+        deliveryIdempotencyKey: acceptedDelivery.idempotencyKey,
+        explicitTarget: null,
+        intentId: effect.effectId,
+        message: "",
+        operation: { kind: "message-reaction", reaction: "heart" },
+        replyToMessageId: "linq_message_retryable",
+        status: "sending",
+      }) as AssistantOutboxIntent;
+      try {
+        await dispatchHooks?.persistDeliveredIntent?.({
+          delivery: acceptedDelivery,
+          intent: durableIntent,
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+      } catch (error) {
+        confirmationError = error;
+        return createDispatchResult({
+          ...durableIntent,
+          lastError: {
+            code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+            message: "Accepted reaction exact-consume confirmation is pending.",
+          },
+          status: "retryable",
+        }, {
+          code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+          message: "Accepted reaction exact-consume confirmation is pending.",
+        });
+      }
+
+      throw new Error("Expected exact-consume confirmation to fail.");
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(confirmationError).toMatchObject({
+      code: "ASSISTANT_LINQ_DELIVERY_OUTCOME_RECORD_FAILED",
+      deliveryMayHaveSucceeded: true,
+    });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "retryable",
+        retryable: true,
+      }),
+    ]);
+    expect(mocks.setLinqMessageReaction).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: expect.any(String),
+        answeredMailboxItemIds: ["mailbox_item_retryable"],
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("confirms a retained Linq reaction receipt without replaying provider or route authority", async () => {
+    const effect = createEffect({
+      answeredMailboxItemIds: ["mailbox_item_retry"],
+      channel: "linq",
+      bindingDeliveryTarget: "linq_chat_retry",
+      message: "",
+      replyToMessageId: "linq_message_retry",
+      transportIdempotent: false,
+    });
+    const acceptedDelivery = {
+      channel: "linq" as const,
+      idempotencyKey: "assistant-outbox:intent_123",
+      kind: "message-reaction" as const,
+      reaction: "heart" as const,
+      sentAt: "2026-04-08T00:01:00.000Z",
+      target: "linq_chat_retry",
+      targetKind: "thread" as const,
+      targetMessageId: "linq_message_retry",
+    };
+    const storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: ["mailbox_item_retry"],
+      bindingDelivery: { kind: "thread", target: "linq_chat_retry" },
+      channel: "linq",
+      delivery: acceptedDelivery,
+      deliveryIdempotencyKey: "assistant-outbox:intent_123",
+      explicitTarget: null,
+      intentId: effect.effectId,
+      message: "",
+      operation: { kind: "message-reaction", reaction: "heart" },
+      replyToMessageId: "linq_message_retry",
+      status: "retryable",
+    }) as AssistantOutboxIntent;
+    const assertRecentInbound = vi.fn(async () => {
+      throw new Error("route authority must not be re-entered");
+    });
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({
+      dependencies,
+      dispatchHooks,
+    }) => {
+      await expect(dispatchHooks?.preflightDispatchIntent?.({
+        intent: storedIntent,
+        now: new Date("2026-04-08T00:02:00.000Z"),
+        vault: HOSTED_WAKE.vaultRoot,
+      })).resolves.toEqual({ action: "continue" });
+      const resolved = await dispatchHooks?.resolveDeliveredIntent?.({
+        intent: storedIntent,
+        vault: HOSTED_WAKE.vaultRoot,
+      });
+      expect(dependencies.setLinqMessageReaction).toBeDefined();
+      return createDispatchResult({
+        ...storedIntent,
+        delivery: resolved,
+        status: "sent",
+      });
+    });
+
+    const outcomes = await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_TOKEN: "linq-token",
+      },
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        deliveryStatus: "sent",
+        retryable: false,
+      }),
+    ]);
+    expect(assertRecentInbound).not.toHaveBeenCalled();
+    expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+    expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedAt: acceptedDelivery.sentAt,
+        answeredMailboxItemIds: ["mailbox_item_retry"],
+        attemptedAt: acceptedDelivery.sentAt,
+        idempotencyKey: acceptedDelivery.idempotencyKey,
+        intentId: effect.effectId,
+        providerTarget: acceptedDelivery.target,
+        target: acceptedDelivery.target,
+        targetKind: "thread",
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("blocks routed Linq reactions when the final provider claim loses route authority", async () => {
@@ -13537,7 +13783,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("marks post-success Linq reaction liveness aborts as possibly committed", async () => {
+  it("keeps an accepted Linq reaction receipt when liveness changes after the provider response", async () => {
     const effect = createEffect({
       channel: "linq",
       bindingDeliveryTarget: "linq_chat_123",
@@ -13545,7 +13791,6 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_1",
       transportIdempotent: false,
     });
-    let capturedError: unknown = null;
     const assertLiveness = vi.fn()
       .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("aborted after Linq reaction response"));
@@ -13554,31 +13799,25 @@ describe("hosted runtime callbacks", () => {
       targetMessageId: "linq_message_1",
     });
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
-      try {
-        await dependencies.setLinqMessageReaction({
-          reaction: "heart",
-          target: "linq_chat_123",
-          targetMessageId: "linq_message_1",
-        });
-      } catch (error) {
-        capturedError = error;
-        return createDispatchResult(
-          {
-            intentId: "intent_123",
-            lastError: {
-              code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-              message: "Ambiguous Linq reaction delivery.",
-            },
-            status: "abandoned",
-          },
-          {
-            code: "ASSISTANT_DELIVERY_AMBIGUOUS",
-            message: "Ambiguous Linq reaction delivery.",
-          },
-        );
-      }
+      const delivery = await dependencies.setLinqMessageReaction({
+        reaction: "heart",
+        target: "linq_chat_123",
+        targetMessageId: "linq_message_1",
+      });
 
-      throw new Error("expected post-success Linq reaction liveness failure");
+      return createDispatchResult({
+        delivery: {
+          channel: "linq",
+          idempotencyKey: "assistant-outbox:intent_123",
+          kind: "message-reaction",
+          reaction: delivery.reaction,
+          sentAt: "2026-04-08T00:01:00.000Z",
+          target: delivery.target,
+          targetKind: "thread",
+          targetMessageId: delivery.targetMessageId,
+        },
+        status: "sent",
+      });
     });
 
     const outcomes = await drainHostedPreparedAssistantDeliveries({
@@ -13594,15 +13833,12 @@ describe("hosted runtime callbacks", () => {
       vaultRoot: HOSTED_WAKE.vaultRoot,
       wake: HOSTED_WAKE.wake,
     });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
 
-    expect(assertLiveness).toHaveBeenCalledTimes(2);
-    expect(capturedError).toMatchObject({
-      deliveryMayHaveSucceeded: true,
-      message: "aborted after Linq reaction response",
-    });
+    expect(assertLiveness).toHaveBeenCalledTimes(1);
     expect(outcomes).toEqual([
       expect.objectContaining({
-        deliveryStatus: "failed_ambiguous",
+        deliveryStatus: "sent",
         retryable: false,
       }),
     ]);
