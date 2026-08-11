@@ -1332,6 +1332,12 @@ test("device sync store keeps source instances distinct and lists them determini
       [],
     );
     assert.equal(store.getAccountById(connection.id)?.sources?.[0]?.resourceCount, 1);
+    assert.deepEqual(
+      store.getAccountById(connection.id)?.sources?.find(
+        (source) => source.sourceProviderSlug === "dexcom",
+      )?.resourceAvailabilitySummary,
+      { glucose: "not_granted" },
+    );
 
     const updatedOuraA = store.upsertConnectionSource({
       connectionId: connection.id,

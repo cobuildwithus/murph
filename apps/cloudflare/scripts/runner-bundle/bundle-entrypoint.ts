@@ -201,9 +201,21 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // closure, and 10,044,661B total. Ratchet the entry and total baselines to the
 // exact combined graph while retaining the established cross-platform
 // tolerances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 10_044_661 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_689_761;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_023_354;
+//
+// Preserving admitted identity and retry state for Junction blood-pressure
+// history extends the deferred provider's lazy output. After merging the later
+// mainline runtime boundaries, exact local production assembly of the combined
+// graph measured a 1,596,214B entry, 7,718,295B static closure, and 9,637,008B
+// total on 2026-08-10. Ratchet the total while retaining the reviewed startup
+// baselines and all fixed cross-platform allowances.
+//
+// Combining that reduced graph with the reviewed current-sender private
+// completion path measured a 1,614,630B entry, 7,757,204B static closure, and
+// 9,678,656B total on macOS. Both startup measurements remain within the
+// retained reviewed baselines, so ratchet only the total ceiling.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_678_656 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:
