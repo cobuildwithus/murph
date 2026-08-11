@@ -261,6 +261,26 @@ value exists. After that point, the new bundle is the hard rollback floor for
 workspaces, checkpoints, retained outbox intents, and side effects. Forward-fix
 on that bundle or newer rather than restoring an older reader.
 
+## Exercise Routine Response-Card Rollout
+
+The `exercise_routine` discriminator extends the strict assistant outbox card
+union. Deploy the Cloudflare Worker operation allowlist before the new runner can
+emit `sendRichMessage`, then use `container_rollout=immediate`. An older Worker
+returns a non-Telegram policy response. The new runner treats that result as
+terminal ambiguity and does not send text fallback. Before routine traffic,
+require managed-container smoke to report the exact new runner-bundle fingerprint.
+
+The prior runner remains safe only before the first routine-card outbox intent
+is written. After that write, the new runner bundle is a hard rollback floor for
+that workspace because an older strict reader can quarantine the retained
+intent. Forward-fix on this bundle or newer. Monitor Workers Observability for
+`outbox.intent.quarantined`, strict outbox parse failures, and stale runner
+fingerprints after rollout.
+
+Telegram daily-nutrition Rich Messages reuse the existing queryless response-
+card image route. Keep that Web route available while sent Telegram or Linq
+cards can still fetch their immutable image.
+
 ## Audience-Key Rollout
 
 The first production deploy that can write assistant conversation keys with an

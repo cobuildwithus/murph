@@ -6,6 +6,7 @@ import type {
 } from '@murphai/operator-config/agentmail-runtime'
 import type { InboxShowResult } from '@murphai/operator-config/inbox-cli-contracts'
 import {
+  assistantResponseCardSchema,
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -48,6 +49,56 @@ const NUTRITION_CARD: AssistantResponseCard = {
 }
 
 const NUTRITION_CARD_TEXT = renderAssistantResponseCardText(NUTRITION_CARD)
+
+const ROUTINE_CARD: AssistantResponseCard = {
+  exercises: [{
+    dose: '8 repetitions',
+    estimatedSeconds: 45,
+    images: [],
+    instructions: ['Move slowly.'],
+    name: 'Shoulder circles',
+  }],
+  footer: null,
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain increases.',
+  subtitle: null,
+  title: 'Short reset',
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
+}
+
+const ROUTINE_CARD_TEXT = renderAssistantResponseCardText(ROUTINE_CARD)
+
+const LONG_ROUTINE_CARD = assistantResponseCardSchema.parse({
+  ...ROUTINE_CARD,
+  exercises: Array.from({ length: 8 }, (_, index) => ({
+    dose: `Eight controlled repetitions ${'d'.repeat(50)}`,
+    estimatedSeconds: 45,
+    images: [],
+    instructions: [
+      `Keep the movement controlled ${'a'.repeat(50)}`,
+      `Stop before the range becomes forced ${'b'.repeat(50)}`,
+    ],
+    name: `Exercise ${index + 1} ${'n'.repeat(60)}`,
+  })),
+  footer: `Keep breathing normally ${'f'.repeat(130)}`,
+  intensity: `Easy and controlled ${'i'.repeat(130)}`,
+  safety: `Stop if pain or dizziness increases ${'s'.repeat(120)}`,
+  subtitle: `Complete movement guide ${'u'.repeat(130)}`,
+  title: `Long routine ${'t'.repeat(140)}`,
+  totalSeconds: 360,
+  transitionSeconds: 0,
+})
+
+const LONG_ROUTINE_CARD_TEXT = renderAssistantResponseCardText(LONG_ROUTINE_CARD)
 
 const CHALLENGE_CARD: AssistantResponseCard = {
   kind: 'challenge_standings',
@@ -106,6 +157,7 @@ import {
   sendLinqMessage,
   sendTelegramImageMessage,
   sendTelegramMessage,
+  sendTelegramRichMessage,
   sendTelegramVoiceMemoMessage,
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
@@ -286,6 +338,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -293,6 +346,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(429, {
         description: 'retry later',
         error_code: 429,
+        ok: false,
         parameters: {
           retry_after: 0.001,
         },
@@ -425,6 +479,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -624,10 +679,12 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'later chunk failed',
         error_code: 400,
+        ok: false,
       }),
       createTelegramResponse(502, {
         description: 'rollback failed',
         error_code: 502,
+        ok: false,
       }),
     ])
 
@@ -813,6 +870,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -826,10 +884,12 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'later chunk failed',
         error_code: 400,
+        ok: false,
       }),
       createTelegramResponse(502, {
         description: 'rollback failed',
         error_code: 502,
+        ok: false,
       }),
     ])
 
@@ -884,6 +944,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -934,6 +995,416 @@ describe('assistant channels runtime seam', () => {
       chat_id: '456',
       text: 'b',
     })
+  })
+
+  it('sends one Telegram rich message with native structured content', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2501 },
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Fallback routine',
+        replyToMessageId: '42',
+        richMessage: {
+          html: '<h2>Routine</h2><table><tr><td>Squat</td></tr></table>',
+        },
+        target: '123:topic:9',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).resolves.toEqual({
+      cleanupMessages: [{ messageId: '2501', target: '123:topic:9' }],
+      providerMessageId: '2501',
+      target: '123:topic:9',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    expect(fetchImplementation.mock.calls[0]?.[0]).toBe(
+      'https://telegram.test/botbot-token/sendRichMessage',
+    )
+    expect(readJsonBody(fetchImplementation.mock.calls[0]?.[1]?.body)).toEqual({
+      chat_id: '123',
+      message_thread_id: 9,
+      reply_parameters: { message_id: 42 },
+      rich_message: {
+        html: '<h2>Routine</h2><table><tr><td>Squat</td></tr></table>',
+      },
+    })
+  })
+
+  it('falls back to text only after a definitive rich-message rejection', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'Bad Request: rich messages are not supported',
+        error_code: 400,
+        ok: false,
+      }),
+      createTelegramResponse(200, {
+        ok: true,
+        result: { message_id: 2502 },
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: LONG_ROUTINE_CARD_TEXT,
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).resolves.toMatchObject({
+      providerMessageId: '2502',
+      target: '123',
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+    expect(fetchImplementation.mock.calls[0]?.[0]).toContain('/sendRichMessage')
+    expect(fetchImplementation.mock.calls[1]?.[0]).toContain('/sendMessage')
+    expect(readJsonBody(fetchImplementation.mock.calls[1]?.[1]?.body)).toMatchObject({
+      chat_id: '123',
+      text: LONG_ROUTINE_CARD_TEXT,
+    })
+    expect(LONG_ROUTINE_CARD_TEXT.length).toBeGreaterThan(3_000)
+    expect(LONG_ROUTINE_CARD_TEXT.length).toBeLessThanOrEqual(4_096)
+  })
+
+  it('keeps an ambiguous definitive-rejection fallback terminal and single-attempt', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(400, {
+        description: 'Bad Request: rich messages are not supported',
+        error_code: 400,
+        ok: false,
+      }),
+      createTelegramResponse(500, {
+        message: 'upstream response without a Bot API envelope',
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: LONG_ROUTINE_CARD_TEXT,
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects a multi-message rich fallback before provider entry', async () => {
+    const fetchImplementation = vi.fn()
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'x'.repeat(4_097),
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_RICH_FALLBACK_TOO_LONG',
+      deliveryMayHaveSucceeded: false,
+    })
+
+    expect(fetchImplementation).not.toHaveBeenCalled()
+  })
+
+  it('does not send a text fallback when rich-message acceptance is ambiguous', async () => {
+    const fetchImplementation = vi.fn(async () => {
+      throw new Error('socket closed')
+    })
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Do not duplicate this',
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([408, 409, 425, 429, 500])(
+    'preserves proven Bot API rejection for existing retry ownership after HTTP %s',
+    async (status) => {
+      const fetchImplementation = createQueuedFetch([
+        createTelegramResponse(status, {
+          description: `Telegram returned ${status}`,
+          error_code: status,
+          ok: false,
+        }),
+      ])
+
+      await expect(sendTelegramRichMessage(
+        {
+          fallbackMessage: 'Do not duplicate this',
+          richMessage: { html: '<h2>Routine</h2>' },
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      )).rejects.toMatchObject({
+        code: 'ASSISTANT_TELEGRAM_DELIVERY_FAILED',
+        deliveryMayHaveSucceeded: false,
+      })
+
+      expect(fetchImplementation).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('treats an HTTP response without a Bot API rejection envelope as ambiguous', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(500, {
+        message: 'upstream gateway failure',
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Do not duplicate this',
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps invalid Bot API response envelopes terminal across existing Telegram sends', async () => {
+    const textFetch = createQueuedFetch([
+      createTelegramResponse(502, { message: 'upstream text gateway failure' }),
+    ])
+    await expect(sendTelegramMessage(
+      { message: 'One text reply', target: '123' },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation: textFetch,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+    expect(textFetch).toHaveBeenCalledTimes(1)
+
+    const photoFetch = createQueuedFetch([
+      createTelegramResponse(502, { message: 'upstream photo gateway failure' }),
+    ])
+    await expect(sendTelegramImageMessage(
+      {
+        media: [{
+          alt: 'A chart',
+          kind: 'image',
+          source: 'test',
+          url: 'https://cdn.example.test/chart.png',
+        }],
+        message: 'One image reply',
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation: photoFetch,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+    expect(photoFetch).toHaveBeenCalledTimes(1)
+
+    const voiceFetch = createQueuedFetch([
+      createAudioResponse(mp3Bytes),
+      createTelegramResponse(502, { message: 'upstream voice gateway failure' }),
+    ])
+    await expect(sendTelegramVoiceMemoMessage(
+      {
+        filename: 'memo',
+        generation: {
+          kind: 'elevenlabs_speech',
+          modelId: 'eleven_multilingual_v2',
+          outputFormat: 'mp3_44100_128',
+          text: 'Short memo.',
+          voiceId: 'voice_murph',
+        },
+        replyToMessageId: null,
+        target: '123',
+      },
+      {
+        env: {
+          ELEVENLABS_API_KEY: 'elevenlabs-key',
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation: voiceFetch,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+    expect(voiceFetch).toHaveBeenCalledTimes(2)
+    expect(voiceFetch.mock.calls[1]?.[0]).toContain('/sendVoice')
+  })
+
+  it('keeps an old Worker rich-route rejection terminal without text fallback', async () => {
+    const fetchImplementation = createQueuedFetch([
+      createTelegramResponse(403, {
+        code: 'ASSISTANT_PROVIDER_OPERATION_NOT_ALLOWED',
+        message: 'sendRichMessage is not allowed by this Worker release',
+      }),
+    ])
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Do not start fallback after an unknown provider result',
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toMatchObject({
+      code: 'ASSISTANT_TELEGRAM_DELIVERY_AMBIGUOUS',
+      deliveryMayHaveSucceeded: true,
+      retryable: false,
+    })
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves a proven pre-provider rich-message rejection', async () => {
+    const providerEntryError = Object.assign(
+      new Error('provider entry rejected'),
+      { deliveryMayHaveSucceeded: false as const },
+    )
+    const fetchImplementation = vi.fn(async () => {
+      throw providerEntryError
+    })
+
+    await expect(sendTelegramRichMessage(
+      {
+        fallbackMessage: 'Provider was not called',
+        richMessage: { html: '<h2>Routine</h2>' },
+        target: '123',
+      },
+      {
+        env: {
+          TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+          TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+        fetchImplementation,
+      },
+    )).rejects.toBe(providerEntryError)
+
+    expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
+  it('projects a frozen Telegram response card into the rich-message path', async () => {
+    const sendTelegramRich = vi.fn().mockResolvedValue({
+      providerMessageId: 'rich-card-1',
+      target: '123',
+    })
+    const sendTelegram = vi.fn()
+
+    await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
+      actorId: null,
+      bindingDelivery: createAssistantBindingDelivery('thread', '123'),
+      card: NUTRITION_CARD,
+      explicitTarget: null,
+      idempotencyKey: 'rich-card-idempotency',
+      identityId: null,
+      media: [],
+      message: NUTRITION_CARD_TEXT,
+      replyToMessageId: '42',
+      threadIsDirect: true,
+    }, {
+      sendTelegram,
+      sendTelegramRich,
+    })).resolves.toMatchObject({
+      channel: 'telegram',
+      providerMessageId: 'rich-card-1',
+      target: '123',
+    })
+
+    expect(sendTelegramRich).toHaveBeenCalledWith(expect.objectContaining({
+      fallbackMessage: NUTRITION_CARD_TEXT,
+      idempotencyKey: 'rich-card-idempotency',
+      replyToMessageId: '42',
+      richMessage: expect.objectContaining({
+        html: expect.stringContaining('<table bordered striped>'),
+      }),
+      target: '123',
+    }))
+    expect(sendTelegram).not.toHaveBeenCalled()
   })
 
   it('sends Telegram image response media through sendPhoto with a caption', async () => {
@@ -1064,6 +1535,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -1183,6 +1655,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(429, {
         description: 'retry later',
         error_code: 429,
+        ok: false,
         parameters: {
           retry_after: 0.001,
         },
@@ -1239,6 +1712,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'group chat migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -1337,6 +1811,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(502, {
         description: 'bad gateway',
         error_code: 502,
+        ok: false,
       }),
       createTelegramResponse(200, {
         ok: true,
@@ -1444,6 +1919,7 @@ describe('assistant channels runtime seam', () => {
       createTelegramResponse(400, {
         description: 'migrated',
         error_code: 400,
+        ok: false,
         parameters: {
           migrate_to_chat_id: '456',
         },
@@ -1769,6 +2245,44 @@ describe('assistant channels runtime seam', () => {
     })
     expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
     expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
+  })
+
+  it('uses deterministic text for Linq exercise routine cards', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'routine-text-message-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: ROUTINE_CARD,
+      directRecipientPhoneNumber: '+15550001',
+      idempotencyKey: 'routine-card-delivery-1',
+      message: ROUTINE_CARD_TEXT,
+      target: 'private-thread-routine',
+      targetKind: 'thread',
+      threadIsDirect: true,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      providerMessageId: 'routine-text-message-1',
+      target: 'private-thread-routine',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).not.toHaveBeenCalled()
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'routine-card-delivery-1',
+    })
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledWith({
+      chatId: 'private-thread-routine',
+      idempotencyKey: 'routine-card-delivery-1',
+      message: ROUTINE_CARD_TEXT,
+      replyToMessageId: null,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
   })
 
   it('falls back to deterministic ordinary text when Linq card capability is unavailable', async () => {
