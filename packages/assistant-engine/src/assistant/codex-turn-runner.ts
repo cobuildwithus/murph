@@ -19,9 +19,6 @@ import {
   hasHostedCodexModelCatalogFlexTier,
 } from '../assistant-codex/config.js'
 import {
-  ASSISTANT_INSTRUCTION_SUPPRESSED_THREAD_CONFIG,
-} from '../assistant-codex/instruction-suppressed-thread-config.js'
-import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
 } from './codex-runtime.js'
@@ -133,7 +130,20 @@ const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
   'memories.use_memories': false,
   web_search: 'disabled',
 } as const
-const ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES = [
+const ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
+  include_apps_instructions: false,
+  include_collaboration_mode_instructions: false,
+  include_environment_context: false,
+  include_permissions_instructions: false,
+  project_doc_max_bytes: 0,
+  'features.request_permissions_tool': false,
+  'skills.include_instructions': false,
+} as const
+const ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+  ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
+  ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+} as const
+const ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
   'memories.generate_memories=false',
   'web_search="disabled"',
   'features.web_search_request=false',
@@ -147,7 +157,7 @@ const ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES = [
   'features.tool_suggest=false',
 ] as const
 const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
-  ...ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES,
+  ...ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES,
   'memories.use_memories=false',
   'features.shell_tool=false',
 ] as const
@@ -161,7 +171,7 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
   nativeCapabilitiesRestrictedTurn: boolean
-  readOnlyAutomationTurn: boolean
+  shellPreservingCapabilitiesRestrictedTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
   if (input.nativeCapabilitiesRestrictedTurn) {
@@ -170,8 +180,8 @@ function resolveAssistantCodexConfigOverrides(input: {
       ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
     ]
   }
-  if (input.readOnlyAutomationTurn) {
-    return ASSISTANT_READ_ONLY_AUTOMATION_CODEX_CONFIG_OVERRIDES
+  if (input.shellPreservingCapabilitiesRestrictedTurn) {
+    return ASSISTANT_SHELL_PRESERVING_RESTRICTED_CODEX_CONFIG_OVERRIDES
   }
   if (!input.filesystemDisabledTurn) {
     return input.requested
@@ -591,15 +601,18 @@ async function executeAssistantCodexAttempt(input: {
           filesystemDisabledTurn: groupEmailTurn,
           nativeCapabilitiesRestrictedTurn:
             hostedImageCompletionNativeCapabilitiesRestrictedTurn,
-          readOnlyAutomationTurn,
+          shellPreservingCapabilitiesRestrictedTurn:
+            memberMemoryMaintenanceTurn || readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         codexThreadConfig:
-          nativeCapabilitiesRestrictedTurn || groupRoomModelMaintenanceTurn
+          nativeCapabilitiesRestrictedTurn
             ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
-            : memberMemoryMaintenanceTurn || readOnlyAutomationTurn
-              ? ASSISTANT_INSTRUCTION_SUPPRESSED_THREAD_CONFIG
-              : null,
+            : groupRoomModelMaintenanceTurn
+              ? ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG
+              : memberMemoryMaintenanceTurn || readOnlyAutomationTurn
+                ? ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG
+                : null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,

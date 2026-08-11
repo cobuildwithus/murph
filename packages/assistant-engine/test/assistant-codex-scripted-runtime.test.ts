@@ -10,6 +10,14 @@ import { crc32, deflateSync } from 'node:zlib'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import {
+  buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
+  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
+  buildMurphMemberReadPermissionProfileTomlLines,
+  MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
+  MURPH_MEMBER_READ_PERMISSION_PROFILE,
+} from '@murphai/hosted-execution/assistant-permissions'
 import type {
   HostedRuntimeAssistantConfigurationSnapshot,
 } from '@murphai/hosted-execution/runtime-control'
@@ -40,6 +48,7 @@ import type { CodexAppServerLiveTurn } from '../src/assistant-codex.ts'
 import {
   MURPH_AUTOMATION_TOOL,
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
+  MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -99,6 +108,38 @@ const SCRIPTED_MODEL = 'gpt-5.6-terra'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const TURN_TIMEOUT_MS = 90_000
 const execFileAsync = promisify(execFile)
+const RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
+  include_apps_instructions: false,
+  include_collaboration_mode_instructions: false,
+  include_environment_context: false,
+  include_permissions_instructions: false,
+  project_doc_max_bytes: 0,
+  'features.request_permissions_tool': false,
+  'skills.include_instructions': false,
+} as const
+const GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+  ...RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+  'features.apps': false,
+  'features.browser_use': false,
+  'features.enable_mcp_apps': false,
+  'features.multi_agent': false,
+  'features.multi_agent_v2': false,
+  'features.plugins': false,
+  'features.shell_tool': false,
+  'features.standalone_web_search': false,
+  'features.tool_suggest': false,
+  'features.web_search_request': false,
+  'memories.generate_memories': false,
+  'memories.use_memories': false,
+  web_search: 'disabled',
+} as const
+const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
+  '[shell_environment_policy]',
+  'inherit = "all"',
+  'ignore_default_excludes = true',
+  'include_only = ["HOME", "PATH", "TMPDIR", "VAULT"]',
+  '',
+] as const
 
 const GROUP_CHALLENGE_DEFINITION = {
   format: {
@@ -268,6 +309,7 @@ interface ScriptedProviderRequestSummary {
   providerRequestDiagnostics?: {
     bytes: number
     includesAllTools: boolean
+    includesExecCommand: boolean
     includesAutomation: boolean
     includesGroup: boolean
     includesReadShared: boolean
@@ -349,6 +391,262 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('attests member-memory instructions while preserving the hosted vault shell and permitted write', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines: [
+        ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
+        ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
+      ],
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    const operatorHome = path.join(vaultRoot, 'operator-home')
+    const memoryDirectory = path.join(vaultRoot, 'bank')
+    const memoryPath = path.join(memoryDirectory, 'memory.md')
+    await Promise.all([
+      mkdir(operatorHome, { recursive: true }),
+      mkdir(memoryDirectory, { recursive: true }),
+      writeFile(
+        path.join(vaultRoot, 'AGENTS.md'),
+        'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+      ),
+    ])
+    await writeFile(
+      path.join(vaultRoot, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+test "\${VAULT:-}" = ${quotePosixShellLiteral(vaultRoot)}
+test "\${HOME:-}" = ${quotePosixShellLiteral(operatorHome)}
+case "$*" in
+  "memory show --format json")
+    printf '%s\\n' 'MEMORY_SHOW_OK'
+    ;;
+  "memory upsert --fact scripted")
+    printf '%s\\n' 'scripted durable memory' > "\${VAULT}/bank/memory.md"
+    printf '%s\\n' 'MEMORY_UPSERT_OK'
+    ;;
+  *)
+    printf '%s\\n' 'unexpected command' >&2
+    exit 4
+    ;;
+esac
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli memory show --format json && ./vault-cli memory upsert --fact scripted",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'RESTRICTED_MEMBER_MEMORY_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      configOverrides: [
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ],
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        HOME: operatorHome,
+        VAULT: vaultRoot,
+      },
+      ephemeral: true,
+      permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      prompt: 'Run the scripted memory read and write, then reply exactly RESTRICTED_MEMBER_MEMORY_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_MEMBER_MEMORY_OK')
+    expect(await readFile(memoryPath, 'utf8')).toBe('scripted durable memory\n')
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesExecCommand: true,
+    })
+    expect(
+      summaries.flatMap((summary) => summary.customToolCallOutputs ?? []).join('\n'),
+    ).toContain('MEMORY_SHOW_OK\nMEMORY_UPSERT_OK')
+  })
+
+  it('attests onboarding instructions while preserving reads and denying mutation', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines: [
+        ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
+        ...buildMurphMemberReadPermissionProfileTomlLines(),
+      ],
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    const operatorHome = path.join(vaultRoot, 'operator-home')
+    const goalsDirectory = path.join(vaultRoot, 'goals')
+    const goalPath = path.join(goalsDirectory, 'current.md')
+    await Promise.all([
+      mkdir(operatorHome, { recursive: true }),
+      mkdir(goalsDirectory, { recursive: true }),
+      writeFile(
+        path.join(vaultRoot, 'AGENTS.md'),
+        'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+      ),
+    ])
+    await writeFile(goalPath, 'ONBOARDING_GOAL_READ_OK\n', 'utf8')
+    await writeFile(
+      path.join(vaultRoot, 'vault-cli'),
+      `#!/bin/sh
+set -eu
+test "\${VAULT:-}" = ${quotePosixShellLiteral(vaultRoot)}
+test "\${HOME:-}" = ${quotePosixShellLiteral(operatorHome)}
+test "$*" = "goals show --format json"
+cat "\${VAULT}/goals/current.md"
+`,
+      { encoding: 'utf8', mode: 0o755 },
+    )
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "./vault-cli goals show --format json",
+});
+text(result.output);
+`,
+          name: 'exec',
+        },
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "printf '%s\\n' 'MUTATION_SHOULD_FAIL' > goals/current.md",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'RESTRICTED_ONBOARDING_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      configOverrides: [
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+      ],
+      dynamicTools: [],
+      env: {
+        ...scenario.turnInput.env,
+        HOME: operatorHome,
+        VAULT: vaultRoot,
+      },
+      ephemeral: true,
+      permissions: MURPH_MEMBER_READ_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      prompt: 'Read the scripted goal, attempt the scripted mutation, then reply exactly RESTRICTED_ONBOARDING_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_ONBOARDING_OK')
+    expect(await readFile(goalPath, 'utf8')).toBe('ONBOARDING_GOAL_READ_OK\n')
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesExecCommand: true,
+    })
+    const outputs = summaries
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+    expect(outputs).toContain('ONBOARDING_GOAL_READ_OK')
+    expect(outputs).not.toContain('MUTATION_SHOULD_FAIL')
+  })
+
+  it('attests group-room instructions while exposing its fixed tool without shell', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      additionalTomlLines:
+        buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
+    })
+    const vaultRoot = scenario.turnInput.workingDirectory
+    await writeFile(
+      path.join(vaultRoot, 'AGENTS.md'),
+      'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
+    )
+    const forbiddenShellPath = path.join(vaultRoot, 'shell-should-not-run')
+    scenario.stub.captureProviderRequestDiagnostics()
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.exec_command({
+  cmd: "printf '%s\\n' 'SHELL_RAN' > shell-should-not-run",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { action: 'show' },
+          name: 'group_room_model',
+          namespace: 'murph',
+        },
+      },
+      { text: 'RESTRICTED_GROUP_ROOM_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      approvalPolicy: 'never',
+      dynamicTools: [MURPH_GROUP_ROOM_MODEL_TOOL],
+      ephemeral: true,
+      groupRoomModelMaintenanceAuthorized: true,
+      permissions: MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
+      processLifetime: 'one-shot',
+      prompt: 'Show the room model, then reply exactly RESTRICTED_GROUP_ROOM_OK.',
+      runtimeWorkspaceRoots: [vaultRoot],
+      sandbox: undefined,
+      threadConfig: GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG,
+      vaultRoot,
+    })
+
+    expect(result.finalMessage).toBe('RESTRICTED_GROUP_ROOM_OK')
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    await expect(readFile(forbiddenShellPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    expect(
+      summaries.flatMap((summary) => summary.functionCallOutputs ?? []).join('\n'),
+    ).toContain('"status":"missing"')
   })
 
   it('preserves original width for supported detail and bounds gallery widths through the real app server', {
@@ -6060,6 +6358,7 @@ function buildScriptedHostedSystemPrompt(
 
 async function prepareScriptedTurnScenario(
   options: {
+    additionalTomlLines?: readonly string[]
     modelProvider?: string
     multiAgentV2?: boolean
   } = {},
@@ -6169,6 +6468,7 @@ async function writeOpenAiFlexModelCatalogJson(input: {
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
+    additionalTomlLines?: readonly string[]
     modelProvider?: string
     multiAgentV2?: boolean
   } = {},
@@ -6202,6 +6502,7 @@ function buildScriptedCodexConfigToml(
           '',
         ]
       : []),
+    ...(options.additionalTomlLines ?? []),
   ].join('\n')
 }
 
@@ -6487,6 +6788,7 @@ function readScriptedProviderRequestSummary(
           providerRequestDiagnostics: {
             bytes: Buffer.byteLength(requestBody),
             includesAllTools: requestBody.includes('ALL_TOOLS'),
+            includesExecCommand: requestBody.includes('exec_command'),
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
             includesReadShared: requestBody.includes('read_shared'),
