@@ -88,3 +88,7 @@ Updated: 2026-08-11
   entire delta is the assembled instruction input; tool/schema/generated
   guidance and other included fields are unchanged. Temporary capture code and
   payloads were removed.
+- Public changelog fragment validation passed: 1 file and 7 tests. The first
+  concurrent invocation raced its generated registry preparation; the same test
+  passed after the Web typecheck completed generation. Final Web typecheck
+  passed with the fragment included.

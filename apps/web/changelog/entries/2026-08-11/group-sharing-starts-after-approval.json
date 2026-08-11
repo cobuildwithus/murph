@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 200,
+  "item": {
+    "id": "group-sharing-starts-after-approval",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Group health sharing starts after approval",
+    "summary": "When you approve an exact health share in a Murph group, Murph now starts preparing it right away and tells the group while the shared view is still getting ready.",
+    "details": "Pending shares stay unranked and do not trigger another permission request or a guess about device status. Sleep-sharing prompts also state that sleep timing and duration cover the last seven days, with the same exact permission and privacy boundaries.",
+    "relevanceTags": ["groups", "sharing", "sleep", "privacy", "reliability"],
+    "sourcePullRequests": [1688]
+  }
+}
