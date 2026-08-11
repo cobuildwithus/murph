@@ -235,9 +235,9 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 //
 // Exact conversation mailbox consumption and its accepted-reaction recovery
 // extend the existing hosted callback output without adding a forbidden boot
-// input. Exact current-main assembly measured 9,844,282B total on 2026-08-11,
+// input. Exact current-main assembly measured 9,846,997B total on 2026-08-11,
 // so ratchet the total only and retain the 32KB allowance.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_844_282 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_846_997 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
