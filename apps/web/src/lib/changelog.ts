@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
+      "Starter access, patterns, reliable referrals, reminders, cards, voices, web search, and a lighter homepage",
     summary:
-      "Starter usage lasts until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations and scheduled cards stay with their intended private conversation, reminders keep the requested local time, completed workout rows stay clear, voice memos keep the selected voice, and managed OpenAI web search works again.",
+      "Starter usage waits until used, patterns compare actions with next-day sleep and recovery, referral celebrations and scheduled cards stay with the intended conversation, reminders keep local time, workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, and the public homepage starts with less to download.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -206,6 +206,22 @@ const RAW_CHANGELOG_EDITIONS = [
           "reliability",
         ],
         sourcePullRequests: [1624],
+      },
+      {
+        id: "lighter-accessible-homepage",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage starts lighter",
+        summary:
+          "The public homepage now uses compact avatar images while continuing to prepare secure sign-in automatically in the background.",
+        details:
+          "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
+        relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],
+        sourcePullRequests: [1573],
+        tryIt: {
+          href: "/",
+          label: "Visit the homepage",
+        },
       },
     ],
   },

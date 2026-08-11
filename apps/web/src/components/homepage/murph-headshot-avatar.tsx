@@ -1,10 +1,10 @@
 import { cn } from "@/src/lib/utils";
 
 export const MURPH_HEADSHOT_SOURCES = [
-  "/murph-headshots/murph-headshot-01.png",
-  "/murph-headshots/murph-headshot-02.png",
-  "/murph-headshots/murph-headshot-03.png",
-  "/murph-headshots/murph-headshot-04.png",
+  "/murph-headshots/murph-headshot-01-avatar.avif",
+  "/murph-headshots/murph-headshot-02-avatar.avif",
+  "/murph-headshots/murph-headshot-03-avatar.avif",
+  "/murph-headshots/murph-headshot-04-avatar.avif",
 ] as const;
 
 export type MurphHeadshotSrc = (typeof MURPH_HEADSHOT_SOURCES)[number];
