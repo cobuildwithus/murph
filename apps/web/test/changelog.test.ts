@@ -349,6 +349,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("environment-report-loading-preview")).toMatchObject({
+      sourcePullRequests: [1617],
+      summary: expect.stringContaining("report-shaped preview"),
+      tryIt: {
+        href: "/environment/print",
+        label: "Open your Environment report",
+      },
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -565,6 +573,7 @@ describe("changelog registry", () => {
           "appointment-reminders-by-default",
           "workout-card-status-rendering",
           "lighter-accessible-homepage",
+          "environment-report-loading-preview",
         ],
       },
       {

@@ -8,7 +8,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 
 import { deriveCategoryNote, overallGrade } from "../category-notes";
-import { EnvironmentPrintReport } from "../environment-print-report";
+import {
+  EnvironmentPrintLoading,
+  EnvironmentPrintReport,
+} from "../environment-print-report";
 import { selectEnvironmentHabitatValues } from "../habitat-values";
 import {
   resolveEnvironmentCoverage,
@@ -34,7 +37,7 @@ export function EnvironmentPrintPageClient({
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
 
   if (status === "loading") {
-    return <PrintStatus>Unlocking your private Environment report…</PrintStatus>;
+    return <EnvironmentPrintLoading />;
   }
 
   if (status === "error") {
