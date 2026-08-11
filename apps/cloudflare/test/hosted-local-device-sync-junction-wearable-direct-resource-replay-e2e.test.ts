@@ -100,6 +100,26 @@ let scenario: HostedLocalFullStackScenario | null = null;
 let linqStub: HostedLocalLinqStub | null = null;
 let browserVaultSummary: JunctionWearableBrowserVaultReplicaSummary | null = null;
 
+describe("hosted system mailbox frontier proof", () => {
+  it.each([
+    null,
+    "not-a-sequence",
+    "-1",
+  ])("rejects a %s pre-trigger imported sequence", (value) => {
+    expect(() => requireNonNegativeDecimalSequence(
+      value,
+      "pre-trigger hosted system mailbox imported sequence",
+    )).toThrow("pre-trigger hosted system mailbox imported sequence");
+  });
+
+  it("accepts an explicit non-negative pre-trigger imported sequence", () => {
+    expect(requireNonNegativeDecimalSequence(
+      "42",
+      "pre-trigger hosted system mailbox imported sequence",
+    )).toBe("42");
+  });
+});
+
 describe("hosted local Junction wearable direct-resource replay e2e", () => {
   beforeAll(async () => {
     plan = await buildJunctionWearableHostedReplayPlan({ replaySize: "smoke" });
@@ -475,6 +495,7 @@ describe("hosted local Junction wearable direct-resource replay e2e", () => {
     }
 
     await assertHostedDeviceSyncReplayReceiptAccepted({
+      requireAdvancedDurableFrontier: true,
       scenario: activeScenario,
       systemImportedSeqBefore: systemImportedSeqBeforeDeviceSync,
       userId,
@@ -1232,6 +1253,7 @@ async function readBrowserVaultReplica(input: {
 }
 
 async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
+  requireAdvancedDurableFrontier?: boolean;
   scenario: HostedLocalFullStackScenario;
   systemImportedSeqBefore: string;
   userId: string;
@@ -1278,7 +1300,10 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
       lane.lane === "system" && lane.lag === "0"
     );
   const receiptObserved = durableSystemLaneAdvancedAndSettled
-    || recordedDeviceSyncLog !== undefined;
+    || (
+      input.requireAdvancedDurableFrontier !== true
+      && recordedDeviceSyncLog !== undefined
+    );
 
   if (
     !receiptObserved
@@ -1299,6 +1324,8 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
         systemHandledThroughSeq,
         systemImportedSeq,
         systemImportedSeqBefore: input.systemImportedSeqBefore,
+        requireAdvancedDurableFrontier:
+          input.requireAdvancedDurableFrontier === true,
       })}`,
       ...(safeErrors.length > 0
         ? [`system mailbox safe errors: ${JSON.stringify(safeErrors)}`]
@@ -1322,10 +1349,13 @@ async function readHostedSystemImportedSeq(input: {
       },
     ),
   );
-  return readStringAtPath(
-    status.workspace?.redactedStatus ?? null,
-    ["hostedMailboxSystemImportedSeq"],
-  ) ?? "0";
+  return requireNonNegativeDecimalSequence(
+    readStringAtPath(
+      status.workspace?.redactedStatus ?? null,
+      ["hostedMailboxSystemImportedSeq"],
+    ),
+    "pre-trigger hosted system mailbox imported sequence",
+  );
 }
 
 async function assertNoHostedDeviceSyncJobFailures(input: {
@@ -1728,6 +1758,16 @@ function hasDecimalSequenceAdvanced(before: string, after: string): boolean {
     return false;
   }
   return BigInt(after) > BigInt(before);
+}
+
+function requireNonNegativeDecimalSequence(
+  value: string | null,
+  label: string,
+): string {
+  if (value === null || !/^\d+$/u.test(value)) {
+    throw new Error(`${label} must be a non-negative decimal string.`);
+  }
+  return value;
 }
 
 function collectUnsafeHostedStatusFailureKeys(value: unknown): string[] {
