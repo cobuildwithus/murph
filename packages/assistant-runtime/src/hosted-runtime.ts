@@ -34,6 +34,8 @@ import {
 } from "@murphai/device-syncd/hosted-runtime";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
@@ -1636,6 +1638,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       ...projectHostedRuntimeTrustStoreEnv(process.env),
       ...guardedRuntime.forwardedEnv,
       ...guardedRuntime.userEnv,
+      ...(isMurphAndroidAppEnabled(guardedRuntime.platformEnv)
+        ? { [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }
+        : {}),
       ...(imageCodexModelCatalogJson
         ? { [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: imageCodexModelCatalogJson }
         : {}),
