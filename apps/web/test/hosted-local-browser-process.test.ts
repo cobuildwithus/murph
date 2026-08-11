@@ -44,6 +44,7 @@ describe("hosted-local browser process contracts", () => {
   it("reads required values and clears only the declared environment keys", () => {
     const environment: NodeJS.ProcessEnv = {
       KEEP: "kept",
+      NODE_ENV: "test",
       SECRET: "secret",
       VALUE: "  configured  ",
     };
@@ -60,13 +61,16 @@ describe("hosted-local browser process contracts", () => {
     )).toThrow(`${RUNNER_NAME} requires MISSING.`);
 
     clearHostedLocalBrowserEnvironment(["SECRET", "VALUE"], environment);
-    expect(environment).toEqual({ KEEP: "kept" });
+    expect(environment).toEqual({ KEEP: "kept", NODE_ENV: "test" });
   });
 
   it("applies one bounded integer policy for browser timeouts", () => {
     const readTimeout = (value?: string) => readHostedLocalBrowserTimeout({
       defaultMs: 120_000,
-      environment: value === undefined ? {} : { TIMEOUT: value },
+      environment: {
+        NODE_ENV: "test",
+        ...(value === undefined ? {} : { TIMEOUT: value }),
+      },
       key: "TIMEOUT",
       maximumMs: 300_000,
       minimumMs: 30_000,
