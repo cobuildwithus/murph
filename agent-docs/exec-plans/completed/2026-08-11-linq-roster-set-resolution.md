@@ -1,6 +1,6 @@
 # Bound Linq group-roster database work
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -66,9 +66,9 @@ Updated: 2026-08-11
    maximum-cardinality coverage.
 3. [x] Replay the cap-32 incident shape locally, run focused PostgreSQL proof,
    typecheck, lint, and diff/privacy checks, and document the final bound.
-4. [ ] Commit and push the candidate, open the PR after the guidance PR is merged,
+4. [x] Commit and push the candidate, open the PR after the guidance PR is merged,
    and run preliminary specialist plus sensitive final ReviewGPT review with CI.
-5. [ ] Resolve accepted findings, perform the parent final review, close this plan
+5. [x] Resolve accepted findings, perform the parent final review, close this plan
    with `scripts/finish-task`, and require green exact-head CI.
 
 ## Decisions
@@ -112,3 +112,8 @@ Updated: 2026-08-11
   transaction-local, production-shaped shadow of the participant table. It
   proves PostgreSQL statement semantics after migrations, not foreign-key or
   index integration against the durable table.
+- Final ReviewGPT round 2 rechecked the full sensitive patch at the corrected
+  head, verified both accepted findings and the PostgreSQL claim correction,
+  and returned `ROUND_OUTCOME: PASS` with no remaining original-PR or
+  review-induced findings. Exact-head required CI is green.
+Completed: 2026-08-11
