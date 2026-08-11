@@ -18,7 +18,7 @@ const ACTIVE_WORKOUT_CARD = {
   kind: 'compact_table',
   version: 1,
   title: 'Push day',
-  subtitle: '3 of 6 sets complete',
+  subtitle: null,
   footer: 'Tap an exercise to log or correct a set.',
   tracking: {
     kind: 'workout',
@@ -106,7 +106,7 @@ describe('workout session response cards', () => {
         k: 'w',
         v: 1,
         t: 'Push day',
-        u: '3 of 6 sets complete',
+        u: null,
         s: 'a',
         e: [
           [
@@ -174,7 +174,6 @@ describe('workout session response cards', () => {
     ): CompactTableResponseCardV1 => ({
       ...ACTIVE_WORKOUT_CARD,
       title: 'Lower body strength',
-      subtitle: `${completedSetCount} of 24 sets complete`,
       footer: state === 'active'
         ? 'Tap an exercise to log or correct a set.'
         : 'Workout completed.',
@@ -205,7 +204,7 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1399, 1609, 1651])
+    expect(urls.map((url) => url.length)).toEqual([1373, 1583, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 
@@ -224,21 +223,39 @@ describe('workout session response cards', () => {
     expect(transcript).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-09T19:45:00.000Z]',
     )
+
+    const legacyCard = {
+      ...ACTIVE_WORKOUT_CARD,
+      subtitle: '3/6 sets complete',
+    } satisfies AssistantResponseCard
+    expect(assistantResponseCardSchema.parse(legacyCard)).toEqual(legacyCard)
+    expect(renderAssistantResponseCardText(legacyCard).match(
+      /3\/6 sets complete/gu,
+    )).toHaveLength(1)
+    expect(decodeAppCardUrl(
+      encodeWorkoutSessionAppCardUrl(legacyCard),
+    )).toMatchObject({
+      schemaVersion: 4,
+      card: { u: '3/6 sets complete' },
+    })
   })
 
   it('builds a truthful Messages preview layout', () => {
     expect(buildLinqIMessageAppLayout(ACTIVE_WORKOUT_CARD)).toEqual({
-      caption: 'Push day — 3 of 6 sets complete',
+      caption: 'Push day',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: [
-        'Active workout · 3/6 sets complete',
-        'Bench press: set 1: 185 lb × 8 · set 2: 185 lb × 7 · set 3: target 185 lb × 6–8',
-        'Incline dumbbell press: set 1: 55 lb × 10 · set 2: target 55 lb × 8–10 · set 3: pending',
-      ].join('\n'),
-      trailing_caption: 'Tap an exercise to log or correct a set.',
+      subcaption: '3/6 sets complete',
     })
+
+    for (const [key, value] of Object.entries(
+      buildLinqIMessageAppLayout(ACTIVE_WORKOUT_CARD),
+    )) {
+      if (key !== 'image_url') {
+        expect(value.length).toBeLessThanOrEqual(512)
+      }
+    }
   })
 
   it('rejects impossible completion states before encoding', () => {
@@ -310,7 +327,10 @@ describe('workout session response cards', () => {
               oneOf: [
                 { required: ['rowHeader', 'columns', 'rows'] },
                 {
-                  properties: { tracking: { type: 'object' } },
+                  properties: {
+                    subtitle: { type: 'null' },
+                    tracking: { type: 'object' },
+                  },
                   required: ['workout'],
                 },
               ],
@@ -389,11 +409,7 @@ describe('workout session response cards', () => {
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: [
-        'Completed workout · 3/6 sets complete',
-        'Bench press: set 1: 185 lb × 8 · set 2: 185 lb × 7 · set 3: skipped (target 185 lb × 6–8)',
-        'Incline dumbbell press: set 1: 55 lb × 10 · set 2: skipped (target 55 lb × 8–10) · set 3: skipped',
-      ].join('\n'),
+      subcaption: '3/6 sets complete',
     })
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(completedCard),
