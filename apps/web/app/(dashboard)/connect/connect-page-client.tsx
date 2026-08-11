@@ -153,6 +153,7 @@ export function ConnectSourcesGrid({
           (source) =>
             source.connectionAvailable !== false ||
             Boolean(source.setupGuideId) ||
+            Boolean(source.unavailableActionUrl) ||
             source.connected === true ||
             source.requiresReconnect === true ||
             Boolean(source.recoveryKind) ||
