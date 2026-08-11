@@ -98,6 +98,7 @@ import {
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  buildHostedFamilyInviteRecoveryPathFromReturnPath,
   parseHostedFamilyInviteCode,
   parseHostedFamilyInviteReturnPath,
 } from "@/src/lib/hosted-onboarding/app-routes";
@@ -230,6 +231,14 @@ describe("hosted Family plan", () => {
       "//example.test/family/accept/invite_return_target",
     )).toBeNull();
     expect(parseHostedFamilyInviteReturnPath("/settings")).toBeNull();
+    expect(buildHostedFamilyInviteRecoveryPathFromReturnPath(
+      "/family/accept/invite_return_target",
+    )).toBe(
+      "/settings?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target#subscription",
+    );
+    expect(buildHostedFamilyInviteRecoveryPathFromReturnPath(
+      "https://example.test/family/accept/invite_return_target",
+    )).toBeNull();
   });
 
   const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
@@ -1110,6 +1119,14 @@ describe("hosted Family plan", () => {
       checkoutUrl: stripeUrl,
       publicBaseUrl: "https://local.withmurph.ai:3443",
     })).toBe("https://local.withmurph.ai:3443/checkout/family/cs_test_a1FamilyCheckout123");
+    expect(buildHostedFamilyCheckoutRedirectUrl({
+      checkoutUrl: stripeUrl,
+      familyInviteReturnPath: "/family/accept/invite_return_target",
+      publicBaseUrl: "https://local.withmurph.ai:3443",
+    })).toBe(
+      "https://local.withmurph.ai:3443/checkout/family/cs_test_a1FamilyCheckout123"
+      + "?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target",
+    );
     expect(buildHostedFamilyCheckoutRedirectUrl({
       checkoutUrl: "https://example.test/not-stripe",
       publicBaseUrl: "https://local.withmurph.ai:3443",
@@ -6061,6 +6078,25 @@ describe("hosted Family plan", () => {
     });
   });
 
+  it("rejects a non-canonical invite return before reading billing state", async () => {
+    const transaction = vi.fn();
+
+    await expect(createHostedFamilyBillingCheckout({
+      familyInviteReturnPath:
+        "https://example.test/family/accept/invite_return_target",
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: { $transaction: transaction } as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_INVITE_RETURN_INVALID",
+      httpStatus: 400,
+    });
+
+    expect(transaction).not.toHaveBeenCalled();
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+  });
+
   it("rejects synthetic owners before creating a Stripe Checkout Session", async () => {
     const tx = createTxMock({
       billedSeatCount: null,
@@ -6809,6 +6845,225 @@ describe("hosted Family plan", () => {
       success_url:
         "https://local.withmurph.ai:3443/join?family_checkout=success&session_id={CHECKOUT_SESSION_ID}",
     });
+  });
+
+  it("retires an idempotently replayed Session that predates the exact invite return", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    let billingRef = {
+      ...createBillingRefMock({
+        billedSeatCount: null,
+        checkoutAttemptId: "hbfca_existing",
+        checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
+        checkoutSeatCount: 2,
+        group,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
+      async () => billingRef,
+    );
+    tx.hostedAccountGroupBillingRef.updateMany.mockImplementation(
+      async ({ data }) => {
+        billingRef = {
+          ...billingRef,
+          checkoutAttemptId: data.checkoutAttemptId === null
+            ? null
+            : billingRef.checkoutAttemptId,
+          checkoutCreatedAt: data.checkoutCreatedAt === null
+            ? null
+            : billingRef.checkoutCreatedAt,
+          checkoutSeatCount: data.checkoutSeatCount === null
+            ? null
+            : billingRef.checkoutSeatCount,
+          stripeCheckoutSessionIdEncrypted:
+            data.stripeCheckoutSessionIdEncrypted === null
+              ? null
+              : data.stripeCheckoutSessionIdEncrypted
+                ?? billingRef.stripeCheckoutSessionIdEncrypted,
+        };
+        return { count: 1 };
+      },
+    );
+    tx.hostedAccountGroupBillingRef.upsert.mockImplementation(
+      async ({ create, update }) => {
+        const next = billingRef.checkoutAttemptId ? update : create;
+        billingRef = {
+          ...billingRef,
+          checkoutAttemptId: next.checkoutAttemptId,
+          checkoutCreatedAt: next.checkoutCreatedAt,
+          checkoutSeatCount: next.checkoutSeatCount,
+          stripeCheckoutSessionIdEncrypted:
+            next.stripeCheckoutSessionIdEncrypted ?? null,
+        };
+        return billingRef;
+      },
+    );
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const familyInviteReturnPath = "/family/accept/invite_return_target";
+    const expectedCancelUrl =
+      "https://local.withmurph.ai:3443/settings?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target#subscription";
+    const oldSessionId = "cs_test_familyOldCancel123";
+    const replacementSessionId = "cs_test_familyInviteReturn123";
+    const checkoutCreate = vi.fn().mockImplementation(async (params) => {
+      const first = checkoutCreate.mock.calls.length === 1;
+      return makeFamilyStripeCheckoutSession({
+        cancelUrl: first
+          ? "https://local.withmurph.ai:3443/settings"
+          : params.cancel_url,
+        checkoutAttemptId: params.metadata?.checkoutAttemptId,
+        sessionId: first ? oldSessionId : replacementSessionId,
+        status: "open",
+        subscriptionId: null,
+        url: `https://checkout.stripe.com/c/pay/${first
+          ? oldSessionId
+          : replacementSessionId}`,
+      });
+    });
+    const oldSession = makeFamilyStripeCheckoutSession({
+      cancelUrl: "https://local.withmurph.ai:3443/settings",
+      checkoutAttemptId: "hbfca_existing",
+      sessionId: oldSessionId,
+      status: "open",
+      subscriptionId: null,
+      url: `https://checkout.stripe.com/c/pay/${oldSessionId}`,
+    });
+    const checkoutRetrieve = vi.fn().mockResolvedValue(oldSession);
+    const checkoutExpire = vi.fn().mockResolvedValue({
+      ...oldSession,
+      status: "expired",
+      url: null,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+          expire: checkoutExpire,
+          retrieve: checkoutRetrieve,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      familyInviteReturnPath,
+      groupId: group.id,
+      now: new Date("2026-07-28T12:00:00.000Z"),
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url:
+        `https://local.withmurph.ai:3443/checkout/family/${replacementSessionId}`
+        + "?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target",
+    });
+
+    expect(checkoutCreate).toHaveBeenCalledTimes(2);
+    expect(checkoutCreate.mock.calls[0]?.[0]).toMatchObject({
+      cancel_url: expectedCancelUrl,
+    });
+    expect(checkoutCreate.mock.calls[1]?.[0]).toMatchObject({
+      cancel_url: expectedCancelUrl,
+    });
+    expect(checkoutCreate.mock.calls[0]?.[1]).not.toEqual(
+      checkoutCreate.mock.calls[1]?.[1],
+    );
+    expect(checkoutRetrieve).toHaveBeenCalledTimes(2);
+    expect(checkoutExpire).toHaveBeenCalledOnce();
+    expect(checkoutExpire).toHaveBeenCalledWith(oldSessionId);
+    expect(tx.hostedAccountGroupBillingRef.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ checkoutAttemptId: null }),
+        where: expect.objectContaining({
+          checkoutAttemptId: "hbfca_existing",
+          groupId: group.id,
+        }),
+      }),
+    );
+  });
+
+  it("preserves billing when an old-cancel Session completes during retirement", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const sessionId = "cs_test_familyCancelRace123";
+    const billingRef = {
+      ...createBillingRefMock({
+        billedSeatCount: null,
+        checkoutAttemptId: "hbfca_existing",
+        checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
+        checkoutSeatCount: 2,
+        group,
+        stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+        stripeSubscriptionIdEncrypted: null,
+      }),
+      group,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+    const openSession = makeFamilyStripeCheckoutSession({
+      cancelUrl: "https://local.withmurph.ai:3443/settings",
+      checkoutAttemptId: "hbfca_existing",
+      sessionId,
+      status: "open",
+      subscriptionId: null,
+    });
+    const checkoutRetrieve = vi.fn()
+      .mockResolvedValueOnce(openSession)
+      .mockResolvedValueOnce(makeFamilyStripeCheckoutSession({
+        cancelUrl: "https://local.withmurph.ai:3443/settings",
+        checkoutAttemptId: "hbfca_existing",
+        sessionId,
+        status: "complete",
+        subscriptionId: "sub_family_complete",
+        url: null,
+      }));
+    const checkoutExpire = vi.fn();
+    const checkoutCreate = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+          expire: checkoutExpire,
+          retrieve: checkoutRetrieve,
+        },
+      },
+    });
+
+    await expect(createHostedFamilyBillingCheckout({
+      familyInviteReturnPath: "/family/accept/invite_return_target",
+      groupId: group.id,
+      now: new Date("2026-07-28T12:00:00.000Z"),
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_BILLING_SYNCING",
+      httpStatus: 409,
+      retryable: true,
+    });
+
+    expect(checkoutRetrieve).toHaveBeenCalledTimes(2);
+    expect(checkoutExpire).not.toHaveBeenCalled();
+    expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
   it("retains a freshly bound Family Session past the attempt cutoff", async () => {
@@ -7843,7 +8098,7 @@ describe("hosted Family plan", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("keeps a successful current Family redirect alert-silent", async () => {
+  it("validates an exact invite return on a current Family redirect", async () => {
     const sessionId = "cs_test_familyRedirectOpen123";
     const checkoutUrl = `https://checkout.stripe.com/c/pay/${sessionId}`;
     const group = {
@@ -7878,6 +8133,38 @@ describe("hosted Family plan", () => {
       prisma: tx as never,
       sessionId,
     })).resolves.toBe(checkoutUrl);
+
+    retrieve.mockResolvedValueOnce(makeFamilyStripeCheckoutSession({
+      cancelUrl:
+        "https://local.withmurph.ai:3443/settings?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target#subscription",
+      checkoutAttemptId: "hbfca_redirect_current",
+      sessionId,
+      status: "open",
+      subscriptionId: null,
+      url: checkoutUrl,
+    }));
+    await expect(resolveHostedFamilyCheckoutRedirectUrl({
+      familyInviteReturnPath: "/family/accept/invite_return_target",
+      prisma: tx as never,
+      sessionId,
+    })).resolves.toBe(checkoutUrl);
+
+    retrieve.mockResolvedValueOnce(makeFamilyStripeCheckoutSession({
+      checkoutAttemptId: "hbfca_redirect_current",
+      sessionId,
+      status: "open",
+      subscriptionId: null,
+      url: checkoutUrl,
+    }));
+    await expect(resolveHostedFamilyCheckoutRedirectUrl({
+      familyInviteReturnPath: "/family/accept/invite_return_target",
+      prisma: tx as never,
+      sessionId,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_CHECKOUT_RETURN_MISMATCH",
+      httpStatus: 409,
+      retryable: true,
+    });
 
     expect(nextServerMocks.after).not.toHaveBeenCalled();
   });
@@ -9035,6 +9322,7 @@ function createTxMock(input: {
 }
 
 function makeFamilyStripeCheckoutSession(input: {
+  cancelUrl?: string | null;
   checkoutAttemptId?: string | null;
   sessionId?: string;
   status?: Stripe.Checkout.Session["status"];
@@ -9044,6 +9332,9 @@ function makeFamilyStripeCheckoutSession(input: {
   const sessionId = input.sessionId ?? "cs_test_family123";
 
   const session: Partial<Stripe.Checkout.Session> = {
+    cancel_url: input.cancelUrl === undefined
+      ? "https://local.withmurph.ai:3443/settings"
+      : input.cancelUrl,
     customer: "cus_family",
     id: sessionId,
     metadata: {

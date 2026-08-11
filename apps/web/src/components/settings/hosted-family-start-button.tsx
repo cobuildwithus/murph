@@ -31,6 +31,7 @@ interface HostedFamilyCheckoutConfirmation {
 
 export function HostedFamilyStartButton(props: {
   block?: boolean;
+  familyInviteReturnPath?: string | null;
   label: string;
   ownershipConfirmation?: boolean;
   trialConversionConfirmation?: Omit<HostedFamilyCheckoutConfirmation, "description"> & {
@@ -59,13 +60,21 @@ export function HostedFamilyStartButton(props: {
     setStatusMessage(null);
     setIsSubmitting(true);
     try {
+      const payload = {
+        ...(props.trialConversionConfirmation
+          ? { confirmedTrialConversion: true }
+          : {}),
+        ...(props.familyInviteReturnPath
+          ? { familyInviteReturnPath: props.familyInviteReturnPath }
+          : {}),
+      };
       const response = await requestHostedOnboardingJson<{
         alreadyActive: boolean;
         url: string | null;
       }>({
         method: "POST",
-        ...(props.trialConversionConfirmation
-          ? { payload: { confirmedTrialConversion: true } }
+        ...(Object.keys(payload).length > 0
+          ? { payload }
           : {}),
         url: "/api/settings/billing/family/checkout",
       });

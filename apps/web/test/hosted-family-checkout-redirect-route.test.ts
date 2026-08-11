@@ -37,6 +37,38 @@ test("redirects short Family checkout links to the validated Stripe checkout URL
   );
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   expect(mocks.resolveHostedFamilyCheckoutRedirectUrl).toHaveBeenCalledWith({
+    familyInviteReturnPath: null,
     sessionId: "cs_test_family",
   });
+});
+
+test("carries one exact Family invite return into short-link validation", async () => {
+  const response = await familyCheckoutRedirectRoute.GET(
+    new Request(
+      "https://local.withmurph.ai:3443/checkout/family/cs_test_family?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_return_target",
+    ),
+    {
+      params: Promise.resolve({ sessionId: "cs_test_family" }),
+    },
+  );
+
+  expect(response.status).toBe(303);
+  expect(mocks.resolveHostedFamilyCheckoutRedirectUrl).toHaveBeenCalledWith({
+    familyInviteReturnPath: "/family/accept/invite_return_target",
+    sessionId: "cs_test_family",
+  });
+});
+
+test("fails repeated Family invite returns closed before resolving Stripe", async () => {
+  const response = await familyCheckoutRedirectRoute.GET(
+    new Request(
+      "https://local.withmurph.ai:3443/checkout/family/cs_test_family?familyInviteReturn=%2Ffamily%2Faccept%2Ffirst&familyInviteReturn=%2Ffamily%2Faccept%2Fsecond",
+    ),
+    {
+      params: Promise.resolve({ sessionId: "cs_test_family" }),
+    },
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.resolveHostedFamilyCheckoutRedirectUrl).not.toHaveBeenCalled();
 });

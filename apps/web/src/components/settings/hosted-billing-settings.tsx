@@ -497,6 +497,7 @@ export function HostedBillingSettings(props: {
                   ) : (
                     <HostedFamilyStartButton
                       block
+                      familyInviteReturnPath={props.familyInviteReturnPath}
                       label={familyDraftRecoveryState
                         ? "Continue your Family setup"
                         : "Start your own Family plan"}

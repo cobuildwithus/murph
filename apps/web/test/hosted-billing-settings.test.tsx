@@ -1353,6 +1353,60 @@ describe("HostedBillingSettings", () => {
     }
   });
 
+  test("carries the exact Family invite when continuing a starting checkout", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      alreadyActive: false,
+      url: null,
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const familyInviteReturnPath = "/family/accept/invite_return_target";
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecoveryState: "checkout_starting",
+        familyInviteReturnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const continueButton = findButtonByText(
+        rendered.window.document,
+        "Continue your Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        continueButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Start a plan I pay for",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.requestHostedOnboardingJson.mock.calls[0]?.[0], {
+        method: "POST",
+        payload: { familyInviteReturnPath },
+        url: "/api/settings/billing/family/checkout",
+      });
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("routes a current Max member through the canonical Family owner", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       alreadyActive: false,

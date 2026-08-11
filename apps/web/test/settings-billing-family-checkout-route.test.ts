@@ -80,6 +80,7 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
   });
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
     confirmedTrialConversion: undefined,
+    familyInviteReturnPath: null,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
@@ -102,11 +103,51 @@ test("forwards an explicit seat count and trial-conversion confirmation", async 
   expect(response.status).toBe(200);
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
     confirmedTrialConversion: true,
+    familyInviteReturnPath: null,
     groupId: "hbag_family",
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
     seatCount: 3,
   });
+});
+
+test("forwards one exact Family invite return", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({ familyInviteReturnPath }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
+    expect.objectContaining({ familyInviteReturnPath }),
+  );
+});
+
+test.each([
+  "https://example.test/family/accept/invite_return_target",
+  "/family/accept/invite return target",
+])("rejects a non-canonical Family invite return %s", async (familyInviteReturnPath) => {
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({ familyInviteReturnPath }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(400);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
 });
 
 test("rejects cross-origin Family checkout before reading the session", async () => {
