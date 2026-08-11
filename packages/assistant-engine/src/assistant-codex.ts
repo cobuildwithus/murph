@@ -4309,7 +4309,7 @@ async function runCodexAppServerTurnOnProcess(
       closeLiveTurn()
     }
 
-    let groupEmailTerminalEffectAccepted = false
+    let dynamicToolRequestSettled = false
     const runDynamicTool = () => withHostedCanonicalWritePort(
       hostedCanonicalWritePort,
       async () => {
@@ -4439,7 +4439,7 @@ async function runCodexAppServerTurnOnProcess(
         // an interrupt racing that continuation can leave the turn open.
         // TurnAborted resolves the pending server request structurally, so a
         // terminal external effect must not also write a tool response.
-        groupEmailTerminalEffectAccepted = true
+        dynamicToolRequestSettled = true
         await interruptLiveTurnForTerminalNoReply()
         return
       }
@@ -4542,15 +4542,19 @@ async function runCodexAppServerTurnOnProcess(
           dynamicToolDeliveryContextOrdinal ?? 0,
         )
       }
-      void tryWriteRpcMessage({
+      const writeFailure = tryWriteRpcMessage({
         id: requestId,
         result: result.rpcResult,
       })
+      if (writeFailure) {
+        return
+      }
+      dynamicToolRequestSettled = true
     }).catch((error: unknown) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
-      if (groupEmailTerminalEffectAccepted) {
+      if (dynamicToolRequestSettled) {
         rejectOnce(error)
         return
       }
