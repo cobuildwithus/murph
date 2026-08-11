@@ -353,7 +353,6 @@ export async function activateHostedGroupSponsorshipMomentTx(input: {
     select: {
       activatedAt: true,
       fundingPageAliasConsent: true,
-      fundingPageAliasPublishedAt: true,
       publicAliasEncrypted: true,
       runningBitRequestEncrypted: true,
     },
@@ -368,18 +367,6 @@ export async function activateHostedGroupSponsorshipMomentTx(input: {
       HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT &&
     current.publicAliasEncrypted !== null;
   if (current.activatedAt) {
-    if (shouldPublishAlias && !current.fundingPageAliasPublishedAt) {
-      await input.tx.hostedGroupSponsorshipMoment.updateMany({
-        data: {
-          fundingPageAliasPublishedAt: current.activatedAt,
-        },
-        where: {
-          activatedAt: { not: null },
-          fundingPageAliasPublishedAt: null,
-          purchaseId: input.purchaseId,
-        },
-      });
-    }
     return;
   }
   const duration = getHostedGroupSponsorshipExperiencePolicy(

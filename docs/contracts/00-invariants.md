@@ -533,9 +533,9 @@ it has been explicitly elevated to a cross-cutting invariant.
   unsponsored. For a signed-in active group participant, the funding page may
   separately recognize the current activation and at most 20 recent fulfilled
   one-time moments only by an alias with exact funding-page consent metadata
-  that was marked publishable by the existing verified-settlement
-  participant-authority check, or as Anonymous, plus the coarse monthly versus
-  one-time kind.
+  that was marked publishable by the existing participant-authority check at
+  its first verified settlement, or as Anonymous, plus the coarse monthly
+  versus one-time kind. A later replay cannot acquire publication authority.
   Historical aliases, pending or incompletely materialized moments, and moments
   settled after the creator lost authority remain Anonymous. That alias is not payer identity;
   the page projection contains no payer record, amount, monthly cap, balance,

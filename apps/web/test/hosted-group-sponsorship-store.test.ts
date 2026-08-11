@@ -678,7 +678,7 @@ describe("hosted group sponsorship store", () => {
     });
   });
 
-  it("keeps recognized alias storage legacy-readable and publishes on current replay", async () => {
+  it("keeps recognized alias storage legacy-readable without retroactive publication", async () => {
     const harness = createHarness();
     const draft = {
       publicAlias: "Rollback-safe sponsor",
@@ -723,7 +723,7 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_materialized_by_base_web",
       tx: harness.prisma as never,
     });
-    expect(harness.row.fundingPageAliasPublishedAt).toBe(PAID_AT);
+    expect(harness.row.fundingPageAliasPublishedAt).toBeNull();
 
     await activateHostedGroupSponsorshipMomentTx({
       activatedAt: PAID_AT,
@@ -733,7 +733,7 @@ describe("hosted group sponsorship store", () => {
       tx: harness.prisma as never,
     });
     expect(harness.prisma.hostedGroupSponsorshipMoment.updateMany)
-      .toHaveBeenCalledTimes(1);
+      .not.toHaveBeenCalled();
   });
 });
 

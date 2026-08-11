@@ -1012,10 +1012,11 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   one separate bounded recognition projection for the current activation and
   at most 20 recent fulfilled one-time moments. It exposes only a public alias
   whose separate exact consent metadata and existing verified-settlement
-  authority check stamped the moment publishable, or `Anonymous`, plus monthly
-  versus one-time kind. Historical aliases and moments settled after creator
-  authority was lost remain anonymous. Recognition streams below the primary
-  funding controls. A two-second signal stops later query stages and bounds
+  authority check stamped the moment publishable at its first activation, or
+  `Anonymous`, plus monthly versus one-time kind. Publication authority cannot
+  be acquired by a later settlement replay. Historical aliases and moments
+  settled after creator authority was lost remain anonymous. Recognition streams
+  below the primary funding controls. A two-second signal stops later query stages and bounds
   secure-box work but cannot cancel an in-flight Prisma query; the independent
   Suspense boundary keeps optional alias work from delaying funding, management,
   cancellation, or recovery. The alias ciphertext remains legacy-readable plain

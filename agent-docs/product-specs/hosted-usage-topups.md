@@ -238,8 +238,9 @@ For a signed-in active group participant, the funding page may recognize the
 current live monthly sponsorship activation and at most the 20 most recent
 fulfilled one-time contribution moments. It displays only `Monthly sponsor` or
 `One-time contribution` with the moment's consented public alias only when the
-existing verified-settlement transaction also marked it publishable after its
-creator-authority recheck, falling back to `Anonymous`; the alias is a
+first verified-settlement transaction also marked it publishable after its
+creator-authority recheck, falling back to `Anonymous`; a later settlement
+replay cannot acquire publication authority. The alias is a
 presentation label, not authenticated payer identity. Pre-feature aliases,
 pending or incompletely materialized moments, and moments settled after the
 creator lost authority remain Anonymous. The projection never exposes payer records, contribution amounts,
@@ -1412,10 +1413,11 @@ the base strict request parser before Stripe; rollback must disable new
 sponsorship intake and force a page reload before routing sponsorship requests
 to base Web. Current-created pending moments remain recoverable and
 materializable by base Web. Base settlement cannot stamp the new publication
-metadata, so recognition remains Anonymous until a later compatible verified
-settlement replay rechecks authority and idempotently stamps the original
-activation time. Purchased credit, creative materialization, notifications,
-and funding recovery do not depend on that optional publication marker.
+metadata, so recognition remains Anonymous permanently even after a later
+compatible settlement replay. This deliberately prefers the narrower privacy
+fallback over retroactive publication. Purchased credit, creative
+materialization, notifications, and funding recovery do not depend on that
+optional publication marker.
 
 ## Verification
 
