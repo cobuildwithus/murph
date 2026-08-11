@@ -120,7 +120,6 @@ export function buildOnboardingGoalCheckinSeed(
   })
   const installedWindow = resolveInstalledOnboardingGoalCheckinWindow({
     completedAt: onboardingState.completedAt,
-    completionLocalDate,
     existingAutomation: input.existingAutomation ?? null,
     localTime,
     timeZone: input.timeZone,
@@ -260,15 +259,36 @@ export async function runOnboardingGoalCheckinAuthorityPrecondition(input: {
     vaultRoot: input.vault,
   })
   if (automation !== null) {
-    const reconciledAtMs = Date.parse(automation.updatedAt)
     if (
-      !Number.isFinite(reconciledAtMs) ||
-      completedAtMs > reconciledAtMs
+      automation.schedule.kind !== 'at' ||
+      automation.schedule.at !== input.occurrenceAt ||
+      automation.activeUntil === null
     ) {
       return {
         kind: 'skip',
         reason:
-          'Onboarding was completed after this support check was last reconciled.',
+          'Post-onboarding support-gap check no longer matches its canonical occurrence.',
+      }
+    }
+
+    const vault = await loadVault({ vaultRoot: input.vault })
+    const timeZone = isValidIanaTimeZone(vault.metadata.timezone)
+      ? vault.metadata.timezone
+      : 'UTC'
+    const localTime = resolveOnboardingGoalCheckinLocalTime(
+      vault.metadata.vaultId,
+    )
+    if (!matchesOnboardingGoalCheckinWindow({
+      activeUntil: automation.activeUntil,
+      completedAt: onboardingState.completedAt,
+      localTime,
+      scheduledAt: automation.schedule.at,
+      timeZone,
+    })) {
+      return {
+        kind: 'skip',
+        reason:
+          'Post-onboarding support-gap check no longer matches the current answered-onboarding window.',
       }
     }
   }
@@ -371,7 +391,6 @@ function resolveDesiredOnboardingGoalCheckinWindow(input: {
 
 function resolveInstalledOnboardingGoalCheckinWindow(input: {
   completedAt: string
-  completionLocalDate: string
   existingAutomation: AutomationRecord | null
   localTime: OnboardingGoalCheckinLocalTime
   timeZone: string
@@ -381,43 +400,14 @@ function resolveInstalledOnboardingGoalCheckinWindow(input: {
     existing === null ||
     existing.automationId !== MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID ||
     existing.schedule.kind !== 'at' ||
-    existing.activeUntil === null
-  ) {
-    return null
-  }
-
-  const scheduledAtMs = Date.parse(existing.schedule.at)
-  const activeUntilMs = Date.parse(existing.activeUntil)
-  const completedAtMs = Date.parse(input.completedAt)
-  const ageMs = scheduledAtMs - completedAtMs
-  if (
-    !Number.isFinite(scheduledAtMs) ||
-    !Number.isFinite(activeUntilMs) ||
-    !Number.isFinite(completedAtMs) ||
-    scheduledAtMs >= activeUntilMs ||
-    ageMs < ONBOARDING_GOAL_CHECKIN_MINIMUM_AGE_MS
-  ) {
-    return null
-  }
-
-  const scheduledParts = formatTimeZoneDateTimeParts(
-    new Date(scheduledAtMs),
-    input.timeZone,
-  )
-  const activeUntilParts = formatTimeZoneDateTimeParts(
-    new Date(activeUntilMs),
-    input.timeZone,
-  )
-  if (
-    scheduledParts.hour !== input.localTime.hour ||
-    scheduledParts.minute !== input.localTime.minute ||
-    activeUntilParts.dayKey !==
-      addDaysToIsoDate(
-        input.completionLocalDate,
-        ONBOARDING_GOAL_CHECKIN_ACTIVE_UNTIL_DAYS,
-      ) ||
-    activeUntilParts.hour !== input.localTime.hour ||
-    activeUntilParts.minute !== input.localTime.minute
+    existing.activeUntil === null ||
+    !matchesOnboardingGoalCheckinWindow({
+      activeUntil: existing.activeUntil,
+      completedAt: input.completedAt,
+      localTime: input.localTime,
+      scheduledAt: existing.schedule.at,
+      timeZone: input.timeZone,
+    })
   ) {
     return null
   }
@@ -426,6 +416,61 @@ function resolveInstalledOnboardingGoalCheckinWindow(input: {
     activeUntil: existing.activeUntil,
     scheduledAt: existing.schedule.at,
   }
+}
+
+function matchesOnboardingGoalCheckinWindow(input: {
+  activeUntil: string
+  completedAt: string
+  localTime: OnboardingGoalCheckinLocalTime
+  scheduledAt: string
+  timeZone: string
+}): boolean {
+  const activeUntilMs = Date.parse(input.activeUntil)
+  const completedAtMs = Date.parse(input.completedAt)
+  const scheduledAtMs = Date.parse(input.scheduledAt)
+  if (
+    !Number.isFinite(activeUntilMs) ||
+    !Number.isFinite(completedAtMs) ||
+    !Number.isFinite(scheduledAtMs) ||
+    scheduledAtMs >= activeUntilMs ||
+    activeUntilMs % (60 * 1000) !== 0 ||
+    scheduledAtMs % (60 * 1000) !== 0
+  ) {
+    return false
+  }
+
+  const completionLocalDate = formatTimeZoneDateTimeParts(
+    new Date(completedAtMs),
+    input.timeZone,
+  ).dayKey
+  const firstScheduledLocalDate = addDaysToIsoDate(
+    completionLocalDate,
+    ONBOARDING_GOAL_CHECKIN_DELAY_DAYS,
+  )
+  const activeUntilLocalDate = addDaysToIsoDate(
+    completionLocalDate,
+    ONBOARDING_GOAL_CHECKIN_ACTIVE_UNTIL_DAYS,
+  )
+  const scheduledParts = formatTimeZoneDateTimeParts(
+    new Date(scheduledAtMs),
+    input.timeZone,
+  )
+  const activeUntilParts = formatTimeZoneDateTimeParts(
+    new Date(activeUntilMs),
+    input.timeZone,
+  )
+
+  return (
+    scheduledParts.dayKey >= firstScheduledLocalDate &&
+    scheduledParts.dayKey < activeUntilLocalDate &&
+    scheduledParts.hour === input.localTime.hour &&
+    scheduledParts.minute === input.localTime.minute &&
+    scheduledParts.second === 0 &&
+    activeUntilParts.dayKey === activeUntilLocalDate &&
+    activeUntilParts.hour === input.localTime.hour &&
+    activeUntilParts.minute === input.localTime.minute &&
+    activeUntilParts.second === 0
+  )
 }
 
 function isManagedOnboardingGoalCheckinRecord(
