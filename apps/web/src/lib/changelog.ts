@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, personality, reliable referrals, reminders, cards, voices, web search, and a lighter homepage",
+      "Starter access, patterns, personality, referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
     summary:
-      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, personality is editable in Settings or chat, referral celebrations stay with the intended conversation, reminders keep local time, completed workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, and the homepage starts with less to download.",
+      "Starter usage waits until used; patterns compare actions with next-day sleep and recovery; personality is editable in Settings or chat; referrals stay in the intended conversation; reminders keep local time; workout rows stay clear; voice memos keep the selected voice; web search reaches current information; the homepage starts lighter; and Environment reports show their shape while loading.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -219,6 +219,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/",
           label: "Visit the homepage",
+        },
+      },
+      {
+        id: "environment-report-loading-preview",
+        kind: "improvement",
+        priority: 3,
+        title: "Environment reports show their shape while loading",
+        summary:
+          "The private Environment report now opens with a clear preparing state and a report-shaped preview instead of a mostly empty page.",
+        details:
+          "The preview mirrors the printable report and gives immediate feedback while the existing private Browser Vault opens. The finished report, empty state, and error recovery continue unchanged.",
+        relevanceTags: ["environment", "reports", "web", "privacy"],
+        sourcePullRequests: [1617],
+        tryIt: {
+          href: "/environment/print",
+          label: "Open your Environment report",
         },
       },
     ],
