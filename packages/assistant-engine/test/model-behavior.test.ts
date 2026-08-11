@@ -3153,6 +3153,21 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('inspect saved local self-targets')
   })
 
+  it('advertises collision-safe create-only owners on privileged local routes', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'direct',
+      hostedRuntime: false,
+    }))
+
+    expect(prompt).toContain(
+      'Scheduled assistant automation commands are available directly through `vault-cli automation ...`',
+    )
+    expect(prompt).toContain(
+      'Use `--create-only` without `--id` or `--slug` when a new opaque owner must not replace an existing record.',
+    )
+    expect(prompt).not.toContain('Use `createOnly: true`')
+  })
+
   it('does not advertise hosted automation when the turn lacks its typed tool', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'direct',

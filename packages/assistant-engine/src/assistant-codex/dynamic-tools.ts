@@ -107,6 +107,7 @@ import {
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
+  createAssistantHostedAutomationCreateReplayKey,
   createAssistantHostedScheduledRequestKey,
   type AssistantHostedInvocationScope,
   type AssistantHostedToolContext,
@@ -1904,9 +1905,31 @@ export async function executeMurphDynamicToolRequest(input: {
           'automation management is unavailable for this turn',
         )
       }
+      const createOnlyRequested =
+        input.request.request.action === 'save'
+        && input.request.request.createOnly === true
+      const userActionScope = createOnlyRequested
+        ? input.hostedToolContext?.currentUserActionScope?.() ?? null
+        : null
+      if (createOnlyRequested && userActionScope?.acceptedInputIds.length === 0) {
+        return toolTextResult(
+          false,
+          'create-only automation saves require fresh accepted user input',
+        )
+      }
+      if (createOnlyRequested && userActionScope === null) {
+        return toolTextResult(
+          false,
+          'create-only automation saves require fresh accepted user input',
+        )
+      }
+      const createOnlyReplayKey = userActionScope
+        ? createAssistantHostedAutomationCreateReplayKey({ scope: userActionScope })
+        : undefined
       return await executeAutomationDynamicTool({
         abortSignal: input.abortSignal ?? null,
         automationTool,
+        ...(createOnlyReplayKey === undefined ? {} : { createOnlyReplayKey }),
         onboardingFirstReadCompletionTransitionAvailable:
           input.onboardingFirstReadCompletionTransitionAvailable ?? false,
         request: input.request,

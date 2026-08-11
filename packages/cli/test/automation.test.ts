@@ -10,7 +10,7 @@ import {
   buildAutomationSupportSeriesTag,
 } from "@murphai/contracts";
 import { HOSTED_RUNTIME_PROCESS_ENV } from "@murphai/hosted-execution/env";
-import { upsertAutomation } from "@murphai/core";
+import { listAutomations, upsertAutomation } from "@murphai/core";
 import {
   automationRecordSchema,
   automationScaffoldResultSchema,
@@ -296,6 +296,7 @@ test("automation save and edit schemas expose typed fields while automation impo
 
   for (const field of [
     "id",
+    "createOnly",
     "slug",
     "status",
     "summary",
@@ -358,6 +359,96 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("includeBody" in listSchema.options.properties, false);
   assert.equal("supportSeriesId" in listSchema.options.properties, true);
   assert.equal("cursor" in listSchema.options.properties, true);
+});
+
+test("automation save create-only makes opaque owners and rejects selected ownership", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-create-only-",
+  );
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    const save = () => runInProcessJsonCli<{
+      automationId: string;
+      created: boolean;
+      lookupId: string;
+    }>(cli, [
+      "automation",
+      "save",
+      "Midtown appointment on August 12 at 9:30 AM",
+      "--create-only",
+      "--instructions",
+      "Send the privacy-safe appointment reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2099-08-12T00:00:00.000Z",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram-thread-appointment",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    const first = await save();
+    const second = await save();
+    assert.equal(first.exitCode, null);
+    assert.equal(second.exitCode, null);
+    if (!first.envelope.ok || !second.envelope.ok) {
+      throw new Error("Expected both create-only saves to succeed.");
+    }
+    assert.equal(first.envelope.data?.created, true);
+    assert.equal(second.envelope.data?.created, true);
+    assert.notEqual(
+      first.envelope.data?.automationId,
+      second.envelope.data?.automationId,
+    );
+    assert.match(first.envelope.data?.lookupId ?? "", /^automation-[a-z0-9]+$/u);
+    assert.match(second.envelope.data?.lookupId ?? "", /^automation-[a-z0-9]+$/u);
+    const firstAutomationId = first.envelope.data?.automationId;
+
+    const conflicting = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Conflicting owner",
+      "--create-only",
+      "--id",
+      firstAutomationId ?? "automation_missing",
+      "--instructions",
+      "This must not replace the first reminder.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2099-08-12T01:00:00.000Z",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram-thread-appointment",
+      "--vault",
+      vaultRoot,
+    ]);
+    if (conflicting.envelope.ok) {
+      throw new Error("Expected selected create-only ownership to fail.");
+    }
+    assert.match(
+      String(conflicting.envelope.error?.message),
+      /--create-only cannot be combined with --id or --slug/u,
+    );
+    const records = await listAutomations({ vaultRoot });
+    assert.equal(records.count, 2);
+    assert.equal(
+      records.items.find((record) =>
+        record.automationId === firstAutomationId
+      )?.instructions,
+      "Send the privacy-safe appointment reminder.",
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
 });
 
 test("automation save and edit manage assistant target overrides from typed fields", async () => {

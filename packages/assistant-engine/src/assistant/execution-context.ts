@@ -183,6 +183,7 @@ export type AssistantHostedAutomationToolRequest =
   | {
       action: 'list'
       exactTag?: string
+      query?: string
       status?: readonly AutomationStatus[]
     }
   | {
@@ -230,6 +231,7 @@ export type AssistantHostedAutomationToolResponse =
       lookupId: string
       nextOccurrenceAt: string | null
       routeBinding: 'current_conversation' | 'preserved'
+      replayed?: boolean
       schedule: AutomationSchedule
       status: AutomationStatus
       timingVerified: boolean
@@ -247,6 +249,7 @@ export interface AssistantHostedAutomationTool {
   request(
     request: AssistantHostedAutomationToolRequest,
     context?: {
+      createOnlyReplayKey?: string
       onboardingFirstReadCompletionTransition?: true
       signal?: AbortSignal | null
     },

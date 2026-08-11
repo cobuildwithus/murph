@@ -75,10 +75,16 @@ describe('assistant appointment reminder policy', () => {
       'include the ordinary tag `appointment-reminder`',
     )
     expect(normalizedSkill).toContain(
-      'only when the result says `created: true`',
+      'either `created: true`, or `created: false` with `replayed: true`',
     )
     expect(normalizedSkill).toContain(
       '`action: "list"` and `exactTag: "appointment-reminder"`',
+    )
+    expect(normalizedSkill).toContain(
+      'repeat the same bounded query once without `exactTag`',
+    )
+    expect(normalizedSkill).toContain(
+      '`vault-cli automation save --create-only`',
     )
     expect(normalizedSkill).toContain(
       'patch that exact owner with the replacement one-shot schedule, current privacy-safe title or summary, and `status: "active"`',
@@ -105,7 +111,7 @@ describe('assistant appointment reminder policy', () => {
       'if zero or multiple plausible owners remain, make no mutation',
     )
     expect(normalizedSkill).toContain(
-      'If the result is truncated',
+      'If the result remains truncated',
     )
   })
 
@@ -127,7 +133,7 @@ describe('assistant appointment reminder policy', () => {
       'Scheduled automation changes are unavailable in this turn.',
     )
     expect(unavailablePrompt).toContain(
-      'Complete and report a confirmed appointment normally without attempting, promising, or asking about its default reminder.',
+      'say concisely that no reminder was created because scheduled reminders are unavailable in the current conversation.',
     )
   })
 })

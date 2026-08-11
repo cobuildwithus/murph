@@ -4732,8 +4732,28 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
         })
 
         expectAppointmentSkillRead(readCapabilityRoutingActions(created.jsonEvents))
-        expect(requests).toHaveLength(1)
-        expect(requests[0]).toMatchObject({
+        const initialListRequests = requests.filter((request) =>
+          request.action === 'list'
+        )
+        const initialSaveRequests = requests.filter((request) =>
+          request.action === 'save'
+        )
+        expect(initialListRequests).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            action: 'list',
+            exactTag: 'appointment-reminder',
+            query: expect.stringMatching(/midtown|august|9:30/iu),
+          }),
+          expect.objectContaining({
+            action: 'list',
+            query: expect.stringMatching(/midtown|august|9:30/iu),
+          }),
+        ]))
+        expect(initialListRequests.some((request) =>
+          request.action === 'list' && request.exactTag === undefined
+        )).toBe(true)
+        expect(initialSaveRequests).toHaveLength(1)
+        expect(initialSaveRequests[0]).toMatchObject({
           action: 'save',
           continuityPolicy: 'preserve',
           createOnly: true,
@@ -4746,8 +4766,8 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
           summary: expect.stringMatching(/midtown.{0,80}august 12.{0,80}9:30/iu),
           title: expect.stringMatching(/midtown.{0,80}august 12.{0,80}9:30/iu),
         })
-        expect(requests[0]).not.toHaveProperty('automationId')
-        expect(requests[0]).not.toHaveProperty('slug')
+        expect(initialSaveRequests[0]).not.toHaveProperty('automationId')
+        expect(initialSaveRequests[0]).not.toHaveProperty('slug')
         expect(created.finalMessage).toMatch(
           /8(?::00)?\s*p\.?m\.?|20:00/iu,
         )
@@ -4809,6 +4829,272 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
         expect(cancellationPatches[0]).not.toHaveProperty('slug')
         expect(cancelled.finalMessage).toMatch(/cancel|archiv|removed/iu)
         expect(owner.lookupId).toBe('automation-opaque-appointment-owner-1')
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'recovers an untagged owner after a narrowed continuation in a fresh session',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-appointment-reminder-recovery-e2e-'),
+      )
+      const requests: AssistantHostedAutomationToolRequest[] = []
+      const listResults: Array<{
+        count: number
+        request: Extract<AssistantHostedAutomationToolRequest, { action: 'list' }>
+        truncated: boolean
+      }> = []
+      const decoyRecords = [
+        ['Alpha', 'August 20', '9 AM'],
+        ['Bravo', 'August 21', '10 AM'],
+        ['Charlie', 'August 22', '11 AM'],
+        ['Delta', 'August 23', 'noon'],
+        ['Echo', 'August 24', '1 PM'],
+      ].map(([destination, date, time], index) => ({
+        item: {
+          automationId: `automation-recovery-decoy-${index}`,
+          lookupId: `automation-opaque-recovery-decoy-${index}`,
+          schedule: {
+            at: `2026-08-${String(20 + index).padStart(2, '0')}T12:00:00.000Z`,
+            kind: 'at' as const,
+          },
+          status: 'active' as const,
+          summaryExcerpt:
+            `${destination} appointment reminder on ${date} at ${time}`,
+          title: `${destination} appointment reminder on ${date} at ${time}`,
+        },
+        route: 'current' as const,
+        tags: ['appointment-reminder'],
+      }))
+      const legacyRecord = {
+        item: {
+          automationId: 'automation-care-appointment-legacy',
+          lookupId: 'automation-opaque-appointment-legacy',
+          schedule: {
+            at: '2026-08-12T00:00:00.000Z',
+            kind: 'at' as const,
+          },
+          status: 'active' as const,
+          summaryExcerpt:
+            'Midtown Clinic appointment reminder on August 12 at 9:30 AM',
+          title: 'Midtown Clinic appointment reminder on August 12 at 9:30 AM',
+        },
+        route: 'current' as const,
+        tags: [] as string[],
+      }
+      const foreignRouteDecoy = {
+        item: {
+          ...legacyRecord.item,
+          automationId: 'automation-foreign-appointment-decoy',
+          lookupId: 'automation-opaque-foreign-appointment-decoy',
+        },
+        route: 'foreign' as const,
+        tags: [] as string[],
+      }
+      const recoveryRecords = [
+        ...decoyRecords,
+        legacyRecord,
+        foreignRouteDecoy,
+      ]
+      let acceptedInputId = 'assistant_input_recovery_ambiguous'
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'appointment-scheduling',
+        })
+        const commonInput = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildAppointmentReminderDeveloperInstructions({
+            automationAvailable: true,
+          }),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (
+                request: AssistantHostedAutomationToolRequest,
+              ): Promise<AssistantHostedAutomationToolResponse> => {
+                requests.push(request)
+                if (request.action === 'list') {
+                  const queryTerms = request.query
+                    ?.trim()
+                    .toLocaleLowerCase()
+                    .split(/\s+/u)
+                    .filter(Boolean) ?? []
+                  const matched = recoveryRecords.filter((record) => {
+                    if (record.route !== 'current') {
+                      return false
+                    }
+                    if (
+                      request.exactTag !== undefined
+                      && !record.tags.includes(request.exactTag)
+                    ) {
+                      return false
+                    }
+                    const haystack = [
+                      record.item.title,
+                      record.item.summaryExcerpt ?? '',
+                      JSON.stringify(record.item.schedule),
+                      record.item.status,
+                    ].join('\n').toLocaleLowerCase()
+                    return queryTerms.every((term) => haystack.includes(term))
+                  })
+                  const items = matched.slice(0, 4).map((record) => record.item)
+                  const result = {
+                    action: 'list' as const,
+                    count: matched.length,
+                    items,
+                    truncated: matched.length > items.length,
+                  }
+                  listResults.push({
+                    count: result.count,
+                    request,
+                    truncated: result.truncated,
+                  })
+                  return result
+                }
+                if (request.action === 'save') {
+                  throw new Error('Recovery must not create a second owner.')
+                }
+                if (request.action === 'reconcile') {
+                  throw new Error('Appointment reminders do not reconcile.')
+                }
+                if (request.lookup !== legacyRecord.item.automationId) {
+                  throw new Error('Recovery did not select the legacy owner.')
+                }
+                return {
+                  action: 'patch',
+                  automationId: legacyRecord.item.automationId,
+                  created: false,
+                  effectiveTimeZone: null,
+                  lookupId: legacyRecord.item.lookupId,
+                  nextOccurrenceAt: request.schedule?.kind === 'at'
+                    ? request.schedule.at
+                    : legacyRecord.item.schedule.at,
+                  routeBinding: 'preserved',
+                  schedule: request.schedule ?? legacyRecord.item.schedule,
+                  status: request.status ?? legacyRecord.item.status,
+                  timingVerified: true,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [acceptedInputId],
+              conversationId: 'conversation-appointment-recovery',
+              conversationScope: 'direct' as const,
+              inboundMailboxItemIds: [`mailbox-${acceptedInputId}`],
+              originSessionId: 'session-appointment-recovery',
+              recipientKey: 'recipient-appointment-recovery',
+            }),
+            sendVaultFile: async () => ({
+              filename: 'unused',
+              status: 'denied' as const,
+            }),
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const ambiguous = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'An existing appointment reminder needs updating. It is an',
+            'appointment reminder, but I have not said which appointment.',
+            'Help me identify the right reminder before changing anything.',
+          ].join(' '),
+        })
+        const firstTurnRequests = [...requests]
+        const firstTurnListResults = [...listResults]
+
+        expectAppointmentSkillRead(
+          readCapabilityRoutingActions(ambiguous.jsonEvents),
+        )
+        expect(firstTurnRequests.every((request) =>
+          request.action === 'list'
+        )).toBe(true)
+        expect(firstTurnListResults.some((result) =>
+          result.request.exactTag === 'appointment-reminder'
+          && result.truncated
+          && result.count === 5
+        )).toBe(true)
+        expect(firstTurnListResults.some((result) =>
+          result.request.exactTag === undefined
+          && result.truncated
+          && result.count === 6
+        )).toBe(true)
+        expect(ambiguous.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
+
+        acceptedInputId = 'assistant_input_recovery_specific'
+        const continuationRequestStart = requests.length
+        const recovered = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'It is Midtown Clinic, originally August 12 at 9:30 AM Eastern.',
+            'The confirmed appointment moved to August 15, 2026 at 3 PM',
+            'Eastern. Update that existing reminder.',
+          ].join(' '),
+          resumeSessionId: ambiguous.sessionId,
+        })
+        const continuationRequests = requests.slice(continuationRequestStart)
+        const continuationPatches = continuationRequests.filter((request) =>
+          request.action === 'patch'
+        )
+
+        expect(continuationRequests).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            action: 'list',
+            exactTag: 'appointment-reminder',
+            query: expect.stringMatching(/midtown|august|9:30/iu),
+          }),
+        ]))
+        expect(continuationRequests.some((request) =>
+          request.action === 'list'
+          && request.exactTag === undefined
+          && /midtown|august|9:30/iu.test(request.query ?? '')
+        )).toBe(true)
+        expect(continuationRequests.some((request) =>
+          request.action === 'save'
+        )).toBe(false)
+        expect(continuationPatches).toHaveLength(1)
+        expect(continuationPatches[0]).toMatchObject({
+          action: 'patch',
+          lookup: legacyRecord.item.automationId,
+          schedule: {
+            at: '2026-08-15T12:00:00.000Z',
+            kind: 'at',
+          },
+          status: 'active',
+        })
+        expect(continuationPatches[0]).not.toHaveProperty('slug')
+        expect(recovered.finalMessage).toMatch(
+          /8(?::00)?\s*a\.?m\.?|08:00/iu,
+        )
+        expect(recovered.finalMessage).toMatch(/move|cancel/iu)
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -4932,19 +5218,27 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
             expect(scenario.finalMessage).toMatch(
               /appointment.{0,80}confirmed|confirmed.{0,80}appointment/iu,
             )
+            expect(scenario.finalMessage).toMatch(
+              /no reminder.{0,120}(?:unavailable|not available)|(?:unavailable|not available).{0,120}no reminder/iu,
+            )
             expect(scenario.finalMessage).not.toMatch(
-              /remind|notification|alert/iu,
+              /reminder (?:is|was|has been) (?:set|scheduled|created|active)/iu,
             )
           } else if (testCase.kind === 'unchanged') {
             expect(scenario.finalMessage).not.toMatch(
               /I(?:'ve| have) (?:changed|moved|rescheduled|updated)|reminder (?:is|was|has been) (?:changed|moved|rescheduled|updated)/iu,
             )
           } else {
-            expect(scenario.requests).toHaveLength(1)
-            expect(scenario.requests[0]).toMatchObject({
-              action: 'list',
-              exactTag: 'appointment-reminder',
-            })
+            expect(scenario.requests).toEqual(expect.arrayContaining([
+              expect.objectContaining({
+                action: 'list',
+                exactTag: 'appointment-reminder',
+                query: expect.any(String),
+              }),
+            ]))
+            expect(scenario.requests.some((request) =>
+              request.action === 'list' && request.exactTag === undefined
+            )).toBe(true)
             expect(scenario.finalMessage.match(/\?/gu) ?? []).toHaveLength(1)
             expect(scenario.finalMessage).toMatch(
               /which|midtown|downtown|appointment/iu,
@@ -4966,6 +5260,14 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
       try {
         const unverified = await executeRealCodexAppointmentReminderScenario({
           automationRequest: async (request) => {
+            if (request.action === 'list') {
+              return {
+                action: 'list',
+                count: 0,
+                items: [],
+                truncated: false,
+              }
+            }
             if (request.action !== 'save') {
               throw new Error('Expected an appointment reminder save.')
             }
@@ -4989,7 +5291,9 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
           ].join(' '),
         })
 
-        expect(unverified.requests).toHaveLength(1)
+        expect(unverified.requests.filter((request) =>
+          request.action === 'save'
+        )).toHaveLength(1)
         expect(unverified.finalMessage).toMatch(
           /could not verify|couldn't verify|unable to verify/iu,
         )
@@ -4999,7 +5303,15 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
         )
 
         const failed = await executeRealCodexAppointmentReminderScenario({
-          automationRequest: async () => {
+          automationRequest: async (request) => {
+            if (request.action === 'list') {
+              return {
+                action: 'list',
+                count: 0,
+                items: [],
+                truncated: false,
+              }
+            }
             throw new Error('appointment reminder storage unavailable')
           },
           config,
@@ -5009,7 +5321,9 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
           ].join(' '),
         })
 
-        expect(failed.requests).toHaveLength(1)
+        expect(failed.requests.filter((request) =>
+          request.action === 'save'
+        )).toHaveLength(1)
         expect(failed.finalMessage).toMatch(/appointment.{0,80}confirmed/iu)
         expect(failed.finalMessage).toMatch(
           /reminder.{0,80}(?:not|failed|could not|couldn't|unable)/iu,

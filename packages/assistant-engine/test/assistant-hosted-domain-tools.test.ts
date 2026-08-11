@@ -52,6 +52,9 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Use createOnly=true with no automationId or slug',
     )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'query narrows only those scoped records',
+    )
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -230,12 +233,14 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('automation', {
       action: 'list',
       exactTag: 'appointment-reminder',
+      query: 'Midtown August 12',
       status: ['active', 'archived'],
     })).toEqual({
       kind: 'automation',
       request: {
         action: 'list',
         exactTag: 'appointment-reminder',
+        query: 'Midtown August 12',
         status: ['active', 'archived'],
       },
     })
@@ -445,6 +450,7 @@ describe('hosted domain dynamic tools', () => {
     const request = readToolRequest('automation', {
       action: 'list',
       exactTag: 'appointment-reminder',
+      query: 'Midtown',
     })
     if (!request) {
       throw new Error('Expected an automation list request.')
@@ -462,6 +468,7 @@ describe('hosted domain dynamic tools', () => {
     expect(automationTool.request).toHaveBeenCalledWith({
       action: 'list',
       exactTag: 'appointment-reminder',
+      query: 'Midtown',
     }, { signal: null })
     expect(readResultPayload(result)).toEqual({
       action: 'list',
@@ -478,6 +485,72 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(JSON.stringify(readResultPayload(result))).not.toMatch(
       /deliveryTarget|identityId|participantId|threadId/u,
+    )
+  })
+
+  it('binds create-only saves to the trusted accepted input instead of the tool call', async () => {
+    const automationRequest = vi.fn<
+      NonNullable<AssistantHostedToolContext['automationTool']>['request']
+    >(async () => ({
+      action: 'save' as const,
+      automationId: 'automation-appointment-1',
+      created: true,
+      effectiveTimeZone: null,
+      lookupId: 'automation-opaque-owner-1',
+      nextOccurrenceAt: '2026-08-12T00:00:00.000Z',
+      routeBinding: 'current_conversation' as const,
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' as const },
+      status: 'active' as const,
+      timingVerified: true,
+    }))
+    const automationTool = {
+      request: automationRequest,
+    }
+    const request = readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      instructions: 'Send the Midtown appointment reminder.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      tags: ['appointment-reminder'],
+      title: 'Midtown appointment on August 12 at 9:30 AM',
+    })
+    if (!request) {
+      throw new Error('Expected a create-only automation request.')
+    }
+    const hostedToolContext = createHostedToolContext({
+      automationTool,
+      currentUserActionScope: () => ({
+        acceptedInputIds: ['assistant_input_appointment'],
+        conversationId: 'conversation-appointment',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox-appointment'],
+        originSessionId: 'session-appointment',
+        recipientKey: 'recipient-appointment',
+      }),
+    })
+
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+    await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    const firstContext = automationRequest.mock.calls[0]?.[1]
+    const secondContext = automationRequest.mock.calls[1]?.[1]
+    expect(firstContext?.createOnlyReplayKey).toMatch(/^automation_create_[a-f0-9]{64}$/u)
+    expect(secondContext?.createOnlyReplayKey).toBe(
+      firstContext?.createOnlyReplayKey,
     )
   })
 
@@ -599,6 +672,7 @@ function readToolRequest(tool: 'automation' | 'device', argumentsValue: unknown)
 
 function createHostedToolContext(input: {
   automationTool?: AssistantHostedToolContext['automationTool']
+  currentUserActionScope?: AssistantHostedToolContext['currentUserActionScope']
   deviceTool?: AssistantHostedToolContext['deviceTool']
 }): AssistantHostedToolContext {
   return {
@@ -606,6 +680,7 @@ function createHostedToolContext(input: {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
+    currentUserActionScope: input.currentUserActionScope ?? (() => null),
     deviceTool: input.deviceTool ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')

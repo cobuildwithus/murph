@@ -5027,16 +5027,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
           }
+          const appointmentReminderRequest = {
+            action: "save" as const,
+            createOnly: true as const,
+            instructions: "Send the Midtown appointment reminder.",
+            schedule: { at: "2099-08-12T00:00:00.000Z", kind: "at" as const },
+            summary: "Midtown appointment on August 12 at 9:30 AM",
+            tags: ["appointment-reminder"],
+            title: "Midtown appointment on August 12 at 9:30 AM",
+          };
           const appointmentReminder =
-            await executionContext.hosted?.automationTool?.request({
-              action: "save",
-              createOnly: true,
-              instructions: "Send the Midtown appointment reminder.",
-              schedule: { at: "2099-08-12T00:00:00.000Z", kind: "at" },
-              summary: "Midtown appointment on August 12 at 9:30 AM",
-              tags: ["appointment-reminder"],
-              title: "Midtown appointment on August 12 at 9:30 AM",
-            });
+            await executionContext.hosted?.automationTool?.request(
+              appointmentReminderRequest,
+              { createOnlyReplayKey: "linq-accepted-input-appointment" },
+            );
           if (!appointmentReminder || appointmentReminder.action !== "save") {
             throw new Error("Expected an opaque appointment reminder owner.");
           }
@@ -5044,7 +5048,47 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             created: true,
             effectiveTimeZone: null,
             lookupId: expect.stringMatching(/^automation-[a-z0-9]+$/u),
+            replayed: false,
           }));
+          await expect(executionContext.hosted?.automationTool?.request(
+            appointmentReminderRequest,
+            { createOnlyReplayKey: "linq-accepted-input-appointment" },
+          )).resolves.toEqual(expect.objectContaining({
+            automationId: appointmentReminder.automationId,
+            created: false,
+            lookupId: appointmentReminder.lookupId,
+            replayed: true,
+          }));
+          for (const [index, title] of [
+            "Alpha appointment on August 20 at 9 AM",
+            "Bravo appointment on August 21 at 10 AM",
+            "Charlie appointment on August 22 at 11 AM",
+            "Delta appointment on August 23 at noon",
+            "Echo appointment on August 24 at 1 PM",
+          ].entries()) {
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              createOnly: true,
+              instructions: `Send the ${title} reminder.`,
+              schedule: {
+                at: `2099-08-${String(20 + index).padStart(2, "0")}T12:00:00.000Z`,
+                kind: "at",
+              },
+              summary: title,
+              tags: ["appointment-reminder"],
+              title,
+            }, {
+              createOnlyReplayKey: `linq-accepted-input-extra-${index}`,
+            });
+          }
+          await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Send the legacy Lakeside appointment reminder.",
+            schedule: { at: "2099-09-01T12:00:00.000Z", kind: "at" },
+            slug: "legacy-lakeside-appointment",
+            summary: "Legacy Lakeside appointment on September 1 at 2 PM",
+            title: "Legacy Lakeside appointment on September 1 at 2 PM",
+          });
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
             createOnly: true,
@@ -5209,10 +5253,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               summary: "Downtown appointment on August 12 at 2 PM",
               tags: ["appointment-reminder"],
               title: "Downtown appointment on August 12 at 2 PM",
-            });
+            }, { createOnlyReplayKey: "telegram-accepted-input-appointment" });
           if (!appointmentReminder || appointmentReminder.action !== "save") {
             throw new Error("Expected a Telegram appointment reminder owner.");
           }
+          await executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Send the foreign legacy Lakeside appointment reminder.",
+            schedule: { at: "2099-09-01T12:00:00.000Z", kind: "at" },
+            slug: "foreign-legacy-lakeside-appointment",
+            summary: "Legacy Lakeside appointment on September 1 at 2 PM",
+            title: "Legacy Lakeside appointment on September 1 at 2 PM",
+          });
           return newsletter;
         },
         turnEnvironment: null,
@@ -5239,17 +5291,73 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }),
         turnEnvironment: null,
       });
-      expect(linqAppointmentOwners).toEqual({
+      expect(linqAppointmentOwners).toEqual(expect.objectContaining({
+        action: "list",
+        count: 6,
+        items: expect.any(Array),
+        truncated: true,
+      }));
+      if (!linqAppointmentOwners || linqAppointmentOwners.action !== "list") {
+        throw new Error("Expected the scoped appointment-owner list.");
+      }
+      expect(linqAppointmentOwners.items).toHaveLength(4);
+      expect(linqAppointmentOwners.items.map((item) => item.title)).not.toContain(
+        "Midtown appointment on August 12 at 9:30 AM",
+      );
+      const narrowedLinqAppointmentOwners = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [linqInputId],
+        operation: async (executionContext) =>
+          await executionContext.hosted?.automationTool?.request({
+            action: "list",
+            exactTag: "appointment-reminder",
+            query: "Midtown August 12",
+          }),
+        turnEnvironment: null,
+      });
+      expect(narrowedLinqAppointmentOwners).toEqual({
         action: "list",
         count: 1,
-        items: [{
+        items: [expect.objectContaining({
           automationId: expect.stringMatching(/^automation_/u),
-          lookupId: expect.stringMatching(/^automation-[a-z0-9]+$/u),
-          schedule: { at: "2099-08-12T00:00:00.000Z", kind: "at" },
-          status: "active",
-          summaryExcerpt: "Midtown appointment on August 12 at 9:30 AM",
           title: "Midtown appointment on August 12 at 9:30 AM",
-        }],
+        })],
+        truncated: false,
+      });
+      const taggedLegacyOwners = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [linqInputId],
+        operation: async (executionContext) =>
+          await executionContext.hosted?.automationTool?.request({
+            action: "list",
+            exactTag: "appointment-reminder",
+            query: "Legacy Lakeside September 1",
+          }),
+        turnEnvironment: null,
+      });
+      expect(taggedLegacyOwners).toEqual({
+        action: "list",
+        count: 0,
+        items: [],
+        truncated: false,
+      });
+      const untaggedLegacyOwners = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [linqInputId],
+        operation: async (executionContext) =>
+          await executionContext.hosted?.automationTool?.request({
+            action: "list",
+            query: "Legacy Lakeside September 1",
+          }),
+        turnEnvironment: null,
+      });
+      expect(untaggedLegacyOwners).toEqual({
+        action: "list",
+        count: 1,
+        items: [expect.objectContaining({
+          lookupId: "legacy-lakeside-appointment",
+          title: "Legacy Lakeside appointment on September 1 at 2 PM",
+        })],
         truncated: false,
       });
       expect(JSON.stringify(linqAppointmentOwners)).not.toMatch(

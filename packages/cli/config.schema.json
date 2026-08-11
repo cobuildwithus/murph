@@ -1249,6 +1249,10 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "createOnly": {
+                          "description": "Create a new opaque automation owner and refuse id or slug collisions.",
+                          "type": "boolean"
+                        },
                         "activeUntil": {
                           "description": "Exclusive automation end timestamp, including a one-shot retry deadline.",
                           "type": "string",

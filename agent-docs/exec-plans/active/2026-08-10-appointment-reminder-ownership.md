@@ -25,8 +25,9 @@ Updated: 2026-08-10
 ## Scope
 
 - In scope: the canonical automation create boundary, the hosted automation
-  tool's current-conversation read surface, appointment scheduling policy,
-  focused runtime/tool/prompt tests, and real App Server scenario coverage.
+  tool's current-conversation read surface, the typed local create-only CLI
+  surface, appointment scheduling policy, focused runtime/tool/prompt tests,
+  and real App Server scenario coverage.
 - Out of scope: new databases or runtime stores, generic appointment-record
   persistence, route retargeting, frontend changes, and unrelated automation
   behavior.
@@ -38,7 +39,8 @@ Updated: 2026-08-10
 - Existing ordinary upsert behavior remains compatible unless create-only is
   explicitly requested.
 - No reminder success claim is allowed unless the initial result proves a new
-  record was created and timing claims match the returned verification fields.
+  record was created or an exact trusted replay recovered it, and timing claims
+  match the returned verification fields.
 
 ## Risks and mitigations
 
@@ -54,9 +56,9 @@ Updated: 2026-08-10
 
 ## Tasks
 
-1. [ ] Add canonical create-only ownership and hosted current-conversation list.
-2. [ ] Update the appointment policy to use create-only save and exact-owner list.
-3. [ ] Replace synthetic owner tests with stateful lifecycle and fallback proof.
+1. [x] Add canonical create-only ownership and hosted current-conversation list.
+2. [x] Update the appointment policy to use create-only save and exact-owner list.
+3. [x] Replace synthetic owner tests with stateful lifecycle and fallback proof.
 4. [ ] Run focused verification, completion reviews, exact-head CI, and acceptance.
 5. [ ] Push the verified candidate to `main`, close the draft PR, and retire the worktree.
 
@@ -70,3 +72,12 @@ Updated: 2026-08-10
 - Exact-head specialist and final ReviewGPT gates, GitHub checks, privacy/diff
   inspection, and `pnpm verify:acceptance` after final reconciliation with
   `origin/main`.
+
+Completed focused proof:
+
+- All four affected package typechecks pass.
+- Core: 782 tests pass.
+- Assistant Engine: 91 focused tests pass; 58 credential-gated real App Server
+  cases are registered and skipped without the live provider credential.
+- CLI: 87 focused tests pass.
+- Assistant Runtime: the scoped hosted-automation integration case passes.

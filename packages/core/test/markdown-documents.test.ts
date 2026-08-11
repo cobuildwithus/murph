@@ -326,6 +326,45 @@ describe("markdown document primitives", () => {
     }));
   });
 
+  it("replays a trusted create-only effect without a second write", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const request = {
+      vaultRoot,
+      createOnly: true,
+      createOnlyReplayKey: "accepted-input-appointment-1",
+      ...createAutomationPayload({
+        instructions: "Send the Midtown appointment reminder.",
+        schedule: { at: "2026-08-12T00:00:00.000Z", kind: "at" as const },
+        slug: undefined,
+        tags: ["appointment-reminder"],
+        title: "Midtown appointment on August 12 at 9:30 AM",
+      }),
+    };
+
+    const created = await upsertAutomation(request);
+    const replayed = await upsertAutomation(request);
+
+    expect(created.created).toBe(true);
+    expect(replayed).toEqual({
+      auditPath: null,
+      created: false,
+      record: created.record,
+    });
+    await expect(listAutomations({ vaultRoot })).resolves.toEqual({
+      count: 1,
+      items: [created.record],
+    });
+
+    await expect(upsertAutomation({
+      ...request,
+      instructions: "Divergent instructions for the same accepted input.",
+    })).rejects.toThrow("Create-only automation ownership already exists.");
+    await expect(readAutomation({
+      automationId: created.record.automationId,
+      vaultRoot,
+    })).resolves.toEqual(created.record);
+  });
+
   it("advances the schedule anchor only for timing transitions", async () => {
     const vaultRoot = await makeVaultRoot();
     const createdAt = "2026-07-29T12:00:00.000Z";

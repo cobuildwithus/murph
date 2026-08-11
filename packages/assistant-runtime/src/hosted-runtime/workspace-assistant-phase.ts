@@ -1444,7 +1444,24 @@ function createHostedAssistantAutomationTool(input: {
             currentRoute,
           )
         );
-        const items = scopedRecords
+        const normalizedQuery = request.query?.trim().toLocaleLowerCase() ?? "";
+        const queryTerms = normalizedQuery.split(/\s+/u).filter(Boolean);
+        const matchedRecords = normalizedQuery.length === 0
+          ? scopedRecords
+          : scopedRecords.filter((record) => {
+              const summaryExcerpt = record.summary?.slice(
+                0,
+                HOSTED_ASSISTANT_AUTOMATION_SUMMARY_EXCERPT_MAX_CHARS,
+              ) ?? "";
+              const haystack = [
+                record.title,
+                summaryExcerpt,
+                JSON.stringify(record.schedule),
+                record.status,
+              ].join("\n").toLocaleLowerCase();
+              return queryTerms.every((term) => haystack.includes(term));
+            });
+        const items = matchedRecords
           .slice(0, HOSTED_ASSISTANT_AUTOMATION_LIST_MAX_ITEMS)
           .map((record) => ({
             automationId: record.automationId,
@@ -1459,9 +1476,9 @@ function createHostedAssistantAutomationTool(input: {
           }));
         return {
           action: "list",
-          count: scopedRecords.length,
+          count: matchedRecords.length,
           items,
-          truncated: scopedRecords.length > items.length,
+          truncated: matchedRecords.length > items.length,
         };
       }
       if (request.action === "reconcile") {
@@ -1557,6 +1574,12 @@ function createHostedAssistantAutomationTool(input: {
           route: currentRoute,
           status,
         });
+        if (request.createOnly === true && !context?.createOnlyReplayKey) {
+          throw new VaultCliError(
+            "invalid_option",
+            "Create-only saves require trusted accepted-input replay authority.",
+          );
+        }
         const result = await upsertAutomation({
           ...(request.activeUntil === undefined
             ? {}
@@ -1567,6 +1590,9 @@ function createHostedAssistantAutomationTool(input: {
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
           ...(request.createOnly === true ? { createOnly: true } : {}),
+          ...(context?.createOnlyReplayKey
+            ? { createOnlyReplayKey: context.createOnlyReplayKey }
+            : {}),
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
@@ -1593,6 +1619,7 @@ function createHostedAssistantAutomationTool(input: {
         });
         return await buildHostedAutomationToolResponse({
           action: "save",
+          replayed: request.createOnly === true && result.created === false,
           result,
           routeBinding: "current_conversation",
           vaultRoot: input.vaultRoot,
@@ -1840,6 +1867,7 @@ function assertActiveHostedAutomationRoute(input: {
 
 async function buildHostedAutomationToolResponse(input: {
   action: "patch" | "save";
+  replayed?: boolean;
   result: Awaited<ReturnType<typeof upsertAutomation>>;
   routeBinding: "current_conversation" | "preserved";
   vaultRoot: string;
@@ -1903,6 +1931,7 @@ async function buildHostedAutomationToolResponse(input: {
     lookupId: input.result.record.slug,
     nextOccurrenceAt,
     routeBinding: input.routeBinding,
+    ...(input.replayed === undefined ? {} : { replayed: input.replayed }),
     schedule,
     status: input.result.record.status,
     timingVerified,

@@ -34,7 +34,7 @@ import {
 } from "@murphai/contracts";
 
 import { VAULT_LAYOUT } from "./constants.ts";
-import { generateRecordId } from "./ids.ts";
+import { deterministicContractId, generateRecordId } from "./ids.ts";
 import { VaultError } from "./errors.ts";
 import { readUtf8File, walkVaultFilesInterruptible } from "./fs.ts";
 import {
@@ -144,12 +144,13 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  createOnlyReplayKey?: string;
   now?: Date;
   vaultRoot: string;
 }
 
 export interface UpsertAutomationResult {
-  auditPath: string;
+  auditPath: string | null;
   created: boolean;
   record: AutomationRecord;
 }
@@ -1582,21 +1583,41 @@ async function upsertAutomationWithLatestRegistry(
   records?: AutomationRecord[],
 ): Promise<UpsertAutomationResult> {
   const suppliedId = normalizeId(input.automationId, "automationId", "automation");
-  const normalizedId = input.createOnly === true && suppliedId === undefined
-    ? generateRecordId("automation")
-    : suppliedId;
   const title = normalizeAutomationTitle(input.title);
-  const requestedSlug = input.createOnly === true && input.slug === undefined
-    ? normalizeSlug(undefined, "slug", normalizedId)
-    : resolveAutomationUpsertSlug({
-        slug: input.slug,
-        title,
-      });
+  const createOnlyReplayIdentity = input.createOnly === true
+    ? resolveAutomationCreateOnlyReplayIdentity({ input, title })
+    : null;
+  const normalizedId = createOnlyReplayIdentity?.automationId
+    ?? (
+      input.createOnly === true && suppliedId === undefined
+        ? generateRecordId("automation")
+        : suppliedId
+    );
+  const requestedSlug = createOnlyReplayIdentity?.slug
+    ?? (
+      input.createOnly === true && input.slug === undefined
+        ? normalizeSlug(undefined, "slug", normalizedId)
+        : resolveAutomationUpsertSlug({
+            slug: input.slug,
+            title,
+          })
+    );
   const existingRecord = selectAutomationRecord(
     records ?? await loadAutomationRecords(input.vaultRoot),
     { automationId: normalizedId, slug: requestedSlug },
   );
   if (input.createOnly === true && existingRecord !== null) {
+    if (
+      createOnlyReplayIdentity !== null
+      && existingRecord.automationId === createOnlyReplayIdentity.automationId
+      && existingRecord.slug === createOnlyReplayIdentity.slug
+    ) {
+      return {
+        auditPath: null,
+        created: false,
+        record: existingRecord,
+      };
+    }
     throw new VaultError(
       "VAULT_AUTOMATION_CONFLICT",
       "Create-only automation ownership already exists.",
@@ -1712,6 +1733,61 @@ async function upsertAutomationWithLatestRegistry(
     auditPath,
     created: target.created,
     record: writtenRecord,
+  };
+}
+
+function resolveAutomationCreateOnlyReplayIdentity(input: {
+  input: UpsertAutomationInput;
+  title: string;
+}): { automationId: string; slug: string } | null {
+  const replayKey = optionalString(
+    input.input.createOnlyReplayKey,
+    "createOnlyReplayKey",
+    256,
+  );
+  if (!replayKey) {
+    return null;
+  }
+  if (input.input.automationId !== undefined || input.input.slug !== undefined) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "Replay-safe create-only automation ownership cannot specify an id or slug.",
+    );
+  }
+  const schedule = normalizeAutomationSchedule(input.input.schedule);
+  const fingerprint = JSON.stringify({
+    activeUntil: normalizeAutomationActiveUntil(input.input.activeUntil),
+    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
+      input.input.assistantTargetOverride,
+    ),
+    continuityPolicy: normalizeAutomationContinuityPolicy(
+      input.input.continuityPolicy,
+    ),
+    instructions: normalizeAutomationAvailabilityForSchedule({
+      instructions: normalizeAutomationInstructions(input.input.instructions),
+      scheduleKind: schedule.kind,
+    }),
+    route: normalizeAutomationRoute(input.input.route),
+    schedule,
+    status: normalizeAutomationStatus(input.input.status),
+    summary: normalizeAutomationSummary(input.input.summary),
+    supportKind: normalizeAutomationSupportKind(input.input.supportKind),
+    tags: normalizeAutomationTags(input.input.tags),
+    title: input.title,
+  });
+  return {
+    automationId: deterministicContractId(
+      "automation",
+      `murph.automation-create-owner.v1:${replayKey}`,
+    ),
+    slug: normalizeSlug(
+      undefined,
+      "slug",
+      deterministicContractId(
+        "automation",
+        `murph.automation-create-payload.v1:${replayKey}:${fingerprint}`,
+      ),
+    ),
   };
 }
 

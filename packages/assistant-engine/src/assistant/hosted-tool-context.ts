@@ -521,6 +521,28 @@ export function createAssistantHostedScheduledRequestKey(input: {
   return `scheduled_${digest}`
 }
 
+export function createAssistantHostedAutomationCreateReplayKey(input: {
+  scope: AssistantHostedToolRequestKeyScope
+}): `automation_create_${string}` {
+  const acceptedInputId = input.scope.acceptedInputIds.at(-1) ?? null
+  if (!acceptedInputId) {
+    throw new TypeError(
+      'Automation create replay keys require accepted user input.',
+    )
+  }
+  const digest = createHash('sha256')
+    .update(JSON.stringify({
+      acceptedInputId,
+      conversationId: input.scope.conversationId,
+      inboundMailboxItemId:
+        input.scope.inboundMailboxItemIds.at(-1) ?? null,
+      recipientKey: input.scope.recipientKey,
+      schema: 'murph.automation-create-replay-key.v1',
+    }))
+    .digest('hex')
+  return `automation_create_${digest}`
+}
+
 // The host, not the model or tool arguments, owns which durable session an
 // asynchronous image completion resumes. Binding it here keeps the caller's
 // `scopeId` (pending/queued coordination) and `readStatus` untouched.

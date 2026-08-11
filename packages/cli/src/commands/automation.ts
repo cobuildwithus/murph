@@ -611,6 +611,10 @@ const automationSaveOptionSchemas = {
     .min(1)
     .optional()
     .describe("Optional existing automation id whose full definition will be replaced."),
+  createOnly: z
+    .boolean()
+    .optional()
+    .describe("Create a new opaque automation owner and refuse id or slug collisions."),
   ...automationSharedOptionSchemas,
   instructions: z
     .string()
@@ -687,6 +691,15 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       assertAutomationCliMutationAllowed();
+      if (
+        context.options.createOnly === true
+        && (context.options.id !== undefined || context.options.slug !== undefined)
+      ) {
+        throw new VaultCliError(
+          "invalid_option",
+          "--create-only cannot be combined with --id or --slug.",
+        );
+      }
       const now = new Date().toISOString();
       const route = buildAutomationRouteFromOptions({
         channel: context.options.channel,
@@ -739,6 +752,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       });
       const result = await upsertAutomation({
         ...input,
+        ...(context.options.createOnly === true ? { createOnly: true } : {}),
         vaultRoot: context.options.vault,
       });
 
