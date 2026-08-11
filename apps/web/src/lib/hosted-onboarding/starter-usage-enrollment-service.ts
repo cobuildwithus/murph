@@ -443,38 +443,52 @@ async function prepareHostedStarterUsageActivationCrypto(input: {
       prisma: input.prisma,
       userId: input.userId,
     });
+  let firstPrewarmError: unknown;
+  let hasPrewarmError = false;
   const settled = await Promise.allSettled(
     HOSTED_STARTER_USAGE_ACTIVATION_CRYPTO_DOMAINS.map(async (domain) => {
-      const candidate = preparedCryptoDomainRoots.get(domain);
-      if (candidate) {
-        await prewarmPreparedHostedCryptoDomainRootForWeb({
+      try {
+        const candidate = preparedCryptoDomainRoots.get(domain);
+        if (candidate) {
+          await prewarmPreparedHostedCryptoDomainRootForWeb({
+            domain,
+            prepared: preparedCryptoDomainRoots,
+            userId: input.userId,
+          });
+          return [domain, candidate.rootKeyId] as const;
+        }
+
+        const root = await unwrapHostedDomainRootForWeb({
           domain,
-          prepared: preparedCryptoDomainRoots,
+          prisma: input.prisma,
+          retainFailureInScopedCache: true,
           userId: input.userId,
         });
-        return [domain, candidate.rootKeyId] as const;
-      }
-
-      const root = await unwrapHostedDomainRootForWeb({
-        domain,
-        prisma: input.prisma,
-        retainFailureInScopedCache: true,
-        userId: input.userId,
-      });
-      try {
-        return [domain, root.envelope.rootKeyId] as const;
-      } finally {
-        root.rootKey.fill(0);
+        try {
+          return [domain, root.envelope.rootKeyId] as const;
+        } finally {
+          root.rootKey.fill(0);
+        }
+      } catch (error) {
+        if (!hasPrewarmError) {
+          firstPrewarmError = error;
+          hasPrewarmError = true;
+        }
+        throw error;
       }
     }),
   );
+  if (hasPrewarmError) {
+    throw firstPrewarmError;
+  }
   const prewarmedRootKeyIds = new Map<
     HostedStarterUsageActivationCryptoDomain,
     string
   >();
   for (const outcome of settled) {
+    // Rejections are handled above after every sibling has settled.
     if (outcome.status === "rejected") {
-      throw outcome.reason;
+      continue;
     }
     const [domain, rootKeyId] = outcome.value;
     prewarmedRootKeyIds.set(domain, rootKeyId);

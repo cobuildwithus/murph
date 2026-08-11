@@ -93,6 +93,10 @@ Updated: 2026-08-11
 
 - Focused Starter enrollment Vitest, including existing, missing, partial-race,
   bounded-retry, and transaction-active provider guard scenarios.
+- The focused owner suite uses staged transaction state to prove rollback and
+  exact post-commit effect ownership across device/runtime retry seams. It
+  composes with the real lower-level domain-root and member-activation suites;
+  it is not represented as a new real-PostgreSQL end-to-end owner matrix.
 - Hosted Web typecheck.
 - `git diff --check`, architecture/doc drift checks when live docs change, and
   a diff-only identifier/secret scan.

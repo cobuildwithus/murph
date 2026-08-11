@@ -104,6 +104,7 @@ vi.mock("@/src/lib/hosted-onboarding/starter-usage-grant", () => ({
 import {
   ensureHostedLinqInstantStartStarterUsageEnrollment,
   ensureHostedStarterUsageEnrollment,
+  runHostedLinqInstantStartDeferredActivationWakeBestEffort,
 } from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
 
 const NOW = new Date("2026-08-09T14:00:00.000Z");
@@ -141,18 +142,28 @@ type ProviderWork = {
   transactionOpen: boolean;
 };
 
+type TransactionWriteKind =
+  | "activation"
+  | "audit"
+  | "grant"
+  | "mailbox"
+  | "root";
+
+let activationWritten: boolean;
 let activeRootKeyIds: Map<ActivationCryptoDomain, string>;
+let activeTransactionWrites: TransactionWriteKind[] | null;
 let candidateGeneration: number;
+let createdGrantCount: number;
 let providerCallsInFlight: number;
+let durableTransactionWrites: TransactionWriteKind[];
+let grantState: { effectiveAt: Date } | null;
+let memberState: MemberState;
 let scopedRootKeyIds: Map<string, string> | null;
+let transactionCallsInFlight: number;
 let transactionOpen: boolean;
+let transactionPeak: number;
 
 describe("Starter usage enrollment owner", () => {
-  let activationWritten: boolean;
-  let createdGrantCount: number;
-  let grantState: { effectiveAt: Date } | null;
-  let memberState: MemberState;
-
   beforeEach(() => {
     vi.clearAllMocks();
     activationWritten = false;
@@ -160,13 +171,17 @@ describe("Starter usage enrollment owner", () => {
       ["control", "control_active_1"],
       ["ingress", "ingress_active_1"],
     ]);
+    activeTransactionWrites = null;
     candidateGeneration = 0;
     createdGrantCount = 0;
+    durableTransactionWrites = [];
     grantState = null;
     memberState = buildMemberState();
     providerCallsInFlight = 0;
     scopedRootKeyIds = null;
+    transactionCallsInFlight = 0;
     transactionOpen = false;
+    transactionPeak = 0;
 
     mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
       async (callback: () => Promise<unknown>) => {
@@ -281,6 +296,7 @@ describe("Starter usage enrollment owner", () => {
     mocks.readHostedStarterUsageGrantTx.mockImplementation(async () => grantState);
     mocks.ensureHostedStarterUsageGrantTx.mockImplementation(async () => {
       if (!grantState) {
+        stageTransactionWrites("grant");
         grantState = { effectiveAt: NOW };
         createdGrantCount += 1;
       }
@@ -344,6 +360,7 @@ describe("Starter usage enrollment owner", () => {
             hostedExecutionEventId: null,
           };
         }
+        stageTransactionWrites("activation", "root", "audit", "mailbox");
         activationWritten = true;
         return {
           activated: true,
@@ -459,6 +476,57 @@ describe("Starter usage enrollment owner", () => {
     expectAllProviderWorkOutsideTransaction();
   });
 
+  it("drains sibling prewarms and preserves the first observed failure", async () => {
+    const controlStarted = createDeferred();
+    const releaseControl = createDeferred();
+    const ingressRejected = createDeferred();
+    const controlError = new Error("control unwrap failed later");
+    const ingressError = new Error("ingress unwrap failed first");
+    mocks.providerWork.mockImplementation(async (input: ProviderWork) => {
+      if (input.transactionOpen) {
+        throw new Error("Provider work executed inside the transaction callback.");
+      }
+      if (input.kind !== "kms-unwrap") {
+        return;
+      }
+      if (input.domain === "control") {
+        controlStarted.resolve();
+        await releaseControl.promise;
+        throw controlError;
+      }
+      ingressRejected.resolve();
+      throw ingressError;
+    });
+    const prisma = buildPrisma(() => memberState);
+    let enrollmentSettled = false;
+    const enrollment = ensureHostedStarterUsageEnrollment({
+      inviteCode: "invite_123",
+      member: { id: memberState.id, suspendedAt: null },
+      now: NOW,
+      prisma: prisma as never,
+      source: "web_onboarding",
+    });
+    void enrollment.then(
+      () => { enrollmentSettled = true; },
+      () => { enrollmentSettled = true; },
+    );
+
+    await Promise.all([controlStarted.promise, ingressRejected.promise]);
+    await Promise.resolve();
+    expect(enrollmentSettled).toBe(false);
+    expect(providerCallsInFlight).toBe(1);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+
+    releaseControl.resolve();
+    await expect(enrollment).rejects.toBe(ingressError);
+    expect(providerCallsInFlight).toBe(0);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+  });
+
   it("reprepares once when a concurrent provision wins one missing-root race", async () => {
     activeRootKeyIds.clear();
     let injectedConcurrentControlRoot = false;
@@ -493,40 +561,114 @@ describe("Starter usage enrollment owner", () => {
     expectAllProviderWorkOutsideTransaction();
   });
 
-  it("reprepares once when activation discovers a missing non-write root candidate", async () => {
-    mocks.activateHostedMemberForPositiveSourceTx.mockImplementationOnce(
-      async () => {
-        throw new mocks.HostedCryptoDomainRootCandidateRequiredError({
-          domain: "device",
-        });
-      },
-    );
-    let transactionAttempt = 0;
-    const prisma = buildPrisma(
-      () => memberState,
-      undefined,
-      false,
-      () => {
-        transactionAttempt += 1;
-        if (transactionAttempt === 2) {
-          grantState = null;
-          createdGrantCount = 0;
-        }
-      },
-    );
+  it.each(["device", "runtime"] as const)(
+    "rolls back a staged %s candidate failure and commits one instant-start retry",
+    async (domain) => {
+      activeRootKeyIds.clear();
+      mocks.activateHostedMemberForPositiveSourceTx.mockImplementationOnce(
+        failActivationAfterStagedWrites(domain),
+      );
+      const admission = buildInstantStartAdmission(memberState.id);
+      const prisma = buildPrisma(() => memberState, admission);
 
-    await expect(ensureHostedStarterUsageEnrollment({
-      inviteCode: "invite_123",
-      member: { id: memberState.id, suspendedAt: null },
+      const result = await ensureHostedLinqInstantStartStarterUsageEnrollment({
+        admissionEventId: admission.eventId,
+        inviteCode: admission.inviteCode,
+        memberId: admission.memberId,
+        now: NOW,
+        prisma: prisma as never,
+      });
+
+      expect(result).toMatchObject({
+        deferredActivationWake: {
+          hostedExecutionEventId: "execution_activation_1",
+          memberId: memberState.id,
+        },
+        status: "enrolled",
+      });
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(transactionPeak).toBe(1);
+      expect(transactionCallsInFlight).toBe(0);
+      expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(2);
+      expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx)
+        .toHaveBeenCalledTimes(4);
+      expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledTimes(2);
+      expect(mocks.activateHostedMemberForPositiveSourceTx)
+        .toHaveBeenCalledTimes(2);
+      expect(readProviderWorkByKind("kms-sign")).toHaveLength(4);
+      expect(readProviderWorkByKind("kms-unwrap")).toHaveLength(4);
+      expect(durableTransactionWrites).toEqual([
+        "grant",
+        "activation",
+        "root",
+        "audit",
+        "mailbox",
+      ]);
+      expect(createdGrantCount).toBe(1);
+      expect(prisma.__readAdmission()).toBeNull();
+      expect(prisma.hostedInvite.updateMany).toHaveBeenCalledOnce();
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .not.toHaveBeenCalled();
+      expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+        .not.toHaveBeenCalled();
+
+      if (!result.deferredActivationWake) {
+        throw new Error("Expected one deferred activation wake.");
+      }
+      await runHostedLinqInstantStartDeferredActivationWakeBestEffort({
+        continuation: result.deferredActivationWake,
+        prisma: prisma as never,
+      });
+      expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+        .toHaveBeenCalledOnce();
+      expect(readProviderWorkByKind("runtime-wake")).toHaveLength(1);
+      expectAllProviderWorkOutsideTransaction();
+    },
+  );
+
+  it("rolls back both staged candidate failures and preserves instant-start admission", async () => {
+    activeRootKeyIds.clear();
+    mocks.activateHostedMemberForPositiveSourceTx
+      .mockImplementationOnce(failActivationAfterStagedWrites("device"))
+      .mockImplementationOnce(failActivationAfterStagedWrites("runtime"));
+    const admission = buildInstantStartAdmission(memberState.id);
+    const prisma = buildPrisma(() => memberState, admission);
+
+    await expect(ensureHostedLinqInstantStartStarterUsageEnrollment({
+      admissionEventId: admission.eventId,
+      inviteCode: admission.inviteCode,
+      memberId: admission.memberId,
       now: NOW,
       prisma: prisma as never,
-      source: "web_onboarding",
-    })).resolves.toMatchObject({ status: "enrolled" });
+    })).rejects.toMatchObject({
+      code: "HOSTED_STARTER_USAGE_CRYPTO_PREPARATION_REQUIRED",
+      details: {
+        domain: "runtime",
+        reason: "candidate-required",
+      },
+      retryable: true,
+    });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(transactionPeak).toBe(1);
+    expect(transactionCallsInFlight).toBe(0);
     expect(mocks.prepareHostedCryptoDomainRootCandidates).toHaveBeenCalledTimes(2);
+    expect(mocks.lockAndReadActiveHostedDomainRootKeyIdTx).toHaveBeenCalledTimes(4);
+    expect(mocks.ensureHostedStarterUsageGrantTx).toHaveBeenCalledTimes(2);
     expect(mocks.activateHostedMemberForPositiveSourceTx).toHaveBeenCalledTimes(2);
-    expect(createdGrantCount).toBe(1);
+    expect(readProviderWorkByKind("kms-sign")).toHaveLength(4);
+    expect(readProviderWorkByKind("kms-unwrap")).toHaveLength(4);
+    expect(durableTransactionWrites).toEqual([]);
+    expect(grantState).toBeNull();
+    expect(createdGrantCount).toBe(0);
+    expect(activationWritten).toBe(false);
+    expect(prisma.__readAdmission()).toEqual(admission);
+    expect(prisma.hostedInvite.updateMany).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
+    expect(readProviderWorkByKind("runtime-wake")).toEqual([]);
     expectAllProviderWorkOutsideTransaction();
   });
 
@@ -812,14 +954,65 @@ function buildPrisma(
         throw new Error("Nested interactive transactions are not supported by this fixture.");
       }
 
+      const snapshot = {
+        activationWritten,
+        activeRootKeyIds: new Map(activeRootKeyIds),
+        admission,
+        createdGrantCount,
+        grantState,
+      };
+      const stagedWrites: TransactionWriteKind[] = [];
+      const previousTransactionWrites = activeTransactionWrites;
+      activeTransactionWrites = stagedWrites;
+      transactionCallsInFlight += 1;
+      transactionPeak = Math.max(transactionPeak, transactionCallsInFlight);
       transactionOpen = true;
       try {
-        return await callback(tx);
+        const result = await callback(tx);
+        durableTransactionWrites.push(...stagedWrites);
+        return result;
+      } catch (error) {
+        activationWritten = snapshot.activationWritten;
+        activeRootKeyIds = snapshot.activeRootKeyIds;
+        admission = snapshot.admission;
+        createdGrantCount = snapshot.createdGrantCount;
+        grantState = snapshot.grantState;
+        throw error;
       } finally {
+        activeTransactionWrites = previousTransactionWrites;
+        transactionCallsInFlight -= 1;
         transactionOpen = false;
       }
     }),
+    __readAdmission: () => admission,
   };
+}
+
+function buildInstantStartAdmission(memberId: string) {
+  return {
+    eventId: "event_admission_1",
+    inviteCode: "invite_123",
+    inviteId: "invite_id_123",
+    memberId,
+  };
+}
+
+function failActivationAfterStagedWrites(domain: "device" | "runtime") {
+  return async () => {
+    // This synthetic late failure proves the enrollment owner's full rollback
+    // envelope. Concrete root-provisioning order remains covered by the
+    // lower-level domain-root and member-activation suites.
+    stageTransactionWrites("activation", "root", "audit", "mailbox");
+    activationWritten = true;
+    throw new mocks.HostedCryptoDomainRootCandidateRequiredError({ domain });
+  };
+}
+
+function stageTransactionWrites(...writes: TransactionWriteKind[]): void {
+  if (!activeTransactionWrites || !transactionOpen) {
+    throw new Error("Starter transaction writes must be staged inside the callback.");
+  }
+  activeTransactionWrites.push(...writes);
 }
 
 function buildCryptoEnvelope(input: {
