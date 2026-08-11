@@ -201,7 +201,13 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // graph measured a 1,596,214B entry, 7,718,295B static closure, and 9,637,008B
 // total on 2026-08-10. Ratchet the total while retaining the reviewed startup
 // baselines and all fixed cross-platform allowances.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_637_008 + 32_768;
+//
+// Publishing the browser-vault replica after a model-free system-mailbox
+// device unit adds the existing cancelable refresh path to the deferred hosted
+// runtime output. Exact local production assembly of the combined graph
+// measured 9,673,902B total on 2026-08-10. Ratchet only the total baseline and
+// retain both startup baselines and all fixed cross-platform allowances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_673_902 + 32_768;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
