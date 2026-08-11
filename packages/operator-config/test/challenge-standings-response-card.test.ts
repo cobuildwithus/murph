@@ -9,6 +9,7 @@ import {
 
 import {
   challengeStandingsResponseCardJsonSchema,
+  challengeStandingsResponseCardV1Schema,
   buildLinqIMessageAppCardImageUrl,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
@@ -69,6 +70,34 @@ const COLLECTIVE_CARD: ChallengeStandingsResponseCardV1 = {
 function decodeAppCardUrl(url: string): unknown {
   const encoded = new URL(url).hash.replace(/^#murph-card=/u, '')
   return JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
+}
+
+function decodeImageAppCardUrl(url: string): {
+  schemaVersion: 5
+  card: ChallengeStandingsResponseCardV1
+} {
+  const match = new URL(url).pathname.match(
+    /^\/imessage\/card\/v1\/([A-Za-z0-9_-]+)\.png$/u,
+  )
+  if (match?.[1] === undefined) {
+    throw new TypeError('Expected a canonical app card image URL.')
+  }
+  const envelope: unknown = JSON.parse(
+    Buffer.from(match[1], 'base64url').toString('utf8'),
+  )
+  if (
+    typeof envelope !== 'object'
+    || envelope === null
+    || !('schemaVersion' in envelope)
+    || envelope.schemaVersion !== 5
+    || !('card' in envelope)
+  ) {
+    throw new TypeError('Expected a schema-v5 app card image envelope.')
+  }
+  return {
+    schemaVersion: 5,
+    card: challengeStandingsResponseCardV1Schema.parse(envelope.card),
+  }
 }
 
 describe('challenge standings response cards', () => {
@@ -194,6 +223,59 @@ describe('challenge standings response cards', () => {
     })
   })
 
+  it('keeps native and semantic labels while removing identity from image URLs', () => {
+    const identityCard: ChallengeStandingsResponseCardV1 = {
+      ...INDIVIDUAL_CARD,
+      title: 'Private challenge title',
+      subtitle: 'Private challenge subtitle',
+      entries: INDIVIDUAL_CARD.entries.map((entry, index) => ({
+        ...entry,
+        label: `Private participant ${index + 1}`,
+      })),
+      footer: 'Private challenge footer',
+    }
+    const teamCard: ChallengeStandingsResponseCardV1 = {
+      ...identityCard,
+      format: 'teams',
+      entries: identityCard.entries.map((entry, index) => ({
+        ...entry,
+        label: `Private team ${index + 1}`,
+      })),
+    }
+    const collectiveCard: ChallengeStandingsResponseCardV1 = {
+      ...COLLECTIVE_CARD,
+      title: 'Private collective title',
+      subtitle: 'Private collective subtitle',
+      footer: 'Private collective footer',
+    }
+
+    for (const [card, expectedLabels] of [
+      [identityCard, ['Participant 1', 'Participant 2', 'Participant 3']],
+      [teamCard, ['Team 1', 'Team 2', 'Team 3']],
+      [collectiveCard, null],
+    ] as const) {
+      const imageEnvelope = decodeImageAppCardUrl(
+        buildLinqIMessageAppCardImageUrl(card),
+      )
+      expect(imageEnvelope.card.title).toBe('Challenge standings')
+      expect(imageEnvelope.card.subtitle).toBeNull()
+      expect(imageEnvelope.card.footer).toBeNull()
+      if (imageEnvelope.card.format === 'collective') {
+        expect(expectedLabels).toBeNull()
+      } else {
+        expect(imageEnvelope.card.entries.map((entry) => entry.label))
+          .toEqual(expectedLabels)
+      }
+
+      const encodedImage = JSON.stringify(imageEnvelope)
+      expect(encodedImage).not.toContain('Private')
+      expect(decodeAppCardUrl(encodeChallengeStandingsAppCardUrl(card)))
+        .toEqual({ schemaVersion: 5, card })
+      expect(Object.values(buildLinqIMessageAppLayout(card)).join('\n'))
+        .toContain(card.title)
+    }
+  })
+
   it('includes target context in ranked static previews', () => {
     expect(buildLinqIMessageAppLayout({
       ...INDIVIDUAL_CARD,
@@ -234,7 +316,7 @@ describe('challenge standings response cards', () => {
     expect(maximumImageUrl).toMatch(
       /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
     )
-    expect(maximumImageUrl.length).toBe(1_954)
+    expect(maximumImageUrl.length).toBeLessThan(2_048)
     const maximumLayout = buildLinqIMessageAppLayout(maximumRankedCard)
     const { image_url: _imageUrl, ...semanticLayout } = maximumLayout
     expect(Object.values(semanticLayout).every((value) => value.length <= 512))
@@ -275,7 +357,7 @@ describe('challenge standings response cards', () => {
     expect(encodeChallengeStandingsAppCardUrl(acceptedBoundaryCard).length)
       .toBe(2_037)
     expect(buildLinqIMessageAppCardImageUrl(acceptedBoundaryCard).length)
-      .toBe(2_046)
+      .toBeLessThan(2_048)
     expect(() => encodeChallengeStandingsAppCardUrl(makeBoundaryCard(79)))
       .toThrow('static image payload limit')
   })

@@ -240,7 +240,9 @@ export function buildLinqIMessageAppCardImageUrl(
     ? encodeDailyNutritionAppCardPayload(parsed)
     : parsed.kind === 'compact_table'
       ? encodeCompactTableAppCardPayload(parsed)
-      : encodeChallengeStandingsAppCardPayload(parsed)
+      : encodeChallengeStandingsAppCardPayload(
+          buildIdentityFreeChallengeStandingsImageCard(parsed),
+        )
   if (encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
     throw new TypeError('The encoded app card image payload is too large.')
   }
@@ -342,6 +344,31 @@ function encodeChallengeStandingsAppCardPayload(
     card: parsed,
   }
   return encodeAppCardEnvelopePayload(envelope)
+}
+
+function buildIdentityFreeChallengeStandingsImageCard(
+  card: ChallengeStandingsResponseCardV1,
+): ChallengeStandingsResponseCardV1 {
+  if (card.format === 'collective') {
+    return {
+      ...card,
+      title: 'Challenge standings',
+      subtitle: null,
+      footer: null,
+    }
+  }
+
+  const labelPrefix = card.format === 'teams' ? 'Team' : 'Participant'
+  return {
+    ...card,
+    title: 'Challenge standings',
+    subtitle: null,
+    footer: null,
+    entries: card.entries.map((entry, index) => ({
+      ...entry,
+      label: `${labelPrefix} ${index + 1}`,
+    })),
+  }
 }
 
 function encodeWorkoutSessionAppCardPayload(

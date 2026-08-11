@@ -76,10 +76,13 @@ workout summary, while Linq captions independently preserve every cell or every
 workout state, set status, target, and actual value. V3 tracking stays only in
 the semantic transcript and is stripped before both encodings; V4 contains no
 tracking or canonical event reference. Challenge standings use the authority-free
-V5 envelope in authenticated Linq groups. Their generated image mirrors the
-native ranked or collective state, leads directly with the challenge title, and
-omits format and per-row coverage labels; complete semantic captions remain
-available independently of image loading. The shared image route accepts only
+V5 envelope in authenticated Linq groups. Their native fragment and complete
+semantic captions preserve the room-authorized title and labels. The generated
+image instead uses a fixed title, no subtitle or footer, and ordinal participant
+or team labels so the public path carries no challenge or member identity; it
+still preserves scorer-owned order, values, target, coverage, and the native
+ranked or collective hierarchy while omitting format and per-row coverage
+labels. The shared image route accepts only
 strict V1-V5 presentation envelopes and otherwise fails closed without weakening
 the deterministic text fallback.
 

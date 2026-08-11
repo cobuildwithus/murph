@@ -11,24 +11,24 @@ const SYNTHETIC_TEAM_CARD: ChallengeStandingsResponseCardV1 = {
   kind: "challenge_standings",
   version: 1,
   format: "teams",
-  title: "Summer movement challenge",
-  subtitle: "Day 4 of 7",
+  title: "Challenge standings",
+  subtitle: null,
   objective: { kind: "target", targetPoints: 250 },
   entries: [
     {
-      label: "North team",
+      label: "Team 1",
       points: 210,
       coverage: "complete",
       detail: null,
     },
     {
-      label: "South team",
+      label: "Team 2",
       points: 180,
       coverage: "partial",
       detail: null,
     },
     {
-      label: "West team",
+      label: "Team 3",
       points: null,
       coverage: "unscored",
       detail: null,
@@ -41,8 +41,8 @@ const SYNTHETIC_COLLECTIVE_CARD: ChallengeStandingsResponseCardV1 = {
   kind: "challenge_standings",
   version: 1,
   format: "collective",
-  title: "Move together",
-  subtitle: "Weekly progress",
+  title: "Challenge standings",
+  subtitle: null,
   objective: { kind: "target", targetPoints: 1_000 },
   collectivePoints: 640,
   coverage: "partial",
@@ -66,9 +66,10 @@ export function ImessageChallengeStandingsCardStudy() {
           Challenge standings cards
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-          The image fallback mirrors the native ranked and collective states.
-          Titles lead directly, incomplete ranks stay neutral, and a shared
-          target remains group progress rather than an individual result.
+          The identity-free image fallback mirrors the native ranked and
+          collective hierarchy. Generic labels preserve scorer order,
+          incomplete ranks stay neutral, and a shared target remains group
+          progress rather than an individual result.
         </p>
       </div>
       <div className="hidden flex-col gap-8 sm:flex">

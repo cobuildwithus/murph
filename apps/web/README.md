@@ -1703,8 +1703,10 @@ Public provider-facing routes:
 
 - `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V5
   nutrition, generic-table, workout, or challenge-standings presentation for
-  Linq's static Messages fallback. It accepts no query string, identity,
-  canonical reference,
+  Linq's static Messages fallback. Production challenge-standings producers
+  replace the challenge title and ranked labels with fixed ordinal presentation
+  before encoding, while exact names remain only in the native fragment and
+  semantic captions. The route accepts no query string, canonical reference,
   credential, tracking reference, or authority; it performs no database or
   remote read and returns private no-store/no-index headers. Deploy the
   compatible native reader first, this route second, and its runtime producer
