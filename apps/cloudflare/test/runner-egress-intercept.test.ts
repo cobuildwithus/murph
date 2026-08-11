@@ -8131,6 +8131,11 @@ describe("hostedRunnerIntercept", () => {
     },
     {
       method: "POST",
+      operation: "sendRichMessage",
+      query: "",
+    },
+    {
+      method: "POST",
       operation: "sendVoice",
       query: "",
     },

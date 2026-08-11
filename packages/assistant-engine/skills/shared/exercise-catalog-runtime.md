@@ -33,8 +33,20 @@ programmatically appropriate.
    and the first-launch close are not movement-instruction turns merely because
    the saved plan contains named exercises. Defer catalog media until the first
    instructional turn or until the user asks to see the exercises.
-5. When the current turn is a movement-instruction turn and the delivery surface
-   supports response media:
+5. For every routine, keep each dose and instruction concrete. Estimate the
+   exercise time, transition time, and total honestly. Before sending, compare
+   the stated total with the work in the routine and do not pad a short plan to
+   sound more substantial. When `murph.attach_exercise_routine_card` is
+   available, prefer one card when it alone fully answers the request. Copy
+   each selected catalog image URL, alt, and step exactly. Construct its source as
+   `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`. Keep
+   the returned image order when assigning that position. Use short concrete
+   instructions, normally one or two cues per exercise. The current channel
+   chooses its supported card presentation and fallback. Do not also attach
+   response media or repeat the card in final text.
+6. Use the existing response-media path when the current turn teaches a
+   movement, the delivery surface supports response media, and either the
+   surface is Linq/iMessage or a routine card is unavailable or unsuitable:
    - If any movement being taught is likely unfamiliar or uncommon, attach at
      least one useful returned catalog image and normally two in the same
      response. Count useful frames per unfamiliar movement, not only across the
@@ -53,11 +65,15 @@ programmatically appropriate.
    - If the user clearly demonstrates relevant training fluency and every
      movement being taught is common or already familiar, omit exercise images
      unless the user asks for them.
-   - Use returned `images[]` with catalog URL, alt text, and source
-     `exercise_catalog:<id>:<step>`. Do not paste image URLs into message text
+   - Use returned `images[]` with catalog URL and alt text. Construct source as
+     `exercise_catalog:<returned-item-id>:<1-based-position-in-images[]>`. Do
+     not paste image URLs into message text
      when media delivery exists. If an important movement has no image, say "no
      catalog image yet"; never imply that an image was attached.
-6. If acute pain or safety requires an immediate action, give the minimal plan
+   Use the strongest presentation supported by the current channel. Do not
+   recreate another platform's UI or default to a long text when the available
+   card or media path can present the same answer more clearly.
+7. If acute pain or safety requires an immediate action, give the minimal plan
    now and include available catalog media in the same response. For a known
    routine the user has already performed, send a concise reference. Provide
    full steps only when asked, accepted as a walkthrough, or required for
