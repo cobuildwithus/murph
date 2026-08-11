@@ -1,6 +1,6 @@
 # Make database fanout a standard completion and ReviewGPT review concern
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -80,3 +80,25 @@ Updated: 2026-08-10
   ReviewGPT pass on the pushed head; required exact-head GitHub checks.
 - Expected outcomes: concise internally consistent guidance, no identifier
   leakage, prompt-lens pass or fully resolved findings, and green required CI.
+
+## Results
+
+- ReviewGPT supplied the implementation patch. Parent inspection added only the
+  index wording required by `pnpm docs:drift`; no new policy owner or audit stage
+  was introduced.
+- The preliminary prompt lens found two instruction-consistency issues. The
+  branch now covers changes to existing collection paths and leaves standalone
+  missing-proof findings with the preliminary coverage owner while the final
+  audit remains production-failure based.
+- `git diff --check`, privacy/reference readback, `pnpm docs:drift`, the local PR
+  changelog check, and the local frontend-design applicability check pass.
+- A separate read-only ReviewGPT audit reported five reachable website fanout
+  mechanisms: Linq roster N+1 work, device runtime apply transactions retaining
+  connections across crypto, unbounded device snapshot/status projection,
+  repeated pending-group candidate hydration, and message-edit lineage crypto
+  inside a locked transaction. Parent readback confirmed the named call paths
+  and bounds as static upper limits; no production frequency was inferred.
+- Runtime fixes remain out of scope for this policy PR. The smallest follow-up
+  boundaries are existing set readers, hard pages/item caps, batched root
+  preparation, and short transactions with live locked revalidation.
+Completed: 2026-08-10
