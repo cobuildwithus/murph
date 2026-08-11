@@ -2870,7 +2870,7 @@ describe("hosted device-sync wakes", () => {
     expect(revokeAccess).toHaveBeenCalledWith(storedConnection);
   });
 
-  it("uses stored Strava authority to disconnect and purge when private credentials require repair", async () => {
+  it("disconnects and purges with a durable warning when private Strava credentials require repair", async () => {
     const activeConnection = buildHostedConnection({
       displayName: "Strava",
       provider: "strava",
@@ -2903,12 +2903,16 @@ describe("hosted device-sync wakes", () => {
       buildPublicConnectionId("dsc_123"),
     )).resolves.toMatchObject({
       connection: {
+        lastErrorCode: "DEVICE_PROVIDER_APPLICATION_REPAIR_REQUIRED",
         provider: "strava",
         status: "disconnected",
       },
+      warning: {
+        code: "DEVICE_PROVIDER_APPLICATION_REPAIR_REQUIRED",
+      },
     });
 
-    expect(mocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedConnection);
+    expect(mocks.revokeStravaDeviceSyncAccess).not.toHaveBeenCalled();
     expect(mocks.registryGet).not.toHaveBeenCalled();
     expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
       clearRefreshLease: true,
@@ -2982,7 +2986,7 @@ describe("hosted device-sync wakes", () => {
       failedCount: 0,
     });
 
-    expect(mocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedConnection);
+    expect(mocks.revokeStravaDeviceSyncAccess).not.toHaveBeenCalled();
     expect(mocks.registryGet).not.toHaveBeenCalled();
   });
 

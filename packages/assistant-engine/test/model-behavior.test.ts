@@ -1474,16 +1474,13 @@ describe('assistant local PDF evidence guidance', () => {
       'Hosted wearable connection links are available for Oura (`oura`) and WHOOP (`whoop`)',
     )
     expect(prompt).toContain(
-      'When offering examples, mention about six supported choices from this list, not the full provider list',
+      'Name about six examples, not all; omit generic health apps and unsolicited unsupported caveats',
     )
     expect(prompt).toContain(
-      'Do not add generic consumer-health app examples or proactively name unsupported sources as caveats',
+      'For a source in neither this list nor health relay guidance, say it is not supported yet',
     )
     expect(prompt).toContain(
-      'If the user asks for a wearable/source that is neither in this list nor named in the health data relay section, say it is not supported yet',
-    )
-    expect(prompt).toContain(
-      'Use `murph.device` to list accounts, create a real connection link, or queue reconciliation',
+      'Use `murph.device` to list accounts, create a real link, or reconcile',
     )
     expect(prompt).toContain('Murph iOS app:')
     expect(prompt).toContain(
@@ -1537,7 +1534,7 @@ describe('assistant local PDF evidence guidance', () => {
     expect(prompt).not.toContain('Before creating a connection link')
     expect(prompt).not.toContain('empty `--provider garmin`')
     expect(prompt).toContain(
-      'put it on its own final line with no text after it',
+      'End on a URL-only line, especially in iMessage',
     )
     expect(prompt).not.toContain('Do not route supported hosted connect flows through local `device connect`')
     expect(prompt).toContain(
@@ -1591,6 +1588,44 @@ describe('assistant local PDF evidence guidance', () => {
     )
     expect(prompt).not.toContain('hosted connect helper is not exposed')
     expect(prompt).not.toContain('connection links are temporarily unavailable')
+  })
+
+  it('keeps Strava private-app setup guidance in direct initial input only', () => {
+    const directLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantHostedDeviceConnectProviders: [
+          { label: 'Strava', provider: 'strava' },
+        ],
+        conversationScope: 'direct',
+      }),
+    )
+    const groupLayers = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        assistantHostedDeviceConnectProviders: [
+          { label: 'Strava', provider: 'strava' },
+        ],
+        conversationScope: 'group',
+      }),
+    )
+    const directGuidance = directLayers.stableRouteCapabilityPrompt
+      .split('\n')
+      .find((line) => line.startsWith(
+        '- Hosted wearable connection links are available for ',
+      ))
+
+    expect(directGuidance).toContain(
+      'For Strava, the link starts/resumes durable private-app setup',
+    )
+    expect(directGuidance).toContain(
+      'Murph creates the app and seals credentials; the member only handles sign-in, MFA/CAPTCHA, and explicit read-only consent',
+    )
+    expect(directGuidance).toContain(
+      'Never ask for, accept, quote, or redisplay its client ID/secret, or keep setup progress in conversation memory',
+    )
+    // The pre-PR direct wearable line was 804 characters for this provider.
+    expect(directGuidance?.length).toBeLessThanOrEqual(804)
+    expect(groupLayers.prompt).not.toContain('durable private-app setup')
+    expect(groupLayers.prompt).not.toContain('client ID/secret')
   })
 
   it('hides Android app guidance while forbidding fabricated wearable connect URLs', () => {
@@ -3333,6 +3368,6 @@ function firstNChars(value: string, length: number): string {
 
 function readHostedWearableProviderList(prompt: string): string | null {
   return prompt.match(
-    /^- Hosted wearable connection links are available for (.+)\. When offering examples/mu,
+    /^- Hosted wearable connection links are available for (.+)\. Name about six examples/mu,
   )?.[1] ?? null
 }
