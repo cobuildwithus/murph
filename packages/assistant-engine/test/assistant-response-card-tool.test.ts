@@ -376,7 +376,7 @@ describe('murph.attach_response_card', () => {
       'Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'explicit numeric-card request authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
+      'An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write',
@@ -394,7 +394,13 @@ describe('murph.attach_response_card', () => {
       'its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A scheduled closeout must not ask for inputs or create, change, or explain a proposal',
+      'Scheduled authority never permits questions or activation; only the first eligible managed meal closeout may create and explain one paused proposal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the complete safety and derivation contracts',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Explicit active targets win metric by metric',

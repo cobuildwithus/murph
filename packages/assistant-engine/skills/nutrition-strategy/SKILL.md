@@ -32,9 +32,11 @@ Food-journal answers "what happened?" This skill answers "what should we do next
 - Use `behavior-followthrough` when reminders, recurring support, accountability, or repeated adherence repair becomes the main job.
 
 Persist only a plan or preference the user accepts, using the best-fit existing
-surface. The one exception is the narrow paused daily-card proposal below: an
-explicit numeric-card request authorizes that canonical draft so provisional
-values do not live in transient assistant state, but it remains unusable until
+surface. The narrow paused daily-card proposal below has two initiation paths:
+an explicit numeric-card request, or the first eligible managed automatic meal
+closeout when the complete canonical read proves that no managed proposal has
+ever existed. Either path authorizes only that canonical draft so provisional
+values do not live in transient assistant state; it remains unusable until
 later acceptance. Do not duplicate facts across stores.
 
 ## Data First
@@ -49,14 +51,19 @@ The lowest useful tracking burden wins:
 - **Light structure:** one or two targets, such as protein occasions, a pre-training snack, carbohydrate during a long session, or a hydration plan.
 - **Quantified:** calories or full macros only when explicitly wanted, materially useful, and safe.
 
-Do not give unsolicited calorie, macro, or weight-loss estimates. Past tracking does not imply current consent. Treat appetite cues as information, not a test of virtue or a guarantee of adequacy.
+Outside the one first-run managed closeout proposal below, do not give
+unsolicited calorie, macro, or weight-loss estimates. Past tracking alone does
+not imply current consent. Treat appetite cues as information, not a test of
+virtue or a guarantee of adequacy.
 
 ### Daily nutrition-card goals
 
 An explicit request for a numeric daily nutrition card supplies numeric intent
-for Murph's goal-aware card workflow and authorizes only its paused canonical
-proposal, subject to the safety rules below. It does not activate or use the
-provisional targets. Before every card,
+for Murph's goal-aware card workflow. The first eligible managed automatic meal
+closeout may also propose once when complete all-status Goal discovery proves
+that no managed proposal has ever existed. Both paths authorize only the paused
+canonical proposal, subject to the safety rules below; neither activates or uses
+the provisional targets. Before every card,
 even when five active goals already exist, read and apply
 `references/daily-nutrition-card-safety.md`. When five usable daily goals are
 missing, also read and follow `references/daily-nutrition-card-goals.md`. The
@@ -65,7 +72,8 @@ encounter-diagnosis discovery plus the separate bounded `pregnancy-test`
 measurement and canonical test-event reads. It
 owns evidence-grounded default derivation, the single canonical Goal proposal,
 and the explanation-before-card sequence. Do not send a goal-less card, create
-a second goal store, or reuse the workflow as unsolicited diet planning.
+a second goal store, or broaden the one scheduled exception into recurring
+unsolicited diet planning.
 
 ## Named Diets And Dietary Patterns
 

@@ -179,7 +179,9 @@ describe('assistant nutrition strategy skill', () => {
 
     expect(nutrition).toContain('It is not the owner for body-composition strategy, digestive symptom strategy, or clinician-managed therapeutic diets.')
     expect(nutrition).toContain('The lowest useful tracking burden wins')
-    expect(nutrition).toContain('Do not give unsolicited calorie, macro, or weight-loss estimates.')
+    expect(nutrition).toContain(
+      'Outside the one first-run managed closeout proposal below, do not give',
+    )
     expect(nutrition).toContain('Treat appetite cues as information')
     expect(nutrition).not.toContain('### Body composition')
     expect(nutrition).not.toContain('### GI comfort and performance')
@@ -297,10 +299,22 @@ describe('assistant nutrition strategy skill', () => {
       'It authorizes only the one paused canonical proposal below so the provisional values do not live in transient assistant state; it does not accept, activate, or use those targets.',
     )
     expect(nutrition).toContain(
-      'explicit numeric-card request authorizes that canonical draft',
+      'The narrow paused daily-card proposal below has two initiation paths:',
+    )
+    expect(nutrition).toContain(
+      'an explicit numeric-card request, or the first eligible managed automatic meal',
     )
     expect(compactGoals).toContain(
-      'A scheduled closeout follows the equivalent discovery contract in its owning skill and may use an already accepted active bundle, but it must not use this workflow to ask for inputs, derive or save targets, or surface a proposal.',
+      'The owning automatic-meal-capture skill may also use this workflow for one first eligible managed closeout',
+    )
+    expect(compactGoals).toContain(
+      'a complete all-status Goal read proves that no Goal with slug `murph-daily-nutrition-starting-targets` exists in any status.',
+    )
+    expect(compactGoals).toContain(
+      'That scheduled exception may use only already-known responsible inputs, creates and explains one paused proposal in ordinary text, asks no question, attaches no card, and never activates the proposal.',
+    )
+    expect(compactGoals).toContain(
+      'Once the managed Goal exists in any status, later scheduled closeouts may use an accepted active bundle but never create, change, or automatically repeat a numeric proposal.',
     )
     expect(compactGoals).toContain('status `paused`')
     expect(compactGoals).toContain(
@@ -564,7 +578,10 @@ describe('assistant nutrition strategy skill', () => {
       'first require that the containing Goal window and target-level dates include the exact card `localDate`; an out-of-window target must neither trigger nor satisfy this gate.',
     )
     expect(compactSafety).toContain(
-      'A scheduled occurrence uses this file only as a card-time safety check.',
+      'A scheduled occurrence never gains authority to ask safety-profile questions, solicit target inputs, activate a proposal, or attach a card from provisional targets.',
+    )
+    expect(compactSafety).toContain(
+      'The owning automatic-meal-capture skill has one narrower exception:',
     )
     expect(compactGoals).toContain(
       'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',

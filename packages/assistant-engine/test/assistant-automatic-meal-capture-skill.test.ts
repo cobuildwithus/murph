@@ -234,13 +234,28 @@ describe('assistant automatic meal capture skill', () => {
       'Missing or ambiguous age alone does not block a scheduled closeout and never authorizes a question.',
     )
     expect(compactSkill).toContain(
-      'This scheduled closeout uses only that card-time safety gate and does not provide target-setting intent',
+      'the first eligible managed closeout has one proposal-only exception',
+    )
+    expect(skill).toContain(
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
     expect(compactSkill).toContain(
-      'do not ask for profile inputs, call `goal import-json`, create or change a paused proposal, or surface a numeric target proposal.',
+      'run `vault-cli goal list --limit 200 --format json` and detail-read only candidate managed records.',
     )
     expect(compactSkill).toContain(
-      'If numeric presentation is suppressed, or the active target bundle is incomplete, ambiguous, unit-incompatible, or comparator-incompatible, retain the ordinary compact closeout and do not attach a card.',
+      'The absence of that managed Goal is the first-run authority; add no flag or second state owner.',
+    )
+    expect(compactSkill).toContain(
+      'create that single canonical Goal as `paused`, with `window.startAt` equal to the selected capture/card local date.',
+    )
+    expect(compactSkill).toContain(
+      'Ask no question, attach no card, and never activate it on the scheduled turn.',
+    )
+    expect(compactSkill).toContain(
+      'If responsible inputs are missing or the bundle is infeasible, write nothing and keep the ordinary closeout.',
+    )
+    expect(compactSkill).toContain(
+      'If numeric presentation is suppressed, or the active target bundle is ambiguous, unit-incompatible, or comparator-incompatible, retain the ordinary compact closeout and do not attach a card.',
     )
     expect(compactSkill).not.toContain(
       'follow it exactly. Resolve all five targets from active canonical Goals.',
@@ -258,6 +273,12 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('under-fueling or RED-S concern')
     expect(compactSafety).toContain('known underweight')
     expect(compactSafety).toContain('frailty, or malnutrition risk')
+    expect(compactSafety).toContain(
+      'its first eligible managed closeout may use already-known responsible inputs to create and explain one paused proposal',
+    )
+    expect(compactSafety).toContain(
+      'Every later scheduled occurrence remains card-time-only and may not create, change, or automatically repeat a numeric proposal.',
+    )
     expect(compactSafety).toContain(
       '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
     )

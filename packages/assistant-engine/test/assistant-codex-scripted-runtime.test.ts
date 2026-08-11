@@ -2848,6 +2848,10 @@ text(result.output);
       "sed -n '1,320p' skills/automatic-meal-capture/SKILL.md",
       "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
     ]
+    const scheduledProposalSkillReads = [
+      ...scheduledSkillReads,
+      "sed -n '1,320p' skills/nutrition-strategy/references/daily-nutrition-card-goals.md",
+    ]
     const interactiveSkillReads = [
       "sed -n '1,180p' skills/food-journal/SKILL.md",
       "sed -n '1,280p' skills/nutrition-strategy/references/daily-nutrition-card-safety.md",
@@ -3229,6 +3233,72 @@ text(result.output);
       nextCursor: null,
       vault: 'synthetic-vault',
     }
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, noActiveGoalsList],
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
+        [allStatusGoalListCommand, noManagedGoalsList],
+        [proposalImportCommand, pausedGoal],
+        [pausedGoalShowCommand, pausedGoal],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        allStatusGoalListCommand,
+        proposalImportCommand,
+        pausedGoalShowCommand,
+      ],
+      finalMessage: 'For your first managed closeout, I proposed 1,800 calories, 140g protein, 190g carbs, 55g fat, and 25g fiber starting 2026-07-30, based on your saved adult maintenance context. The proposal is paused until you choose to accept it.',
+      prompt: 'Run the first managed automatic meal closeout for 2026-07-30. Use only already-known responsible inputs, and follow the one-time paused-proposal path when canonical safety and Goal discovery permit it.',
+      scheduled: true,
+      skillReadCommands: scheduledProposalSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, noActiveGoalsList],
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
+        [allStatusGoalListCommand, pausedManagedGoalList],
+        [pausedGoalShowCommand, pausedGoal],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        allStatusGoalListCommand,
+        pausedGoalShowCommand,
+      ],
+      finalMessage: 'Meal closeout saved. Your earlier paused nutrition proposal is unchanged.',
+      prompt: 'Run a later managed automatic meal closeout for 2026-07-31. Do not create, change, or repeat a proposal once the canonical managed Goal already exists in any status.',
+      scheduled: true,
+      skillReadCommands: scheduledProposalSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
+    })
 
     await runCase({
       commandOutputs: [],

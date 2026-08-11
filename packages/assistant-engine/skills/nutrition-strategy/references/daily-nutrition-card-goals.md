@@ -5,10 +5,15 @@ interactive request to set nutrition targets or receive a numeric daily
 nutrition card, even when the visible context appears to contain a complete
 bundle. Use the proposal workflow only when the complete read proves that the
 member does not already have one unambiguous, unit- and comparator-compatible
-daily target for calories, protein, carbohydrate, fat, and fiber. A scheduled
-closeout follows the equivalent discovery contract in its owning skill and may
-use an already accepted active bundle, but it must not use this workflow to ask
-for inputs, derive or save targets, or surface a proposal.
+daily target for calories, protein, carbohydrate, fat, and fiber. The owning
+automatic-meal-capture skill may also use this workflow for one first eligible
+managed closeout when a complete all-status Goal read proves that no Goal with
+slug `murph-daily-nutrition-starting-targets` exists in any status. That
+scheduled exception may use only already-known responsible inputs, creates and
+explains one paused proposal in ordinary text, asks no question, attaches no
+card, and never activates the proposal. Once the managed Goal exists in any
+status, later scheduled closeouts may use an accepted active bundle but never
+create, change, or automatically repeat a numeric proposal.
 
 Before using this workflow, read and apply `daily-nutrition-card-safety.md`,
 including its complete canonical memory document, bounded active-condition and
@@ -87,9 +92,11 @@ remain required before the proposal can affect a card.
   remain, use ordinary text or one narrow interactive question with no
   mutation; a scheduled closeout asks nothing and sends no card.
 - After explicit interactive target-setting intent, if one consolidated question
-  can collect the genuinely missing inputs, ask it once. Until a responsible
-  calorie estimate and all five goals exist, save no active defaults and attach
-  no card.
+  can collect the genuinely missing inputs, ask it once. The one scheduled
+  first-run exception asks no question: if already-known inputs cannot prove a
+  responsible calorie estimate and all five goals, write nothing and keep the
+  ordinary closeout. Until a responsible calorie estimate and all five goals
+  exist, save no active defaults and attach no card.
 
 ## Derive a conservative proposal
 

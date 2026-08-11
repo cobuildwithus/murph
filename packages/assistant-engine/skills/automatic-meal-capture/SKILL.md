@@ -224,13 +224,28 @@ On a scheduled run:
    pregnancy-evidence read uses the same failure behavior. An explicit positive
    pregnancy-test result from either canonical owner
    uses the same non-numeric, no-write, no-question, no-card path. Reuse all
-   complete gate reads for the current turn. This
-   scheduled closeout uses only that card-time safety gate and does not provide
-   target-setting intent: do not ask for profile inputs, call `goal import-json`,
-   create or change a paused proposal, or surface a numeric target proposal.
-   If numeric presentation is suppressed, or the active target bundle is
-   incomplete, ambiguous, unit-incompatible, or comparator-incompatible, retain
-   the ordinary compact closeout and do not attach a card. Keep the occurrence
+   complete gate reads for the current turn. If the active target bundle is
+   incomplete after those reads, the first eligible managed closeout has one
+   proposal-only exception. Read and follow
+   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`,
+   then run `vault-cli goal list --limit 200 --format json` and detail-read only
+   candidate managed records. If that read fails, is unreadable, is saturated,
+   or finds any Goal with slug `murph-daily-nutrition-starting-targets` in any
+   status, do not create, change, or automatically repeat a numeric proposal.
+   Keep the ordinary compact closeout and attach no card. The absence of that
+   managed Goal is the first-run authority; add no flag or second state owner.
+   When the complete lookup proves absence, the safety gate passed, compatible
+   explicit targets are unambiguous, and already-known inputs prove one
+   responsible five-target bundle, create that single canonical Goal as
+   `paused`, with `window.startAt` equal to the selected capture/card local date.
+   Read it back, then explain all five provisional values, their material facts
+   and assumptions, and the effective date in ordinary text. Ask no question,
+   attach no card, and never activate it on the scheduled turn. If responsible
+   inputs are missing or the bundle is infeasible, write nothing and keep the
+   ordinary closeout. Member correction, acceptance, or decline remains an
+   interactive turn. If numeric presentation is suppressed, or the active
+   target bundle is ambiguous, unit-incompatible, or comparator-incompatible,
+   retain the ordinary compact closeout and do not attach a card. Keep the occurrence
    local date from step 1 only as the work and retry boundary. Resolve target
    applicability against the single selected card `localDate`: the capture date
    whose totals and card are being closed out, including a historical catch-up

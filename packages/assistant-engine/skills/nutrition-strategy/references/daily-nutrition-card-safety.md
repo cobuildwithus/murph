@@ -198,9 +198,14 @@ context.
   clinical path. Do not expose stored targets or their assessments in card or
   fallback text, and do not mutate a Goal merely because the current context
   suppresses presentation.
-- A scheduled occurrence uses this file only as a card-time safety check. It
-  does not gain authority to ask safety-profile questions, solicit target
-  inputs, derive or write goals, explain a proposal, or start target setup.
+- A scheduled occurrence never gains authority to ask safety-profile questions,
+  solicit target inputs, activate a proposal, or attach a card from provisional
+  targets. The owning automatic-meal-capture skill has one narrower exception:
+  after this complete gate passes, its first eligible managed closeout may use
+  already-known responsible inputs to create and explain one paused proposal
+  when complete all-status Goal discovery proves that the managed Goal has
+  never existed. Every later scheduled occurrence remains card-time-only and
+  may not create, change, or automatically repeat a numeric proposal.
 - On an explicit interactive request, explain the non-numeric boundary briefly
   when useful and answer through the owning safe path. Do not use the request
   itself as evidence that the safety gate passed.
