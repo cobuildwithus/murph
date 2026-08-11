@@ -2,6 +2,7 @@ import {
   chromium,
   type BrowserContext,
   type BrowserContextOptions,
+  type Locator,
   type Page,
   type Response,
 } from "@playwright/test";
@@ -164,28 +165,29 @@ async function assertConnectPage(input: {
     exact: true,
     name: "Sync your biomarkers",
   }).waitFor({ state: "visible" });
-  const visibleSearch = input.page.locator(
-    'input[aria-label="Search sources"]:visible',
-  );
-  await visibleSearch.waitFor({ state: "visible" });
-  if (await visibleSearch.count() !== 1) {
-    throw new Error(
-      `Hosted browser ${input.caseName} rendered an ambiguous visible source search control.`,
-    );
-  }
-  await input.page.getByText(/^\d+ of \d+ sources$/u).waitFor({
-    state: "visible",
+  await requireSingleVisible({
+    caseName: input.caseName,
+    label: "source search control",
+    locator: input.page.locator('input[aria-label="Search sources"]:visible'),
   });
-  await input.page.getByRole("heading", {
-    exact: true,
-    name: "Whoop",
-  }).waitFor({ state: "visible" });
+  await requireSingleVisible({
+    caseName: input.caseName,
+    label: "source count",
+    locator: input.page.locator("p:visible").filter({
+      hasText: /^\d+ of \d+ sources$/u,
+    }),
+  });
+  await requireSingleVisible({
+    caseName: input.caseName,
+    label: "Whoop source heading",
+    locator: input.page.locator("h2:visible").filter({ hasText: /^Whoop$/u }),
+  });
 
-  const connectButton = input.page.getByRole("button", {
-    exact: true,
-    name: "Connect Whoop",
+  const connectButton = await requireSingleVisible({
+    caseName: input.caseName,
+    label: "Whoop connect action",
+    locator: input.page.locator('button[aria-label="Connect Whoop"]:visible'),
   });
-  await connectButton.waitFor({ state: "visible" });
   if (!await connectButton.isEnabled()) {
     throw new Error(
       `Hosted browser ${input.caseName} rendered a disabled Whoop connection.`,
@@ -218,7 +220,11 @@ async function assertConnectPage(input: {
   }
 
   await connectButton.click();
-  const disclosureDialog = input.page.getByRole("dialog");
+  const disclosureDialog = await requireSingleVisible({
+    caseName: input.caseName,
+    label: "Whoop disclosure dialog",
+    locator: input.page.locator('[role="dialog"]:visible'),
+  });
   await disclosureDialog.getByRole("heading", {
     exact: true,
     name: "Connect Whoop to Murph",
@@ -227,6 +233,22 @@ async function assertConnectPage(input: {
     exact: true,
     name: "Continue to Whoop",
   }).waitFor({ state: "visible" });
+}
+
+async function requireSingleVisible(input: {
+  caseName: string;
+  label: string;
+  locator: Locator;
+}): Promise<Locator> {
+  const first = input.locator.first();
+  await first.waitFor({ state: "visible" });
+  const count = await input.locator.count();
+  if (count !== 1) {
+    throw new Error(
+      `Hosted browser ${input.caseName} rendered ${count} visible ${input.label} elements.`,
+    );
+  }
+  return first;
 }
 
 async function addHostedSessionCookie(input: {
