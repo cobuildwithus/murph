@@ -207,7 +207,7 @@ function classifyHostedPulseTrialCandidateDispositionForIdentity(input: {
   }
   // A second legacy trial may never replace an already-bound provider
   // identity. Retire the delayed candidate and leave the current identity for
-  // its own exact reconciliation or the bounded operator drain.
+  // its own exact delayed-event reconciliation.
   if (input.currentSubscriptionIdentity === "different") {
     return "loser";
   }
