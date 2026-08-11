@@ -213,9 +213,17 @@ export const RUNNER_ENTRYPOINT_BUNDLE_DIRECTORY_NAME = "dist-bundled";
 // completion path measured a 1,614,630B entry, 7,757,204B static closure, and
 // 9,678,656B total on macOS. Both startup measurements remain within the
 // retained reviewed baselines, so ratchet only the total ceiling.
-const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_678_656 + 32_768;
-const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_641_254;
-const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 8_019_079;
+//
+// Scorer-owned group challenge cards add the normalized score input,
+// deterministic scorer, bounded card mapper, and static presentation to that
+// combined graph. Exact local production assembly after the latest mainline
+// runtime additions measured a 1,619,381B entry, 7,815,801B static closure, and
+// 9,770,208B total on 2026-08-10. No forbidden subsystem entered the boot graph,
+// so ratchet all three measurements and retain the established narrow
+// cross-platform tolerances.
+const RUNNER_ENTRYPOINT_BUNDLE_TOTAL_BYTES_BUDGET = 9_770_208 + 32_768;
+const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_BASELINE_BYTES = 1_619_381;
+const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_BASELINE_BYTES = 7_815_801;
 const RUNNER_ENTRYPOINT_BUNDLE_ENTRY_TOLERANCE_BYTES = 48_000;
 const RUNNER_ENTRYPOINT_BUNDLE_STATIC_CLOSURE_TOLERANCE_BYTES = 96_000;
 // The @murphai package markers are path suffixes, not node_modules-anchored:

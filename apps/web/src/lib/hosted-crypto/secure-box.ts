@@ -22,6 +22,7 @@ const WEB_SEAL_LANES = new Set<HostedCryptoLane>([
   "clinical-records-token",
   "device-sync-external-account-id",
   "device-sync-payload",
+  "device-sync-provider-application",
   "device-sync-token",
   "mailbox-payload",
   "email-raw",

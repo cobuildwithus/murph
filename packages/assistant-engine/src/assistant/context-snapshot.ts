@@ -21,7 +21,7 @@ import {
 } from '@murphai/contracts'
 import {
   parseFrontmatterDocument,
-  readLatestBloodTestHistorySummaryInterruptible,
+  readCanonicalEventAvailabilityInterruptible,
   resolveVaultPath,
   VAULT_LAYOUT,
   walkVaultFilesInterruptible,
@@ -41,13 +41,24 @@ import { resolveAssistantStatePaths } from './store/paths.js'
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA =
   'murph.assistant-context-snapshot'
-export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 5
+export const ASSISTANT_CONTEXT_SNAPSHOT_SCHEMA_VERSION = 6
 export const ASSISTANT_CONTEXT_SNAPSHOT_FILE_NAME = 'context-snapshot.json'
 
+const ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER =
+  'Assistant context snapshot for navigation only:'
+const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_UNAVAILABLE_LINE =
+  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).'
+const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_LOOKUP_LINE =
+  '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.'
+const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_UNAVAILABLE_LINE =
+  '- Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).'
+const ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_LOOKUP_LINE =
+  '- Do not infer that history is absent. If it matters for the current request, inspect canonical records with the existing `vault-cli blood-test list` or exact-day `vault-cli measurement list` then `vault-cli measurement show <event-id>` path.'
+
 const ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT = [
-  'Assistant context snapshot for navigation only:',
-  '- Active safety-critical health context is currently unavailable in the snapshot (recent canonical edit, pending rebuild, or incomplete source read).',
-  '- Before any safety-relevant guidance, enumerate the user\'s current active records with `vault-cli condition list --status active`, `vault-cli allergy list --status active`, `vault-cli regimen list --status active`, and `vault-cli goal list --status active`, then read individual records with the matching `vault-cli condition show <id>` / `vault-cli allergy show <id>` / `vault-cli regimen show <id>` / `vault-cli goal show <id>` as needed.',
+  ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER,
+  ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_UNAVAILABLE_LINE,
+  ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_LOOKUP_LINE,
 ].join('\n')
 
 export const ASSISTANT_CONTEXT_SNAPSHOT_DIRTY_DOMAINS = [
@@ -115,7 +126,6 @@ const MAX_ASSISTANT_CONTEXT_SUPPLEMENT_INGREDIENTS = 3
 const MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES = 64 * 1024
 const MAX_ASSISTANT_CONTEXT_PROMPT_FIELD_LENGTH = 120
 const MAX_ASSISTANT_CONTEXT_FRONTMATTER_FILES_PER_DIR = 200
-
 export function resolveAssistantContextSnapshotPath(vaultRoot: string): string {
   return path.join(
     resolveAssistantStatePaths(vaultRoot).assistantStateRoot,
@@ -130,13 +140,40 @@ export async function readAssistantContextSnapshotPrompt(input: {
     maxBytes: MAX_ASSISTANT_CONTEXT_SNAPSHOT_PROMPT_BYTES,
     vaultRoot: input.vaultRoot,
   })
-  if (state?.pendingDirtyDomains.includes('health_context')) {
-    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
+  const healthContextPending =
+    state?.pendingDirtyDomains.includes('health_context') === true
+  const canonicalHistoryPending =
+    state?.pendingDirtyDomains.includes('blood_tests') === true
+  if (healthContextPending || canonicalHistoryPending) {
+    return buildAssistantContextSnapshotDegradedPrompt({
+      canonicalHistoryUnavailable: canonicalHistoryPending,
+      healthContextUnavailable: healthContextPending,
+    })
   }
   if (state === null || state.lastCompleted === null) {
-    return ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_STALE_PROMPT
+    return buildAssistantContextSnapshotDegradedPrompt({
+      canonicalHistoryUnavailable: true,
+      healthContextUnavailable: true,
+    })
   }
   return normalizeNullableString(state.lastCompleted.promptBlock)
+}
+
+function buildAssistantContextSnapshotDegradedPrompt(input: {
+  canonicalHistoryUnavailable: boolean
+  healthContextUnavailable: boolean
+}): string {
+  return [
+    ASSISTANT_CONTEXT_SNAPSHOT_NAVIGATION_HEADER,
+    input.healthContextUnavailable
+      ? ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_UNAVAILABLE_LINE
+      : null,
+    input.canonicalHistoryUnavailable
+      ? ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_UNAVAILABLE_LINE
+      : null,
+    ASSISTANT_CONTEXT_SNAPSHOT_SAFETY_LOOKUP_LINE,
+    ASSISTANT_CONTEXT_SNAPSHOT_HISTORY_LOOKUP_LINE,
+  ].filter((line): line is string => line !== null).join('\n')
 }
 
 export async function isAssistantContextSnapshotRefreshPending(input: {
@@ -147,6 +184,15 @@ export async function isAssistantContextSnapshotRefreshPending(input: {
       vaultRoot: input.vaultRoot,
     }),
   )
+}
+
+export async function isAssistantContextSnapshotCanonicalEventRefreshPending(input: {
+  vaultRoot: string
+}): Promise<boolean> {
+  const { state } = await readAssistantContextSnapshotStateStatus({
+    vaultRoot: input.vaultRoot,
+  })
+  return state?.pendingDirtyDomains.includes('blood_tests') === true
 }
 
 export async function markAssistantContextSnapshotDirty(input: {
@@ -392,6 +438,8 @@ async function buildAssistantContextSnapshotPrompt(input: {
   ]
   const navigationEvidenceLines = [
     coverage.bloodTestsLine,
+    coverage.bodyMeasurementsLine,
+    coverage.bloodPressureMeasurementsLine,
     coverage.healthContextLine,
     ...safetyLines,
     coverage.activeGoalsLine,
@@ -448,6 +496,8 @@ async function buildAssistantSnapshotCoverage(input: {
   allergyCount: number
   bloodTestsPresent: boolean
   bloodTestsLine: string | null
+  bodyMeasurementsLine: string | null
+  bloodPressureMeasurementsLine: string | null
   conditionCount: number
   goalCount: number
   habitatLine: string | null
@@ -458,37 +508,43 @@ async function buildAssistantSnapshotCoverage(input: {
   safetyComplete: boolean
   supplementCount: number
 }> {
-  const [bloodTestCoverage, goalRead, conditionRead, allergyRead, regimenRead, habitatRead] =
-    await Promise.all([
-      collectAssistantSnapshotBloodTestCoverage(input),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.goalsDirectory,
-        goalFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.conditionsDirectory,
-        conditionFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.allergiesDirectory,
-        allergyFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.regimensDirectory,
-        regimenFrontmatterSchema,
-      ),
-      listAssistantSnapshotFrontmatterRecords(
-        input,
-        VAULT_LAYOUT.habitatDirectory,
-        habitatFrontmatterSchema,
-        (record, relativePath) =>
-          isExpectedHabitatAspectRelativePath(record.aspect, relativePath),
-      ),
-    ])
+  const [
+    canonicalEventCoverage,
+    goalRead,
+    conditionRead,
+    allergyRead,
+    regimenRead,
+    habitatRead,
+  ] = await Promise.all([
+    collectAssistantSnapshotCanonicalEventCoverage(input),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.goalsDirectory,
+      goalFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.conditionsDirectory,
+      conditionFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.allergiesDirectory,
+      allergyFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.regimensDirectory,
+      regimenFrontmatterSchema,
+    ),
+    listAssistantSnapshotFrontmatterRecords(
+      input,
+      VAULT_LAYOUT.habitatDirectory,
+      habitatFrontmatterSchema,
+      (record, relativePath) =>
+        isExpectedHabitatAspectRelativePath(record.aspect, relativePath),
+    ),
+  ])
   const goals = goalRead.records
   const conditions = conditionRead.records
   const allergies = allergyRead.records
@@ -621,12 +677,19 @@ async function buildAssistantSnapshotCoverage(input: {
       totalCount: activeSupplementRegimens.length,
     }),
     allergyCount: allergies.length,
-    bloodTestsPresent: bloodTestCoverage.present,
-    bloodTestsLine: bloodTestCoverage.present
-      ? bloodTestCoverage.latestBloodTestDate
-        ? `- Blood test records are present (latest ${bloodTestCoverage.latestBloodTestDate}). For a named biomarker, read it once with \`vault-cli blood-test list --text "<biomarker>" --limit 1 --format json\`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.`
+    bloodTestsPresent: canonicalEventCoverage.bloodTestsPresent,
+    bloodTestsLine: canonicalEventCoverage.bloodTestsPresent
+      ? canonicalEventCoverage.latestBloodTestDate
+        ? `- Blood test records are present (latest ${canonicalEventCoverage.latestBloodTestDate}). For a named biomarker, read it once with \`vault-cli blood-test list --text "<biomarker>" --limit 1 --format json\`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.`
         : '- Blood test records are present. For a named biomarker, read it once with `vault-cli blood-test list --text "<biomarker>" --limit 1 --format json`; use the unfiltered list only for panel-wide questions. Reuse that output instead of repeating an identical read before supplement, deficiency, or lab-relevant advice.'
       : null,
+    bodyMeasurementsLine: renderAssistantSnapshotBodyMeasurementsLine(
+      canonicalEventCoverage.latestBodyMeasurementDate,
+    ),
+    bloodPressureMeasurementsLine:
+      renderAssistantSnapshotBloodPressureMeasurementsLine(
+        canonicalEventCoverage.latestBloodPressureMeasurementDate,
+      ),
     conditionCount: conditions.length,
     goalCount: goals.length,
     habitatLine: renderHabitatLine(habitatRead.records, input.currentDate),
@@ -699,16 +762,38 @@ async function listAssistantSnapshotFrontmatterRecords<TRecord>(
   return { complete: !truncated && !parseFailed, records }
 }
 
-async function collectAssistantSnapshotBloodTestCoverage(input: {
+function renderAssistantSnapshotBodyMeasurementsLine(
+  latestDate: string | null,
+): string | null {
+  if (!latestDate) {
+    return null
+  }
+
+  return `- Body/scale measurement history is present (latest ${latestDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`. For canonical measurement events, list candidates with \`vault-cli measurement list --from ${latestDate} --to ${latestDate} --limit 100 --format json\`, then read each candidate with \`vault-cli measurement show <event-id> --format json\`; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
+}
+
+function renderAssistantSnapshotBloodPressureMeasurementsLine(
+  latestDate: string | null,
+): string | null {
+  if (!latestDate) {
+    return null
+  }
+
+  return `- Blood-pressure measurement history is present (latest ${latestDate}). List canonical candidates with \`vault-cli measurement list --from ${latestDate} --to ${latestDate} --limit 100 --format json\`, then read each candidate with \`vault-cli measurement show <event-id> --format json\`. Inspect systolic and diastolic entries by their general metric-catalog identity (for example \`systolic-blood-pressure\` / \`diastolic-blood-pressure\` or \`sbp\` / \`dbp\`), treating values as paired only inside the same shown event; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
+}
+
+async function collectAssistantSnapshotCanonicalEventCoverage(input: {
   shouldYield: (() => boolean) | null
   signal: AbortSignal | null
   vaultRoot: string
 }): Promise<{
+  latestBloodPressureMeasurementDate: string | null
   latestBloodTestDate: string | null
-  present: boolean
+  latestBodyMeasurementDate: string | null
+  bloodTestsPresent: boolean
 }> {
   assertAssistantContextSnapshotCanContinue(input)
-  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+  const summary = await readCanonicalEventAvailabilityInterruptible({
     shouldContinue: () =>
       !input.signal?.aborted && input.shouldYield?.() !== true,
     signal: input.signal,
@@ -721,13 +806,24 @@ async function collectAssistantSnapshotBloodTestCoverage(input: {
     )
   }
   assertAssistantContextSnapshotCanContinue(input)
-  const datePrefix = extractIsoDatePrefix(summary.latestOccurredAt)
 
   return {
-    latestBloodTestDate:
-      datePrefix && isStrictIsoDate(datePrefix) ? datePrefix : null,
-    present: summary.present,
+    bloodTestsPresent: summary.latestBloodTestOccurredAt !== null,
+    latestBloodPressureMeasurementDate:
+      canonicalEventDayKey(summary.latestBloodPressureMeasurementDayKey),
+    latestBloodTestDate: canonicalEventDate(summary.latestBloodTestOccurredAt),
+    latestBodyMeasurementDate:
+      canonicalEventDayKey(summary.latestBodyMeasurementDayKey),
   }
+}
+
+function canonicalEventDayKey(dayKey: string | null): string | null {
+  return dayKey && isStrictIsoDate(dayKey) ? dayKey : null
+}
+
+function canonicalEventDate(timestamp: string | null): string | null {
+  const datePrefix = extractIsoDatePrefix(timestamp)
+  return datePrefix && isStrictIsoDate(datePrefix) ? datePrefix : null
 }
 
 async function recordAssistantContextSnapshotRefreshFailureBestEffort(input: {

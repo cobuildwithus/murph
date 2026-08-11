@@ -28,7 +28,6 @@
     "linq:backfill-thread-route-accounts": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-thread-route-account-projections.ts",
     "privacy:backfill-phone-calls": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/backfill-hosted-phone-call-private-content.ts",
     "stripe:migrate-legacy-usage-items": "pnpm --dir ../.. exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrate-legacy-stripe-usage-items.ts",
-    "stripe:retire-legacy-pulse-trials": "pnpm --dir ../.. exec tsx --conditions=react-server --tsconfig apps/web/tsconfig.json apps/web/scripts/retire-legacy-pulse-trials.ts",
     "pitch:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/export-pitch-pdf.ts",
     "legal:pdf": "pnpm --dir ../.. exec tsx apps/web/scripts/generate-legal-pdfs.ts",
     "typecheck": "pnpm health-commons:generate && pnpm prisma:generate && pnpm typecheck:prepared",

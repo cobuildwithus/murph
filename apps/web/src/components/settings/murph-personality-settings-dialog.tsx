@@ -5,7 +5,8 @@ import { Loader2Icon, SlidersHorizontalIcon } from "lucide-react";
 import {
   assistantWebPersonalitySettingIds,
   isAssistantPersonalityScore,
-  resolveAssistantPersonalityScores,
+  resolveAssistantEffectiveStyle,
+  type AssistantPersonaId,
   type AssistantPersonalityPreferences,
   type AssistantWebPersonalitySettingId,
 } from "@murphai/contracts";
@@ -86,12 +87,14 @@ export function MurphPersonalitySettingsDialog({
   onOpenChange,
   onSaved,
   open,
+  persona = null,
   personality = null,
   savePersonality = saveAssistantPersonalityPreference,
 }: {
   onOpenChange: (open: boolean) => void;
   onSaved?: (snapshot: AssistantPersonalitySnapshot) => void;
   open: boolean;
+  persona?: AssistantPersonaId | null;
   personality?: AssistantPersonalitySnapshot | null;
   // The design showcase and tests inject a non-persisting save; everywhere else
   // the default posts a sparse personality delta to the settings endpoint.
@@ -101,7 +104,7 @@ export function MurphPersonalitySettingsDialog({
   // The displayed scores shown when the editor opened seed the draft. Captured
   // once so a later prop change cannot replace a member's in-progress choices.
   const [initialScores] = useState<AssistantWebPersonalityScores>(() =>
-    resolveAssistantPersonalitySnapshotScores(personality),
+    resolveAssistantPersonalitySnapshotScores(personality, persona),
   );
   const [scores, setScores] = useState<AssistantWebPersonalityScores>(initialScores);
   const [touchedDials, setTouchedDials] = useState<Set<AssistantWebPersonalitySettingId>>(
@@ -367,8 +370,12 @@ function PersonalityDialTicks({ value }: { value: number }) {
 
 export function resolveAssistantPersonalitySnapshotScores(
   snapshot: AssistantPersonalitySnapshot | null | undefined,
+  persona: AssistantPersonaId | null = null,
 ): AssistantWebPersonalityScores {
-  const resolved = resolveAssistantPersonalityScores(snapshotToPreferences(snapshot));
+  const resolved = resolveAssistantEffectiveStyle({
+    ...(persona ? { persona } : {}),
+    personality: snapshotToPreferences(snapshot),
+  }).personality;
   const scores = {} as AssistantWebPersonalityScores;
   for (const id of assistantWebPersonalitySettingIds) {
     scores[id] = resolved[id];
