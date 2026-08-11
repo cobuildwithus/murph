@@ -9,6 +9,11 @@ import type { HostedMember, PrismaClient } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
 import { isHostedOnboardingError } from "./errors";
+import {
+  buildHostedFamilyDraftCheckoutConflictReplyText,
+  parseHostedFamilyInviteStartToken,
+  resolveHostedFamilyInviteCodeFromTelegramStartFallback,
+} from "./family-plan";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
 import { lookupHostedMemberByVerifiedEmailAddress } from "./hosted-member-store";
@@ -57,8 +62,11 @@ export type HostedVisibleSecondaryLinqDependencies = {
 };
 
 export type HostedVisibleSecondaryTelegramDependencies = {
+  getPrisma: typeof getPrisma;
   parseHostedTelegramWebhookUpdate: typeof parseHostedTelegramWebhookUpdate;
   requireHostedOnboardingPublicBaseUrl: typeof requireHostedOnboardingPublicBaseUrl;
+  resolveHostedFamilyInviteCodeFromTelegramStartFallback:
+    typeof resolveHostedFamilyInviteCodeFromTelegramStartFallback;
   sendHostedTelegramTextMessage: typeof sendHostedTelegramTextMessage;
   summarizeHostedTelegramWebhook: typeof summarizeHostedTelegramWebhook;
 };
@@ -75,8 +83,10 @@ const defaultLinqDependencies: HostedVisibleSecondaryLinqDependencies = {
 };
 
 const defaultTelegramDependencies: HostedVisibleSecondaryTelegramDependencies = {
+  getPrisma,
   parseHostedTelegramWebhookUpdate,
   requireHostedOnboardingPublicBaseUrl,
+  resolveHostedFamilyInviteCodeFromTelegramStartFallback,
   sendHostedTelegramTextMessage,
   summarizeHostedTelegramWebhook,
 };
@@ -125,6 +135,7 @@ const HOSTED_LINQ_PRIVATE_GROUP_RECOVERY_REASONS = new Set([
 
 const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
   "ambiguous-telegram-binding",
+  "family-invite-draft-recovery-required",
   "family-invite-not-accepted",
   "group-chat-provision-unavailable",
   "telegram-binding-changed",
@@ -287,7 +298,23 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
     const signupUrl = reason === "unlinked-telegram"
       ? buildHostedSignupUrl(dependencies.requireHostedOnboardingPublicBaseUrl())
       : null;
+    let familyInviteCode = reason === "family-invite-draft-recovery-required"
+      ? parseHostedFamilyInviteStartToken(message.text)
+      : null;
+    if (
+      reason === "family-invite-draft-recovery-required"
+      && !familyInviteCode
+    ) {
+      familyInviteCode =
+        await dependencies.resolveHostedFamilyInviteCodeFromTelegramStartFallback({
+          now: new Date(summary.occurredAt),
+          prisma: input.prisma ?? dependencies.getPrisma(),
+          telegramUsername: summary.senderTelegramUsername,
+          text: message.text,
+        });
+    }
     const reply = resolveHostedTelegramVisibleSecondaryReply({
+      familyInviteCode,
       isDirect: summary.isDirect,
       reason,
       signupUrl,
@@ -334,11 +361,18 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
 }
 
 export function resolveHostedTelegramVisibleSecondaryReply(input: {
+  familyInviteCode?: string | null;
   isDirect: boolean;
   reason: string;
   signupUrl: string | null;
 }): string | null {
   switch (input.reason) {
+    case "family-invite-draft-recovery-required":
+      return input.isDirect && input.familyInviteCode
+        ? buildHostedFamilyDraftCheckoutConflictReplyText({
+            inviteCode: input.familyInviteCode,
+          })
+        : null;
     case "family-invite-not-accepted":
       return input.isDirect ? HOSTED_FAMILY_INVITE_UNAVAILABLE_REPLY : null;
     case "unlinked-telegram":

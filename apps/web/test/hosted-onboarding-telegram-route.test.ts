@@ -183,6 +183,56 @@ describe("hosted onboarding Telegram webhook route", () => {
     });
   });
 
+  it("replies to a Family draft conflict in the initiating Telegram message", async () => {
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValueOnce({
+      ignored: true,
+      ok: true,
+      reason: "family-invite-draft-recovery-required",
+    });
+    const rawBody = JSON.stringify({
+      message: {
+        chat: {
+          id: 42,
+          type: "private",
+        },
+        date: 1_785_000_000,
+        from: {
+          first_name: "Invitee",
+          id: 42,
+          is_bot: false,
+        },
+        message_id: 18,
+        text: "/start family_route_recovery",
+      },
+      update_id: 124,
+    });
+
+    const response = await hostedOnboardingTelegramRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
+        body: rawBody,
+        headers: {
+          "x-telegram-bot-api-secret-token": "telegram-secret",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "visible-secondary-reply:family-invite-draft-recovery-required",
+    });
+    expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledWith({
+      message: expect.stringContaining(
+        "familyInviteReturn=%2Ffamily%2Faccept%2Froute_recovery",
+      ),
+      replyToMessageId: 18,
+      signal: expect.any(AbortSignal),
+      target: expect.objectContaining({ chatId: "42" }),
+    });
+  });
+
   it("rejects invalid Telegram secrets before reading the request body", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

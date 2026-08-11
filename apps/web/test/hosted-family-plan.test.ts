@@ -98,6 +98,9 @@ import {
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  parseHostedFamilyInviteReturnPath,
+} from "@/src/lib/hosted-onboarding/app-routes";
+import {
   applyStripeCheckoutCompleted,
 } from "@/src/lib/hosted-onboarding/stripe-billing-events";
 import {
@@ -123,6 +126,7 @@ import {
   prepareHostedFamilyStripeActivationCryptoDomainRoots,
   prepareHostedLegacySyntheticFamilyCleanupTx,
   readHostedFamilyBillingRecoveryForOwner,
+  readHostedFamilyDraftRecoveryStateForOwner,
   readHostedFamilyCheckoutSessionIdFromUrl,
   resolveHostedFamilyChatNotificationRouteTx,
   resolveHostedFamilyCheckoutRedirectUrl,
@@ -205,6 +209,19 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
 };
 
 describe("hosted Family plan", () => {
+  it("accepts only an exact local Family invite as a recovery return path", () => {
+    expect(parseHostedFamilyInviteReturnPath(
+      "/family/accept/invite_return_target",
+    )).toBe("/family/accept/invite_return_target");
+    expect(parseHostedFamilyInviteReturnPath(
+      "https://example.test/family/accept/invite_return_target",
+    )).toBeNull();
+    expect(parseHostedFamilyInviteReturnPath(
+      "//example.test/family/accept/invite_return_target",
+    )).toBeNull();
+    expect(parseHostedFamilyInviteReturnPath("/settings")).toBeNull();
+  });
+
   const previousHostedContactPrivacyKeys = process.env.HOSTED_CONTACT_PRIVACY_KEYS;
   const previousHostedContactPrivacyCurrentKeyVersion =
     process.env.HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION;
@@ -3899,7 +3916,9 @@ describe("hosted Family plan", () => {
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE",
-      message: expect.stringContaining("Abandon Family setup"),
+      message: expect.stringContaining(
+        "familyInviteReturn=%2Ffamily%2Faccept%2Finvite_phone",
+      ),
     });
 
     expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
@@ -4174,16 +4193,14 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
   });
 
-  it("abandons a stale unbound Checkout claim without calling Stripe", async () => {
+  it("preserves a stale unbound Checkout claim without provider proof", async () => {
     const staleDraft = createNeverPaidFamilyDraftRecord({
       checkoutAttemptId: "hbfca_stale_unbound",
       checkoutCreatedAt: new Date("2026-07-30T12:00:00.000Z"),
       checkoutSeatCount: 2,
     });
     const tx = createTxMock();
-    tx.hostedAccountGroup.findUnique
-      .mockResolvedValueOnce(staleDraft)
-      .mockResolvedValueOnce(staleDraft);
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(staleDraft);
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
     };
@@ -4193,10 +4210,121 @@ describe("hosted Family plan", () => {
       now: new Date("2026-08-01T12:00:00.000Z"),
       ownerMemberId: "member_mom",
       prisma: prisma as never,
-    })).resolves.toEqual({ abandoned: true });
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DRAFT_RECOVERY_REQUIRED",
+      retryable: false,
+    });
 
     expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
-    expect(tx.hostedAccountGroup.deleteMany).toHaveBeenCalledOnce();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "exact inert draft",
+      createNeverPaidFamilyDraftRecord(),
+      "abandonable",
+    ],
+    [
+      "bound Checkout draft",
+      createNeverPaidFamilyDraftRecord({
+        checkoutAttemptId: "hbfca_bound_projection",
+        checkoutCreatedAt: new Date("2026-08-01T12:00:00.000Z"),
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionId: "cs_test_bound_projection",
+      }),
+      "abandonable",
+    ],
+    [
+      "recent unbound Checkout draft",
+      createNeverPaidFamilyDraftRecord({
+        checkoutAttemptId: "hbfca_recent_projection",
+        checkoutCreatedAt: new Date("2026-08-01T12:00:00.000Z"),
+        checkoutSeatCount: 2,
+      }),
+      "checkout_starting",
+    ],
+    [
+      "stale unbound Checkout draft",
+      createNeverPaidFamilyDraftRecord({
+        checkoutAttemptId: "hbfca_stale_projection",
+        checkoutCreatedAt: new Date("2026-07-30T12:00:00.000Z"),
+        checkoutSeatCount: 2,
+      }),
+      "recovery_required",
+    ],
+    [
+      "draft with a pending invite",
+      createNeverPaidFamilyDraftRecord({ invites: [{ id: "invite_pending" }] }),
+      "not_abandonable",
+    ],
+    [
+      "draft with another active member",
+      createNeverPaidFamilyDraftRecord({
+        memberships: [
+          { memberId: "member_mom", role: "owner", status: "active" },
+          { memberId: "member_other", role: "member", status: "active" },
+        ],
+      }),
+      "not_abandonable",
+    ],
+    [
+      "draft with paid capacity",
+      createNeverPaidFamilyDraftRecord({
+        planCapacities: [{ groupId: "hbag_draft" }],
+      }),
+      "not_abandonable",
+    ],
+    [
+      "suspended draft",
+      createNeverPaidFamilyDraftRecord({
+        suspendedAt: new Date("2026-08-01T12:00:00.000Z"),
+      }),
+      "recovery_required",
+    ],
+    [
+      "draft with inconsistent Checkout authority",
+      createNeverPaidFamilyDraftRecord({
+        stripeCheckoutSessionId: "cs_test_inconsistent_projection",
+      }),
+      "recovery_required",
+    ],
+    [
+      "draft with subscription authority",
+      createNeverPaidFamilyDraftRecord({
+        stripeSubscriptionId: "sub_projection_authority",
+      }),
+      "recovery_required",
+    ],
+  ] as const)(
+    "projects %s to %s Settings recovery state",
+    async (_label, draft, expectedState) => {
+      const tx = createTxMock();
+      tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(draft);
+
+      await expect(readHostedFamilyDraftRecoveryStateForOwner({
+        now: new Date("2026-08-01T12:30:00.000Z"),
+        ownerMemberId: "member_mom",
+        prisma: tx,
+      })).resolves.toBe(expectedState);
+    },
+  );
+
+  it("does not advertise abandonment during a direct-paid conversion", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
+      createNeverPaidFamilyDraftRecord(),
+    );
+    tx.hostedMember.findUnique.mockResolvedValueOnce({
+      billingRef: { stripeSubscriptionIdEncrypted: "encrypted_subscription" },
+      billingStatus: HostedBillingStatus.active,
+    });
+
+    await expect(readHostedFamilyDraftRecoveryStateForOwner({
+      ownerMemberId: "member_mom",
+      prisma: tx,
+    })).resolves.toBe("not_abandonable");
   });
 
   it.each([
@@ -8647,6 +8775,7 @@ function createNeverPaidFamilyDraftRecord(input: {
   planCapacities?: Array<{ groupId: string }>;
   stripeCheckoutSessionId?: string | null;
   stripeSubscriptionId?: string | null;
+  suspendedAt?: Date | null;
 } = {}) {
   const groupId = input.groupId ?? "hbag_draft";
   const ownerMemberId = input.ownerMemberId ?? "member_mom";
@@ -8688,7 +8817,7 @@ function createNeverPaidFamilyDraftRecord(input: {
     }],
     ownerMemberId,
     planCapacities: input.planCapacities ?? [],
-    suspendedAt: null,
+    suspendedAt: input.suspendedAt ?? null,
   };
 }
 

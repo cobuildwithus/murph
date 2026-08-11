@@ -90,7 +90,13 @@ const mocks = vi.hoisted(() => ({
     currentBillingPhase?: unknown;
     currentBillingPlanCode?: unknown;
     familyBillingOwner?: boolean;
-    familyDraftOwner?: boolean;
+    familyDraftRecoveryState?:
+      | "abandonable"
+      | "checkout_starting"
+      | "not_abandonable"
+      | "recovery_required"
+      | null;
+    familyInviteReturnPath?: string | null;
     familyState?: "none" | "owner" | "sponsored";
     groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
@@ -135,6 +141,7 @@ const mocks = vi.hoisted(() => ({
     React.createElement("div", null, input.children)),
   routerRefresh: vi.fn(),
   readHostedFamilyAccessForMember: vi.fn(),
+  readHostedFamilyDraftRecoveryStateForOwner: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   prisma: {
     $transaction: vi.fn(),
@@ -291,6 +298,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
       billingStatus,
     ),
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
+  readHostedFamilyDraftRecoveryStateForOwner:
+    mocks.readHostedFamilyDraftRecoveryStateForOwner,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
 
@@ -345,6 +354,7 @@ beforeEach(() => {
   mocks.isHostedBillingPlanSelectionAvailable.mockResolvedValue(true);
   mockSettingsPageSnapshot();
   mocks.readHostedFamilyAccessForMember.mockResolvedValue(null);
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(null);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(null);
   mocks.readHostedConsentStatus.mockResolvedValue(
     GRANTED_HEALTH_DATA_CONSENT_STATUS,
@@ -1658,7 +1668,9 @@ test("SettingsPage keeps a frozen active purchase visible when current offers ar
   );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({}),
+  }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -2287,15 +2299,23 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
     },
     suspendedAt: null,
   });
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
+    "abandonable",
+  );
 
   const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+  renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      familyInviteReturn: "/family/accept/invite_return_target",
+    }),
+  }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
     familyBillingOwner: false,
-    familyDraftOwner: true,
+    familyDraftRecoveryState: "abandonable",
+    familyInviteReturnPath: "/family/accept/invite_return_target",
     familyState: "none",
   }), undefined);
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(

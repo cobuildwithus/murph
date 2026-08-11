@@ -232,6 +232,17 @@ describe("visible secondary webhook outcomes", () => {
     })).toBeNull();
   });
 
+  it("maps a Family draft conflict to the exact invite recovery URL", () => {
+    expect(resolveHostedTelegramVisibleSecondaryReply({
+      familyInviteCode: "invite_visible_recovery",
+      isDirect: true,
+      reason: "family-invite-draft-recovery-required",
+      signupUrl: null,
+    })).toContain(
+      "https://www.withmurph.ai/settings?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_visible_recovery#subscription",
+    );
+  });
+
   it("turns a repeated Linq signup message into an idempotent reply", async () => {
     const event = requireHostedLinqMessageReceivedEvent({
       api_version: "v3",
@@ -336,8 +347,12 @@ describe("visible secondary webhook outcomes", () => {
       reason: "unlinked-telegram",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
+      resolveHostedFamilyInviteCodeFromTelegramStartFallback: vi.fn(
+        async () => null,
+      ),
       sendHostedTelegramTextMessage,
       summarizeHostedTelegramWebhook,
     };
@@ -359,6 +374,122 @@ describe("visible secondary webhook outcomes", () => {
       replyToMessageId: 7,
       target: expect.objectContaining({ chatId: "42" }),
     }));
+  });
+
+  it("replies to a Family draft conflict in the initiating Telegram thread", async () => {
+    const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
+      message: {
+        chat: {
+          first_name: "Invitee",
+          id: 42,
+          type: "private",
+        },
+        date: 1_785_000_000,
+        from: {
+          first_name: "Invitee",
+          id: 42,
+          is_bot: false,
+        },
+        message_id: 8,
+        text: "/start family_invite_visible_recovery",
+      },
+      update_id: 124,
+    }));
+    const sendHostedTelegramTextMessage = vi.fn(async () => {});
+    const handler: HostedOnboardingTelegramWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "family-invite-draft-recovery-required",
+    }));
+    const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
+      parseHostedTelegramWebhookUpdate: vi.fn(() => update),
+      requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
+      resolveHostedFamilyInviteCodeFromTelegramStartFallback: vi.fn(
+        async () => null,
+      ),
+      sendHostedTelegramTextMessage,
+      summarizeHostedTelegramWebhook,
+    };
+
+    const response = await withHostedVisibleSecondaryTelegramOutcomes(
+      handler,
+      dependencies,
+    )({
+      rawBody: JSON.stringify(update),
+      secretToken: "secret",
+    });
+
+    expect(response).toMatchObject({
+      ignored: false,
+      reason: "visible-secondary-reply:family-invite-draft-recovery-required",
+    });
+    expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          "familyInviteReturn=%2Ffamily%2Faccept%2Finvite_visible_recovery",
+        ),
+        replyToMessageId: 8,
+        target: expect.objectContaining({ chatId: "42" }),
+      }),
+    );
+  });
+
+  it("recovers a username-bound Family invite when Telegram omits the start token", async () => {
+    const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
+      message: {
+        chat: {
+          first_name: "Invitee",
+          id: 42,
+          type: "private",
+        },
+        date: 1_785_000_000,
+        from: {
+          first_name: "Invitee",
+          id: 42,
+          is_bot: false,
+          username: "invitee_handle",
+        },
+        message_id: 9,
+        text: "/start",
+      },
+      update_id: 125,
+    }));
+    const sendHostedTelegramTextMessage = vi.fn(async () => {});
+    const handler: HostedOnboardingTelegramWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "family-invite-draft-recovery-required",
+    }));
+    const resolveStartFallback = vi.fn(async () => "invite_fallback_recovery");
+    const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
+      parseHostedTelegramWebhookUpdate: vi.fn(() => update),
+      requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
+      resolveHostedFamilyInviteCodeFromTelegramStartFallback:
+        resolveStartFallback,
+      sendHostedTelegramTextMessage,
+      summarizeHostedTelegramWebhook,
+    };
+
+    await withHostedVisibleSecondaryTelegramOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(update),
+      secretToken: "secret",
+    });
+
+    expect(resolveStartFallback).toHaveBeenCalledWith(expect.objectContaining({
+      telegramUsername: "invitee_handle",
+      text: "/start",
+    }));
+    expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          "familyInviteReturn=%2Ffamily%2Faccept%2Finvite_fallback_recovery",
+        ),
+        replyToMessageId: 9,
+        target: expect.objectContaining({ chatId: "42" }),
+      }),
+    );
   });
 
   it("keeps unlinked Telegram referral evidence silent in the group", async () => {
@@ -387,8 +518,12 @@ describe("visible secondary webhook outcomes", () => {
       reason: "usage-referral-evidence-only",
     }));
     const dependencies: HostedVisibleSecondaryTelegramDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
       parseHostedTelegramWebhookUpdate: vi.fn(() => update),
       requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
+      resolveHostedFamilyInviteCodeFromTelegramStartFallback: vi.fn(
+        async () => null,
+      ),
       sendHostedTelegramTextMessage,
       summarizeHostedTelegramWebhook,
     };

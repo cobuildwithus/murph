@@ -1912,6 +1912,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       }),
       secretToken: "telegram-secret",
     })).resolves.toMatchObject({
+      ignored: true,
       ok: true,
       reason: "family-invite-draft-recovery-required",
     });
@@ -1919,36 +1920,8 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(hostedAccountGroupInviteUpdateMany).not.toHaveBeenCalled();
     expect(hostedAccountGroupPlanCapacityFindMany).not.toHaveBeenCalled();
     expect(hostedAccountGroupDeleteMany).not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedExecutionOutbox).toHaveBeenCalledWith(
-      expect.objectContaining({
-        envelope: expect.objectContaining({
-          eventId:
-            "assistant.notification.requested:family-chat:member_telegram_family_draft:telegram:update:334:family-draft-recovery",
-          kind: "assistant.notification.requested",
-          notification: expect.objectContaining({
-            responsePolicy: {
-              kind: "require_send_exact_text",
-              text:
-                "Your Family invite was not used. You still have an unfinished Family checkout of your own. Open Murph Settings and choose Abandon Family setup, then use this invite again.",
-            },
-            route: expect.objectContaining({
-              channel: "telegram",
-              delivery: {
-                kind: "thread",
-                target: "123",
-              },
-            }),
-          }),
-          userId: acceptedMemberId,
-        }),
-      }),
-    );
-    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
-      abortSignal: expect.any(AbortSignal),
-      expectedUserId: acceptedMemberId,
-      mailboxItemId:
-        "mailbox_assistant.notification.requested:family-chat:member_telegram_family_draft:telegram:update:334:family-draft-recovery",
-    });
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("routes unknown token-shaped Telegram text to the assistant", async () => {

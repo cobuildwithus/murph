@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 import {
   requestHostedOnboardingJson,
@@ -21,7 +22,10 @@ import {
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 
-export function HostedFamilyAbandonButton() {
+export function HostedFamilyAbandonButton(props: {
+  returnPath?: string | null;
+}) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -34,7 +38,13 @@ export function HostedFamilyAbandonButton() {
         method: "DELETE",
         url: "/api/settings/billing/family/draft",
       });
-      window.location.reload();
+      if (props.returnPath) {
+        router.replace(props.returnPath);
+      } else {
+        setOpen(false);
+        setIsSubmitting(false);
+        router.refresh();
+      }
     } catch (error) {
       setIsSubmitting(false);
       setErrorMessage(toErrorMessage(

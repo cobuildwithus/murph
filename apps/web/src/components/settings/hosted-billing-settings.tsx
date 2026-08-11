@@ -23,6 +23,9 @@ import {
   SETTINGS_PULSE_FEATURES,
 } from "@/src/lib/hosted-onboarding/plan-features";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+import type {
+  HostedFamilyDraftRecoveryState,
+} from "@/src/lib/hosted-onboarding/family-plan";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
@@ -67,7 +70,8 @@ export function HostedBillingSettings(props: {
   currentBillingPlanCode?: unknown;
   currentPeriodEnd?: Date | null;
   familyBillingOwner?: boolean;
-  familyDraftOwner?: boolean;
+  familyDraftRecoveryState?: HostedFamilyDraftRecoveryState | null;
+  familyInviteReturnPath?: string | null;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
@@ -109,7 +113,9 @@ export function HostedBillingSettings(props: {
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
   const activeFamilyOwner = familyState === "owner";
   const familyBillingOwner = props.familyBillingOwner === true || activeFamilyOwner;
-  const familyDraftOwner = props.familyDraftOwner === true && !familyBillingOwner;
+  const familyDraftRecoveryState = familyBillingOwner
+    ? null
+    : props.familyDraftRecoveryState ?? null;
   const sponsoredMember = familyState === "sponsored";
   const ownAccessActive =
     props.billingStatus === "active"
@@ -481,12 +487,27 @@ export function HostedBillingSettings(props: {
           : props.canStartFamily === true
             ? (
                 <div className="flex w-full flex-col gap-1">
-                  <HostedFamilyStartButton
-                    block
-                    label="Start your own Family plan"
-                    ownershipConfirmation
-                  />
-                  {familyDraftOwner ? <HostedFamilyAbandonButton /> : null}
+                  {familyDraftRecoveryState === "recovery_required" ? (
+                    <ContactSupportAction
+                      className="w-full"
+                      subject="Family checkout recovery"
+                    >
+                      Contact support
+                    </ContactSupportAction>
+                  ) : (
+                    <HostedFamilyStartButton
+                      block
+                      label={familyDraftRecoveryState
+                        ? "Continue your Family setup"
+                        : "Start your own Family plan"}
+                      ownershipConfirmation
+                    />
+                  )}
+                  {familyDraftRecoveryState === "abandonable" ? (
+                    <HostedFamilyAbandonButton
+                      returnPath={props.familyInviteReturnPath}
+                    />
+                  ) : null}
                 </div>
               )
             : null,
@@ -512,8 +533,14 @@ export function HostedBillingSettings(props: {
   const retainedPlan = currentPlanCode
     ? getHostedBillingPlanDefinition(currentPlanCode)
     : null;
-  const noPlanText = familyDraftOwner
+  const noPlanText = familyDraftRecoveryState === "abandonable"
     ? "Your unfinished Family setup is not paid. Continue checkout to start a plan you own, or abandon it before joining someone else's Family."
+    : familyDraftRecoveryState === "checkout_starting"
+      ? "Your Family checkout is still starting. Continue it before changing Family plans."
+      : familyDraftRecoveryState === "recovery_required"
+        ? "Murph could not verify an earlier Family checkout. Contact support before changing Family plans."
+        : familyDraftRecoveryState === "not_abandonable"
+          ? "Your Family setup has membership or billing state to preserve. Continue setup instead of abandoning it."
     : familyBillingOwner && !activeFamilyOwner
     ? "Your Family plan needs billing attention. Use Manage Family billing to repair or cancel it."
     : starterAccessActive

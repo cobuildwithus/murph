@@ -5044,7 +5044,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       chatId: "chat_123",
       idempotencyKey: "linq-message:evt_family_linq_draft_recovery",
       message:
-        "Your Family invite was not used. You still have an unfinished Family checkout of your own. Open Murph Settings and choose Abandon Family setup, then use this invite again.",
+        "Your Family invite was not used. You still have an unfinished Family checkout of your own. Open Family settings to resolve it, then return to this invite: https://www.withmurph.ai/settings?familyInviteReturn=%2Ffamily%2Faccept%2Fdraft_recovery#subscription",
       replyToMessageId: "msg_123",
       signal: undefined,
     });

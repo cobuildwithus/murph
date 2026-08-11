@@ -147,6 +147,12 @@ import {
   isStripeResourceMissingError,
   retrieveAndExpireHostedSubscriptionCheckout,
 } from "./subscription-checkout-lifecycle";
+import {
+  buildHostedFamilyInviteRecoveryUrl,
+  HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
+} from "./app-routes";
+
+export { HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE } from "./app-routes";
 
 export { HOSTED_FAMILY_MAX_SEATS, HOSTED_FAMILY_MIN_SEATS } from "./billing-plans";
 
@@ -154,8 +160,6 @@ export const HOSTED_FAMILY_BILLING_PLAN_CODE = "launch_family_monthly" as const;
 export const HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY =
   "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY";
 export const HOSTED_FAMILY_STRIPE_METADATA_KIND = "hosted_family_plan";
-export const HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE =
-  "HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE";
 const HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS = 24 * 60 * 60_000;
 const HOSTED_FAMILY_STRIPE_CHECKOUT_SESSION_ID_PATTERN = /^cs_(?:test|live)_[A-Za-z0-9]+$/u;
 
@@ -397,6 +401,12 @@ type HostedFamilyOwnerDraftState =
   | "checkout_starting"
   | "inert"
   | "not_draft";
+
+export type HostedFamilyDraftRecoveryState =
+  | "abandonable"
+  | "checkout_starting"
+  | "not_abandonable"
+  | "recovery_required";
 
 export interface HostedAccountGroupBillingLookup {
   billingRef: HostedAccountGroupBillingRefSnapshot;
@@ -4430,10 +4440,10 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
       tx: input.tx,
     });
     if (!activeInvite) {
-      inviteCode = await resolveHostedFamilyInviteCodeFromTelegramUsernameTx({
+      inviteCode = await resolveHostedFamilyInviteCodeFromTelegramUsername({
         now,
         telegramUsername: input.telegramUsername ?? null,
-        tx: input.tx,
+        prisma: input.tx,
       });
     } else if (
       activeInvite.targetTelegramUsernameLookupKey &&
@@ -4459,11 +4469,11 @@ export async function acceptHostedFamilyInviteFromTelegramTx(input: {
       }
     }
   } else {
-    inviteCode = await resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx({
+    inviteCode = await resolveHostedFamilyInviteCodeFromTelegramStartFallback({
       now,
+      prisma: input.tx,
       telegramUsername: input.telegramUsername ?? null,
       text: input.text,
-      tx: input.tx,
     });
   }
   if (!inviteCode) {
@@ -4588,11 +4598,11 @@ async function readHostedFamilyInviteCodePendingActiveTx(input: {
     : null;
 }
 
-async function resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx(input: {
+export async function resolveHostedFamilyInviteCodeFromTelegramStartFallback(input: {
   now: Date;
+  prisma: HostedOnboardingReadClient;
   telegramUsername: string | null;
   text: string | null | undefined;
-  tx: Prisma.TransactionClient;
 }): Promise<string | null> {
   const normalizedText = normalizeNullableString(input.text);
 
@@ -4600,17 +4610,17 @@ async function resolveHostedFamilyInviteCodeFromTelegramStartFallbackTx(input: {
     return null;
   }
 
-  return resolveHostedFamilyInviteCodeFromTelegramUsernameTx({
+  return resolveHostedFamilyInviteCodeFromTelegramUsername({
     now: input.now,
+    prisma: input.prisma,
     telegramUsername: input.telegramUsername,
-    tx: input.tx,
   });
 }
 
-async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
+async function resolveHostedFamilyInviteCodeFromTelegramUsername(input: {
   now: Date;
+  prisma: HostedOnboardingReadClient;
   telegramUsername: string | null;
-  tx: Prisma.TransactionClient;
 }): Promise<string | null> {
   const lookupKeys = createHostedTelegramUsernameLookupKeyReadCandidates(
     input.telegramUsername,
@@ -4619,7 +4629,7 @@ async function resolveHostedFamilyInviteCodeFromTelegramUsernameTx(input: {
     return null;
   }
 
-  const invites = await input.tx.hostedAccountGroupInvite.findMany({
+  const invites = await input.prisma.hostedAccountGroupInvite.findMany({
     orderBy: {
       createdAt: "asc",
     },
@@ -4823,6 +4833,7 @@ export async function acceptHostedFamilyInviteTx(input: {
   const ownerDraftToAbandon = await assertHostedFamilyMemberNotSponsoredElsewhereTx({
     allowOwnerDraftAbandonment: true,
     groupId: invite.groupId,
+    inviteCode: input.inviteCode,
     memberId: input.acceptedMemberId,
     tx: input.tx,
   });
@@ -5879,6 +5890,7 @@ function normalizeHostedFamilyPlanCode(value: unknown): HostedFamilyPlanCode {
 async function assertHostedFamilyMemberNotSponsoredElsewhereTx(input: {
   allowOwnerDraftAbandonment?: boolean;
   groupId: string;
+  inviteCode?: string;
   memberId: string;
   tx: Prisma.TransactionClient;
 }): Promise<HostedFamilyOwnerDraftRecord | null> {
@@ -5944,7 +5956,10 @@ async function assertHostedFamilyMemberNotSponsoredElsewhereTx(input: {
       || state === "checkout_inconsistent"
       || state === "checkout_starting"
     ) {
-      throw buildHostedFamilyDraftConflictError();
+      if (!input.inviteCode) {
+        throw buildHostedFamilyDraftRecoveryRequiredError();
+      }
+      throw buildHostedFamilyDraftConflictError(input.inviteCode);
     } else if (state === "billing_authority") {
       throw buildHostedFamilyDraftBillingMayCompleteError();
     }
@@ -6070,6 +6085,58 @@ function classifyHostedFamilyOwnerDraft(
   return "inert";
 }
 
+export async function readHostedFamilyDraftRecoveryStateForOwner(input: {
+  now?: Date;
+  ownerMemberId: string;
+  prisma?: HostedOnboardingReadClient;
+}): Promise<HostedFamilyDraftRecoveryState | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const draft = await readHostedFamilyOwnerDraftRecord({
+    ownerMemberId: input.ownerMemberId,
+    prisma,
+  });
+  if (!draft) {
+    return null;
+  }
+  const state = classifyHostedFamilyOwnerDraft(draft, input.ownerMemberId);
+  if (state === "checkout_inconsistent") {
+    return "recovery_required";
+  }
+  if (state === "billing_authority" || draft.suspendedAt) {
+    return "recovery_required";
+  }
+  if (await hasHostedFamilyMemberLiveDirectSubscription({
+    memberId: input.ownerMemberId,
+    prisma,
+  })) {
+    return "not_abandonable";
+  }
+  if (state === "inert" || state === "checkout_bound") {
+    return "abandonable";
+  }
+  if (state === "checkout_starting") {
+    return hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
+      checkoutCreatedAt: draft.billingRef?.checkoutCreatedAt ?? null,
+      now: input.now ?? new Date(),
+    })
+      ? "checkout_starting"
+      : "recovery_required";
+  }
+  return "not_abandonable";
+}
+
+function hostedFamilyCheckoutClaimIsWithinSafeReplayWindow(input: {
+  checkoutCreatedAt: Date | null;
+  now: Date;
+}): boolean {
+  const attemptAgeMs = input.checkoutCreatedAt
+    ? input.now.getTime() - input.checkoutCreatedAt.getTime()
+    : Number.NaN;
+  return Number.isFinite(attemptAgeMs)
+    && attemptAgeMs >= 0
+    && attemptAgeMs < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS;
+}
+
 async function prepareHostedFamilyDraftAbandonmentCandidate(input: {
   draft: HostedFamilyOwnerDraftRecord;
   now: Date;
@@ -6097,14 +6164,10 @@ async function prepareHostedFamilyDraftAbandonmentCandidate(input: {
   const checkoutCreatedAt = billingRef?.checkoutCreatedAt ?? null;
   const checkoutSeatCount = billingRef?.checkoutSeatCount ?? null;
   if (state === "checkout_starting") {
-    const attemptAgeMs = checkoutCreatedAt
-      ? input.now.getTime() - checkoutCreatedAt.getTime()
-      : Number.NaN;
-    if (
-      !Number.isFinite(attemptAgeMs)
-      || attemptAgeMs < 0
-      || attemptAgeMs < HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS
-    ) {
+    if (hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
+      checkoutCreatedAt,
+      now: input.now,
+    })) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_DRAFT_CHECKOUT_STARTING",
         httpStatus: 409,
@@ -6113,6 +6176,7 @@ async function prepareHostedFamilyDraftAbandonmentCandidate(input: {
         retryable: true,
       });
     }
+    throw buildHostedFamilyDraftRecoveryRequiredError();
   }
 
   let stripeCheckoutSessionId: string | null = null;
@@ -6255,30 +6319,21 @@ async function deleteHostedFamilyOwnerDraftTx(input: {
   return deleted.count === 1;
 }
 
-export function buildHostedFamilyDraftCheckoutConflictReplyText(): string {
+export function buildHostedFamilyDraftCheckoutConflictReplyText(input: {
+  inviteCode: string;
+}): string {
   return [
     "Your Family invite was not used.",
     "You still have an unfinished Family checkout of your own.",
-    "Open Murph Settings and choose Abandon Family setup, then use this invite again.",
+    `Open Family settings to resolve it, then return to this invite: ${buildHostedFamilyInviteRecoveryUrl(input.inviteCode)}`,
   ].join(" ");
 }
 
-export function buildHostedFamilyDraftCheckoutConflictNotification(): HostedFamilyChatNotificationRequest {
-  return {
-    instructions:
-      "The member tried to use a Family invite, but their unfinished owner checkout blocked it. The recovery reply is provided in responsePolicy.",
-    responsePolicy: {
-      kind: "require_send_exact_text",
-      text: buildHostedFamilyDraftCheckoutConflictReplyText(),
-    },
-  };
-}
-
-function buildHostedFamilyDraftConflictError() {
+function buildHostedFamilyDraftConflictError(inviteCode: string) {
   return hostedOnboardingError({
     code: HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
     httpStatus: 409,
-    message: buildHostedFamilyDraftCheckoutConflictReplyText(),
+    message: buildHostedFamilyDraftCheckoutConflictReplyText({ inviteCode }),
   });
 }
 
@@ -6307,7 +6362,7 @@ function buildHostedFamilyDraftRecoveryRequiredError() {
     code: "HOSTED_FAMILY_DRAFT_RECOVERY_REQUIRED",
     httpStatus: 409,
     message:
-      "This unfinished Family checkout has incomplete billing state. Restart Family checkout so Murph can recover its Stripe session, then abandon it from Settings.",
+      "This unfinished Family checkout has incomplete billing state. Contact support before changing Family plans.",
   });
 }
 

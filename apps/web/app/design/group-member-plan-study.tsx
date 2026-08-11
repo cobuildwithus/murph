@@ -108,9 +108,60 @@ export function GroupMemberPlanStudy() {
             billingStatus="active"
             canStartFamily
             currentBillingPlanCode="launch_monthly"
-            familyDraftOwner
+            familyDraftRecoveryState="abandonable"
             familyState="none"
             payerMemberId="design_family_draft_owner"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family checkout still starting"
+        state="family-checkout-starting"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftRecoveryState="checkout_starting"
+            familyState="none"
+            payerMemberId="design_family_checkout_starting"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family checkout needs support recovery"
+        state="family-checkout-recovery-required"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftRecoveryState="recovery_required"
+            familyState="none"
+            payerMemberId="design_family_checkout_recovery"
+          />
+        </div>
+      </StudyState>
+
+      <StudyState
+        label="Family setup has state that must be preserved"
+        state="family-draft-not-abandonable"
+      >
+        <div inert>
+          <HostedBillingSettings
+            authenticated
+            billingStatus="active"
+            canStartFamily
+            currentBillingPlanCode="launch_monthly"
+            familyDraftRecoveryState="not_abandonable"
+            familyState="none"
+            payerMemberId="design_family_draft_preserved"
           />
         </div>
       </StudyState>

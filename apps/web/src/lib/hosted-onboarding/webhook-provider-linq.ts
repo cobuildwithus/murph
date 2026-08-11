@@ -1396,10 +1396,11 @@ export async function planHostedOnboardingLinqWebhook(input: {
     );
   };
 
-  const familyInviteTokenPresent = await resolveHostedFamilyInviteTokenForInbound({
+  const familyInviteCode = await resolveHostedFamilyInviteTokenForInbound({
     prisma: input.prisma,
     text: summary.text,
-  }) !== null;
+  });
+  const familyInviteTokenPresent = familyInviteCode !== null;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyActivationWake: HostedWebhookWakeHandoff | null = null;
   let familyDraftCheckoutConflict = false;
@@ -1514,6 +1515,14 @@ export async function planHostedOnboardingLinqWebhook(input: {
         retryable: true,
       });
     }
+    if (!familyInviteCode) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_DRAFT_RECOVERY_INVITE_MISSING",
+        httpStatus: 500,
+        message: "The Family invite recovery link could not be resolved.",
+        retryable: true,
+      });
+    }
     const dailyState = await incrementHostedLinqInboundDailyState({
       memberId: existingMember.id,
       occurredAt,
@@ -1523,7 +1532,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       buildFamilyInviteDraftRecoveryResponse({
         chatId: summary.chatId,
         memberId: existingMember.id,
-        message: buildHostedFamilyDraftCheckoutConflictReplyText(),
+        message: buildHostedFamilyDraftCheckoutConflictReplyText({
+          inviteCode: familyInviteCode,
+        }),
         messageId: summary.messageId,
         occurredAt,
         sourceEventId: input.event.event_id,

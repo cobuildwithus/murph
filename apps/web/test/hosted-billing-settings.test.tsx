@@ -1213,7 +1213,7 @@ describe("HostedBillingSettings", () => {
         authenticated: true,
         canStartFamily: true,
         currentBillingPlanCode: "launch_monthly",
-        familyDraftOwner: true,
+        familyDraftRecoveryState: "abandonable",
         familyState: "none",
         payerMemberId: TEST_PAYER_MEMBER_ID,
       },
@@ -1263,6 +1263,91 @@ describe("HostedBillingSettings", () => {
         rendered.window.document.body.textContent ?? "",
         /Family billing changed before recovery/u,
       );
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test.each([
+    [
+      "checkout_starting",
+      "Your Family checkout is still starting",
+      "Continue your Family setup",
+    ],
+    [
+      "recovery_required",
+      "Murph could not verify an earlier Family checkout",
+      "Contact support",
+    ],
+    [
+      "not_abandonable",
+      "membership or billing state to preserve",
+      "Continue your Family setup",
+    ],
+  ] as const)(
+    "does not advertise abandonment for %s Family state",
+    async (familyDraftRecoveryState, expectedText, expectedAction) => {
+      const { HostedBillingSettings } = await import(
+        "@/src/components/settings/hosted-billing-settings"
+      );
+      const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecoveryState,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      }));
+
+      assert.match(markup, new RegExp(expectedText, "u"));
+      assert.match(markup, new RegExp(expectedAction, "u"));
+      assert.doesNotMatch(markup, /Abandon Family setup/u);
+    },
+  );
+
+  test("returns to the exact Family invite after abandonment", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({ abandoned: true });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const returnPath = "/family/accept/invite_return_target";
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecoveryState: "abandonable",
+        familyInviteReturnPath: returnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const abandonButton = findButtonByText(
+        rendered.window.document,
+        "Abandon Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        abandonButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const confirmButton = findButtonByText(
+        rendered.window.document,
+        "Abandon unpaid setup",
+        rendered.window,
+      );
+      await act(async () => {
+        confirmButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(mocks.routerReplace.mock.calls, [[returnPath]]);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
     } finally {
       await rendered.cleanup();
     }
