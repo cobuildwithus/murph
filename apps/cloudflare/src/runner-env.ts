@@ -7,6 +7,9 @@ import {
   HOSTED_SHARED_DEVICE_SYNC_PLATFORM_ENV_NAMES,
 } from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
 import {
+  MURPH_ANDROID_APP_ENABLED_ENV,
+} from "@murphai/hosted-execution/env";
+import {
   buildHostedRuntimeLaunchSpec,
   buildHostedRuntimePlatformEnv,
   readHostedRuntimeCommitTimeoutConfigValue,
@@ -129,6 +132,7 @@ export function buildHostedRunnerContainerPlatformEnv(
   const privateMediaDeliveryOrigin =
     platformEnv[HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN_ENV];
   const physicalNotesEnabled = platformEnv[HOSTED_PHYSICAL_NOTES_ENABLED_ENV];
+  const androidAppEnabled = platformEnv[MURPH_ANDROID_APP_ENABLED_ENV];
   return {
     ...(privateMediaDeliveryOrigin
       ? {
@@ -138,6 +142,9 @@ export function buildHostedRunnerContainerPlatformEnv(
       : {}),
     ...(physicalNotesEnabled
       ? { [HOSTED_PHYSICAL_NOTES_ENABLED_ENV]: physicalNotesEnabled }
+      : {}),
+    ...(androidAppEnabled
+      ? { [MURPH_ANDROID_APP_ENABLED_ENV]: androidAppEnabled }
       : {}),
     ...buildHostedRunnerLegacyDeviceSyncPlatformEnv(source, options),
     ...buildHostedRunnerChannelPlatformEnv(source, options),
