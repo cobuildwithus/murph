@@ -3965,6 +3965,46 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
+  it("terminally supersedes webhook work when the locked connection owner differs from the pre-lock owner", async () => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce({
+      ...buildWebhookAdmissionRecord(),
+      userId: "user-456",
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
+    expect(mocks.getConnectionOwnerId).toHaveBeenCalledTimes(1);
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
+      "user-123",
+      "dsc_123",
+      expect.any(Function),
+      { memberRowLockTimeoutMs: 5_000 },
+    );
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "oura",
+      "trace_123",
+      "claim-token",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
   it("retries webhook work when setup becomes pending before dirty-state commit", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
       buildWebhookAdmissionRecord({
