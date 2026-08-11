@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, reminders, cards, voices, and web search",
+      "Starter access, patterns, reminders, photos, cards, voices, and web search",
     );
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
@@ -113,6 +113,9 @@ describe("ChangelogPage", () => {
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-10#voice-memos-use-your-voice"',
+    );
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-10#sharper-single-photo-review"',
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
@@ -247,6 +250,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
     expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Single photos keep their fine detail");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");

@@ -68,6 +68,20 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
+  it("keeps single-photo detail separate from bounded gallery detail", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "sharper-single-photo-review",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1616],
+      summary: expect.stringContaining("original detail"),
+      details: expect.stringContaining("Multi-photo comparisons stay at high detail"),
+    });
+    expect(item?.details).toContain("follow-up images");
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -531,6 +545,7 @@ describe("changelog registry", () => {
           "personal-patterns",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
+          "sharper-single-photo-review",
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",

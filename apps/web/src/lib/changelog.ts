@@ -65,9 +65,10 @@ const RAW_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
-    title: "Starter access, patterns, reminders, cards, voices, and web search",
+    title:
+      "Starter access, patterns, reminders, photos, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, single photos retain their fine detail, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -134,6 +135,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
         relevanceTags: ["voice", "messaging", "personalization", "reliability"],
         sourcePullRequests: [1587],
+      },
+      {
+        id: "sharper-single-photo-review",
+        kind: "improvement",
+        priority: 3,
+        title: "Single photos keep their fine detail",
+        summary:
+          "When you send one photo, Murph now preserves its original detail for closer visual review.",
+        details:
+          "Multi-photo comparisons stay at high detail to keep visual input cost bounded. The same detail choice carries into follow-up images added while Murph is already working.",
+        relevanceTags: ["assistant", "images", "messaging", "reliability"],
+        sourcePullRequests: [1616],
       },
       {
         id: "web-search-restored",
