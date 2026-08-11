@@ -43,6 +43,7 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
+export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT = 64;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
 
@@ -1629,9 +1630,10 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionUpdate(
       );
   const sources = record.sources === undefined
     ? undefined
-    : requireArray(
+    : requireBoundedArray(
         record.sources,
         `Hosted device-sync runtime apply request updates[${index}].sources`,
+        HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT,
       ).map((entry, sourceIndex) =>
         parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
           entry,
