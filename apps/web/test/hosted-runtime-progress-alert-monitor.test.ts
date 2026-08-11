@@ -24,19 +24,19 @@ describe("hosted runtime progress health", () => {
       now,
       rows: [
         progressRow({
-          headCreatedAt: "2026-08-10T15:45:00.001Z",
+          progressOriginAt: "2026-08-10T15:45:00.001Z",
           lane: "system",
           pendingCount: 9n,
           runtimeKey: "runtime_a",
         }),
         progressRow({
-          headCreatedAt: "2026-08-10T15:45:00.000Z",
+          progressOriginAt: "2026-08-10T15:45:00.000Z",
           lane: "system",
           pendingCount: 3n,
           runtimeKey: "runtime_a",
         }),
         progressRow({
-          headCreatedAt: "2026-08-10T15:30:00.000Z",
+          progressOriginAt: "2026-08-10T15:30:00.000Z",
           lane: "conversation",
           pendingCount: 2n,
           runtimeKey: "runtime_b",
@@ -62,12 +62,12 @@ describe("hosted runtime progress health", () => {
       now,
       rows: [
         progressRow({
-          headCreatedAt: "2026-08-10T15:00:00.000Z",
+          progressOriginAt: "2026-08-10T15:00:00.000Z",
           lane: "system",
           runtimeKey: "runtime_inactive",
         }),
         progressRow({
-          headCreatedAt: "2026-08-10T15:00:00.000Z",
+          progressOriginAt: "2026-08-10T15:00:00.000Z",
           lane: "conversation",
           runtimeKey: "runtime_active",
           usageBlocked: true,
@@ -89,7 +89,7 @@ describe("hosted runtime progress health", () => {
       now,
       rows: [
         progressRow({
-          headCreatedAt: "2026-08-10T15:00:00.000Z",
+          progressOriginAt: "2026-08-10T15:00:00.000Z",
           lane: "unexpected",
           runtimeKey: "runtime_active",
         }),
@@ -136,13 +136,13 @@ describe("hosted runtime progress alert monitor", () => {
   it("opens one aggregate Resend incident and coalesces repeated stalled scans", async () => {
     const fixture = createProgressMonitorFixture([
       progressRow({
-        headCreatedAt: "2026-08-10T15:30:00.000Z",
+        progressOriginAt: "2026-08-10T15:30:00.000Z",
         lane: "system",
         pendingCount: 7n,
         runtimeKey: "runtime_private_a",
       }),
       progressRow({
-        headCreatedAt: "2026-08-10T15:20:00.000Z",
+        progressOriginAt: "2026-08-10T15:20:00.000Z",
         lane: "conversation",
         pendingCount: 2n,
         runtimeKey: "runtime_private_b",
@@ -196,7 +196,7 @@ describe("hosted runtime progress alert monitor", () => {
   it("silently rearms after recovery and gives a later stall a new identity", async () => {
     const fixture = createProgressMonitorFixture([
       progressRow({
-        headCreatedAt: "2026-08-10T15:30:00.000Z",
+        progressOriginAt: "2026-08-10T15:30:00.000Z",
         lane: "system",
         runtimeKey: "runtime_a",
       }),
@@ -221,7 +221,7 @@ describe("hosted runtime progress alert monitor", () => {
     });
     fixture.setRows([
       progressRow({
-        headCreatedAt: "2026-08-10T16:10:00.000Z",
+        progressOriginAt: "2026-08-10T16:10:00.000Z",
         lane: "system",
         runtimeKey: "runtime_a",
       }),
@@ -244,7 +244,7 @@ describe("hosted runtime progress alert monitor", () => {
   it("stays disabled without the shared latency-alert time-zone opt-in", async () => {
     const fixture = createProgressMonitorFixture([
       progressRow({
-        headCreatedAt: "2026-08-10T15:00:00.000Z",
+        progressOriginAt: "2026-08-10T15:00:00.000Z",
         lane: "system",
         runtimeKey: "runtime_a",
       }),
@@ -265,14 +265,16 @@ describe("hosted runtime progress alert monitor", () => {
 });
 
 function progressRow(input: {
-  headCreatedAt: string;
+  chronologyInvalid?: boolean;
+  progressOriginAt: string;
   lane: string;
   pendingCount?: bigint;
   runtimeKey: string;
   usageBlocked?: boolean;
 }): HostedRuntimeProgressHealthRow {
   return {
-    headCreatedAt: instant(input.headCreatedAt),
+    chronologyInvalid: input.chronologyInvalid ?? false,
+    progressOriginAt: instant(input.progressOriginAt),
     lane: input.lane,
     pendingCount: input.pendingCount ?? 1n,
     runtimeKey: input.runtimeKey,
@@ -290,8 +292,17 @@ function createProgressMonitorFixture(
     return rows;
   });
   const hostedMemberFindMany = vi.fn(async () =>
-    [...new Set(rows.map((row) => row.runtimeKey))].map((id) => ({ id }))
+    [...new Set(rows.map((row) => row.runtimeKey))].map((id) => ({
+      accountGroupMemberships: [],
+      billingRef: null,
+      billingStatus: "active",
+      consentGrants: [],
+      id,
+      suspendedAt: null,
+      threadContainer: null,
+    }))
   );
+  const hostedThreadContainerParticipantFindMany = vi.fn(async () => []);
   const alertUpsert = vi.fn(async (args: AlertUpsertArgs) => {
     if (!state) {
       state = {
@@ -335,6 +346,9 @@ function createProgressMonitorFixture(
       },
       hostedMember: {
         findMany: hostedMemberFindMany,
+      },
+      hostedThreadContainerParticipant: {
+        findMany: hostedThreadContainerParticipantFindMany,
       },
     } as never,
     queryRaw,

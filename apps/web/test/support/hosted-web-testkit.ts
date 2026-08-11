@@ -181,6 +181,7 @@ interface HostedTestPrismaFactoryClient {
       payloadSchema: string | null;
       userId: string;
     }>;
+    updateMany(args: unknown): Promise<{ count: number }>;
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
@@ -467,6 +468,11 @@ interface HostedTestPrismaModule {
 }
 
 interface HostedMailboxAppendForTestStoreModule {
+  advanceHostedMailboxConsumedSeqByLane(input: {
+    lanes: readonly { consumedSeq: string; lane: string }[];
+    prisma: unknown;
+    userId: string;
+  }): Promise<Array<{ consumedSeq: string; lane: string }>>;
   appendHostedMailboxEnvelopeTx(input: {
     envelope: HostedExecutionWake;
     tx: unknown;
@@ -826,6 +832,55 @@ export async function readHostedMailboxItemForTest(input: {
   });
 }
 
+export async function ageHostedMailboxItemForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+  mailboxItemId: string;
+  userId: string;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted mailbox item test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const agedAt = new Date(Date.now() - input.ageMs);
+    const updated = await deps.prisma.hostedMailboxItem.updateMany({
+      data: {
+        createdAt: agedAt,
+        occurredAt: agedAt,
+      },
+      where: {
+        id: input.mailboxItemId,
+        userId: input.userId,
+      },
+    });
+    return { updated: updated.count === 1 };
+  });
+}
+
+export async function advanceHostedMailboxConsumedSeqForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  lane: "conversation" | "system";
+  seq: string;
+  userId: string;
+}): Promise<{ consumedSeq: string }> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const advanced = await deps.hostedMailboxStore
+      .advanceHostedMailboxConsumedSeqByLane({
+        lanes: [{ consumedSeq: input.seq, lane: input.lane }],
+        prisma: deps.prisma,
+        userId: input.userId,
+      });
+    const lane = advanced.find((entry) => entry.lane === input.lane);
+    if (!lane) {
+      throw new Error("Hosted mailbox test progress did not return its lane.");
+    }
+    return { consumedSeq: lane.consumedSeq };
+  });
+}
+
 export async function setLatestHostedLinqReplyLatencyForTest(input: {
   environment?: NodeJS.ProcessEnv;
   latencyMs: number;
@@ -963,6 +1018,49 @@ export async function ageHostedRuntimeLatencyAlertForTest(input: {
 
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
     const monitorId = "hosted-runtime-latency-monitor:v1";
+    const state = await deps.prisma.hostedLinqAlert.findUnique({
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    if (!state) {
+      return { updated: false };
+    }
+
+    const agedAt = new Date(Date.now() - input.ageMs);
+    await deps.prisma.hostedLinqAlert.update({
+      data: {
+        lastAttemptedAt: state.lastAttemptedAt ? agedAt : null,
+        sentAt: state.sentAt ? agedAt : null,
+      },
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    return { updated: true };
+  });
+}
+
+export async function ageHostedRuntimeProgressAlertForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted runtime progress alert test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const monitorId = "hosted-runtime-progress-monitor:v1";
     const state = await deps.prisma.hostedLinqAlert.findUnique({
       select: {
         lastAttemptedAt: true,
@@ -1975,6 +2073,8 @@ async function loadHostedMailboxAppendForTestModules(): Promise<HostedMailboxApp
     hostedMailboxStoreModule as HostedMailboxAppendForTestStoreModule;
 
   return {
+    advanceHostedMailboxConsumedSeqByLane:
+      typedHostedMailboxStoreModule.advanceHostedMailboxConsumedSeqByLane,
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
   };
 }

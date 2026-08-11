@@ -42,7 +42,8 @@ Updated: 2026-08-10
 
 - PostgreSQL remains the mailbox and alert-state owner; the monitor is
   read-only apart from its existing operational-alert row.
-- Active-member filtering reuses the canonical set-based access predicate.
+- Runtime filtering reuses the canonical exact AI-access decision through its
+  participant-aware batch form.
 - Live-item filtering follows the mailbox owner's 14-day retention and expiry
   semantics.
 - The monitor must fail visibly when enabled Resend configuration is incomplete
@@ -54,14 +55,20 @@ Updated: 2026-08-10
    Mitigation: use the clean-handling mailbox high-water and a 15-minute age
    boundary, not transient runner state or a single retry.
 2. Risk: inactive or usage-blocked accounts could create permanent noise.
-   Mitigation: filter through active hosted access and suppress conversation
-   heads that have a valid usage-denial stamp with no later execution evidence.
+   Mitigation: filter through exact runtime AI access and suppress conversation
+   heads that have a valid usage-denial stamp with no later execution evidence;
+   resumed work ages from its first post-denial staging, provider, delivery, or
+   durable consumption milestone.
 3. Risk: overlapping cron invocations or ambiguous Resend outcomes could spam.
    Mitigation: reuse the latency monitor's compare-and-set incident lifecycle,
    send lease, stable idempotency, quiet hours, and paced retries.
 4. Risk: operational evidence could disclose customer data.
    Mitigation: persist and email aggregate lane counts, pending counts, ages,
    thresholds, and truncation only.
+5. Risk: one monitor failure could detach its still-running sibling when the
+   serverless request returns.
+   Mitigation: await both monitor outcomes before propagating either failure,
+   preserving a visible error response without stranding either incident owner.
 
 ## Tasks
 
@@ -82,10 +89,24 @@ Updated: 2026-08-10
   - Preliminary `completion-specialists` and final ReviewGPT gates on the exact
     pushed candidate while required PR CI runs.
 - Results so far:
-  - Focused latency/progress/cron Vitest proof passed: 3 files, 53 tests.
+  - Focused latency/progress/cron Vitest proof passed after review remediation:
+    3 files, 55 tests; the opt-in PostgreSQL file skipped in the ordinary run.
+  - The dedicated local-PostgreSQL boundary passed against all 172 production
+    migrations: 1 file, 1 rollback-only test. It covers exact personal/group
+    authority, ineligible participant variants, denial/resume chronology,
+    truncation, and exclusions ahead of the cap.
   - The production migration/schedule guard passed: 1 file, 53 tests.
-  - Focused ESLint, the Web typecheck, and `git diff --check` passed.
+  - Focused ESLint, Web and Cloudflare typechecks, and `git diff --check`
+    passed. The runner bundle also assembled successfully.
   - A read-only aggregate production query confirmed that the bounded scan
     detects current alertable stalls and completed in about 36 ms; no direct
     identifiers or row payloads were persisted in task artifacts.
-  - ReviewGPT specialist/final gates and exact-head PR CI remain pending.
+  - Preliminary specialists and final ReviewGPT round 1 found access-authority,
+    post-denial timing, production-fidelity, full-stack coverage, and sibling
+    request-lifetime gaps. All findings were accepted and corrected; a fresh
+    final review on the corrected pushed head remains pending.
+  - The hosted-local command reached and passed runner-bundle assembly, then
+    stopped before service launch because no Docker executable is installed in
+    this environment. The scenario is typechecked and remains the CI-owned
+    full-stack proof.
+  - Exact-head PR CI remains pending for the corrected candidate.

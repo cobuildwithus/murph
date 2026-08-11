@@ -2,9 +2,10 @@ import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
 
-import { HOSTED_HEALTH_DATA_CONSENT_SCOPE } from "../legal/consent";
 import { HOSTED_MAILBOX_RETENTION_MS } from "../hosted-mailbox/store";
-import { activeHostedMemberAccessWhere } from "../hosted-onboarding/member-access";
+import {
+  readHostedRuntimeAiAllowedMemberIds,
+} from "../hosted-onboarding/member-access";
 import {
   runHostedOperationalEmailIncident,
   type HostedOperationalAlertMonitorOutcome,
@@ -26,6 +27,7 @@ const HOSTED_RUNTIME_PROGRESS_MONITOR_SCHEMA =
 const HOSTED_RUNTIME_PROGRESS_MONITOR_SUBJECT =
   "Hosted runtime progress stalled";
 const HOSTED_RUNTIME_PROGRESS_READ_LIMIT = 20_000;
+const HOSTED_RUNTIME_PROGRESS_READ_PAGE_SIZE = 500;
 
 const MONITOR_STATUS = {
   alertFailed: "progress_alert_failed",
@@ -35,13 +37,17 @@ const MONITOR_STATUS = {
 } as const;
 
 type HostedRuntimeProgressPrismaClient =
-  & Pick<PrismaClient, "$queryRaw" | "hostedMember">
+  & Pick<
+    PrismaClient,
+    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
+  >
   & HostedOperationalAlertPrismaClient;
 
 export interface HostedRuntimeProgressHealthRow {
-  headCreatedAt: Date;
+  chronologyInvalid: boolean;
   lane: string;
   pendingCount: bigint;
+  progressOriginAt: Date;
   runtimeKey: string;
   usageBlocked: boolean;
 }
@@ -140,7 +146,10 @@ export async function runHostedRuntimeProgressAlertMonitor(input: {
 
 export async function readHostedRuntimeProgressHealth(input: {
   now?: Date;
-  prisma?: Pick<PrismaClient, "$queryRaw" | "hostedMember">;
+  prisma?: Pick<
+    PrismaClient,
+    "$queryRaw" | "hostedMember" | "hostedThreadContainerParticipant"
+  >;
 } = {}): Promise<HostedRuntimeProgressHealth> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
@@ -148,7 +157,102 @@ export async function readHostedRuntimeProgressHealth(input: {
     now.getTime() - HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS,
   );
   const retainedAfter = new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
-  const rows = await prisma.$queryRaw<HostedRuntimeProgressQueryRow[]>(Prisma.sql`
+  const alertableRows: HostedRuntimeProgressQueryRow[] = [];
+  let cursor: HostedRuntimeProgressReadCursor | null = null;
+  let excludedInactiveLaneCount = 0;
+  let excludedUsageBlockedConversationLaneCount = 0;
+
+  while (alertableRows.length <= HOSTED_RUNTIME_PROGRESS_READ_LIMIT) {
+    const page = await readHostedRuntimeProgressCandidatePage({
+      cursor,
+      now,
+      prisma,
+      retainedAfter,
+      stalledBefore,
+    });
+    if (page.length === 0) {
+      break;
+    }
+
+    const allowedRuntimeKeys = await readHostedRuntimeAiAllowedMemberIds({
+      memberIds: [...new Set(page.map((row) => row.runtimeKey))],
+      now,
+      prisma,
+    });
+    for (const row of page) {
+      if (!allowedRuntimeKeys.has(row.runtimeKey)) {
+        excludedInactiveLaneCount += 1;
+        continue;
+      }
+      if (row.usageBlocked && row.lane === "conversation") {
+        excludedUsageBlockedConversationLaneCount += 1;
+        continue;
+      }
+      alertableRows.push(row);
+      if (alertableRows.length > HOSTED_RUNTIME_PROGRESS_READ_LIMIT) {
+        break;
+      }
+    }
+
+    const last = page.at(-1);
+    if (!last) {
+      break;
+    }
+    cursor = {
+      lane: last.lane,
+      progressOriginAt: last.progressOriginAt,
+      runtimeKey: last.runtimeKey,
+    };
+    if (
+      alertableRows.length > HOSTED_RUNTIME_PROGRESS_READ_LIMIT
+      || page.length < HOSTED_RUNTIME_PROGRESS_READ_PAGE_SIZE
+    ) {
+      break;
+    }
+  }
+
+  const scanTruncated =
+    alertableRows.length > HOSTED_RUNTIME_PROGRESS_READ_LIMIT;
+  const visibleRows = scanTruncated
+    ? alertableRows.slice(0, HOSTED_RUNTIME_PROGRESS_READ_LIMIT)
+    : alertableRows;
+  return summarizeHostedRuntimeProgressRows({
+    activeRuntimeKeys: [...new Set(visibleRows.map((row) => row.runtimeKey))],
+    excludedInactiveLaneCount,
+    excludedUsageBlockedConversationLaneCount,
+    now,
+    rows: visibleRows,
+    scanTruncated,
+  });
+}
+
+interface HostedRuntimeProgressReadCursor {
+  lane: string;
+  progressOriginAt: Date;
+  runtimeKey: string;
+}
+
+async function readHostedRuntimeProgressCandidatePage(input: {
+  cursor: HostedRuntimeProgressReadCursor | null;
+  now: Date;
+  prisma: Pick<PrismaClient, "$queryRaw">;
+  retainedAfter: Date;
+  stalledBefore: Date;
+}): Promise<HostedRuntimeProgressQueryRow[]> {
+  const cursorWhere = input.cursor === null
+    ? Prisma.empty
+    : Prisma.sql`
+        AND (
+          progress_lane.progress_origin_at,
+          progress_lane.user_id,
+          progress_lane.lane
+        ) > (
+          ${input.cursor.progressOriginAt},
+          ${input.cursor.runtimeKey},
+          ${input.cursor.lane}
+        )
+      `;
+  return await input.prisma.$queryRaw<HostedRuntimeProgressQueryRow[]>(Prisma.sql`
     WITH lane_boundary AS (
       SELECT
         lane_counter.user_id,
@@ -158,17 +262,15 @@ export async function readHostedRuntimeProgressHealth(input: {
           oldest_live.lane_seq - 1::bigint
         ) AS effective_consumed_seq
       FROM hosted_mailbox_lane_counter AS lane_counter
-      JOIN hosted_workspace AS workspace
-        ON workspace.user_id = lane_counter.user_id
       JOIN LATERAL (
         SELECT mailbox_item.lane_seq
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = lane_counter.user_id
           AND mailbox_item.lane = lane_counter.lane
-          AND mailbox_item.created_at > ${retainedAfter}
+          AND mailbox_item.created_at > ${input.retainedAfter}
           AND (
             mailbox_item.expires_at IS NULL
-            OR mailbox_item.expires_at > ${now}
+            OR mailbox_item.expires_at > ${input.now}
           )
         ORDER BY mailbox_item.lane_seq ASC
         LIMIT 1
@@ -180,6 +282,7 @@ export async function readHostedRuntimeProgressHealth(input: {
         lane_boundary.user_id,
         lane_boundary.lane,
         pending_head.ai_usage_denied_at AS head_usage_denied_at,
+        pending_head.consumed_at AS head_consumed_at,
         pending_head.created_at AS head_created_at,
         pending_head.id AS head_item_id,
         pending_head.pending_count
@@ -187,6 +290,7 @@ export async function readHostedRuntimeProgressHealth(input: {
       JOIN LATERAL (
         SELECT
           mailbox_item.ai_usage_denied_at,
+          mailbox_item.consumed_at,
           mailbox_item.created_at,
           mailbox_item.id,
           COUNT(*) OVER () AS pending_count
@@ -194,81 +298,129 @@ export async function readHostedRuntimeProgressHealth(input: {
         WHERE mailbox_item.user_id = lane_boundary.user_id
           AND mailbox_item.lane = lane_boundary.lane
           AND mailbox_item.lane_seq > lane_boundary.effective_consumed_seq
-          AND mailbox_item.created_at > ${retainedAfter}
+          AND mailbox_item.created_at > ${input.retainedAfter}
           AND (
             mailbox_item.expires_at IS NULL
-            OR mailbox_item.expires_at > ${now}
+            OR mailbox_item.expires_at > ${input.now}
           )
         ORDER BY mailbox_item.lane_seq ASC
         LIMIT 1
       ) AS pending_head ON TRUE
+    ),
+    progress_evidence AS (
+      SELECT
+        lagging_lane.*,
+        evidence.first_post_denial_at,
+        COALESCE(evidence.has_future_evidence, FALSE) AS has_future_evidence,
+        COALESCE(
+          evidence.has_pre_denial_evidence,
+          FALSE
+        ) AS has_pre_denial_evidence
+      FROM lagging_lane
+      LEFT JOIN hosted_ingress_latency_trace AS trace
+        ON trace.user_id = lagging_lane.user_id
+        AND trace.mailbox_item_id = lagging_lane.head_item_id
+      LEFT JOIN hosted_linq_delivery AS delivery
+        ON delivery.id = trace.linq_delivery_id
+      LEFT JOIN LATERAL (
+        SELECT
+          MIN(execution_evidence.at) FILTER (
+            WHERE execution_evidence.at > lagging_lane.head_usage_denied_at
+              AND execution_evidence.at <= ${input.now}
+          ) AS first_post_denial_at,
+          COALESCE(
+            BOOL_OR(execution_evidence.at > ${input.now}),
+            FALSE
+          ) AS has_future_evidence,
+          COALESCE(
+            BOOL_OR(
+              execution_evidence.at <= lagging_lane.head_usage_denied_at
+            ),
+            FALSE
+          ) AS has_pre_denial_evidence
+        FROM (
+          VALUES
+            (trace.assistant_input_staged_at),
+            (trace.provider_start_at),
+            (delivery.accepted_at),
+            (lagging_lane.head_consumed_at)
+        ) AS execution_evidence(at)
+        WHERE execution_evidence.at IS NOT NULL
+      ) AS evidence ON TRUE
+    ),
+    progress_lane AS (
+      SELECT
+        progress_evidence.user_id,
+        progress_evidence.lane,
+        progress_evidence.pending_count,
+        CASE
+          WHEN progress_evidence.lane = 'conversation'
+            AND progress_evidence.head_usage_denied_at IS NOT NULL
+            AND progress_evidence.head_usage_denied_at
+              >= progress_evidence.head_created_at
+            AND progress_evidence.head_usage_denied_at <= ${input.now}
+            AND NOT progress_evidence.has_pre_denial_evidence
+            AND progress_evidence.first_post_denial_at IS NOT NULL
+            THEN progress_evidence.first_post_denial_at
+          ELSE progress_evidence.head_created_at
+        END AS progress_origin_at,
+        (
+          progress_evidence.lane = 'conversation'
+          AND progress_evidence.head_usage_denied_at IS NOT NULL
+          AND (
+            progress_evidence.head_usage_denied_at
+              < progress_evidence.head_created_at
+            OR progress_evidence.head_usage_denied_at > ${input.now}
+            OR progress_evidence.has_future_evidence
+          )
+        ) AS chronology_invalid,
+        (
+          progress_evidence.lane = 'conversation'
+          AND progress_evidence.head_usage_denied_at IS NOT NULL
+          AND progress_evidence.head_usage_denied_at
+            >= progress_evidence.head_created_at
+          AND progress_evidence.head_usage_denied_at <= ${input.now}
+          AND NOT progress_evidence.has_pre_denial_evidence
+          AND progress_evidence.first_post_denial_at IS NULL
+          AND NOT progress_evidence.has_future_evidence
+        ) AS usage_blocked
+      FROM progress_evidence
     )
     SELECT
-      lagging_lane.user_id AS "runtimeKey",
-      lagging_lane.lane,
-      lagging_lane.head_created_at AS "headCreatedAt",
-      lagging_lane.pending_count AS "pendingCount",
-      (
-        lagging_lane.lane = 'conversation'
-        AND lagging_lane.head_usage_denied_at IS NOT NULL
-        AND lagging_lane.head_usage_denied_at >= lagging_lane.head_created_at
-        AND lagging_lane.head_usage_denied_at <= ${now}
-        AND NOT COALESCE(
-          trace.assistant_input_staged_at > lagging_lane.head_usage_denied_at
-          OR trace.provider_start_at > lagging_lane.head_usage_denied_at
-          OR delivery.accepted_at > lagging_lane.head_usage_denied_at,
-          FALSE
-        )
-      ) AS "usageBlocked"
-    FROM lagging_lane
-    LEFT JOIN hosted_ingress_latency_trace AS trace
-      ON trace.user_id = lagging_lane.user_id
-      AND trace.mailbox_item_id = lagging_lane.head_item_id
-    LEFT JOIN hosted_linq_delivery AS delivery
-      ON delivery.id = trace.linq_delivery_id
-    WHERE lagging_lane.head_created_at <= ${stalledBefore}
-    ORDER BY lagging_lane.head_created_at ASC
-    LIMIT ${HOSTED_RUNTIME_PROGRESS_READ_LIMIT + 1}
+      progress_lane.chronology_invalid AS "chronologyInvalid",
+      progress_lane.lane,
+      progress_lane.pending_count AS "pendingCount",
+      progress_lane.progress_origin_at AS "progressOriginAt",
+      progress_lane.user_id AS "runtimeKey",
+      progress_lane.usage_blocked AS "usageBlocked"
+    FROM progress_lane
+    WHERE (
+      progress_lane.chronology_invalid
+      OR progress_lane.usage_blocked
+      OR progress_lane.progress_origin_at <= ${input.stalledBefore}
+    )
+    ${cursorWhere}
+    ORDER BY
+      progress_lane.progress_origin_at ASC,
+      progress_lane.user_id ASC,
+      progress_lane.lane ASC
+    LIMIT ${HOSTED_RUNTIME_PROGRESS_READ_PAGE_SIZE}
   `);
-  const scanTruncated = rows.length > HOSTED_RUNTIME_PROGRESS_READ_LIMIT;
-  const visibleRows = scanTruncated
-    ? rows.slice(0, HOSTED_RUNTIME_PROGRESS_READ_LIMIT)
-    : rows;
-  const runtimeKeys = [...new Set(visibleRows.map((row) => row.runtimeKey))];
-  const activeRows = runtimeKeys.length === 0
-    ? []
-    : await prisma.hostedMember.findMany({
-        select: { id: true },
-        where: {
-          ...activeHostedMemberAccessWhere(),
-          consentGrants: {
-            none: {
-              scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE,
-              status: "revoked",
-            },
-          },
-          id: { in: runtimeKeys },
-        },
-      });
-
-  return summarizeHostedRuntimeProgressRows({
-    activeRuntimeKeys: activeRows.map((row) => row.id),
-    now,
-    rows: visibleRows,
-    scanTruncated,
-  });
 }
 
 export function summarizeHostedRuntimeProgressRows(input: {
   activeRuntimeKeys: readonly string[];
+  excludedInactiveLaneCount?: number;
+  excludedUsageBlockedConversationLaneCount?: number;
   now: Date;
   rows: readonly HostedRuntimeProgressHealthRow[];
   scanTruncated?: boolean;
 }): HostedRuntimeProgressHealth {
   const activeRuntimeKeys = new Set(input.activeRuntimeKeys);
   const stalledRuntimeKeys = new Set<string>();
-  let excludedInactiveLaneCount = 0;
-  let excludedUsageBlockedConversationLaneCount = 0;
+  let excludedInactiveLaneCount = input.excludedInactiveLaneCount ?? 0;
+  let excludedUsageBlockedConversationLaneCount =
+    input.excludedUsageBlockedConversationLaneCount ?? 0;
   let invalidRowCount = 0;
   let oldestStalledAgeMs: number | null = null;
   let pendingItemCount = 0;
@@ -281,14 +433,18 @@ export function summarizeHostedRuntimeProgressRows(input: {
       excludedInactiveLaneCount += 1;
       continue;
     }
+    if (row.chronologyInvalid) {
+      invalidRowCount += 1;
+      continue;
+    }
     if (row.usageBlocked && row.lane === "conversation") {
       excludedUsageBlockedConversationLaneCount += 1;
       continue;
     }
-    const headCreatedAtMs = row.headCreatedAt.getTime();
+    const progressOriginAtMs = row.progressOriginAt.getTime();
     if (
-      !Number.isFinite(headCreatedAtMs)
-      || headCreatedAtMs > input.now.getTime()
+      !Number.isFinite(progressOriginAtMs)
+      || progressOriginAtMs > input.now.getTime()
       || row.pendingCount <= 0n
       || (row.lane !== "conversation" && row.lane !== "system")
     ) {
@@ -296,7 +452,7 @@ export function summarizeHostedRuntimeProgressRows(input: {
       continue;
     }
     if (
-      input.now.getTime() - headCreatedAtMs
+      input.now.getTime() - progressOriginAtMs
         < HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS
     ) {
       continue;
@@ -306,7 +462,7 @@ export function summarizeHostedRuntimeProgressRows(input: {
     stalledRuntimeKeys.add(row.runtimeKey);
     oldestStalledAgeMs = Math.max(
       oldestStalledAgeMs ?? 0,
-      input.now.getTime() - headCreatedAtMs,
+      input.now.getTime() - progressOriginAtMs,
     );
     pendingItemCount = addBoundedCount(pendingItemCount, row.pendingCount);
     if (row.lane === "conversation") {

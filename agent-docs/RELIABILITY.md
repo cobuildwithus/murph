@@ -638,10 +638,14 @@ Last verified: 2026-08-10
   item retention/expiry semantics and clean-handling lane high-water to catch
   error-code-independent stalls. An active runtime is anomalous when the oldest
   live item beyond that high-water remains pending for at least 15 minutes.
-  System and conversation lanes are covered, while inactive members, withdrawn
-  health-data consent, and a valid conversation usage denial with no later
-  execution evidence are excluded because those runtimes are not expected to
-  advance. Its bounded scan, persisted state, and email contain aggregate
+  System and conversation lanes are covered. Eligibility uses the canonical
+  runtime AI-access decision, including current thread-container participants,
+  so inactive or consent-withdrawn people are excluded without suppressing an
+  authorized group runtime. A valid conversation usage denial with no later
+  execution evidence is also excluded; resumed work ages from its earliest
+  post-denial staging, provider, delivery, or durable consumption milestone.
+  Paging applies the alert cap only after
+  those exclusions. Its bounded scan, persisted state, and email contain aggregate
   runtime/lane counts, pending counts, timings, and invalid/truncated evidence
   only; they never contain member, mailbox, phone, message, trace, or exception
   identifiers. The progress and latency incidents rearm independently, so one

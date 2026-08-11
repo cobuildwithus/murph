@@ -76,4 +76,64 @@ describe("hosted runtime latency alert cron", () => {
     expect(mocks.runHostedRuntimeLatencyAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeProgressAlertMonitor).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      failing: "progress",
+    },
+    {
+      failing: "latency",
+    },
+  ] as const)(
+    "awaits the sibling monitor before reporting a $failing failure",
+    async ({ failing }) => {
+      let releaseHeldMonitor: (() => void) | undefined;
+      let heldMonitorFinished = false;
+      const heldMonitor = new Promise<void>((resolve) => {
+        releaseHeldMonitor = resolve;
+      }).then(() => {
+        heldMonitorFinished = true;
+        return {
+          configured: true,
+          health: { anomalous: false },
+          outcome: "healthy",
+        };
+      });
+      const failedMonitor = Promise.reject(new Error(`${failing} failed`));
+
+      mocks.runHostedRuntimeLatencyAlertMonitor.mockReturnValue(
+        failing === "latency" ? failedMonitor : heldMonitor,
+      );
+      mocks.runHostedRuntimeProgressAlertMonitor.mockReturnValue(
+        failing === "progress" ? failedMonitor : heldMonitor,
+      );
+
+      let routeSettled = false;
+      const responsePromise = GET(new Request(
+        "https://example.test/api/internal/hosted-runtime/latency-alert/cron",
+        {
+          headers: {
+            authorization: "Bearer latency-cron-secret",
+          },
+        },
+      )).then((response) => {
+        routeSettled = true;
+        return response;
+      });
+
+      await vi.waitFor(() => {
+        expect(mocks.runHostedRuntimeLatencyAlertMonitor).toHaveBeenCalled();
+        expect(mocks.runHostedRuntimeProgressAlertMonitor).toHaveBeenCalled();
+      });
+      await Promise.resolve();
+      expect(routeSettled).toBe(false);
+      expect(heldMonitorFinished).toBe(false);
+
+      releaseHeldMonitor?.();
+      const response = await responsePromise;
+
+      expect(heldMonitorFinished).toBe(true);
+      expect(response.status).toBe(500);
+    },
+  );
 });

@@ -6,7 +6,7 @@ import { runHostedRuntimeProgressAlertMonitor } from "@/src/lib/hosted-runtime-p
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const [latencyResult, progressResult] = await Promise.all([
+  const [latencyResult, progressResult] = await Promise.allSettled([
     runHostedRuntimeLatencyAlertMonitor({
       signal: request.signal,
     }),
@@ -15,8 +15,15 @@ export const GET = withJsonError(async (request: Request) => {
     }),
   ]);
 
+  if (latencyResult.status === "rejected") {
+    throw latencyResult.reason;
+  }
+  if (progressResult.status === "rejected") {
+    throw progressResult.reason;
+  }
+
   return jsonOk({
-    runtimeLatencyAlert: latencyResult,
-    runtimeProgressAlert: progressResult,
+    runtimeLatencyAlert: latencyResult.value,
+    runtimeProgressAlert: progressResult.value,
   });
 });

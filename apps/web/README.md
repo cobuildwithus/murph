@@ -788,10 +788,13 @@ Hosted onboarding extras:
   The separate progress monitor detects an active runtime whose live
   conversation or system mailbox lane has retained work beyond its durable
   clean-handling high-water for at least 15 minutes. It uses the mailbox
-  owner's existing expiry and 14-day retention rules, the canonical set-based
-  active-access projection, and the health-data-consent gate. A conversation
+  owner's existing expiry and 14-day retention rules plus the canonical exact
+  runtime AI-access decision, including current group-participant authority and
+  health-data consent. A conversation
   head with a valid AI-usage denial and no later execution evidence is an
-  intentional pause rather than a stall. The monitor reports aggregate runtime,
+  intentional pause rather than a stall; resumed work ages from its first
+  post-denial staging, provider, delivery, or durable consumption milestone.
+  The monitor reports aggregate runtime,
   lane, age, and pending-item counts only. It has its own singleton incident
   row, so an active reply-latency incident cannot suppress a newly discovered
   progress stall; recovery silently rearms each monitor independently.

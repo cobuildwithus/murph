@@ -121,6 +121,23 @@ const hostedRuntimeAiMemberAccessSelect = Prisma.validator<Prisma.HostedMemberSe
   },
 });
 
+const hostedRuntimeAiBatchMemberAccessSelect =
+  Prisma.validator<Prisma.HostedMemberSelect>()({
+    ...hostedRuntimeAiMemberAccessSelect,
+    id: true,
+  });
+
+const hostedRuntimeAiBatchParticipantSelect =
+  Prisma.validator<Prisma.HostedThreadContainerParticipantSelect>()({
+    containerMemberId: true,
+    participant: {
+      select: {
+        ...hostedRuntimeAiPersonAccessSelect,
+        id: true,
+      },
+    },
+  });
+
 export type HostedMemberPersonAccessState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberPersonAccessSelect;
 }>;
@@ -175,7 +192,6 @@ export function isHostedRuntimeAiAccessNoticeCode(
 }
 
 const HOSTED_RUNTIME_AI_ACCESS_RETRY_MS = 15 * 60_000;
-const HOSTED_AI_USAGE_HOME_URL = "https://withmurph.ai/home";
 const HOSTED_HEALTH_DATA_CONSENT_SETTINGS_URL =
   "https://withmurph.ai/settings#data-privacy";
 // Lapsed billing recovers from the Subscription controls, not the dashboard: the
@@ -403,6 +419,93 @@ export async function readHostedRuntimeAiAccessDecision(input: {
     now,
     person: member,
   });
+}
+
+/**
+ * Batch form of the runtime AI-access owner used by bounded operational reads.
+ * It preserves the exact owner-or-current-participant authority of
+ * `readHostedRuntimeAiAccessDecision` in two set-based queries rather than
+ * falling back to the owner-only sweep approximation.
+ */
+export async function readHostedRuntimeAiAllowedMemberIds(input: {
+  memberIds: readonly string[];
+  now?: Date;
+  prisma?: Pick<
+    Prisma.TransactionClient,
+    "hostedMember" | "hostedThreadContainerParticipant"
+  >;
+}): Promise<Set<string>> {
+  const memberIds = [...new Set(input.memberIds)];
+  if (memberIds.length === 0) {
+    return new Set();
+  }
+
+  const prisma = input.prisma ?? getPrisma();
+  const now = input.now ?? new Date();
+  const members = await prisma.hostedMember.findMany({
+    select: hostedRuntimeAiBatchMemberAccessSelect,
+    where: {
+      id: { in: memberIds },
+    },
+  });
+  const containerMemberIds = members
+    .filter((member) => member.threadContainer !== null)
+    .map((member) => member.id);
+  const participantRows = containerMemberIds.length === 0
+    ? []
+    : await prisma.hostedThreadContainerParticipant.findMany({
+        select: hostedRuntimeAiBatchParticipantSelect,
+        where: {
+          ...activeHostedThreadContainerParticipantWhere({ now }),
+          containerMemberId: { in: containerMemberIds },
+        },
+      });
+  const participantsByContainer = new Map<
+    string,
+    typeof participantRows
+  >();
+  for (const row of participantRows) {
+    const rows = participantsByContainer.get(row.containerMemberId) ?? [];
+    rows.push(row);
+    participantsByContainer.set(row.containerMemberId, rows);
+  }
+
+  const allowedMemberIds = new Set<string>();
+  for (const member of members) {
+    if (isHostedMemberSuspended(member.suspendedAt)) {
+      continue;
+    }
+    if (!member.threadContainer) {
+      if (resolveHostedRuntimeAiPersonAccessDecision({
+        memberId: member.id,
+        now,
+        person: member,
+      }).allowed) {
+        allowedMemberIds.add(member.id);
+      }
+      continue;
+    }
+
+    const ownerAllowed = resolveHostedRuntimeAiPersonAccessDecision({
+      memberId: member.id,
+      now,
+      person: member.threadContainer.owner,
+    }).allowed;
+    const participantAllowed = (
+      participantsByContainer.get(member.id) ?? []
+    ).some(({ participant }) =>
+      resolveHostedRuntimeAiPersonAccessDecision({
+        memberId: participant.id,
+        now,
+        person: participant,
+      }).allowed
+    );
+    if (ownerAllowed || participantAllowed) {
+      allowedMemberIds.add(member.id);
+    }
+  }
+
+  return allowedMemberIds;
 }
 
 function resolveHostedRuntimeAiPersonAccessDecision(input: {
