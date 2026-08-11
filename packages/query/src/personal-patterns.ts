@@ -5,9 +5,14 @@ import {
 
 import type { CanonicalEntity } from "./canonical-entities.ts";
 import {
+  resolveAdherenceObservationActivityKind,
   resolveActivityEvidenceLocalDate,
   resolveInterventionSessionLocalDate,
 } from "./experiment-adherence.ts";
+import {
+  selectMetricSeries,
+  type MetricPoint,
+} from "./metrics/index.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import { buildWearableSummaryBundle } from "./wearables.ts";
 import type {
@@ -106,6 +111,11 @@ interface MatchedPair {
   exposedValue: number;
 }
 
+interface PatternWindow {
+  fromDate: string;
+  outcomeToDate: string;
+}
+
 export function buildPersonalPatternReport(
   vault: VaultReadModel,
   options: { asOf?: Date | string; windowDays?: number } = {},
@@ -122,6 +132,45 @@ export function buildPersonalPatternReportFromWearableBundle(
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
   options: { asOf?: Date | string; windowDays?: number } = {},
 ): PersonalPatternReport {
+  return buildPersonalPatternReportFromOutcomeSeries(
+    vault,
+    collectOutcomeSeries(
+      wearableBundle,
+      resolveWindow(options),
+      readVaultTimeZone(vault),
+    ),
+    options,
+  );
+}
+
+export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+  vault: VaultReadModel,
+  wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
+  metricPoints: readonly MetricPoint[],
+  options: { asOf?: Date | string; windowDays?: number } = {},
+): PersonalPatternReport {
+  const window = resolveWindow(options);
+  const wearableOutcomes = collectOutcomeSeries(
+    wearableBundle,
+    window,
+    readVaultTimeZone(vault),
+  );
+  const wearableOutcomeIds = new Set(wearableOutcomes.map((outcome) => outcome.id));
+  const fallbackOutcomes = collectMetricPointRecoveryOutcomeSeries(metricPoints, window)
+    .filter((outcome) => !wearableOutcomeIds.has(outcome.id));
+
+  return buildPersonalPatternReportFromOutcomeSeries(
+    vault,
+    [...wearableOutcomes, ...fallbackOutcomes],
+    options,
+  );
+}
+
+function buildPersonalPatternReportFromOutcomeSeries(
+  vault: VaultReadModel,
+  outcomes: readonly OutcomeSeries[],
+  options: { asOf?: Date | string; windowDays?: number },
+): PersonalPatternReport {
   const asOfDate = resolveAsOfDate(options.asOf);
   const windowDays = normalizeWindowDays(options.windowDays);
   const fromDate = addDays(asOfDate, -(windowDays - 1));
@@ -130,12 +179,6 @@ export function buildPersonalPatternReportFromWearableBundle(
     .filter((factor) => factor.observedDays >= MIN_MATCHED_DAYS);
   const factorDatesById = new Map(
     [...factorAccumulators.values()].map((factor) => [factor.token, factor.dates] as const),
-  );
-  const outcomes = collectOutcomeSeries(
-    wearableBundle,
-    fromDate,
-    addDays(asOfDate, 1),
-    readVaultTimeZone(vault),
   );
   const candidateCells = candidateFactors.flatMap((factor) =>
     outcomes.map((outcome) => buildPatternCell(
@@ -246,9 +289,9 @@ function readFactorCandidate(
   event: CanonicalEntity,
 ): { kind: "activity" | "intervention"; token: string } | null {
   if (event.kind === "activity_session") {
-    const token = canonicalFactorToken(normalizeActivityKindToken(
-      readString(event.attributes.activityType) ?? readString(event.attributes.activityKind),
-    ));
+    const token = canonicalFactorToken(resolveAdherenceObservationActivityKind({
+      attributes: event.attributes,
+    }));
     return token && !OUTCOME_LIKE_FACTOR_TOKENS.has(token)
       ? { kind: "activity", token }
       : null;
@@ -270,10 +313,10 @@ function readFactorCandidate(
 
 function collectOutcomeSeries(
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
-  fromDate: string,
-  toDate: string,
+  window: PatternWindow,
   fallbackTimeZone: string | null,
 ): OutcomeSeries[] {
+  const { fromDate, outcomeToDate: toDate } = window;
   const sleep = wearableBundle.sleepNights
     .filter(isWearableSleepPatternEligibleNight)
     .filter((day) => {
@@ -291,6 +334,49 @@ function collectOutcomeSeries(
     outcome("hrv", "HRV", "ms", 2, 0.05, recovery, (day) => day.hrv),
     outcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, recovery, (day) => day.restingHeartRate),
   ].filter((series) => series.values.size >= MIN_MATCHED_DAYS * 2);
+}
+
+function collectMetricPointRecoveryOutcomeSeries(
+  metricPoints: readonly MetricPoint[],
+  window: PatternWindow,
+): OutcomeSeries[] {
+  return [
+    metricPointOutcome("readiness-score", "Readiness score", "score", 3, 0.03, "readiness-score", metricPoints, window),
+    metricPointOutcome("hrv", "HRV", "ms", 2, 0.05, "hrv-rmssd", metricPoints, window),
+    metricPointOutcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, "resting-heart-rate", metricPoints, window),
+  ].filter((series) => series.values.size >= MIN_MATCHED_DAYS * 2);
+}
+
+function metricPointOutcome(
+  id: string,
+  label: string,
+  unit: string,
+  meaningfulAbsoluteDelta: number,
+  meaningfulRelativeDelta: number,
+  metricKey: string,
+  metricPoints: readonly MetricPoint[],
+  window: PatternWindow,
+): OutcomeSeries {
+  const rows = selectMetricSeries({
+    from: window.fromDate,
+    metricKey,
+    points: metricPoints,
+    to: window.outcomeToDate,
+  }).rows;
+  return {
+    id,
+    label,
+    meaningfulAbsoluteDelta,
+    meaningfulRelativeDelta,
+    unit,
+    values: new Map(
+      rows.flatMap((row) =>
+        row.confidence !== "none" && row.value !== null
+          ? [[row.date, row.value] as const]
+          : []
+      ),
+    ),
+  };
 }
 
 function outcome<T extends { date: string }>(
@@ -430,6 +516,17 @@ function hasRepeatedDirection(pairs: readonly MatchedPair[], fullDelta: number):
   const firstDelta = mean(first.map((pair) => pair.exposedValue - pair.comparisonValue));
   const secondDelta = mean(second.map((pair) => pair.exposedValue - pair.comparisonValue));
   return Math.sign(firstDelta) === Math.sign(fullDelta) && Math.sign(secondDelta) === Math.sign(fullDelta);
+}
+
+function resolveWindow(
+  options: { asOf?: Date | string; windowDays?: number },
+): PatternWindow {
+  const asOfDate = resolveAsOfDate(options.asOf);
+  const windowDays = normalizeWindowDays(options.windowDays);
+  return {
+    fromDate: addDays(asOfDate, -(windowDays - 1)),
+    outcomeToDate: addDays(asOfDate, 1),
+  };
 }
 
 function resolveAsOfDate(value: Date | string | undefined): string {

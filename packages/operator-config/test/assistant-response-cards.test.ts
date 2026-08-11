@@ -11,9 +11,13 @@ import {
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppCardImageUrl,
   buildLinqIMessageAppLayout,
+  buildTelegramRichMessage,
+  exerciseRoutineResponseCardJsonSchema,
   renderAssistantResponseCardText,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
+  type ExerciseRoutineResponseCardV1,
+  type AssistantResponseCard,
 } from '../src/assistant-response-cards.ts'
 
 const COMPLETE_CARD: DailyNutritionResponseCard = {
@@ -47,6 +51,50 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
+}
+
+const ROUTINE_CARD: ExerciseRoutineResponseCardV1 = {
+  exercises: [
+    {
+      dose: '8 repetitions',
+      estimatedSeconds: 45,
+      images: [
+        {
+          alt: 'Person standing tall with the forearm on a door frame.',
+          source: 'exercise_catalog:ST170:1',
+          step: 'Setup',
+          url: 'https://cdn.example.test/doorway-stretch.png?x=1&y=2',
+        },
+      ],
+      instructions: [
+        'Stand tall without forcing the lower back.',
+        'Move only through a comfortable range.',
+      ],
+      name: 'Doorway stretch <easy>',
+    },
+    {
+      dose: '5 per side',
+      estimatedSeconds: 60,
+      images: [],
+      instructions: ['Turn slowly and keep the hips quiet.'],
+      name: 'Torso rotation',
+    },
+  ],
+  footer: 'Breathe normally.',
+  intensity: 'Easy',
+  kind: 'exercise_routine',
+  labels: {
+    dose: 'Dose',
+    exercise: 'Exercise',
+    time: 'Time',
+    visualGuide: 'Visual guide',
+  },
+  safety: 'Stop if pain or dizziness increases.',
+  subtitle: 'Shoulders and chest',
+  title: 'Short reset',
+  totalSeconds: 120,
+  transitionSeconds: 15,
+  version: 1,
 }
 
 function decodeAppCardUrl(url: string): unknown {
@@ -270,6 +318,184 @@ describe('assistant response cards', () => {
         legacyCompatibleCard,
       )
     }
+  })
+
+  it('keeps routine timing model-authored and renders one accessible rich message', () => {
+    expect(exerciseRoutineResponseCardJsonSchema).toMatchObject({
+      additionalProperties: false,
+      properties: {
+        exercises: { maxItems: 8, minItems: 1, type: 'array' },
+        kind: { const: 'exercise_routine' },
+        totalSeconds: { maximum: 3600, type: 'integer' },
+        version: { const: 1 },
+      },
+    })
+    expect(assistantResponseCardSchema.parse(ROUTINE_CARD)).toEqual(ROUTINE_CARD)
+    expect(assistantResponseCardSchema.parse({
+      ...ROUTINE_CARD,
+      totalSeconds: 480,
+    })).toMatchObject({ totalSeconds: 480 })
+
+    expect(renderAssistantResponseCardText(ROUTINE_CARD)).toContain(
+      'Doorway stretch <easy> — 8 repetitions (45s)',
+    )
+    const richMessage = buildTelegramRichMessage(ROUTINE_CARD)
+    expect(richMessage.html).toContain('<details>')
+    expect(richMessage.html).toContain(
+      '<details><summary>Doorway stretch &lt;easy&gt;</summary><p><b>Dose:</b> 8 repetitions · <b>Time:</b> 45s</p>',
+    )
+    expect(richMessage.html).toContain(
+      '</ol><tg-slideshow><img src="https://cdn.example.test/doorway-stretch.png?x=1&amp;y=2"/></tg-slideshow></details>',
+    )
+    expect(richMessage.html).not.toContain('<th>Exercise</th>')
+    expect(richMessage.html).toContain('Doorway stretch &lt;easy&gt;')
+    expect(richMessage.html).not.toContain('<figcaption>')
+    expect(richMessage.html).not.toContain('Person standing tall')
+  })
+
+  it('preserves nutrition goals in the Telegram rich projection', () => {
+    const richMessage = buildTelegramRichMessage(COMPLETE_CARD_V2)
+    expect(richMessage.html).toContain(
+      `<figure><img src="${buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2)}"/></figure>`,
+    )
+    expect(richMessage.html).toContain(
+      '<details><summary>Daily goals</summary><table bordered>',
+    )
+    expect(richMessage.html).toContain(
+      '<tr><td>Calories</td><td align="right">2,100 cal</td><td>🟠 Below target</td></tr>',
+    )
+    expect(richMessage.html).toContain(
+      '<tr><td>Protein</td><td align="right">100g</td><td>🟢 On target</td></tr>',
+    )
+    expect(richMessage.html).not.toContain('<summary>Goals</summary><ul>')
+    expect(richMessage.html).toContain('<table bordered striped>')
+  })
+
+  it('renders generic tables, workouts, and standings as Telegram rich cards', () => {
+    const genericTable = {
+      columns: ['Result <now>'],
+      footer: null,
+      kind: 'compact_table',
+      rows: [{ label: 'Mobility', values: ['Complete & calm'] }],
+      rowHeader: 'Exercise',
+      subtitle: null,
+      title: 'Today',
+      tracking: null,
+      version: 1,
+    } satisfies AssistantResponseCard
+    const workout = {
+      footer: 'Reply to log a set.',
+      kind: 'compact_table',
+      subtitle: null,
+      title: 'Strength',
+      tracking: {
+        entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+        kind: 'workout',
+        snapshotAt: '2026-08-11T10:00:00.000Z',
+      },
+      version: 1,
+      workout: {
+        exercises: [{
+          name: 'Goblet squat',
+          sets: [{ actual: '10', status: 'completed', target: '8–10' }],
+        }],
+        state: 'active',
+        version: 1,
+      },
+    } satisfies AssistantResponseCard
+    const standings = {
+      entries: [{
+        coverage: 'complete',
+        detail: null,
+        label: 'Team <A>',
+        points: 120,
+      }],
+      footer: null,
+      format: 'teams',
+      kind: 'challenge_standings',
+      objective: { kind: 'ranking' },
+      subtitle: null,
+      title: 'Weekly standings',
+      version: 1,
+    } satisfies AssistantResponseCard
+
+    expect(buildTelegramRichMessage(genericTable).html).toContain(
+      'Result &lt;now&gt;',
+    )
+    expect(buildTelegramRichMessage(genericTable).html).toContain(
+      'Complete &amp; calm',
+    )
+    expect(buildTelegramRichMessage(workout).html).toContain('Goblet squat')
+    expect(buildTelegramRichMessage(workout).html).toContain(
+      '1/1 sets complete',
+    )
+    expect(buildTelegramRichMessage(standings).html).toContain('Team &lt;A&gt;')
+    expect(renderAssistantResponseCardText(standings)).toContain(
+      'Team <A>: 120 points',
+    )
+  })
+
+  it('keeps exercise routine cards on the deterministic iMessage text fallback', () => {
+    expect(() => buildLinqIMessageAppLayout(ROUTINE_CARD)).toThrow(
+      'do not have a native iMessage layout',
+    )
+    expect(() => buildLinqIMessageAppCardUrl(ROUTINE_CARD)).toThrow(
+      'do not have a native iMessage app URL',
+    )
+  })
+
+  it('keeps a maximum-count routine within one rich message and one text fallback', () => {
+    const imageUrlPrefix = 'https://cdn.example.test/'
+    const maximumText = 'x'.repeat(160)
+    const maximumAltText = 'x'.repeat(500)
+    const longExerciseText = 'x'.repeat(80)
+    const maximumImageUrl = imageUrlPrefix.padEnd(500, 'a')
+    const maximumRoutine: ExerciseRoutineResponseCardV1 = {
+      ...ROUTINE_CARD,
+      exercises: Array.from({ length: 8 }, () => ({
+        dose: longExerciseText,
+        estimatedSeconds: 1,
+        images: [{
+          alt: maximumAltText,
+          source: 'exercise_catalog:EX001:1',
+          step: maximumText,
+          url: maximumImageUrl,
+        }],
+        instructions: [longExerciseText, longExerciseText],
+        name: longExerciseText,
+      })),
+      footer: maximumText,
+      intensity: maximumText,
+      labels: {
+        dose: maximumText,
+        exercise: maximumText,
+        time: maximumText,
+        visualGuide: maximumText,
+      },
+      safety: maximumText,
+      subtitle: maximumText,
+      title: maximumText,
+      totalSeconds: 8,
+      transitionSeconds: 0,
+    }
+
+    const parsed = assistantResponseCardSchema.parse(maximumRoutine)
+    expect(buildTelegramRichMessage(parsed).html.length).toBeLessThanOrEqual(
+      32_768,
+    )
+    expect(renderAssistantResponseCardText(parsed).length).toBeLessThanOrEqual(
+      4_096,
+    )
+
+    expect(() => assistantResponseCardSchema.parse({
+      ...maximumRoutine,
+      exercises: maximumRoutine.exercises.map((exercise) => ({
+        ...exercise,
+        dose: maximumText,
+        instructions: [maximumText, maximumText, maximumText],
+        name: maximumText,
+      })),
+    })).toThrow('text fallback must fit 4096 characters')
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {

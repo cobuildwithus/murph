@@ -6018,6 +6018,17 @@ describe('assistant outbox runtime', () => {
       code: 'ASSISTANT_DELIVERY_AMBIGUOUS',
     })
     expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
+
+    const laterDrain = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: seeded.intentId,
+      now: new Date('2026-04-08T04:30:00.000Z'),
+      vault: vaultRoot,
+    })
+
+    expect(laterDrain.intent.status).toBe('abandoned')
+    expect(laterDrain.intent.nextAttemptAt).toBeNull()
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledTimes(1)
   })
 
   it('replays only stale group-email planner roots while recipient sends stay fail-closed', async () => {

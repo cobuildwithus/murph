@@ -245,6 +245,32 @@ const HOSTED_LINQ_RESPONSE_CARD = {
     proteinGrams: { mealCount: 1, total: 35 },
   },
 } as const;
+const HOSTED_TELEGRAM_ROUTINE_CARD: NonNullable<
+  HostedAssistantDeliveryPayload["card"]
+> = {
+  exercises: [{
+    dose: "8 repetitions",
+    estimatedSeconds: 45,
+    images: [],
+    instructions: ["Move slowly."],
+    name: "Shoulder circles",
+  }],
+  footer: null,
+  intensity: "Easy",
+  kind: "exercise_routine",
+  labels: {
+    dose: "Dose",
+    exercise: "Exercise",
+    time: "Time",
+    visualGuide: "Visual guide",
+  },
+  safety: "Stop if pain increases.",
+  subtitle: null,
+  title: "Short reset",
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
+};
 type HostedVoiceMemoDeliveryMedia = Extract<
   HostedAssistantDeliveryMedia,
   { kind: "voice_memo" }
@@ -5671,6 +5697,58 @@ describe("hosted runtime callbacks", () => {
     },
   );
 
+  it("blocks a private Telegram rich card before provider entry when route authority is unavailable", async () => {
+    const target = "telegram_direct_rich_blocked";
+    const routeAuthority = {
+      channel: "telegram" as const,
+      containerMemberId: "member_123",
+      threadId: target,
+    };
+    const effect = createEffect({
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      card: HOSTED_TELEGRAM_ROUTINE_CARD,
+      threadId: "hid_telegram_direct_rich_blocked",
+      threadIsDirect: true,
+    });
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState({
+        delivery: null,
+        externalThreadRouteAuthority: routeAuthority,
+        intentId: effect.effectId,
+        lastError: null,
+        status: "pending",
+      }),
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies }) => {
+        await dependencies.sendTelegramRich({
+          fallbackMessage: "Readable card fallback.",
+          richMessage: { html: "<h2>Card</h2>" },
+          target,
+        });
+        throw new Error("unreachable without live route authority");
+      },
+    );
+    const providerFetch = vi.fn<typeof fetch>();
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub(),
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+    });
+
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
   it("best-effort stops Linq typing after foreground drain fails and swallows cleanup errors", async () => {
     const effect = createEffect({
       bindingDeliveryKind: "thread",
@@ -8327,6 +8405,128 @@ describe("hosted runtime callbacks", () => {
       }),
     ]);
   });
+
+  it.each([
+    ["nutrition", HOSTED_LINQ_RESPONSE_CARD],
+    ["routine", HOSTED_TELEGRAM_ROUTINE_CARD],
+  ] as const)(
+    "sends a private Telegram %s card through the hosted provider boundary",
+    async (_label, card) => {
+      const idempotencyKey = "assistant-outbox:intent_123";
+      const responseText = "Readable card fallback.";
+      const target = "telegram_direct_rich_123";
+      const routeAuthority = {
+        channel: "telegram" as const,
+        containerMemberId: "member_123",
+        threadId: target,
+      };
+      const effect = createEffect({
+        actorId: null,
+        answeredMailboxItemIds: [],
+        bindingDeliveryKind: "thread",
+        bindingDeliveryTarget: target,
+        card,
+        idempotencyKey,
+        identityId: null,
+        message: responseText,
+        threadId: "hid_telegram_direct_rich_123",
+        threadIsDirect: true,
+      });
+      const storedIntent = createPendingHostedDeliveryIntent({
+        actorId: null,
+        answeredMailboxItemIds: [],
+        automationAuthority: null,
+        bindingDelivery: { kind: "thread", target },
+        card,
+        channel: "telegram",
+        deliveryIdempotencyKey: idempotencyKey,
+        deliverySource: null,
+        emailHtml: null,
+        explicitTarget: null,
+        externalThreadRouteAuthority: routeAuthority,
+        identityId: null,
+        intentId: effect.effectId,
+        media: [],
+        message: responseText,
+        operation: null,
+        reviewedAssistantAskCompletionExpiresAt: null,
+        subject: null,
+        threadId: "hid_telegram_direct_rich_123",
+        threadIsDirect: true,
+      }) as AssistantOutboxIntent;
+      mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+        createMirrorState(storedIntent),
+      );
+      mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+      mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+        async ({ dependencies, dispatchHooks }) => {
+          await dispatchHooks?.preflightDispatchIntent?.({
+            intent: storedIntent,
+            now: new Date("2026-04-08T00:00:30.000Z"),
+            vault: HOSTED_WAKE.vaultRoot,
+          });
+          const delivery = await dependencies.sendTelegramRich({
+            fallbackMessage: responseText,
+            idempotencyKey,
+            replyToMessageId: null,
+            richMessage: { html: "<h2>Card</h2>" },
+            target,
+          });
+          return createDispatchResult({
+            delivery: createDelivery({
+              idempotencyKey,
+              messageLength: responseText.length,
+              providerMessageId: delivery.providerMessageId,
+              target: delivery.target,
+              targetKind: "thread",
+            }),
+            status: "sent",
+          });
+        },
+      );
+      const assertExternalThreadRouteAuthority = vi.fn(
+        async () => undefined,
+      );
+      const providerFetch = vi.fn<typeof fetch>(async (url, init) => {
+        expect(String(url)).toContain("/sendRichMessage");
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          chat_id: target,
+          rich_message: { html: "<h2>Card</h2>" },
+        });
+        return Response.json({
+          ok: true,
+          result: { message_id: 701 },
+        });
+      });
+
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertExternalThreadRouteAuthority,
+        }),
+        forwardedEnv: {},
+        platformEnv: {
+          TELEGRAM_API_BASE_URL: "https://telegram.example",
+          TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+          TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+        },
+        providerFetch,
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).resolves.toEqual([
+        expect.objectContaining({
+          deliveryStatus: "sent",
+          providerMessageId: "701",
+        }),
+      ]);
+
+      expect(assertExternalThreadRouteAuthority).toHaveBeenCalledWith(
+        routeAuthority,
+        { signal: null },
+      );
+      expect(providerFetch).toHaveBeenCalledOnce();
+    },
+  );
 
   it("verifies private Telegram image bytes before provider dispatch and sends multipart", async () => {
     const fallbackDescription =

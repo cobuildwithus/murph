@@ -666,9 +666,9 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.referenceImageRefs.description)
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.referenceImageRefs.description)
       .toContain('skill-assets/murph-character-sheet-v1.png')
-    expect(MURPH_GROUP_TOOL.inputSchema.properties.action.enum).toContain(
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.action.enum).toContain(
       'set_chat_avatar',
     )
   })
