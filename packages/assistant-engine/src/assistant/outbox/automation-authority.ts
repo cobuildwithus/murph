@@ -39,9 +39,10 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
     return createAssistantOutboxAutomationAuthorityStaleError()
   }
 
+  const authorityNow = new Date()
   const current = await readAssistantOutboxAuthorizedAutomation({
     authority,
-    now: new Date(),
+    now: authorityNow,
     vault: input.vault,
   })
   if (!current) {
@@ -77,13 +78,13 @@ export async function resolveAssistantOutboxAutomationAuthorityError(input: {
     current.record.automationId ===
     MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
   ) {
-    if (current.record.schedule.kind !== 'at') {
-      return createAssistantOutboxAutomationAuthorityStaleError()
-    }
     const onboardingAuthority =
       await runOnboardingGoalCheckinAuthorityPrecondition({
         automationId: current.record.automationId,
-        occurrenceAt: current.record.schedule.at,
+        occurrenceAt:
+          current.record.schedule.kind === 'at'
+            ? current.record.schedule.at
+            : authorityNow.toISOString(),
         vault: input.vault,
       })
     if (onboardingAuthority.kind === 'skip') {
