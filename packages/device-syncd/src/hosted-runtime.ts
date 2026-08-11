@@ -1,5 +1,10 @@
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 
+import {
+  parseSerializableConfiguredDeviceSyncProviderConfigs,
+  type SerializableConfiguredDeviceSyncProviderConfigs,
+} from "./config/serializable-provider-configs.ts";
+
 import { sanitizeStoredDeviceSyncMetadata } from "./metadata.ts";
 import {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
@@ -380,6 +385,8 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotResponse {
   capabilities?: HostedExecutionDeviceSyncRuntimeSnapshotCapabilities;
   connections: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[];
   generatedAt: string;
+  /** Invocation-scoped client configuration for current app-bound connections. */
+  providerConfigs?: SerializableConfiguredDeviceSyncProviderConfigs;
   userId: string;
 }
 
@@ -818,6 +825,14 @@ export function parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
       record.generatedAt,
       "Hosted device-sync runtime snapshot response generatedAt",
     ),
+    ...(record.providerConfigs === undefined
+      ? {}
+      : {
+          providerConfigs: parseSerializableConfiguredDeviceSyncProviderConfigs(
+            record.providerConfigs,
+            "Hosted device-sync runtime snapshot response providerConfigs",
+          ),
+        }),
     userId: requireString(record.userId, "Hosted device-sync runtime snapshot response userId"),
   };
 }

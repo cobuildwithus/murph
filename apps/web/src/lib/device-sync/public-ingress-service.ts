@@ -22,6 +22,7 @@ import {
   type PublicProviderDescriptor,
   type SdkSignInSessionResult,
   type StartConnectionSourceLifecycleProof,
+  type DeviceSyncPublicIngressStore,
   type DeviceSyncRegistry,
 } from "@murphai/device-syncd/types";
 import type { CompanionHrvRmssdObservation } from "@murphai/contracts";
@@ -58,7 +59,17 @@ import {
 } from "./wake-service";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
-import { createHostedDeviceSyncRegistry } from "./providers";
+import {
+  DeviceProviderApplicationIngressStore,
+  resolveDeviceProviderApplication,
+  resolveDeviceProviderApplicationForConnection,
+  type DeviceProviderApplicationBinding,
+} from "./provider-applications";
+import {
+  createHostedDeviceSyncRegistry,
+  createHostedDeviceSyncRegistryWithProviderConfigs,
+} from "./providers";
+import { resolveHostedDeviceSyncConnectionCleanup } from "./provider-application-cleanup";
 
 export class HostedDeviceSyncPublicIngressService {
   private readonly ingress;
@@ -72,11 +83,23 @@ export class HostedDeviceSyncPublicIngressService {
     private readonly webhookAdmin: HostedDeviceSyncWebhookAdminService,
     private readonly registry: DeviceSyncRegistry,
   ) {
-    this.ingress = createDeviceSyncPublicIngress({
-      publicBaseUrl: this.context.publicIngressBaseUrl,
-      allowedReturnOrigins: this.context.allowedReturnOrigins,
+    this.ingress = this.createIngress({
+      ensureWebhookAdmin: true,
       registry: this.registry,
       store: this.context.store,
+    });
+  }
+
+  private createIngress(input: {
+    ensureWebhookAdmin: boolean;
+    registry: DeviceSyncRegistry;
+    store: DeviceSyncPublicIngressStore;
+  }): ReturnType<typeof createDeviceSyncPublicIngress> {
+    return createDeviceSyncPublicIngress({
+      publicBaseUrl: this.context.publicIngressBaseUrl,
+      allowedReturnOrigins: this.context.allowedReturnOrigins,
+      registry: input.registry,
+      store: input.store,
       hooks: {
         onConnectionEstablished: async ({
           account,
@@ -104,7 +127,9 @@ export class HostedDeviceSyncPublicIngressService {
             store: this.context.store,
           });
 
-          await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
+          if (input.ensureWebhookAdmin) {
+            await this.webhookAdmin.ensureHostedWebhookAdminUpkeepForConnectionEstablished(provider);
+          }
           return {
             sourceAdmissionCommitted: true,
           };
@@ -117,7 +142,7 @@ export class HostedDeviceSyncPublicIngressService {
           await cleanupRejectedHostedDeviceSyncConnectionSource({
             account,
             connectionStartedAt,
-            registry: this.registry,
+            registry: input.registry,
             sourceProviderSlug,
             store: this.context.store,
           });
@@ -139,7 +164,7 @@ export class HostedDeviceSyncPublicIngressService {
           ) {
             const reconciliation = await reconcileHostedDeviceSyncConnectionSourceRegistration({
               account,
-              registry: this.registry,
+              registry: input.registry,
               sourceProviderSlug,
               store: this.context.store,
             });
@@ -222,10 +247,72 @@ export class HostedDeviceSyncPublicIngressService {
       connectTarget?: string | null;
     } = {},
   ): Promise<BeginConnectionResult> {
-    const sourceLifecycleKey = buildPreparedSourceLifecycleKey(
-      userId,
+    return this.startConnectionWithIngress({
+      ingress: this.ingress,
+      options,
       provider,
-      options.sourceProviderSlug ?? null,
+      returnTo,
+      userId,
+    });
+  }
+
+  async startConnectionWithProviderApplication(
+    userId: string,
+    binding: DeviceProviderApplicationBinding,
+    returnTo: string | null,
+    options: {
+      sourceProviderSlug?: string | null;
+      connectSourceId?: string | null;
+      connectTarget?: string | null;
+    } = {},
+  ): Promise<BeginConnectionResult> {
+    const application = await resolveDeviceProviderApplication({
+      applicationId: binding.applicationId,
+      expectedRevision: binding.revision,
+      memberId: userId,
+      prisma: this.context.store.prisma,
+      provider: binding.provider,
+    });
+    const registry = createHostedDeviceSyncRegistryWithProviderConfigs({
+      providerConfigs: application.providerConfigs,
+    });
+    const ingress = this.createIngress({
+      ensureWebhookAdmin: false,
+      registry,
+      store: new DeviceProviderApplicationIngressStore(
+        {
+          applicationId: application.applicationId,
+          provider: application.provider,
+          revision: application.revision,
+        },
+        this.context.store,
+      ),
+    });
+
+    return this.startConnectionWithIngress({
+      ingress,
+      options,
+      provider: application.provider,
+      returnTo,
+      userId,
+    });
+  }
+
+  private startConnectionWithIngress(input: {
+    ingress: ReturnType<typeof createDeviceSyncPublicIngress>;
+    options: {
+      sourceProviderSlug?: string | null;
+      connectSourceId?: string | null;
+      connectTarget?: string | null;
+    };
+    provider: string;
+    returnTo: string | null;
+    userId: string;
+  }): Promise<BeginConnectionResult> {
+    const sourceLifecycleKey = buildPreparedSourceLifecycleKey(
+      input.userId,
+      input.provider,
+      input.options.sourceProviderSlug ?? null,
     );
     const sourceLifecycleProof = sourceLifecycleKey
       ? this.preparedSourceLifecycles.get(sourceLifecycleKey) ?? null
@@ -233,14 +320,15 @@ export class HostedDeviceSyncPublicIngressService {
     if (sourceLifecycleKey) {
       this.preparedSourceLifecycles.delete(sourceLifecycleKey);
     }
-    return this.ingress.startConnection({
-      provider,
-      returnTo,
-      ownerId: userId,
-      sourceProviderSlug: options.sourceProviderSlug ?? null,
+
+    return input.ingress.startConnection({
+      provider: input.provider,
+      returnTo: input.returnTo,
+      ownerId: input.userId,
+      sourceProviderSlug: input.options.sourceProviderSlug ?? null,
       sourceLifecycleProof,
-      connectSourceId: options.connectSourceId ?? null,
-      connectTarget: options.connectTarget ?? null,
+      connectSourceId: input.options.connectSourceId ?? null,
+      connectTarget: input.options.connectTarget ?? null,
     });
   }
 
@@ -454,20 +542,72 @@ export class HostedDeviceSyncPublicIngressService {
     options: { expectedOwnerId: string },
   ): Promise<CompleteConnectionResult> {
     const url = new URL(this.context.request.url);
+    const state = url.searchParams.get("murph_state")
+      ?? url.searchParams.get("state");
+    const ingress = await this.resolveIngressForOAuthState({
+      expectedOwnerId: options.expectedOwnerId,
+      provider,
+      state,
+    });
     const handleConnectionCallback =
-      typeof Reflect.get(this.ingress, "handleConnectionCallback") === "function"
-        ? this.ingress.handleConnectionCallback.bind(this.ingress)
-        : this.ingress.handleOAuthCallback.bind(this.ingress);
+      typeof Reflect.get(ingress, "handleConnectionCallback") === "function"
+        ? ingress.handleConnectionCallback.bind(ingress)
+        : ingress.handleOAuthCallback.bind(ingress);
 
     return handleConnectionCallback({
       provider,
       query: url.searchParams,
       code: url.searchParams.get("code"),
       expectedOwnerId: options.expectedOwnerId,
-      state: url.searchParams.get("murph_state") ?? url.searchParams.get("state"),
+      state,
       scope: url.searchParams.get("scope"),
       error: url.searchParams.get("error"),
       errorDescription: url.searchParams.get("error_description"),
+    });
+  }
+
+  private async resolveIngressForOAuthState(input: {
+    expectedOwnerId: string;
+    provider: string;
+    state: string | null;
+  }): Promise<ReturnType<typeof createDeviceSyncPublicIngress>> {
+    if (!input.state) {
+      return this.ingress;
+    }
+
+    const binding = await this.context.store
+      .readOAuthStateProviderApplicationBinding({
+        expectedOwnerId: input.expectedOwnerId,
+        expectedProvider: input.provider,
+        now: new Date().toISOString(),
+        state: input.state,
+      });
+    if (!binding) {
+      return this.ingress;
+    }
+
+    const application = await resolveDeviceProviderApplication({
+      applicationId: binding.applicationId,
+      expectedRevision: binding.revision,
+      memberId: input.expectedOwnerId,
+      prisma: this.context.store.prisma,
+      provider: binding.provider,
+    });
+    const registry = createHostedDeviceSyncRegistryWithProviderConfigs({
+      providerConfigs: application.providerConfigs,
+    });
+
+    return this.createIngress({
+      ensureWebhookAdmin: false,
+      registry,
+      store: new DeviceProviderApplicationIngressStore(
+        {
+          applicationId: application.applicationId,
+          provider: application.provider,
+          revision: application.revision,
+        },
+        this.context.store,
+      ),
     });
   }
 
@@ -523,9 +663,18 @@ export class HostedDeviceSyncPublicIngressService {
     warning?: { code: string; historicalResetIncomplete?: true; message: string };
   }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
+    const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
+      connectionId: connection.id,
+      memberId: userId,
+      prisma: this.context.store.prisma,
+      provider: connection.provider,
+      resolveSharedRegistry: () => this.registry,
+    });
     const disconnected = await disconnectHostedDeviceSyncConnection({
       connectionId: connection.id,
-      registry: this.registry,
+      registry: cleanup.registry ?? this.registry,
+      revokeAccess: cleanup.revokeAccessOverride,
+      revokeUnavailableWarning: cleanup.warning,
       store: this.context.store,
       userId,
     });
@@ -554,9 +703,13 @@ export class HostedDeviceSyncPublicIngressService {
   ): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
 
+    const registry = await this.resolveRegistryForConnection(
+      userId,
+      connection.id,
+    );
     return disconnectHostedDeviceSyncConnectionSource({
       connectionId: connection.id,
-      registry: this.registry,
+      registry,
       sourceProviderSlug,
       store: this.context.store,
       userId,
@@ -583,9 +736,18 @@ export class HostedDeviceSyncPublicIngressService {
       }
       attemptedCount += 1;
       try {
+        const cleanup = await resolveHostedDeviceSyncConnectionCleanup({
+          connectionId: connection.id,
+          memberId: userId,
+          prisma: this.context.store.prisma,
+          provider: connection.provider,
+          resolveSharedRegistry: () => this.registry,
+        });
         await disconnectHostedDeviceSyncConnection({
           connectionId: connection.id,
-          registry: this.registry,
+          registry: cleanup.registry ?? this.registry,
+          revokeAccess: cleanup.revokeAccessOverride,
+          revokeUnavailableWarning: cleanup.warning,
           store: this.context.store,
           userId,
         });
@@ -614,6 +776,22 @@ export class HostedDeviceSyncPublicIngressService {
 
   createBrowserConnectionId(connectionId: string): string {
     return createHostedBrowserConnectionId(this.context.env.routingIndexKey, connectionId);
+  }
+
+  private async resolveRegistryForConnection(
+    userId: string,
+    connectionId: string,
+  ): Promise<DeviceSyncRegistry> {
+    const application = await resolveDeviceProviderApplicationForConnection({
+      connectionId,
+      memberId: userId,
+      prisma: this.context.store.prisma,
+    });
+    return application
+      ? createHostedDeviceSyncRegistryWithProviderConfigs({
+          providerConfigs: application.providerConfigs,
+        })
+      : this.registry;
   }
 
   private async hasWithdrawnHealthDataConsent(connectionId: string): Promise<boolean> {

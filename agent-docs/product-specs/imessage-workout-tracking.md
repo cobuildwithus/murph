@@ -21,14 +21,14 @@ The experience borrows the useful workout-tracker loop—plan, log sets, correct
 
 ## Response-card contract
 
-The assistant continues authoring `compact_table` V1 through two closed shapes. A generic table keeps `rowHeader`, `columns`, and `rows`. A tracked live workout instead carries the shared title/subtitle/footer fields, a required canonical `tracking` marker, and structured `workout` detail:
+The assistant continues authoring `compact_table` V1 through two closed shapes. A generic table keeps `rowHeader`, `columns`, and `rows`. A tracked live workout instead carries the shared title/footer fields, requires `subtitle: null`, a canonical `tracking` marker, and structured `workout` detail:
 
 - `state`: `active` or `completed`;
 - ordered exercises;
 - ordered sets with `pending`, `completed`, or `skipped` status;
 - a compact target string and actual-result string.
 
-Workout progress summaries are derived from the structured exercise/set detail by text, provider-layout, and native-envelope consumers. The model does not author a second generic row projection of the same state.
+Workout state and progress summaries are derived from the structured exercise/set detail by text, provider-layout, image, and native consumers. The model does not author either a subtitle or a second generic row projection of the same state. Runtime and native readers continue accepting non-null subtitles from already-persisted and already-sent cards, but workout presentation ignores that legacy field.
 
 Tracked workout detail requires a canonical tracking marker in durable transcript context. The native URL strips the event id and snapshot time.
 
@@ -40,9 +40,25 @@ The readable response-card contract remains object-shaped for authoring and runt
 
 Recipients without the Messages extension, including Messages on macOS,
 receive a generated static image that mirrors the compact native workout or
-generic-table balloon. The provider captions independently retain every table
-cell or every workout state, set status, target, and actual value, so image
-failure does not erase the response semantics.
+generic-table balloon. Provider chrome is intentionally bounded to the title
+plus derived progress for structured workouts; it does not repeat the image's
+sets below the balloon. Generic-table provider chrome retains its existing
+title, optional subtitle, rows, and footer. The complete semantic text renderer
+remains the workout recovery owner, and the value-free fallback tells the
+member to ask Murph for the card in text if the image is unavailable.
+
+The bitmap remains rectangular and badge-free because Messages owns the outer
+mask and app icon, but its header keeps the provider's upper-left icon footprint
+clear. Removing the image-owned logo must not move title text beneath the
+provider overlay.
+
+Shared workout footer copy must remain truthful on both projections: it may ask
+the member to reply with an exercise, set, and result, but must not promise a
+native-only tap control. The static workout summary derives `Next` from the
+first pending set in order; a targetless first pending set stays visibly
+targetless instead of borrowing a later set's target. Static text wraps at a
+deterministic display width, and the same calculation owns the raster height so
+every contract-valid title, row, cell, and footer remains inside the image.
 
 The image URL carries the exact same strict authority-free V3 or V4 presentation
 envelope as the native fragment in a bounded queryless path. V3 tracking remains

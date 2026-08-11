@@ -621,6 +621,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
             message,
             ...(nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
             replyToMessageId,
+            threadIsDirect,
           })
         : null
       if (!recovered) {
@@ -795,6 +796,7 @@ async function sendLinqVoiceMemoDelivery(input: {
         message: text,
         ...(input.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
         replyToMessageId: input.replyToMessageId,
+        threadIsDirect: input.threadIsDirect,
       })
       if (!recovered) {
         throw error
@@ -1323,6 +1325,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   message: string
   nativeReplyRequested?: true
   replyToMessageId?: string | null
+  threadIsDirect: boolean | null
 }): Promise<
   | {
       providerMessageId?: string | null
@@ -1332,6 +1335,7 @@ async function maybeRecoverMissingLinqDirectThread(input: {
   | null
 > {
   if (
+    input.threadIsDirect !== true ||
     input.dependencies.sendLinq ||
     input.nativeReplyRequested === true ||
     !looksLikeMissingLinqChatError(input.error)

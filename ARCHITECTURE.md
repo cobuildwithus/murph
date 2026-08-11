@@ -1,6 +1,6 @@
 # Murph Architecture
 
-Last verified: 2026-08-07
+Last verified: 2026-08-10
 
 ## Accepted-Message Targeting
 
@@ -881,6 +881,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   the app-local Vercel OIDC adapter remains for browser/session/status/deletion
   calls into Cloudflare.
 
+  Member-owned device provider applications are also Web-owned control facts.
+  Web stores one encrypted, revisioned application per personal member and
+  provider, binds OAuth state and each resulting connection to the exact
+  application id plus revision, and supplies decrypted provider configuration
+  only in a credential-bearing hosted runtime snapshot. The runner consumes
+  that configuration for the current invocation without adding it to workspace
+  state or ambient environment configuration. Credential replacement is
+  rejected while an exact-bound connection is active; disconnected bindings
+  and stale OAuth state are cleared before the revision advances. The shared
+  provider webhook endpoint admits work only for unbound connections; an
+  app-bound connection relies on scheduled reconciliation until an explicit
+  private-application webhook authority is designed.
+
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display
   evidence only and creates no product, incident, or availability authority.
@@ -1584,12 +1597,16 @@ Messages extension retains its native icon and interactive identity. The
 provider request omits the optional App Store id so app-absent static cards do
 not substitute square App Store artwork into the wider Messages icon slot.
 Their concise native caption keeps only the date and meal count instead of
-repeating visible totals or target amounts. A short subcaption appears only
-when some totals are partial or an assessed V2 goal needs its directional
-status preserved. Compact-table images retain the table grid or workout
-progress and exercise rows, and their native captions
-independently repeat every generic table cell or every workout set status,
-target, and actual value so a missing raster never erases the useful response.
+repeating visible totals or target amounts. Each assessed V2 goal keeps one
+concise directional label inside the image without relying on color alone;
+null and unavailable goals stay absent, and a short subcaption appears only
+when some totals are partial. Compact-table images retain the table grid or
+workout progress and exercise rows while keeping the provider's upper-left icon
+footprint clear without drawing that icon into the bitmap. Their provider
+chrome stays bounded to the title plus an optional generic subtitle or derived
+workout progress rather than repeating the raster's rows and sets. Complete
+semantic text remains available through the deterministic text renderer and
+value-free recovery fallback.
 The nutrition image derives a quantitative calorie arc only from a complete
 total and an assessed non-null goal; V1, partial, null-goal, and
 unavailable-status snapshots retain only the neutral ring track. The extension
@@ -2730,8 +2747,9 @@ visible in the immutable private-direct message, but never a member identity,
 canonical record reference, credential, tracking reference, or other authority.
 The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
-delivery. Complete provider captions preserve every table cell or workout set
-detail independently of raster availability. Nutrition V1 and V2 cards use the
+delivery. Compact-table provider chrome uses only bounded title, optional
+generic subtitle, and derived workout-progress fields; complete detail remains
+owned by the semantic text renderer. Nutrition V1 and V2 cards use the
 same bounded fragment and image-path family without a tracking field. The
 Messages extension remains offline and read-only. This adds no card API,
 database, background synchronization owner, authentication surface, or mutable

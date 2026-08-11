@@ -3246,3 +3246,44 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
     ).toBe("user <redacted-id> denied; retry as <redacted-token>");
   });
 });
+
+describe("member-owned provider runtime snapshot config", () => {
+  it("parses the bounded invocation-scoped provider config", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      connections: [],
+      generatedAt: "2026-08-10T00:00:00.000Z",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+        },
+      },
+      userId: "member_123",
+    })).toEqual({
+      connections: [],
+      generatedAt: "2026-08-10T00:00:00.000Z",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+        },
+      },
+      userId: "member_123",
+    });
+  });
+
+  it("rejects control-plane-only webhook secrets", () => {
+    expect(() => parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      connections: [],
+      generatedAt: "2026-08-10T00:00:00.000Z",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+          webhookSigningSecret: "must-stay-on-web",
+        },
+      },
+      userId: "member_123",
+    })).toThrow(/webhookSigningSecret/u);
+  });
+});
