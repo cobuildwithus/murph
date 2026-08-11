@@ -80,7 +80,7 @@ describe("changelog registry", () => {
       details: expect.stringContaining("follow-up photos"),
     });
     expect(item?.summary).toContain("one available initial photo");
-    expect(item?.summary).toContain("stored detail");
+    expect(item?.summary).toContain("more detail");
     expect(item?.details).toContain("Multiple available initial photos");
     expect(item?.details).toContain("Venice");
     expect(item?.details).toContain("other models");
