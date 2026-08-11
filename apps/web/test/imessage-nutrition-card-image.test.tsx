@@ -179,7 +179,7 @@ const WORKOUT_CARD: Extract<
   kind: "compact_table",
   version: 1,
   title: "Push day",
-  subtitle: "4 of 6 sets complete",
+  subtitle: null,
   footer: "Reply with the exercise, set, and result to log or correct it.",
   workout: {
     version: 1,
@@ -254,6 +254,9 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.match(serialized, /24/u);
   assert.match(serialized, /data-calorie-progress="0\.8364"/u);
   assert.match(serialized, /data-goal-status="under_target"/u);
+  assert.match(serialized, /data-calorie-goal-status="under_target"/u);
+  assert.match(serialized, /top:146px/u);
+  assert.match(serialized, />UNDER</u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /data-goal-status="unavailable"/u);
   assert.match(serialized, /color:#666163/u);
@@ -261,8 +264,38 @@ test("nutrition card image mirrors the native default-state composition", async 
   assert.doesNotMatch(serialized, /box-shadow/u);
   assert.doesNotMatch(
     serialized,
-    /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Under target|Goal unavailable|Complete total/u,
+    /Jun 18|PARTIAL TOTALS|2 of 3 meals|2,200|Goal unavailable|Complete total/u,
   );
+});
+
+test("nutrition card image renders every assessed goal direction without target amounts", async () => {
+  const { NutritionCardImage } = await import(
+    "@/src/components/imessage/nutrition-card-image"
+  );
+  const directionalCard: DailyNutritionResponseCardV2 = {
+    ...CARD,
+    goals: {
+      calories: { target: 3_000, status: "far_under_target" },
+      proteinGrams: { target: 130, status: "under_target" },
+      carbsGrams: { target: 210, status: "on_target" },
+      fatGrams: { target: 50, status: "over_target" },
+      fiberGrams: { target: 10, status: "far_over_target" },
+    },
+  };
+  const serialized = renderToStaticMarkup(
+    <NutritionCardImage card={directionalCard} />,
+  );
+
+  for (const label of [
+    "FAR UNDER",
+    "UNDER",
+    "ON TARGET",
+    "OVER",
+    "FAR OVER",
+  ]) {
+    assert.match(serialized, new RegExp(`>${label}<`, "u"));
+  }
+  assert.doesNotMatch(serialized, /3,000|130g|210g|50g|10g/u);
 });
 
 test("nutrition card image route and component retain truthful V1 compatibility", async () => {
@@ -380,6 +413,7 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.equal(init.height, 580);
   const serialized = renderToStaticMarkup(imageTree);
   assert.match(serialized, /Push day/u);
+  assert.match(serialized, /IN PROGRESS/u);
   assert.match(serialized, /Bench press/u);
   assert.match(serialized, /Next: 55 lb × 8–10/u);
   assert.match(
@@ -390,6 +424,7 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /data-workout-progress="0\.6667"/u);
   assert.match(serialized, /data-exercise-state="resolved"/u);
   assert.match(serialized, /data-exercise-state="in-progress"/u);
+  assert.doesNotMatch(serialized, /4 of 6 sets complete|TODAY/u);
   assert.match(serialized, /data-exercise-checkmark="true"/u);
   assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /border-radius:105px/u);
@@ -397,6 +432,32 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /data-provider-icon-clearance="155"/u);
   assert.match(serialized, /margin-left:155px/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
+});
+
+test("workout images ignore legacy subtitles in both pixels and height", async () => {
+  const {
+    CompactTableCardImage,
+    getCompactTableCardImageSize,
+  } = await import("@/src/components/imessage/compact-table-card-image");
+  const legacySubtitleCard: typeof WORKOUT_CARD = {
+    ...WORKOUT_CARD,
+    subtitle: "Legacy progress copy that must not affect the workout image layout",
+  };
+  const currentCard: typeof WORKOUT_CARD = {
+    ...WORKOUT_CARD,
+    subtitle: null,
+  };
+
+  assert.deepEqual(
+    getCompactTableCardImageSize(legacySubtitleCard),
+    getCompactTableCardImageSize(currentCard),
+  );
+  const serialized = renderToStaticMarkup(
+    <CompactTableCardImage card={legacySubtitleCard} />,
+  );
+  assert.doesNotMatch(serialized, /Legacy progress copy/u);
 });
 
 test("workout image keeps Next on the first pending set when it has no target", async () => {

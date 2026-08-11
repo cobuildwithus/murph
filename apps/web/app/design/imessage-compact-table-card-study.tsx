@@ -14,7 +14,7 @@ const SYNTHETIC_TARGETLESS_WORKOUT_CARD: Extract<
   kind: "compact_table",
   version: 1,
   title: "Pull day",
-  subtitle: "The next set has no planned target",
+  subtitle: null,
   footer: "Reply with the exercise, set, and result to log or correct it.",
   workout: {
     version: 1,
@@ -114,8 +114,8 @@ export function ImessageCompactTableCardStudy() {
           The image fallback keeps a targetless first pending set honest and
           measures every wrapped row in the dense four-column boundary.
           Messages supplies the app icon and outer corner mask; the rectangular
-          raster keeps that icon footprint clear, while provider captions retain
-          the complete values if the image cannot load.
+          raster keeps that icon footprint clear. Provider chrome stays concise;
+          the complete semantic fallback remains available as text.
         </p>
       </div>
       <div className="hidden flex-col gap-8 sm:flex">

@@ -18,7 +18,7 @@ const ACTIVE_WORKOUT_CARD = {
   kind: 'compact_table',
   version: 1,
   title: 'Push day',
-  subtitle: '3 of 6 sets complete',
+  subtitle: null,
   footer: 'Reply with the exercise, set, and result to log or correct it.',
   tracking: {
     kind: 'workout',
@@ -106,7 +106,7 @@ describe('workout session response cards', () => {
         k: 'w',
         v: 1,
         t: 'Push day',
-        u: '3 of 6 sets complete',
+        u: null,
         s: 'a',
         e: [
           [
@@ -174,7 +174,6 @@ describe('workout session response cards', () => {
     ): CompactTableResponseCardV1 => ({
       ...ACTIVE_WORKOUT_CARD,
       title: 'Lower body strength',
-      subtitle: `${completedSetCount} of 24 sets complete`,
       footer: state === 'active'
         ? 'Reply with the exercise, set, and result to log or correct it.'
         : 'Workout completed.',
@@ -205,7 +204,7 @@ describe('workout session response cards', () => {
       return encodeWorkoutSessionAppCardUrl(card)
     })
 
-    expect(urls.map((url) => url.length)).toEqual([1428, 1639, 1651])
+    expect(urls.map((url) => url.length)).toEqual([1403, 1612, 1624])
     expect(urls.every((url) => url.length < 2_048)).toBe(true)
   })
 
@@ -228,6 +227,21 @@ describe('workout session response cards', () => {
     expect(transcript).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ; snapshot: 2026-08-09T19:45:00.000Z]',
     )
+
+    const legacyCard = {
+      ...ACTIVE_WORKOUT_CARD,
+      subtitle: '3/6 sets complete',
+    } satisfies AssistantResponseCard
+    expect(assistantResponseCardSchema.parse(legacyCard)).toEqual(legacyCard)
+    expect(renderAssistantResponseCardText(legacyCard).match(
+      /3\/6 sets complete/gu,
+    )).toHaveLength(1)
+    expect(decodeAppCardUrl(
+      encodeWorkoutSessionAppCardUrl(legacyCard),
+    )).toMatchObject({
+      schemaVersion: 4,
+      card: { u: '3/6 sets complete' },
+    })
   })
 
   it('preserves a completed extra set without inventing a target', () => {
@@ -257,9 +271,9 @@ describe('workout session response cards', () => {
     expect(renderAssistantResponseCardText(completedExtraSetCard)).toContain(
       semanticSet,
     )
-    expect(
-      buildLinqIMessageAppLayout(completedExtraSetCard).subcaption,
-    ).toContain(semanticSet)
+    expect(buildLinqIMessageAppLayout(completedExtraSetCard).subcaption).toBe(
+      '4/7 sets complete',
+    )
     expect(renderAssistantResponseCardText(completedExtraSetCard)).not.toContain(
       `${semanticSet}; target`,
     )
@@ -267,18 +281,20 @@ describe('workout session response cards', () => {
 
   it('builds a truthful Messages preview layout', () => {
     expect(buildLinqIMessageAppLayout(ACTIVE_WORKOUT_CARD)).toEqual({
-      caption: 'Push day — 3 of 6 sets complete',
+      caption: 'Push day',
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: [
-        'Active workout · 3/6 sets complete',
-        'Bench press: set 1: completed; actual 185 lb × 8; target 185 lb × 8 · set 2: completed; actual 185 lb × 7; target 185 lb × 8 · set 3: pending; target 185 lb × 6–8',
-        'Incline dumbbell press: set 1: completed; actual 55 lb × 10; target 55 lb × 10 · set 2: pending; target 55 lb × 8–10 · set 3: pending',
-      ].join('\n'),
-      trailing_caption:
-        'Reply with the exercise, set, and result to log or correct it.',
+      subcaption: '3/6 sets complete',
     })
+
+    for (const [key, value] of Object.entries(
+      buildLinqIMessageAppLayout(ACTIVE_WORKOUT_CARD),
+    )) {
+      if (key !== 'image_url') {
+        expect(value.length).toBeLessThanOrEqual(512)
+      }
+    }
   })
 
   it('rejects impossible completion states before encoding', () => {
@@ -350,7 +366,10 @@ describe('workout session response cards', () => {
               oneOf: [
                 { required: ['rowHeader', 'columns', 'rows'] },
                 {
-                  properties: { tracking: { type: 'object' } },
+                  properties: {
+                    subtitle: { type: 'null' },
+                    tracking: { type: 'object' },
+                  },
                   required: ['workout'],
                 },
               ],
@@ -429,11 +448,7 @@ describe('workout session response cards', () => {
       image_url: expect.stringMatching(
         /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
       ),
-      subcaption: [
-        'Completed workout · 3/6 sets complete',
-        'Bench press: set 1: completed; actual 185 lb × 8; target 185 lb × 8 · set 2: completed; actual 185 lb × 7; target 185 lb × 8 · set 3: skipped; target 185 lb × 6–8',
-        'Incline dumbbell press: set 1: completed; actual 55 lb × 10; target 55 lb × 10 · set 2: skipped; target 55 lb × 8–10 · set 3: skipped',
-      ].join('\n'),
+      subcaption: '3/6 sets complete',
     })
     expect(decodeAppCardUrl(
       encodeWorkoutSessionAppCardUrl(completedCard),

@@ -134,6 +134,9 @@ The outer card remains `compact_table` V1. Set `workout` to:
 
 Use `state="completed"` only after replacing every remaining `pending` set with `skipped`. A completed set always carries `actual`; pending and skipped sets never do.
 
+Set the outer `subtitle` to `null`. Workout state and progress are derived from
+the structured sets, so do not author a second state or progress label there.
+
 The footer is shared verbatim by the interactive native card and the static
 fallback. Keep it channel-neutral: never tell the member to tap an exercise or
 use another control that is unavailable on macOS or without the extension.

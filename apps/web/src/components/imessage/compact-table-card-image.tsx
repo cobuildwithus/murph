@@ -63,9 +63,8 @@ export function getCompactTableCardImageSize(
 
 /**
  * Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size.
- * Messages owns the app icon and outer corner mask, so the bitmap stays
- * rectangular and badge-free while keeping the provider's icon footprint
- * clear.
+ * The provider owns the app icon and outer corner mask, so the bitmap stays
+ * rectangular and badge-free while keeping that icon footprint clear.
  */
 export function CompactTableCardImage({
   card,
@@ -112,7 +111,7 @@ export function CompactTableCardImage({
         >
           {layout.title.text}
         </div>
-        {card.subtitle === null ? null : (
+        {"workout" in card || card.subtitle === null ? null : (
           <div
             style={{
               display: "flex",
@@ -193,7 +192,9 @@ function WorkoutSnapshot({
             letterSpacing: "0.08em",
           }}
         >
-          {card.workout.state === "active" ? "TODAY" : "WORKOUT COMPLETE"}
+          {card.workout.state === "active"
+            ? "IN PROGRESS"
+            : "WORKOUT COMPLETE"}
         </div>
         <div
           style={{
@@ -491,7 +492,7 @@ function getCompactTableCardImageLayout(
   card: CompactTablePresentationCardV1,
 ): CompactTableCardImageLayout {
   const title = wrapCardText(card.title, HEADER_TEXT_WIDTH, 48);
-  const subtitle = card.subtitle === null
+  const subtitle = "workout" in card || card.subtitle === null
     ? null
     : wrapCardText(card.subtitle, HEADER_TEXT_WIDTH, 28);
   const footer = card.footer === null
