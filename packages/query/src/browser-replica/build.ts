@@ -1,6 +1,7 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
+import { buildPersonalPatternReport } from "../personal-patterns.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -50,7 +51,7 @@ import {
   type BrowserVaultRequestedMetric,
 } from "./metric-points.ts";
 import { toBrowserVaultLabResultRows } from "./lab-results.ts";
-import { buildPersonalPatternReport } from "../personal-patterns.ts";
+import { projectBrowserTrainingSession } from "./training.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -62,7 +63,7 @@ export async function createBrowserVaultReplica(
   const defaultProjectedVault = createDefaultProjectedVault(input.vault);
   const entities = defaultProjectedVault.entities
     .filter((entity) => isBrowserVaultIncludedFamily(entity.family))
-    .map(projectEntity);
+    .map((entity) => projectEntity(entity, generatedAt));
   const timelineRows = buildTimeline(defaultProjectedVault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(defaultProjectedVault, generatedAt);
@@ -350,9 +351,12 @@ function readStringArray(value: unknown): string[] {
 }
 
 
-function projectEntity(entity: CanonicalEntity): BrowserVaultEntity {
+function projectEntity(
+  entity: CanonicalEntity,
+  generatedAt: string,
+): BrowserVaultEntity {
   return {
-    attributes: projectEntityAttributes(entity),
+    attributes: projectEntityAttributes(entity, generatedAt),
     bodyPreview: projectEntityBodyPreview(entity),
     date: entity.date,
     experimentSlug: entity.experimentSlug,
@@ -410,9 +414,12 @@ function projectEntityBodyPreview(entity: CanonicalEntity): string | null {
   return previewText(entity.body, BODY_PREVIEW_CHARS);
 }
 
-function projectEntityAttributes(entity: CanonicalEntity): Record<string, unknown> {
+function projectEntityAttributes(
+  entity: CanonicalEntity,
+  generatedAt: string,
+): Record<string, unknown> {
   if (entity.family === "event") {
-    return projectSafeEventAttributes(entity);
+    return projectSafeEventAttributes(entity, generatedAt);
   }
   if (entity.family === "habitat") {
     return projectSafeAttributeKeys(entity, [
@@ -464,7 +471,10 @@ function projectSafeAttributes(entity: CanonicalEntity): Record<string, unknown>
   return allowed;
 }
 
-function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unknown> {
+function projectSafeEventAttributes(
+  entity: CanonicalEntity,
+  generatedAt: string,
+): Record<string, unknown> {
   if (entity.family !== "event") {
     return {};
   }
@@ -472,9 +482,20 @@ function projectSafeEventAttributes(entity: CanonicalEntity): Record<string, unk
   switch (entity.kind) {
     case "activity_session": {
       const attributes = projectSafeAttributeKeys(entity, ["source"]);
-      const activityKind = resolveAdherenceObservationActivityKind({ attributes: entity.attributes });
+      const activityKind = resolveAdherenceObservationActivityKind({
+        attributes: entity.attributes,
+      });
       if (activityKind) {
         attributes.activityKind = activityKind;
+      }
+
+      const training = projectBrowserTrainingSession({
+        activityKind,
+        entity,
+        generatedAt,
+      });
+      if (training) {
+        attributes.training = training;
       }
       return attributes;
     }

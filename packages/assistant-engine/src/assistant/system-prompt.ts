@@ -693,6 +693,9 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
+    conversationScope === "direct"
+      ? buildAssistantTrainingPageText(input.murphProductBaseUrl ?? null)
+      : null,
     assistantStylePreferencesApply && input.assistantPersona
       ? buildAssistantPersonaPrompt(input.assistantPersona)
       : null,
@@ -1028,6 +1031,18 @@ function buildAssistantProductBaseUrlLineText(
   return currentMurphProductBaseUrl
     ? `Current Murph product base URL for user-facing app links: ${currentMurphProductBaseUrl}`
     : null;
+}
+
+function buildAssistantTrainingPageText(
+  currentMurphProductBaseUrl: string | null
+): string | null {
+  if (!currentMurphProductBaseUrl) {
+    return null;
+  }
+
+  return `Private Training page:
+- When the member asks to see or review their current workout, recent sessions, 30-day consistency, or exercise progress, or a visual summary would materially help answer that request, tell them the signed-in Training page is available at ${currentMurphProductBaseUrl}/training.
+- The page is read-only and intentionally absent from the Home sidebar. Keep workout logging and changes in this conversation. Never use this link for unsolicited outreach or lead a new conversation with a link.`;
 }
 
 function buildAssistantTimeStyleContextText(input: {
