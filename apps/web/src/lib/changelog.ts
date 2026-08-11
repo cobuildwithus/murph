@@ -131,7 +131,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Structured workout cards keep exercise and set detail inside the card instead of repeating the full workout beneath the static image.",
         details:
-          "The fallback shows the workout title and derived set progress, older sent cards remain readable, and generic tables keep their optional subtitle.",
+          "The fallback shows the workout title and derived set progress without a duplicate badge or corner mask, older sent cards remain readable, and generic tables keep their optional subtitle.",
         relevanceTags: ["workouts", "imessage", "cards", "design"],
         sourcePullRequests: [1588],
       },

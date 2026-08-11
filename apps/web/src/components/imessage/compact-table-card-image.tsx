@@ -3,10 +3,7 @@ import type {
   WorkoutSessionExerciseV1,
 } from "@murphai/contracts";
 
-import {
-  IMESSAGE_CARD_COLOR,
-  ImessageCardBadge,
-} from "./card-image-chrome";
+import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
 
 export const IMESSAGE_COMPACT_TABLE_CARD_IMAGE_WIDTH = 1_200;
 
@@ -22,7 +19,11 @@ export function getCompactTableCardImageSize(
   };
 }
 
-/** Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size. */
+/**
+ * Mirrors the shipping SwiftUI compact-table snapshot at a wider raster size.
+ * The provider owns the outer card chrome, so this image deliberately avoids
+ * its own badge and corner mask.
+ */
 export function CompactTableCardImage({
   card,
 }: {
@@ -36,23 +37,19 @@ export function CompactTableCardImage({
         display: "flex",
         width: "100%",
         height: "100%",
-        overflow: "hidden",
         flexDirection: "column",
-        borderRadius: 105,
         padding: "38px 45px 42px",
         backgroundColor: IMESSAGE_CARD_COLOR.balloon,
         color: IMESSAGE_CARD_COLOR.primary,
         fontFamily: "DM Sans",
       }}
     >
-      <ImessageCardBadge top={30} left={30} />
       <div
         style={{
           display: "flex",
           minHeight: 105,
           flexDirection: "column",
           justifyContent: "center",
-          marginLeft: 155,
           gap: 8,
         }}
       >

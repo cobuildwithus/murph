@@ -307,6 +307,8 @@ test("response-card image route renders the exact V3 generic table snapshot", as
   assert.match(serialized, /Upper body/u);
   assert.match(serialized, /Wednesday/u);
   assert.match(serialized, />16</u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
 });
 
 test("response-card image route restores and renders the exact compact V4 workout snapshot", async () => {
@@ -338,6 +340,8 @@ test("response-card image route restores and renders the exact compact V4 workou
   assert.match(serialized, /data-exercise-checkmark="true"/u);
   assert.doesNotMatch(serialized, /✓/u);
   assert.doesNotMatch(serialized, /evt_|snapshotAt/u);
+  assert.doesNotMatch(serialized, /border-radius:105px/u);
+  assert.doesNotMatch(serialized, /box-shadow/u);
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {
