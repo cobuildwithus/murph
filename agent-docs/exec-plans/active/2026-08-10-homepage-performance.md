@@ -94,7 +94,7 @@ Updated: 2026-08-10
 - Axe color-contrast checks reported zero violations at both 1440px desktop and
   390px mobile. Native-resolution catalog crops preserved the existing layout
   and avatar framing.
-- Focused Vitest passed 88 tests across 12 files; scoped ESLint passed; the
+- Focused Vitest passed 89 tests across 12 files; scoped ESLint passed; the
   official Web production build, including Web typechecking and trace checks,
   passed.
 - ReviewGPT final round 1 identified the open-session replacement and import-
@@ -126,12 +126,14 @@ Updated: 2026-08-10
   recovered panel appears without a fallback and retains phone autofocus.
 - Final round 6 found that the delayed-mount autofocus suppression remained
   false for the whole open session, so a later "Use a different number" or
-  email-to-phone remount could lose its normal focus target. The suppression is
-  now consumed after the first telephone input mounts: updating the existing
-  input does not refocus it or steal deliberate Close focus, while later phone
-  entry mounts receive the restored autofocus value. The production-shaped
-  regression proves both Close preservation and same-session phone-entry
-  refocus. The correction is pending final round 7.
+  email-to-phone remount could lose its normal focus target. Final round 7 then
+  found that waiting specifically for the first telephone input still failed
+  when the delayed panel first rendered a resumable or restart state containing
+  only recovery buttons. The dialog now completes one focus handoff when the
+  delayed panel's first usable control appears and immediately restores normal
+  autofocus for every later child mount. Production-shaped regressions prove
+  Close preservation and later phone-entry focus from both phone-first and
+  resumable initial states. The correction is pending final round 8.
 - Current `main` was merged before round 6 so GitHub can construct the PR merge
   commit. The three changelog conflicts retained every upstream Aug 10 item and
   added the homepage improvement last in the same edition; focused tests,

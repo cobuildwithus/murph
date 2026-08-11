@@ -43,7 +43,6 @@ const AUTH_DIALOG_PANEL_CONTROL_SELECTOR = [
   "a[href]",
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
-const AUTH_DIALOG_PHONE_INPUT_SELECTOR = "input[type='tel']";
 
 export function resolveAuthDialogHeaderPresentation({
   description = DEFAULT_AUTH_DIALOG_DESCRIPTION,
@@ -242,7 +241,11 @@ export function AuthDialog({
   }, [open, privyRuntime, readyAuthPanelModule]);
 
   useEffect(() => {
-    if (!open || !readyAuthPanelModule || !restorePanelFocusRef.current) {
+    if (
+      !open
+      || !readyAuthPanelModule
+      || (phoneInputAutoFocus && !restorePanelFocusRef.current)
+    ) {
       return;
     }
 
@@ -252,18 +255,7 @@ export function AuthDialog({
       return;
     }
 
-    const restoreFocus = () => {
-      const activeElement = document.activeElement;
-      if (
-        activeElement
-        && activeElement !== document.body
-        && activeElement !== content
-        && content.contains(activeElement)
-      ) {
-        restorePanelFocusRef.current = false;
-        return true;
-      }
-
+    const completeFocusHandoff = () => {
       const control = panel.querySelector<HTMLElement>(
         AUTH_DIALOG_PANEL_CONTROL_SELECTOR,
       );
@@ -271,49 +263,28 @@ export function AuthDialog({
         return false;
       }
 
-      restorePanelFocusRef.current = false;
-      control.focus({ preventScroll: true });
-      return true;
-    };
-
-    if (restoreFocus()) {
-      return;
-    }
-
-    const observer = new MutationObserver(() => {
-      if (restoreFocus()) {
-        observer.disconnect();
+      if (restorePanelFocusRef.current) {
+        const activeElement = document.activeElement;
+        restorePanelFocusRef.current = false;
+        if (
+          !activeElement
+          || activeElement === document.body
+          || activeElement === content
+          || !content.contains(activeElement)
+        ) {
+          control.focus({ preventScroll: true });
+        }
       }
-    });
-    observer.observe(panel, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, [open, readyAuthPanelModule]);
-
-  useEffect(() => {
-    if (!open || !readyAuthPanelModule || phoneInputAutoFocus) {
-      return;
-    }
-
-    const panel = loadedPanelRef.current;
-    if (!panel) {
-      return;
-    }
-
-    const releaseInitialAutoFocusSuppression = () => {
-      if (!panel.querySelector(AUTH_DIALOG_PHONE_INPUT_SELECTOR)) {
-        return false;
-      }
-
       setPhoneInputAutoFocus(true);
       return true;
     };
 
-    if (releaseInitialAutoFocusSuppression()) {
+    if (completeFocusHandoff()) {
       return;
     }
 
     const observer = new MutationObserver(() => {
-      if (releaseInitialAutoFocusSuppression()) {
+      if (completeFocusHandoff()) {
         observer.disconnect();
       }
     });
