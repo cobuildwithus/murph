@@ -212,6 +212,19 @@ files, then inspect enough callers, state owners, trust boundaries, tests, and
 deployment paths inside the ZIP to judge the change in context. Do not review a
 diff hunk in isolation.
 
+For every changed database-touching collection path, apply
+`docs/contracts/00-invariants.md` § Database Load And Collection Fanout across
+the composed call tree at the maximum admitted cardinality. Trace callers and
+nested helpers for reachable N+1 reads, repeated owner-row loads, concurrent
+per-item transactions, and uncapped external or crypto work; compute peak query,
+pooled-connection, transaction, and external-call concurrency rather than
+reviewing each helper in isolation. Require deterministic maximum-cardinality
+call-count and concurrency proof for hot, locked, or transactional paths. Any
+read reduction must reuse owner predicates or resolvers and preserve required
+live authority, lifetime, target, crypto, transaction, and irreversible-effect
+revalidation at their owning boundaries; do not mistake those checks for
+removable duplicate reads.
+
 Do not use app connectors, memory, pasted repository context, or out-of-band
 files as repository evidence.
 
