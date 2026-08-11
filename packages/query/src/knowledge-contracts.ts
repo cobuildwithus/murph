@@ -30,6 +30,7 @@ export interface KnowledgePageMetadata extends KnowledgePageReference {}
 export interface KnowledgePage extends KnowledgePageMetadata {
   body: string;
   markdown: string;
+  pageRevisionDigest: string;
 }
 
 export interface KnowledgeGraphSearchHit extends KnowledgePageReference {
@@ -134,6 +135,7 @@ export const knowledgePageMetadataSchema = knowledgePageReferenceSchema;
 export const knowledgePageSchema = knowledgePageReferenceSchema.extend({
   body: z.string(),
   markdown: nonEmptyStringSchema,
+  pageRevisionDigest: z.string().regex(/^[0-9a-f]{64}$/u),
 }) satisfies z.ZodType<KnowledgePage>;
 
 export const knowledgeUpsertResultSchema = z.object({

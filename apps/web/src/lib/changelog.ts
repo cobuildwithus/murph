@@ -3222,7 +3222,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "A real zero still counts. Missing sharing permission, a stale sync, a disconnected source, and a source that needs attention stay distinct. When an exact required share has not been granted, Murph may offer one separate Like-or-heart permission card; the standings message itself never becomes a consent surface.",
         relevanceTags: ["groups", "challenges", "sharing", "wearables"],
-        sourcePullRequests: [769],
+        sourcePullRequests: [769, 1463],
         tryIt: {
           label: "Review missing standings data",
           prompt:

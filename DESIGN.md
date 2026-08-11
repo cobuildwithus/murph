@@ -227,6 +227,16 @@ clearance for the icon that Messages overlays, and let Messages supply that icon
 and the outer corner mask. Keep structural rounding only where it communicates
 an inner state, such as a progress track or set-status marker.
 
+### iMessage Challenge Standings Card Image
+Render the app-absent standings fallback as the static counterpart to the
+shipping SwiftUI balloon. Keep the cream field, title, rank or collective
+progress, and score hierarchy aligned with the native card. The bitmap remains
+rectangular and badge-free because Messages owns the outer chrome. Reserve the
+upper-left title gutter for its provider-owned logo without drawing that logo
+into the bitmap. Preserve
+scorer-owned order, scores, progress, and coverage while using the identity-free
+public presentation defined by the challenge standings delivery contract.
+
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
 current MRR, tracked fulfilled usage top-ups, paying-customer growth, active
