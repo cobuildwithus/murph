@@ -4020,7 +4020,9 @@ function createHostedAssistantLinqSendDependency(input: {
       includesVaultFile
       && (
         providerTarget !== request.target
-        || providerTargetKind !== (request.targetKind ?? null)
+        || providerTargetKind !== (
+          request.targetKind === "participant" ? "participant" : "thread"
+        )
         || (
           providerTargetKind === "thread"
           && looksLikeHostedProviderRedactedLinqTarget(providerTarget)

@@ -72,6 +72,7 @@ Success means:
 - Focused Web engagement and group route tests pass: 199 tests.
 - Focused Assistant Runtime callback, channel, workspace phase, entrypoint,
   and runner tests pass: 933 tests.
+- Full Assistant Runtime package coverage passes: 2,163 tests with 4 skipped.
 - Focused Cloudflare parser/platform tests pass: 150 tests.
 - Focused changelog registry and archive tests pass: 41 tests.
 - Hosted-execution, Web, Assistant Runtime, and Cloudflare typechecks pass.
@@ -81,9 +82,13 @@ Success means:
   path remains covered by the passing callback and workspace-runner tests.
 - Final diff whitespace and identifier scans pass. The only secret-like value
   is an explicit non-production test token fixture.
-- Pending: push the exact candidate, run required CI plus the preliminary
-  completion-specialists and final ReviewGPT gates, and resolve every accepted
-  finding before completion.
+- The first exact-head platform coverage shard exposed an `explicit` versus
+  canonical `thread` comparison on approved vault-file delivery plus two stale
+  integration mocks. The semantic comparison is corrected, the two failing
+  files pass (12 tests), and the full package coverage rerun passes.
+- Pending: push the corrected candidate, rerun required CI, complete the
+  preliminary completion-specialists pass and the required next final ReviewGPT
+  round, and resolve every accepted finding before completion.
 
 ## Deployment
 
