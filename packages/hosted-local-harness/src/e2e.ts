@@ -74,6 +74,7 @@ export type HostedLocalE2eScenarioName =
   | "family-sponsored-group-roundtrip"
   | "group-sleep-source-sharing"
   | "foreground-reply-priority"
+  | "hosted-web-browser-smoke"
   | "idle-checkpoint-deferred-progress"
   | "junction-link-connect"
   | "junction-wearable-fixture"
@@ -176,6 +177,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-device-connect-e2e.test.ts",
     name: "device-connect",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-web-browser-smoke-e2e.test.ts",
+    manualOnly: true,
+    name: "hosted-web-browser-smoke",
   },
   {
     file: "apps/cloudflare/test/hosted-local-device-sync-wake-e2e.test.ts",
