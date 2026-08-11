@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { PublicProviderDescriptor } from "@murphai/device-syncd/public-ingress";
 
+import { toHostedBrowserDeviceSyncConnectionSource } from "@/src/lib/device-sync/browser-connection-source";
+import type { HostedDeviceConnectionSource } from "@/src/lib/device-sync/prisma-store/sources";
 import type { HostedBrowserDeviceSyncConnection } from "@/src/lib/device-sync/public-connection";
 import {
   buildHostedDeviceSyncSettingsSources,
@@ -67,7 +69,44 @@ function buildConnection(overrides: Partial<HostedBrowserDeviceSyncConnection> =
   } satisfies HostedBrowserDeviceSyncConnection;
 }
 
+function buildConnectionSource(overrides: Partial<HostedDeviceConnectionSource> = {}): HostedDeviceConnectionSource {
+  return {
+    connectionId: "dspc_example",
+    createdAt: "2026-04-01T08:00:00.000Z",
+    displayName: null,
+    firstSeenAt: "2026-04-01T08:00:00.000Z",
+    id: "dspcs_example",
+    lastDataAt: "2026-04-03T08:00:00.000Z",
+    lastErrorCode: null,
+    lastErrorMessage: null,
+    lastSeenAt: "2026-04-03T08:00:00.000Z",
+    resourceAvailabilitySummary: { sleep: true },
+    sourceInstanceKey: "fitbit",
+    sourceProviderSlug: "fitbit",
+    status: "connected",
+    updatedAt: "2026-04-03T08:00:00.000Z",
+    ...overrides,
+  } satisfies HostedDeviceConnectionSource;
+}
+
 describe("buildHostedDeviceSyncSettingsSources", () => {
+  it("carries sanitized upstream source error codes from the database projection", () => {
+    expect(
+      toHostedBrowserDeviceSyncConnectionSource(
+        buildConnectionSource({
+          lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+          status: "disconnected",
+        }),
+        "dspc_fitbit",
+      ),
+    ).toMatchObject({
+      connectionId: "dspc_fitbit",
+      lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
+    });
+  });
+
   it("omits configured providers that do not have a connection yet", () => {
     const sources = buildHostedDeviceSyncSettingsSources({
       connections: [],
@@ -173,6 +212,37 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
       resourceCount: 4,
       sourceProviderSlug: "fitbit",
       status: "connected",
+    }]);
+  });
+
+  it("projects sanitized upstream source error codes for migration state resolution", () => {
+    const [source] = buildHostedDeviceSyncSettingsSources({
+      connectionSources: [{
+        connectionId: "dspc_fitbit_legacy",
+        firstSeenAt: "2026-07-01T08:00:00.000Z",
+        lastDataAt: "2026-08-10T08:00:00.000Z",
+        lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+        lastSeenAt: "2026-08-10T08:00:00.000Z",
+        resourceCount: 4,
+        sourceProviderSlug: "fitbit",
+        status: "disconnected",
+      }],
+      connections: [buildConnection({
+        id: "dspc_fitbit_legacy",
+        provider: "junction",
+      })],
+      providers: [JUNCTION_PROVIDER],
+    });
+
+    expect(source?.upstreamSources).toEqual([{
+      firstSeenAt: "2026-07-01T08:00:00.000Z",
+      lastDataAt: "2026-08-10T08:00:00.000Z",
+      lastErrorCode: "SOURCE_PROVIDER_DISCONNECTED",
+      lastSeenAt: "2026-08-10T08:00:00.000Z",
+      providerLabel: "Fitbit",
+      resourceCount: 4,
+      sourceProviderSlug: "fitbit",
+      status: "disconnected",
     }]);
   });
 

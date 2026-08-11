@@ -159,6 +159,12 @@ export function createConnectCallbackNotice(
     return null;
   }
 
+  const catalogSource = findCallbackSource({
+    connectSource: input.connectSource,
+    connectTarget: input.connectTarget,
+    provider: input.provider,
+    sources,
+  });
   const sourceLabel = resolveCallbackSourceLabel({
     connectSource: input.connectSource,
     connectTarget: input.connectTarget,
@@ -167,6 +173,19 @@ export function createConnectCallbackNotice(
   });
 
   if (input.status === "connected") {
+    if (
+      catalogSource?.id === "fitbit" &&
+      (catalogSource.migrationState === "authorization_required" ||
+        catalogSource.migrationState === "verifying_successor")
+    ) {
+      return {
+        kind: "success",
+        title: "Google Health authorized",
+        message:
+          "Murph is verifying Fitbit history before you finish the migration. The legacy Fitbit connection stays active for now.",
+      };
+    }
+
     return {
       kind: "success",
       title: "Device connected",
@@ -177,13 +196,6 @@ export function createConnectCallbackNotice(
   // Error callbacks are taken straight from query params, so only a catalog
   // source and a recognizable code shape may reach the prefilled support mail.
   // Anything else is unverified text and is dropped rather than quoted back.
-  const catalogSource = findCallbackSource({
-    connectSource: input.connectSource,
-    connectTarget: input.connectTarget,
-    provider: input.provider,
-    sources,
-  });
-
   return {
     errorCode: normalizeConnectCallbackErrorReference(input.errorCode),
     kind: "error",

@@ -143,7 +143,7 @@ export function SourceCard({
                   ? "Authorize Google Health before September 2026. Murph will not change the legacy Fitbit connection until you explicitly finish the migration."
                   : migrationState === "verifying_successor"
                     ? "Google Health is authorized, but Murph cannot verify representative history yet. The legacy Fitbit connection stays active while Murph waits for supported resources and a fresh update."
-                    : "Google Health has reported supported resources and a fresh update. Murph has not imported overlapping history; confirm representative recent Fitbit history before finishing."}
+                    : "Google Health has reported supported resources and a fresh update. Murph has not imported overlapping history; open Fitbit or Pixel Watch first and check the last few days of sleep, activity, heart rate, exercise, and workouts before finishing."}
               </p>
             ) : requiresConnectionReset ? (
               <p className="max-w-[22rem] text-sm leading-relaxed text-pretty text-destructive">

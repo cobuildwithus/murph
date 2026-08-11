@@ -7,6 +7,7 @@ export type HostedBrowserDeviceSyncConnectionSourceRecoveryKind = "connection_re
 export interface HostedBrowserDeviceSyncConnectionSource {
   connectionId: string;
   firstSeenAt: string;
+  lastErrorCode?: string | null;
   lastDataAt?: string | null;
   lastSeenAt: string;
   recoveryKind?: HostedBrowserDeviceSyncConnectionSourceRecoveryKind;
@@ -26,6 +27,7 @@ export function toHostedBrowserDeviceSyncConnectionSource(
     connectionId: browserConnectionId,
     firstSeenAt: source.firstSeenAt,
     lastDataAt: source.lastDataAt,
+    ...(source.lastErrorCode ? { lastErrorCode: source.lastErrorCode } : {}),
     lastSeenAt: source.lastSeenAt,
     ...(recoveryKind ? { recoveryKind } : {}),
     ...(requiresConnectionSourceReconnect(source) ? { requiresReconnect: true } : {}),

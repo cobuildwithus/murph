@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
@@ -66,6 +67,9 @@ type JunctionConnectionRequest = {
   intentClaim?: string;
   source: ConnectSource;
 };
+
+const FITBIT_MIGRATION_REFRESH_INTERVAL_MS = 15_000;
+const FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT = 12;
 
 export type {
   ConnectCallbackInput,
@@ -141,6 +145,8 @@ export function ConnectSourcesGrid({
     useState(false);
   const initialConnectIntentAuthOpenedRef = useRef(false);
   const initialConnectIntentAttemptedRef = useRef(false);
+  const fitbitMigrationRefreshAttemptsRef = useRef(0);
+  const router = useRouter();
   const { openAuthDialog } = useAuth();
   const callbackConnectedSourceId =
     initialCallback?.status === "connected"
@@ -178,6 +184,15 @@ export function ConnectSourcesGrid({
   const filteredSources = useMemo(
     () => filterConnectSourcesForSearch(displaySources, search),
     [displaySources, search],
+  );
+  const hasVerifyingFitbitMigration = useMemo(
+    () =>
+      displaySources.some(
+        (source) =>
+          source.id === "fitbit" &&
+          source.migrationState === "verifying_successor",
+      ),
+    [displaySources],
   );
   const hasInitialCallback = Boolean(initialCallback);
   const activeConnectIntent = initialConnectIntent ?? locationConnectIntent;
@@ -233,6 +248,33 @@ export function ConnectSourcesGrid({
       stripConnectCallbackParams();
     }
   }, [hasInitialCallback]);
+
+  useEffect(() => {
+    if (!hasVerifyingFitbitMigration) {
+      fitbitMigrationRefreshAttemptsRef.current = 0;
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const nextAttempt = fitbitMigrationRefreshAttemptsRef.current + 1;
+      fitbitMigrationRefreshAttemptsRef.current = nextAttempt;
+      router.refresh();
+
+      if (nextAttempt >= FITBIT_MIGRATION_REFRESH_ATTEMPT_LIMIT) {
+        window.clearInterval(intervalId);
+        setNotice((current) =>
+          current ?? {
+            kind: "warning",
+            title: "Fitbit migration is still verifying",
+            message:
+              "Google Health is authorized, but Murph has not seen a fresh supported update yet. Keep legacy Fitbit connected and check back after your next Fitbit or Pixel Watch sync.",
+          },
+        );
+      }
+    }, FITBIT_MIGRATION_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasVerifyingFitbitMigration, router]);
 
   useEffect(() => {
     if (
@@ -463,7 +505,9 @@ export function ConnectSourcesGrid({
       }
       setNotice({
         kind: result.warning?.message ? "warning" : "success",
-        title: "Source disconnected",
+        title: source.migrationState === "cutover_ready"
+          ? "Fitbit migration complete"
+          : "Source disconnected",
         message: result.warning?.message
           ? `${resolveDisconnectSuccessMessage(source)} ${resolveDisconnectWarningDetail(result.warning)}`
           : resolveDisconnectSuccessMessage(source),

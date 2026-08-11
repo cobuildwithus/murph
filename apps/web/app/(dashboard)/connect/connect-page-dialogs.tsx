@@ -219,7 +219,7 @@ function resolveDisconnectDialogDescription(
   source: ConnectSource | null,
 ): string {
   if (source?.migrationState === "cutover_ready") {
-    return "Murph has confirmed a Google Health connection, supported resources, and a fresh update, but cannot prove historical completeness automatically. Only finish after you confirm representative recent Fitbit history. Murph will then stop the legacy Fitbit connection and admit only Google Health records after the cutover boundary; your existing Murph history is kept.";
+    return "Murph has confirmed a Google Health connection, supported resources, and a fresh update, but cannot prove historical completeness automatically. Before finishing, open Fitbit or Pixel Watch and check the last few days of sleep, activity, heart rate, exercise, and workouts. If recent history is missing, cancel and wait for Google Health to update. Murph will then stop the legacy Fitbit connection and admit only Google Health records after the cutover boundary; your existing Murph history is kept.";
   }
   if (source?.disconnectScope === "junction_account") {
     return "Murph will stop syncing new data from every source in this connection. Your history is kept.";

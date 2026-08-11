@@ -73,6 +73,7 @@ export interface HostedDeviceSyncSettingsUpstreamSource {
   connectTarget?: string | null;
   firstSeenAt?: string;
   lastDataAt?: string | null;
+  lastErrorCode?: string | null;
   lastSeenAt?: string;
   providerLabel: string;
   recoveryKind?: HostedBrowserDeviceSyncConnectionSource["recoveryKind"];
@@ -823,6 +824,7 @@ function toSettingsUpstreamSource(
           lastSeenAt: source.lastSeenAt,
         }
       : {}),
+    ...(source.lastErrorCode ? { lastErrorCode: source.lastErrorCode } : {}),
     providerLabel: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
     ...(source.recoveryKind ? { recoveryKind: source.recoveryKind } : {}),
     ...(source.requiresReconnect ? { requiresReconnect: true } : {}),

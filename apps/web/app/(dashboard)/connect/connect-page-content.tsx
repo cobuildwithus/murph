@@ -10,6 +10,9 @@ import {
   readConfiguredDeviceSyncConnectTargetConfigs,
   resolveDeviceConnectSourceIdForJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
+import {
+  DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+} from "@murphai/device-syncd/public-account";
 
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
@@ -999,7 +1002,7 @@ function resolveFitbitMigrationConnectionState(input: {
   const legacy = input.source.upstreamSources.find(
     (source) =>
       normalizeDeviceSyncConnectTargetKey(source.sourceProviderSlug) === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG &&
-      isLiveJunctionUpstreamSource(source),
+      isUnfinishedFitbitLegacySource(source),
   );
   if (!legacy) {
     return null;
@@ -1064,6 +1067,17 @@ function isLiveJunctionUpstreamSource(
     source.status === "error" ||
     source.requiresReconnect === true
   );
+}
+
+function isUnfinishedFitbitLegacySource(
+  source: ConnectSettingsSourceMatch["upstreamSources"][number],
+): boolean {
+  if (isLiveJunctionUpstreamSource(source)) {
+    return true;
+  }
+
+  return source.status === "disconnected"
+    && source.lastErrorCode !== DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE;
 }
 
 function isDisconnectableJunctionUpstreamSource(
