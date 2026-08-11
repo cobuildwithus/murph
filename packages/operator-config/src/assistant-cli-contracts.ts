@@ -997,7 +997,25 @@ export const assistantOutboxIntentSchema = z
       })
     }
 
-    if (intent.card !== null && intent.threadIsDirect !== true) {
+    if (
+      intent.card?.kind === 'challenge_standings' &&
+      !(
+        intent.threadIsDirect === false &&
+        intent.channel?.trim().toLowerCase() === 'linq'
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Challenge standings response cards require an authenticated Linq group conversation.',
+        path: ['card'],
+      })
+    }
+    if (
+      intent.card !== null &&
+      intent.card.kind !== 'challenge_standings' &&
+      intent.threadIsDirect !== true
+    ) {
       context.addIssue({
         code: 'custom',
         message: 'Assistant response cards require a private direct conversation.',

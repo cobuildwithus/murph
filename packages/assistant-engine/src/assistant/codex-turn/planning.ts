@@ -21,6 +21,7 @@ import {
 } from '../cli-surface-bootstrap.js'
 import {
   readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshotBestEffort,
 } from '../context-snapshot.js'
 import {
   assistantRouteSupportsGroupRoomModel,
@@ -131,6 +132,8 @@ import {
   resolveAssistantVoiceMemoDeliveryChannel,
   type AssistantVoiceMemoDeliveryChannel,
 } from '../voice-memo-delivery.js'
+
+const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
   assistantContractFingerprint: string
@@ -519,6 +522,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.input.scheduledInvocationAuthority == null) ||
       input.input.scheduledInvocationAuthority?.automationId ===
         MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID)
+  const groupChallengeResponseCardsAvailable =
+    authenticatedGroupChatRuntime &&
+    resolvedChannel?.trim().toLowerCase() === 'linq' &&
+    input.hostedToolContext?.groupSharedReader != null &&
+    input.profile.promptProfile === 'conversation' &&
+    input.profile.toolProfile === 'provider-turn' &&
+    (scheduledInvocationScope !== null ||
+      (ordinaryInboundTurn &&
+        input.input.scheduledInvocationAuthority == null))
   const shouldUseCommittedTranscriptHistory =
     input.profile.threadScope === 'session-thread' ||
     input.profile.promptProfile === 'assistant-ask-continuation' ||
@@ -688,6 +700,22 @@ export async function resolveAssistantRouteTurnPlan(input: {
     hostedRuntime: input.executionContext?.hosted != null,
     researchAvailable: assistantResearchAvailable,
   })
+  if (privateInteractiveProviderTurn) {
+    // A small vault can repair its navigation snapshot before provider start.
+    // Larger vaults yield to the degraded prompt instead of delaying the turn.
+    let remainingRefreshSteps =
+      ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS
+    await refreshAssistantContextSnapshotBestEffort({
+      shouldYield: () => {
+        if (remainingRefreshSteps <= 0) {
+          return true
+        }
+        remainingRefreshSteps -= 1
+        return false
+      },
+      vaultRoot: input.input.vault,
+    })
+  }
   let assistantContextSnapshotElapsedMs: number | null = null
   const assistantContextSnapshotPrompt =
     maintenanceTurn || systemNotificationTurn || !privateInteractiveAudience
@@ -927,6 +955,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.executionContext?.hosted?.productFeedbackCandidateSink
             ?.acceptProductFeedbackCandidate === 'function',
         responseCardsAvailable,
+        groupChallengeResponseCardsAvailable,
         physicalNotesAvailable:
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           input.hostedToolContext?.physicalNotes != null &&

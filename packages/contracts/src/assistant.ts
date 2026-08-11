@@ -1,6 +1,10 @@
 import * as z from "./zod-runtime.ts";
 
 import {
+  challengeStandingsResponseCardV1Schema,
+  type ChallengeStandingsResponseCardV1,
+} from "./challenge-standings-card.ts";
+import {
   compactTableResponseCardV1Schema,
   type CompactTableResponseCardV1,
 } from "./compact-table-card.ts";
@@ -98,7 +102,8 @@ export type DailyNutritionResponseCard =
 
 export type AssistantResponseCard =
   | DailyNutritionResponseCard
-  | CompactTableResponseCardV1;
+  | CompactTableResponseCardV1
+  | ChallengeStandingsResponseCardV1;
 
 const nutritionCardMealCountSchema = z
   .number()
@@ -353,6 +358,7 @@ export const assistantResponseCardSchema: z.ZodType<AssistantResponseCard> =
   z.union([
     dailyNutritionResponseCardSchema,
     compactTableResponseCardV1Schema,
+    challengeStandingsResponseCardV1Schema,
   ]);
 
 function isValidLocalCalendarDate(value: string): boolean {

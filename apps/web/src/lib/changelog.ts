@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Generated group photos, Starter, patterns, referrals, reminders, cards, voices, search, faster pages, clearer reports",
+      "Group photos, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
     summary:
-      "Use a visible Murph-made image as a group photo after an explicit request. Starter usage waits until used; patterns compare actions with next-day sleep/recovery; referrals stay in the intended conversation; reminders keep local time; workout rows stay clear; voice memos use your voice; web search is current; the homepage starts lighter; and Environment reports show their shape while loading.",
+      "Use a visible Murph-made image as a group photo after an explicit request. Starter usage waits until used; patterns link actions to next-day sleep; blood-pressure history survives source-access changes; referrals stay in their conversation; reminders keep local time; cards and voice choices stay clear; search stays current; pages start lighter; and private reports show their shape while loading.",
     items: [
       {
         id: "generated-image-group-photo",
@@ -97,6 +97,16 @@ const RAW_CHANGELOG_EDITIONS = [
           href: "/settings#subscription",
           label: "View Starter usage",
         },
+      },
+      {
+        id: "cleaner-plan-and-model-settings",
+        kind: "improvement",
+        priority: 1,
+        title: "Cleaner plan and model settings",
+        summary:
+          "Settings now presents Starter usage and unavailable models more concisely while keeping relevant plan and upgrade choices visible.",
+        relevanceTags: ["settings", "plans", "models"],
+        sourcePullRequests: [1621],
       },
       {
         id: "personal-patterns",
@@ -131,6 +141,18 @@ const RAW_CHANGELOG_EDITIONS = [
           "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
         relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
         sourcePullRequests: [1592],
+      },
+      {
+        id: "blood-pressure-history-completion",
+        kind: "improvement",
+        priority: 4,
+        title: "Blood-pressure history waits for the whole sync",
+        summary:
+          "When Murph is recovering older blood-pressure readings, a temporary change in source access no longer lets an unfinished history import look complete.",
+        details:
+          "Murph keeps the same history window available to retry after access returns and marks it complete only after every remaining day finishes under the currently connected source.",
+        relevanceTags: ["blood-pressure", "wearables", "health-data", "reliability"],
+        sourcePullRequests: [1523, 1625],
       },
       {
         id: "reminders-keep-requested-timezone",
@@ -3234,7 +3256,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "A real zero still counts. Missing sharing permission, a stale sync, a disconnected source, and a source that needs attention stay distinct. When an exact required share has not been granted, Murph may offer one separate Like-or-heart permission card; the standings message itself never becomes a consent surface.",
         relevanceTags: ["groups", "challenges", "sharing", "wearables"],
-        sourcePullRequests: [769],
+        sourcePullRequests: [769, 1463],
         tryIt: {
           label: "Review missing standings data",
           prompt:

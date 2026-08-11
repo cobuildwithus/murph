@@ -94,11 +94,11 @@ export { readJsonlRecords, toMonthlyShardRelativePath } from "./jsonl.ts";
 export { parseFrontmatterDocument, stringifyFrontmatterDocument } from "./frontmatter.ts";
 export { loadVault } from "./vault.ts";
 export {
-  readLatestBloodTestHistorySummaryInterruptible,
+  readCanonicalEventAvailabilityInterruptible,
 } from "./history/api.ts";
 export type {
-  LatestBloodTestHistorySummary,
-  ReadLatestBloodTestHistorySummaryInput,
+  CanonicalEventAvailabilitySummary,
+  ReadCanonicalEventAvailabilityInput,
 } from "./history/api.ts";
 export {
   MAX_EXPERIMENT_LIFECYCLE_DOCUMENTS,

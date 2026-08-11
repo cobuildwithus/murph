@@ -60,8 +60,9 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Generated group photos, Starter, patterns, referrals, reminders, cards, voices, search, faster pages, clearer reports",
+      "Group photos, Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
     );
+    expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).toContain("Response cards stay compact in Messages");
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
@@ -256,6 +257,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
     expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week of follow-through");
     expect(markup).toContain("Generated images can become group photos");

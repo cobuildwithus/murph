@@ -462,6 +462,10 @@ function buildTeamEntries(input: {
       return -1
     }
     return compareSafeIntegersDescending(left.verifiedPoints, right.verifiedPoints)
+      || compareUnscoredLast(
+        left.coverage.unscoredParticipants === left.coverage.totalParticipants,
+        right.coverage.unscoredParticipants === right.coverage.totalParticipants,
+      )
       || left.teamId.localeCompare(right.teamId)
   })
 }
@@ -513,7 +517,21 @@ function compareScoreboardEntries(
   right: GroupChallengeIndividualScoreboardEntry,
 ): number {
   return compareSafeIntegersDescending(left.verifiedPoints, right.verifiedPoints)
+    || compareUnscoredLast(
+      left.coverage === 'unscored',
+      right.coverage === 'unscored',
+    )
     || left.participantId.localeCompare(right.participantId)
+}
+
+function compareUnscoredLast(
+  leftUnscored: boolean,
+  rightUnscored: boolean,
+): number {
+  if (leftUnscored === rightUnscored) {
+    return 0
+  }
+  return leftUnscored ? 1 : -1
 }
 
 function compareSafeIntegersDescending(left: number, right: number): number {

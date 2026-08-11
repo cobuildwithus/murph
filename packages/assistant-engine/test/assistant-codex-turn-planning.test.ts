@@ -20,6 +20,22 @@ const planningMocks = vi.hoisted(() => ({
     vi.fn(async (): Promise<string | null> => 'bootstrap contract'),
   readAssistantContextSnapshotPrompt:
     vi.fn(async (): Promise<string | null> => null),
+  refreshAssistantContextSnapshotBestEffort: vi.fn(async (_input?: {
+    shouldYield?: (() => boolean) | null
+  }): Promise<{
+    pendingDirtyDomains: readonly (
+      | 'experiments'
+      | 'blood_tests'
+      | 'health_context'
+      | 'habitat'
+    )[]
+    refreshed: boolean
+    skipped: boolean
+  }> => ({
+    pendingDirtyDomains: [],
+    refreshed: false,
+    skipped: true,
+  })),
   readAssistantGroupRoomModelPrompt:
     vi.fn(async (): Promise<string | null> => null),
   resolveCodexAssistantTargetCapabilities: vi.fn(() => ({
@@ -57,6 +73,8 @@ vi.mock('../src/assistant/service.js', () => ({
 vi.mock('../src/assistant/context-snapshot.js', () => ({
   readAssistantContextSnapshotPrompt:
     planningMocks.readAssistantContextSnapshotPrompt,
+  refreshAssistantContextSnapshotBestEffort:
+    planningMocks.refreshAssistantContextSnapshotBestEffort,
 }))
 
 vi.mock('../src/assistant/group-room-model.js', () => ({
@@ -139,6 +157,12 @@ import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js
 afterEach(() => {
   planningMocks.readAssistantCliSurfaceBootstrapContext.mockReset()
   planningMocks.readAssistantContextSnapshotPrompt.mockReset()
+  planningMocks.refreshAssistantContextSnapshotBestEffort.mockReset()
+  planningMocks.refreshAssistantContextSnapshotBestEffort.mockResolvedValue({
+    pendingDirtyDomains: [],
+    refreshed: false,
+    skipped: true,
+  })
   planningMocks.readAssistantGroupRoomModelPrompt.mockReset()
   planningMocks.readAssistantGroupRoomModelPrompt.mockResolvedValue(null)
   planningMocks.resolveCodexAssistantTargetCapabilities.mockReset()
@@ -146,6 +170,84 @@ afterEach(() => {
 })
 
 describe('assistant Codex turn planning', () => {
+  it('bounds snapshot refresh inside direct provider planning and skips it for groups', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'VALUE_FREE_DEGRADED_SNAPSHOT',
+    )
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    let refreshContinuationChecks = 0
+    planningMocks.refreshAssistantContextSnapshotBestEffort.mockImplementationOnce(
+      async (input?: { shouldYield?: (() => boolean) | null }) => {
+        if (!input?.shouldYield) {
+          throw new Error('Expected a foreground snapshot refresh budget.')
+        }
+        while (input.shouldYield() !== true) {
+          refreshContinuationChecks += 1
+        }
+        return {
+          pendingDirtyDomains: ['blood_tests'],
+          refreshed: false,
+          skipped: false,
+        }
+      },
+    )
+
+    const directPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(refreshContinuationChecks).toBe(64)
+    expect(planningMocks.refreshAssistantContextSnapshotBestEffort)
+      .toHaveBeenCalledTimes(1)
+    expect(planningMocks.readAssistantContextSnapshotPrompt)
+      .toHaveBeenCalledTimes(1)
+    expect(directPlan.systemPrompt).toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+
+    planningMocks.refreshAssistantContextSnapshotBestEffort.mockClear()
+    planningMocks.readAssistantContextSnapshotPrompt.mockClear()
+    const groupSharedPlan = createSharedPlan()
+    groupSharedPlan.conversationPolicy.audience.effectiveThreadIsDirect = false
+
+    const groupPlan = await resolveAssistantRouteTurnPlan({
+      executionContext: null,
+      input: createMessageInput(),
+      profile: {
+        promptProfile: 'conversation',
+        threadScope: 'session-thread',
+        toolProfile: 'provider-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-05-04',
+        currentTimeZone: 'Asia/Kuala_Lumpur',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: groupSharedPlan,
+    })
+
+    expect(planningMocks.refreshAssistantContextSnapshotBestEffort).not.toHaveBeenCalled()
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+    expect(groupPlan.systemPrompt).not.toContain('VALUE_FREE_DEGRADED_SNAPSHOT')
+  })
+
   it('exposes grounded research guidance only when Exa is configured across conversation routes', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue([
       'Murph CLI Contract:',
@@ -2426,17 +2528,16 @@ describe('assistant Codex turn planning', () => {
     )
   })
 
-  it('offers response cards to current private requests and exact scheduled occurrences', async () => {
+  it('offers audience-scoped private and Linq group challenge cards only', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
       'bootstrap contract',
     )
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     const common = {
-      executionContext: null,
       profile: {
-        promptProfile: 'conversation',
-        threadScope: 'session-thread',
-        toolProfile: 'provider-turn',
+        promptProfile: 'conversation' as const,
+        threadScope: 'session-thread' as const,
+        toolProfile: 'provider-turn' as const,
       },
       promptTimeContext: {
         currentLocalDate: '2026-07-28',
@@ -2444,54 +2545,137 @@ describe('assistant Codex turn planning', () => {
       },
       route: createRoute(),
       session: createSession(),
-    } satisfies Omit<
-      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
-      'input' | 'sharedPlan'
-    >
-    const toolNames = async (
-      input: AssistantMessageInput,
-      sharedPlan = createSharedPlan(),
-    ) => (await resolveAssistantRouteTurnPlan({
-      ...common,
-      input,
-      sharedPlan,
-    })).dynamicTools.map((tool) => tool.name)
+    }
+    const cardTool = async (options: {
+      executionContext?: Parameters<typeof resolveAssistantRouteTurnPlan>[0]['executionContext']
+      hostedToolContext?: AssistantHostedToolContext | null
+      input: AssistantMessageInput
+      sharedPlan?: AssistantTurnSharedPlan
+    }) => {
+      const plan = await resolveAssistantRouteTurnPlan({
+        ...common,
+        executionContext: options.executionContext ?? null,
+        hostedToolContext: options.hostedToolContext ?? null,
+        input: options.input,
+        sharedPlan: options.sharedPlan ?? createSharedPlan(),
+      })
+      return plan.dynamicTools.find(
+        (tool) => tool.name === 'attach_response_card',
+      )
+    }
 
-    await expect(toolNames({
-      ...createMessageInput(),
-      scheduledInvocationAuthority: {
-        automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
-        occurrenceAt: '2026-07-28T21:00:00.000-04:00',
-      },
-      scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
-      turnTrigger: 'automation-cron',
-    })).resolves.toContain('attach_response_card')
-    await expect(toolNames(createMessageInput())).resolves.toContain(
-      'attach_response_card',
-    )
-    await expect(toolNames({
-      ...createMessageInput(),
-      scheduledInvocationAuthority: {
-        automationId: 'automation_other',
-        occurrenceAt: '2026-07-28T21:00:00.000-04:00',
-      },
-      scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
-      turnTrigger: 'automation-cron',
-    })).resolves.toContain('attach_response_card')
-    await expect(toolNames(
-      {
+    const privateTool = await cardTool({ input: createMessageInput() })
+    expect(privateTool).toBeDefined()
+    const privateSchema = JSON.stringify(privateTool!.inputSchema)
+    expect(privateSchema).toContain('daily_nutrition')
+    expect(privateSchema).toContain('compact_table')
+    expect(privateSchema).not.toContain('challenge_standings')
+
+    await expect(cardTool({
+      input: {
         ...createMessageInput(),
         scheduledInvocationAuthority: {
-          automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
+          automationId: 'automation_other',
           occurrenceAt: '2026-07-28T21:00:00.000-04:00',
         },
-        threadIsDirect: false,
+        scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        turnTrigger: 'automation-cron',
       },
-      createSharedPlan({}, {
-        effectiveThreadIsDirect: false,
-        threadIsDirect: false,
-      }),
-    )).resolves.not.toContain('attach_response_card')
+    })).resolves.toBeDefined()
+
+    const hostedExecutionContext = {
+      hosted: {
+        dynamicContextPrompts: [],
+        groupSharedReader: { request: vi.fn() },
+        memberId: 'member-group-challenge-card',
+        userEnvKeys: [],
+      },
+    }
+    const linqGroupPlan = createSharedPlan({}, {
+      channel: 'linq',
+      effectiveThreadIsDirect: false,
+      threadId: 'linq-group-challenge-card',
+      threadIsDirect: false,
+    })
+    const linqGroupInput = {
+      ...createMessageInput(),
+      channel: 'linq' as const,
+      threadId: 'linq-group-challenge-card',
+      threadIsDirect: false,
+    }
+    const groupTool = await cardTool({
+      executionContext: hostedExecutionContext,
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupSharedReader: { request: vi.fn() },
+      },
+      input: linqGroupInput,
+      sharedPlan: linqGroupPlan,
+    })
+    expect(groupTool).toBeDefined()
+    const groupSchema = JSON.stringify(groupTool!.inputSchema)
+    expect(groupSchema).toContain('participantObservations')
+    expect(groupSchema).toContain('challengeSlug')
+    expect(groupSchema).toContain('pageRevisionDigest')
+    expect(groupSchema).not.toContain('definitionDigest')
+    expect(groupSchema).not.toContain('componentProjectionScopeKeys')
+    expect(groupSchema).not.toContain('scoreInput')
+    expect(groupSchema).not.toContain('participantLabels')
+    expect(groupSchema).not.toContain('challenge_standings')
+    expect(groupSchema).not.toContain('daily_nutrition')
+    expect(groupSchema).not.toContain('compact_table')
+
+    await expect(cardTool({
+      executionContext: {
+        hosted: {
+          dynamicContextPrompts: [],
+          memberId: 'member-group-challenge-card-no-reader',
+          userEnvKeys: [],
+        },
+      },
+      hostedToolContext: createHostedToolContext(),
+      input: linqGroupInput,
+      sharedPlan: linqGroupPlan,
+    })).resolves.toBeUndefined()
+
+    await expect(cardTool({
+      executionContext: hostedExecutionContext,
+      hostedToolContext: {
+        ...createHostedToolContext(),
+        groupSharedReader: { request: vi.fn() },
+      },
+      input: {
+        ...linqGroupInput,
+        scheduledInvocationAuthority: {
+          automationId: 'automation_group_challenge_update',
+          occurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        },
+        scheduledOccurrenceAt: '2026-07-28T21:00:00.000-04:00',
+        turnTrigger: 'automation-cron',
+      },
+      sharedPlan: linqGroupPlan,
+    })).resolves.toBeDefined()
+
+    await expect(cardTool({
+      input: linqGroupInput,
+      sharedPlan: linqGroupPlan,
+    })).resolves.toBeUndefined()
+
+    const telegramGroupPlan = createSharedPlan({}, {
+      channel: 'telegram',
+      effectiveThreadIsDirect: false,
+      threadId: 'telegram-group-challenge-card',
+      threadIsDirect: false,
+    })
+    await expect(cardTool({
+      executionContext: hostedExecutionContext,
+      input: {
+        ...linqGroupInput,
+        channel: 'telegram',
+        threadId: 'telegram-group-challenge-card',
+      },
+      sharedPlan: telegramGroupPlan,
+    })).resolves.toBeUndefined()
   })
 
   it('offers scheduled image generation only on routes that can deliver vault images', async () => {
