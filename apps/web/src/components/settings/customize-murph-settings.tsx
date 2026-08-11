@@ -5,6 +5,7 @@ import {
   assistantVoiceOptions,
   defaultAssistantPersonaId,
   resolveAssistantBasePersonaOption,
+  resolveAssistantEffectiveStyle,
   resolveAssistantPersonaParts,
   type AssistantPersonaId,
   type AssistantWebPersonalitySettingId,
@@ -84,6 +85,11 @@ export function CustomizeMurphSettings({
   const [styleLevelsOpen, setStyleLevelsOpen] = useState(false);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [previousOpenVoiceLink, setPreviousOpenVoiceLink] = useState(openVoiceLink);
+  const effectiveStyle = resolveAssistantEffectiveStyle({
+    persona,
+    ...(style.tone ? { tone: style.tone } : {}),
+    ...(style.voice ? { voice: style.voice } : {}),
+  });
 
   if (previousOpenVoiceLink !== openVoiceLink) {
     setPreviousOpenVoiceLink(openVoiceLink);
@@ -104,8 +110,7 @@ export function CustomizeMurphSettings({
         <SettingsRow
           icon={<MessageSquareText className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="How Murph talks"
-          value={style.tone ? formatAssistantTone(style.tone) : "Default"}
-          empty={!style.tone}
+          value={formatAssistantToneSummary(effectiveStyle.tone, style.tone !== null)}
           action={
             <Button type="button" size="default" variant="ghost" onClick={() => setPickerStep("tone")}>
               Customize
@@ -135,8 +140,7 @@ export function CustomizeMurphSettings({
         <SettingsRow
           icon={<Mic2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
           label="Voice"
-          value={style.voice ? formatAssistantVoice(style.voice) : "Classic Murph"}
-          empty={!style.voice}
+          value={formatAssistantVoiceSummary(effectiveStyle.voice, style.voice !== null)}
           action={
             <Button type="button" size="default" variant="ghost" onClick={() => setPickerStep("voice")}>
               Change
@@ -160,8 +164,8 @@ export function CustomizeMurphSettings({
         <MurphAssistantStylePicker
           singleStep
           initialStep={pickerStep}
-          initialTone={style.tone}
-          initialVoice={style.voice}
+          initialTone={effectiveStyle.tone}
+          initialVoice={effectiveStyle.voice}
           // The successful save owns the chat handoff; closing the picker any
           // other way never navigates.
           onSaved={(preferences) => {
@@ -181,8 +185,8 @@ export function CustomizeMurphSettings({
       {personaPickerOpen ? (
         <MurphPersonaPicker
           initialPersona={persona}
-          initialTone={style.tone}
-          initialVoice={style.voice}
+          initialTone={effectiveStyle.tone}
+          initialVoice={effectiveStyle.voice}
           mode="personality"
           onSaved={(preferences) => setPersona(preferences.persona)}
           onOpenChange={(open) => {
@@ -250,8 +254,22 @@ function formatAssistantTone(tone: AssistantTonePreference): string {
   return tone === "formal" ? "Formal" : "Casual";
 }
 
+function formatAssistantToneSummary(
+  tone: AssistantTonePreference,
+  custom: boolean,
+): string {
+  return `${formatAssistantTone(tone)} · ${custom ? "Custom" : "Personality default"}`;
+}
+
 function formatAssistantVoice(voice: AssistantVoiceOptionId): string {
   return assistantVoiceOptions.find((option) => option.id === voice)?.label ?? "Classic";
+}
+
+function formatAssistantVoiceSummary(
+  voice: AssistantVoiceOptionId,
+  custom: boolean,
+): string {
+  return `${formatAssistantVoice(voice)} · ${custom ? "Custom" : "Personality default"}`;
 }
 
 async function saveAssistantPersonaOnlyPreference(

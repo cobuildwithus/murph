@@ -14,8 +14,9 @@ Updated: 2026-08-10
 
 - Settings shows the saved main and optional supporting personality and opens
   the existing persona selector in a focused two-step edit flow.
-- A Settings persona save updates only `persona`; it does not implicitly change
-  tone, voice, or the existing independently editable style levels.
+- A Settings persona save updates only `persona`; it preserves explicit tone,
+  voice, and style-level overrides while displaying and editing the effective
+  persona defaults wherever no explicit tone or voice override exists.
 - `murph.personalization` can read and atomically update the same main and
   optional supporting personality under its existing input-bound authority.
 - Existing onboarding, tone, voice, and dial behavior remains available and
@@ -53,6 +54,10 @@ Updated: 2026-08-10
 3. Risk: Settings and chat could drift onto separate storage paths.
    Mitigation: both resolve to the existing combined persona ID and write
    through the same canonical member-preferences owner.
+4. Risk: a persona-only save could leave Settings showing raw null values while
+   runtime behavior changes to the new persona's defaults.
+   Mitigation: derive displayed and picker-initial tone and voice through the
+   existing effective-style resolver without adding storage or state.
 
 ## Tasks
 
@@ -81,6 +86,9 @@ Updated: 2026-08-10
   needed read, so the write stays atomic without a new pre-write database read.
 - Reject persona writes from scheduled occurrences while preserving their
   existing tone, voice, and dial authority.
+- Keep persona-derived tone and voice as fallback behavior: persona-only writes
+  never mutate explicit tone or voice columns, while Settings derives the same
+  effective defaults and provenance that runtime planning uses.
 
 ## Verification
 

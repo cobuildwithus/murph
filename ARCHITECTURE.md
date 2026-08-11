@@ -689,7 +689,11 @@ tone, and voice changes continue to
 append the existing `member.preferences.updated` mailbox event inside the web
 transaction and converge into canonical vault preferences through normal
 runtime handling. Personal Settings projects the canonical combined persona ID
-and reuses the onboarding selector for a persona-only save. The existing
+and reuses the onboarding selector for a persona-only save. It derives displayed
+tone and voice through the same effective-style resolver used by runtime
+planning, labels each as an explicit override or personality default, and opens
+the existing editors on that effective value without writing derived defaults
+to storage. The existing
 browser Style levels editor continues to project and update Humor, Push, and
 Detail independently; Unhinged remains conversational-only. Hosted
 `murph.assistant_style` set/reset operations use a

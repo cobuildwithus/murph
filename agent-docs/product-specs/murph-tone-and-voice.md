@@ -1,6 +1,6 @@
 # How Murph Talks
 
-Last verified: 2026-08-01
+Last verified: 2026-08-10
 Status: Implemented for persona-first onboarding, personal Settings, hosted mailbox handoff, prompt style, voice memo default resolution, supervisor-run preview generation, private conversational controls, room-owned hosted Linq group controls, and the conversational-only Unhinged dial
 
 ## Product Contract
@@ -18,10 +18,13 @@ The six controls are:
 
 Tone and voice appear during the hosted first visit and under **How Murph
 talks** in personal Settings. Main and optional supporting personality appear
-under **Personality**. Humor, Push, and Detail remain available through explicit
-private conversational requests and under **Style levels** in personal
-Settings. Settings shows those three effective 0–10 values in one dialog on
-desktop and one drawer on mobile; it does not add onboarding steps.
+under **Personality**. The Settings rows show the effective tone and voice plus
+whether each value is a custom override or the selected personality's default,
+and each editor opens on that same effective value. Humor, Push, and Detail
+remain available through explicit private conversational requests and under
+**Style levels** in personal Settings. Settings shows those three effective
+0–10 values in one dialog on desktop and one drawer on mobile; it does not add
+onboarding steps.
 
 Unhinged is conversational-only. It has no first-visit step and no Settings row, and the browser `POST /api/settings/assistant-style` route rejects it; the only way to change it is to ask Murph in conversation, which uses `murph.assistant_style`. It scales how much Murph self-censors its own style and how much edgy, crude, or adult-flavored latitude it takes among clearly consenting adults. It never changes safety, truth, privacy, consent, authority, tool access, or notification cadence.
 

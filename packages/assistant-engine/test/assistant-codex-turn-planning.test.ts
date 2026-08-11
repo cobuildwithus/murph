@@ -3057,7 +3057,10 @@ describe('assistant Codex turn planning', () => {
       phoneCalls: { start: vi.fn() },
       subscriptionTool: { request: vi.fn() },
     }
-    const plan = await resolveAssistantRouteTurnPlan({
+    const groupPlanInput: Omit<
+      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+      'preferenceContext'
+    > = {
       acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
       executionContext: {
         hosted: {
@@ -3073,14 +3076,6 @@ describe('assistant Codex turn planning', () => {
         ...createMessageInput(),
         channel: 'linq',
         deliverResponse: true,
-      },
-      preferenceContext: {
-        assistantPersona: 'scientist-with-classic',
-        assistantPersonality: {
-          humor: 9,
-        },
-        assistantTone: 'casual',
-        assistantVoice: 'warm',
       },
       profile: {
         promptProfile: 'conversation',
@@ -3099,6 +3094,17 @@ describe('assistant Codex turn planning', () => {
         threadId: 'group-thread',
         threadIsDirect: false,
       }),
+    }
+    const plan = await resolveAssistantRouteTurnPlan({
+      ...groupPlanInput,
+      preferenceContext: {
+        assistantPersona: 'scientist-with-classic',
+        assistantPersonality: {
+          humor: 9,
+        },
+        assistantTone: 'casual',
+        assistantVoice: 'warm',
+      },
     })
 
     expect(plan.developerInstructions).toContain('Conversation scope: hosted group chat.')
@@ -3138,6 +3144,21 @@ describe('assistant Codex turn planning', () => {
     )
     expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
       resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
+    )
+    const personaDefaultPlan = await resolveAssistantRouteTurnPlan({
+      ...groupPlanInput,
+      preferenceContext: {
+        assistantPersona: 'hype-coach',
+        assistantPersonality: null,
+        assistantTone: null,
+        assistantVoice: null,
+      },
+    })
+    expect(personaDefaultPlan.developerInstructions).toContain(
+      'Casual is a persistent user-facing writing invariant',
+    )
+    expect(personaDefaultPlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('football-announcer'),
     )
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(

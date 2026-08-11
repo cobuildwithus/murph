@@ -116,7 +116,7 @@ const RAW_CHANGELOG_EDITIONS = [
         summary:
           "Choose Murph's main and optional supporting personality in Settings, or ask Murph to change them in chat.",
         details:
-          "Both paths update the same saved personality. Settings leaves your tone, voice, Humor, Push, and Detail choices unchanged, and a group request changes only that room's Murph rather than anyone's private settings.",
+          "Both paths update the same saved personality. Explicit tone, voice, Humor, Push, and Detail choices stay unchanged; where you have not customized tone or voice, Settings shows the selected personality's defaults. A group request changes only that room's Murph rather than anyone's private settings.",
         relevanceTags: ["personality", "settings", "chat", "groups"],
         sourcePullRequests: [1589],
         tryIt: {

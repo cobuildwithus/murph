@@ -72,7 +72,8 @@ export function PersonaSettingsStudy() {
       <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
         Settings reuses the production personality selector as a focused
         two-step flow. It changes only the main and optional supporting
-        personality, leaving tone and voice untouched.
+        personality. Explicit tone and voice choices stay untouched; absent
+        overrides follow the selected main personality’s defaults.
       </p>
       <div className="mt-5 flex flex-col gap-5 rounded-xl border border-border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>

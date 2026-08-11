@@ -1,6 +1,6 @@
 # Murph Personas
 
-Last verified: 2026-07-22
+Last verified: 2026-08-10
 Status: Implemented contract
 
 ## Product decision
@@ -73,8 +73,12 @@ without writing preferences or showing that final dialog.
 Existing members reuse the same selector in Settings as a focused two-step
 main/supporting editor. That save writes only the canonical persona ID; it does
 not rewrite tone, voice, or sparse Humor, Push, and Detail overrides. Those
-three existing Settings controls remain available separately under **Style
-levels**, while Unhinged remains conversational-only.
+explicit overrides continue to win. When tone or voice has no explicit
+override, changing the main personality changes its effective default;
+Settings shows that effective value and its source and initializes the editor
+from the same value. The three existing dial controls remain available
+separately under **Style levels**, while Unhinged remains
+conversational-only.
 
 Hosted private and authenticated Linq group conversations expose the same
 persona through `murph.personalization`. A persona mutation requires accepted
