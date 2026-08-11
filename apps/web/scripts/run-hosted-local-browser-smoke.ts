@@ -6,6 +6,23 @@ import {
   type Response,
 } from "@playwright/test";
 
+const MOTION_FREEZE_INIT_SCRIPT = String.raw`
+(() => {
+  const install = () => {
+    const target = document.head ?? document.documentElement;
+    if (!target) return false;
+    const style = document.createElement("style");
+    style.textContent =
+      "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
+    target.appendChild(style);
+    return true;
+  };
+  if (!install()) {
+    document.addEventListener("DOMContentLoaded", install, { once: true });
+  }
+})();
+`;
+
 const browserCases = [
   {
     contextOptions: {
@@ -92,25 +109,7 @@ async function prepareStablePrivatePage(
     }
     await route.abort();
   });
-  await page.addInitScript(() => {
-    const installMotionFreeze = (): boolean => {
-      const target = document.head ?? document.documentElement;
-      if (!target) {
-        return false;
-      }
-      const style = document.createElement("style");
-      style.textContent =
-        "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
-      target.appendChild(style);
-      return true;
-    };
-
-    if (!installMotionFreeze()) {
-      document.addEventListener("DOMContentLoaded", installMotionFreeze, {
-        once: true,
-      });
-    }
-  });
+  await page.addInitScript({ content: MOTION_FREEZE_INIT_SCRIPT });
 }
 
 async function proveConnectJourney(input: {
