@@ -3,11 +3,11 @@ import { Buffer } from 'node:buffer'
 import { describe, expect, it } from 'vitest'
 
 import {
-  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
   LINQ_IMESSAGE_APP_CARD_ORIGIN,
   assistantResponseCardAuthoringSchema,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
+  buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppCardImageUrl,
   buildLinqIMessageAppLayout,
@@ -572,8 +572,8 @@ describe('assistant response cards', () => {
         fiberGrams: null,
       },
     })
-    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Ask Murph for this card in text',
+    expect(buildLinqIMessageAppFallbackText(COMPLETE_CARD_V2)).toBe(
+      'Your daily nutrition. Ask Murph for this card in text',
     )
     const completeCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD)
     const goalCardUrl = buildLinqIMessageAppCardUrl(COMPLETE_CARD_V2)
@@ -625,7 +625,7 @@ describe('assistant response cards', () => {
     })
     expect(buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2).length)
       .toBeLessThan(2_048)
-    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).not.toMatch(
+    expect(buildLinqIMessageAppFallbackText(COMPLETE_CARD_V2)).not.toMatch(
       /\d|today|day|time/iu,
     )
   })

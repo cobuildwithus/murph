@@ -46,6 +46,54 @@ function isDeviceSyncCredentialIndependentImportJob(input: {
   );
 }
 
+describe("wearable import delay buckets", () => {
+  it.each([
+    ["2026-04-08T00:04:59.999Z", "under_5_minutes"],
+    ["2026-04-08T00:05:00.000Z", "5_to_30_minutes"],
+    ["2026-04-08T00:30:00.000Z", "30_minutes_to_2_hours"],
+    ["2026-04-08T02:00:00.000Z", "2_to_24_hours"],
+    ["2026-04-09T00:00:00.000Z", "over_24_hours"],
+  ])("buckets event-to-provider delay ending at %s", (providerSentAt, expected) => {
+    expect(hostedRuntime.bucketHostedDeviceSyncEventToProviderSendDelay({
+      eventOccurredAt: "2026-04-08T00:00:00.000Z",
+      providerSentAt,
+    })).toBe(expected);
+  });
+
+  it("omits missing or negatively ordered event-to-provider delay", () => {
+    expect(hostedRuntime.bucketHostedDeviceSyncEventToProviderSendDelay({
+      eventOccurredAt: null,
+      providerSentAt: "2026-04-08T00:00:00.000Z",
+    })).toBeNull();
+    expect(hostedRuntime.bucketHostedDeviceSyncEventToProviderSendDelay({
+      eventOccurredAt: "2026-04-08T00:01:00.000Z",
+      providerSentAt: "2026-04-08T00:00:00.000Z",
+    })).toBeNull();
+  });
+
+  it("measures signed provider send to Murph receipt without pairing coalesced timestamps", () => {
+    expect(hostedRuntime.measureHostedDeviceSyncProviderSendToWebhookMs({
+      providerSentAt: "2026-04-08T00:03:00.000Z",
+      webhookReceivedAt: "2026-04-08T00:04:30.000Z",
+    })).toBe(90_000);
+    expect(hostedRuntime.measureHostedDeviceSyncProviderSendToWebhookMs({
+      providerSentAt: "2026-04-08T00:05:00.000Z",
+      webhookReceivedAt: "2026-04-08T00:04:30.000Z",
+    })).toBeNull();
+    expect(hostedRuntime.measureHostedDeviceSyncProviderSendToWebhookMs({
+      providerSentAt: null,
+      webhookReceivedAt: "2026-04-08T00:04:30.000Z",
+    })).toBeNull();
+  });
+
+  it("keeps the slowest bucket when webhook hints coalesce", () => {
+    expect(hostedRuntime.mergeHostedDeviceSyncEventToProviderSendBuckets(
+      "5_to_30_minutes",
+      "2_to_24_hours",
+    )).toBe("2_to_24_hours");
+  });
+});
+
 describe("isDeviceSyncCredentialIndependentImportJob", () => {
   it("preserves only executor-owned inline imports", () => {
     expect(classifyCredentialIndependentImportJob({

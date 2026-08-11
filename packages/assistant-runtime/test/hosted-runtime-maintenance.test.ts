@@ -1781,6 +1781,114 @@ describe("runHostedDeviceSyncPass", () => {
     ).toBe(snapshot);
   });
 
+  it("logs stage-specific wearable import latency after successful dirty payload work", async () => {
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 1),
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const logPort = {
+      write: vi.fn(async (request: HostedRuntimeLogRequest) => ({
+        loggedCount: request.entries.length,
+      })),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.promoteHostedCompletedDirtyPayloadAcks.mockReturnValueOnce([{
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
+      jobCreatedAt: "2026-04-08T00:04:30.000Z",
+      jobKind: "resource",
+      provider: "junction",
+      providerSendToWebhookMs: 60_000,
+    }, {
+      eventToProviderSendBucket: "5_to_30_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: null,
+      jobCreatedAt: "2026-04-08T00:07:00.000Z",
+      jobKind: "resource",
+      provider: "strava",
+      providerSendToWebhookMs: null,
+    }]);
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_import_timing",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:06:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        runtimeLogPlatform: { logPort },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(logPort.write).toHaveBeenCalled();
+    });
+    const requests = logPort.write.mock.calls.map(([request]) => request);
+    const entry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.eventCode === "device-sync.import_completed");
+    assert.ok(entry);
+    expect(entry).toEqual({
+      at: "2026-04-08T00:06:00.000Z",
+      component: "device-sync",
+      eventCode: "device-sync.import_completed",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        eventToProviderSendBucket: "under_5_minutes",
+        importExecutionMs: 60_000,
+        jobKind: "resource",
+        provider: "junction",
+        providerSendToWebhookMs: 60_000,
+        runtimeQueueMs: 30_000,
+        webhookToImportMs: 120_000,
+      },
+    });
+    const skewedEntry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.redactedJson?.provider === "strava");
+    assert.ok(skewedEntry);
+    expect(skewedEntry.redactedJson).toMatchObject({
+      eventToProviderSendBucket: "5_to_30_minutes",
+      provider: "strava",
+      webhookToImportMs: 180_000,
+    });
+    expect(skewedEntry.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("runtimeQueueMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("importExecutionMs");
+    for (const privateField of [
+      "eventCount",
+      "eventToImportMs",
+      "eventToProviderSendMs",
+      "eventType",
+      "importCompletedAt",
+      "importExecutionStartedAt",
+      "jobCreatedAt",
+      "oldestEventOccurredAt",
+      "oldestProviderSentAt",
+      "oldestWebhookReceivedAt",
+      "resource",
+      "resourceCategory",
+      "sourceProvider",
+    ]) {
+      expect(entry.redactedJson).not.toHaveProperty(privateField);
+      expect(skewedEntry.redactedJson).not.toHaveProperty(privateField);
+    }
+  });
+
   it("stops a superseded connection wake after hydration without running device-sync work", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 0);
