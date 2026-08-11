@@ -250,7 +250,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     try {
       latencyMs = await sendInboundAndRequirePromptReply({
         afterAccepted: async () => {
-          await waitForForegroundReplacementWhileBarrierHeld(
+          await requireSystemOwnerPreservedWhileBarrierHeld(
             systemMailboxProbe.userId,
             systemFence.attemptId,
           );
@@ -1844,37 +1844,33 @@ async function waitForSystemWakeStormCheckpointBarrier(
   ]));
 }
 
-async function waitForForegroundReplacementWhileBarrierHeld(
+async function requireSystemOwnerPreservedWhileBarrierHeld(
   userId: string,
   systemAttemptId: string,
 ): Promise<void> {
-  const deadlineAt = Date.now() + 15_000;
-  let lastFence = await readActiveRuntimeFenceForTest(userId);
-
-  while (Date.now() < deadlineAt) {
+  for (let observation = 0; observation < 3; observation += 1) {
     const barrier =
       await requireScenario().harness.readShutdownCheckpointPublicationBarrierForTest(
         userId,
       );
     if (barrier.state !== "entered") {
-      throw new Error("Canonical checkpoint publication escaped before foreground replacement.");
+      throw new Error(
+        "Canonical checkpoint publication escaped before the foreground-safe handoff.",
+      );
     }
-    lastFence = await readActiveRuntimeFenceForTest(userId);
+    const activeFence = await readActiveRuntimeFenceForTest(userId);
     if (
-      lastFence
-      && lastFence.attemptId !== systemAttemptId
-      && lastFence.processingMode === "default"
+      activeFence?.attemptId !== systemAttemptId
+      || activeFence?.processingMode !== "system_mailbox"
     ) {
-      return;
+      throw new Error(await requireScenario().buildFailureMessage(userId, [
+        "Foreground admission replaced the system owner before its held checkpoint became durable.",
+        `system attempt id: ${systemAttemptId}`,
+        `active fence: ${JSON.stringify(activeFence)}`,
+      ]));
     }
     await sleep(100);
   }
-
-  throw new Error(await requireScenario().buildFailureMessage(userId, [
-    "Foreground admission did not replace the held system-mailbox owner.",
-    `system attempt id: ${systemAttemptId}`,
-    `last active fence: ${JSON.stringify(lastFence)}`,
-  ]));
 }
 
 async function readActiveRuntimeFenceForTest(userId: string): Promise<{
