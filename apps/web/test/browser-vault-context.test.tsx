@@ -105,6 +105,7 @@ import {
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
 import { requestHostedPrivyCompletionWithRetry } from "@/src/components/hosted-onboarding/hosted-privy-auth-support";
 import { logoutHostedAppSession } from "@/src/components/hosted-onboarding/hosted-app-session-client";
+import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
 
 beforeEach(() => {
   // The warm path lives in module memory; reset it so ready snapshots and
@@ -1440,7 +1441,7 @@ test("a matching ordinary read retires its queued stronger refresh", async () =>
   await rendered.cleanup();
 });
 
-test("a post-request runtime refresh ignores ordinary work and its request response", async () => {
+test("a post-request runtime refresh survives the production checkpoint floor", async () => {
   vi.useFakeTimers();
   const currentRef = createReplicaRef();
   const admittedRef = createReplicaRef({
@@ -1456,6 +1457,7 @@ test("a post-request runtime refresh ignores ordinary work and its request respo
     sourceBundleHash: "c".repeat(64),
   });
   const focusResponse = createDeferred<Response>();
+  let replacementPublished = false;
   const fetchMock = vi.fn()
     .mockResolvedValueOnce(jsonResponse({
       encryptedReplica: createReplicaEnvelope(),
@@ -1474,25 +1476,26 @@ test("a post-request runtime refresh ignores ordinary work and its request respo
       refreshPending: true,
       state: "not_modified",
     }))
-    .mockResolvedValueOnce(jsonResponse({
-      encryptedReplica: null,
-      memberId: "member_123",
-      replicaAad: null,
-      replicaKeyEnvelope: null,
-      replicaRef: admittedRef,
-      refreshPending: true,
-      state: "not_modified",
-    }))
-    .mockResolvedValueOnce(jsonResponse({
-      encryptedReplica: createReplicaEnvelope("f"),
-      replicaAad: createReplicaAad("member_123", "f", {
-        objectKey: replacementRef.objectKey,
-        sourceBundleHash: replacementRef.sourceBundleHash,
-      }),
-      replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
-      replicaRef: replacementRef,
-      state: "ready",
-    }));
+    .mockImplementation(() => Promise.resolve(replacementPublished
+      ? jsonResponse({
+          encryptedReplica: createReplicaEnvelope("f"),
+          replicaAad: createReplicaAad("member_123", "f", {
+            objectKey: replacementRef.objectKey,
+            sourceBundleHash: replacementRef.sourceBundleHash,
+          }),
+          replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
+          replicaRef: replacementRef,
+          state: "ready",
+        })
+      : jsonResponse({
+          encryptedReplica: null,
+          memberId: "member_123",
+          replicaAad: null,
+          replicaKeyEnvelope: null,
+          replicaRef: admittedRef,
+          refreshPending: true,
+          state: "not_modified",
+        })));
 
   installBrowserVaultCryptoMocks();
   mocks.decryptHostedStoragePayload
@@ -1555,22 +1558,166 @@ test("a post-request runtime refresh ignores ordinary work and its request respo
   assert.equal(refreshBody.requestRefresh, true);
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.advanceTimersByTimeAsync(180_000);
   });
   await waitForText(
     rendered.container,
     `${admittedRef.sourceBundleHash}:${admittedRef.dataVersion}:pending`,
   );
-  assert.equal(fetchMock.mock.calls.length, 4);
+  for (const [, init] of fetchMock.mock.calls.slice(3)) {
+    const pollBody = JSON.parse(String(init?.body));
+    assert.equal(pollBody.requestRefresh, undefined);
+  }
+  assert.equal(fetchMock.mock.calls.filter(([, init]) => {
+    const body = JSON.parse(String(init?.body));
+    return body.requestRefresh === true;
+  }).length, 1);
 
+  replacementPublished = true;
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(1_500);
+    await vi.advanceTimersByTimeAsync(15_000);
   });
   await waitForText(
     rendered.container,
     `${replacementRef.sourceBundleHash}:${replacementRef.dataVersion}:ready`,
   );
-  assert.equal(fetchMock.mock.calls.length, 5);
+  assert.equal(fetchMock.mock.calls.filter(([, init]) => {
+    const body = JSON.parse(String(init?.body));
+    return body.requestRefresh === true;
+  }).length, 1);
+
+  await rendered.cleanup();
+});
+
+test("Environment keeps one refresh boundary through delayed checkpoint recovery", async () => {
+  vi.useFakeTimers();
+  mocks.usePathname.mockReturnValue("/environment");
+  const currentRef = createReplicaRef();
+  const replacementRef = createReplicaRef({
+    dataVersion: "f".repeat(64),
+    keyId: "browser-vault-replica:f",
+    objectKey: "users/browser-vault-replicas/opaque/environment-replacement.json",
+    sourceBundleHash: "c".repeat(64),
+  });
+  let processing = true;
+  let replacementPublished = false;
+  const fetchMock = vi.fn(async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url === "/api/environment/voice") {
+      return jsonResponse({ processing });
+    }
+    assert.equal(url, "/api/browser-vault/session");
+    const body = JSON.parse(String(init?.body));
+    if (!body.knownReplicaRef) {
+      return jsonResponse({
+        encryptedReplica: createReplicaEnvelope(),
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: currentRef,
+        state: "ready",
+      });
+    }
+    if (replacementPublished) {
+      return jsonResponse({
+        encryptedReplica: createReplicaEnvelope("f"),
+        replicaAad: createReplicaAad("member_123", "f", {
+          objectKey: replacementRef.objectKey,
+          sourceBundleHash: replacementRef.sourceBundleHash,
+        }),
+        replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
+        replicaRef: replacementRef,
+        state: "ready",
+      });
+    }
+    return jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      refreshPending: true,
+      state: "not_modified",
+    });
+  });
+
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload
+    .mockReset()
+    .mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify(createReplica())),
+    )
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      source: {
+        dataVersion: replacementRef.dataVersion,
+        sourceBundleHash: replacementRef.sourceBundleHash,
+      },
+    }))));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+        pathname: "/environment",
+        search: "",
+      },
+      requireButton: false,
+    },
+  );
+  await waitForText(rendered.container, "Murph is processing your recording");
+
+  processing = false;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+  await waitForText(rendered.container, "Updating your environment report");
+  const countForcedRefreshes = () => fetchMock.mock.calls.filter(([, init]) => {
+    if (!init?.body) {
+      return false;
+    }
+    const body = JSON.parse(String(init.body));
+    return body.requestRefresh === true;
+  }).length;
+  assert.equal(countForcedRefreshes(), 1);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
+  await waitForText(rendered.container, "Murph is taking longer than usual");
+  const firstCheckAgain = Array.from(
+    rendered.window.document.querySelectorAll("button"),
+  ).find((button) => button.textContent?.includes("Check again"));
+  assert.ok(firstCheckAgain instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    firstCheckAgain.click();
+    await Promise.resolve();
+  });
+  assert.equal(countForcedRefreshes(), 1);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(120_000);
+  });
+  await waitForText(rendered.container, "Murph is taking longer than usual");
+  assert.equal(countForcedRefreshes(), 1);
+
+  replacementPublished = true;
+  const finalCheckAgain = Array.from(
+    rendered.window.document.querySelectorAll("button"),
+  ).find((button) => button.textContent?.includes("Check again"));
+  assert.ok(finalCheckAgain instanceof rendered.window.HTMLButtonElement);
+  await act(async () => {
+    finalCheckAgain.click();
+  });
+  await waitForText(rendered.container, "The report was not updated");
+  assert.equal(countForcedRefreshes(), 1);
 
   await rendered.cleanup();
 });

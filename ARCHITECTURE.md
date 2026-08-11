@@ -2192,8 +2192,11 @@ mode. The provider excludes already-running ordinary reads, treats the explicit
 refresh response as the request-local admission boundary, and remains pending
 until a later replica ref is published; only then may the page distinguish
 changed Habitat facts from a completed recording with no clear new facts.
-Delayed and reload recovery reuse the same voice-processing and replica-refresh
-owners, with no second result store.
+The one-minute delayed notice is presentation-only: it does not retire that
+causal fence, and Check again performs an ordinary read against the same attempt
+instead of scheduling another forced refresh. Delayed and reload recovery reuse
+the same voice-processing and replica-refresh owners, with no second result
+store.
 
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while

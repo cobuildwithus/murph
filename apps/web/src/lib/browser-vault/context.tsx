@@ -188,8 +188,15 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         : null;
       if (runtimeRefreshTimeoutRef.current) {
         clearTimeout(runtimeRefreshTimeoutRef.current);
+        runtimeRefreshTimeoutRef.current = null;
       }
       setRuntimeRefreshPending(true);
+      if (requirePostRequestReplica) {
+        // The hosted runtime publishes Browser Vault state only after its
+        // checkpoint floor. Keep this request-local admission boundary alive
+        // until that later replica arrives or the provider loses authority.
+        return;
+      }
       runtimeRefreshTimeoutRef.current = setTimeout(() => {
         runtimeRefreshCompletionRef.current = null;
         runtimeRefreshAdmissionRef.current = null;
@@ -423,6 +430,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
             ref: null,
             status: "admitted",
           };
+        } else {
+          // No request-local boundary was admitted. Release this failed
+          // attempt so the caller may explicitly retry it.
+          clearRuntimeRefreshWait();
         }
       }
 

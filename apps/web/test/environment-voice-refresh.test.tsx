@@ -375,12 +375,8 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
     await rendered.rerender(
       createElement(EnvironmentPageClient, { contactOptions: [] }),
     );
-    mocks.vault.runtimeRefreshPending = false;
-    await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    );
     await act(async () => {
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(60_000);
     });
     assert.match(
       rendered.window.document.body.textContent ?? "",
@@ -404,20 +400,19 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
       await Promise.resolve();
     });
     assert.equal(mocks.refresh.mock.calls.length, 2);
+    assert.deepEqual(mocks.refresh.mock.calls[1]?.[0], {
+      background: true,
+    });
     assert.equal(fetchMock.mock.calls.filter(
       ([input, init]) =>
         input === "/api/environment/voice" && init?.method === "PATCH",
     ).length, patchCallsBeforeReplicaRetry);
 
-    mocks.vault.runtimeRefreshPending = true;
-    await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    );
-    const retryCompletion = mocks.refresh.mock.calls[1]?.[0]
+    const originalCompletion = mocks.refresh.mock.calls[0]?.[0]
       ?.requestRuntimeRefreshUntilAfterRequest;
-    assert.ok(retryCompletion);
+    assert.ok(originalCompletion);
     assert.equal(
-      Reflect.apply(retryCompletion, undefined, [null, replacementRef]),
+      Reflect.apply(originalCompletion, undefined, [null, replacementRef]),
       true,
     );
     mocks.vault.ref = replacementRef;

@@ -54,6 +54,7 @@ const EMPTY_HABITAT_VALUES: HabitatValues = {};
 const EMPTY_HABITAT_SCENE = resolveHabitatScene(EMPTY_HABITAT_VALUES);
 const VOICE_REFRESH_INTERVAL_MS = 2_000;
 const VOICE_REFRESH_DELAYED_INTERVAL_MS = 10_000;
+const VOICE_REFRESH_REPORT_DELAY_MS = 60_000;
 const VOICE_REFRESH_WINDOW_MS = 2 * 60 * 1_000;
 
 export type VoiceRefreshState =
@@ -266,6 +267,17 @@ export default function EnvironmentPageClient({
     }
     runtimeRefreshPendingObservedRef.current = false;
     voiceRefreshCompletedReplicaRef.current = null;
+    const delayedTimeoutId = setTimeout(() => {
+      setVoiceRefreshState((current) =>
+        current.status === "refreshing"
+          ? {
+              baselineValues: current.baselineValues,
+              phase: "refreshing",
+              status: "delayed",
+            }
+          : current,
+      );
+    }, VOICE_REFRESH_REPORT_DELAY_MS);
     void refresh({
       background: true,
       requestRuntimeRefreshUntilAfterRequest: (_client, nextRef) => {
@@ -273,6 +285,7 @@ export default function EnvironmentPageClient({
         return true;
       },
     }).catch(() => undefined);
+    return () => clearTimeout(delayedTimeoutId);
   }, [refresh, voiceRefreshState]);
 
   useEffect(() => {
@@ -396,12 +409,16 @@ export default function EnvironmentPageClient({
             void requestEnvironmentVoiceProcessingRecheck().catch(() => undefined);
             return;
           }
-          runtimeRefreshPendingObservedRef.current = false;
-          voiceRefreshCompletedReplicaRef.current = null;
-          setVoiceRefreshState({
-            baselineValues: voiceRefreshState.baselineValues,
-            status: "refreshing",
-          });
+          if (!runtimeRefreshPending) {
+            runtimeRefreshPendingObservedRef.current = false;
+            voiceRefreshCompletedReplicaRef.current = null;
+            setVoiceRefreshState({
+              baselineValues: voiceRefreshState.baselineValues,
+              status: "refreshing",
+            });
+            return;
+          }
+          void refresh({ background: true }).catch(() => undefined);
         }}
       />
       {hasEnvironmentData ? (
