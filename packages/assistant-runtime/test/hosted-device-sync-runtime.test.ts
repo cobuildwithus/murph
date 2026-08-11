@@ -3075,6 +3075,7 @@ describe("hosted device-sync runtime", () => {
           eventToProviderSendBucket: "under_5_minutes",
           firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
           providerSendToWebhookMs: 60_000,
+          sourceProvider: "garmin",
         },
       }]);
       assert.deepEqual(
@@ -3122,6 +3123,7 @@ describe("hosted device-sync runtime", () => {
         jobKind: "resource",
         provider: "demo",
         providerSendToWebhookMs: 60_000,
+        sourceProvider: "garmin",
       });
       assert.equal(completedImports.length, 1);
       assert.deepEqual(state.pendingDirtyAcks, [{
@@ -3130,6 +3132,68 @@ describe("hosted device-sync runtime", () => {
         processedRevision: "42",
       }]);
       assert.deepEqual(state.pendingDirtyPayloadJobs, []);
+
+      const [timedResource] = dirtyState.dirtyResources;
+      assert.ok(timedResource);
+      const directProviderState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort: {
+          ...createNoDirtyStateDeviceSyncPortMethods(),
+          async applyUpdates() {
+            throw new Error("applyUpdates should not be called during sync");
+          },
+          async createConnectLink() {
+            throw new Error("createConnectLink should not be called during sync");
+          },
+          async fetchDirtyStates() {
+            return {
+              hasMore: false,
+              items: [{
+                ...dirtyState,
+                dirtyResources: [{
+                  ...timedResource,
+                  resource: "sleep",
+                  resourceCategory: "summary",
+                  sourceProviderSlug: null,
+                }],
+                dirtyRevision: "43",
+                eventCount: "1",
+                processedRevision: "42",
+                resourceCategoryCounts: { summary: 1 },
+                sourceProviderCounts: {},
+              }],
+              nextWakeAt: null,
+              userId: "member_123",
+            };
+          },
+          async fetchSnapshot() {
+            return snapshot;
+          },
+        },
+        wake: buildDeviceSyncWake({
+          connectionId: "hosted_conn_dirty_wake",
+          eventId: "evt_device_sync_direct_timing",
+          hint: { reason: "dirty" },
+          occurredAt: "2026-04-04T10:01:00.000Z",
+          reason: "webhook_hint",
+        }),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      assert.equal(
+        directProviderState.pendingDirtyPayloadJobs[0]?.timing?.sourceProvider,
+        "demo",
+      );
+      const directProviderJob = readJobsForAccount(service, connected.account.id)
+        .find((job) => job.id === directProviderState.pendingDirtyPayloadJobs[0]?.jobId);
+      assert.deepEqual(
+        directProviderJob?.payloadJson ? JSON.parse(directProviderJob.payloadJson) : null,
+        {
+          resource: "sleep",
+          resourceCategory: "summary",
+          windowEnd: "2026-04-04T00:00:00.000Z",
+          windowStart: "2026-04-02T00:00:00.000Z",
+        },
+      );
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();
@@ -3181,6 +3245,7 @@ describe("hosted device-sync runtime", () => {
             eventToProviderSendBucket: "under_5_minutes",
             firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
             providerSendToWebhookMs: 60_000,
+            sourceProvider: "garmin",
           },
         }, {
           connectionId: "hosted_conn_deduped",
@@ -3191,6 +3256,7 @@ describe("hosted device-sync runtime", () => {
             eventToProviderSendBucket: "5_to_30_minutes",
             firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
             providerSendToWebhookMs: 120_000,
+            sourceProvider: "fitbit",
           },
         }],
         snapshot: null,
@@ -3217,6 +3283,7 @@ describe("hosted device-sync runtime", () => {
         jobKind: "reconcile",
         provider: "demo",
         providerSendToWebhookMs: 120_000,
+        sourceProvider: null,
       });
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_deduped",

@@ -1682,6 +1682,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     jobs: input.webhook.jobs ?? [],
     provider: input.account.provider,
     providerSentAt: input.webhook.providerSentAt ?? null,
+    sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
   await persistHostedDeviceSyncWebhookAccepted({
@@ -2510,12 +2511,19 @@ function buildHostedWebhookDirtyResources(input: {
   jobs: readonly DeviceSyncJobInput[];
   provider: string;
   providerSentAt?: string | null;
+  sourceProviderSlug?: string | null;
   webhookReceivedAt?: string | null;
 }): HostedDeviceSyncDirtyResource[] {
   const resources: HostedDeviceSyncDirtyResource[] = [];
+  const webhookSourceProviderSlug = readHostedDirtyResourceString(
+    input.sourceProviderSlug,
+  );
 
   for (const job of input.jobs) {
     const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
+    const payloadSourceProviderSlug = readHostedDirtyResourceString(
+      payload.sourceProviderSlug,
+    );
     resources.push({
       count: 1,
       ...buildHostedWebhookDirtyResourceTiming(input),
@@ -2523,7 +2531,11 @@ function buildHostedWebhookDirtyResources(input: {
       payload: readHostedDirtyResourcePayload(payload),
       resource: readHostedDirtyResourceString(payload.resource),
       resourceCategory: readHostedDirtyResourceString(payload.resourceCategory),
-      sourceProviderSlug: readHostedDirtyResourceString(payload.sourceProviderSlug),
+      // Resource jobs can promote this field back into provider input. Keep the
+      // provider-owned payload authoritative; other job kinds use it only for
+      // source attribution.
+      sourceProviderSlug: payloadSourceProviderSlug
+        ?? (job.kind === "resource" ? null : webhookSourceProviderSlug),
       windowEnd: readHostedDirtyResourceString(payload.windowEnd),
       windowStart: readHostedDirtyResourceString(payload.windowStart),
     });
@@ -2536,7 +2548,7 @@ function buildHostedWebhookDirtyResources(input: {
       jobKind: "reconcile",
       resource: null,
       resourceCategory: null,
-      sourceProviderSlug: null,
+      sourceProviderSlug: webhookSourceProviderSlug,
       windowEnd: null,
       windowStart: null,
     });

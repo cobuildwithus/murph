@@ -1795,6 +1795,7 @@ describe("runHostedDeviceSyncPass", () => {
       jobKind: "resource",
       provider: "junction",
       providerSendToWebhookMs: 60_000,
+      sourceProvider: "garmin",
     }, {
       eventToProviderSendBucket: "5_to_30_minutes",
       firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
@@ -1804,6 +1805,7 @@ describe("runHostedDeviceSyncPass", () => {
       jobKind: "resource",
       provider: "strava",
       providerSendToWebhookMs: null,
+      sourceProvider: "strava",
     }]);
 
     await runHostedDeviceSyncPass(
@@ -1844,6 +1846,7 @@ describe("runHostedDeviceSyncPass", () => {
         provider: "junction",
         providerSendToWebhookMs: 60_000,
         runtimeQueueMs: 30_000,
+        sourceProvider: "garmin",
         webhookToImportMs: 120_000,
       },
     });
@@ -1854,25 +1857,33 @@ describe("runHostedDeviceSyncPass", () => {
     expect(skewedEntry.redactedJson).toMatchObject({
       eventToProviderSendBucket: "5_to_30_minutes",
       provider: "strava",
+      sourceProvider: "strava",
       webhookToImportMs: 180_000,
     });
     expect(skewedEntry.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
     expect(skewedEntry.redactedJson).not.toHaveProperty("runtimeQueueMs");
     expect(skewedEntry.redactedJson).not.toHaveProperty("importExecutionMs");
     for (const privateField of [
+      "connectionId",
+      "deviceId",
       "eventCount",
       "eventToImportMs",
       "eventToProviderSendMs",
       "eventType",
+      "externalAccountId",
+      "healthValue",
       "importCompletedAt",
       "importExecutionStartedAt",
       "jobCreatedAt",
+      "memberId",
       "oldestEventOccurredAt",
       "oldestProviderSentAt",
       "oldestWebhookReceivedAt",
       "resource",
       "resourceCategory",
-      "sourceProvider",
+      "sourceProviderSlug",
+      "userId",
+      "webhookBody",
     ]) {
       expect(entry.redactedJson).not.toHaveProperty(privateField);
       expect(skewedEntry.redactedJson).not.toHaveProperty(privateField);

@@ -90,6 +90,7 @@ export interface HostedDeviceSyncImportTiming {
   eventToProviderSendBucket: HostedDeviceSyncEventToProviderSendBucket | null;
   firstWebhookReceivedAt: string | null;
   providerSendToWebhookMs: number | null;
+  sourceProvider: string | null;
 }
 
 export interface HostedDeviceSyncCompletedImportTiming extends HostedDeviceSyncImportTiming {
@@ -850,7 +851,10 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
       priority: job.input.priority ?? 0,
       provider: input.provider,
     });
-    const timing = buildHostedDeviceSyncImportTiming(job.resource);
+    const timing = buildHostedDeviceSyncImportTiming({
+      provider: input.provider,
+      resource: job.resource,
+    });
     return job.dirtyPayloadId || "timing" in timing
       ? [{
           connectionId: input.connectionId,
@@ -864,11 +868,14 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
 }
 
 function buildHostedDeviceSyncImportTiming(
-  resource: HostedExecutionDeviceSyncDirtyResource,
+  input: {
+    provider: string;
+    resource: HostedExecutionDeviceSyncDirtyResource;
+  },
 ): { timing: HostedDeviceSyncImportTiming } | Record<string, never> {
-  const eventToProviderSendBucket = resource.eventToProviderSendBucket ?? null;
-  const firstWebhookReceivedAt = resource.firstWebhookReceivedAt ?? null;
-  const providerSendToWebhookMs = resource.providerSendToWebhookMs ?? null;
+  const eventToProviderSendBucket = input.resource.eventToProviderSendBucket ?? null;
+  const firstWebhookReceivedAt = input.resource.firstWebhookReceivedAt ?? null;
+  const providerSendToWebhookMs = input.resource.providerSendToWebhookMs ?? null;
   if (!eventToProviderSendBucket && !firstWebhookReceivedAt && providerSendToWebhookMs === null) {
     return {};
   }
@@ -878,6 +885,7 @@ function buildHostedDeviceSyncImportTiming(
       eventToProviderSendBucket,
       firstWebhookReceivedAt,
       providerSendToWebhookMs,
+      sourceProvider: input.resource.sourceProviderSlug ?? input.provider,
     },
   };
 }
@@ -986,6 +994,9 @@ function mergeHostedDeviceSyncImportTiming(
       left.providerSendToWebhookMs,
       right.providerSendToWebhookMs,
     ),
+    sourceProvider: left.sourceProvider === right.sourceProvider
+      ? left.sourceProvider
+      : null,
   };
 }
 

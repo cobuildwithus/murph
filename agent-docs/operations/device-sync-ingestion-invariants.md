@@ -158,9 +158,14 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    pre-existing ingestion fields still use provider occurrence for dirty-window
    and clean-transition wake ownership. Coalesced hints
    keep the slowest upstream bucket, longest signed delivery, and earliest
-   receipt without pairing timestamps from different events. The runtime log contains only the
-   coarse upstream bucket, provider/job kind, provider-send-to-receipt,
-   receipt-to-import, queue, and execution durations. It deliberately omits raw
+   receipt without pairing timestamps from different events. Source attribution
+   coalesces only when every timing hint agrees; conflicting sources are omitted.
+   The runtime log contains only the coarse upstream bucket, connector provider,
+   normalized source provider when known, job kind, provider-send-to-receipt,
+   receipt-to-import, queue, and execution durations. `provider` names the
+   executor/transport owner, while `sourceProvider` distinguishes Garmin,
+   Fitbit, and other Junction-backed sources and falls back to the connector for
+   direct integrations or unknown Junction sources. It deliberately omits raw
    stage timestamps, event/resource semantics, counts, and exactly reversible
    event-origin intervals. Missing or negatively ordered clocks omit only the
    affected measurement. The runtime timing association is pass-local, so a
