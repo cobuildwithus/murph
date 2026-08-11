@@ -68,7 +68,7 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
-  it("keeps lone first-photo detail separate from bounded follow-up and gallery detail", () => {
+  it("keeps Terra's lone first-photo detail separate from other bounded image paths", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "sharper-single-photo-review",
     );
@@ -76,10 +76,11 @@ describe("changelog registry", () => {
     expect(item).toMatchObject({
       editionId: "2026-08-10",
       sourcePullRequests: [1616],
-      summary: expect.stringContaining("original detail"),
+      summary: expect.stringContaining("Murph uses Terra"),
       details: expect.stringContaining("follow-up photos"),
     });
-    expect(item?.details).toContain("custom inference endpoints");
+    expect(item?.details).toContain("use another model");
+    expect(item?.details).toContain("custom inference");
   });
 
   it("keeps support escalation private and contact disclosure opt-in", () => {

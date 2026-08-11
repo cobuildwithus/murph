@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, reliable referrals, reminders, photos, cards, voices, web search, and a lighter homepage",
+      "Starter access, patterns, referrals, reminders, Terra photos, cards, voices, search, and a lighter homepage",
     );
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
@@ -255,7 +255,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
     expect(markup).toContain("Managed OpenAI web search works again");
-    expect(markup).toContain("Lone first photos keep their fine detail");
+    expect(markup).toContain("Terra keeps lone first photos at original detail");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");

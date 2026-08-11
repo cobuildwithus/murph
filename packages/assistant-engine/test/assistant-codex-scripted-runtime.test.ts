@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { crc32, deflateSync } from 'node:zlib'
 
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
@@ -15,6 +16,9 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import {
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
@@ -133,6 +137,7 @@ interface ScriptedStub {
 interface ScriptedProviderRequestSummary {
   customToolCallOutputs?: string[]
   functionCallOutputs?: string[]
+  imageWidths?: number[]
   model: string | null
   providerRequestDiagnostics?: {
     bytes: number
@@ -218,6 +223,48 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('preserves original width for supported detail and bounds gallery widths through the real app server', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+    })
+    const imagePath = path.join(
+      scenario.turnInput.workingDirectory,
+      'fine-detail.png',
+    )
+    await writeFile(imagePath, createDeterministicPng(3072, 64))
+    scenario.stub.queue(
+      { text: 'SCRIPTED_ORIGINAL_IMAGE_OK' },
+      { text: 'SCRIPTED_GALLERY_IMAGE_OK' },
+    )
+
+    const originalResult = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      images: [{
+        detail: 'original',
+        mimeType: 'image/png',
+        path: imagePath,
+      }],
+      prompt: 'Reply exactly SCRIPTED_ORIGINAL_IMAGE_OK.',
+    })
+    const galleryResult = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      images: [
+        { detail: 'original', mimeType: 'image/png', path: imagePath },
+        { detail: 'original', mimeType: 'image/png', path: imagePath },
+      ],
+      prompt: 'Reply exactly SCRIPTED_GALLERY_IMAGE_OK.',
+    })
+
+    expect(originalResult.finalMessage).toBe('SCRIPTED_ORIGINAL_IMAGE_OK')
+    expect(galleryResult.finalMessage).toBe('SCRIPTED_GALLERY_IMAGE_OK')
+    expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
+      { imageWidths: [3072] },
+      { imageWidths: [2048, 2048] },
+    ])
   })
 
   it('keeps a fresh onboarding greeting on the compact root and bounded resume read', {
@@ -5578,6 +5625,7 @@ function buildScriptedHostedSystemPrompt(
 
 async function prepareScriptedTurnScenario(
   options: {
+    modelProvider?: string
     multiAgentV2?: boolean
   } = {},
 ): Promise<{
@@ -5595,6 +5643,7 @@ async function prepareScriptedTurnScenario(
 }> {
   const scriptedStub = await requireScriptedStub()
   scriptedStub.markRequestBaseline()
+  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
   const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-codex-scripted-home-'))
   temporaryPaths.push(codexHome)
   const workingDirectory = await mkdtemp(
@@ -5603,7 +5652,10 @@ async function prepareScriptedTurnScenario(
   temporaryPaths.push(workingDirectory)
   await writeFile(
     path.join(codexHome, 'config.toml'),
-    buildScriptedCodexConfigToml(scriptedStub.baseUrl, options),
+    buildScriptedCodexConfigToml(scriptedStub.baseUrl, {
+      ...options,
+      modelProvider,
+    }),
     {
       encoding: 'utf8',
       mode: 0o600,
@@ -5622,7 +5674,7 @@ async function prepareScriptedTurnScenario(
         TMPDIR: process.env.TMPDIR,
       },
       model: SCRIPTED_MODEL,
-      modelProvider: SCRIPTED_MODEL_PROVIDER,
+      modelProvider,
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -5682,12 +5734,14 @@ async function writeOpenAiFlexModelCatalogJson(input: {
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
+    modelProvider?: string
     multiAgentV2?: boolean
   } = {},
 ): string {
+  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
   return [
     `model = "${SCRIPTED_MODEL}"`,
-    `model_provider = "${SCRIPTED_MODEL_PROVIDER}"`,
+    `model_provider = "${modelProvider}"`,
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
     'sandbox_mode = "workspace-write"',
@@ -5696,7 +5750,7 @@ function buildScriptedCodexConfigToml(
     '[history]',
     'persistence = "none"',
     '',
-    `[model_providers.${SCRIPTED_MODEL_PROVIDER}]`,
+    `[model_providers."${modelProvider}"]`,
     'name = "Local scripted stub"',
     `base_url = "${baseUrl}"`,
     `env_key = "${SCRIPTED_STUB_KEY_ENV}"`,
@@ -5714,6 +5768,42 @@ function buildScriptedCodexConfigToml(
         ]
       : []),
   ].join('\n')
+}
+
+function createDeterministicPng(width: number, height: number): Buffer {
+  const rowBytes = width * 3 + 1
+  const pixels = Buffer.alloc(rowBytes * height)
+  let state = 0x4d555250
+  for (let row = 0; row < height; row += 1) {
+    const rowOffset = row * rowBytes
+    pixels[rowOffset] = 0
+    for (let offset = rowOffset + 1; offset < rowOffset + rowBytes; offset += 1) {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
+      pixels[offset] = state & 0xff
+    }
+  }
+
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8
+  header[9] = 2
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    createPngChunk('IHDR', header),
+    createPngChunk('IDAT', deflateSync(pixels)),
+    createPngChunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
+function createPngChunk(type: string, data: Buffer): Buffer {
+  const typeBytes = Buffer.from(type, 'ascii')
+  const chunk = Buffer.alloc(data.length + 12)
+  chunk.writeUInt32BE(data.length, 0)
+  typeBytes.copy(chunk, 4)
+  data.copy(chunk, 8)
+  chunk.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), data.length + 8)
+  return chunk
 }
 
 async function startScriptedResponsesStub(): Promise<ScriptedStub> {
@@ -5899,12 +5989,28 @@ function readScriptedProviderRequestSummary(
       .filter((item) => item?.type === 'tool_search_output')
       .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
     : []
+  const imageWidths = Array.isArray(body?.input)
+    ? body.input.flatMap((inputItem) => {
+        const content = readRecord(inputItem)?.content
+        if (!Array.isArray(content)) {
+          return []
+        }
+        return content
+          .map(readRecord)
+          .filter((item) => item?.type === 'input_image')
+          .map((item) => readString(item?.image_url))
+          .filter((imageUrl): imageUrl is string => imageUrl !== null)
+          .map(readPngDataUrlWidth)
+          .filter((width): width is number => width !== null)
+      })
+    : []
   const tools = Array.isArray(body?.tools)
     ? body.tools.map(readRecord)
     : []
   return {
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
+    ...(imageWidths.length > 0 ? { imageWidths } : {}),
     model: readString(body?.model),
     ...(includeDiagnostics
       ? {
@@ -5951,6 +6057,17 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
+}
+
+function readPngDataUrlWidth(value: string): number | null {
+  const match = /^data:image\/png;base64,(.+)$/su.exec(value)
+  if (!match?.[1]) {
+    return null
+  }
+  const image = Buffer.from(match[1], 'base64')
+  return image.length >= 24 && image.subarray(12, 16).toString('ascii') === 'IHDR'
+    ? image.readUInt32BE(16)
+    : null
 }
 
 function readProviderToolOutputText(value: unknown): string | null {

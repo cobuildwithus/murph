@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, reliable referrals, reminders, photos, cards, voices, web search, and a lighter homepage",
+      "Starter access, patterns, referrals, reminders, Terra photos, cards, voices, search, and a lighter homepage",
     summary:
-      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, referral celebrations stay with the intended conversation, reminders keep local time, lone first photos retain fine detail, completed workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, and the public homepage starts with less to download.",
+      "Starter usage waits until used; patterns compare actions with next-day sleep and recovery; referral celebrations stay in the right conversation; reminders keep local time; Terra keeps lone first photos at original detail; workout rows and chosen voices stay clear; managed search reaches current information; and the public homepage starts lighter.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -152,11 +152,11 @@ const RAW_CHANGELOG_EDITIONS = [
         id: "sharper-single-photo-review",
         kind: "improvement",
         priority: 3,
-        title: "Lone first photos keep their fine detail",
+        title: "Terra keeps lone first photos at original detail",
         summary:
-          "When a request starts with one photo on Murph's managed model, Murph now preserves its original detail for closer visual review.",
+          "When Murph uses Terra, one initial photo is now sent at its original detail for closer visual review.",
         details:
-          "Requests that start with multiple photos, follow-up photos added while Murph is working, and custom inference endpoints stay at high detail to keep visual input cost and compatibility bounded.",
+          "Requests that start with multiple photos, use another model, add follow-up photos while Murph is working, or use custom inference stay at high detail to keep visual input cost and compatibility bounded.",
         relevanceTags: ["assistant", "images", "messaging", "reliability"],
         sourcePullRequests: [1616],
       },
