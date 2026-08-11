@@ -1952,6 +1952,146 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
+  it("proves an explicit direct Linq target from exact validated route authority", async () => {
+    const externalThreadRouteAuthority = {
+      channel: "linq" as const,
+      containerMemberId: "member_123",
+      threadId: "linq-direct-chat",
+    };
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_direct_linq_notification",
+      memberId: "member_123",
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: "usage-referral-reward:direct-linq",
+        deliveryIdempotencyKey: "usage-referral-reward:direct-linq",
+        externalThreadRouteAuthority,
+        instructions: "Celebrate the completed referral reward.",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: "linq-participant",
+          channel: "linq",
+          delivery: {
+            kind: "explicit",
+            target: "linq-direct-chat",
+          },
+          identityId: "direct-identity",
+          threadId: "direct-thread",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-08-10T12:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+      wake,
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: "linq-direct-chat",
+        channel: "linq",
+        deliveryKind: null,
+        deliveryTarget: "linq-direct-chat",
+        outboxExternalThreadRouteAuthority: externalThreadRouteAuthority,
+        threadIsDirect: true,
+      }),
+    );
+  });
+
+  it.each([
+    {
+      authority: undefined,
+      label: "absent authority",
+    },
+    {
+      authority: {
+        channel: "linq" as const,
+        containerMemberId: "member_123",
+        threadId: "stale-linq-chat",
+      },
+      label: "stale target authority",
+    },
+    {
+      authority: {
+        channel: "linq" as const,
+        containerMemberId: "different-member",
+        threadId: "linq-direct-chat",
+      },
+      label: "wrong-member authority",
+    },
+    {
+      authority: {
+        channel: "telegram" as const,
+        containerMemberId: "member_123",
+        threadId: "linq-direct-chat",
+      },
+      label: "wrong-channel authority",
+    },
+    {
+      authority: {
+        channel: "linq" as const,
+        containerMemberId: "member_123",
+        threadId: "linq-direct-chat",
+      },
+      label: "non-direct route",
+      threadIsDirect: false,
+    },
+    {
+      authority: {
+        channel: "linq" as const,
+        containerMemberId: "wake-member",
+        threadId: "linq-direct-chat",
+      },
+      label: "runtime-member mismatch",
+      memberId: "wake-member",
+    },
+  ])("fails closed for an explicit Linq target with $label", async (fixture) => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: `evt_direct_linq_unverified_${fixture.label.replaceAll(" ", "-")}`,
+      memberId: fixture.memberId ?? "member_123",
+      notification: {
+        ...(fixture.authority
+          ? { externalThreadRouteAuthority: fixture.authority }
+          : {}),
+        instructions: "Celebrate the completed referral reward.",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: "linq-participant",
+          channel: "linq",
+          delivery: {
+            kind: "explicit",
+            target: "linq-direct-chat",
+          },
+          identityId: "direct-identity",
+          threadId: "direct-thread",
+          threadIsDirect: fixture.threadIsDirect ?? true,
+        },
+      },
+      occurredAt: "2026-08-10T12:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+      wake,
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bindingDeliveryTarget: null,
+        deliveryKind: null,
+        deliveryTarget: "linq-direct-chat",
+      }),
+    );
+  });
+
   it("initializes explicit group room setup before accepting activation replay", async () => {
     const roomContext = "## Explicit setup\n\nKeep this room low-key.";
     const wake = buildHostedExecutionMemberActivatedWake({
