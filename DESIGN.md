@@ -240,13 +240,13 @@ public presentation defined by the challenge standings delivery contract.
 
 ### Shared iMessage Card Handoff
 When a shared response-card URL reaches the public homepage instead of the
-Messages extension, open one compact handoff dialog after hydration. Use the
-same flat cream paper, warm hairline, sage primary action, Fraunces heading,
-and DM Mono filing labels as the rest of the product. Explain the two-step
-recovery plainly: get Murph for iPhone, then return to Messages and tap the
-card again. Keep the App Store link as the only forward action and provide one
-quiet dismiss action. The dialog must not display or decode the fragment, add
-device-specific branching, or turn the fallback into a signup flow.
+Messages extension, open one compact handoff dialog after hydration. Reuse the
+standard Dialog and Button conventions without a logo, eyebrow, numbered step
+grid, or promotional accent treatment. In one short description, tell the user
+to install or open Murph and then return to Messages and tap the card again.
+Use Open App Store as the primary action, Cancel as the secondary action, and
+the standard close control. The dialog must not display or decode the fragment,
+add device-specific branching, or turn the fallback into a signup flow.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep

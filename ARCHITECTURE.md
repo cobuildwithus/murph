@@ -1605,8 +1605,12 @@ layout with a generated image that mirrors the same compact native presentation.
 Nutrition images retain the calorie ring and metric row while remaining
 rectangular and badge-free so the provider owns the outer mask. The installed
 Messages extension retains its native icon and interactive identity. The
-provider request omits the optional App Store id so app-absent static cards do
-not substitute square App Store artwork into the wider Messages icon slot.
+provider request supplies Murph's canonical App Store id so app-absent cards
+can expose the provider-owned install affordance. That producer change remains
+rollout-blocked until physical no-extension iPhone and macOS proof confirms the
+wide static preview stays legible; if Linq substitutes square artwork for that
+preview, the App Store id must remain omitted until the provider offers a
+treatment that preserves both states.
 Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. Each assessed V2 goal keeps one
 concise directional label inside the image without relying on color alone;
