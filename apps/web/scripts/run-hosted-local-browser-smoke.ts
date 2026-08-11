@@ -93,10 +93,23 @@ async function prepareStablePrivatePage(
     await route.abort();
   });
   await page.addInitScript(() => {
-    const style = document.createElement("style");
-    style.textContent =
-      "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
-    (document.head ?? document.documentElement).appendChild(style);
+    const installMotionFreeze = (): boolean => {
+      const target = document.head ?? document.documentElement;
+      if (!target) {
+        return false;
+      }
+      const style = document.createElement("style");
+      style.textContent =
+        "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
+      target.appendChild(style);
+      return true;
+    };
+
+    if (!installMotionFreeze()) {
+      document.addEventListener("DOMContentLoaded", installMotionFreeze, {
+        once: true,
+      });
+    }
   });
 }
 
