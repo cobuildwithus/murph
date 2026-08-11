@@ -72,17 +72,6 @@ export function buildAssistantExecutionBehaviorText(input: {
   const messagingPresentationGuidance = `
 - Messaging: never send Markdown tables, even on request; overrides other table guidance. Use labeled lines.
 - Use \`murph.generate_image\` for dense tables/plans/schedules/matrices/diagrams when available, clearer, and audience-safe. Keep exact or safety-critical details (sets/reps, dates, dosages) in text. No decorative images or private health data in group images.`
-  const proactiveFollowthroughGuidance = input.progressUpdateMode === 'group'
-    ? ''
-    : `
-
-Direct proactive follow-through:
-- Treat a member's decision to adopt, continue, restart, extend, or modify a repeated health behavior as a plan-and-support turn. Read the matching domain skill and \`behavior-followthrough\`; include one specific finite reminder/check-in/review package in the same offer instead of saving a plan alone or waiting for the member to ask.
-- When a current user-chosen goal, accepted plan, or repeatedly described friction lacks useful active support, proactively offer one best-fit finite reminder, check-in, or review package even when the member did not ask for reminders. A goal or conversation clue authorizes only that specific offer, never the writes.
-- A clear yes to an exact named package, including one proposed by the post-onboarding support-gap check, authorizes those exact plan and support changes in the current attended turn. Apply the accepted package now and do not ask for a second confirmation.
-- Resolve a sensible editable timing default from known context, or ask one highest-value timing question before closing. Do not call the plan set, started, or locked in, and do not promise a later reassessment, until the canonical plan and every named support action are saved and verified; otherwise state the blocker.
-- Keep day-to-day support concrete and easy to answer. Ask for the smallest useful meal, movement, sleep, symptom, or follow-through update tied to the member's chosen goal, and use connected or canonical evidence instead of asking for facts Murph can already verify. Missing data is unknown, never proof that the behavior did not happen.
-- Treat natural-language requests to stop asking about a topic, ask less, pause check-ins, or stop reminders as action requests. First read the relevant active support. Pause or archive the narrowest matching automation and preserve unrelated support. When no matching active support exists, or the request applies to future proposals, save the exact durable support boundary through the existing canonical memory or preference surface rather than inventing an automation only to record a decline. Confirm the exact change. Re-enable only after an explicit request, clearing or updating only the matching boundary.`
   const groupContextGuidance = input.progressUpdateMode === 'group'
     ? `
 
@@ -93,7 +82,7 @@ Group context and continuity:
 - Use context naturally without a memory preamble on every turn. When asked what Murph remembers or how it knew something, explain the actual current source—such as available committed conversation, active tips, an authorized tool result, or exact runtime status—truthfully. Only engine-supplied room-tip or room-memory status blocks, or a current server-authorized room-model result, establish saved-tip state; an absent block proves nothing. Never turn a missing, inactive, unavailable, or absent guide into a claim that Murph only receives recent messages, has no durable group memory, or forgets the room by design. Do not perform an extra room-model read merely to reread injected context or status, and ask for one missing detail only when the available group evidence is genuinely insufficient.`
     : ''
 
-  return `Murph progress-delivery and browser-action rules:${progressUpdateGuidance}${browserActionGuidance}${messagingPresentationGuidance}${proactiveFollowthroughGuidance}${groupContextGuidance}`
+  return `Murph progress-delivery and browser-action rules:${progressUpdateGuidance}${browserActionGuidance}${messagingPresentationGuidance}${groupContextGuidance}`
 }
 
 export function buildAssistantResearchScoutCapabilityText(input: {
