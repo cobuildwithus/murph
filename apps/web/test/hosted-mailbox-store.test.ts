@@ -764,6 +764,26 @@ describe("tryMarkHostedMailboxConversationAiUsageDenied", () => {
 });
 
 describe("appendHostedMailboxItemTx", () => {
+  it("rejects writes for retired mailbox kinds before touching storage", async () => {
+    const tx = createHostedMailboxTx({
+      hostedMailboxItem: createHostedMailboxItemDelegate(),
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(appendHostedMailboxItemTx({
+      dedupeKey: "dedupe_retired_newsletter_1",
+      kind: "group-newsletter.email-needed",
+      lane: "system",
+      occurredAt: "2026-04-26T00:00:00.000Z",
+      payloadSerializedJson: JSON.stringify({ kind: "retired" }),
+      tx,
+      userId: "member_mailbox_1",
+    })).rejects.toThrow("Hosted mailbox retired kinds are read-only.");
+
+    expect(tx.$executeRaw).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+  });
+
   it("allocates a lane sequence and stores small opaque payload ciphertext inline", async () => {
     const hostedMailboxItem = createHostedMailboxItemDelegate();
     const hostedMailboxPayload = createHostedMailboxPayloadDelegate();
@@ -2696,7 +2716,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         itemDedupeKey: "system-dedupe-3",
         itemExpiresAt: null,
         itemId: "mailbox_system_3",
-        itemKind: "runtime.manual-requested",
+        itemKind: "group-newsletter.email-needed",
         itemLane: "system",
         itemLaneSeq: 3n,
         itemOccurredAt: new Date("2026-04-26T00:00:03.000Z"),
@@ -2758,6 +2778,7 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
       {
         consumedAt: null,
         id: "mailbox_system_3",
+        kind: "group-newsletter.email-needed",
         laneSeq: "3",
         payloadInlineCiphertext: null,
         payloadRef: "hosted-mailbox-payload:mailbox_system_3",

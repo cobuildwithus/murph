@@ -144,6 +144,15 @@ export function readHostedRuntimeFailurePhaseCode(
   }
 }
 
+// Migration-only reader metadata. Remove after one mailbox retention window
+// has elapsed since the old producer was retired and no retained rows remain.
+export const HOSTED_RETIRED_MAILBOX_KINDS = [
+  "group-newsletter.email-needed",
+] as const;
+
+export type HostedRetiredMailboxKind =
+  (typeof HOSTED_RETIRED_MAILBOX_KINDS)[number];
+
 export const HOSTED_MAILBOX_KINDS = [
   "conversation.message",
   "member.activated",
@@ -155,10 +164,10 @@ export const HOSTED_MAILBOX_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "environment-voice.captured",
-  "group-newsletter.email-needed",
   "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
+  ...HOSTED_RETIRED_MAILBOX_KINDS,
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -1516,6 +1525,10 @@ export type HostedRuntimeGroupToolRequest =
       linqSenderHandles?: readonly string[];
       telegramSenderHandles?: readonly string[];
     } & HostedRuntimeGroupSharedReadRequest)
+  | {
+      action: "prepare_email";
+      projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
+    }
   | { action: "list_memberships" }
   | { action: "leave_membership"; membershipId: string }
   | {
@@ -1663,6 +1676,10 @@ export type HostedRuntimeGroupToolResponse =
       result: HostedRuntimeGroupSharedReadResult;
     }
   | {
+      action: "prepare_email";
+      result: HostedRuntimeGroupEmailPreparationResult;
+    }
+  | {
       action: "list_memberships";
       result:
         | {
@@ -1799,33 +1816,35 @@ export type HostedRuntimeGroupToolResponse =
         | { status: "unavailable"; unavailableReason: string };
     };
 
-export type HostedRuntimeNewsletterToolAction = "prepare" | "send";
+export type HostedRuntimeGroupEmailEffectAction =
+  | "prepare_email"
+  | "send_email";
 
-export const HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH = 160;
-export const HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH = 100_000;
-export const HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH = 500_000;
-export const HOSTED_RUNTIME_NEWSLETTER_PARTICIPANTS_MAX = 100;
-export const HOSTED_RUNTIME_NEWSLETTER_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 100;
-export const HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_HEX_LENGTH = 64;
-const HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_PATTERN = new RegExp(
-  `^[0-9a-f]{${HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_HEX_LENGTH}}$`,
+export const HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH = 160;
+export const HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH = 100_000;
+export const HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH = 500_000;
+export const HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX = 100;
+export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX = 100;
+export const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH = 64;
+const HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_PATTERN = new RegExp(
+  `^[0-9a-f]{${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_HEX_LENGTH}}$`,
   "u",
 );
 
-export function isHostedRuntimeNewsletterAuthorizationProof(
+export function isHostedRuntimeGroupEmailAuthorizationProof(
   value: unknown,
 ): value is string {
   return typeof value === "string"
-    && HOSTED_RUNTIME_NEWSLETTER_AUTHORIZATION_PROOF_PATTERN.test(value);
+    && HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZATION_PROOF_PATTERN.test(value);
 }
 
-export interface HostedRuntimeNewsletterAuthorizedShare {
+export interface HostedRuntimeGroupEmailAuthorizedShare {
   projectionScopeKey: string;
   shareId: string;
 }
 
-export interface HostedRuntimeNewsletterParticipantSummary {
-  authorizedShares: HostedRuntimeNewsletterAuthorizedShare[];
+export interface HostedRuntimeGroupEmailParticipantSummary {
+  authorizedShares: HostedRuntimeGroupEmailAuthorizedShare[];
   hasEmail: boolean;
   memberId: string;
 }
@@ -1835,71 +1854,74 @@ export interface HostedRuntimeScheduledAutomationAuthority {
   occurrenceAt: string;
 }
 
-export type HostedRuntimeNewsletterScheduledAuthority =
+export type HostedRuntimeGroupEmailScheduledAuthority =
   HostedRuntimeScheduledAutomationAuthority;
 
-export interface HostedRuntimeNewsletterToolSendRequest {
+export interface HostedRuntimeGroupEmailEffectSendRequest {
+  action: "send_email";
   html: string;
-  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
   subject: string;
   text?: string | null;
 }
 
-export interface HostedRuntimeNewsletterToolPrepareRequest {
-  action: "prepare";
-  /** Trusted runtime context; stripped before the web callback request. */
-  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null;
+export interface HostedRuntimeGroupEmailEffectPrepareRequest {
+  action: "prepare_email";
+  projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
 }
 
-export type HostedRuntimeNewsletterToolRequest =
-  | HostedRuntimeNewsletterToolPrepareRequest
-  | ({ action: "send" } & HostedRuntimeNewsletterToolSendRequest);
+export type HostedRuntimeGroupEmailEffectRequest =
+  | HostedRuntimeGroupEmailEffectPrepareRequest
+  | HostedRuntimeGroupEmailEffectSendRequest;
 
-export type HostedRuntimeNewsletterToolResponse =
+export type HostedRuntimeGroupEmailPreparationResult =
   | {
-      action: "prepare";
-      result:
-        | {
-            authorizationProof: string;
-            groupId: string;
-            missingEmailParticipants: HostedRuntimeNewsletterParticipantSummary[];
-            participants: HostedRuntimeNewsletterParticipantSummary[];
-            status: "ok";
-          }
-        | {
-            status: "unavailable";
-            unavailableReason: string;
-          };
+      authorizationProof: string;
+      groupId: string;
+      missingEmailParticipants: HostedRuntimeGroupEmailParticipantSummary[];
+      participants: HostedRuntimeGroupEmailParticipantSummary[];
+      status: "ok";
     }
   | {
-      action: "send";
-      result:
-        | {
-            participantCount: number;
-            skippedNoEmailMemberIds: string[];
-            status: "accepted";
-          }
-        | {
-            participantCount: number;
-            skippedNoEmailMemberIds: string[];
-            status: "sent";
-          }
-        | {
-            failedRecipientCount: number;
-            participantCount: number;
-            sentRecipientCount: number;
-            skippedNoEmailMemberIds: string[];
-            status: "partial_failure";
-          }
-        | {
-            participantCount: 0;
-            skippedNoEmailMemberIds: string[];
-            status: "no_recipients";
-          }
-        | {
-            status: "unavailable";
-            unavailableReason: string;
-          };
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
+export type HostedRuntimeGroupEmailSendResult =
+  | {
+      participantCount: number;
+      skippedNoEmailMemberIds: string[];
+      status: "accepted";
+    }
+  | {
+      participantCount: number;
+      skippedNoEmailMemberIds: string[];
+      status: "sent";
+    }
+  | {
+      failedRecipientCount: number;
+      participantCount: number;
+      sentRecipientCount: number;
+      skippedNoEmailMemberIds: string[];
+      status: "partial_failure";
+    }
+  | {
+      participantCount: 0;
+      skippedNoEmailMemberIds: string[];
+      status: "no_recipients";
+    }
+  | {
+      status: "unavailable";
+      unavailableReason: string;
+    };
+
+export type HostedRuntimeGroupEmailEffectResponse =
+  | {
+      action: "prepare_email";
+      result: HostedRuntimeGroupEmailPreparationResult;
+    }
+  | {
+      action: "send_email";
+      result: HostedRuntimeGroupEmailSendResult;
     };
 
 export type HostedRuntimeFamilyPlanToolAction =
@@ -3468,4 +3490,10 @@ export function isHostedMailboxLane(value: string): value is HostedMailboxLane {
 
 export function isHostedMailboxKind(value: string): value is HostedMailboxKind {
   return HOSTED_MAILBOX_KINDS.includes(value as HostedMailboxKind);
+}
+
+export function isHostedRetiredMailboxKind(
+  value: string,
+): value is HostedRetiredMailboxKind {
+  return HOSTED_RETIRED_MAILBOX_KINDS.some((kind) => kind === value);
 }

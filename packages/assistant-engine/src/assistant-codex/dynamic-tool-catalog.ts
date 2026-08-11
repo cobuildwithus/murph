@@ -21,9 +21,9 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -852,6 +852,7 @@ export const MURPH_GROUP_TOOL = {
           'post_disclosure_request',
           'revoke_disclosure_grant',
           'read_shared',
+          'send_email',
           'read_current',
           'prepare_next_group',
           'read_next_group',
@@ -1065,7 +1066,36 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+          'For ordinary read_shared, one to three exact consent-aware group projections, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+      },
+      audience: {
+        type: 'string',
+        enum: ['group_email'],
+        description:
+          'Optional only for read_shared in a scheduled group automation. group_email prepares the generic email effect, filters members and facts to currently eligible email recipients, and returns recipientCount, missingVerifiedEmailCount, and referenceAt without exposing addresses or authorization metadata.',
+      },
+      subject: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
+        description: 'Required only for send_email.',
+      },
+      html: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
+        description: 'Required only for send_email.',
+      },
+      text: {
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+          },
+          { type: 'null' },
+        ],
+        default: null,
+        description: 'Optional plain-text equivalent for send_email.',
       },
       standaloneLink: {
         type: 'boolean',
@@ -1073,44 +1103,6 @@ export const MURPH_GROUP_TOOL = {
           'For action="offer_access" only. Set true only when the room explicitly asks for a standalone link; otherwise omit it and let the trusted host choose the best presentation for this channel.',
       },
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-    },
-    required: ['action'],
-  },
-} as const
-
-export const MURPH_NEWSLETTER_TOOL = {
-  namespace: 'murph',
-  name: 'newsletter',
-  description:
-    'Prepare or send the scheduled group health newsletter. `prepare` returns recipient eligibility, the occurrence reference, and shared facts from the seven completed local days before the run, filtered to exact live email and health-share grants; compose only from its members. Each turn allows one prepare attempt and at most one send attempt. `send` durably queues recipient-scoped delivery and may return `accepted` while that outbox work is pending; stop after that result and do not claim provider completion. Start the subject with the exact name in the current scheduled automation instructions, never a generic label. Send the first edition only after the setup notice and opt-out window. This tool sends one shared email thread, never exposes addresses or grant metadata, and does not manage the automation.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['prepare', 'send'],
-      },
-      subject: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-      },
-      html: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-      },
-      text: {
-        anyOf: [
-          {
-            type: 'string',
-            maxLength: HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
-          },
-          { type: 'null' },
-        ],
-        default: null,
-      },
     },
     required: ['action'],
   },
@@ -1359,7 +1351,6 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SUBSCRIPTION_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
@@ -1418,7 +1409,6 @@ export interface MurphDynamicToolAvailability {
   groupRoomModelAvailable?: boolean | null
   groupPermissionOfferAvailable?: boolean | null
   groupSharedReadAvailable?: boolean | null
-  newsletterAvailable?: boolean | null
   messageTargetingAvailable?: boolean | null
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
@@ -1468,7 +1458,6 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_GROUP_ROOM_MODEL_TOOL, defaultOff((a) => a.groupRoomModelAvailable)],
-    [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
