@@ -8604,6 +8604,10 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         type: "input.reply-failed",
       }),
     }));
+    const serializedLogRequests = JSON.stringify(logRequests);
+    expect(serializedLogRequests).not.toContain('"itemId"');
+    expect(serializedLogRequests).not.toContain('"mailboxDedupeKey"');
+    expect(serializedLogRequests).not.toContain('"requestId"');
   });
 
   it("redacts unsafe diagnostic error text before persistence", async () => {
@@ -12395,11 +12399,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("writes a system mailbox processing summary", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "system_mailbox.retryable",
       errorMessage: "redacted",
       itemId: "system_mailbox_item_123456789",
+      legacyUsageReferralAuthorityClassification: "identity_mismatch",
       nextWakeAt: "2026-04-27T00:10:00.000Z",
+      routeAction: "dispatch-assistant-notification",
       status: "retryable_failed",
+      wakeKind: "assistant.notification.requested",
     });
 
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
@@ -12415,9 +12423,13 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       level: "warn",
       phase: "checkpoint",
       redactedJson: expect.objectContaining({
+        attemptCount: 2,
         errorCode: "system_mailbox.retryable",
+        legacyUsageReferralAuthorityClassification: "identity_mismatch",
         nextWakeAtPresent: true,
+        routeAction: "dispatch-assistant-notification",
         status: "retryable_failed",
+        wakeKind: "assistant.notification.requested",
       }),
     }));
   });
@@ -12675,13 +12687,18 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     }));
   });
 
-  it("preserves system mailbox retry wake without running idle device sync", async () => {
+  it("does not mark a retryable device-sync mailbox attempt as completed", async () => {
+    const deviceSyncWorkspaceWakeAt = "2026-04-27T00:00:00.000Z";
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "system_mailbox.retryable",
       errorMessage: "redacted",
       itemId: "system_mailbox_item_retryable",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:10:00.000Z",
+      routeAction: "run-device-sync-wake",
       status: "retryable_failed",
+      wakeKind: "device-sync.wake",
     });
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       now: () => "2026-04-27T00:00:00.000Z",
@@ -12695,13 +12712,56 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         publicBaseUrl: "https://device-sync.example.test",
         secret: "synthetic-device-sync-secret",
       },
+      workspace: createDueAssistantWorkspace({
+        nextWakeAt: deviceSyncWorkspaceWakeAt,
+        nextWakeReason: "device-sync.reconcile",
+      }),
     }));
     const postCheckpoint = await result.afterCheckpoint?.();
 
     expect(result.nextWakeAt).toBe("2026-04-27T00:10:00.000Z");
+    expect(result.nextWakeReason).toBeUndefined();
+    expect(result.deviceSyncMaintenanceRan).toBeUndefined();
     expect(postCheckpoint).toBeUndefined();
     expect(mocks.runHostedDeviceSyncWakeLane).not.toHaveBeenCalled();
     expect(mocks.recordHostedDeviceSyncDirtyPostCheckpointRecord).not.toHaveBeenCalled();
+  });
+
+  it("does not record a retryable mailbox item during an unrelated checkpoint", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    mocks.readHostedProviderCleanupCheckpoint.mockResolvedValueOnce({
+      nextWakeAt: null,
+    });
+    mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
+      errorCode: "system_mailbox.retryable",
+      errorMessage: "redacted",
+      itemId: "system_mailbox_item_retryable",
+      legacyUsageReferralAuthorityClassification: null,
+      nextWakeAt: "2026-04-27T00:10:00.000Z",
+      routeAction: "dispatch-assistant-notification",
+      status: "retryable_failed",
+      wakeKind: "assistant.notification.requested",
+    });
+
+    const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+      logRequests,
+      now: () => "2026-04-27T00:00:00.000Z",
+    }));
+    await result.afterCheckpoint?.();
+
+    expect(mocks.recordHostedSystemMailboxItemAfterCheckpoint).not.toHaveBeenCalled();
+    expect(
+      logRequests.flatMap((request) => request.entries).filter((entry) =>
+        entry.eventCode === "mailbox.system_processed"
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        redactedJson: expect.objectContaining({
+          status: "retryable_failed",
+        }),
+      }),
+    ]);
   });
 
   it("preserves a device-sync mailbox follow-up wake after recording the mailbox item", async () => {
@@ -15691,11 +15751,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           "initialize-group-room-model",
         ]);
         return {
+          attemptCount: item.attemptCount,
           errorCode: "group_room_model_unavailable",
           errorMessage: "Group room model unavailable.",
           itemId: item.itemId,
+          legacyUsageReferralAuthorityClassification: null,
           nextWakeAt: "2026-07-29T18:02:00.000Z",
+          routeAction: item.routeAction,
           status: "retryable_failed",
+          wakeKind: item.wake.kind,
         };
       })
       .mockImplementationOnce(async (input) => {
@@ -16025,11 +16089,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockImplementationOnce(async () => {
       callOrder.push("member-preferences");
       return {
+        attemptCount: 2,
         errorCode: "synthetic_preferences_retry",
         errorMessage: "Synthetic preferences retry.",
         itemId: "system_mailbox_item_member_preferences",
+        legacyUsageReferralAuthorityClassification: null,
         nextWakeAt: "2026-04-27T00:01:00.000Z",
+        routeAction: "apply-member-preferences",
         status: "retryable_failed",
+        wakeKind: "member.preferences.updated",
       };
     });
     mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async () => {
@@ -16754,11 +16822,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const deliveryEffect = createDeliveryEffect();
     const preparedDispatches = createPreparedDispatchesForDeliveryEffect(deliveryEffect);
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
       errorMessage: "Hosted member-channel update failed.",
       itemId: "system_mailbox_item_member_channels",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:01:00.000Z",
+      routeAction: "apply-member-channels-update",
       status: "retryable_failed",
+      wakeKind: "member.channels.updated",
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -16801,11 +16873,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "2026-04-27T00:14:00.000Z",
     );
     mocks.prepareHostedSystemMailboxItemForCheckpoint.mockResolvedValueOnce({
+      attemptCount: 2,
       errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
       errorMessage: "Hosted member-channel update failed.",
       itemId: "system_mailbox_item_member_channels",
+      legacyUsageReferralAuthorityClassification: null,
       nextWakeAt: "2026-04-27T00:30:00.000Z",
+      routeAction: "apply-member-channels-update",
       status: "retryable_failed",
+      wakeKind: "member.channels.updated",
     });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,
@@ -16867,11 +16943,15 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "processed",
       })
       .mockResolvedValueOnce({
+        attemptCount: 2,
         errorCode: "HOSTED_MEMBER_CHANNELS_TRANSIENT",
         errorMessage: "Hosted member-channel update failed.",
         itemId: "system_mailbox_item_member_channels",
+        legacyUsageReferralAuthorityClassification: null,
         nextWakeAt: "2026-04-27T00:30:00.000Z",
+        routeAction: "apply-member-channels-update",
         status: "retryable_failed",
+        wakeKind: "member.channels.updated",
       });
     mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
       deliveryEffect,

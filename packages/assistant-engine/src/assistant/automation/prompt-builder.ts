@@ -65,7 +65,9 @@ export type AssistantTrustedHostedImageCompletion =
       media: readonly [
         AssistantVaultImageResponseMedia,
       ]
-      savedImageRef: string | null
+      originAssistantInputId: string | null
+      originAssistantInputIdExact: boolean
+      savedImageRef: string
       status: 'ready'
     }
 

@@ -115,13 +115,17 @@ import {
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
 import {
   createAssistantHostedScheduledRequestKey,
+  type AssistantHostedImageCompletionEffectScope,
   type AssistantHostedInvocationScope,
   type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
 } from '../assistant/providers/types.js'
-import { normalizeAssistantResponseMediaList } from '../assistant/response-media.js'
+import {
+  matchesExactAssistantVaultImageResponseMedia,
+  normalizeAssistantResponseMediaList,
+} from '../assistant/response-media.js'
 import {
   buildSafeToolCallValidationDigest,
   type SafeToolCallValidationDigest,
@@ -1810,6 +1814,20 @@ export async function executeMurphDynamicToolRequest(input: {
   askGrokTurnState?: AskGrokTurnState | null
   generateSongTurnState?: GenerateSongTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
+  const hostedImageCompletionEffectScope =
+    input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
+  if (
+    hostedImageCompletionEffectScope !== null &&
+    !isHostedImageCompletionToolRequestAllowed({
+      request: input.request,
+      scope: hostedImageCompletionEffectScope,
+    })
+  ) {
+    return toolTextResult(
+      false,
+      'this hosted image completion carries no authority for that tool action',
+    )
+  }
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
     !canExecuteComputerDynamicTools(input.hostedToolContext ?? null)
@@ -1940,6 +1958,24 @@ export async function executeMurphDynamicToolRequest(input: {
           ...toolTextResult(
             false,
             'private response image could not be prepared',
+          ),
+          responseMediaPatch: {
+            media: [],
+            op: 'replace',
+          },
+        }
+      }
+      if (
+        hostedImageCompletionEffectScope !== null &&
+        !matchesExactHostedImageCompletionMedia({
+          actual: media,
+          expected: hostedImageCompletionEffectScope.exactMedia,
+        })
+      ) {
+        return {
+          ...toolTextResult(
+            false,
+            'the trusted completion image no longer matches its saved media',
           ),
           responseMediaPatch: {
             media: [],
@@ -2161,13 +2197,29 @@ export async function executeMurphDynamicToolRequest(input: {
       let artwork: ResolvedGenerateImageReference | null = null
       let originAssistantInputId: string | null = null
       try {
+        const completionEffectScope =
+          hostedToolContext.currentHostedImageCompletionEffectScope?.() ?? null
         trustedCompletion = hasExplicitArtwork
           ? null
           : await readAssistantHostedImageCompletion({
               assistantInputId:
-                hostedToolContext.currentAssistantInputId?.() ?? null,
+                completionEffectScope?.completionAssistantInputId
+                ?? hostedToolContext.currentAssistantInputId?.()
+                ?? null,
               vault: vaultRoot,
             })
+        if (
+          completionEffectScope !== null
+          && !matchesTrustedHostedImageCompletionScope({
+            completion: trustedCompletion,
+            scope: completionEffectScope,
+          })
+        ) {
+          return toolTextResult(
+            false,
+            'physical-note sending requires the exact trusted hosted image completion authorized for this turn',
+          )
+        }
         const userActionScope = hasExplicitArtwork
           ? hostedToolContext.currentUserActionScope?.() ?? null
           : null
@@ -2885,6 +2937,55 @@ export async function executeMurphDynamicToolRequest(input: {
       })
     }
   }
+}
+
+function isHostedImageCompletionToolRequestAllowed(input: {
+  request: MurphDynamicToolRequest
+  scope: AssistantHostedImageCompletionEffectScope
+}): boolean {
+  if (input.request.kind === 'finish-without-reply') {
+    return true
+  }
+  if (input.request.kind === 'attach-response-media') {
+    return matchesExactHostedImageCompletionMedia({
+      actual: input.request.media,
+      expected: input.scope.exactMedia,
+    })
+  }
+  // Physical-note generation already owns an exact-origin continuation: the
+  // model must have launched generation with an authorized message_ref, and
+  // that executor re-reads the completion and verifies the vault bytes.
+  return input.request.kind === 'send-physical-note' &&
+    input.scope.authorizedOriginAssistantInputId !== null &&
+    input.scope.exactMedia !== null
+}
+
+function matchesExactHostedImageCompletionMedia(input: {
+  actual: readonly AssistantResponseMedia[]
+  expected: AssistantHostedImageCompletionEffectScope['exactMedia']
+}): boolean {
+  const expected = input.expected?.[0] ?? null
+  return expected !== null && matchesExactAssistantVaultImageResponseMedia({
+    actual: input.actual,
+    expected,
+  })
+}
+
+function matchesTrustedHostedImageCompletionScope(input: {
+  completion: Awaited<ReturnType<typeof readAssistantHostedImageCompletion>>
+  scope: AssistantHostedImageCompletionEffectScope
+}): boolean {
+  const completion = input.completion
+  const media = input.scope.exactMedia?.[0] ?? null
+  return completion !== null &&
+    completion.originAssistantInputIdExact &&
+    completion.originAssistantInputId ===
+      input.scope.authorizedOriginAssistantInputId &&
+    media !== null &&
+    completion.imageRef === media.ref &&
+    completion.imageSha256 === media.sha256 &&
+    completion.contentType === media.contentType &&
+    completion.sizeBytes === media.sizeBytes
 }
 
 async function resolveAttachedResponseMedia(input: {
@@ -4805,6 +4906,15 @@ async function prepareGroupAvatarRuntimeRequest(input: {
         input.hostedToolContext?.persistGeneratedImageCapture ?? null,
       providerRequestOrdinal: input.nextUsageOrdinal(),
       requireHostedPrivateImageDelivery: true,
+      ...(input.captureScope === 'group-avatar'
+        ? {
+            validateResolvedReferenceImages: async (references) =>
+              await validateGeneratedGroupAvatarSourceReferences({
+                hostedToolContext: input.hostedToolContext,
+                references,
+              }),
+          }
+        : {}),
       vaultRoot: input.vaultRoot,
     })
     if (!generated.rpcSuccess) {
@@ -4850,6 +4960,7 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     hostedToolContext: input.hostedToolContext,
     imageRef: avatar.imageRef,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    verifyGeneratedDelivery: true,
     vaultRoot: input.vaultRoot,
   })
   if (!published.rpcSuccess) {
@@ -4868,6 +4979,7 @@ async function publishGroupAvatarImageReference(input: {
   hostedToolContext: AssistantHostedToolContext | null
   imageRef: string
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  verifyGeneratedDelivery?: boolean
   vaultRoot: string | null
 }): Promise<
   | { rpcSuccess: true; url: string }
@@ -4912,6 +5024,20 @@ async function publishGroupAvatarImageReference(input: {
     }
   }
 
+  if (input.verifyGeneratedDelivery === true) {
+    const deliveryVerified = await verifyGeneratedGroupAvatarSourceReference({
+      hostedToolContext: input.hostedToolContext,
+      reference,
+    })
+    if (!deliveryVerified) {
+      return {
+        rpcSuccess: false,
+        rpcText:
+          'generated image must be visible before it can become the group avatar',
+      }
+    }
+  }
+
   try {
     const published = await publisher.publishPrivateImageUrl({
       bytes: reference.bytes,
@@ -4924,6 +5050,39 @@ async function publishGroupAvatarImageReference(input: {
       rpcText: 'private group avatar delivery could not be prepared',
     }
   }
+}
+
+async function validateGeneratedGroupAvatarSourceReferences(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  references: readonly ResolvedGenerateImageReference[]
+}): Promise<string | null> {
+  for (const reference of input.references) {
+    const deliveryVerified = await verifyGeneratedGroupAvatarSourceReference({
+      hostedToolContext: input.hostedToolContext,
+      reference,
+    })
+    if (!deliveryVerified) {
+      return 'generated image must be visible before it can become the group avatar'
+    }
+  }
+  return null
+}
+
+async function verifyGeneratedGroupAvatarSourceReference(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  reference: ResolvedGenerateImageReference
+}): Promise<boolean> {
+  if (!input.reference.sourceRef.startsWith('raw/captures/')) {
+    return true
+  }
+  const verified = await input.hostedToolContext
+    ?.verifyGeneratedImageDelivery?.({
+      contentType: input.reference.mediaType,
+      imageRef: input.reference.sourceRef,
+      sha256: input.reference.sha256,
+      sizeBytes: input.reference.bytes.byteLength,
+    })
+  return verified !== false
 }
 
 function isAbortError(error: unknown): boolean {
