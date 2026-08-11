@@ -1968,7 +1968,7 @@ if (!tool) {
       kind: 'compact_table',
       version: 1,
       title: 'Lower body strength',
-      subtitle: '24 of 24 sets complete',
+      subtitle: null,
       footer: 'Workout completed.',
       tracking: {
         kind: 'workout',

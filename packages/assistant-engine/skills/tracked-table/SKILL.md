@@ -134,6 +134,9 @@ The outer card remains `compact_table` V1. Set `workout` to:
 
 Use `state="completed"` only after replacing every remaining `pending` set with `skipped`. A completed set always carries `actual`; pending and skipped sets never do.
 
+Set the outer `subtitle` to `null`. Workout state and progress are derived from
+the structured sets, so do not author a second state or progress label there.
+
 Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>", "snapshotAt": "<canonical verified UTC instant>" }`. The backend keeps tracking in durable transcript text and strips it from the native URL.
 
 ## Card refresh behavior
