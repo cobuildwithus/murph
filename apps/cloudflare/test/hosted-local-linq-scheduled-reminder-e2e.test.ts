@@ -44,13 +44,22 @@ const overlapReminderText = "Time to sleep. This is the overlap reminder.";
 const overlapForegroundInboundText = "Show the daily nutrition summary as a card.";
 const overlapForegroundNutritionCard = {
   kind: "daily_nutrition",
+  version: 2,
   localDate: "2026-07-28",
   mealCount: 3,
   totals: {
     calories: { mealCount: 3, total: 1_490.25 },
     carbsGrams: { mealCount: 3, total: 193.125 },
     fatGrams: { mealCount: 3, total: 34.75 },
+    fiberGrams: { mealCount: 3, total: 26.5 },
     proteinGrams: { mealCount: 3, total: 94.5 },
+  },
+  goals: {
+    calories: { status: "under_target", target: 2_100 },
+    carbsGrams: { status: "on_target", target: 220 },
+    fatGrams: { status: "on_target", target: 40 },
+    fiberGrams: { status: "under_target", target: 30 },
+    proteinGrams: { status: "on_target", target: 100 },
   },
 } as const;
 const wakePreservationWindowRequestText =

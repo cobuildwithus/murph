@@ -566,7 +566,8 @@ a route-scoped pause. The current rollback floor is forward-only: repair or
 redeploy a compatible current Web/runner pair; the prior Web or runner is not a
 resumable target against the migrated ledger.
 
-The canonical remaining cleanup and retirement procedure lives in
+The one-time legacy Stripe object drain is complete. The bounded delayed-event
+compatibility contract and its final removal gate live in
 `agent-docs/product-specs/starter-usage.md`.
 
 For the capacity-epoch change, deploy the assistant runtime that timestamps

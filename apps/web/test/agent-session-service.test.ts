@@ -243,6 +243,119 @@ describe("HostedDeviceSyncAgentSessionService.refreshTokenBundle", () => {
     }));
     expect(touchAgentSession).not.toHaveBeenCalled();
   });
+
+  it("resolves the exact connection provider before claiming a refresh lease", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_member_provider";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const prisma = { marker: "member-provider-prisma" };
+      Object.assign(harness.store, { prisma });
+      const order: string[] = [];
+      const originalClaim = harness.store.claimConnectionRefreshLease.bind(
+        harness.store,
+      );
+      const claimConnectionRefreshLease = vi
+        .spyOn(harness.store, "claimConnectionRefreshLease")
+        .mockImplementation(async (input) => {
+          order.push("claim");
+          return originalClaim(input);
+        });
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "member-access-refreshed",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: "member-refresh-refreshed",
+      }));
+      const provider = createWhoopProvider({ refreshTokens });
+      const resolveRefreshProvider = vi.fn(async () => {
+        order.push("resolve");
+        expect(harness.getRefreshLease()).toBeNull();
+        return provider;
+      });
+      const sharedProviderLookup = vi.fn(() => null);
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest(
+          "https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle",
+          bearerToken,
+        ),
+        store: harness.store,
+        registry: {
+          get: sharedProviderLookup,
+          list: () => [],
+        } as never,
+        resolveRefreshProvider,
+      });
+
+      const response = await service.refreshTokenBundle(
+        SESSION,
+        "conn-1",
+        { force: true },
+      );
+
+      expect(resolveRefreshProvider).toHaveBeenCalledWith({
+        connectionId: "conn-1",
+        prisma,
+        providerId: "whoop",
+        userId: "user-1",
+      });
+      expect(order.slice(0, 2)).toEqual(["resolve", "claim"]);
+      expect(claimConnectionRefreshLease).toHaveBeenCalledTimes(1);
+      expect(refreshTokens).toHaveBeenCalledTimes(1);
+      expect(sharedProviderLookup).not.toHaveBeenCalled();
+      expect(response).toMatchObject({
+        refreshed: true,
+        tokenBundle: {
+          accessToken: "member-access-refreshed",
+          refreshToken: "member-refresh-refreshed",
+          tokenVersion: 3,
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not claim a refresh lease when connection provider resolution fails", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const bearerToken = "hbds_agent_missing_member_provider";
+      const harness = createRetrySafeStoreHarness(bearerToken);
+      const prisma = { marker: "missing-member-provider-prisma" };
+      Object.assign(harness.store, { prisma });
+      const claimConnectionRefreshLease = vi.spyOn(
+        harness.store,
+        "claimConnectionRefreshLease",
+      );
+      const resolveRefreshProvider = vi.fn(async () => null);
+      const service = new HostedDeviceSyncAgentSessionService({
+        request: createAgentRequest(
+          "https://murph.example/api/device-sync/agent/connections/conn-1/refresh-token-bundle",
+          bearerToken,
+        ),
+        store: harness.store,
+        registry: createDeviceSyncRegistry([createWhoopProvider()]),
+        resolveRefreshProvider,
+      });
+
+      await expect(
+        service.refreshTokenBundle(SESSION, "conn-1", { force: true }),
+      ).rejects.toMatchObject({
+        code: "PROVIDER_NOT_CONFIGURED",
+      });
+      expect(resolveRefreshProvider).toHaveBeenCalledWith({
+        connectionId: "conn-1",
+        prisma,
+        providerId: "whoop",
+        userId: "user-1",
+      });
+      expect(claimConnectionRefreshLease).not.toHaveBeenCalled();
+      expect(harness.getRefreshLease()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
@@ -345,6 +458,53 @@ describe("HostedDeviceSyncAgentSessionService retry-safe bearer reuse", () => {
       code: "OAUTH_TOKENS_REQUIRED",
     });
     expect(createTokenAudit).not.toHaveBeenCalled();
+  });
+
+  it("rejects export and refresh fast paths before returning tokens when app authority is invalid", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-04-01T00:10:00.000Z"));
+      const harness = createRetrySafeStoreHarness("hbds_agent_token");
+      const refreshTokens = vi.fn(async () => ({
+        accessToken: "unexpected-refreshed-token",
+        accessTokenExpiresAt: "2026-04-01T02:00:00.000Z",
+        refreshToken: "unexpected-refresh-token",
+      }));
+      const registry = createDeviceSyncRegistry([createWhoopProvider({ refreshTokens })]);
+      const authorityError = deviceSyncError({
+        code: "DEVICE_PROVIDER_APPLICATION_INVALID",
+        httpStatus: 409,
+        message: "Private provider application credentials require repair.",
+        retryable: false,
+      });
+      const assertTokenExportAuthority = vi.fn(async () => {
+        throw authorityError;
+      });
+      const service = new HostedDeviceSyncAgentSessionService({
+        assertTokenExportAuthority,
+        request: createAgentRequest("https://murph.example/api/device-sync/agent", "hbds_agent_token"),
+        store: harness.store,
+        registry,
+      });
+
+      await expect(service.exportTokenBundle(SESSION, "conn-1")).rejects.toBe(authorityError);
+      await expect(service.refreshTokenBundle(SESSION, "conn-1", {
+        expectedTokenVersion: 1,
+        force: true,
+      })).rejects.toBe(authorityError);
+      await expect(service.refreshTokenBundle(SESSION, "conn-1")).rejects.toBe(authorityError);
+
+      expect(assertTokenExportAuthority).toHaveBeenCalledTimes(3);
+      expect(assertTokenExportAuthority).toHaveBeenCalledWith(expect.objectContaining({
+        connectionId: "conn-1",
+        providerId: "whoop",
+        userId: "user-1",
+      }));
+      expect(refreshTokens).not.toHaveBeenCalled();
+      expect(harness.audits).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("lets export-token-bundle retry with the original bearer after a lost response", async () => {

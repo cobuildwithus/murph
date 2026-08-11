@@ -1375,9 +1375,9 @@ The value also authorizes privacy, export, media, and account-deletion paths, so
 removing it is not a route-scoped runtime-start pause and would disable
 unrelated operations. The migrated ledger is now a forward-only floor: repair
 or redeploy a compatible current Web/runner pair. Neither pre-Starter plane is
-a resumable target against the migrated database. The remaining legacy Stripe
-object cleanup procedure is owned by
-`agent-docs/product-specs/starter-usage.md`.
+a resumable target against the migrated database. The one-time legacy Stripe
+object drain is complete; the remaining delayed-event compatibility and final
+removal gate are owned by `agent-docs/product-specs/starter-usage.md`.
 
 The accepted group-message participant rollout is Web-first. Deploy the Web
 release that accepts both new exact `groupRequester` / `participant` evidence

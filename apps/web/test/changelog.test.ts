@@ -335,6 +335,14 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
+      sourcePullRequests: [1588],
+      summary: expect.stringContaining("nutrition goal direction"),
+      details: expect.stringContaining("without repeating target amounts"),
+    });
+    expect(
+      items.get("cleaner-workout-cards-in-messages")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("lighter-accessible-homepage")).toMatchObject({
       sourcePullRequests: [1573],
       summary: expect.stringContaining("compact avatar images"),
@@ -364,6 +372,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("environment-report-loading-preview")).toMatchObject({
+      sourcePullRequests: [1617],
+      summary: expect.stringContaining("report-shaped preview"),
+      tryIt: {
+        href: "/environment/print",
+        label: "Open your Environment report",
+      },
+    });
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -576,11 +592,13 @@ describe("changelog registry", () => {
           "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
+          "cleaner-workout-cards-in-messages",
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",
           "scheduled-cards-use-current-private-route",
           "lighter-accessible-homepage",
+          "environment-report-loading-preview",
         ],
       },
       {
