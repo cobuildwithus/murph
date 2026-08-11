@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "homepage-mobile-phone-proportions",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "The homepage phone fits mobile screens better",
+    "summary": "On phone-size screens, the public homepage now gives its iPhone conversation preview a narrower, more natural shape while keeping the message and signup action easy to read.",
+    "details": "Tablet and desktop proportions, conversation behavior, and the signup path are unchanged.",
+    "relevanceTags": ["homepage", "mobile", "design"],
+    "sourcePullRequests": [1643],
+    "tryIt": {
+      "href": "/",
+      "label": "Visit the homepage"
+    }
+  }
+}

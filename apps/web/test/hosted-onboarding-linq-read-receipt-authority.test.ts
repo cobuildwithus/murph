@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   readHostedThreadRouteByThreadIdentity: vi.fn(),
   requireHostedLinqMessageReceivedEvent: vi.fn(),
   resolveHostedLinqRecipientPhoneNumber: vi.fn(() => "+15555550123"),
+  resolveHostedLinqThreadContainerCryptoPreparationTarget: vi.fn(() => null),
   sendHostedLinqReadReceipt: vi.fn(),
   startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
     baseDetails,
@@ -38,6 +39,8 @@ vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", () => ({
   planHostedOnboardingLinqWebhook: mocks.planHostedOnboardingLinqWebhook,
+  resolveHostedLinqThreadContainerCryptoPreparationTarget:
+    mocks.resolveHostedLinqThreadContainerCryptoPreparationTarget,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/webhook-service-wake", () => ({

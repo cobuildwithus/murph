@@ -4,8 +4,8 @@ import type {
   HostedReturnContactKind,
 } from '@murphai/hosted-execution/return-contact'
 import type {
-  HostedRuntimeNewsletterToolResponse,
-  HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeGroupEmailEffectResponse,
+  HostedRuntimeGroupEmailScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -43,7 +43,7 @@ import type {
   AssistantHostedImageGenerationLauncher,
   AssistantGeneratedImageCapturePersistence,
   AssistantHostedLabsTool,
-  AssistantHostedNewsletterTool,
+  AssistantHostedGroupEmailEffect,
   AssistantHostedPersonalizationTool,
   AssistantHostedPlanUsageTool,
   AssistantPhysicalNotePort,
@@ -55,7 +55,7 @@ import type {
 import {
   resolveAssistantHostedReturnContactKind,
 } from './return-contact-kind.js'
-import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
+import { createAssistantGroupEmailOutboxTool } from './group-email-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
 
 export interface AssistantHostedDeliveryContext {
@@ -143,7 +143,7 @@ export interface AssistantHostedToolContext {
   readonly labsTool?: AssistantHostedLabsTool | null
   readonly imageGenerationLauncher?: AssistantHostedImageGenerationLauncher | null
   readonly persistGeneratedImageCapture?: AssistantGeneratedImageCapturePersistence | null
-  readonly newsletterTool?: AssistantHostedNewsletterTool | null
+  readonly groupEmailEffect?: AssistantHostedGroupEmailEffect | null
   readonly personalizationTool?: AssistantHostedPersonalizationTool | null
   readonly planUsageTool?: AssistantHostedPlanUsageTool | null
   readonly physicalNotes?: AssistantPhysicalNotePort | null
@@ -169,11 +169,14 @@ export interface AssistantHostedToolContext {
   currentAssistantInputId?(): string | null
   claimSubscriptionAssistantInputId?(): string | null
   claimIMessageContactAssistantInputId?(): string | null
-  currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
+  currentScheduledAutomationAuthority?(): HostedRuntimeGroupEmailScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
-  closeNewsletterCapability?(): void
-  recordNewsletterSendResult?(
-    result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
+  closeGroupEmailCapability?(): void
+  recordGroupEmailSendResult?(
+    result: Extract<
+      HostedRuntimeGroupEmailEffectResponse,
+      { action: 'send_email' }
+    >,
   ): void
   recordDetachedUsage?(input: {
     effectiveEnv: Readonly<Record<string, string | undefined>>
@@ -208,16 +211,19 @@ export function createAssistantHostedToolContext(input: {
   getUserActionAcceptedInputIds?: () => readonly string[]
   getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
-  newsletterOutbox?: {
+  groupEmailOutbox?: {
     turnId: string
     vault: string
   } | null
   pendingVaultFilesAvailable?: boolean
   route?: CodexThreadIdentity | null
-  recordNewsletterSendResult?: (
-    result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
+  recordGroupEmailSendResult?: (
+    result: Extract<
+      HostedRuntimeGroupEmailEffectResponse,
+      { action: 'send_email' }
+    >,
   ) => void
-  recordNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+  recordGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
   verifyGeneratedImageDelivery?: (input: {
     contentType: AssistantVaultImageResponseMedia['contentType']
     imageRef: string
@@ -237,8 +243,8 @@ export function createAssistantHostedToolContext(input: {
     executionContext?.clinicalRecordsConnectLinkTool ?? null
   const imageGenerationLauncher =
     executionContext?.imageGenerationLauncher ?? null
-  const newsletterPort = input.messageInput.scheduledAutomationAuthority
-    ? executionContext?.newsletterTool ?? null
+  const groupEmailHost = input.messageInput.scheduledAutomationAuthority
+    ? executionContext?.groupTool ?? null
     : null
   const readDeliveryContext = () => input.getDeliveryContext?.() ?? {
     messageInput: input.messageInput,
@@ -256,19 +262,19 @@ export function createAssistantHostedToolContext(input: {
       recipientKey: context?.recipientKey ?? null,
     }
   }
-  const newsletterOutboxTool = newsletterPort && input.newsletterOutbox
-    ? createAssistantNewsletterOutboxTool({
+  const groupEmailOutboxTool = groupEmailHost && input.groupEmailOutbox
+    ? createAssistantGroupEmailOutboxTool({
         automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
-        newsletterTool: newsletterPort,
+        groupTool: groupEmailHost,
         recordPendingDeliveryIntentId:
-          input.recordNewsletterPendingDeliveryIntentId,
+          input.recordGroupEmailPendingDeliveryIntentId,
         sessionId: input.session.sessionId,
-        turnId: input.newsletterOutbox.turnId,
-        vault: input.newsletterOutbox.vault,
+        turnId: input.groupEmailOutbox.turnId,
+        vault: input.groupEmailOutbox.vault,
       })
     : null
-  const newsletterTool = newsletterOutboxTool ?? newsletterPort
+  const groupEmailEffect = groupEmailOutboxTool
   const readRawCurrentAssistantInputId = () =>
     executionContext?.currentAssistantInputId?.() ?? null
   const readCurrentHostedImageCompletionEffectScope = ():
@@ -410,7 +416,7 @@ export function createAssistantHostedToolContext(input: {
       : null,
     persistGeneratedImageCapture:
       executionContext?.persistGeneratedImageCapture ?? null,
-    newsletterTool,
+    groupEmailEffect,
     personalizationTool: executionContext?.personalizationTool ?? null,
     planUsageTool: executionContext?.planUsageTool ?? null,
     physicalNotes: executionContext?.physicalNotes ?? null,
@@ -524,8 +530,8 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
     currentInvocationScope: readCurrentInvocationScope,
-    closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
-    recordNewsletterSendResult: input.recordNewsletterSendResult,
+    closeGroupEmailCapability: groupEmailOutboxTool?.closeCapability,
+    recordGroupEmailSendResult: input.recordGroupEmailSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>

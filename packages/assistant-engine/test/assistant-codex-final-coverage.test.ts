@@ -51,30 +51,22 @@ const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
   resolveCodexAssistantCapabilities: vi.fn(),
   resolveCodexAssistantTargetCapabilities: vi.fn(),
-  resolveCodexAssistantLabel: vi.fn((profile) =>
-    (profile.target?.kind ?? profile.provider) === 'codex-cli'
-      ? 'Codex CLI'
-      : 'Unsupported provider',
-  ),
-  resolveCodexStaticModels: vi.fn((profile) =>
-    (profile.target?.kind ?? profile.provider) === 'codex-cli'
-      ? [
-          {
-            id: 'gpt-5.4',
-            label: 'GPT-5.4',
-            description: 'Frontier model',
-            source: 'static',
-            capabilities: {
-              images: true,
-              pdf: false,
-              reasoning: true,
-              streaming: true,
-              tools: true,
-            },
-          },
-        ]
-      : [],
-  ),
+  resolveCodexAssistantLabel: vi.fn(() => 'Codex CLI'),
+  resolveCodexStaticModels: vi.fn(() => [
+    {
+      id: 'gpt-5.4',
+      label: 'GPT-5.4',
+      description: 'Frontier model',
+      source: 'static',
+      capabilities: {
+        images: true,
+        pdf: false,
+        reasoning: true,
+        streaming: true,
+        tools: true,
+      },
+    },
+  ]),
 }))
 
 const providerTurnRunnerMocks = vi.hoisted(() => ({
@@ -442,41 +434,34 @@ describe('Codex model catalog', () => {
   })
 
   it('normalizes provider profiles and builds model catalogs with current and static models', () => {
-    providerMocks.resolveCodexAssistantLabel.mockImplementation((profile) =>
-      (profile.target?.kind ?? profile.provider) === 'codex-cli'
-        ? 'Codex CLI'
-        : 'Unsupported provider',
-    )
+    providerMocks.resolveCodexAssistantLabel.mockReturnValue('Codex CLI')
     providerMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
       supportedUserMessageContentTypes: ['text', 'image'],
       supportsReasoningEffort: true,
     })
-    providerMocks.resolveCodexStaticModels.mockImplementation((profile) =>
-      (profile.target?.kind ?? profile.provider) === 'codex-cli'
-        ? [
-            {
-              id: 'gpt-5.4',
-              label: 'GPT-5.4',
-              description: 'Frontier model',
-              source: 'static',
-              capabilities: {
-                images: true,
-                pdf: false,
-                reasoning: true,
-                streaming: true,
-                tools: true,
-              },
-            },
-          ]
-        : [],
-    )
+    providerMocks.resolveCodexStaticModels.mockReturnValue([
+      {
+        id: 'gpt-5.4',
+        label: 'GPT-5.4',
+        description: 'Frontier model',
+        source: 'static',
+        capabilities: {
+          images: true,
+          pdf: false,
+          reasoning: true,
+          streaming: true,
+          tools: true,
+        },
+      },
+    ])
 
     const profile = resolveCodexAssistantProfile({
       provider: 'codex-cli',
     })
     expect(profile).toMatchObject({
       target: {
-        kind: 'codex-cli',
+        model: null,
+        modelProvider: null,
       },
       providerLabel: 'Codex CLI',
     })

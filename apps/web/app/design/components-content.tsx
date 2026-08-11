@@ -156,6 +156,7 @@ import {
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
+  GroupFundingSupportersStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
@@ -174,6 +175,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
+import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -1468,6 +1470,15 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section
+          id="murph-card-handoff-dialog"
+          title="Shared card handoff dialog"
+        >
+          <MurphCardHandoffStudy />
+        </Section>
+
+        <Separator />
+
         <Section title="Hosted plan change">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Immediate upgrades open Stripe&apos;s exact proration confirmation.
@@ -2140,6 +2151,17 @@ export function ComponentsContent() {
               </div>
             ))}
           </div>
+        </Section>
+
+        <Separator />
+
+        <Section title="Group funding supporters">
+          <p className="text-sm text-muted-foreground">
+            The funding page recognizes the current monthly sponsor and recent
+            one-time supporters without exposing contribution amounts or the
+            sponsor&apos;s private monthly maximum.
+          </p>
+          <GroupFundingSupportersStudy />
         </Section>
 
         <Separator />

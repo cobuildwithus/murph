@@ -187,6 +187,8 @@ type LinqOperation =
 
 type LinqFailureKind = 'chat_not_found'
 
+const LINQ_IMESSAGE_APP_STORE_ID = 6786145859
+
 type LinqIMessageCapabilityCheckRequest = {
   address: string
   from?: string
@@ -202,6 +204,7 @@ type LinqIMessageAppCardRequest = {
         name: 'Murph'
         team_id: 'G9DJH2XUMK'
         bundle_id: 'ai.withmurph.app.messages'
+        app_store_id: typeof LINQ_IMESSAGE_APP_STORE_ID
       }
       interactive: true
       url: string
@@ -719,12 +722,11 @@ export async function sendLinqIMessageAppCard(
       idempotency_key: idempotencyKey,
       parts: [{
         type: 'imessage_app',
-        // `app_store_id` is intentionally absent. Linq otherwise substitutes
-        // square artwork in app-absent static Messages cards.
         app: {
           name: 'Murph',
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
+          app_store_id: LINQ_IMESSAGE_APP_STORE_ID,
         },
         interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),

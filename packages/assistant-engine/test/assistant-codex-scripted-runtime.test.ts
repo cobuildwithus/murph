@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { crc32, deflateSync } from 'node:zlib'
 
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
@@ -15,11 +16,14 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import {
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
 import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -214,6 +218,16 @@ interface ScriptedResponseRoute {
 type ScriptedResponse = ScriptedResponseRoute & (
   | { text: string }
   | {
+      commentaryAndFunctionCall: {
+        commentary: string
+        functionCall: {
+          arguments: Record<string, unknown>
+          name: string
+          namespace?: string
+        }
+      }
+    }
+  | {
       customToolCall: {
         input: string
         name: string
@@ -249,6 +263,7 @@ interface ScriptedStub {
 interface ScriptedProviderRequestSummary {
   customToolCallOutputs?: string[]
   functionCallOutputs?: string[]
+  imageWidths?: number[]
   model: string | null
   providerRequestDiagnostics?: {
     bytes: number
@@ -258,7 +273,7 @@ interface ScriptedProviderRequestSummary {
     includesReadShared: boolean
     includesResponseCardCompactTableShape: boolean
     includesResponseCardNutritionV2Shape: boolean
-    includesSaveNewsletter: boolean
+    includesGroupEmail: boolean
     includesToolSearch: boolean
   }
   serviceTier: string | null
@@ -334,6 +349,48 @@ describe('real codex app-server with scripted provider', () => {
     expect(result.turnId).toEqual(expect.any(String))
     expect(result.sessionId).toEqual(expect.any(String))
     expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
+  })
+
+  it('preserves original width for supported detail and bounds gallery widths through the real app server', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+    })
+    const imagePath = path.join(
+      scenario.turnInput.workingDirectory,
+      'fine-detail.png',
+    )
+    await writeFile(imagePath, createDeterministicPng(3072, 64))
+    scenario.stub.queue(
+      { text: 'SCRIPTED_ORIGINAL_IMAGE_OK' },
+      { text: 'SCRIPTED_GALLERY_IMAGE_OK' },
+    )
+
+    const originalResult = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      images: [{
+        detail: 'original',
+        mimeType: 'image/png',
+        path: imagePath,
+      }],
+      prompt: 'Reply exactly SCRIPTED_ORIGINAL_IMAGE_OK.',
+    })
+    const galleryResult = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      images: [
+        { detail: 'original', mimeType: 'image/png', path: imagePath },
+        { detail: 'original', mimeType: 'image/png', path: imagePath },
+      ],
+      prompt: 'Reply exactly SCRIPTED_GALLERY_IMAGE_OK.',
+    })
+
+    expect(originalResult.finalMessage).toBe('SCRIPTED_ORIGINAL_IMAGE_OK')
+    expect(galleryResult.finalMessage).toBe('SCRIPTED_GALLERY_IMAGE_OK')
+    expect(scenario.stub.requestSummariesSinceBaseline()).toMatchObject([
+      { imageWidths: [3072] },
+      { imageWidths: [2048, 2048] },
+    ])
   })
 
   it('keeps a fresh onboarding greeting on the compact root and bounded resume read', {
@@ -1587,7 +1644,7 @@ if (!tool) {
         includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
@@ -1632,7 +1689,7 @@ if (!tool) {
       providerRequestDiagnostics: {
         includesAutomation: true,
         includesGroup: true,
-        includesSaveNewsletter: true,
+        includesGroupEmail: true,
       },
     })
     expect(
@@ -4659,7 +4716,7 @@ text(result.output);
         includesAllTools: false,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
         includesToolSearch: true,
       },
     })
@@ -4744,7 +4801,7 @@ text(JSON.stringify(result));
         includesAutomation: false,
         includesGroup: false,
         includesReadShared: true,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(groupSharedRequests).toEqual([{
@@ -5331,6 +5388,76 @@ text(JSON.stringify(result));
     expect(progressUpdates).toEqual(['Scripted progress update.'])
     expect(result.finalMessage).toBe('DYNAMIC_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('ends an accepted group email effect without another provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupEmailRequests: unknown[] = []
+    const groupEmailSendResultRecorder = vi.fn()
+    const traceEvents: unknown[] = []
+    scenario.stub.queue({
+      commentaryAndFunctionCall: {
+        commentary: 'Preparing the scheduled group update.',
+        functionCall: {
+          arguments: {
+            action: 'send_email',
+            html: '<p>Scheduled update</p>',
+            subject: 'Scheduled update',
+            text: 'Scheduled update',
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async () => ({
+          action: 'read_chat_participants',
+          result: { participants: [], status: 'ok' },
+        })),
+        groupEmailEffect: {
+          request: async (request) => {
+            groupEmailRequests.push(request)
+            return {
+              action: 'send_email',
+              result: {
+                participantCount: 1,
+                skippedNoEmailMemberIds: [],
+                status: 'accepted',
+              },
+            }
+          },
+        },
+        recordGroupEmailSendResult: groupEmailSendResultRecorder,
+      },
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      prompt: 'Send the prepared scheduled group email.',
+    })
+
+    expect(groupEmailRequests).toEqual([{
+      action: 'send_email',
+      html: '<p>Scheduled update</p>',
+      subject: 'Scheduled update',
+      text: 'Scheduled update',
+    }])
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+    expect(JSON.stringify(traceEvents)).toContain(
+      'Preparing the scheduled group update.',
+    )
+    expect(groupEmailSendResultRecorder).toHaveBeenCalledOnce()
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
   it.each([
@@ -5933,6 +6060,7 @@ function buildScriptedHostedSystemPrompt(
 
 async function prepareScriptedTurnScenario(
   options: {
+    modelProvider?: string
     multiAgentV2?: boolean
   } = {},
 ): Promise<{
@@ -5950,6 +6078,7 @@ async function prepareScriptedTurnScenario(
 }> {
   const scriptedStub = await requireScriptedStub()
   scriptedStub.markRequestBaseline()
+  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
   const codexHome = await mkdtemp(path.join(tmpdir(), 'murph-codex-scripted-home-'))
   temporaryPaths.push(codexHome)
   const workingDirectory = await mkdtemp(
@@ -5958,7 +6087,10 @@ async function prepareScriptedTurnScenario(
   temporaryPaths.push(workingDirectory)
   await writeFile(
     path.join(codexHome, 'config.toml'),
-    buildScriptedCodexConfigToml(scriptedStub.baseUrl, options),
+    buildScriptedCodexConfigToml(scriptedStub.baseUrl, {
+      ...options,
+      modelProvider,
+    }),
     {
       encoding: 'utf8',
       mode: 0o600,
@@ -5977,7 +6109,7 @@ async function prepareScriptedTurnScenario(
         TMPDIR: process.env.TMPDIR,
       },
       model: SCRIPTED_MODEL,
-      modelProvider: SCRIPTED_MODEL_PROVIDER,
+      modelProvider,
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -6037,12 +6169,14 @@ async function writeOpenAiFlexModelCatalogJson(input: {
 function buildScriptedCodexConfigToml(
   baseUrl: string,
   options: {
+    modelProvider?: string
     multiAgentV2?: boolean
   } = {},
 ): string {
+  const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
   return [
     `model = "${SCRIPTED_MODEL}"`,
-    `model_provider = "${SCRIPTED_MODEL_PROVIDER}"`,
+    `model_provider = "${modelProvider}"`,
     'model_reasoning_effort = "low"',
     'approval_policy = "never"',
     'sandbox_mode = "workspace-write"',
@@ -6051,7 +6185,7 @@ function buildScriptedCodexConfigToml(
     '[history]',
     'persistence = "none"',
     '',
-    `[model_providers.${SCRIPTED_MODEL_PROVIDER}]`,
+    `[model_providers."${modelProvider}"]`,
     'name = "Local scripted stub"',
     `base_url = "${baseUrl}"`,
     `env_key = "${SCRIPTED_STUB_KEY_ENV}"`,
@@ -6069,6 +6203,42 @@ function buildScriptedCodexConfigToml(
         ]
       : []),
   ].join('\n')
+}
+
+function createDeterministicPng(width: number, height: number): Buffer {
+  const rowBytes = width * 3 + 1
+  const pixels = Buffer.alloc(rowBytes * height)
+  let state = 0x4d555250
+  for (let row = 0; row < height; row += 1) {
+    const rowOffset = row * rowBytes
+    pixels[rowOffset] = 0
+    for (let offset = rowOffset + 1; offset < rowOffset + rowBytes; offset += 1) {
+      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
+      pixels[offset] = state & 0xff
+    }
+  }
+
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header[8] = 8
+  header[9] = 2
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'),
+    createPngChunk('IHDR', header),
+    createPngChunk('IDAT', deflateSync(pixels)),
+    createPngChunk('IEND', Buffer.alloc(0)),
+  ])
+}
+
+function createPngChunk(type: string, data: Buffer): Buffer {
+  const typeBytes = Buffer.from(type, 'ascii')
+  const chunk = Buffer.alloc(data.length + 12)
+  chunk.writeUInt32BE(data.length, 0)
+  typeBytes.copy(chunk, 4)
+  data.copy(chunk, 8)
+  chunk.writeUInt32BE(crc32(Buffer.concat([typeBytes, data])), data.length + 8)
+  return chunk
 }
 
 async function startScriptedResponsesStub(): Promise<ScriptedStub> {
@@ -6121,56 +6291,91 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
     responseSequence += 1
     const responseId = `resp_scripted_${responseSequence}`
-    const outputItem = 'toolSearchCall' in scripted
-      ? {
-          arguments: {
-            query: scripted.toolSearchCall.query,
-            ...(scripted.toolSearchCall.limit === undefined
-              ? {}
-              : { limit: scripted.toolSearchCall.limit }),
+    const outputItems = 'commentaryAndFunctionCall' in scripted
+      ? [
+          {
+            content: [
+              {
+                annotations: [],
+                text: scripted.commentaryAndFunctionCall.commentary,
+                type: 'output_text',
+              },
+            ],
+            id: `msg_${responseId}_commentary`,
+            phase: 'commentary',
+            role: 'assistant',
+            status: 'completed',
+            type: 'message',
           },
-          call_id: `call_${responseId}`,
-          execution: 'client',
-          id: `tsearch_${responseId}`,
-          status: 'completed',
-          type: 'tool_search_call',
-        }
-      : 'customToolCall' in scripted
-      ? {
-          call_id: `call_${responseId}`,
-          id: `ctcall_${responseId}`,
-          input: scripted.customToolCall.input,
-          name: scripted.customToolCall.name,
-          status: 'completed',
-          type: 'custom_tool_call',
-        }
-      : 'functionCall' in scripted
-      ? {
-          arguments: JSON.stringify(scripted.functionCall.arguments),
-          call_id: `call_${responseId}`,
-          id: `fcall_${responseId}`,
-          name: scripted.functionCall.name,
-          ...(scripted.functionCall.namespace
-            ? { namespace: scripted.functionCall.namespace }
-            : {}),
-          status: 'completed',
-          type: 'function_call',
-        }
-      : {
-          content: [
-            {
-              annotations: [],
-              text: scripted.text,
-              type: 'output_text',
-            },
-          ],
-          id: `msg_${responseId}`,
-          role: 'assistant',
-          status: 'completed',
-          type: 'message',
-        }
+          {
+            arguments: JSON.stringify(
+              scripted.commentaryAndFunctionCall.functionCall.arguments,
+            ),
+            call_id: `call_${responseId}_group_email`,
+            id: `fcall_${responseId}_group_email`,
+            name: scripted.commentaryAndFunctionCall.functionCall.name,
+            ...(scripted.commentaryAndFunctionCall.functionCall.namespace
+              ? {
+                  namespace:
+                    scripted.commentaryAndFunctionCall.functionCall.namespace,
+                }
+              : {}),
+            status: 'completed',
+            type: 'function_call',
+          },
+        ]
+      : [
+          'toolSearchCall' in scripted
+            ? {
+                arguments: {
+                  query: scripted.toolSearchCall.query,
+                  ...(scripted.toolSearchCall.limit === undefined
+                    ? {}
+                    : { limit: scripted.toolSearchCall.limit }),
+                },
+                call_id: `call_${responseId}`,
+                execution: 'client',
+                id: `tsearch_${responseId}`,
+                status: 'completed',
+                type: 'tool_search_call',
+              }
+            : 'customToolCall' in scripted
+              ? {
+                  call_id: `call_${responseId}`,
+                  id: `ctcall_${responseId}`,
+                  input: scripted.customToolCall.input,
+                  name: scripted.customToolCall.name,
+                  status: 'completed',
+                  type: 'custom_tool_call',
+                }
+              : 'functionCall' in scripted
+                ? {
+                    arguments: JSON.stringify(scripted.functionCall.arguments),
+                    call_id: `call_${responseId}`,
+                    id: `fcall_${responseId}`,
+                    name: scripted.functionCall.name,
+                    ...(scripted.functionCall.namespace
+                      ? { namespace: scripted.functionCall.namespace }
+                      : {}),
+                    status: 'completed',
+                    type: 'function_call',
+                  }
+                : {
+                    content: [
+                      {
+                        annotations: [],
+                        text: scripted.text,
+                        type: 'output_text',
+                      },
+                    ],
+                    id: `msg_${responseId}`,
+                    role: 'assistant',
+                    status: 'completed',
+                    type: 'message',
+                  },
+        ]
     writeScriptedSseResponse({
-      outputItem,
+      outputItems,
       response,
       responseId,
     })
@@ -6254,12 +6459,28 @@ function readScriptedProviderRequestSummary(
       .filter((item) => item?.type === 'tool_search_output')
       .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
     : []
+  const imageWidths = Array.isArray(body?.input)
+    ? body.input.flatMap((inputItem) => {
+        const content = readRecord(inputItem)?.content
+        if (!Array.isArray(content)) {
+          return []
+        }
+        return content
+          .map(readRecord)
+          .filter((item) => item?.type === 'input_image')
+          .map((item) => readString(item?.image_url))
+          .filter((imageUrl): imageUrl is string => imageUrl !== null)
+          .map(readPngDataUrlWidth)
+          .filter((width): width is number => width !== null)
+      })
+    : []
   const tools = Array.isArray(body?.tools)
     ? body.tools.map(readRecord)
     : []
   return {
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
+    ...(imageWidths.length > 0 ? { imageWidths } : {}),
     model: readString(body?.model),
     ...(includeDiagnostics
       ? {
@@ -6286,7 +6507,7 @@ function readScriptedProviderRequestSummary(
               'target',
               'totals',
             ].every((field) => requestBody.includes(field)),
-            includesSaveNewsletter: requestBody.includes('save_newsletter'),
+            includesGroupEmail: requestBody.includes('send_email'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },
         }
@@ -6308,6 +6529,17 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' ? value : null
 }
 
+function readPngDataUrlWidth(value: string): number | null {
+  const match = /^data:image\/png;base64,(.+)$/su.exec(value)
+  if (!match?.[1]) {
+    return null
+  }
+  const image = Buffer.from(match[1], 'base64')
+  return image.length >= 24 && image.subarray(12, 16).toString('ascii') === 'IHDR'
+    ? image.readUInt32BE(16)
+    : null
+}
+
 function readProviderToolOutputText(value: unknown): string | null {
   if (typeof value === 'string') {
     return value
@@ -6324,7 +6556,7 @@ function readProviderToolOutputText(value: unknown): string | null {
 }
 
 function writeScriptedSseResponse(input: {
-  outputItem: Record<string, unknown>
+  outputItems: readonly Record<string, unknown>[]
   response: ServerResponse
   responseId: string
 }): void {
@@ -6339,7 +6571,7 @@ function writeScriptedSseResponse(input: {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
     model: SCRIPTED_MODEL,
-    output: [input.outputItem],
+    output: input.outputItems,
     status: 'completed',
     usage,
   }
@@ -6355,19 +6587,21 @@ function writeScriptedSseResponse(input: {
     },
     type: 'response.created',
   })
-  writeScriptedSseEvent(input.response, 'response.output_item.added', {
-    item: {
-      ...input.outputItem,
-      status: 'in_progress',
-    },
-    output_index: 0,
-    type: 'response.output_item.added',
-  })
-  writeScriptedSseEvent(input.response, 'response.output_item.done', {
-    item: input.outputItem,
-    output_index: 0,
-    type: 'response.output_item.done',
-  })
+  for (const [outputIndex, outputItem] of input.outputItems.entries()) {
+    writeScriptedSseEvent(input.response, 'response.output_item.added', {
+      item: {
+        ...outputItem,
+        status: 'in_progress',
+      },
+      output_index: outputIndex,
+      type: 'response.output_item.added',
+    })
+    writeScriptedSseEvent(input.response, 'response.output_item.done', {
+      item: outputItem,
+      output_index: outputIndex,
+      type: 'response.output_item.done',
+    })
+  }
   writeScriptedSseEvent(input.response, 'response.completed', {
     response: completedResponse,
     type: 'response.completed',

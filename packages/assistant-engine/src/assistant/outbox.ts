@@ -272,7 +272,7 @@ export type AssistantOutboxCreateIntentInput = {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
-  newsletterAuthorizationProof?: string | null
+  groupEmailAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
   replyToMessageId?: string | null
   sessionId: string
@@ -480,7 +480,7 @@ export async function createAssistantOutboxIntent(
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
-      newsletterAuthorizationProof: input.newsletterAuthorizationProof ?? null,
+      groupEmailAuthorizationProof: input.groupEmailAuthorizationProof ?? null,
       answeredMailboxItemIds,
       reviewedAssistantAskCompletionExpiresAt:
         input.reviewedAssistantAskCompletionExpiresAt ?? undefined,

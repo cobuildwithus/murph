@@ -948,7 +948,6 @@ export async function resolveAssistantRouteTurnPlan(input: {
         groupSharedReadAvailable:
           hostedGroupRuntime &&
           input.hostedToolContext?.groupSharedReader != null,
-        newsletterAvailable: input.hostedToolContext?.newsletterTool != null,
         personalizationAvailable:
           assistantStyleSettingsAvailable &&
           input.hostedToolContext?.personalizationTool != null,

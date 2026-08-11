@@ -273,6 +273,14 @@ card without fallback text remains contentless there rather than receiving the
 active-member placeholder. This rule is app-card-specific; legacy media-only
 first contacts retain their existing behavior.
 
+The public homepage also owns the browser fallback for shared response-card
+URLs. After hydration, a non-empty `#murph-card=` fragment opens the iPhone App
+Store handoff; the client compares only the prefix and presence of a value and
+never decodes, displays, stores, logs, or transmits that value. Other homepage
+fragments render normally. The compact dialog complements the canonical App
+Store identity in Linq's card payload; neither path changes Messages-extension
+routing or application authorization.
+
 ## Legal and health-permission publication surfaces
 
 Hosted deployments should expose HTML legal pages in addition to downloadable
@@ -1208,6 +1216,15 @@ The signed assertion must include hosted user claims plus:
 
 Each assertion nonce is consumed once so replayed assertions fail even if the
 user tuple is unchanged.
+The assertion uses integer-second `exp` claims and the shared 60-second skew
+policy, so it remains admissible through the millisecond before
+`(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
+rows persist that first-invalid horizon, while request admission performs one
+primary-key insert and treats only the exact nonce conflict as replay. The
+bounded hourly hosted-retention owner deletes only rows whose stored
+`expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
+full acceptance window and deliberately retains new-format rows for an
+additional 61 seconds.
 There is no unauthenticated development-user fallback; local development must
 exercise the same signed assertion contract.
 

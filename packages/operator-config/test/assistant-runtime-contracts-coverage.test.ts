@@ -7,18 +7,11 @@ import {
   parseAssistantSessionRecord,
 } from '../src/assistant-cli-contracts.ts'
 import {
-  normalizeAssistantExecutionDriver,
-  normalizeAssistantResumeKind,
-  resolveAssistantRuntimeTarget,
-} from '../src/assistant/target-runtime.ts'
+  serializeAssistantProviderSessionOptions,
+} from '../src/assistant/provider-config.ts'
 
-test('assistant target runtime exposes only Codex app-server execution and resume values', () => {
-  assert.equal(normalizeAssistantExecutionDriver(' codex-app-server '), 'codex-app-server')
-  assert.equal(normalizeAssistantExecutionDriver('responses'), null)
-  assert.equal(normalizeAssistantResumeKind(' codex-thread '), 'codex-thread')
-  assert.equal(normalizeAssistantResumeKind('openai-response-id'), null)
-
-  const codexTarget = resolveAssistantRuntimeTarget({
+test('assistant session options expose only Codex app-server execution and resume values', () => {
+  const options = serializeAssistantProviderSessionOptions({
     provider: 'codex-cli',
     model: 'gpt-5.6-terra',
     modelProvider: 'vercel-ai-gateway',
@@ -26,15 +19,14 @@ test('assistant target runtime exposes only Codex app-server execution and resum
     sandbox: 'danger-full-access',
     approvalPolicy: 'never',
   })
-  assert.equal(codexTarget.executionDriver, 'codex-app-server')
-  assert.equal(codexTarget.resumeKind, 'codex-thread')
-  assert.equal(codexTarget.modelProvider, 'vercel-ai-gateway')
-  assert.equal(codexTarget.supportsNativeResume, true)
-  assert.equal(codexTarget.supportsReasoningEffort, true)
+  assert.equal(options.executionDriver, 'codex-app-server')
+  assert.equal(options.resumeKind, 'codex-thread')
+  assert.equal(options.modelProvider, 'vercel-ai-gateway')
+  assert.equal(options.provider, 'codex-cli')
 
   assert.throws(
     () =>
-      resolveAssistantRuntimeTarget({
+      serializeAssistantProviderSessionOptions({
         provider: 'unsupported-provider',
         model: 'gpt-5.4',
       }),
@@ -43,7 +35,7 @@ test('assistant target runtime exposes only Codex app-server execution and resum
 })
 
 test('assistant session parsing resolves Codex modelProvider and status automation cursors', () => {
-  const runtimeTarget = resolveAssistantRuntimeTarget({
+  const sessionOptions = serializeAssistantProviderSessionOptions({
     provider: 'codex-cli',
     approvalPolicy: 'never',
     codexHome: '/tmp/codex-home',
@@ -70,7 +62,7 @@ test('assistant session parsing resolves Codex modelProvider and status automati
     lastTurnAt: null,
     resumeState: {
       providerSessionId: 'codex-thread-123',
-      resumeRouteId: runtimeTarget.continuityFingerprint,
+      resumeRouteId: sessionOptions.continuityFingerprint,
     },
     schema: 'murph.assistant-session.v1',
     sessionId: 'session_codex_runtime',
@@ -91,7 +83,10 @@ test('assistant session parsing resolves Codex modelProvider and status automati
 
   assert.equal(parsedSession.codexResume?.threadId, 'codex-thread-123')
   assert.equal(parsedSession.resumeState?.threadId, 'codex-thread-123')
-  assert.equal(parsedSession.providerOptions.continuityFingerprint, runtimeTarget.continuityFingerprint)
+  assert.equal(
+    parsedSession.providerOptions.continuityFingerprint,
+    sessionOptions.continuityFingerprint,
+  )
   assert.equal(parsedSession.providerOptions.executionDriver, 'codex-app-server')
   assert.equal(parsedSession.providerOptions.modelProvider, 'vercel-ai-gateway')
   assert.equal(parsedSession.providerOptions.resumeKind, 'codex-thread')
