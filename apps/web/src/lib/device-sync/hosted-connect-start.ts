@@ -26,6 +26,14 @@ export async function startHostedDeviceSyncConnection(input: {
   request: Request;
   target: DeviceSyncConnectTarget;
 }): Promise<HostedDeviceSyncConnectResponse> {
+  if (input.target.provider === "strava") {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_REQUIRED",
+      httpStatus: 409,
+      message: "Direct Strava connections must use the private provider setup journey.",
+      retryable: false,
+    });
+  }
   if (!isDeviceConnectSourceAvailableForConnection(input.target.connectSourceId)) {
     throw deviceSyncError({
       code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",

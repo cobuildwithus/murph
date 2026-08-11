@@ -168,6 +168,16 @@ Murph should earn the right to be shared. It should not quietly turn private hea
 Product implication:
 private results come first. Friend sharing and public contribution both require explicit user intent.
 
+### 13. Integration Work Should Feel Like Murph Is Helping
+
+Members should not become accidental integration engineers. When a provider
+permits a private member-owned application, Murph should perform the mechanical
+setup, preserve progress, and ask for only irreducible sign-in or consent. Secret
+copying, opaque duplicate applications, hijacking unrelated browser work, and
+false success states are product failures, not acceptable setup friction. Shared
+setup behavior should remain provider-neutral while each provider's finite
+browser semantics stay explicit and checked in.
+
 ### 13. Status Should Come From Useful Contribution, Not Biomarker Superiority.
 
 If Murph develops status mechanics, the status should come from completing clean experiments, sharing helpful notes, replicating results, or improving protocol quality.

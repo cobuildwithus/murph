@@ -30,6 +30,7 @@ export async function createHostedDeviceConnectIntent(input: {
   memberId: string;
   now?: Date;
   provider: ConfiguredDeviceSyncProviderKey;
+  providerSetupId?: string | null;
   request: Request;
   sourceProviderSlug: string | null;
   ttlMs?: number;

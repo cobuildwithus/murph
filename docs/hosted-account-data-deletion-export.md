@@ -24,7 +24,20 @@ Account deletion is intentionally stricter than normal settings reads. Vault exp
 6. `POST /api/settings/privacy/delete` keeps authenticated privacy access for members without active billing, requires the exact typed phrase, and consumes its distinct `account.delete` authorization before suspending the member or starting provider cleanup.
 7. All challenge and action routes enforce browser mutation-origin protection and bounded JSON request bodies.
 8. A signature is bound to one member, one app session, one action, and one challenge. Replays, cross-action use, and cross-session use fail closed.
-9. Provider revocation and Retell call-object deletion run before local database deletion while local retry identifiers and token references are still readable. Retell cleanup fails closed on ambiguous provider or local-write outcomes.
+9. The account-deletion owner commits the member suspension fence before any
+   provider revocation, provider-dashboard automation, decryption, or Retell
+   call-object deletion. External cleanup then runs while local retry identifiers
+   and token/application references remain readable. Retell cleanup fails closed
+   on ambiguous provider or local-write outcomes.
+   For a member-owned provider, the exact bound connection is revoked through the
+   exact stored application revision first. The existing hosted browser profile
+   may then remove only the deterministically marked Murph application through a
+   deletion-only authority bound to the fenced setup and its exact browser run. A
+   sign-in/MFA/CAPTCHA challenge or ambiguous dashboard result aborts local
+   deletion for retry. Unrelated provider applications are preserved and never
+   adopted, modified, or deleted. Only after external cleanup succeeds are setup
+   rows, encrypted application rows, browser runs, Managed Auth artifacts, and the
+   Kernel profile deleted by their existing owners.
 10. Prisma deletion happens in a single hosted onboarding transaction and explicitly deletes child tables before the hosted member row. That same transaction first inserts a foreign-key-free cleanup receipt whose minimal vendor/runtime identifier payload is KMS-encrypted with receipt- and environment-bound authenticated data.
 11. Account deletion revokes the current hosted app session and clears its browser cookie after the local delete succeeds.
 12. The per-user Temporal runtime workflow is terminated best-effort before deletion starts, again after the Prisma transaction commits, and again after Cloudflare runner/R2 cleanup, so live runtime writers are stopped before local rows are removed and stale wake state is neutralized after cleanup.
@@ -113,6 +126,8 @@ The Settings vault export does not include:
 | `prisma.device_token_audit` | Live delete | Metadata/counts | Deletes token audit history. |
 | `prisma.device_sync_signal` | Live delete | Metadata/counts | Deletes pre-existing wake/sync signals. Deletion-time provider revocation does not enqueue new disconnect or wake work. |
 | `prisma.device_connect_intent` | Live delete | Metadata/counts | Deletes short-lived hosted device connect intents. Export reports safe metadata only and omits assertion/nonces and routing internals. |
+| `prisma.device_provider_setup` | Fenced provider delete, then live delete | Metadata/counts | After the suspension fence and exact-bound connection revoke, deletes durable setup intent/progress, browser-run references, and exact application revision bindings after removing only the deterministically marked Murph-owned provider application. Cleanup failure preserves the row for retry. No client credential plaintext is stored or exported. |
+| `prisma.device_provider_application` | Live delete | Metadata/counts | Deletes the member's encrypted revisioned provider application after exact connection and external dashboard cleanup. Export never includes ciphertext, client id, client secret, or provider configuration. |
 | `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. |
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |

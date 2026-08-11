@@ -19,6 +19,9 @@ import {
 } from "../connected-apps/config";
 import { resolveHostedDeviceSyncBrowserProviderLabel } from "../device-sync/provider-label";
 import { resolveHostedDeviceSyncConnectionCleanup } from "../device-sync/provider-application-cleanup";
+import {
+  deleteMemberOwnedProviderSetupExternalStateForAccountDeletion,
+} from "../device-sync/provider-setup";
 import { acquireHostedWebhookTraceOwnerLockTx } from "../device-sync/webhook-trace-owner-lock";
 import { createHostedPrivyUserLookupKey } from "../hosted-onboarding/contact-privacy";
 import {
@@ -468,6 +471,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes each member-owned OAuth client application and encrypted client credentials after linked device connection rows are removed. Browser-vault export omits the client identity, ciphertext, and credentials.",
   },
   {
+    slug: "prisma.device_provider_setup",
+    label: "Member-owned device provider setup journeys",
+    deletion: "live-delete",
+    note: "Deletes durable provider setup ownership, progress, browser-run references, and exact encrypted application revision bindings after the Murph-owned provider application has been removed through its browser owner. No client credential plaintext is stored here or exported.",
+  },
+  {
     slug: "prisma.device_sync_companion_capture_receipt",
     label: "Companion capture replay receipts",
     deletion: "live-delete",
@@ -824,9 +833,8 @@ async function deleteHostedAccountDataInternal(input: {
     ownerMemberId: input.memberId,
     prisma: input.prisma,
   });
-  // The suspension fence is committed before provider identifiers are
-  // decrypted so relationship writers cannot add ownership outside this
-  // durable cleanup snapshot.
+  // The suspension fence is committed before every external provider effect
+  // and before provider identifiers are decrypted.
   const deletionTargets = await readHostedAccountDeletionExternalTargets({
     memberId: input.memberId,
     prisma: input.prisma,
@@ -892,6 +900,15 @@ async function deleteHostedAccountDataInternal(input: {
     ...connectedAppRevocations,
   ];
   assertProviderRevocationsAllowDeletion(providerRevocations);
+  // Revoke exact application-bound connections while the application credentials
+  // are still valid, then remove only Murph's marked provider application. The
+  // setup-owned browser authority is available solely to this already-fenced
+  // account-deletion path. Local setup/application rows remain for safe retry if
+  // this external cleanup does not complete.
+  await deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
   const phoneTransfer = input.phoneTransfer;
   const phoneTransferSessionBeforeBillingCleanup = phoneTransfer
     ? await readHostedPrivyPhoneTransferTargetSession(phoneTransfer)
@@ -2263,6 +2280,7 @@ async function deleteHostedAccountPrismaRows(input: {
   record("prisma.device_sync_signal", await input.prisma.deviceSyncSignal.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_oauth_session", await input.prisma.deviceOauthSession.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_connect_intent", await input.prisma.deviceConnectIntent.deleteMany({ where: { memberId: memberIdFilter } }));
+  record("prisma.device_provider_setup", await input.prisma.deviceProviderSetup.deleteMany({ where: { memberId: memberIdFilter } }));
   record("prisma.device_agent_session", await input.prisma.deviceAgentSession.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.device_browser_assertion_nonce", await input.prisma.deviceBrowserAssertionNonce.deleteMany({ where: { userId: memberIdFilter } }));
   record("prisma.hosted_web_internal_request_nonce", await input.prisma.hostedWebInternalRequestNonce.deleteMany({ where: { userId: memberIdFilter } }));

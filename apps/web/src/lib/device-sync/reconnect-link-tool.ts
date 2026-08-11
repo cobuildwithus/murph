@@ -11,6 +11,11 @@ import {
   HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS,
   createHostedDeviceConnectIntentTx,
 } from "./connect-intent-core";
+import {
+  createMemberOwnedProviderSetupService,
+  listMemberOwnedProviderSetupRegistrations,
+  readMemberOwnedProviderSetupRegistration,
+} from "./provider-setup";
 import { readHostedPublicBaseUrl } from "../hosted-web/public-url";
 import { getPrisma } from "../prisma";
 
@@ -109,14 +114,29 @@ export function resolveHostedDeviceReconnectLinkTarget(
     return { status: "missing" };
   }
 
-  const matches = listConfiguredDeviceSyncReconnectTargets(
-    readConfiguredDeviceSyncConnectTargetConfigs(env),
-  ).filter((target) =>
-    isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
-    && (!connectSourceId || target.connectSourceId === connectSourceId)
-    && (!connectTarget || target.connectTarget === connectTarget)
-    && (!sourceProviderSlug || (target.sourceProviderSlug ?? null) === sourceProviderSlug)
-  );
+  const memberOwnedTargets = listMemberOwnedProviderSetupRegistrations()
+    .map((registration) => ({
+      ...registration.coordinates,
+      label: registration.presentation.providerName,
+    }))
+    .filter((target) =>
+      !sourceProviderSlug
+      && (!connectSourceId || target.connectSourceId === connectSourceId)
+      && (!connectTarget || target.connectTarget === connectTarget)
+    );
+
+  const matches = [
+    ...memberOwnedTargets,
+    ...listConfiguredDeviceSyncReconnectTargets(
+      readConfiguredDeviceSyncConnectTargetConfigs(env),
+    ).filter((target) =>
+      !readMemberOwnedProviderSetupRegistration(target.provider)
+      && isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+      && (!connectSourceId || target.connectSourceId === connectSourceId)
+      && (!connectTarget || target.connectTarget === connectTarget)
+      && (!sourceProviderSlug || (target.sourceProviderSlug ?? null) === sourceProviderSlug)
+    ),
+  ];
   const firstMatch = matches[0];
 
   if (matches.length === 1 && firstMatch) {
@@ -161,10 +181,23 @@ export async function createHostedDeviceReconnectLink(input: {
   }
 
   const request = new Request(resolveHostedDeviceReconnectLinkBaseUrl(env, input.args.baseUrl));
+  const setupRegistration = readMemberOwnedProviderSetupRegistration(
+    targetResult.target.provider,
+  );
+  const setup = setupRegistration
+    ? await createMemberOwnedProviderSetupService(
+        setupRegistration.coordinates.provider,
+      ).ensure(memberId)
+    : null;
   const intent = await getPrisma().$transaction((tx) =>
     createHostedDeviceConnectIntentTx({
       connectSourceId: targetResult.target.connectSourceId,
       connectTarget: targetResult.target.connectTarget,
+      ...(setup
+        ? {
+            providerSetupId: setup.id,
+          }
+        : {}),
       memberId,
       now: input.now,
       provider: targetResult.target.provider,

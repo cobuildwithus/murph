@@ -7614,7 +7614,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           connectUrl: `https://connect.example.test/${request.connectTarget}`,
           expiresAt: "2026-04-29T00:05:00.000Z",
           provider: request.connectTarget,
-          providerLabel: "WHOOP",
+          providerLabel:
+            request.connectTarget === "strava" ? "Strava" : "WHOOP",
         };
       },
       async fetchSnapshot(request) {
@@ -7671,10 +7672,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             providerFilter: ["fitbit"],
             region: "us",
           },
-          strava: {
-            clientId: "synthetic-strava-client",
-            clientSecret: "synthetic-strava-secret",
-          },
           whoop: {
             clientId: "synthetic-whoop-client",
             clientSecret: "synthetic-whoop-secret",
@@ -7692,6 +7689,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         deviceConnectProviders: [
           { label: "WHOOP", provider: "whoop" },
           { label: "Fitbit", provider: "fitbit" },
+          { label: "Strava", provider: "strava" },
         ],
         deviceTool: expect.objectContaining({ request: expect.any(Function) }),
         memberId: "member_synthetic_phase",
@@ -7763,8 +7761,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     await expect(deviceTool.request({
       action: "connect",
       provider: "strava",
-    })).rejects.toThrow("not available to connect");
-    expect(connectLinkRequests).toHaveLength(1);
+    })).resolves.toEqual({
+      action: "connect",
+      link: {
+        authorizationUrl: "https://connect.example.test/strava",
+        connectUrl: "https://connect.example.test/strava",
+        expiresAt: "2026-04-29T00:05:00.000Z",
+        provider: "strava",
+        providerLabel: "Strava",
+      },
+    });
+    expect(connectLinkRequests).toEqual([
+      { connectTarget: "whoop", messagingReturnTarget: "telegram" },
+      { connectTarget: "strava", messagingReturnTarget: "telegram" },
+    ]);
     await Promise.resolve();
     const deviceConnectLogs = logRequests
       .flatMap((request) => request.entries)
@@ -7773,8 +7783,8 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         deviceConnectIssueLinkAvailable: true,
         deviceConnectPortPresent: true,
-        deviceConnectProviderCount: 2,
-        deviceConnectProviders: ["whoop", "fitbit"],
+        deviceConnectProviderCount: 3,
+        deviceConnectProviders: ["whoop", "fitbit", "strava"],
         deviceConnectStage: "context",
         deviceConnectStatus: "available",
       }),
@@ -7791,11 +7801,42 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         expiresAtPresent: true,
         provider: "whoop",
       }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "requested",
+        deviceConnectReturnTarget: "telegram",
+        provider: "strava",
+      }),
+      expect.objectContaining({
+        deviceConnectStage: "request",
+        deviceConnectStatus: "issued",
+        deviceConnectReturnTarget: "telegram",
+        expiresAtPresent: true,
+        provider: "strava",
+      }),
     ]);
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("connect.example.test");
     expect(JSON.stringify(deviceConnectLogs)).not.toContain("synthetic-whoop-secret");
     expect(JSON.stringify(await deviceTool.request({ action: "list_accounts" })))
       .not.toContain("not-for-assistant");
+  });
+
+  it("does not log catalog-only device connect context without a runtime surface", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+
+    await runHostedWorkspaceAssistantPhase(createPhaseInput({ logRequests }));
+    await Promise.resolve();
+
+    const hydratedContext = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0];
+    expect(hydratedContext?.hosted?.deviceConnectProviders).toEqual([
+      { label: "Strava", provider: "strava" },
+    ]);
+    expect(hydratedContext?.hosted?.deviceTool).toBeUndefined();
+    expect(
+      logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode === "assistant.device_connect"),
+    ).toEqual([]);
   });
 
   it("exposes the existing Clinical Records link method to the hosted assistant context", async () => {

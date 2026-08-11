@@ -18,6 +18,12 @@ import { getPrisma } from "../prisma";
 import { computerUseConflictError, computerUseNotFoundError } from "./errors";
 import { createComputerId } from "./ids";
 
+
+export const MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE =
+  "member_owned_provider_setup" as const;
+export type MemberOwnedProviderSetupComputerRunPurpose =
+  typeof MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE;
+
 const ACTIVE_COMPUTER_RUN_STATUSES = [
   "running",
   "awaiting_user",
@@ -47,6 +53,8 @@ export interface ComputerRunRecord {
   lastTitle: string | null;
   lastUrl: string | null;
   memberId: string;
+  ownerKey?: string | null;
+  ownerPurpose?: string | null;
   pausedAt: Date | null;
   pendingHandoffId: string | null;
   resumeAfterMailboxLaneSeq: bigint | null;
@@ -163,6 +171,8 @@ export interface ComputerUseStore {
     kernelProfileName: string;
     memberId: string;
     now: Date;
+    ownerKey?: string | null;
+    ownerPurpose?: string | null;
     startUrl: string | null;
   }): Promise<ComputerCreateRunResult>;
   attachRunBrowser(input: {
@@ -305,6 +315,24 @@ export interface ComputerUseStore {
     memberId: string;
     runId: string;
   }): Promise<ComputerRunRecord>;
+  requireMemberOwnedProviderSetupRun(input: {
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<ComputerRunRecord>;
+  requireMemberOwnedProviderSetupRunAcquisition(input: {
+    candidateRunId?: string | null;
+    expectedRunId: string | null;
+    memberId: string;
+    now?: Date;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+  }): Promise<void>;
+  requireComputerHandoffAccess(input: {
+    memberId: string;
+    tokenHash: string;
+  }): Promise<ComputerHandoffRecord>;
   requireMemberComputerUseAvailable(input: {
     memberId: string;
   }): Promise<void>;
@@ -451,10 +479,13 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     kernelProfileName: string;
     memberId: string;
     now: Date;
+    ownerKey?: string | null;
+    ownerPurpose?: string | null;
     startUrl: string | null;
   }): Promise<ComputerCreateRunResult> {
+    assertComputerRunOwnerPair(input);
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerRunCreationAvailable(tx, input);
 
       const activeRun = await tx.hostedComputerRun.findFirst({
         where: {
@@ -482,6 +513,8 @@ export class PrismaComputerUseStore implements ComputerUseStore {
           kernelProfileName: input.kernelProfileName,
           lastUrl: input.startUrl,
           memberId: input.memberId,
+          ownerKey: input.ownerKey ?? null,
+          ownerPurpose: input.ownerPurpose ?? null,
         },
       });
 
@@ -500,7 +533,7 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerRunRecord> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerRunMutationAvailable(tx, input);
       const updated = await tx.hostedComputerRun.updateMany({
         data: {
           kernelLiveViewUrlEncrypted: input.kernelLiveViewUrlEncrypted,
@@ -560,6 +593,94 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     return mapRun(run);
   }
 
+  async requireMemberOwnedProviderSetupRun(input: {
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<ComputerRunRecord> {
+    const run = await this.prisma.hostedComputerRun.findFirst({
+      where: {
+        id: input.runId,
+        memberId: input.memberId,
+        ownerKey: input.ownerKey,
+        ownerPurpose: input.ownerPurpose,
+      },
+    });
+    if (!run) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        message: "Computer run is not owned by this operation.",
+        retryable: false,
+      });
+    }
+    await requireMemberOwnedProviderSetupRunAccess(this.prisma, {
+      memberId: input.memberId,
+      ownerKey: input.ownerKey,
+      runId: input.runId,
+    });
+    return mapRun(run);
+  }
+
+  async requireMemberOwnedProviderSetupRunAcquisition(input: {
+    candidateRunId?: string | null;
+    expectedRunId: string | null;
+    memberId: string;
+    now?: Date;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+  }): Promise<void> {
+    if (input.ownerPurpose !== MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE) {
+      throw new TypeError("Computer run owner purpose is invalid.");
+    }
+    await requireMemberOwnedProviderSetupRunAccess(this.prisma, {
+      expectedRunId: input.expectedRunId,
+      memberId: input.memberId,
+      ownerKey: input.ownerKey,
+    });
+    if (input.candidateRunId) {
+      await requireMemberOwnedProviderSetupAcquisitionRecovery(this.prisma, {
+        candidateRunId: input.candidateRunId,
+        expectedRunId: input.expectedRunId,
+        memberId: input.memberId,
+        now: input.now,
+        ownerKey: input.ownerKey,
+        ownerPurpose: input.ownerPurpose,
+      });
+    }
+  }
+
+  async requireComputerHandoffAccess(input: {
+    memberId: string;
+    tokenHash: string;
+  }): Promise<ComputerHandoffRecord> {
+    const handoff = await this.prisma.hostedComputerHandoff.findUnique({
+      include: {
+        run: {
+          select: { id: true, memberId: true, ownerKey: true, ownerPurpose: true },
+        },
+      },
+      where: { tokenHash: input.tokenHash },
+    });
+    if (!handoff || handoff.memberId !== input.memberId) {
+      throw computerUseNotFoundError("Computer handoff was not found.");
+    }
+    if (
+      handoff.run.memberId === input.memberId
+      && handoff.run.ownerPurpose === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+      && handoff.run.ownerKey
+    ) {
+      await requireMemberOwnedProviderSetupRunAccess(this.prisma, {
+        memberId: input.memberId,
+        ownerKey: handoff.run.ownerKey,
+        runId: handoff.run.id,
+      });
+    } else {
+      await requireMemberComputerUseAvailable(this.prisma, input.memberId);
+    }
+    return mapHandoff(handoff);
+  }
+
   async requireMemberComputerUseAvailable(input: {
     memberId: string;
   }): Promise<void> {
@@ -603,7 +724,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     tokenHash: string;
   }): Promise<ComputerHandoffRecord> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.handoffId,
+        memberId: input.memberId,
+        runId: input.runId,
+      });
       const updated = await tx.hostedComputerHandoff.updateMany({
         data: {
           expiresAt: input.expiresAt,
@@ -786,7 +911,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerManagedLoginTerminalResult> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.handoffId,
+        memberId: input.memberId,
+        runId: input.runId,
+      });
       const existing = await requireManagedLoginTerminalState(tx, input);
       if (
         existing.handoff.purpose === "managed_login" &&
@@ -843,7 +972,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
         tx,
         input.memberId,
       );
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.handoffId,
+        memberId: input.memberId,
+        runId: input.runId,
+      });
       const existing = await requireManagedLoginTerminalState(tx, input);
       if (
         existing.handoff.purpose === "login" &&
@@ -899,7 +1032,10 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     memberId: string;
   }): Promise<ComputerHandoffRecord | null> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.handoffId,
+        memberId: input.memberId,
+      });
       const claimed = await tx.hostedComputerHandoff.updateMany({
         data: {
           status: "checkpointing",
@@ -939,7 +1075,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerHandoffRecord | null> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.handoffId,
+        memberId: input.memberId,
+        runId: input.runId,
+      });
       const claimed = await tx.hostedComputerHandoff.updateMany({
         data: {
           status: "checkpointing",
@@ -990,7 +1130,10 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     now: Date;
   }): Promise<ComputerHandoffRecord | null> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.handoffId,
+        memberId: input.memberId,
+      });
       const reclaimed = await tx.hostedComputerHandoff.updateMany({
         data: {
           updatedAt: input.now,
@@ -1211,7 +1354,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerRunRecord> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.handoffId,
+        memberId: input.memberId,
+        runId: input.runId,
+      });
       const updated = await tx.hostedComputerRun.updateMany({
         data: {
           awaitingMessage: null,
@@ -1282,7 +1429,11 @@ export class PrismaComputerUseStore implements ComputerUseStore {
     runId: string;
   }): Promise<ComputerRunRecord> {
     return await this.prisma.$transaction(async (tx) => {
-      await lockMemberComputerUseAvailable(tx, input.memberId);
+      await lockMemberComputerHandoffAccess(tx, {
+        handoffId: input.expectedPendingHandoffId,
+        memberId: input.memberId,
+        runId: input.runId,
+      });
       const where = requireHandoffForBrowserUpdate({
         expectedHandoffStatus: "checkpointing",
         expectedHandoffUpdatedAt: input.expectedHandoffUpdatedAt ?? null,
@@ -1518,6 +1669,270 @@ export class PrismaComputerUseStore implements ComputerUseStore {
       return mapRun(run);
     });
   }
+}
+
+function assertComputerRunOwnerPair(input: {
+  ownerKey?: string | null;
+  ownerPurpose?: string | null;
+}): void {
+  const ownerKey = input.ownerKey?.trim() || null;
+  const ownerPurpose = input.ownerPurpose?.trim() || null;
+  if ((ownerKey === null) !== (ownerPurpose === null)) {
+    throw new TypeError("Computer run owner purpose and key must be supplied together.");
+  }
+  if (
+    ownerPurpose !== null
+    && ownerPurpose !== MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+  ) {
+    throw new TypeError("Computer run owner purpose is invalid.");
+  }
+}
+
+async function lockMemberComputerRunCreationAvailable(
+  prisma: Prisma.TransactionClient,
+  input: {
+    id: string;
+    memberId: string;
+    now: Date;
+    ownerKey?: string | null;
+    ownerPurpose?: string | null;
+  },
+): Promise<void> {
+  if (!input.ownerKey || !input.ownerPurpose) {
+    await lockMemberComputerUseAvailable(prisma, input.memberId);
+    return;
+  }
+  await lockMemberComputerUseOwner(prisma, input.memberId);
+  await requireMemberOwnedProviderSetupRunAccess(prisma, {
+    allowStaleBoundRunReplacement: true,
+    allowUnboundRun: true,
+    expectedRunId: input.id,
+    memberId: input.memberId,
+    now: input.now,
+    ownerKey: input.ownerKey,
+  });
+}
+
+async function lockMemberComputerRunMutationAvailable(
+  prisma: Prisma.TransactionClient,
+  input: { memberId: string; now: Date; runId: string },
+): Promise<void> {
+  await lockMemberComputerUseOwner(prisma, input.memberId);
+  const run = await prisma.hostedComputerRun.findFirst({
+    select: { ownerKey: true, ownerPurpose: true },
+    where: { id: input.runId, memberId: input.memberId },
+  });
+  if (!run) {
+    throw computerUseNotFoundError();
+  }
+  if (
+    run.ownerPurpose === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+    && run.ownerKey
+  ) {
+    await requireMemberOwnedProviderSetupRunAccess(prisma, {
+      allowStaleBoundRunReplacement: true,
+      allowUnboundRun: true,
+      expectedRunId: input.runId,
+      memberId: input.memberId,
+      now: input.now,
+      ownerKey: run.ownerKey,
+    });
+    return;
+  }
+  await requireMemberComputerUseAvailable(prisma, input.memberId);
+}
+
+async function lockMemberComputerHandoffAccess(
+  prisma: Prisma.TransactionClient,
+  input: {
+    handoffId: string | null;
+    memberId: string;
+    runId?: string;
+  },
+): Promise<void> {
+  await lockMemberComputerUseOwner(prisma, input.memberId);
+  if (!input.handoffId) {
+    await requireMemberComputerUseAvailable(prisma, input.memberId);
+    return;
+  }
+  const handoff = await prisma.hostedComputerHandoff.findFirst({
+    select: {
+      run: {
+        select: { id: true, memberId: true, ownerKey: true, ownerPurpose: true },
+      },
+    },
+    where: {
+      id: input.handoffId,
+      memberId: input.memberId,
+      ...(input.runId ? { runId: input.runId } : {}),
+    },
+  });
+  if (
+    handoff?.run.memberId === input.memberId
+    && handoff.run.ownerPurpose === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+    && handoff.run.ownerKey
+  ) {
+    await requireMemberOwnedProviderSetupRunAccess(prisma, {
+      memberId: input.memberId,
+      ownerKey: handoff.run.ownerKey,
+      runId: handoff.run.id,
+    });
+    return;
+  }
+  await requireMemberComputerUseAvailable(prisma, input.memberId);
+}
+
+async function requireMemberOwnedProviderSetupRunAccess(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  input: {
+    allowStaleBoundRunReplacement?: boolean;
+    allowUnboundRun?: boolean;
+    expectedRunId?: string | null;
+    memberId: string;
+    now?: Date;
+    ownerKey: string;
+    runId?: string;
+  },
+): Promise<void> {
+  const member = await prisma.hostedMember.findUnique({
+    select: { id: true, suspendedAt: true },
+    where: { id: input.memberId },
+  });
+  if (!member) {
+    throw computerUseNotFoundError("Hosted member was not found.");
+  }
+
+  const setup = await prisma.deviceProviderSetup.findFirst({
+    select: { browserRunId: true, status: true },
+    where: {
+      active: true,
+      id: input.ownerKey,
+      memberId: input.memberId,
+    },
+  });
+  if (!setup) {
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      message: "Computer run owner is no longer available.",
+      retryable: false,
+    });
+  }
+
+  const expectedRunId = input.runId ?? input.expectedRunId ?? null;
+  let bindingMatches = expectedRunId === null
+    ? setup.browserRunId === null
+    : setup.browserRunId === expectedRunId
+      || (input.allowUnboundRun === true && setup.browserRunId === null);
+  if (
+    !bindingMatches
+    && input.allowStaleBoundRunReplacement === true
+    && input.now
+    && setup.browserRunId
+  ) {
+    const staleBoundRun = await prisma.hostedComputerRun.findFirst({
+      select: {
+        expiresAt: true,
+        ownerKey: true,
+        ownerPurpose: true,
+        status: true,
+      },
+      where: {
+        id: setup.browserRunId,
+        memberId: input.memberId,
+      },
+    });
+    bindingMatches = Boolean(
+      staleBoundRun
+      && staleBoundRun.ownerKey === input.ownerKey
+      && staleBoundRun.ownerPurpose
+        === MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE
+      && !isComputerRunActiveAt(staleBoundRun, input.now),
+    );
+  }
+  if (!bindingMatches) {
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      message: "Computer run does not match the setup operation.",
+      retryable: false,
+    });
+  }
+
+  if (member.suspendedAt === null) {
+    return;
+  }
+  if (setup.status !== "deletion_pending") {
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_MEMBER_SUSPENDED",
+      message: "Computer use is not available for this hosted member.",
+      retryable: false,
+    });
+  }
+}
+
+async function requireMemberOwnedProviderSetupAcquisitionRecovery(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  input: {
+    candidateRunId: string;
+    expectedRunId: string | null;
+    memberId: string;
+    now?: Date;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+  },
+): Promise<void> {
+  if (!input.expectedRunId || !input.now) {
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      message: "Computer run does not match the setup operation.",
+      retryable: false,
+    });
+  }
+  const runs = await prisma.hostedComputerRun.findMany({
+    select: {
+      expiresAt: true,
+      id: true,
+      ownerKey: true,
+      ownerPurpose: true,
+      status: true,
+    },
+    where: {
+      id: { in: [input.expectedRunId, input.candidateRunId] },
+      memberId: input.memberId,
+    },
+  });
+  const expected = runs.find((run) => run.id === input.expectedRunId);
+  const candidate = runs.find((run) => run.id === input.candidateRunId);
+  const exactOwner = (run: typeof candidate) => Boolean(
+    run
+    && run.ownerKey === input.ownerKey
+    && run.ownerPurpose === input.ownerPurpose,
+  );
+  if (
+    exactOwner(expected)
+    && exactOwner(candidate)
+    && expected
+    && candidate
+    && !isComputerRunActiveAt(expected, input.now)
+    && isComputerRunActiveAt(candidate, input.now)
+  ) {
+    return;
+  }
+  throw computerUseConflictError({
+    code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    message: "Computer run does not match the setup operation.",
+    retryable: false,
+  });
+}
+
+function isComputerRunActiveAt(
+  run: Pick<PrismaHostedComputerRun, "expiresAt" | "status">,
+  now: Date,
+): boolean {
+  return run.status === "cleanup_pending"
+    || (
+      run.expiresAt > now
+      && (run.status === "running" || run.status === "awaiting_user")
+    );
 }
 
 async function requireMemberComputerUseAvailable(
@@ -1897,6 +2312,8 @@ function mapRun(run: PrismaHostedComputerRun): ComputerRunRecord {
     lastTitle: run.lastTitle,
     lastUrl: run.lastUrl,
     memberId: run.memberId,
+    ownerKey: run.ownerKey,
+    ownerPurpose: run.ownerPurpose,
     pausedAt: run.pausedAt,
     pendingHandoffId: run.pendingHandoffId,
     resumeAfterMailboxLaneSeq: run.resumeAfterMailboxLaneSeq,

@@ -78,6 +78,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
 import { PersonalPatternsStudy } from "./personal-patterns-study";
+import { MemberOwnedProviderSetupFlowStudy } from "./member-owned-provider-setup-study";
 
 function StudySection({
   children,
@@ -568,6 +569,12 @@ export function SectionsContent() {
 
       <StudySection title="Family billing recovery and management on Join">
         <JoinFamilyBillingRecoveryStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private provider setup journey">
+        <MemberOwnedProviderSetupFlowStudy />
       </StudySection>
 
       <Separator />

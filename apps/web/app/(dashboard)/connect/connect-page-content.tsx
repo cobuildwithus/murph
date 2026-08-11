@@ -19,9 +19,19 @@ import {
   readAppleHealthRelaySourceName,
   type AppleHealthRelaySetupGuideId,
 } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
+import {
+  readMemberOwnedProviderSetupProjections,
+  readMemberOwnedProviderSetupRegistrationByConnectSourceId,
+} from "@/src/lib/device-sync/provider-setup";
+import type {
+  MemberOwnedProviderSetupProjectionMap,
+} from "@/src/lib/device-sync/provider-setup/types";
 import { buildHostedDeviceSyncSettingsResponse } from "@/src/lib/device-sync/settings-service";
 import type { DeviceSyncCompletionContactAction } from "@/src/lib/device-sync/connect-completion-types";
-import type { HostedDeviceSyncSettingsSource } from "@/src/lib/device-sync/settings-surface";
+import type {
+  HostedDeviceSyncSettingsSource,
+  HostedDeviceSyncSettingsUpstreamSource,
+} from "@/src/lib/device-sync/settings-surface";
 import { resolveDeviceSyncVoiceMemoSources } from "@/src/lib/device-sync/device-sync-voice-memos";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
@@ -51,16 +61,15 @@ export type ConnectPageSearchParams = Record<
 type ConnectSourceUi = Omit<ConnectSource, "id">;
 type ConnectSettingsSourceMatch = Pick<
   HostedDeviceSyncSettingsSource,
+  "provider" | "state" | "upstreamSources"
+> & Partial<Pick<
+  HostedDeviceSyncSettingsSource,
+  | "connectionId"
   | "connectSourceId"
   | "connectTarget"
   | "historicalResetIncomplete"
-  | "provider"
-  | "state"
-  | "upstreamSources"
-> & {
-  connectionId?: string | null;
-  primaryAction?: HostedDeviceSyncSettingsSource["primaryAction"];
-};
+  | "primaryAction"
+>>;
 type ConnectSourceConnectionState = {
   connectionId: string | null;
   connectProvider: string | null;
@@ -337,6 +346,7 @@ export default async function ConnectPage({
   >();
   const disconnectSourceProviderSlugBySourceId = new Map<string, string>();
   let historicalResetIncompleteSourceIds = new Set<string>();
+  let memberOwnedProviderSetups: MemberOwnedProviderSetupProjectionMap = {};
   let initialLoadError: ConnectPageInitialLoadError | null = null;
   const [
     recoveryContactAction,
@@ -358,6 +368,9 @@ export default async function ConnectPage({
 
   if (auth.authenticatedMember) {
     try {
+      memberOwnedProviderSetups = await readMemberOwnedProviderSetupProjections(
+        auth.authenticatedMember.id,
+      );
       const response = await buildHostedDeviceSyncSettingsResponse({
         member: auth.authenticatedMember,
       });
@@ -423,6 +436,7 @@ export default async function ConnectPage({
       disconnectScopeBySourceId,
       disconnectSourceProviderSlugBySourceId,
       historicalResetIncompleteSourceIds,
+      memberOwnedProviderSetups,
       reconnectProviderBySourceId,
       reconnectSourceIds,
       reconnectTargetBySourceId,
@@ -619,6 +633,7 @@ export function resolveConfiguredConnectSources(
     >;
     disconnectSourceProviderSlugBySourceId?: ReadonlyMap<string, string>;
     historicalResetIncompleteSourceIds?: ReadonlySet<string>;
+    memberOwnedProviderSetups?: MemberOwnedProviderSetupProjectionMap;
     reconnectProviderBySourceId?: ReadonlyMap<string, string>;
     reconnectSourceIds?: ReadonlySet<string>;
     reconnectTargetBySourceId?: ReadonlyMap<string, string>;
@@ -633,9 +648,15 @@ export function resolveConfiguredConnectSources(
 
   return sortConnectSourcesByConnectionState(
     sources.map((source) => {
-      const connectionAvailable = isDeviceConnectSourceAvailableForConnection(
-        source.id,
-      );
+      const memberOwnedRegistration =
+        readMemberOwnedProviderSetupRegistrationByConnectSourceId(source.id);
+      const memberOwnedSetupProvider =
+        memberOwnedRegistration?.coordinates.provider ?? null;
+      const memberOwnedProjection = memberOwnedSetupProvider
+        ? options.memberOwnedProviderSetups?.[memberOwnedSetupProvider]
+        : undefined;
+      const connectionAvailable = memberOwnedSetupProvider !== null
+        || isDeviceConnectSourceAvailableForConnection(source.id);
       const connectConfig = connectConfigBySourceId.get(source.id);
       const connected = options.connectedSourceIds?.has(source.id) === true;
       const recoveryKind = !connected
@@ -659,16 +680,28 @@ export function resolveConfiguredConnectSources(
         source.id,
       );
       const reconnectTarget = options.reconnectTargetBySourceId?.get(source.id);
-      const resolvedConnectTarget = connectionAvailable
+      const resolvedConnectTarget = memberOwnedRegistration
+        ? memberOwnedRegistration.coordinates.connectTarget
+        : connectionAvailable
         ? (reconnectTarget ?? connectConfig?.connectTarget)
         : undefined;
       const requiresVitalDisclosure =
-        connectionAvailable &&
-        connectConfig?.provider === "junction";
+        memberOwnedSetupProvider === null
+        && connectionAvailable
+        && connectConfig?.provider === "junction";
 
       return {
         ...source,
         connectionAvailable,
+        ...(memberOwnedSetupProvider
+          ? {
+              memberOwnedSetup: memberOwnedProjection?.setup ?? null,
+              memberOwnedSetupPresentation:
+                memberOwnedProjection?.presentation
+                ?? memberOwnedRegistration?.presentation,
+              memberOwnedSetupProvider,
+            }
+          : {}),
         ...(reconnectProvider ? { connectProvider: reconnectProvider } : {}),
         ...(resolvedConnectTarget
           ? { connectTarget: resolvedConnectTarget }
@@ -767,10 +800,7 @@ export function resolveHistoricalResetIncompleteConnectSourceIds(
 
 export function resolveConnectedConnectSourceIds(
   sources: readonly Pick<ConnectSource, "id">[],
-  settingsSources: readonly Pick<
-    HostedDeviceSyncSettingsSource,
-    "provider" | "state" | "upstreamSources"
-  >[],
+  settingsSources: readonly ConnectSettingsSourceMatch[],
 ): Set<string> {
   return new Set(
     resolveConnectedConnectSourceConnections(sources, settingsSources).map(
@@ -809,12 +839,10 @@ function resolveConnectSourceConnectionMatches(
 
   for (const source of settingsSources) {
     const provider = normalizeDeviceSyncConnectTargetKey(source.provider);
-    const sourceState =
-      source.state === "active" ||
-      (options.includeReauthorizationRequired === true &&
-        isReauthorizationRequiredConnectSourceState(source.state))
-        ? source.state
-        : null;
+    const sourceState = resolveVisibleConnectSourceState(
+      source.state,
+      options.includeReauthorizationRequired === true,
+    );
     const parentRequiresReconnect = isReauthorizationRequiredConnectSourceState(
       source.state,
     );
@@ -951,13 +979,13 @@ function resolveConnectSourceConnectionMatches(
 }
 
 function countLiveJunctionUpstreamSources(
-  upstreamSources: ConnectSettingsSourceMatch["upstreamSources"],
+  upstreamSources: readonly HostedDeviceSyncSettingsUpstreamSource[],
 ): number {
   return upstreamSources.filter(isLiveJunctionUpstreamSource).length;
 }
 
 function isLiveJunctionUpstreamSource(
-  source: ConnectSettingsSourceMatch["upstreamSources"][number],
+  source: HostedDeviceSyncSettingsUpstreamSource,
 ): boolean {
   return (
     source.status === "connected" ||
@@ -967,7 +995,7 @@ function isLiveJunctionUpstreamSource(
 }
 
 function isDisconnectableJunctionUpstreamSource(
-  source: ConnectSettingsSourceMatch["upstreamSources"][number],
+  source: HostedDeviceSyncSettingsUpstreamSource,
 ): boolean {
   return source.status !== "disconnected" || source.requiresReconnect === true;
 }
@@ -1012,6 +1040,22 @@ function isReauthorizationRequiredConnectSourceState(
     | ConnectSourceConnectionState["state"],
 ): state is "reauthorization_required" {
   return state === "reauthorization_required";
+}
+
+function resolveVisibleConnectSourceState(
+  state: HostedDeviceSyncSettingsSource["state"],
+  includeReauthorizationRequired: boolean,
+): ConnectSourceConnectionState["state"] | null {
+  if (state === "active") {
+    return state;
+  }
+  if (
+    includeReauthorizationRequired
+    && isReauthorizationRequiredConnectSourceState(state)
+  ) {
+    return state;
+  }
+  return null;
 }
 
 function resolveInitialConnectCallback(

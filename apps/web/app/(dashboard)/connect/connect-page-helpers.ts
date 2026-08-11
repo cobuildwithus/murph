@@ -442,6 +442,20 @@ function normalizeConnectKey(value: string | null | undefined): string | null {
   return normalized || null;
 }
 
+export function readSafeMemberOwnedProviderHandoffUrl(
+  value: string,
+  origin: string,
+): string | null {
+  try {
+    const url = new URL(value, origin);
+    return url.origin === origin && url.pathname.startsWith("/computer/handoff/")
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeConnectSourceId(value: string | null | undefined): string | null {
   const normalized = value
     ?.trim()

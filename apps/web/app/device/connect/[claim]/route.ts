@@ -1,8 +1,9 @@
-import { isDeviceSyncError } from "@murphai/device-syncd/errors";
+import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   isDeviceConnectSourceAvailableForConnection,
   listConfiguredDeviceSyncReconnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
+  type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 
 import { buildHostedDeviceConnectCompletionReturnTo } from "@/src/lib/device-sync/connect-completion-return";
@@ -13,16 +14,34 @@ import {
   type HostedDeviceConnectIntentRecord,
 } from "@/src/lib/device-sync/connect-intents";
 import { startHostedDeviceSyncConnection } from "@/src/lib/device-sync/hosted-connect-start";
+import { assertHostedDeviceSyncBrowserCallbackHostname } from "@/src/lib/device-sync/public-base-url";
+import {
+  createMemberOwnedProviderSetupService,
+  readMemberOwnedProviderSetupRegistration,
+  type MemberOwnedProviderSetupCoordinates,
+} from "@/src/lib/device-sync/provider-setup";
 import { jsonError, jsonOk } from "@/src/lib/device-sync/settings-http";
 import {
   requireActiveHostedAppSessionFromRequest,
 } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { readHostedDeviceSyncPublicBaseUrl } from "@/src/lib/hosted-web/public-url";
+import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
+import { getPrisma } from "@/src/lib/prisma";
 import {
   InvalidRouteParamEncodingError,
   resolveDecodedRouteParam,
 } from "@/src/lib/http";
+
+type HostedDeviceConnectIntentTarget =
+  | (MemberOwnedProviderSetupCoordinates & {
+      label: string;
+      memberOwnedSetup: true;
+    })
+  | (DeviceSyncConnectTarget & {
+      memberOwnedSetup: false;
+    });
 
 export async function GET(
   request: Request,
@@ -97,6 +116,79 @@ export async function POST(
       });
     }
 
+    if (target.memberOwnedSetup) {
+      const setupId = claimed.intent.providerSetupId;
+      if (!setupId) {
+        await releaseHostedDeviceConnectIntentStart({
+          claim,
+          memberId: session.member.id,
+        });
+        return deviceConnectIntentMessageResponse(request, {
+          code: "HOSTED_DEVICE_CONNECT_INTENT_SETUP_INVALID",
+          message: "This private provider setup link is no longer valid.",
+          status: 410,
+          title: "Connection link unavailable",
+        });
+      }
+
+      try {
+        await assertHostedHistoricalLaunchConsentGranted({
+          memberId: session.member.id,
+          prisma: getPrisma(),
+        });
+        const setupService = createMemberOwnedProviderSetupService(target.provider);
+        const advanced = await setupService.advance(session.member.id, setupId);
+        if (advanced.handoffUrl) {
+          const handoffUrl = requireHostedProviderSetupHandoffUrl(
+            request,
+            advanced.handoffUrl,
+          );
+          await releaseHostedDeviceConnectIntentStart({
+            claim,
+            memberId: session.member.id,
+          });
+          return deviceConnectIntentStartResponse(request, handoffUrl);
+        }
+        if (advanced.setup.action !== "continue_oauth") {
+          await releaseHostedDeviceConnectIntentStart({
+            claim,
+            memberId: session.member.id,
+          });
+          return deviceConnectIntentStartResponse(
+            request,
+            buildHostedProviderSetupPageUrl(request, target.connectSourceId),
+          );
+        }
+
+        assertHostedDeviceSyncBrowserCallbackHostname({
+          appSessionUrl: request.url,
+          callbackBaseUrl: readHostedDeviceSyncPublicBaseUrl(),
+        });
+        const started = await setupService.startOAuth({
+          memberId: session.member.id,
+          request,
+          returnTo: buildHostedDeviceConnectCompletionReturnTo({
+            connectSourceId: target.connectSourceId,
+            connectTarget: target.connectTarget,
+            source: "assistant",
+          }),
+          sessionId: session.sessionId,
+          setupId,
+        });
+        return deviceConnectIntentStartResponse(
+          request,
+          started.authorizationUrl,
+          started.callbackProofCookie,
+        );
+      } catch (error) {
+        await releaseHostedDeviceConnectIntentStart({
+          claim,
+          memberId: session.member.id,
+        });
+        throw error;
+      }
+    }
+
     let started: Awaited<ReturnType<typeof startHostedDeviceSyncConnection>>;
     try {
       started = await startHostedDeviceSyncConnection({
@@ -126,16 +218,38 @@ export async function POST(
   }
 }
 
-function resolveHostedDeviceConnectIntentTarget(intent: HostedDeviceConnectIntentRecord) {
-  return listConfiguredDeviceSyncReconnectTargets(
+function resolveHostedDeviceConnectIntentTarget(
+  intent: HostedDeviceConnectIntentRecord,
+): HostedDeviceConnectIntentTarget | null {
+  if (intent.providerSetupId) {
+    const registration = readMemberOwnedProviderSetupRegistration(
+      intent.provider,
+    );
+    if (
+      registration
+      && registration.coordinates.connectSourceId === intent.connectSourceId
+      && registration.coordinates.connectTarget === intent.connectTarget
+      && registration.coordinates.sourceProviderSlug === intent.sourceProviderSlug
+    ) {
+      return {
+        ...registration.coordinates,
+        label: registration.presentation.providerName,
+        memberOwnedSetup: true,
+      };
+    }
+    return null;
+  }
+
+  const target = listConfiguredDeviceSyncReconnectTargets(
     readConfiguredDeviceSyncConnectTargetConfigs(process.env),
-  ).find((target) =>
-    isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
-    && target.provider === intent.provider
-    && target.connectSourceId === intent.connectSourceId
-    && target.connectTarget === intent.connectTarget
-    && (target.sourceProviderSlug ?? null) === intent.sourceProviderSlug
-  ) ?? null;
+  ).find((candidate) =>
+    isDeviceConnectSourceAvailableForConnection(candidate.connectSourceId)
+    && candidate.provider === intent.provider
+    && candidate.connectSourceId === intent.connectSourceId
+    && candidate.connectTarget === intent.connectTarget
+    && (candidate.sourceProviderSlug ?? null) === intent.sourceProviderSlug
+  );
+  return target ? { ...target, memberOwnedSetup: false } : null;
 }
 
 function describeUnavailableIntentStatus(status: string): string {
@@ -165,6 +279,44 @@ function buildHostedDeviceConnectPageUrl(input: {
   fragment.set("connectSource", input.connectSourceId);
   url.hash = fragment.toString();
   return `${url.pathname}${url.hash}`;
+}
+
+function buildHostedProviderSetupPageUrl(
+  request: Request,
+  connectSourceId: string,
+): string {
+  const url = new URL("/connect", request.url);
+  url.hash = new URLSearchParams({ connectSource: connectSourceId }).toString();
+  return `${url.pathname}${url.hash}`;
+}
+
+function requireHostedProviderSetupHandoffUrl(
+  request: Request,
+  value: string,
+): string {
+  let url: URL;
+  try {
+    url = new URL(value, request.url);
+  } catch {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_HANDOFF_INVALID",
+      httpStatus: 502,
+      message: "Murph could not open the secure provider sign-in handoff.",
+      retryable: true,
+    });
+  }
+
+  const requestOrigin = new URL(request.url).origin;
+  if (url.origin !== requestOrigin || !url.pathname.startsWith("/computer/handoff/")) {
+    throw deviceSyncError({
+      code: "DEVICE_PROVIDER_SETUP_HANDOFF_INVALID",
+      httpStatus: 502,
+      message: "Murph could not open the secure provider sign-in handoff.",
+      retryable: true,
+    });
+  }
+
+  return url.toString();
 }
 
 function handleHostedDeviceConnectIntentError(error: unknown, request?: Request): Response {
@@ -202,18 +354,22 @@ function handleHostedDeviceConnectIntentError(error: unknown, request?: Request)
 function deviceConnectIntentStartResponse(
   request: Request,
   authorizationUrl: string,
-  callbackProofCookie: string,
+  callbackProofCookie?: string,
 ): Response {
   if (wantsJsonDeviceConnectIntentResponse(request)) {
     const response = jsonOk({
       authorizationUrl,
     });
-    response.headers.append("Set-Cookie", callbackProofCookie);
+    if (callbackProofCookie) {
+      response.headers.append("Set-Cookie", callbackProofCookie);
+    }
     return response;
   }
 
   const response = redirectNoReferrer(authorizationUrl);
-  response.headers.append("Set-Cookie", callbackProofCookie);
+  if (callbackProofCookie) {
+    response.headers.append("Set-Cookie", callbackProofCookie);
+  }
   return response;
 }
 

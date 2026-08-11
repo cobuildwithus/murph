@@ -5,6 +5,10 @@ import type { CloudflareHostedControlClient } from "@murphai/cloudflare-hosted-c
 
 import { revokeAllMealPhotoCaptureEnrollmentsForMember } from "../device-sync/meal-photo-capture";
 import { disconnectAllHostedDeviceSyncConnectionsForUser } from "../device-sync/public-ingress-service";
+import {
+  readMemberOwnedProviderSetupRegistration,
+} from "../device-sync/provider-setup";
+import { PrismaDeviceProviderSetupStore } from "../device-sync/provider-setup/store";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -58,6 +62,22 @@ export async function cleanupWithdrawnHostedHealthDataConsent(input: {
       request: input.request,
       userId: input.memberId,
     });
+    const setupStore = new PrismaDeviceProviderSetupStore(input.prisma);
+    const providers = new Set(
+      (await setupStore.listMemberSetups(input.memberId))
+        .filter((setup) => setup.active)
+        .map((setup) => setup.provider),
+    );
+    for (const provider of providers) {
+      const registration = readMemberOwnedProviderSetupRegistration(provider);
+      if (!registration) {
+        continue;
+      }
+      await setupStore.markDisconnected({
+        memberId: input.memberId,
+        provider: registration.coordinates.provider,
+      });
+    }
   });
   await runWithdrawalCleanup("meal photo capture", async () => {
     await revokeAllMealPhotoCaptureEnrollmentsForMember({

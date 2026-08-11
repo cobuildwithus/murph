@@ -3,14 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   createScopedRegistry: vi.fn(),
   resolveApplication: vi.fn(),
-  revokeStravaAccess: vi.fn(),
   scopedGet: vi.fn(),
   sharedGet: vi.fn(),
 }));
 
-vi.mock("@murphai/device-syncd/providers/strava", () => ({
-  revokeStravaDeviceSyncAccess: mocks.revokeStravaAccess,
-}));
 vi.mock("@/src/lib/device-sync/provider-applications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/src/lib/device-sync/provider-applications")>()),
   resolveDeviceProviderApplicationForConnection: mocks.resolveApplication,
@@ -36,8 +32,8 @@ describe("member-owned provider application cleanup", () => {
     const revokeAccess = vi.fn();
     const providerConfigs = {
       strava: {
-        clientId: "member-client",
-        clientSecret: "member-secret",
+        clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+        clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
       },
     };
     mocks.resolveApplication.mockResolvedValue({ providerConfigs });
@@ -59,7 +55,7 @@ describe("member-owned provider application cleanup", () => {
     expect(mocks.sharedGet).not.toHaveBeenCalled();
   });
 
-  it("uses token-only Strava revocation for repairable application state", async () => {
+  it("requires application repair when exact Strava credentials cannot be recovered", async () => {
     mocks.resolveApplication.mockRejectedValue(new DeviceProviderApplicationError(
       "DEVICE_PROVIDER_APPLICATION_INVALID",
       "Private provider application credentials are invalid.",
@@ -74,8 +70,11 @@ describe("member-owned provider application cleanup", () => {
     })).resolves.toEqual({
       repairRequired: true,
       registry: null,
-      revokeAccessOverride: mocks.revokeStravaAccess,
-      warning: null,
+      revokeAccessOverride: null,
+      warning: {
+        code: "DEVICE_PROVIDER_APPLICATION_REPAIR_REQUIRED",
+        message: "Provider access could not be revoked because the private provider application must be repaired.",
+      },
     });
 
     expect(mocks.createScopedRegistry).not.toHaveBeenCalled();

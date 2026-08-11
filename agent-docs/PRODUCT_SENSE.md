@@ -129,6 +129,15 @@ default destination for every goal or the definition of activation.
   provider-side account selection is trusted as-is. A callback that cannot
   prove the initiating-browser context fails safely without attaching an
   account and lands on the Connect callback-error notice to start again.
+- For a permitted member-owned wearable application, conversation still begins
+  and resumes the durable setup while Murph performs provider-dashboard work. The
+  member handles only provider sign-in, MFA/CAPTCHA, and explicit consent through
+  the first-party handoff. Never turn developer credentials into a copy/paste
+  chore or imply completion before the exact connection is active. `/connect` is
+  the truthful provider-indexed progress and recovery surface, not a separate
+  setup owner. Provider-specific dashboard friction stays inside a finite adapter;
+  shared ownership, recovery, OAuth, disconnect, and deletion behavior must not
+  need a rewrite when the next permitted provider is added.
 - Apple Health follows that exception narrowly: Murph can explain and hand off
   setup in a direct conversation with the canonical App Store listing, while
   the iOS app owns sign-in and the operating-system HealthKit permission flow.

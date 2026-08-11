@@ -284,6 +284,17 @@ describe("Strava device-sync provider", () => {
     expect(result).toMatchObject({
       externalAccountId: "12345",
       displayName: "Strava 12345",
+      initialJobs: [
+        {
+          kind: "backfill",
+          priority: 100,
+          payload: expect.objectContaining({
+            includeAthlete: true,
+            windowKind: "backfill",
+          }),
+        },
+      ],
+      nextReconcileAt: expect.any(String),
       scopes: ["activity:read", "read"],
       tokens: {
         accessToken: "access-token",
@@ -512,7 +523,7 @@ describe("Strava device-sync provider", () => {
           });
         }
 
-        if (url.startsWith("https://www.strava.com/oauth/deauthorize")) {
+        if (url === "https://www.strava.com/oauth/revoke") {
           return new Response(JSON.stringify({ ok: true }), {
             status: 200,
             headers: {
@@ -540,7 +551,7 @@ describe("Strava device-sync provider", () => {
     });
     expect(requests).toEqual([
       "https://www.strava.com/oauth/token",
-      "https://www.strava.com/oauth/deauthorize?access_token=access-token",
+      "https://www.strava.com/oauth/revoke",
     ]);
   });
 
@@ -886,8 +897,8 @@ describe("Strava device-sync provider", () => {
 
   it("invokes the disconnect callback when deauthorization jobs execute", async () => {
     const provider = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
     });
     const disconnectAccount = vi.fn(async () => undefined);
 
@@ -940,8 +951,8 @@ describe("Strava device-sync provider", () => {
   it("does not emit delete imports when a resource webhook fetch returns 404", async () => {
     const importSnapshot = vi.fn(async () => undefined);
     const provider = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_CLIENT_SECRET",
       webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = typeof input === "string"
@@ -1060,8 +1071,8 @@ describe("Strava device-sync provider", () => {
     });
 
     const provider = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
       fetchImpl,
     });
 
@@ -1176,8 +1187,8 @@ describe("Strava device-sync provider", () => {
       id: `activity-${index}`,
     }));
     const providerWithEndlessPages = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = readUrl(input);
 
@@ -1219,8 +1230,8 @@ describe("Strava device-sync provider", () => {
       id: `activity-${index}`,
     }));
     const providerWithOversizedPage = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = readUrl(input);
 
@@ -1262,8 +1273,8 @@ describe("Strava device-sync provider", () => {
   it("ensures Strava webhook subscriptions only when a verify token is configured and tolerates benign deauthorization responses", async () => {
     const calls: Array<{ body?: string; method: string }> = [];
     const providerWithoutToken = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
       fetchImpl: vi.fn(async () => {
         throw new Error("should not run without a verify token");
       }),
@@ -1276,8 +1287,8 @@ describe("Strava device-sync provider", () => {
     ).resolves.toBeUndefined();
 
     const providerWithToken = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
       webhookVerifyToken: "verify-me",
       fetchImpl: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
         const method = init?.method ?? "GET";
@@ -1321,10 +1332,11 @@ describe("Strava device-sync provider", () => {
       "callback_url=https%3A%2F%2Fmurph.example.com%2Fwebhooks%2Fstrava",
     );
 
+    const revokeFetch = vi.fn(async () => new Response("", { status: 200 }));
     const revokeAccess = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
-      fetchImpl: vi.fn(async () => new Response("", { status: 404 })),
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_CLIENT_SECRET",
+      fetchImpl: revokeFetch,
     }).connectionHandler.revokeAccess;
 
     if (!revokeAccess) {
@@ -1334,28 +1346,76 @@ describe("Strava device-sync provider", () => {
     await expect(
       revokeAccess(buildStravaAccount()),
     ).resolves.toBeUndefined();
+    expect(revokeFetch).toHaveBeenCalledTimes(1);
   });
 
-  it("revokes stored Strava access without client credentials", async () => {
+  it("revokes the exact Strava token with Basic application authentication", async () => {
     const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+    const clientId = "NON_CREDENTIAL_TEST_CLIENT_ID";
+    const clientSecret = "NON_CREDENTIAL_TEST_CLIENT_SECRET";
+    const accessToken = "NON_CREDENTIAL_TEST_ACCESS_TOKEN";
 
-    await revokeStravaDeviceSyncAccess(buildStravaAccount({
-      accessToken: "cleanup-access-token",
-    }), {
-      authBaseUrl: "https://strava.example.test",
+    await revokeStravaDeviceSyncAccess(buildStravaAccount({ accessToken }), {
+      authBaseUrl: "https://strava.example.test/",
+      clientId,
+      clientSecret,
       fetchImpl,
     });
 
-    expect(fetchImpl).toHaveBeenCalledWith(
-      "https://strava.example.test/oauth/deauthorize?access_token=cleanup-access-token",
-      expect.objectContaining({ method: "POST" }),
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [requestUrl, requestInit] = fetchImpl.mock.calls[0] ?? [];
+    expect(requestUrl).toBe("https://strava.example.test/oauth/revoke");
+    expect(requestInit).toMatchObject({ method: "POST" });
+    expect(new Headers(requestInit?.headers).get("authorization")).toBe(
+      `Basic ${Buffer.from(`${clientId}:${clientSecret}`, "utf8").toString("base64")}`,
     );
+    expect(new Headers(requestInit?.headers).get("content-type")).toBe(
+      "application/x-www-form-urlencoded",
+    );
+    const body = requestInit?.body;
+    expect(body).toBeInstanceOf(URLSearchParams);
+    const parameters = new URLSearchParams(String(body));
+    expect(parameters.get("token")).toBe(accessToken);
+    expect(parameters.get("token_type_hint")).toBe("access_token");
+    expect(String(requestUrl)).not.toContain(accessToken);
   });
 
-  it("imports delete jobs, validates malformed jobs and webhook payloads, and handles deauthorize edge cases", async () => {
+  it("treats an already-revoked Strava token as an idempotent success", async () => {
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+
+    await expect(revokeStravaDeviceSyncAccess(buildStravaAccount({
+      accessToken: "NON_CREDENTIAL_TEST_ALREADY_REVOKED_TOKEN",
+    }), {
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_CLIENT_SECRET",
+      fetchImpl,
+    })).resolves.toBeUndefined();
+  });
+
+  it("does not call Strava when the account has no access token", async () => {
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 }));
+
+    await expect(revokeStravaDeviceSyncAccess(buildStravaAccount({
+      credential: {
+        kind: "oauth_tokens",
+        tokens: {
+          accessToken: "",
+          accessTokenExpiresAt: null,
+          refreshToken: null,
+        },
+      },
+    }), {
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_CLIENT_SECRET",
+      fetchImpl,
+    })).resolves.toBeUndefined();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("imports delete jobs, validates malformed jobs and webhook payloads, and handles revoke edge cases", async () => {
     const provider = createStravaDeviceSyncProvider({
-      clientId: "12345",
-      clientSecret: "secret",
+      clientId: "NON_CREDENTIAL_TEST_CLIENT_ID",
+      clientSecret: "NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE",
       webhookSigningSecret: STRAVA_WEBHOOK_SIGNING_SECRET,
       fetchImpl: vi.fn(async (input: RequestInfo | URL) => {
         const url = typeof input === "string"
@@ -1364,7 +1424,7 @@ describe("Strava device-sync provider", () => {
             ? input.toString()
             : input.url;
 
-        if (url.startsWith("https://www.strava.com/oauth/deauthorize")) {
+        if (url === "https://www.strava.com/oauth/revoke") {
           return new Response(JSON.stringify({ message: "boom" }), {
             status: 500,
             headers: {
@@ -1504,10 +1564,16 @@ describe("Strava device-sync provider", () => {
       jobs: [],
     });
 
-    await expect(
-      revokeAccess(buildStravaAccount()),
-    ).rejects.toMatchObject({
-      code: "STRAVA_DEAUTHORIZE_FAILED",
+    const revokeFailure = await revokeAccess(buildStravaAccount({
+      accessToken: "NON_CREDENTIAL_TEST_REVOKE_TOKEN",
+    })).catch((error: unknown) => error);
+    expect(revokeFailure).toMatchObject({
+      code: "STRAVA_REVOKE_FAILED",
+      retryable: true,
     });
+    const serializedFailure = JSON.stringify(revokeFailure);
+    expect(serializedFailure).not.toContain("NON_CREDENTIAL_TEST_REVOKE_TOKEN");
+    expect(serializedFailure).not.toContain("NON_CREDENTIAL_TEST_SECRET_DO_NOT_USE");
+    expect(serializedFailure).not.toContain("Basic ");
   });
 });

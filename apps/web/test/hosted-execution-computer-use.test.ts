@@ -957,6 +957,95 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toBeNull();
   });
 
+  it("captures provider credentials only inside the seal callback and scrubs browser results", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const credentialResult = {
+      result: {
+        clientId: "synthetic-client-id-not-a-credential",
+        clientSecret: "synthetic-client-secret-not-a-credential",
+      },
+      title: "Provider application",
+      url: "https://provider.example.test/settings/application",
+    };
+    const kernel = createFakeKernel({ executeResult: credentialResult });
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({ updatedAt: now }),
+    });
+    const service = new ComputerUseService({
+      env: {
+        HOSTED_WEB_BASE_URL: "https://web.example.test",
+      },
+      kernel,
+      now: () => now,
+      store,
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warningLog = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = await service.captureAndSealProviderCredentials({
+      code: "return { clientId: 'synthetic-captured-id-not-a-credential', clientSecret: 'synthetic-captured-secret-not-a-credential' };",
+      consume: async (credentials) => {
+        expect(credentials).toEqual({
+          clientId: "synthetic-client-id-not-a-credential",
+          clientSecret: "synthetic-client-secret-not-a-credential",
+        });
+        return { applicationId: "dpa_synthetic", revision: 7 };
+      },
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 1_000,
+    });
+
+    expect(result).toEqual({
+      title: "Provider application",
+      url: "https://provider.example.test/settings/application",
+      value: { applicationId: "dpa_synthetic", revision: 7 },
+    });
+    expect(JSON.stringify(result)).not.toContain("synthetic-client");
+    expect(credentialResult.result).toEqual({ clientId: "", clientSecret: "" });
+    expect(JSON.stringify(store.run)).not.toContain("synthetic-client");
+    expect(JSON.stringify(errorLog.mock.calls)).not.toContain("synthetic-client");
+    expect(JSON.stringify(warningLog.mock.calls)).not.toContain("synthetic-client");
+    expect(kernel.executePlaywrightInputs[0]?.code).not.toContain(
+      "synthetic-client-secret-not-a-credential",
+    );
+
+    errorLog.mockRestore();
+    warningLog.mockRestore();
+  });
+
+  it("scrubs malformed provider credential execution results before rejecting them", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const malformedResult = {
+      nested: {
+        clientId: "synthetic-malformed-id-not-a-credential",
+        clientSecret: "synthetic-malformed-secret-not-a-credential",
+      },
+    };
+    const kernel = createFakeKernel({ executeResult: malformedResult });
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store: new FakeComputerUseStore({
+        run: createRunRecord({ updatedAt: now }),
+      }),
+    });
+    const consume = vi.fn(async () => ({ applicationId: "dpa_unreachable" }));
+
+    await expect(service.captureAndSealProviderCredentials({
+      code: "return { clientId: 'synthetic-captured-id-not-a-credential', clientSecret: 'synthetic-captured-secret-not-a-credential' };",
+      consume,
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 1_000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_ACT_RESULT_INVALID",
+    });
+    expect(consume).not.toHaveBeenCalled();
+    expect(malformedResult.nested).toEqual({ clientId: "", clientSecret: "" });
+    expect(JSON.stringify(malformedResult)).not.toContain("synthetic-malformed");
+  });
+
   it("passes arbitrary start URLs to Kernel navigation", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const startKernel = createFakeKernel();
@@ -6611,6 +6700,208 @@ describe("ComputerUseService", () => {
     expect(kernel.deletedProfileNames).toEqual([]);
   });
 
+  it("rejects an unrelated active browser run when a provider setup acquires ownership", async () => {
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: null,
+        ownerPurpose: null,
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, store });
+
+    await expect(service.acquireOwnedRun({
+      expectedRunId: null,
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+
+    expect(kernel.createdBrowserInputs).toEqual([]);
+    expect(store.createRunInputs).toEqual([]);
+  });
+
+  it("reuses only the browser run already bound to the exact provider setup", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.acquireOwnedRun({
+      expectedRunId: "hcr_run123",
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: "hcr_run123",
+      status: "running",
+    });
+
+    await expect(service.acquireOwnedRun({
+      expectedRunId: "hcr_run123",
+      memberId: "member_123",
+      ownerKey: "dps_other",
+      ownerPurpose: "member_owned_provider_setup",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+    expect(kernel.createdBrowserInputs).toEqual([]);
+  });
+
+  it("creates a replacement only after the setup-bound run is terminal", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const terminalRun = createRunRecord({
+      completedAt: new Date("2026-06-17T11:30:00.000Z"),
+      expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+      id: "hcr_terminal_setup",
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T11:30:00.000Z"),
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [terminalRun],
+      run: terminalRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    const result = await service.acquireOwnedRun({
+      expectedRunId: terminalRun.id,
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+
+    expect(result).toMatchObject({
+      reused: false,
+      status: "running",
+    });
+    expect(result.runId).not.toBe(terminalRun.id);
+    expect(store.run).toMatchObject({
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    });
+    expect(kernel.createdBrowserInputs).toHaveLength(1);
+  });
+
+  it("recovers an ambiguous setup-owned acquisition only when the prior binding is terminal", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const terminalRun = createRunRecord({
+      completedAt: new Date("2026-06-17T11:30:00.000Z"),
+      expiresAt: new Date("2026-06-17T11:30:00.000Z"),
+      id: "hcr_terminal_setup",
+      kernelLiveViewUrlEncrypted: null,
+      kernelSessionId: null,
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      status: "completed",
+      updatedAt: new Date("2026-06-17T11:30:00.000Z"),
+    });
+    const acquiredRun = createRunRecord({
+      id: "hcr_acquired_setup",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [terminalRun, acquiredRun],
+      run: acquiredRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.acquireOwnedRun({
+      expectedRunId: terminalRun.id,
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    })).resolves.toMatchObject({
+      reused: true,
+      runId: acquiredRun.id,
+      status: "running",
+    });
+    expect(kernel.createdBrowserInputs).toEqual([]);
+  });
+
+
+  it("rejects an ambiguous setup-owned acquisition while the prior binding remains active", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const expectedRun = createRunRecord({
+      id: "hcr_active_setup",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      updatedAt: now,
+    });
+    const candidateRun = createRunRecord({
+      id: "hcr_ambiguous_candidate",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+      updatedAt: now,
+    });
+    const store = new FakeComputerUseStore({
+      memberRuns: [candidateRun, expectedRun],
+      run: candidateRun,
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({
+      kernel,
+      now: () => now,
+      store,
+    });
+
+    await expect(service.acquireOwnedRun({
+      expectedRunId: expectedRun.id,
+      memberId: "member_123",
+      ownerKey: "dps_setup123",
+      ownerPurpose: "member_owned_provider_setup",
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+    expect(kernel.createdBrowserInputs).toEqual([]);
+    expect(store.createRunInputs).toEqual([]);
+  });
+
+  it("rejects generic browser actions against a setup-owned run", async () => {
+    const now = new Date("2026-06-17T12:05:00.000Z");
+    const store = new FakeComputerUseStore({
+      run: createRunRecord({
+        ownerKey: "dps_setup123",
+        ownerPurpose: "member_owned_provider_setup",
+      }),
+    });
+    const kernel = createFakeKernel();
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+
+    await expect(service.act({
+      code: "return await page.title();",
+      memberId: "member_123",
+      runId: "hcr_run123",
+      timeoutMs: 1_000,
+    })).rejects.toMatchObject({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    });
+    expect(kernel.executePlaywrightCalls).toBe(0);
+  });
+
   it("deletes stored Kernel sessions and profiles even when namespace cleanup is not configured", async () => {
     const store = new FakeComputerUseStore({
       run: createRunRecord({
@@ -6778,6 +7069,8 @@ describe("PrismaComputerUseStore", () => {
     const tx = {
       $queryRaw: vi.fn(async () => [{ id: reclaimed.memberId }]),
       hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(reclaimed)),
         findUnique: vi.fn(async () => reclaimed),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
@@ -6835,6 +7128,8 @@ describe("PrismaComputerUseStore", () => {
       ) => Promise<Array<{ id: string }>>>()
         .mockResolvedValue([{ id: completed.memberId }]),
       hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(completed)),
         findUnique: vi.fn(async () => claimed),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
@@ -6919,6 +7214,8 @@ describe("PrismaComputerUseStore", () => {
       ) => Promise<Array<{ id: string }>>>()
         .mockResolvedValue([{ id: claimed.memberId }]),
       hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(claimed)),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
       hostedComputerRun: {
@@ -7001,6 +7298,8 @@ describe("PrismaComputerUseStore", () => {
       ) => Promise<Array<{ id: string }>>>()
         .mockResolvedValue([{ id: "member_123" }]),
       hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(createHandoffRecord())),
         findUnique: vi.fn(async () => createHandoffRecord()),
         updateMany: vi.fn(async () => ({ count: 0 })),
       },
@@ -7035,6 +7334,8 @@ describe("PrismaComputerUseStore", () => {
       ) => Promise<Array<{ id: string }>>>()
         .mockResolvedValue([{ id: "member_123" }]),
       hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(createHandoffRecord())),
         updateMany: vi.fn(async () => ({ count: 0 })),
       },
       hostedComputerRun: {
@@ -7073,6 +7374,8 @@ describe("PrismaComputerUseStore", () => {
       ) => Promise<Array<{ id: string }>>>()
         .mockResolvedValue([{ id: "member_123" }]),
       hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(createHandoffRecord())),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
       hostedComputerRun: {
@@ -7122,6 +7425,8 @@ describe("PrismaComputerUseStore", () => {
     const tx = {
       $queryRaw: vi.fn(async () => [{ id: handoff.memberId }]),
       hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(handoff)),
         findUnique: vi.fn(async () => rotated),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
@@ -7281,7 +7586,11 @@ describe("PrismaComputerUseStore", () => {
     const tx = {
       $queryRaw: queryRaw,
       hostedComputerHandoff: {
-        findFirst: vi.fn(async () => claimed),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(
+            createOrdinaryComputerHandoffAccessRecord(claimed),
+          )
+          .mockResolvedValueOnce(claimed),
         findUnique: vi.fn(async () => converted),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
@@ -7457,7 +7766,11 @@ describe("PrismaComputerUseStore", () => {
           : [{ id: claimed.memberId }];
       }),
       hostedComputerHandoff: {
-        findFirst: vi.fn(async () => claimed),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(
+            createOrdinaryComputerHandoffAccessRecord(claimed),
+          )
+          .mockResolvedValueOnce(claimed),
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
@@ -7518,7 +7831,11 @@ describe("PrismaComputerUseStore", () => {
           : [{ id: "member_123" }];
       }),
       hostedComputerHandoff: {
-        findFirst: vi.fn(async () => converted),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(
+            createOrdinaryComputerHandoffAccessRecord(converted),
+          )
+          .mockResolvedValueOnce(converted),
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
@@ -7548,7 +7865,7 @@ describe("PrismaComputerUseStore", () => {
       handoff: converted,
       run: publishedRun,
     });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     expect(tx.hostedComputerRun.updateMany).not.toHaveBeenCalled();
     expect(tx.hostedComputerHandoff.updateMany).not.toHaveBeenCalled();
   });
@@ -7576,7 +7893,11 @@ describe("PrismaComputerUseStore", () => {
           : [{ id: converted.memberId }];
       }),
       hostedComputerHandoff: {
-        findFirst: vi.fn(async () => converted),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(
+            createOrdinaryComputerHandoffAccessRecord(converted),
+          )
+          .mockResolvedValueOnce(converted),
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
@@ -7628,7 +7949,11 @@ describe("PrismaComputerUseStore", () => {
     const tx = {
       $queryRaw: vi.fn(async () => [{ id: completed.memberId }]),
       hostedComputerHandoff: {
-        findFirst: vi.fn(async () => completed),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(
+            createOrdinaryComputerHandoffAccessRecord(completed),
+          )
+          .mockResolvedValueOnce(completed),
         findUnique: vi.fn(),
         updateMany: vi.fn(),
       },
@@ -7686,7 +8011,11 @@ describe("PrismaComputerUseStore", () => {
     const tx = {
       $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
       hostedComputerHandoff: {
-        findFirst: vi.fn(async () => claimed),
+        findFirst: vi.fn()
+          .mockResolvedValueOnce(
+            createOrdinaryComputerHandoffAccessRecord(claimed),
+          )
+          .mockResolvedValueOnce(claimed),
         findUnique: vi.fn(async () => completed),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
@@ -7743,6 +8072,10 @@ describe("PrismaComputerUseStore", () => {
     }));
     const tx = {
       $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () =>
+          createOrdinaryComputerHandoffAccessRecord(createHandoffRecord())),
+      },
       hostedComputerRun: {
         findUnique,
         updateMany,
@@ -7814,7 +8147,7 @@ describe("PrismaComputerUseStore", () => {
         status: "awaiting_user",
       },
     });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
       updateMany.mock.invocationCallOrder[1]!,
     );
@@ -8234,6 +8567,8 @@ describe("PrismaComputerUseStore", () => {
         kernelProfileName: "murph-test-member",
         lastUrl: null,
         memberId: "member_123",
+        ownerKey: null,
+        ownerPurpose: null,
       },
     });
     expect(trace).toEqual(["lock-member", "find-active-run", "create-run"]);
@@ -8287,11 +8622,18 @@ describe("PrismaComputerUseStore", () => {
   it("locks member computer-use availability before attaching a browser to a reserved run", async () => {
     const trace: string[] = [];
     const tx = {
-      $queryRaw: vi.fn(async () => {
-        trace.push("lock-member");
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        trace.push(sql.includes("suspended_at IS NULL")
+          ? "check-member-active"
+          : "lock-member");
         return [{ id: "member_123" }];
       }),
       hostedComputerRun: {
+        findFirst: vi.fn(async () => {
+          trace.push("find-run-owner");
+          return createOrdinaryComputerRunAccessRecord();
+        }),
         findUnique: vi.fn(async () => {
           trace.push("find-run");
           return createRunRecord({
@@ -8325,7 +8667,7 @@ describe("PrismaComputerUseStore", () => {
     });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
     expect(tx.hostedComputerRun.updateMany).toHaveBeenCalledWith({
       data: {
         kernelLiveViewUrlEncrypted: "encrypted-live-view",
@@ -8339,27 +8681,41 @@ describe("PrismaComputerUseStore", () => {
         status: "running",
       },
     });
-    expect(trace).toEqual(["lock-member", "attach-browser", "find-run"]);
+    expect(trace).toEqual([
+      "lock-member",
+      "find-run-owner",
+      "check-member-active",
+      "attach-browser",
+      "find-run",
+    ]);
   });
 
   it("treats same-browser attach replay as already attached under the member lock", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const trace: string[] = [];
     const tx = {
-      $queryRaw: vi.fn(async () => {
-        trace.push("lock-member");
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        trace.push(sql.includes("suspended_at IS NULL")
+          ? "check-member-active"
+          : "lock-member");
         return [{ id: "member_123" }];
       }),
       hostedComputerRun: {
-        findFirst: vi.fn(async () => {
-          trace.push("find-attached-run");
-          return createRunRecord({
-            id: "hcr_created",
-            kernelLiveViewUrlEncrypted: "encrypted-live-view",
-            kernelSessionId: "kernel-session-1",
-            status: "running",
-          });
-        }),
+        findFirst: vi.fn()
+          .mockImplementationOnce(async () => {
+            trace.push("find-run-owner");
+            return createOrdinaryComputerRunAccessRecord();
+          })
+          .mockImplementationOnce(async () => {
+            trace.push("find-attached-run");
+            return createRunRecord({
+              id: "hcr_created",
+              kernelLiveViewUrlEncrypted: "encrypted-live-view",
+              kernelSessionId: "kernel-session-1",
+              status: "running",
+            });
+          }),
         findUnique: vi.fn(),
         updateMany: vi.fn(async () => {
           trace.push("attach-browser");
@@ -8395,7 +8751,13 @@ describe("PrismaComputerUseStore", () => {
       },
     });
     expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
-    expect(trace).toEqual(["lock-member", "attach-browser", "find-attached-run"]);
+    expect(trace).toEqual([
+      "lock-member",
+      "find-run-owner",
+      "check-member-active",
+      "attach-browser",
+      "find-attached-run",
+    ]);
   });
 
   it("treats same-browser replacement replay as already attached under the member lock", async () => {
@@ -8403,10 +8765,21 @@ describe("PrismaComputerUseStore", () => {
     const now = new Date("2026-06-17T12:05:00.000Z");
     const trace: string[] = [];
     const tx = {
-      $queryRaw: vi.fn(async () => {
-        trace.push("lock-member");
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        const sql = Array.from(strings).join("?");
+        trace.push(sql.includes("suspended_at IS NULL")
+          ? "check-member-active"
+          : "lock-member");
         return [{ id: "member_123" }];
       }),
+      hostedComputerHandoff: {
+        findFirst: vi.fn(async () => {
+          trace.push("find-handoff-owner");
+          return createOrdinaryComputerHandoffAccessRecord(
+            createHandoffRecord(),
+          );
+        }),
+      },
       hostedComputerRun: {
         findFirst: vi.fn(async () => {
           trace.push("find-replaced-run");
@@ -8462,7 +8835,13 @@ describe("PrismaComputerUseStore", () => {
       },
     });
     expect(tx.hostedComputerRun.findUnique).not.toHaveBeenCalled();
-    expect(trace).toEqual(["lock-member", "replace-browser", "find-replaced-run"]);
+    expect(trace).toEqual([
+      "lock-member",
+      "find-handoff-owner",
+      "check-member-active",
+      "replace-browser",
+      "find-replaced-run",
+    ]);
   });
 });
 
@@ -8584,6 +8963,109 @@ class FakeComputerUseStore implements ComputerUseStore {
     }
   }
 
+  async requireMemberOwnedProviderSetupRunAcquisition(
+    input: Parameters<ComputerUseStore["requireMemberOwnedProviderSetupRunAcquisition"]>[0],
+  ): Promise<void> {
+    if (input.memberId !== this.run.memberId) {
+      throw new Error("Member not found.");
+    }
+    const runs = this.memberRuns ?? [this.run];
+    const now = input.now ?? new Date("2026-06-17T12:00:00.000Z");
+    const exactOwner = (run: ComputerRunRecord | undefined): boolean => Boolean(
+      run
+      && run.memberId === input.memberId
+      && run.ownerKey === input.ownerKey
+      && run.ownerPurpose === input.ownerPurpose,
+    );
+    if (input.expectedRunId === null) {
+      const activeRun = selectActiveRunForTest(runs, input.memberId, now);
+      if (
+        activeRun
+        && (activeRun.ownerKey || activeRun.ownerPurpose)
+        && !exactOwner(activeRun)
+      ) {
+        throw Object.assign(new Error("Browser run belongs to another operation."), {
+          code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        });
+      }
+      if (activeRun && !activeRun.ownerKey && !activeRun.ownerPurpose) {
+        throw Object.assign(new Error("Browser run belongs to another operation."), {
+          code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        });
+      }
+      return;
+    }
+
+    const expectedRun = runs.find((run) => run.id === input.expectedRunId);
+    if (!exactOwner(expectedRun)) {
+      throw Object.assign(new Error("Browser run ownership does not match setup."), {
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      });
+    }
+    if (!input.candidateRunId) {
+      return;
+    }
+
+    const candidateRun = runs.find((run) => run.id === input.candidateRunId);
+    if (
+      !expectedRun
+      || !exactOwner(candidateRun)
+      || selectActiveRunForTest([expectedRun], input.memberId, now)
+      || selectActiveRunForTest(candidateRun ? [candidateRun] : [], input.memberId, now) === null
+    ) {
+      throw Object.assign(new Error("Browser run ownership does not match setup."), {
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      });
+    }
+  }
+
+  async requireMemberOwnedProviderSetupRun(
+    input: Parameters<ComputerUseStore["requireMemberOwnedProviderSetupRun"]>[0],
+  ): Promise<ComputerRunRecord> {
+    if (
+      input.memberId !== this.run.memberId
+      || input.runId !== this.run.id
+      || input.ownerKey !== this.run.ownerKey
+      || input.ownerPurpose !== this.run.ownerPurpose
+    ) {
+      throw Object.assign(new Error("Browser run ownership does not match setup."), {
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      });
+    }
+    return this.run;
+  }
+
+  async requireComputerHandoffAccess(
+    input: Parameters<ComputerUseStore["requireComputerHandoffAccess"]>[0],
+  ): Promise<ComputerHandoffRecord> {
+    const handoff = await this.requireHandoffByTokenHash({
+      tokenHash: input.tokenHash,
+    });
+    if (handoff.memberId !== input.memberId) {
+      throw new Error("Handoff not found.");
+    }
+    const ownerKey = this.run.ownerKey;
+    if (
+      this.run.id === handoff.runId
+      && this.run.memberId === input.memberId
+      && this.run.ownerPurpose === "member_owned_provider_setup"
+      && typeof ownerKey === "string"
+      && ownerKey.length > 0
+    ) {
+      await this.requireMemberOwnedProviderSetupRun({
+        memberId: input.memberId,
+        ownerKey,
+        ownerPurpose: "member_owned_provider_setup",
+        runId: handoff.runId,
+      });
+      return handoff;
+    }
+    await this.requireMemberComputerUseAvailable({
+      memberId: input.memberId,
+    });
+    return handoff;
+  }
+
   async requireOwnedRun(input: {
     memberId: string;
     runId: string;
@@ -8682,6 +9164,8 @@ class FakeComputerUseStore implements ComputerUseStore {
         lastTitle: null,
         lastUrl: input.startUrl,
         memberId: input.memberId,
+        ownerKey: input.ownerKey ?? null,
+        ownerPurpose: input.ownerPurpose ?? null,
         status: "cleanup_pending",
         updatedAt: input.now,
       });
@@ -8701,6 +9185,8 @@ class FakeComputerUseStore implements ComputerUseStore {
         lastTitle: null,
         lastUrl: input.startUrl,
         memberId: input.memberId,
+        ownerKey: input.ownerKey ?? null,
+        ownerPurpose: input.ownerPurpose ?? null,
         status: "running",
         updatedAt: new Date("2026-06-17T12:05:00.000Z"),
       });
@@ -8719,6 +9205,8 @@ class FakeComputerUseStore implements ComputerUseStore {
       lastTitle: null,
       lastUrl: input.startUrl,
       memberId: input.memberId,
+      ownerKey: input.ownerKey ?? null,
+      ownerPurpose: input.ownerPurpose ?? null,
       status: "running",
       updatedAt: new Date("2026-06-17T12:05:00.000Z"),
     });
@@ -8774,7 +9262,10 @@ class FakeComputerUseStore implements ComputerUseStore {
     return this.run;
   }
 
-  async requireHandoffByTokenHash(): Promise<ComputerHandoffRecord> {
+  async requireHandoffByTokenHash(
+    input: Parameters<ComputerUseStore["requireHandoffByTokenHash"]>[0],
+  ): Promise<ComputerHandoffRecord> {
+    void input;
     if (!this.handoff) {
       throw new Error("Handoff not found.");
     }
@@ -9743,6 +10234,26 @@ function createHandoffRecord(overrides: Partial<ComputerHandoffRecord> = {}): Co
   };
 }
 
+function createOrdinaryComputerHandoffAccessRecord(
+  handoff: Pick<ComputerHandoffRecord, "memberId" | "runId">,
+) {
+  return {
+    run: {
+      id: handoff.runId,
+      memberId: handoff.memberId,
+      ownerKey: null,
+      ownerPurpose: null,
+    },
+  };
+}
+
+function createOrdinaryComputerRunAccessRecord() {
+  return {
+    ownerKey: null,
+    ownerPurpose: null,
+  };
+}
+
 function createResumeMailboxItem(overrides: Partial<ResumeMailboxItem> = {}): ResumeMailboxItem {
   return {
     createdAt: new Date("2026-06-17T12:04:00.000Z"),
@@ -9770,6 +10281,8 @@ function createRunRecord(overrides: Partial<ComputerRunRecord> = {}): ComputerRu
     lastTitle: "Scheduler",
     lastUrl: "https://dentist.example.test",
     memberId: "member_123",
+    ownerKey: null,
+    ownerPurpose: null,
     pausedAt: null,
     pendingHandoffId: null,
     resumeAfterMailboxLaneSeq: null,

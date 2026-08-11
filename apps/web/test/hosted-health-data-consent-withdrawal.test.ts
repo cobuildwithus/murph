@@ -4,6 +4,8 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   disconnectAllHostedDeviceSyncConnectionsForUser: vi.fn(),
+  listMemberOwnedProviderSetups: vi.fn(),
+  markMemberOwnedProviderSetupDisconnected: vi.fn(),
   readHostedConsentStatus: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
   revokeAllMealPhotoCaptureEnrollmentsForMember: vi.fn(),
@@ -13,6 +15,17 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   disconnectAllHostedDeviceSyncConnectionsForUser:
     mocks.disconnectAllHostedDeviceSyncConnectionsForUser,
+}));
+vi.mock("@/src/lib/device-sync/provider-setup/store", () => ({
+  PrismaDeviceProviderSetupStore: class {
+    async listMemberSetups(memberId: string) {
+      return await mocks.listMemberOwnedProviderSetups(memberId);
+    }
+
+    async markDisconnected(input: { memberId: string; provider: "strava" }) {
+      return await mocks.markMemberOwnedProviderSetupDisconnected(input);
+    }
+  },
 }));
 vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
   revokeAllMealPhotoCaptureEnrollmentsForMember:
@@ -63,6 +76,26 @@ describe("withdrawHostedHealthDataConsent", () => {
       disconnectedCount: 1,
       failedCount: 0,
     });
+    mocks.listMemberOwnedProviderSetups.mockResolvedValue([{
+      active: true,
+      browserRunId: null,
+      completedAt: null,
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      createdAt: new Date("2026-08-11T12:00:00.000Z"),
+      id: "dps_strava_123",
+      lastErrorCode: null,
+      memberId: "member_123",
+      provider: "strava",
+      providerApplicationId: "dpa_strava_123",
+      providerApplicationRevision: 2,
+      providerSubmissionAt: new Date("2026-08-11T12:01:00.000Z"),
+      sourceProviderSlug: null,
+      status: "connected",
+      updatedAt: new Date("2026-08-11T12:02:00.000Z"),
+      version: 3,
+    }]);
+    mocks.markMemberOwnedProviderSetupDisconnected.mockResolvedValue(null);
     mocks.revokeAllMealPhotoCaptureEnrollmentsForMember.mockResolvedValue({
       revokedCount: 1,
     });
@@ -97,6 +130,11 @@ describe("withdrawHostedHealthDataConsent", () => {
     expect(mocks.disconnectAllHostedDeviceSyncConnectionsForUser).toHaveBeenCalledWith({
       request,
       userId: "member_123",
+    });
+    expect(mocks.listMemberOwnedProviderSetups).toHaveBeenCalledWith("member_123");
+    expect(mocks.markMemberOwnedProviderSetupDisconnected).toHaveBeenCalledWith({
+      memberId: "member_123",
+      provider: "strava",
     });
     expect(mocks.revokeAllMealPhotoCaptureEnrollmentsForMember).toHaveBeenCalledWith({
       memberId: "member_123",

@@ -42,6 +42,11 @@ type MockComputerUseStore = ComputerUseStore & {
   replaceRunBrowser: MockStoreMethod<"replaceRunBrowser">;
   resumeRunAfterLoginCheckpoint: MockStoreMethod<"resumeRunAfterLoginCheckpoint">;
   rotateManagedLoginHandoffCapability: MockStoreMethod<"rotateManagedLoginHandoffCapability">;
+  requireComputerHandoffAccess: MockStoreMethod<"requireComputerHandoffAccess">;
+  requireHandoffByTokenHash: MockStoreMethod<"requireHandoffByTokenHash">;
+  requireMemberComputerUseAvailable: MockStoreMethod<"requireMemberComputerUseAvailable">;
+  requireMemberOwnedProviderSetupRun: MockStoreMethod<"requireMemberOwnedProviderSetupRun">;
+  requireMemberOwnedProviderSetupRunAcquisition: MockStoreMethod<"requireMemberOwnedProviderSetupRunAcquisition">;
   requireOwnedRun: MockStoreMethod<"requireOwnedRun">;
 };
 
@@ -588,7 +593,7 @@ describe("Kernel managed-login handoffs", () => {
     let run = createRun();
     let handoff = createHandoff();
     const store = createStore({ handoff, run });
-    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.requireHandoffByTokenHash.mockImplementation(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
       handoff = {
         ...handoff,
@@ -688,7 +693,7 @@ describe("Kernel managed-login handoffs", () => {
       status: "AUTHENTICATED",
     });
     const store = createStore({ handoff, run });
-    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.requireHandoffByTokenHash.mockImplementation(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
       handoff = {
         ...handoff,
@@ -766,7 +771,7 @@ describe("Kernel managed-login handoffs", () => {
       status: "AUTHENTICATED",
     });
     const store = createStore({ handoff, run });
-    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.requireHandoffByTokenHash.mockImplementation(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
       handoff = {
         ...handoff,
@@ -858,7 +863,7 @@ describe("Kernel managed-login handoffs", () => {
       status: "NEEDS_AUTH",
     });
     const store = createStore({ handoff, run });
-    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.requireHandoffByTokenHash.mockImplementation(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
       handoff = {
         ...handoff,
@@ -1378,7 +1383,7 @@ describe("Kernel managed-login handoffs", () => {
       hostedUrl: "https://auth.onkernel.com/login/test",
     });
     const store = createStore({ handoff, run });
-    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.requireHandoffByTokenHash.mockImplementation(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
       handoff = {
         ...handoff,
@@ -1503,7 +1508,7 @@ describe("Kernel managed-login handoffs", () => {
       status: "NEEDS_AUTH",
     });
     const store = createStore({ handoff, run });
-    store.requireHandoffByTokenHash = vi.fn(async () => handoff);
+    store.requireHandoffByTokenHash.mockImplementation(async () => handoff);
     store.claimHandoffForCompletion.mockImplementation(async () => {
       handoff = {
         ...handoff,
@@ -2160,6 +2165,90 @@ function createStore(input: {
         updatedAt: CLAIMED_AT,
       }
     : null;
+  const requireHandoffByTokenHash = vi.fn(async (
+    lookupInput: Parameters<ComputerUseStore["requireHandoffByTokenHash"]>[0],
+  ): Promise<ComputerHandoffRecord> => {
+    void lookupInput;
+    if (!input.handoff) {
+      throw new Error("Handoff missing.");
+    }
+    return input.handoff;
+  });
+  const requireMemberComputerUseAvailable = vi.fn(async (
+    availabilityInput: Parameters<
+      ComputerUseStore["requireMemberComputerUseAvailable"]
+    >[0],
+  ): Promise<void> => {
+    if (availabilityInput.memberId !== input.run.memberId) {
+      throw new Error("Member missing.");
+    }
+  });
+  const requireMemberOwnedProviderSetupRun = vi.fn(async (
+    ownerInput: Parameters<
+      ComputerUseStore["requireMemberOwnedProviderSetupRun"]
+    >[0],
+  ): Promise<ComputerRunRecord> => {
+    if (
+      input.run.memberId !== ownerInput.memberId
+      || input.run.id !== ownerInput.runId
+      || input.run.ownerKey !== ownerInput.ownerKey
+      || input.run.ownerPurpose !== ownerInput.ownerPurpose
+    ) {
+      throw new Error("Browser run ownership does not match setup.");
+    }
+    return input.run;
+  });
+  const requireMemberOwnedProviderSetupRunAcquisition = vi.fn(async (
+    ownerInput: Parameters<
+      ComputerUseStore["requireMemberOwnedProviderSetupRunAcquisition"]
+    >[0],
+  ): Promise<void> => {
+    if (ownerInput.expectedRunId === null) {
+      throw new Error("Browser run belongs to another operation.");
+    }
+    await requireMemberOwnedProviderSetupRun({
+      memberId: ownerInput.memberId,
+      ownerKey: ownerInput.ownerKey,
+      ownerPurpose: ownerInput.ownerPurpose,
+      runId: ownerInput.expectedRunId,
+    });
+    if (
+      ownerInput.candidateRunId
+      && ownerInput.candidateRunId !== ownerInput.expectedRunId
+    ) {
+      throw new Error("Browser run ownership does not match setup.");
+    }
+  });
+  const requireComputerHandoffAccess = vi.fn(async (
+    accessInput: Parameters<ComputerUseStore["requireComputerHandoffAccess"]>[0],
+  ): Promise<ComputerHandoffRecord> => {
+    const handoff = await requireHandoffByTokenHash({
+      tokenHash: accessInput.tokenHash,
+    });
+    if (handoff.memberId !== accessInput.memberId) {
+      throw new Error("Handoff missing.");
+    }
+    const ownerKey = input.run.ownerKey;
+    if (
+      input.run.id === handoff.runId
+      && input.run.memberId === accessInput.memberId
+      && input.run.ownerPurpose === "member_owned_provider_setup"
+      && typeof ownerKey === "string"
+      && ownerKey.length > 0
+    ) {
+      await requireMemberOwnedProviderSetupRun({
+        memberId: accessInput.memberId,
+        ownerKey,
+        ownerPurpose: "member_owned_provider_setup",
+        runId: handoff.runId,
+      });
+    } else {
+      await requireMemberComputerUseAvailable({
+        memberId: accessInput.memberId,
+      });
+    }
+    return handoff;
+  });
   return {
     attachAwaitingRunHandoff: vi.fn(async (attachInput) => ({
       ...input.run,
@@ -2291,13 +2380,11 @@ function createStore(input: {
       expiresAt: rotateInput.expiresAt,
       tokenHash: rotateInput.tokenHash,
     })),
-    requireHandoffByTokenHash: vi.fn(async () => {
-      if (!input.handoff) {
-        throw new Error("Handoff missing.");
-      }
-      return input.handoff;
-    }),
-    requireMemberComputerUseAvailable: vi.fn(async () => {}),
+    requireComputerHandoffAccess,
+    requireHandoffByTokenHash,
+    requireMemberComputerUseAvailable,
+    requireMemberOwnedProviderSetupRun,
+    requireMemberOwnedProviderSetupRunAcquisition,
     requireOwnedRun: vi.fn(async () => input.run),
     async updateRunBrowserState() {},
   } satisfies MockComputerUseStore;

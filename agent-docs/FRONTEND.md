@@ -97,3 +97,20 @@ When frontend behavior changes:
 - `PRODUCT.md` (only if brand personality, anti-references, or design principles shift)
 - `agent-docs/PRODUCT_SENSE.md`
 - `apps/web/README.md`
+## Member-owned provider setup
+
+- `/connect`, contextual assistant handoffs, and reconnect/repair render the same
+  Web-owned provider-indexed setup projection. Do not reproduce the state machine
+  in React or prompts, and do not add a provider-specific scalar prop to the page.
+- Use `MemberOwnedProviderSetup` for production and both design-catalog studies.
+  Pass explicit registered provider presentation metadata; the component has no
+  hidden Strava default.
+  Studies are synthetic and inert; production actions call authenticated,
+  CSRF-protected routes.
+- Show one truthful primary action only when provider sign-in/consent, OAuth, or
+  retry is required. Working, connected, repair, transient retry, and
+  disconnect-first states remain visible after refresh. Never render client-id or
+  client-secret fields, and never display a captured secret.
+- Browser handoffs must remain same-origin under `/computer/handoff/`; external
+  redirects are reserved for the exact OAuth authorization URL. Preserve source
+  card semantics, keyboard focus, accessible status copy, and narrow-screen flow.

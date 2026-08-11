@@ -1,4 +1,11 @@
 import type { AppleHealthRelaySetupGuideId } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
+import type {
+  MemberOwnedProviderSetupPresentation,
+  MemberOwnedProviderSetupView,
+} from "@/src/lib/device-sync/provider-setup/types";
+import type {
+  MemberOwnedDeviceProviderApplicationProvider,
+} from "@/src/lib/device-sync/provider-applications";
 
 export type LogoAsset = {
   className: string;
@@ -23,6 +30,9 @@ export type ConnectSource = {
   historicalResetIncomplete?: boolean;
   id: string;
   logo: LogoAsset;
+  memberOwnedSetup?: MemberOwnedProviderSetupView | null;
+  memberOwnedSetupPresentation?: MemberOwnedProviderSetupPresentation;
+  memberOwnedSetupProvider?: MemberOwnedDeviceProviderApplicationProvider;
   name: string;
   recoveryKind?: "connection_reset";
   requiresReconnect?: boolean;

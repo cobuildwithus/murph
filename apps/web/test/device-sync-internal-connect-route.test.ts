@@ -4,12 +4,20 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceConnectIntent: vi.fn(),
+  ensureMemberOwnedProviderSetup: vi.fn(),
   isHostedThreadContainerMember: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/connect-intents", () => ({
   createHostedDeviceConnectIntent: mocks.createHostedDeviceConnectIntent,
+}));
+
+vi.mock("@/src/lib/device-sync/provider-setup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/device-sync/provider-setup")>()),
+  createMemberOwnedProviderSetupService: vi.fn(() => ({
+    ensure: mocks.ensureMemberOwnedProviderSetup,
+  })),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
@@ -47,6 +55,10 @@ describe("device sync internal connect-link route", () => {
     vi.stubEnv("STRAVA_CLIENT_SECRET", "");
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");
     mocks.isHostedThreadContainerMember.mockResolvedValue(false);
+    mocks.ensureMemberOwnedProviderSetup.mockResolvedValue({
+      id: "dps_strava_123",
+      provider: "strava",
+    });
     mocks.createHostedDeviceConnectIntent.mockResolvedValue({
       claim: "dc_opaque",
       connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_opaque&connectSource=whoop",
@@ -104,16 +116,22 @@ describe("device sync internal connect-link route", () => {
     expect(JSON.stringify(infoSpy.mock.calls)).not.toContain("opaque-state");
   });
 
-  it("does not issue a hosted connect link for configured Strava routes", async () => {
+  it("issues a provider-setup intent for Strava without using configured global routes", async () => {
     vi.stubEnv("WHOOP_CLIENT_ID", "");
     vi.stubEnv("WHOOP_CLIENT_SECRET", "");
-    vi.stubEnv("STRAVA_CLIENT_ID", "strava-client");
-    vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-secret");
+    vi.stubEnv("STRAVA_CLIENT_ID", "NON_CREDENTIAL_LEGACY_STRAVA_CLIENT_ID");
+    vi.stubEnv("STRAVA_CLIENT_SECRET", "NON_CREDENTIAL_LEGACY_STRAVA_CLIENT_SECRET");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "junction-client-user-id-secret");
     vi.stubEnv("JUNCTION_ENV", "sandbox");
     vi.stubEnv("JUNCTION_PROVIDER_FILTER", "strava");
     vi.stubEnv("JUNCTION_REGION", "us");
+    mocks.createHostedDeviceConnectIntent.mockResolvedValueOnce({
+      claim: "dc_strava_setup",
+      connectUrl:
+        "https://join.example.test/connect#deviceConnectIntent=dc_strava_setup&connectSource=strava",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+    });
 
     const response = await internalDeviceSyncConnectLinkRoute.POST(
       new Request("https://join.example.test/api/internal/device-sync/connect-targets/strava/connect-link", {
@@ -126,13 +144,25 @@ describe("device sync internal connect-link route", () => {
       },
     );
 
-    expect(response.status).toBe(404);
-    expect(mocks.createHostedDeviceConnectIntent).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toMatchObject({
-      error: {
-        code: "HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED",
-        retryable: false,
-      },
+    expect(response.status).toBe(200);
+    expect(mocks.ensureMemberOwnedProviderSetup).toHaveBeenCalledWith("member_123");
+    expect(mocks.createHostedDeviceConnectIntent).toHaveBeenCalledWith({
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      memberId: "member_123",
+      provider: "strava",
+      providerSetupId: "dps_strava_123",
+      request: expect.any(Request),
+      sourceProviderSlug: null,
+    });
+    await expect(response.json()).resolves.toEqual({
+      authorizationUrl:
+        "https://join.example.test/connect#deviceConnectIntent=dc_strava_setup&connectSource=strava",
+      connectUrl:
+        "https://join.example.test/connect#deviceConnectIntent=dc_strava_setup&connectSource=strava",
+      expiresAt: "2026-04-04T12:00:00.000Z",
+      provider: "strava",
+      providerLabel: "Strava",
     });
   });
 

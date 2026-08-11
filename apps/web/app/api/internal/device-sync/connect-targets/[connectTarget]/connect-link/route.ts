@@ -5,11 +5,17 @@ import {
   listConfiguredDeviceSyncConnectTargets,
   readConfiguredDeviceSyncConnectTargetConfigs,
   resolveConfiguredDeviceSyncConnectTarget,
+  type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 
 import {
   createHostedDeviceConnectIntent,
 } from "@/src/lib/device-sync/connect-intents";
+import {
+  createMemberOwnedProviderSetupService,
+  readMemberOwnedProviderSetupRegistration,
+  readMemberOwnedProviderSetupRegistrationByConnectTarget,
+} from "@/src/lib/device-sync/provider-setup";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { readOptionalJsonObject, resolveDecodedRouteParam } from "@/src/lib/http";
 import {
@@ -19,6 +25,10 @@ import { isHostedThreadContainerMember } from "@/src/lib/hosted-onboarding/membe
 
 type HostedAssistantDeviceConnectMessagingReturnTarget =
   "imessage" | "telegram";
+
+type HostedDeviceConnectLinkTarget = DeviceSyncConnectTarget & {
+  memberOwnedSetup: boolean;
+};
 
 const HOSTED_ASSISTANT_DEVICE_CONNECT_UNAVAILABLE_ERROR = {
   code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE",
@@ -146,13 +156,26 @@ async function requireHostedDeviceConnectCallbackRequest(request: Request): Prom
 
 async function createHostedDeviceConnectLinkIntent(input: {
   request: Request;
-  target: NonNullable<ReturnType<typeof resolveConfiguredDeviceSyncConnectTarget>>;
+  target: HostedDeviceConnectLinkTarget;
   userId: string;
 }) {
   try {
+    const setupRegistration = input.target.memberOwnedSetup
+      ? readMemberOwnedProviderSetupRegistration(input.target.provider)
+      : null;
+    const setup = setupRegistration
+      ? await createMemberOwnedProviderSetupService(
+          setupRegistration.coordinates.provider,
+        ).ensure(input.userId)
+      : null;
     return await createHostedDeviceConnectIntent({
       connectSourceId: input.target.connectSourceId,
       connectTarget: input.target.connectTarget,
+      ...(setup
+        ? {
+            providerSetupId: setup.id,
+          }
+        : {}),
       memberId: input.userId,
       provider: input.target.provider,
       request: input.request,
@@ -163,7 +186,19 @@ async function createHostedDeviceConnectLinkIntent(input: {
   }
 }
 
-function resolveHostedDeviceConnectTarget(connectTarget: string) {
+function resolveHostedDeviceConnectTarget(
+  connectTarget: string,
+): HostedDeviceConnectLinkTarget {
+  const memberOwnedRegistration =
+    readMemberOwnedProviderSetupRegistrationByConnectTarget(connectTarget);
+  if (memberOwnedRegistration) {
+    return {
+      ...memberOwnedRegistration.coordinates,
+      label: memberOwnedRegistration.presentation.providerName,
+      memberOwnedSetup: true,
+    };
+  }
+
   let target: ReturnType<typeof resolveConfiguredDeviceSyncConnectTarget> = null;
   try {
     target = resolveConfiguredDeviceSyncConnectTarget(
@@ -186,7 +221,7 @@ function resolveHostedDeviceConnectTarget(connectTarget: string) {
     });
   }
 
-  return target;
+  return { ...target, memberOwnedSetup: false };
 }
 
 async function readHostedDeviceConnectRequestBody(

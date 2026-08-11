@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 200,
+  "item": {
+    "id": "private-strava-setup-journey",
+    "kind": "feature",
+    "priority": 4,
+    "title": "A private Strava setup journey",
+    "summary": "Starting or repairing Strava now uses one durable Connect journey instead of asking you to copy developer credentials into Murph.",
+    "details": "Murph creates or recovers only its marked private application, seals credentials without displaying them, continues with read-only OAuth, and keeps saved progress for sign-in, consent, retry, disconnect, and deletion. This release records checked-in workflow and deterministic fake-provider validation; it does not claim external production launch proof.",
+    "relevanceTags": [
+      "strava",
+      "connections",
+      "privacy",
+      "wearables"
+    ],
+    "sourcePullRequests": [],
+    "tryIt": {
+      "href": "/connect#connectSource=strava",
+      "label": "Open Strava setup"
+    }
+  }
+}

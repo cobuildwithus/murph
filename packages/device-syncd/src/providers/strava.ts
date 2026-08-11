@@ -71,16 +71,19 @@ import type { StravaWebhookSubscriptionClient } from "./strava-webhooks.ts";
 
 export type { StravaDeviceSyncProviderConfig } from "../config/provider-types.ts";
 
-export type StravaDeviceSyncRevocationConfig = Pick<
-  StravaDeviceSyncProviderConfig,
-  "authBaseUrl" | "fetchImpl" | "requestTimeoutMs"
->;
+export interface StravaDeviceSyncRevocationConfig {
+  authBaseUrl?: string;
+  clientId: string;
+  clientSecret: string;
+  fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
+}
 
 const STRAVA_AUTH_BASE_URL = "https://www.strava.com";
 const STRAVA_API_BASE_URL = "https://www.strava.com/api/v3";
 const STRAVA_AUTHORIZE_PATH = "/oauth/authorize";
 const STRAVA_TOKEN_PATH = "/oauth/token";
-const STRAVA_DEAUTHORIZE_PATH = "/oauth/deauthorize";
+const STRAVA_REVOKE_PATH = "/oauth/revoke";
 const STRAVA_PROVIDER_DESCRIPTOR =
   resolveDeviceProviderDescriptor("strava") ??
   (() => {
@@ -534,7 +537,7 @@ export function resolveStravaWebhookPreflightResponse(input: {
 
 export async function revokeStravaDeviceSyncAccess(
   account: DeviceSyncAccount,
-  config: StravaDeviceSyncRevocationConfig = {},
+  config: StravaDeviceSyncRevocationConfig,
 ): Promise<void> {
   const tokens = getDeviceSyncAccountOAuthTokens(account);
   if (!tokens?.accessToken) {
@@ -551,39 +554,47 @@ async function revokeStravaAccessToken(
   const fetchImpl = config.fetchImpl ?? fetch;
   const authBaseUrl = (config.authBaseUrl ?? STRAVA_AUTH_BASE_URL).replace(/\/+$/u, "");
   const timeoutMs = Math.max(1_000, config.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const url = new URL(`${authBaseUrl}${STRAVA_DEAUTHORIZE_PATH}`);
-  url.searchParams.set("access_token", accessToken);
+  const authorization = Buffer.from(
+    `${config.clientId}:${config.clientSecret}`,
+    "utf8",
+  ).toString("base64");
+  const body = new URLSearchParams({
+    token: accessToken,
+    token_type_hint: "access_token",
+  });
 
-  const response = await fetchImpl(url.toString(), {
+  const response = await fetchImpl(`${authBaseUrl}${STRAVA_REVOKE_PATH}`, {
     method: "POST",
     headers: {
       Accept: "application/json",
+      Authorization: `Basic ${authorization}`,
+      "Content-Type": "application/x-www-form-urlencoded",
     },
+    body,
     signal: AbortSignal.timeout(timeoutMs),
   });
 
-  if (response.status === 401 || response.status === 404) {
-    return;
-  }
-
   if (!response.ok) {
     throw buildStravaApiError(
-      "STRAVA_DEAUTHORIZE_FAILED",
-      "Strava deauthorization failed.",
+      "STRAVA_REVOKE_FAILED",
+      "Strava access revocation failed.",
       response,
       await parseResponseBody(response),
       {
         retryable: response.status === 429 || response.status >= 500,
-        accountStatus: response.status === 401 ? "disconnected" : null,
         diagnostics: buildProviderRequestDiagnostics({
           method: "POST",
-          endpointKind: "strava_oauth_deauthorize",
-          authKind: "bearer_access_token_query",
-          authPlacement: "query_parameters",
-          credentialPresent: Boolean(accessToken),
-          contentType: "none",
-          bodyKind: "none",
-          queryParameterNames: ["access_token"],
+          endpointKind: "strava_oauth_revoke",
+          authKind: "oauth_client_basic",
+          authPlacement: "authorization_header",
+          credentialPresent: Boolean(
+            config.clientId.trim()
+            && config.clientSecret.trim()
+            && accessToken.trim(),
+          ),
+          contentType: "application_x_www_form_urlencoded",
+          bodyKind: "form_urlencoded",
+          bodyFieldNames: ["token", "token_type_hint"],
         }),
       },
     );

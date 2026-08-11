@@ -16,6 +16,10 @@ import {
 } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildWhoopAppleHealthSetupGuide } from "@/src/lib/device-sync/whoop-apple-health-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
+import type {
+  MemberOwnedProviderSetupPresentation,
+  MemberOwnedProviderSetupView,
+} from "@/src/lib/device-sync/provider-setup/types";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import {
@@ -32,6 +36,7 @@ import {
   markCallbackConnectedSource,
   markLocallyDisconnectedSources,
   readDeviceConnectIntentFromCurrentLocation,
+  readSafeMemberOwnedProviderHandoffUrl,
   requestConnectionAuthorizationUrl,
   resolveCallbackSourceId,
   resolveConnectIntentRedirectSource,
@@ -54,6 +59,23 @@ import type {
 
 interface HostedDeviceSyncDisconnectResponse {
   warning?: { historicalResetIncomplete?: boolean; message: string };
+}
+
+interface MemberOwnedProviderSetupReadResponse {
+  presentation: MemberOwnedProviderSetupPresentation;
+  setup: MemberOwnedProviderSetupView | null;
+}
+
+interface MemberOwnedProviderSetupMutationResponse {
+  handoffUrl?: string;
+  presentation: MemberOwnedProviderSetupPresentation;
+  setup: MemberOwnedProviderSetupView;
+}
+
+interface MemberOwnedProviderOAuthResponse {
+  authorizationUrl: string;
+  presentation: MemberOwnedProviderSetupPresentation;
+  setup: MemberOwnedProviderSetupView;
 }
 
 type ConnectStartOptions = {
@@ -130,6 +152,13 @@ export function ConnectSourcesGrid({
   const [disconnectedSourceIds, setDisconnectedSourceIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
+  const [memberOwnedSetupBySourceId, setMemberOwnedSetupBySourceId] = useState<
+    ReadonlyMap<string, MemberOwnedProviderSetupView | null>
+  >(() => new Map(
+    sources
+      .filter((source) => Boolean(source.memberOwnedSetupProvider))
+      .map((source) => [source.id, source.memberOwnedSetup ?? null] as const),
+  ));
   const [locationConnectIntent] = useState<InitialDeviceConnectIntent>(() =>
     initialConnectIntent ? null : readDeviceConnectIntentFromCurrentLocation(),
   );
@@ -146,7 +175,18 @@ export function ConnectSourcesGrid({
     () =>
       sortConnectSourcesByConnectionState(
         markLocallyDisconnectedSources(
-          markCallbackConnectedSource(sources, callbackConnectedSourceId),
+          markCallbackConnectedSource(
+            sources.map((source) => source.memberOwnedSetupProvider
+              ? {
+                  ...source,
+                  memberOwnedSetup:
+                    memberOwnedSetupBySourceId.get(source.id)
+                    ?? source.memberOwnedSetup
+                    ?? null,
+                }
+              : source),
+            callbackConnectedSourceId,
+          ),
           disconnectedConnectionIds,
           disconnectedSourceIds,
         ).filter(
@@ -164,6 +204,7 @@ export function ConnectSourcesGrid({
       callbackConnectedSourceId,
       disconnectedConnectionIds,
       disconnectedSourceIds,
+      memberOwnedSetupBySourceId,
       sources,
     ],
   );
@@ -247,6 +288,56 @@ export function ConnectSourcesGrid({
     openAuthDialog();
   }, [activeConnectIntent, authenticated, displaySources, openAuthDialog]);
 
+  const startMemberOwnedProviderSetup = useCallback(
+    async (source: ConnectSource): Promise<void> => {
+      const provider = source.memberOwnedSetupProvider;
+      if (!provider) {
+        return;
+      }
+      const current = memberOwnedSetupBySourceId.get(source.id)
+        ?? source.memberOwnedSetup
+        ?? null;
+      const startOAuth = async () => {
+        const oauth = await requestHostedOnboardingJson<MemberOwnedProviderOAuthResponse>({
+          method: "POST",
+          url: `/api/settings/device-sync/provider-setups/${encodeURIComponent(provider)}/oauth`,
+        });
+        setMemberOwnedSetupBySourceId((values) =>
+          new Map(values).set(source.id, oauth.setup),
+        );
+        window.location.assign(oauth.authorizationUrl);
+      };
+
+      if (current?.action === "continue_oauth") {
+        await startOAuth();
+        return;
+      }
+
+      const advanced = await requestHostedOnboardingJson<MemberOwnedProviderSetupMutationResponse>({
+        method: "POST",
+        url: `/api/settings/device-sync/provider-setups/${encodeURIComponent(provider)}`,
+      });
+      setMemberOwnedSetupBySourceId((values) =>
+        new Map(values).set(source.id, advanced.setup),
+      );
+      if (advanced.handoffUrl) {
+        const handoffUrl = readSafeMemberOwnedProviderHandoffUrl(
+          advanced.handoffUrl,
+          window.location.origin,
+        );
+        if (!handoffUrl) {
+          throw new Error("Murph could not open the secure provider sign-in handoff.");
+        }
+        window.location.assign(handoffUrl);
+        return;
+      }
+      if (advanced.setup.action === "continue_oauth") {
+        await startOAuth();
+      }
+    },
+    [memberOwnedSetupBySourceId],
+  );
+
   const startConnection = useCallback(
     async (source: ConnectSource, options: ConnectStartOptions = {}) => {
       if (!authenticated || (!options.intentClaim && !source.connectTarget)) {
@@ -259,6 +350,23 @@ export function ConnectSourcesGrid({
       setConnectIntentRecovery(null);
       setShowWhoopAppleHealthSetupDialog(false);
       setActiveSetupGuideId(null);
+
+      if (source.memberOwnedSetupProvider && !options.intentClaim) {
+        setPendingSourceId(source.id);
+        try {
+          await startMemberOwnedProviderSetup(source);
+        } catch (error) {
+          setActionError({
+            message: error instanceof Error
+              ? error.message
+              : "Private provider setup could not continue.",
+            sourceId: source.id,
+          });
+        } finally {
+          setPendingSourceId(null);
+        }
+        return;
+      }
 
       if (
         requiresVitalConnectionPreflight(source) &&
@@ -322,7 +430,7 @@ export function ConnectSourcesGrid({
         setPendingSourceId(null);
       }
     },
-    [authenticated],
+    [authenticated, startMemberOwnedProviderSetup],
   );
 
   useEffect(() => {
@@ -449,11 +557,33 @@ export function ConnectSourcesGrid({
           (current) => new Set([...current, connectionId]),
         );
       }
+      let setupRefreshFailed = false;
+      if (source.memberOwnedSetupProvider) {
+        try {
+          const refreshed =
+            await requestHostedOnboardingJson<MemberOwnedProviderSetupReadResponse>({
+              method: "GET",
+              url: `/api/settings/device-sync/provider-setups/${encodeURIComponent(source.memberOwnedSetupProvider)}`,
+            });
+          setMemberOwnedSetupBySourceId((values) =>
+            new Map(values).set(source.id, refreshed.setup),
+          );
+        } catch {
+          // The disconnect already succeeded. Do not fabricate a setup state or
+          // turn the completed upstream effect into a false failure.
+          setupRefreshFailed = true;
+        }
+      }
+      const warningDetail = result.warning?.message
+        ? resolveDisconnectWarningDetail(result.warning)
+        : setupRefreshFailed
+          ? "Refresh this page to update the private application setup status."
+          : null;
       setNotice({
-        kind: result.warning?.message ? "warning" : "success",
+        kind: warningDetail ? "warning" : "success",
         title: "Source disconnected",
-        message: result.warning?.message
-          ? `${resolveDisconnectSuccessMessage(source)} ${resolveDisconnectWarningDetail(result.warning)}`
+        message: warningDetail
+          ? `${resolveDisconnectSuccessMessage(source)} ${warningDetail}`
           : resolveDisconnectSuccessMessage(source),
       });
     } catch (error) {

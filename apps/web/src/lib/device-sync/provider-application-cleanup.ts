@@ -1,4 +1,3 @@
-import { revokeStravaDeviceSyncAccess } from "@murphai/device-syncd/providers/strava";
 import type {
   DeviceConnectionHandler,
   DeviceSyncRegistry,
@@ -50,15 +49,6 @@ export async function resolveHostedDeviceSyncConnectionCleanup(input: {
   } catch (error) {
     if (!isRepairableDeviceProviderApplicationStateError(error)) {
       throw error;
-    }
-
-    if (input.provider === "strava") {
-      return {
-        repairRequired: true,
-        registry: null,
-        revokeAccessOverride: revokeStravaDeviceSyncAccess,
-        warning: null,
-      };
     }
 
     return {

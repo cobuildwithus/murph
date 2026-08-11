@@ -692,6 +692,11 @@ Provider-owned webhook-admin settings:
 - `OURA_WEBHOOK_VERIFICATION_TOKEN` when the shared Oura provider config should answer webhook preflight challenges and maintain Oura webhook subscriptions. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
 - `STRAVA_WEBHOOK_SIGNING_SECRET` when direct Strava webhook POST delivery is enabled, plus optional `STRAVA_WEBHOOK_TIMESTAMP_TOLERANCE_MS`; these stay on the provider-owned config path and are not needed for hosted connect-source flows that do not use direct Strava webhook delivery.
 - `STRAVA_WEBHOOK_VERIFY_TOKEN` when the shared Strava provider config should answer webhook preflight challenges and maintain the one app-global Strava webhook subscription. This secret should stay on the provider-owned config path rather than the generic hosted env surface.
+- Direct hosted Strava connection does not use `STRAVA_CLIENT_ID` or
+  `STRAVA_CLIENT_SECRET`; it is available only through the personal member-owned
+  setup. The checked-in adapter requests `activity:read`, starts the existing
+  initial backfill and scheduled polling path, and deliberately leaves webhook
+  administration disabled for member-owned applications.
 
 Hosted onboarding extras:
 
@@ -1747,6 +1752,12 @@ Hosted settings-authenticated wearable routes:
 - `GET /api/settings/device-sync`
 - `GET /api/settings/device-sync/connections/:connectionId/status`
 - `POST /api/settings/device-sync/connections/:connectionId/disconnect`
+- `GET|POST /api/settings/device-sync/provider-setups/strava` reads or advances
+  the durable member-owned setup; POST may return only a same-origin hosted
+  computer handoff and safe setup metadata.
+- `POST /api/settings/device-sync/provider-setups/strava/oauth` starts OAuth only
+  for the exact encrypted application id/revision and emits the existing
+  initiating-browser callback proof.
 - `POST /api/settings/email/sync`
 
 Assertion-authenticated browser-to-agent bridge routes:

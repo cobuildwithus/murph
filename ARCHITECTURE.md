@@ -905,6 +905,28 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   app-bound connection relies on scheduled reconciliation until an explicit
   private-application webhook authority is designed.
 
+  `DeviceProviderSetup` is the durable Web owner for the member-visible setup
+  journey. One active row per personal member and finite member-owned provider
+  records the exact connect coordinates, setup-owned browser run, provider
+  submission ambiguity, application id/revision, and terminal outcome. A small
+  exhaustive checked-in registry maps each supported provider to presentation
+  metadata and one explicit adapter; adding a provider does not change the
+  store, state machine, routes, `/connect` projection, deletion owner, or shared
+  component. The adapter owns only finite provider-dashboard semantics. The
+  existing hosted computer owner owns the persistent browser profile and human
+  handoff, and admits navigation only on a run bound to that exact setup (or a
+  newly acquired setup-owned run persisted before navigation).
+  `DeviceProviderApplication` owns encrypted credentials, while device-sync owns
+  OAuth, authoritative connection activation, initial backfill, polling, revoke,
+  and disconnect. Setup reads reconcile their visible projection from current
+  connection truth; post-callback and post-disconnect projection updates are
+  idempotent best-effort bookkeeping. Strava is the first registry entry: it
+  recognizes only the deterministic Murph marker, models the provider's
+  subscription prerequisite as a recoverable pause, uses the checked-in callback
+  and `activity:read` scope, never falls back to global credentials, and does not
+  enable member-application webhooks. Ambiguous form submission resumes by
+  dashboard inspection rather than replaying creation.
+
   The shared public footer may read incident.io's fixed, public, bodyless,
   queryless status summary directly from the browser. The response is display
   evidence only and creates no product, incident, or availability authority.

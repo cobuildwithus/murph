@@ -1821,7 +1821,7 @@ export async function runHostedWorkspaceAssistantPhase(
     string,
     HostedRuntimeProductFeedbackRecord
   >();
-  if (shouldWriteHostedDeviceConnectContextLog({ deviceConnectProviders, input })) {
+  if (shouldWriteHostedDeviceConnectContextLog(input)) {
     void writeHostedDeviceConnectRuntimeLog({
       deviceConnectProviders,
       input,
@@ -8234,18 +8234,21 @@ function resolveHostedWorkspaceDeviceConnectProviders(
   runtime: Pick<NormalizedHostedAssistantRuntimeConfig, "resolvedConfig">,
 ): Array<{ label: string; provider: string }> {
   const providerConfigs = runtime.resolvedConfig.deviceSync?.providerConfigs ?? null;
-  if (!providerConfigs) {
-    return [];
-  }
+  const providers = providerConfigs
+    ? listConfiguredDeviceSyncConnectTargets(providerConfigs)
+        .filter((target) =>
+          isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
+        )
+        .map((target) => ({
+          label: target.label,
+          provider: target.connectTarget,
+        }))
+    : [];
 
-  return listConfiguredDeviceSyncConnectTargets(providerConfigs)
-    .filter((target) =>
-      isDeviceConnectSourceAvailableForConnection(target.connectSourceId)
-    )
-    .map((target) => ({
-      label: target.label,
-      provider: target.connectTarget,
-    }));
+  if (!providers.some((candidate) => candidate.provider === "strava")) {
+    providers.push({ label: "Strava", provider: "strava" });
+  }
+  return providers;
 }
 
 function resolveHostedWorkspaceDeviceReconnectTargets(
@@ -8485,13 +8488,11 @@ function resolveHostedClinicalRecordsConnectLinkTool(
   return { createConnectLink };
 }
 
-function shouldWriteHostedDeviceConnectContextLog(input: {
-  deviceConnectProviders: readonly { label: string; provider: string }[];
-  input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): boolean {
-  return input.deviceConnectProviders.length > 0
-    || input.input.runtime.platform.deviceSyncPort != null
-    || input.input.runtime.resolvedConfig.deviceSync !== null;
+function shouldWriteHostedDeviceConnectContextLog(
+  input: HostedWorkspaceRuntimeAssistantPhaseInput,
+): boolean {
+  return input.runtime.platform.deviceSyncPort != null
+    || input.runtime.resolvedConfig.deviceSync !== null;
 }
 
 async function writeHostedDeviceConnectRuntimeLog(input: {

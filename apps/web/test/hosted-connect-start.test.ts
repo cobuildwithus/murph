@@ -49,6 +49,13 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
+const STRAVA_TARGET = {
+  connectSourceId: "strava",
+  connectTarget: "strava",
+  label: "Strava",
+  provider: "strava",
+} as const;
+
 const OURA_TARGET = {
   connectSourceId: "oura",
   connectTarget: "oura",
@@ -93,6 +100,21 @@ afterEach(() => {
 });
 
 describe("startHostedDeviceSyncConnection", () => {
+  it("rejects provider-global direct Strava before creating OAuth state", async () => {
+    await expect(startHostedDeviceSyncConnection({
+      defaultReturnTo: "/device-sync/connect/complete?source=connect",
+      request: REQUEST,
+      target: STRAVA_TARGET,
+    })).rejects.toMatchObject({
+      code: "DEVICE_PROVIDER_SETUP_REQUIRED",
+      httpStatus: 409,
+    });
+
+    expect(mocks.isDeviceConnectSourceAvailableForConnection).not.toHaveBeenCalled();
+    expect(mocks.requireActiveHostedAppSessionFromRequest).not.toHaveBeenCalled();
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+  });
+
   it("starts provider authorization when the callback uses the app-session hostname", async () => {
     await expect(startHostedDeviceSyncConnection({
       defaultReturnTo: "/device-sync/connect/complete?source=connect",

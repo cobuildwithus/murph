@@ -87,4 +87,30 @@ describe("hosted device connect intents", () => {
     expect(fragment.get("connectSource")).toBe("whoop");
     expect(result.expiresAt).toBe("2026-05-13T12:00:00.000Z");
   });
+
+  it("derives provider-setup intent ownership from the nullable setup binding", async () => {
+    const { toHostedDeviceConnectIntentRecord } = await import(
+      "@/src/lib/device-sync/connect-intent-core"
+    );
+    const base = {
+      claimHash: "synthetic_claim_hash",
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      createdAt: new Date("2026-08-11T12:00:00.000Z"),
+      expiresAt: new Date("2026-08-11T12:15:00.000Z"),
+      memberId: "member_123",
+      provider: "strava",
+      sourceProviderSlug: null,
+      startedAt: null,
+    };
+
+    expect(toHostedDeviceConnectIntentRecord({
+      ...base,
+      providerSetupId: null,
+    }).providerSetupId).toBeNull();
+    expect(toHostedDeviceConnectIntentRecord({
+      ...base,
+      providerSetupId: "dps_synthetic",
+    }).providerSetupId).toBe("dps_synthetic");
+  });
 });

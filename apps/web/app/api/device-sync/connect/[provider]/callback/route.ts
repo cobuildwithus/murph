@@ -20,9 +20,14 @@ import {
   verifyHostedDeviceSyncCallbackProof,
 } from "@/src/lib/device-sync/browser-callback-proof";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
+import {
+  createMemberOwnedProviderSetupService,
+  readMemberOwnedProviderSetupRegistration,
+} from "@/src/lib/device-sync/provider-setup";
 import { reportHostedDeviceConnectFailure } from "@/src/lib/device-sync/connect-failure-alert";
 import { requireActiveHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { getPrisma } from "@/src/lib/prisma";
 
 // The provider proof cookie is one slot per provider that a newer start may
 // overwrite while an older callback response is still in flight, so no
@@ -74,6 +79,42 @@ export async function GET(
     const result = await publicIngress.handleConnectionCallback(providerName, {
       expectedOwnerId: session.member.id,
     });
+    const memberOwnedRegistration = readMemberOwnedProviderSetupRegistration(
+      providerName,
+    );
+    if (memberOwnedRegistration) {
+      // The created connection is authoritative. Projection repair must never
+      // turn a successful provider callback into a false callback failure.
+      try {
+        const provider = memberOwnedRegistration.coordinates.provider;
+        const connection = await getPrisma().deviceConnection.findFirst({
+          select: {
+            providerApplicationId: true,
+            providerApplicationRevision: true,
+          },
+          where: {
+            id: result.account.id,
+            provider,
+            userId: session.member.id,
+          },
+        });
+        if (
+          connection?.providerApplicationId
+          && connection.providerApplicationRevision !== null
+        ) {
+          await createMemberOwnedProviderSetupService(provider).markConnected({
+            applicationId: connection.providerApplicationId,
+            memberId: session.member.id,
+            revision: connection.providerApplicationRevision,
+          });
+        }
+      } catch (projectionError) {
+        console.warn("Member-owned provider setup callback projection failed.", {
+          errorType: describeHostedDeviceSyncCallbackErrorType(projectionError),
+          provider: memberOwnedRegistration.coordinates.provider,
+        });
+      }
+    }
     const fallbackReturnTo = new URL("/connect", request.url).toString();
 
     return providerCallbackRedirect({

@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   listConnectionSources: vi.fn(),
   listConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
+  markMemberOwnedSetupDisconnected: vi.fn(),
+  readMemberOwnedProviderSetupRegistration: vi.fn(),
   probeRest: vi.fn(),
   prepareConnectionStart: vi.fn(),
   prismaClient: {} as {
@@ -43,6 +45,13 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService: mocks.createHostedDeviceSyncPublicIngressService,
+}));
+
+vi.mock("@/src/lib/device-sync/provider-setup", () => ({
+  createMemberOwnedProviderSetupService: () => ({
+    markDisconnected: mocks.markMemberOwnedSetupDisconnected,
+  }),
+  readMemberOwnedProviderSetupRegistration: mocks.readMemberOwnedProviderSetupRegistration,
 }));
 
 vi.mock("@/src/lib/device-sync/providers", () => ({
@@ -470,11 +479,18 @@ describe("device sync settings routes", () => {
       state: "callback_state_1234567890",
     });
     mocks.disconnectConnection.mockResolvedValue({
+      connection: {
+        id: "dspc_oura_123",
+        provider: "oura",
+        status: "disconnected",
+      },
       warning: {
         code: "REMOTE_REVOKE_FAILED",
         message: "Provider revocation timed out.",
       },
     });
+    mocks.markMemberOwnedSetupDisconnected.mockResolvedValue(undefined);
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -1302,7 +1318,7 @@ describe("device sync settings routes", () => {
     expect(mocks.findManyDeviceConnections).not.toHaveBeenCalled();
   });
 
-  it("rejects Strava source starts even when direct and Junction credentials are configured", async () => {
+  it("prevents the generic source-start route from bypassing member-owned Strava setup", async () => {
     vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
     vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
     vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
@@ -1324,11 +1340,11 @@ describe("device sync settings routes", () => {
       createRouteContext({ sourceId: "strava" }),
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "HOSTED_DEVICE_CONNECT_SOURCE_NOT_CONFIGURED",
-        message: "Hosted device connect source is not configured.",
+        code: "DEVICE_PROVIDER_SETUP_REQUIRED",
+        message: "Direct Strava connections must use the private provider setup journey.",
         retryable: false,
       },
     });
@@ -1795,11 +1811,66 @@ describe("device sync settings routes", () => {
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.disconnectConnection).toHaveBeenCalledWith("member_123", "dspc_oura_123");
     await expect(response.json()).resolves.toEqual({
+      connection: {
+        id: "dspc_oura_123",
+        provider: "oura",
+        status: "disconnected",
+      },
       warning: {
         code: "REMOTE_REVOKE_FAILED",
         message: "Provider revocation timed out.",
       },
     });
+  });
+
+
+  it("returns a completed member-owned disconnect when setup projection repair fails", async () => {
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.disconnectConnection.mockResolvedValueOnce({
+      connection: {
+        id: "dspc_strava_123",
+        provider: "strava",
+        status: "disconnected",
+      },
+      warning: null,
+    });
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValueOnce({
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+    });
+    mocks.markMemberOwnedSetupDisconnected.mockRejectedValueOnce(
+      new Error("NON_SECRET_TEST_PROJECTION_FAILURE"),
+    );
+
+    const response = await settingsDeviceSyncDisconnectRoute.POST(
+      new Request(
+        "https://join.example.test/api/settings/device-sync/connections/dspc_strava_123/disconnect",
+        {
+          headers: { origin: "https://join.example.test" },
+          method: "POST",
+        },
+      ),
+      createRouteContext({ connectionId: "dspc_strava_123" }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      connection: {
+        id: "dspc_strava_123",
+        provider: "strava",
+        status: "disconnected",
+      },
+      warning: null,
+    });
+    expect(mocks.markMemberOwnedSetupDisconnected).toHaveBeenCalledWith("member_123");
+    expect(warningSpy).toHaveBeenCalledWith(
+      "Member-owned provider setup disconnect projection failed.",
+      { errorType: "Error", provider: "strava" },
+    );
   });
 
   it("disconnects only the selected hosted Junction source", async () => {

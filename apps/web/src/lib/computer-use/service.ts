@@ -25,12 +25,14 @@ import {
   type KernelManagedAuthConnection,
 } from "./kernel-client";
 import {
+  MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE,
   PrismaComputerUseStore,
   type ComputerHandoffRecord,
   type ComputerManagedLoginBrowser,
   type ComputerRunCheckpointContext,
   type ComputerRunRecord,
   type ComputerUseStore,
+  type MemberOwnedProviderSetupComputerRunPurpose,
   type PersistedComputerHandoffPurpose,
 } from "./store";
 
@@ -98,6 +100,17 @@ export interface ComputerPauseForUserResult {
   runId: string;
   status: "awaiting_user";
   suggestedReply: string | null;
+}
+
+export interface ComputerProviderCredentialCaptureResult<T> {
+  title: string | null;
+  url: string | null;
+  value: T;
+}
+
+export interface ComputerProviderCredentials {
+  clientId: string;
+  clientSecret: string;
 }
 
 export interface ComputerExpiredRunCleanupResult {
@@ -197,6 +210,55 @@ export class ComputerUseService {
     return await this.startRunWithStore(input, this.store);
   }
 
+  async acquireOwnedRun(input: {
+    expectedRunId: string | null;
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+  }): Promise<ComputerRunHandle> {
+    await this.store.requireMemberOwnedProviderSetupRunAcquisition(input);
+    let handle = await this.acquireRunWithStore({
+      expectedRunId: input.expectedRunId,
+      memberId: input.memberId,
+      ownerKey: input.ownerKey,
+      ownerPurpose: input.ownerPurpose,
+      startUrl: null,
+    }, this.store);
+    if (
+      handle.status === "awaiting_user"
+      && handle.runId === input.expectedRunId
+    ) {
+      const run = await this.store.requireMemberOwnedProviderSetupRun({
+        memberId: input.memberId,
+        ownerKey: input.ownerKey,
+        ownerPurpose: input.ownerPurpose,
+        runId: handle.runId,
+      });
+      try {
+        await this.readAwaitingOpenBrowserState({
+          memberId: input.memberId,
+          now: this.now(),
+          resumeAfterMailboxItemId: null,
+          resumeDeliveryContext: null,
+          run,
+          store: this.store,
+        });
+        const resumed = await this.store.requireMemberOwnedProviderSetupRun({
+          memberId: input.memberId,
+          ownerKey: input.ownerKey,
+          ownerPurpose: input.ownerPurpose,
+          runId: handle.runId,
+        });
+        handle = runHandle(resumed, true);
+      } catch (error) {
+        if (!isComputerAwaitingUserError(error)) {
+          throw error;
+        }
+      }
+    }
+    return handle;
+  }
+
   async openRun(input: {
     memberId: string;
     resumeAfterMailboxItemId?: string | null;
@@ -289,11 +351,15 @@ export class ComputerUseService {
   }
 
   private async acquireRunWithStore(input: {
+    expectedRunId?: string | null;
     memberId: string;
+    ownerKey?: string | null;
+    ownerPurpose?: MemberOwnedProviderSetupComputerRunPurpose | null;
     startUrl: string | null;
   }, store: ComputerUseStore): Promise<ComputerRunHandle> {
     const now = this.now();
     const startUrl = requireComputerNavigationUrl(input.startUrl);
+    const owner = readComputerRunOwner(input);
 
     let activeRun = await store.findActiveRunForMember({
       memberId: input.memberId,
@@ -301,6 +367,14 @@ export class ComputerUseService {
     });
 
     if (activeRun) {
+      await assertReusableComputerRunOwner({
+        activeRun,
+        expectedRunId: input.expectedRunId ?? null,
+        memberId: input.memberId,
+        now,
+        owner,
+        store,
+      });
       if (activeRun.status === "cleanup_pending") {
         const cleanup = await this.expireRunAndDeleteBrowserBestEffort(
           activeRun,
@@ -338,6 +412,14 @@ export class ComputerUseService {
       return runHandle(activeRun, true);
     }
 
+    if (input.expectedRunId && !owner) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        message: "The browser run bound to this operation is no longer active.",
+        retryable: false,
+      });
+    }
+
     const kernel = this.requireKernel();
     const kernelProfileName = this.resolveKernelProfileName({
       memberId: input.memberId,
@@ -363,9 +445,19 @@ export class ComputerUseService {
         kernelProfileName,
         memberId: input.memberId,
         now,
+        ownerKey: owner?.ownerKey ?? null,
+        ownerPurpose: owner?.ownerPurpose ?? null,
         startUrl: sanitizeComputerDisplayUrl(startUrl),
       });
       if (!createResult.created) {
+        await assertReusableComputerRunOwner({
+          activeRun: createResult.run,
+          expectedRunId: input.expectedRunId ?? null,
+          memberId: input.memberId,
+          now,
+          owner,
+          store,
+        });
         if (createResult.run.status === "cleanup_pending") {
           const cleanup = await this.expireRunAndDeleteBrowserBestEffort(
             createResult.run,
@@ -528,6 +620,25 @@ export class ComputerUseService {
       memberId: input.memberId,
     });
     const run = await this.requireRunnableRun(input);
+    assertGenericComputerRun(run);
+    return this.executeBrowserAct(input, run);
+  }
+
+  async actOwnedRun(input: HostedComputerActRequest & {
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+  }): Promise<{ result: unknown; title: string | null; url: string | null }> {
+    await this.store.requireMemberOwnedProviderSetupRun(input);
+    const run = await this.requireRunnableRun(input);
+    return this.executeBrowserAct(input, run);
+  }
+
+  private async executeBrowserAct(
+    input: HostedComputerActRequest & { runId: string },
+    run: ComputerRunRecord,
+  ): Promise<{ result: unknown; title: string | null; url: string | null }> {
     const kernel = this.requireKernel();
     const sessionId = requireKernelSessionId(run);
     let result: Awaited<ReturnType<ComputerKernelClient["executePlaywright"]>>;
@@ -557,6 +668,115 @@ export class ComputerUseService {
     };
   }
 
+  async captureAndSealProviderCredentials<T>(input: {
+    code: string;
+    consume: (credentials: ComputerProviderCredentials) => Promise<T>;
+    memberId: string;
+    runId: string;
+    timeoutMs: number;
+  }): Promise<ComputerProviderCredentialCaptureResult<T>> {
+    await this.store.requireMemberComputerUseAvailable({
+      memberId: input.memberId,
+    });
+    const run = await this.requireRunnableRun(input);
+    assertGenericComputerRun(run);
+    return this.executeCredentialCapture(input, run);
+  }
+
+  async captureAndSealProviderCredentialsInOwnedRun<T>(input: {
+    code: string;
+    consume: (credentials: ComputerProviderCredentials) => Promise<T>;
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    runId: string;
+    timeoutMs: number;
+  }): Promise<ComputerProviderCredentialCaptureResult<T>> {
+    await this.store.requireMemberOwnedProviderSetupRun(input);
+    const run = await this.requireRunnableRun(input);
+    return this.executeCredentialCapture(input, run);
+  }
+
+  private async executeCredentialCapture<T>(
+    input: {
+      code: string;
+      consume: (credentials: ComputerProviderCredentials) => Promise<T>;
+      runId: string;
+      timeoutMs: number;
+    },
+    run: ComputerRunRecord,
+  ): Promise<ComputerProviderCredentialCaptureResult<T>> {
+    const kernel = this.requireKernel();
+    const sessionId = requireKernelSessionId(run);
+    let execution: Awaited<ReturnType<ComputerKernelClient["executePlaywright"]>>;
+    try {
+      execution = await kernel.executePlaywright({
+        code: buildComputerProviderCredentialCaptureCode(input.code),
+        sessionId,
+        timeoutMs: input.timeoutMs + COMPUTER_ACT_RESULT_MARGIN_MS,
+      });
+    } catch (error) {
+      throw addComputerActFailureContext(error, {
+        code: input.code,
+        timeoutMs: input.timeoutMs,
+      });
+    }
+
+    let credentials: ComputerProviderCredentials | null = null;
+    let sealed: {
+      state: ReturnType<typeof readRequiredBrowserActionStateResult>;
+      value: T;
+    } | null = null;
+    try {
+      let state: ReturnType<typeof readRequiredBrowserActionStateResult>;
+      try {
+        state = readRequiredBrowserActionStateResult(execution.result);
+      } catch {
+        throw computerUseError({
+          code: "HOSTED_COMPUTER_ACT_RESULT_INVALID",
+          httpStatus: 502,
+          message: "Provider application credential capture returned an invalid result.",
+          retryable: true,
+        });
+      }
+      credentials = readRequiredComputerProviderCredentials(state.result);
+      sealed = {
+        state,
+        value: await input.consume(credentials),
+      };
+    } finally {
+      if (credentials) {
+        credentials.clientId = "";
+        credentials.clientSecret = "";
+      }
+      scrubComputerProviderCredentialResult(execution.result);
+      execution.result = null;
+    }
+    if (!sealed) {
+      throw computerUseError({
+        code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_INVALID",
+        httpStatus: 502,
+        message: "Provider application credentials could not be captured safely.",
+        retryable: true,
+      });
+    }
+
+    await this.store.updateRunBrowserState({
+      expectedKernelSessionId: run.kernelSessionId,
+      lastTitle: sealed.state.title,
+      lastUrl: sanitizeComputerDisplayUrl(sealed.state.url),
+      runId: run.id,
+    }).catch(() => {
+      // Credential storage is already authoritative; this is only a display cache.
+    });
+
+    return {
+      title: sealed.state.title,
+      url: sanitizeComputerDisplayUrl(sealed.state.url),
+      value: sealed.value,
+    };
+  }
+
   async osControl(input: HostedComputerOsControlRequest & {
     memberId: string;
     runId: string;
@@ -566,6 +786,7 @@ export class ComputerUseService {
       memberId,
     });
     const run = await this.requireRunnableRun({ memberId, runId });
+    assertGenericComputerRun(run);
     const kernel = this.requireKernel();
     const sessionId = requireKernelSessionId(run);
     await requireNonSensitiveComputerOsTextTarget({
@@ -597,6 +818,21 @@ export class ComputerUseService {
     return await this.pauseForUserWithStore(input, this.store);
   }
 
+  async pauseOwnedRunForUser(input: {
+    handoffPurpose: HostedComputerHandoffPurpose;
+    memberId: string;
+    ownerKey: string;
+    ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+    reason: HostedComputerAwaitingReason;
+    runId: string;
+    suggestedReply: string | null;
+  }): Promise<ComputerPauseForUserResult> {
+    return await this.pauseForUserWithStore(input, this.store, {
+      ownerKey: input.ownerKey,
+      ownerPurpose: input.ownerPurpose,
+    });
+  }
+
   private async pauseForUserWithStore(
     input: {
       handoffPurpose: HostedComputerHandoffPurpose | null;
@@ -607,15 +843,28 @@ export class ComputerUseService {
       suggestedReply: string | null;
     },
     store: ComputerUseStore,
+    owner: ComputerRunOwner | null = null,
   ): Promise<ComputerPauseForUserResult> {
-    await store.requireMemberComputerUseAvailable({
-      memberId: input.memberId,
-    });
+    if (owner) {
+      await store.requireMemberOwnedProviderSetupRun({
+        memberId: input.memberId,
+        ownerKey: owner.ownerKey,
+        ownerPurpose: owner.ownerPurpose,
+        runId: input.runId,
+      });
+    } else {
+      await store.requireMemberComputerUseAvailable({
+        memberId: input.memberId,
+      });
+    }
     const now = this.now();
     const run = await this.requireFreshRun({
       memberId: input.memberId,
       runId: input.runId,
     }, store);
+    if (!owner) {
+      assertGenericComputerRun(run);
+    }
     if (input.handoffPurpose === "managed_login" && input.reason !== "login_needed") {
       throw managedLoginRequiresLoginNeededError();
     }
@@ -792,14 +1041,12 @@ export class ComputerUseService {
     memberId: string;
     token: string;
   }): Promise<ComputerHandoffPageState> {
-    await this.store.requireMemberComputerUseAvailable({
-      memberId: input.memberId,
-    });
-    const now = this.now();
     const tokenHash = sha256Hex(input.token);
-    let handoff = await this.store.requireHandoffByTokenHash({
+    let handoff = await this.store.requireComputerHandoffAccess({
+      memberId: input.memberId,
       tokenHash,
     });
+    const now = this.now();
 
     assertHandoffOwnedByMember(handoff, input.memberId);
     if (handoff.status === "completed") {
@@ -976,14 +1223,12 @@ export class ComputerUseService {
     memberId: string;
     token: string;
   }): Promise<ComputerManagedLoginContinuation> {
-    await this.store.requireMemberComputerUseAvailable({
-      memberId: input.memberId,
-    });
-    const now = this.now();
     const tokenHash = sha256Hex(input.token);
-    let handoff = await this.store.requireHandoffByTokenHash({
+    let handoff = await this.store.requireComputerHandoffAccess({
+      memberId: input.memberId,
       tokenHash,
     });
+    const now = this.now();
 
     assertHandoffOwnedByMember(handoff, input.memberId);
     if (handoff.status === "completed") {
@@ -1511,21 +1756,23 @@ export class ComputerUseService {
     memberId: string;
     token: string;
   }): Promise<ComputerHandoffCompletion> {
-    await this.store.requireMemberComputerUseAvailable({
+    const handoff = await this.store.requireComputerHandoffAccess({
       memberId: input.memberId,
+      tokenHash: sha256Hex(input.token),
     });
-    return await this.completeHandoffWithStore(input, this.store);
+    return await this.completeHandoffWithStore(input, this.store, handoff);
   }
 
-  private async completeHandoffWithStore(input: {
-    memberId: string;
-    token: string;
-  }, store: ComputerUseStore): Promise<ComputerHandoffCompletion> {
+  private async completeHandoffWithStore(
+    input: {
+      memberId: string;
+      token: string;
+    },
+    store: ComputerUseStore,
+    handoff: ComputerHandoffRecord,
+  ): Promise<ComputerHandoffCompletion> {
     const now = this.now();
     const tokenHash = sha256Hex(input.token);
-    const handoff = await store.requireHandoffByTokenHash({
-      tokenHash,
-    });
 
     assertHandoffOwnedByMember(handoff, input.memberId);
 
@@ -3510,6 +3757,89 @@ export function createComputerUseService(): ComputerUseService {
   return new ComputerUseService();
 }
 
+type ComputerRunOwner = {
+  ownerKey: string;
+  ownerPurpose: MemberOwnedProviderSetupComputerRunPurpose;
+};
+
+function readComputerRunOwner(input: {
+  ownerKey?: string | null;
+  ownerPurpose?: MemberOwnedProviderSetupComputerRunPurpose | null;
+}): ComputerRunOwner | null {
+  const ownerKey = input.ownerKey?.trim() || null;
+  const ownerPurpose = input.ownerPurpose ?? null;
+  if ((ownerKey === null) !== (ownerPurpose === null)) {
+    throw new TypeError("Computer run owner purpose and key must be supplied together.");
+  }
+  if (ownerPurpose === null || ownerKey === null) {
+    return null;
+  }
+  if (ownerPurpose !== MEMBER_OWNED_PROVIDER_SETUP_COMPUTER_RUN_PURPOSE) {
+    throw new TypeError("Computer run owner purpose is invalid.");
+  }
+  return { ownerKey, ownerPurpose };
+}
+
+async function assertReusableComputerRunOwner(input: {
+  activeRun: ComputerRunRecord;
+  expectedRunId: string | null;
+  memberId: string;
+  now: Date;
+  owner: ComputerRunOwner | null;
+  store: ComputerUseStore;
+}): Promise<void> {
+  if (!input.owner) {
+    if (input.activeRun.ownerKey || input.activeRun.ownerPurpose) {
+      throw computerUseConflictError({
+        code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+        message: "Another browser operation is already active for this member.",
+        retryable: false,
+      });
+    }
+    return;
+  }
+  const ownerMatches =
+    input.activeRun.ownerKey === input.owner.ownerKey
+    && input.activeRun.ownerPurpose === input.owner.ownerPurpose;
+  if (!ownerMatches) {
+    throw computerUseConflictError({
+      code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+      message: "Another browser operation is already active for this member.",
+      retryable: false,
+    });
+  }
+  if (
+    input.expectedRunId !== null
+    && input.activeRun.id !== input.expectedRunId
+  ) {
+    await input.store.requireMemberOwnedProviderSetupRunAcquisition({
+      candidateRunId: input.activeRun.id,
+      expectedRunId: input.expectedRunId,
+      memberId: input.memberId,
+      now: input.now,
+      ownerKey: input.owner.ownerKey,
+      ownerPurpose: input.owner.ownerPurpose,
+    });
+  }
+}
+
+function assertGenericComputerRun(run: ComputerRunRecord): void {
+  if (!run.ownerKey && !run.ownerPurpose) {
+    return;
+  }
+  throw computerUseConflictError({
+    code: "HOSTED_COMPUTER_RUN_OWNERSHIP_CONFLICT",
+    message: "Computer run is owned by another operation.",
+    retryable: false,
+  });
+}
+
+function isComputerAwaitingUserError(error: unknown): boolean {
+  return error !== null
+    && typeof error === "object"
+    && Reflect.get(error, "code") === "HOSTED_COMPUTER_AWAITING_USER";
+}
+
 function runHandle(run: ComputerRunRecord, reused: boolean): ComputerRunHandle {
   return {
     awaitingReason: run.awaitingReason,
@@ -3899,6 +4229,94 @@ function buildComputerActCode(input: HostedComputerActRequest): string {
     "  url: __murphUrl,",
     "};",
   ].join("\n");
+}
+
+function buildComputerProviderCredentialCaptureCode(code: string): string {
+  return [
+    "const __murphProviderCredentials = await (async () => {",
+    code,
+    "\n})();",
+    "const __murphUrl = page.url();",
+    "const __murphTitle = await page.title().catch(() => null);",
+    "return {",
+    "  result: __murphProviderCredentials,",
+    "  title: __murphTitle,",
+    "  url: __murphUrl,",
+    "};",
+  ].join("\n");
+}
+
+function readRequiredComputerProviderCredentials(
+  value: unknown,
+): ComputerProviderCredentials {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_INVALID",
+      httpStatus: 502,
+      message: "Provider application credentials could not be captured safely.",
+      retryable: true,
+    });
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (keys.length !== 2 || keys[0] !== "clientId" || keys[1] !== "clientSecret") {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_INVALID",
+      httpStatus: 502,
+      message: "Provider application credentials could not be captured safely.",
+      retryable: true,
+    });
+  }
+  return {
+    clientId: requireComputerProviderCredentialString(record.clientId, 512),
+    clientSecret: requireComputerProviderCredentialString(record.clientSecret, 4096),
+  };
+}
+
+function requireComputerProviderCredentialString(
+  value: unknown,
+  maxLength: number,
+): string {
+  if (typeof value !== "string") {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_INVALID",
+      httpStatus: 502,
+      message: "Provider application credentials could not be captured safely.",
+      retryable: true,
+    });
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > maxLength) {
+    throw computerUseError({
+      code: "HOSTED_COMPUTER_PROVIDER_CREDENTIAL_CAPTURE_INVALID",
+      httpStatus: 502,
+      message: "Provider application credentials could not be captured safely.",
+      retryable: true,
+    });
+  }
+  return normalized;
+}
+
+function scrubComputerProviderCredentialResult(value: unknown): void {
+  const seen = new Set<object>();
+  const scrub = (candidate: unknown): void => {
+    if (!candidate || typeof candidate !== "object" || seen.has(candidate)) {
+      return;
+    }
+    seen.add(candidate);
+    for (const key of Object.getOwnPropertyNames(candidate)) {
+      const descriptor = Object.getOwnPropertyDescriptor(candidate, key);
+      if (!descriptor || !("value" in descriptor)) {
+        continue;
+      }
+      if (key === "clientId" || key === "clientSecret") {
+        Reflect.set(candidate, key, "");
+        continue;
+      }
+      scrub(descriptor.value);
+    }
+  };
+  scrub(value);
 }
 
 function addComputerActFailureContext(

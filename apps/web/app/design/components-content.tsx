@@ -173,6 +173,7 @@ import {
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
+import { MemberOwnedProviderSetupComponentStudy } from "./member-owned-provider-setup-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
@@ -1376,6 +1377,10 @@ export function ComponentsContent() {
               title="Unable to finish connection"
             />
           </div>
+        </Section>
+
+        <Section title="Member-owned provider setup">
+          <MemberOwnedProviderSetupComponentStudy />
         </Section>
 
         <Separator />

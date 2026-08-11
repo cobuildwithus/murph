@@ -2,12 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createHostedDeviceConnectIntentTx: vi.fn(),
+  ensureProviderSetup: vi.fn(),
   tx: {},
 }));
 
 vi.mock("@/src/lib/device-sync/connect-intent-core", () => ({
   createHostedDeviceConnectIntentTx: mocks.createHostedDeviceConnectIntentTx,
   HOSTED_DEVICE_RECONNECT_NOTICE_INTENT_TTL_MS: 72 * 60 * 60 * 1000,
+}));
+
+
+vi.mock("@/src/lib/device-sync/provider-setup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/device-sync/provider-setup")>()),
+  createMemberOwnedProviderSetupService: () => ({
+    ensure: mocks.ensureProviderSetup,
+  }),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -68,23 +77,92 @@ describe("hosted device reconnect link tool", () => {
     expect(result.status === "ambiguous" ? result.matches : []).toHaveLength(2);
   });
 
-  it("does not issue a hosted reconnect target for configured Strava routes", async () => {
+  it("ignores legacy direct Strava credentials in favor of the member-owned setup path", async () => {
     const { resolveHostedDeviceReconnectLinkTarget } = await import(
       "@/src/lib/device-sync/reconnect-link-tool"
     );
 
     expect(resolveHostedDeviceReconnectLinkTarget({
-      ...configuredWhoopEnv,
-      JUNCTION_PROVIDER_FILTER: "strava",
-      STRAVA_CLIENT_ID: "strava-client",
-      STRAVA_CLIENT_SECRET: "strava-secret",
-      WHOOP_CLIENT_ID: "",
-      WHOOP_CLIENT_SECRET: "",
+      HOSTED_WEB_BASE_URL: "https://join.example.test",
+      STRAVA_CLIENT_ID: "NON_CREDENTIAL_LEGACY_CLIENT_ID",
+      STRAVA_CLIENT_SECRET: "NON_CREDENTIAL_LEGACY_CLIENT_SECRET",
+    }, {
+      connectSourceId: null,
+      connectTarget: "strava",
+      sourceProviderSlug: null,
+    })).toEqual({
+      status: "found",
+      target: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        label: "Strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+    });
+  });
+
+  it("resolves Strava to the member-owned setup path without global credentials", async () => {
+    const { resolveHostedDeviceReconnectLinkTarget } = await import(
+      "@/src/lib/device-sync/reconnect-link-tool"
+    );
+
+    expect(resolveHostedDeviceReconnectLinkTarget({
+      HOSTED_WEB_BASE_URL: "https://join.example.test",
     }, {
       connectSourceId: "strava",
       connectTarget: null,
       sourceProviderSlug: null,
-    })).toEqual({ status: "missing" });
+    })).toEqual({
+      status: "found",
+      target: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        label: "Strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+    });
+  });
+
+  it("creates a reconnect intent bound to the durable Strava setup", async () => {
+    mocks.ensureProviderSetup.mockResolvedValueOnce({ id: "dps_synthetic" });
+    mocks.createHostedDeviceConnectIntentTx.mockResolvedValueOnce({
+      claim: "dc_strava",
+      connectUrl: "https://join.example.test/connect#deviceConnectIntent=dc_strava&connectSource=strava",
+      deviceConnectUrl: "https://join.example.test/device/connect/dc_strava",
+      expiresAt: "2026-06-19T12:00:00.000Z",
+    });
+
+    const { createHostedDeviceReconnectLink } = await import(
+      "@/src/lib/device-sync/reconnect-link-tool"
+    );
+    await createHostedDeviceReconnectLink({
+      args: {
+        baseUrl: null,
+        connectSourceId: "strava",
+        connectTarget: null,
+        help: false,
+        memberId: "member_123",
+        sourceProviderSlug: null,
+      },
+      env: { HOSTED_WEB_BASE_URL: "https://join.example.test" },
+      now: new Date("2026-06-16T12:00:00.000Z"),
+    });
+
+    expect(mocks.ensureProviderSetup).toHaveBeenCalledWith("member_123");
+    expect(mocks.createHostedDeviceConnectIntentTx).toHaveBeenCalledWith({
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      memberId: "member_123",
+      now: new Date("2026-06-16T12:00:00.000Z"),
+      provider: "strava",
+      providerSetupId: "dps_synthetic",
+      request: expect.any(Request),
+      sourceProviderSlug: null,
+      ttlMs: 72 * 60 * 60 * 1000,
+      tx: mocks.tx,
+    });
   });
 
   it("creates a long-lived source-specific connect intent for the selected target", async () => {

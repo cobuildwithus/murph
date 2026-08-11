@@ -75,6 +75,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'billingStatus HostedBillingStatus @default(not_started) @map("billing_status")',
     "codexAuthConnection HostedCodexAuthConnection?",
     "deviceProviderApplications DeviceProviderApplication[]",
+    "deviceProviderSetups DeviceProviderSetup[]",
     'groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[] @relation("HostedGroupSponsorshipMomentCreator")',
     'groupSponsorshipsPaid HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")',
     'groupSponsorshipsReceived HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")',
@@ -1092,6 +1093,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260810020000_device_sync_dirty_payload_credential_independence",
       "20260810050000_relax_detached_automatic_refill_failure",
       "20260810150000_hosted_usage_credit_grant_slot_release",
+      "20260811100000_member_owned_provider_setup",
       "20260811160000_add_group_sponsorship_funding_alias_publication",
       "migration_lock.toml",
     ]);

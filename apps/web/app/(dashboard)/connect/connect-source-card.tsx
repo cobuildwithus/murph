@@ -1,5 +1,6 @@
 import Image from "next/image";
 
+import { MemberOwnedProviderSetup } from "@/src/components/device-sync/member-owned-provider-setup";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 
@@ -27,10 +28,11 @@ export function SourceCard({
   onSetupGuideOpen?: (setupGuideId: ConnectSourceSetupGuideId) => void;
   onStartConnection: (source: ConnectSource) => Promise<void>;
 }) {
+  const memberOwnedSetup = Boolean(source.memberOwnedSetupProvider);
   const setupGuideActionLabel = source.setupGuideActionLabel;
   const setupGuideId = source.setupGuideId;
-  const setupOnly = Boolean(setupGuideId)
-    || (source.connectionAvailable === false && Boolean(source.unavailableActionUrl));
+  const setupOnly = !memberOwnedSetup && (Boolean(setupGuideId)
+    || (source.connectionAvailable === false && Boolean(source.unavailableActionUrl)));
   const isAvailable = Boolean(source.connectTarget);
   const canStart = authenticated && isAvailable;
   const canDisconnect = !setupOnly
@@ -62,7 +64,8 @@ export function SourceCard({
   // These branches add message content beside the source details. Stack the
   // card on phone widths so the message and action never squeeze the
   // description into a narrow column.
-  const showsSideMessage = requiresConnectionReset
+  const showsSideMessage = memberOwnedSetup
+    || requiresConnectionReset
     || requiresReconnect
     || historicalResetIncomplete
     || Boolean(unavailableMessage)
@@ -102,7 +105,44 @@ export function SourceCard({
           </p>
         </div>
 
-        {!setupOnly && source.connected && !requiresReconnect ? (
+        {memberOwnedSetup && source.memberOwnedSetupPresentation ? (
+          <div className="flex w-full flex-col items-stretch gap-2 self-stretch sm:mt-auto">
+            <MemberOwnedProviderSetup
+              actionAvailable={authenticated}
+              connected={source.connected === true}
+              pending={pending}
+              presentation={source.memberOwnedSetupPresentation}
+              setup={source.memberOwnedSetup ?? null}
+              onAction={() => {
+                void onStartConnection(source);
+              }}
+            />
+            {!authenticated ? (
+              <AuthButton
+                aria-label={`Sign in to set up ${source.name}`}
+                className="self-end"
+              >
+                Sign in
+              </AuthButton>
+            ) : null}
+            {errorMessage ? (
+              <p role="alert" className="text-xs leading-snug text-destructive">
+                {errorMessage}
+              </p>
+            ) : null}
+            {canDisconnect ? (
+              <button
+                type="button"
+                aria-label={disconnectAriaLabel}
+                disabled={pendingDisconnect}
+                onClick={() => onDisconnectTargetChange(source)}
+                className="relative self-end text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+              >
+                {pendingDisconnect ? "Disconnecting..." : "Disconnect"}
+              </button>
+            ) : null}
+          </div>
+        ) : !setupOnly && source.connected && !requiresReconnect ? (
           <div className="ml-auto flex shrink-0 flex-col items-end gap-2 self-end sm:mt-auto sm:shrink">
             {errorMessage ? (
               <p role="alert" className="text-xs leading-snug text-destructive">

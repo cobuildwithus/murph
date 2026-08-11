@@ -63,6 +63,26 @@ Last verified: 2026-08-10
   binding under the connection lock and terminally drops that work. Only
   credential-bearing runtime snapshots may decrypt and project the
   invocation-scoped configuration.
+  Member-owned dashboard setup adds no model-visible credential path. A narrow
+  hosted-computer execution boundary reads client id and secret inside Kernel,
+  validates the exact bounded result, immediately calls the encrypted application
+  store, recursively scrubs the raw execution result even on malformed output,
+  and returns only non-secret application metadata. General browser actions, DOM
+  summaries, screenshots, tool results, logs, exceptions, analytics, workspaces,
+  fixtures, and UI must never receive the secret. Human sign-in, MFA, CAPTCHA,
+  and consent use only the same-origin `/computer/handoff/` surface. The Strava
+  adapter may inspect, create, repair, or delete only the exact deterministic
+  Murph marker and must fail closed around unrelated applications. A setup may
+  navigate only a browser run durably bound to that exact setup owner key; a
+  generic active member run is never reusable for provider setup, and generic
+  computer actions reject setup-owned runs. Account deletion commits the member
+  suspension fence before external provider or decryption work, then uses only a
+  narrow deletion-only authority for the exact fenced setup/run pair. Current
+  Strava revocation uses the exact bound application's client authentication and
+  puts the access token only in the form body; credentials and authorization
+  headers never enter diagnostics. Permanently malformed application state is a
+  repair condition, not permission to fall back to operator credentials or a
+  credential-free revoke.
 - Established shared Junction account preservation is one closed persistence
   contract across hosted and local operation. Shared ingress selects
   `preserve_established` for a source addition and `replace` for an account

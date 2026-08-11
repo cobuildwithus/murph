@@ -49,7 +49,7 @@ describe("DeviceProviderApplicationIngressStore", () => {
       existingAccountPolicy: "replace" as const,
       ownerId: "member_123",
       provider: "strava",
-      scopes: ["activity:read_all"],
+      scopes: ["activity:read"],
     };
 
     await store.createOAuthState(oauthState);

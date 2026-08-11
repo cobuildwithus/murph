@@ -103,6 +103,7 @@ const mocks = vi.hoisted(() => ({
   authDialogProps: null as { open?: boolean } | null,
   buildHostedDeviceSyncSettingsResponse: vi.fn(),
   getHostedPageAuthSnapshot: vi.fn(),
+  readMemberOwnedProviderSetupProjections: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedMurphContactOptions: vi.fn(),
 }));
@@ -116,6 +117,11 @@ vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   },
   preloadHostedAuthPanelIsland: vi.fn(),
   useHostedAuthPanelIslandIdlePreload: vi.fn(),
+}));
+
+vi.mock("@/src/lib/device-sync/provider-setup/projection", () => ({
+  readMemberOwnedProviderSetupProjections:
+    mocks.readMemberOwnedProviderSetupProjections,
 }));
 
 vi.mock("@/src/lib/device-sync/settings-service", () => ({
@@ -139,6 +145,9 @@ beforeEach(() => {
     ok: true,
     sources: [],
   });
+  mocks.readMemberOwnedProviderSetupProjections.mockResolvedValue(
+    createStravaSetupProjection(),
+  );
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
     authenticated: true,
     authenticatedMember: {
@@ -162,6 +171,65 @@ afterEach(() => {
   mocks.authDialogProps = null;
 });
 
+function createStravaSetupProjection(input: {
+  action?: "continue_oauth" | "disconnect_first" | "none" | "retry" | "start";
+  connected?: boolean;
+  status?: "connected" | "disconnect_first" | "oauth_ready" | "pending" | "repair_required";
+} = {}) {
+  const status = input.status ?? "pending";
+  return {
+    strava: {
+      presentation: {
+        actionLabels: {
+          continue_oauth: "Continue with Strava",
+          continue_provider: "Continue in Strava",
+          continue_sign_in: "Continue sign-in",
+          disconnect_first: "Disconnect Strava first",
+          retry: "Retry safely",
+          start: "Set up Strava",
+        },
+        messages: {
+          canceled: "Strava setup was canceled. You can start again.",
+          connected: "Strava is connected and sync is starting.",
+          deletion_pending: "Murph is removing its private Strava application.",
+          deleted: "This Strava setup was deleted.",
+          disconnect_first: "Disconnect the current Strava connection first.",
+          inspection_required: "Murph needs to inspect Strava before continuing.",
+          oauth_in_progress: "Strava is waiting for read-only consent.",
+          oauth_ready: "Your private Strava application is ready.",
+          pending: "Murph is ready to set up your private Strava connection.",
+          provider_conflict: "Murph will not change an unrelated application.",
+          provider_prerequisite: "Continue in Strava to complete its prerequisite.",
+          repair_required: "Murph can repair its private Strava application.",
+          retryable_failure: "Your progress is saved and safe to retry.",
+          waiting_for_user: "Continue in Strava for sign-in or verification.",
+          working: "Murph is setting up Strava for you.",
+        },
+        provider: "strava" as const,
+        providerName: "Strava",
+        readOnlyAccessLabel: "Read-only activity access",
+      },
+      setup: {
+        action: input.action ?? (status === "connected" ? "none" : "start"),
+        applicationRevision: status === "pending" ? null : 2,
+        connected: input.connected ?? status === "connected",
+        message: status === "connected"
+          ? "Strava is connected and sync is starting."
+          : status === "repair_required"
+          ? "Murph can repair its private Strava application."
+          : status === "disconnect_first"
+          ? "Disconnect the current Strava connection first."
+          : status === "oauth_ready"
+          ? "Your private Strava application is ready."
+          : "Murph is ready to set up your private Strava connection.",
+        provider: "strava" as const,
+        status,
+        updatedAt: "2026-08-11T00:00:00.000Z",
+      },
+    },
+  };
+}
+
 test("ConnectPage renders source search, source names, and logo marks", async () => {
   const { default: ConnectPage, metadata } = await import(
     "../app/(dashboard)/connect/connect-page-content"
@@ -173,7 +241,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
   assert.match(markup, /aria-label="Search sources"/);
-  assert.match(markup, />33 of 33 sources</);
+  assert.match(markup, />34 of 34 sources</);
   assert.match(markup, /lg:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(markup, /data-priority list/);
   assert.doesNotMatch(markup, /Priority/u);
@@ -294,6 +362,11 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Beurer",
     },
     {
+      assetPath: "/brand-logos/connect/strava.svg",
+      description: "Rides, runs, power, and training load.",
+      name: "Strava",
+    },
+    {
       assetPath: "/brand-logos/connect/omron.png",
       description:
         "Blood pressure, pulse, weight, and connected home measurements from Omron.",
@@ -403,14 +476,14 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     },
   ];
 
-  assert.equal(sources.length, 33);
+  assert.equal(sources.length, 34);
   assert.equal(
     markup.match(/data-connection-state="idle"/gu)?.length,
     sources.length - 6,
   );
   assert.equal(
     markup.match(/>Not available<\/button>/gu)?.length,
-    sources.length - 7,
+    sources.length - 8,
   );
   assert.match(markup, /disabled=""/);
   assert.match(markup, /aria-label="Download app for Apple Health"/);
@@ -452,7 +525,9 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   assert.doesNotMatch(markup, />Contour BLE</u);
   assert.doesNotMatch(markup, />OneTouch</u);
   assert.doesNotMatch(markup, />Manual</u);
-  assert.doesNotMatch(markup, />Strava</u);
+  assert.match(markup, />Strava</u);
+  assert.match(markup, /aria-label="Set up Strava for Strava"/u);
+  assert.doesNotMatch(markup, /client secret|client ID/iu);
   assert.doesNotMatch(markup, /Whoop V2/u);
   assert.ok(
     sourceHeadingIndex(markup, "Apple Health") <
@@ -1119,9 +1194,9 @@ test("ConnectPage enables Garmin when Junction exposes Garmin as a connect targe
   assert.equal(markup.match(/>Connect<\/button>/gu)?.length, 1);
 });
 
-test("ConnectPage hides Strava when direct and Junction connection routes are configured", async () => {
-  vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
-  vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
+test("ConnectPage uses the member-owned Strava path even when legacy global routes are configured", async () => {
+  vi.stubEnv("STRAVA_CLIENT_ID", "NON_CREDENTIAL_LEGACY_GLOBAL_CLIENT_ID-id");
+  vi.stubEnv("STRAVA_CLIENT_SECRET", "NON_CREDENTIAL_LEGACY_GLOBAL_CLIENT_SECRET");
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
   vi.stubEnv(
     "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -1136,13 +1211,21 @@ test("ConnectPage hides Strava when direct and Junction connection routes are co
   );
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.doesNotMatch(markup, />Strava</u);
-  assert.doesNotMatch(markup, /Connect Strava/u);
+  assert.match(markup, />Strava</u);
+  assert.match(markup, /Murph is ready to set up your private Strava connection/u);
+  assert.match(markup, /aria-label="Set up Strava for Strava"/u);
+  assert.doesNotMatch(markup, /aria-label="Connect Strava"/u);
+  assert.doesNotMatch(markup, /NON_CREDENTIAL_LEGACY_GLOBAL_CLIENT_ID|client secret/iu);
 });
 
-test("ConnectPage preserves an existing Strava connection for status and disconnect only", async () => {
-  vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
-  vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
+test("ConnectPage renders an authoritative connected Strava projection with disconnect", async () => {
+  mocks.readMemberOwnedProviderSetupProjections.mockResolvedValueOnce(
+    createStravaSetupProjection({
+      action: "none",
+      connected: true,
+      status: "connected",
+    }),
+  );
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
     ok: true,
@@ -1167,9 +1250,13 @@ test("ConnectPage preserves an existing Strava connection for status and disconn
   assert.doesNotMatch(markup, /aria-label="Reconnect Strava"/u);
 });
 
-test("ConnectPage does not offer Strava reconnection for an existing account needing access", async () => {
-  vi.stubEnv("STRAVA_CLIENT_ID", "strava-client-id");
-  vi.stubEnv("STRAVA_CLIENT_SECRET", "strava-client-secret");
+test("ConnectPage routes Strava access repair through the shared member-owned setup", async () => {
+  mocks.readMemberOwnedProviderSetupProjections.mockResolvedValueOnce(
+    createStravaSetupProjection({
+      action: "retry",
+      status: "repair_required",
+    }),
+  );
   mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
     generatedAt: "2026-05-01T00:00:00.000Z",
     ok: true,
@@ -1194,7 +1281,8 @@ test("ConnectPage does not offer Strava reconnection for an existing account nee
   );
   const markup = renderToStaticMarkup(await ConnectPage());
 
-  assert.match(markup, /Strava needs attention from the connected app/u);
+  assert.match(markup, /Murph can repair its private Strava application/u);
+  assert.match(markup, /aria-label="Retry safely for Strava"/u);
   assert.match(markup, /aria-label="Disconnect Strava"/u);
   assert.doesNotMatch(markup, /aria-label="Reconnect Strava"/u);
 });

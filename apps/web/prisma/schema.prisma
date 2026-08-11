@@ -133,9 +133,39 @@ model DeviceProviderApplication {
   member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
   connections           DeviceConnection[]
   oauthSessions         DeviceOauthSession[]
+  setups                DeviceProviderSetup[]
 
   @@unique([memberId, provider])
   @@map("device_provider_application")
+}
+
+model DeviceProviderSetup {
+  id                          String    @id
+  memberId                    String    @map("member_id")
+  provider                    String
+  connectSourceId             String    @map("connect_source_id")
+  connectTarget               String    @map("connect_target")
+  sourceProviderSlug          String?   @map("source_provider_slug")
+  status                      String
+  active                      Boolean   @default(true)
+  version                     Int       @default(1)
+  browserRunId                String?   @map("browser_run_id")
+  providerApplicationId       String?   @map("provider_application_id")
+  providerApplicationRevision Int?      @map("provider_application_revision")
+  lastErrorCode               String?   @map("last_error_code")
+  providerSubmissionAt        DateTime? @map("provider_submission_at")
+  completedAt                 DateTime? @map("completed_at")
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  updatedAt                   DateTime  @updatedAt @map("updated_at")
+  member                      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  browserRun                  HostedComputerRun? @relation(fields: [browserRunId], references: [id], onDelete: SetNull)
+  providerApplication         DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Cascade)
+  connectIntents              DeviceConnectIntent[]
+
+  @@index([memberId, provider, updatedAt])
+  @@index([providerApplicationId])
+  @@index([browserRunId])
+  @@map("device_provider_setup")
 }
 
 model DeviceConnectIntent {
@@ -145,13 +175,16 @@ model DeviceConnectIntent {
   connectSourceId      String    @map("connect_source_id")
   connectTarget        String    @map("connect_target")
   sourceProviderSlug   String?   @map("source_provider_slug")
+  providerSetupId      String?   @map("provider_setup_id")
   createdAt            DateTime  @default(now()) @map("created_at")
   expiresAt            DateTime  @map("expires_at")
   startedAt            DateTime? @map("started_at")
+  providerSetup        DeviceProviderSetup? @relation(fields: [providerSetupId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
   @@index([memberId, expiresAt])
   @@index([startedAt])
+  @@index([providerSetupId])
   @@map("device_connect_intent")
 }
 
@@ -630,6 +663,7 @@ model HostedMember {
   inferenceConnection            HostedInferenceConnection?
   computerRuns                   HostedComputerRun[]
   computerHandoffs               HostedComputerHandoff[]
+  deviceProviderSetups           DeviceProviderSetup[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   productFeedback                HostedProductFeedback[]
@@ -828,6 +862,8 @@ model HostedComputerRun {
   id                         String                         @id
   memberId                   String                         @map("member_id")
   kernelProfileName          String                         @map("kernel_profile_name")
+  ownerPurpose               String?                        @map("owner_purpose")
+  ownerKey                   String?                        @map("owner_key")
   status                     HostedComputerRunStatus        @default(running)
   kernelSessionId            String?                        @map("kernel_session_id")
   kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")
@@ -846,8 +882,10 @@ model HostedComputerRun {
   completedAt                DateTime?                      @map("completed_at")
   member                     HostedMember                   @relation(fields: [memberId], references: [id], onDelete: Cascade)
   handoffs                   HostedComputerHandoff[]
+  deviceProviderSetups       DeviceProviderSetup[]
 
   @@index([memberId, status, updatedAt])
+  @@index([memberId, ownerPurpose, ownerKey, status])
   @@index([memberId, awaitingReason, updatedAt])
   @@index([status, expiresAt])
   @@map("hosted_computer_run")

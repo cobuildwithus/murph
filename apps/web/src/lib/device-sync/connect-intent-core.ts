@@ -12,6 +12,7 @@ export interface HostedDeviceConnectIntentRecord {
   claimHash: string;
   memberId: string;
   provider: ConfiguredDeviceSyncProviderKey;
+  providerSetupId: string | null;
   connectSourceId: string;
   connectTarget: string;
   sourceProviderSlug: string | null;
@@ -31,6 +32,7 @@ export async function createHostedDeviceConnectIntentTx(input: {
   memberId: string;
   now?: Date;
   provider: ConfiguredDeviceSyncProviderKey;
+  providerSetupId?: string | null;
   request: Request;
   sourceProviderSlug: string | null;
   ttlMs?: number;
@@ -45,7 +47,7 @@ export async function createHostedDeviceConnectIntentTx(input: {
   const expiresAt = new Date(now.getTime() + normalizeHostedDeviceConnectIntentTtlMs(input.ttlMs));
   const claim = generateHostedDeviceConnectIntentClaim();
   const claimHash = hashHostedDeviceConnectIntentClaim(claim);
-
+  const providerSetupId = input.providerSetupId ?? null;
   await input.tx.deviceConnectIntent.deleteMany({
     where: {
       expiresAt: {
@@ -59,6 +61,7 @@ export async function createHostedDeviceConnectIntentTx(input: {
       claimHash,
       memberId: input.memberId,
       provider: input.provider,
+      providerSetupId,
       connectSourceId: input.connectSourceId,
       connectTarget: input.connectTarget,
       sourceProviderSlug: input.sourceProviderSlug,
@@ -98,6 +101,7 @@ export function toHostedDeviceConnectIntentRecord(record: {
   claimHash: string;
   memberId: string;
   provider: string;
+  providerSetupId: string | null;
   connectSourceId: string;
   connectTarget: string;
   sourceProviderSlug: string | null;
@@ -105,10 +109,12 @@ export function toHostedDeviceConnectIntentRecord(record: {
   expiresAt: Date;
   startedAt: Date | null;
 }): HostedDeviceConnectIntentRecord {
+  const providerSetupId = record.providerSetupId ?? null;
   return {
     claimHash: record.claimHash,
     memberId: record.memberId,
     provider: requireConfiguredDeviceSyncProviderKey(record.provider),
+    providerSetupId,
     connectSourceId: record.connectSourceId,
     connectTarget: record.connectTarget,
     sourceProviderSlug: record.sourceProviderSlug,

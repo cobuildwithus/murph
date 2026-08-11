@@ -675,3 +675,14 @@ Keep the copy observational. Use “lined up with” or “was associated with.�
 - **Don't** add explanation tooltips to UI labels the user already understands. If a badge says `In range` next to `55–75 bpm`, a tooltip restating the band is redundant. Either the label is clear without help, or the label needs to be clearer; tooltips are not the fix.
 - **Don't** use a diagonal up-right arrow (`ArrowUpRight`) on internal links. It reads as "opens in new tab / external" and misleads users on cards that navigate within the app. Use `ArrowRight` for forward navigation; for clickable cards, the surface itself is the affordance and no arrow is needed.
 - **Don't** mix filled and stroked glyphs inside a single concept icon set. Pick one (line-art for biomarker identifiers, filled for the hand-drawn About Quiver register) and hold it across every member.
+### Member-Owned Provider Setup
+
+Render the shared `MemberOwnedProviderSetup` inside the existing source card.
+The component is a compact status journey, not a credential form: short title,
+plain status sentence, optional non-secret application revision, and at most one
+primary action. Working and connected states have no action; waiting states name
+the human step; repair and transient failures retain saved-progress language; an
+active conflicting connection says `Disconnect first`. Never show client ids,
+secrets, dashboard screenshots, or raw provider errors. The same component must
+appear in `/design?tab=components`, and the complete synthetic state study must
+appear in `/design?tab=sections` with inert controls.

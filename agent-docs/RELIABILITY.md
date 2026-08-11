@@ -656,16 +656,37 @@ Last verified: 2026-08-10
   undecryptable application makes the affected connection require
   reauthorization without running credential-dependent provider work, and
   every agent token-return path revalidates that exact application authority.
-  Disconnect, consent withdrawal, and account deletion may still use the
-  connection's stored OAuth access token for a provider's credential-free
-  revoke operation before the existing local purge; they never fall back to
-  operator credentials. Transient secure-box, root-key, database, and KMS
+  Disconnect, consent withdrawal, and account deletion resolve the exact bound
+  application configuration when provider revocation requires client
+  authentication; they never fall back to operator credentials or silently
+  reinterpret malformed application state as a valid revoke path. Transient
+  secure-box, root-key, database, and KMS
   failures propagate as operational failures so a valid credential is never
   misclassified as member-repairable state. Shared webhook admission rereads
   the raw connection binding inside the existing health-data admission lock;
   an application-bound row completes the trace without dirty state, wake,
   signal, or provider job. Such connections retain scheduled reconciliation
   until private-application webhook ownership is explicitly designed.
+- Member-owned provider setup is a revisioned, optimistic state machine, not an
+  assistant-memory workflow. Known-unsent, provider-owned in-progress, ambiguous
+  submission, waiting-for-user, repairable credential state, transient failure,
+  OAuth-in-progress, connected, disconnect-first, deletion-pending, and deleted
+  outcomes survive page refresh and process restart. Ambiguous creation records
+  the submission boundary before the provider call; the next missing inspection
+  clears ambiguity without creating, and only another independent inspection may
+  create. Permanent malformed or undecryptable application state enters repair;
+  transient crypto, KMS, root-key, and database failures remain retryable
+  infrastructure errors. Browser acquisition is part of that state machine: a
+  newly acquired run is bound to the exact setup before navigation, an unrelated
+  reusable run is rejected, and a lost acquisition response resumes only by
+  inspecting that same owner binding. Connection rows and upstream revoke results
+  are authoritative; setup projection writes after callback or disconnect are
+  idempotent best-effort repairs, and every read reconciles projection from live
+  connection truth. OAuth-ready transitions commit before a usable state is
+  issued. Account deletion commits the suspension fence before external cleanup;
+  cleanup failure preserves local setup, application, and run ownership for
+  retry. Late OAuth and disconnect transitions cannot overwrite deletion
+  ownership.
 - Companion Apple Health metadata and WHOOP overnight summaries recheck their
   exact source inside the health-data admission lock and again before runtime
   import by rereading the durable source row rather than trusting the queued

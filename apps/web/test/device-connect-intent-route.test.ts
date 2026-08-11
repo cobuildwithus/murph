@@ -7,12 +7,15 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { createRouteContext } from "./route-test-helpers";
 
 const mocks = vi.hoisted(() => ({
+  advanceMemberOwnedProviderSetup: vi.fn(),
+  assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   claimHostedDeviceConnectIntentForStart: vi.fn(),
   readHostedDeviceConnectIntent: vi.fn(),
   releaseHostedDeviceConnectIntentStart: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   startHostedDeviceSyncConnection: vi.fn(),
+  startMemberOwnedProviderSetupOAuth: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/connect-intents", () => ({
@@ -23,6 +26,20 @@ vi.mock("@/src/lib/device-sync/connect-intents", () => ({
 
 vi.mock("@/src/lib/device-sync/hosted-connect-start", () => ({
   startHostedDeviceSyncConnection: mocks.startHostedDeviceSyncConnection,
+}));
+
+vi.mock("@/src/lib/device-sync/provider-setup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/device-sync/provider-setup")>()),
+  createMemberOwnedProviderSetupService: () => ({
+    advance: mocks.advanceMemberOwnedProviderSetup,
+    startOAuth: mocks.startMemberOwnedProviderSetupOAuth,
+  }),
+}));
+
+vi.mock("@/src/lib/legal/consent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/src/lib/legal/consent")>()),
+  assertHostedHistoricalLaunchConsentGranted:
+    mocks.assertHostedHistoricalLaunchConsentGranted,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
@@ -74,6 +91,19 @@ describe("hosted device connect intent route", () => {
       authorizationUrl: "https://provider.example.test/oauth/start",
       callbackProofCookie: "murph-device-sync-whoop=proof; Path=/; HttpOnly",
     });
+    mocks.advanceMemberOwnedProviderSetup.mockResolvedValue({
+      setup: {
+        action: "continue_sign_in",
+        applicationRevision: null,
+        connected: false,
+        message: "Continue the secure provider sign-in.",
+        provider: "strava",
+        status: "waiting_for_user",
+        updatedAt: "2026-08-11T12:00:00.000Z",
+      },
+      handoffUrl: "https://join.example.test/computer/handoff/synthetic-handoff",
+    });
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
   });
 
@@ -177,6 +207,82 @@ describe("hosted device connect intent route", () => {
       memberId: "member_123",
     });
     expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
+  });
+
+  it("starts an exact member-owned Strava setup handoff", async () => {
+    mocks.claimHostedDeviceConnectIntentForStart.mockResolvedValueOnce({
+      status: "claimed",
+      intent: createIntentRecord({
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        providerSetupId: "dps_synthetic",
+        startedAt: new Date("2026-05-08T12:01:00.000Z"),
+      }),
+    });
+
+    const response = await deviceConnectIntentRoute.POST(
+      new Request("https://join.example.test/device/connect/dc_opaque", {
+        method: "POST",
+      }),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(
+      "https://join.example.test/computer/handoff/synthetic-handoff",
+    );
+    expect(mocks.advanceMemberOwnedProviderSetup).toHaveBeenCalledWith(
+      "member_123",
+      "dps_synthetic",
+    );
+    expect(mocks.releaseHostedDeviceConnectIntentStart).toHaveBeenCalledWith({
+      claim: "dc_opaque",
+      memberId: "member_123",
+    });
+    expect(mocks.startHostedDeviceSyncConnection).not.toHaveBeenCalled();
+  });
+
+  it("rejects a provider setup handoff outside Murph's first-party computer surface", async () => {
+    mocks.claimHostedDeviceConnectIntentForStart.mockResolvedValueOnce({
+      status: "claimed",
+      intent: createIntentRecord({
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        providerSetupId: "dps_synthetic",
+        startedAt: new Date("2026-05-08T12:01:00.000Z"),
+      }),
+    });
+    mocks.advanceMemberOwnedProviderSetup.mockResolvedValueOnce({
+      setup: {
+        action: "continue_sign_in",
+        applicationRevision: null,
+        connected: false,
+        message: "Continue the secure provider sign-in.",
+        provider: "strava",
+        status: "waiting_for_user",
+        updatedAt: "2026-08-11T12:00:00.000Z",
+      },
+      handoffUrl: "https://attacker.example/computer/handoff/synthetic-handoff",
+    });
+
+    const response = await deviceConnectIntentRoute.POST(
+      new Request("https://join.example.test/device/connect/dc_opaque", {
+        method: "POST",
+      }),
+      createRouteContext({ claim: "dc_opaque" }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.text()).toContain(
+      "Murph could not open the secure provider sign-in handoff.",
+    );
+    expect(mocks.releaseHostedDeviceConnectIntentStart).toHaveBeenCalledWith({
+      claim: "dc_opaque",
+      memberId: "member_123",
+    });
   });
 
   it("returns JSON for app-page intent starts", async () => {
@@ -312,20 +418,22 @@ function createIntentRecord(
   overrides: Partial<{
     connectSourceId: string;
     connectTarget: string;
-    provider: "junction" | "whoop";
+    provider: "junction" | "strava" | "whoop";
+    providerSetupId: string | null;
     sourceProviderSlug: string | null;
     startedAt: Date | null;
   }> = {},
 ) {
   return {
     claimHash: "claim_hash",
-    memberId: "member_123",
-    provider: overrides.provider ?? "whoop",
     connectSourceId: overrides.connectSourceId ?? "whoop",
     connectTarget: overrides.connectTarget ?? "whoop",
-    sourceProviderSlug: overrides.sourceProviderSlug ?? null,
     createdAt: new Date("2026-05-08T12:00:00.000Z"),
     expiresAt: new Date("2026-05-08T12:15:00.000Z"),
+    memberId: "member_123",
+    provider: overrides.provider ?? "whoop",
+    providerSetupId: overrides.providerSetupId ?? null,
+    sourceProviderSlug: overrides.sourceProviderSlug ?? null,
     startedAt: overrides.startedAt ?? null,
   };
 }

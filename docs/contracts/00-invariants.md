@@ -276,8 +276,19 @@ it has been explicitly elevated to a cross-cutting invariant.
   call.
 - Once a non-idempotent provider call may have started, ambiguous failure does
   not release the claim or permit blind resend without provider idempotency or
-  proof that the effect did not begin. Acknowledge, clean up, or advance
-  progress only after terminal or durable pending evidence.
+  proof that the effect did not begin. Persist the attempt boundary first,
+  inspect provider state under the same durable owner, and repeat the effect only
+  after a later independent inspection proves it did not happen. Acknowledge,
+  clean up, or advance progress only after terminal or durable pending evidence.
+  Member-owned provider setup additionally binds every transition to member,
+  finite supported provider, connect coordinates, exact setup-owned browser run,
+  and the exact application id/revision once created; one active setup exists per
+  member/provider, and replacement cannot overlap an active bound connection.
+  Generic member browser runs are not setup authority. Connection records are the
+  authoritative completion/disconnection truth, and projection bookkeeping after
+  an irreversible provider effect cannot turn success into a reported failure.
+  Account deletion commits its suspension fence before external setup cleanup and
+  retains local retry ownership when that cleanup fails.
 - Any path that suppresses or defers a user-visible effect records a typed
   durable outcome. A persisted pending effect names its current validity
   predicate and is durably superseded instead of delivered when that predicate

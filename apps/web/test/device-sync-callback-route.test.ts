@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncPublicIngressService: vi.fn(),
   discardConnectionCallback: vi.fn(),
   handleConnectionCallback: vi.fn(),
+  markMemberOwnedSetupConnected: vi.fn(),
+  readMemberOwnedProviderSetupRegistration: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
+  deviceConnectionFindFirst: vi.fn(),
 }));
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
@@ -26,6 +29,21 @@ vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireActiveHostedAppSessionFromRequest: mocks.requireActiveHostedAppSessionFromRequest,
+}));
+
+vi.mock("@/src/lib/device-sync/provider-setup", () => ({
+  createMemberOwnedProviderSetupService: () => ({
+    markConnected: mocks.markMemberOwnedSetupConnected,
+  }),
+  readMemberOwnedProviderSetupRegistration: mocks.readMemberOwnedProviderSetupRegistration,
+}));
+
+vi.mock("@/src/lib/prisma", () => ({
+  getPrisma: () => ({
+    deviceConnection: {
+      findFirst: mocks.deviceConnectionFindFirst,
+    },
+  }),
 }));
 
 // The real error module stays unmocked so the route's isHostedOnboardingError
@@ -63,6 +81,9 @@ describe("hosted device-sync callback boundary", () => {
       member: { id: "member_a" },
       sessionId: "session_a",
     });
+    mocks.markMemberOwnedSetupConnected.mockResolvedValue(undefined);
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValue(null);
+    mocks.deviceConnectionFindFirst.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -89,6 +110,95 @@ describe("hosted device-sync callback boundary", () => {
     // A newer concurrent start may own the provider proof slot by the time
     // this response applies, so no callback response may touch the cookie.
     expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+
+  it("projects a completed member-owned callback with the exact application binding", async () => {
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValue({
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+    });
+    mocks.handleConnectionCallback.mockResolvedValueOnce({
+      account: {
+        id: "dsc_strava",
+        provider: "strava",
+      },
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      returnTo: "https://control.example.test/connect",
+    });
+    mocks.deviceConnectionFindFirst.mockResolvedValueOnce({
+      providerApplicationId: "dpa_exact",
+      providerApplicationRevision: 7,
+    });
+
+    const response = await callbackRoute.GET(
+      buildProviderCallbackRequest("strava"),
+      createRouteContext({ provider: "strava" }),
+    );
+
+    expect(response.status).toBe(302);
+    expect(mocks.deviceConnectionFindFirst).toHaveBeenCalledWith({
+      select: {
+        providerApplicationId: true,
+        providerApplicationRevision: true,
+      },
+      where: {
+        id: "dsc_strava",
+        provider: "strava",
+        userId: "member_a",
+      },
+    });
+    expect(mocks.markMemberOwnedSetupConnected).toHaveBeenCalledWith({
+      applicationId: "dpa_exact",
+      memberId: "member_a",
+      revision: 7,
+    });
+  });
+
+  it("does not turn a committed connection into a callback failure when projection repair fails", async () => {
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.readMemberOwnedProviderSetupRegistration.mockReturnValue({
+      coordinates: {
+        connectSourceId: "strava",
+        connectTarget: "strava",
+        provider: "strava",
+        sourceProviderSlug: null,
+      },
+    });
+    mocks.handleConnectionCallback.mockResolvedValueOnce({
+      account: {
+        id: "dsc_strava",
+        provider: "strava",
+      },
+      connectSourceId: "strava",
+      connectTarget: "strava",
+      returnTo: "https://control.example.test/connect",
+    });
+    mocks.deviceConnectionFindFirst.mockResolvedValueOnce({
+      providerApplicationId: "dpa_exact",
+      providerApplicationRevision: 7,
+    });
+    mocks.markMemberOwnedSetupConnected.mockRejectedValueOnce(
+      new Error("NON_SECRET_TEST_PROJECTION_FAILURE"),
+    );
+
+    const response = await callbackRoute.GET(
+      buildProviderCallbackRequest("strava"),
+      createRouteContext({ provider: "strava" }),
+    );
+
+    expect(response.status).toBe(302);
+    const destination = new URL(response.headers.get("location")!);
+    expect(destination.searchParams.get("deviceSyncStatus")).toBe("connected");
+    expect(warningSpy).toHaveBeenCalledWith(
+      "Member-owned provider setup callback projection failed.",
+      { errorType: "Error", provider: "strava" },
+    );
   });
 
   it("burns the callback state and shows the Connect error notice when the URL arrives without its proof", async () => {
@@ -290,6 +400,26 @@ function buildCallbackRequest(): Request {
   return new Request(CALLBACK_URL, {
     headers: {
       cookie: buildProofCookie(),
+    },
+  });
+}
+
+function buildProviderCallbackRequest(provider: string): Request {
+  const callbackUrl = new URL(
+    `/api/device-sync/connect/${encodeURIComponent(provider)}/callback`,
+    "https://control.example.test",
+  );
+  callbackUrl.searchParams.set("murph_state", CALLBACK_STATE);
+  callbackUrl.searchParams.set("result", "success");
+  const { cookie } = buildHostedDeviceSyncCallbackProof({
+    memberId: "member_a",
+    provider,
+    sessionId: "session_a",
+    state: CALLBACK_STATE,
+  });
+  return new Request(callbackUrl, {
+    headers: {
+      cookie: cookie.split(";", 1)[0] ?? "",
     },
   });
 }
