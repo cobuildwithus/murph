@@ -49,6 +49,7 @@ async function main(): Promise<void> {
         const page = await context.newPage();
         page.setDefaultTimeout(config.timeoutMs);
         page.setDefaultNavigationTimeout(config.timeoutMs);
+        await prepareStablePrivatePage(page, webBaseUrl);
         let pageErrorCount = 0;
         page.on("pageerror", () => {
           pageErrorCount += 1;
@@ -78,18 +79,38 @@ async function main(): Promise<void> {
   })}\n`);
 }
 
+async function prepareStablePrivatePage(
+  page: Page,
+  webBaseUrl: URL,
+): Promise<void> {
+  await page.route("**/*", async (route) => {
+    const requestUrl = new URL(route.request().url());
+    if (requestUrl.origin === webBaseUrl.origin) {
+      await route.continue();
+      return;
+    }
+    await route.abort();
+  });
+  await page.addInitScript(() => {
+    const style = document.createElement("style");
+    style.textContent =
+      "*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}";
+    (document.head ?? document.documentElement).appendChild(style);
+  });
+}
+
 async function proveConnectJourney(input: {
   caseName: string;
   page: Page;
   webBaseUrl: URL;
 }): Promise<void> {
   const navigation = await input.page.goto("/connect", {
-    waitUntil: "domcontentloaded",
+    waitUntil: "load",
   });
   assertSuccessfulNavigation(navigation, input.caseName, "initial");
   await assertConnectPage(input);
 
-  const reload = await input.page.reload({ waitUntil: "domcontentloaded" });
+  const reload = await input.page.reload({ waitUntil: "load" });
   assertSuccessfulNavigation(reload, input.caseName, "reload");
   await assertConnectPage(input);
 }
@@ -161,6 +182,12 @@ async function assertConnectPage(input: {
     );
   }
 
+  await input.page.evaluate(async () => {
+    await document.fonts?.ready;
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
   const horizontalOverflow = await input.page.evaluate(() =>
     document.documentElement.scrollWidth
       - document.documentElement.clientWidth
