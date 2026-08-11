@@ -3932,6 +3932,81 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
+  it("schedules concrete reaction confirmation without blocking a preferred later reply", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:01:00.000Z"));
+    const retainedReaction = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: ["mailbox_item_reaction"],
+      bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+      channel: "linq",
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "assistant-outbox:intent_reaction",
+        kind: "message-reaction",
+        reaction: "heart",
+        sentAt: "2026-04-08T00:00:30.000Z",
+        target: "linq_chat_1",
+        targetKind: "thread",
+        targetMessageId: "linq_message_1",
+      },
+      deliveryConfirmationPending: true,
+      deliveryIdempotencyKey: "assistant-outbox:intent_reaction",
+      deliveryTransportIdempotent: false,
+      explicitTarget: null,
+      intentId: "intent_reaction",
+      lastError: {
+        code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING",
+        message: "delivery confirmation is still pending",
+      },
+      message: "",
+      nextAttemptAt: "2026-04-08T00:02:00.000Z",
+      operation: { kind: "message-reaction", reaction: "heart" },
+      replyToMessageId: "linq_message_1",
+      status: "retryable",
+      threadId: "linq_chat_1",
+      turnId: "turn_reaction",
+    });
+    const laterReply = createPendingHostedDeliveryIntent({
+      bindingDelivery: { kind: "thread", target: "linq_chat_1" },
+      channel: "linq",
+      createdAt: "2026-04-08T00:01:01.000Z",
+      deliveryIdempotencyKey: "assistant-outbox:intent_later_reply",
+      deliveryTransportIdempotent: true,
+      explicitTarget: null,
+      intentId: "intent_later_reply",
+      message: "later reply",
+      nextAttemptAt: "2026-04-08T00:01:01.000Z",
+      replyToMessageId: "linq_message_1",
+      threadId: "linq_chat_1",
+      turnId: "turn_reaction",
+    });
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      retainedReaction,
+      laterReply,
+    ]);
+    mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(
+      (intent) => intent.intentId === laterReply.intentId,
+    );
+
+    const sideEffects = await collectHostedAssistantDeliverySideEffects({
+      includeBackgroundDueIntents: false,
+      preferredIntentIds: [laterReply.intentId],
+      vaultRoot: "/tmp/vault",
+    });
+
+    expect(sideEffects.map((effect) => effect.effectId)).toEqual([
+      laterReply.intentId,
+    ]);
+
+    mocks.listAssistantOutboxIntents.mockResolvedValueOnce([
+      retainedReaction,
+    ]);
+    await expect(resolveHostedAssistantOutboxNextWakeAt({
+      now: new Date(),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toBe("2026-04-08T00:02:00.000Z");
+  });
+
   it("collects stale non-idempotent sending predecessors before later same-boundary replies", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T00:10:00.000Z"));

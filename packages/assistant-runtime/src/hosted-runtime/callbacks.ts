@@ -257,6 +257,7 @@ export async function collectHostedAssistantDeliverySideEffects(
       intent.status === "retryable"
       && !intent.deliveryTransportIdempotent
       && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+      && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
     ) {
       continue;
     }
@@ -1743,6 +1744,7 @@ function resolveHostedAssistantOutboxIntentWakeAt(
         intent.status === "retryable"
         && !intent.deliveryTransportIdempotent
         && intent.lastError?.code === "ASSISTANT_DELIVERY_CONFIRMATION_PENDING"
+        && !readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)
       ) {
         return null;
       }
@@ -3228,13 +3230,17 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             vaultRoot: vault,
           });
         },
-        resolveDeliveredIntent: ({ intent }) =>
-          confirmHostedAcceptedLinqReactionDelivery({
+        resolveDeliveredIntent: async ({ intent }) => {
+          if (intent.delivery === null) {
+            return null;
+          }
+          return confirmHostedAcceptedLinqReactionDelivery({
             effectsPort: input.effectsPort,
             intent,
             linqDeliveryContexts,
             timing: null,
-          }),
+          });
+        },
         shouldRethrowDispatchError: ({ error }) =>
           input.preparedDispatch !== null
           && isHostedBackgroundDeliveryDeferredError(error),

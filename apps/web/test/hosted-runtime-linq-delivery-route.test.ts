@@ -568,9 +568,9 @@ describe("hosted runtime Linq delivery route", () => {
     expect(mocks.recordHostedLinqRuntimeDeliveryOutcomeTx).not.toHaveBeenCalled();
   });
 
-  it("accepts grouped delivery outcomes with more than forty answered mailbox item ids", async () => {
+  it("accepts the maximum one hundred answered mailbox item ids as one grouped outcome", async () => {
     const answeredMailboxItemIds = Array.from(
-      { length: 45 },
+      { length: 100 },
       (_, index) => `mailbox_item_grouped_${index}`,
     );
 

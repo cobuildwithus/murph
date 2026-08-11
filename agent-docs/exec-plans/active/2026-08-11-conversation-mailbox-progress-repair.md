@@ -48,9 +48,13 @@ Updated: 2026-08-11
 - Keep the provider receipt as the durable retry owner after acceptance so a failed Web confirmation cannot replay the provider reaction.
 - Filter conversation rows at the database boundary while leaving system-lane selection unchanged.
 - After current-main integration, make the durable delivered intent the dispatch-failure owner before the confirmation hook; this lets failure classification see the concrete reaction receipt instead of misclassifying it as provider ambiguity.
+- Treat a fresh exact-consume reaction with no delivery receipt as an ordinary provider send; the recovery hook handles only intents that already carry delivery evidence.
+- Make only a concrete accepted Linq reaction receipt with exact answered IDs schedulable for callback-only retry. Ambiguous non-idempotent sends remain parked and cannot replay.
+- Prove the admitted 100-ID Web boundary as one set-based transaction and an idempotent replay instead of adding batching or another persistence layer.
 
 ## Verification
 
-- Passed locally: assistant outbox (101 tests), hosted callbacks (243 tests), Web monitor (8 tests), assistant-engine/runtime/Web typechecks, assistant-engine/runtime builds, runner-bundle assembly, runner-bundle policy tests (50 tests), docs drift, and diff/privacy checks.
+- Passed locally: assistant outbox (101 tests), hosted callbacks plus the real Linq outbox regression (255 tests), focused Web route/store/monitor coverage (158 tests), assistant-engine/runtime/Web typechecks, assistant-engine/runtime builds, runner-bundle assembly, runner-bundle policy tests (50 tests), docs drift, and diff/privacy checks.
 - PostgreSQL proofs: three tests are present but skipped locally because the loopback PostgreSQL server is unavailable; exact-head CI owns their execution.
-- Remaining: required GitHub Actions and both Review GPT completion gates on the exact pushed PR head.
+- Review GPT round 1 accepted findings: repaired fresh-intent resolver ordering, concrete-receipt wake ownership, and maximum-cardinality transactional proof. The preliminary specialist pass returned the same wake-ownership finding plus the coverage bound; no patch artifact was returned.
+- Remaining: push the corrected candidate, obtain a passing final Review GPT round, finish exact-head GitHub Actions, and close this plan.

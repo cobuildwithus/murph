@@ -18,8 +18,10 @@ import {
 } from "@murphai/hosted-execution/side-effects";
 
 import {
+  collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
 import type {
   HostedRuntimeActionApprovalPort,
@@ -34,6 +36,125 @@ const cleanupTasks: Array<() => Promise<void>> = [];
 afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(cleanupTasks.splice(0).map((cleanup) => cleanup()));
+});
+
+it("sends a fresh exact-consume reaction once and retries only its Web confirmation", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));
+  const fixture = await createHostedLinqReactionFixture();
+  const providerFetch = vi.fn<typeof fetch>(async (request) => {
+    const url = String(request);
+    if (!url.endsWith(`/messages/${fixture.messageId}/reactions`)) {
+      throw new Error(`Unexpected Linq provider request: ${url}`);
+    }
+    return new Response(JSON.stringify({}), {
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+  const assertRecentInboundEngagement = vi.fn(async (request: {
+    authorityCheckOnly?: boolean;
+  }) => request.authorityCheckOnly === true
+    ? {}
+    : { providerDispatchClaimed: true });
+  const recordLinqDeliveryOutcome = vi.fn()
+    .mockRejectedValueOnce(new Error("Web confirmation unavailable"))
+    .mockResolvedValueOnce(undefined);
+  const effectsPort = createHostedRuntimeEffectsPortStub({
+    assertLinqRecentInboundEngagement: assertRecentInboundEngagement,
+    recordLinqDeliveryOutcome,
+  });
+
+  const firstOutcomes = await drainHostedPreparedAssistantDeliveries({
+    assistantDeliveryEffects: [fixture.effect],
+    effectsPort,
+    forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+    linqDeliveryContext: fixture.linqDeliveryContext,
+    platformEnv: {},
+    providerFetch,
+    vaultRoot: fixture.vaultRoot,
+    wake: fixture.wake,
+  });
+
+  expect(firstOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "retryable",
+      effectId: fixture.intent.intentId,
+      retryable: true,
+    }),
+  ]);
+  expect(providerFetch).toHaveBeenCalledTimes(1);
+  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(1);
+  expect(recordLinqDeliveryOutcome).toHaveBeenCalledTimes(1);
+  expect(recordLinqDeliveryOutcome).toHaveBeenCalledWith(
+    expect.objectContaining({
+      acceptedAt: expect.any(String),
+      answeredMailboxItemIds: [fixture.mailboxItemId],
+      intentId: fixture.intent.intentId,
+    }),
+    expect.objectContaining({ signal: expect.any(AbortSignal) }),
+  );
+
+  const retained = await readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  );
+  expect(retained).toMatchObject({
+    answeredMailboxItemIds: [fixture.mailboxItemId],
+    delivery: {
+      channel: "linq",
+      kind: "message-reaction",
+      targetMessageId: fixture.messageId,
+    },
+    deliveryConfirmationPending: true,
+    lastError: { code: "ASSISTANT_DELIVERY_CONFIRMATION_PENDING" },
+    nextAttemptAt: expect.any(String),
+    status: "retryable",
+  });
+  if (!retained?.nextAttemptAt) {
+    throw new Error("Expected the retained reaction confirmation to schedule a retry.");
+  }
+  expect(await resolveHostedAssistantOutboxNextWakeAt({
+    now: new Date(),
+    vaultRoot: fixture.vaultRoot,
+  })).toBe(retained.nextAttemptAt);
+
+  vi.setSystemTime(new Date(retained.nextAttemptAt));
+  const retryEffects = await collectHostedAssistantDeliverySideEffects({
+    includeBackgroundDueIntents: true,
+    vaultRoot: fixture.vaultRoot,
+  });
+  expect(retryEffects.map((effect) => effect.effectId)).toEqual([
+    fixture.intent.intentId,
+  ]);
+
+  const retryOutcomes = await drainHostedPreparedAssistantDeliveries({
+    assistantDeliveryEffects: retryEffects,
+    effectsPort,
+    forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+    linqDeliveryContext: fixture.linqDeliveryContext,
+    platformEnv: {},
+    providerFetch,
+    vaultRoot: fixture.vaultRoot,
+    wake: fixture.wake,
+  });
+
+  expect(retryOutcomes).toEqual([
+    expect.objectContaining({
+      deliveryStatus: "sent",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(providerFetch).toHaveBeenCalledTimes(1);
+  expect(assertRecentInboundEngagement).toHaveBeenCalledTimes(1);
+  expect(recordLinqDeliveryOutcome).toHaveBeenCalledTimes(2);
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    deliveryConfirmationPending: false,
+    status: "sent",
+  });
 });
 
 it.each([
@@ -777,6 +898,82 @@ async function createHostedLinqAttachmentFixture(input: {
       occurredAt: "2026-08-06T20:00:00.000Z",
       triggerKind: "runtime_timer",
       userId: `member_${input.key}`,
+    }),
+  };
+}
+
+async function createHostedLinqReactionFixture() {
+  const workspace = await createHostedRuntimeWorkspace(
+    "hosted-runtime-linq-reaction-confirmation-",
+  );
+  cleanupTasks.push(workspace.cleanup);
+
+  const mailboxItemId = "mailbox_item_reaction_confirmation";
+  const messageId = "linq_message_reaction_confirmation";
+  const target = "linq_chat_reaction_confirmation";
+  const intent = await createAssistantOutboxIntent({
+    actorId: "actor_reaction_confirmation",
+    answeredMailboxItemIds: [mailboxItemId],
+    bindingDelivery: { kind: "thread", target },
+    channel: "linq",
+    dedupeToken: "reaction-confirmation",
+    identityId: "identity_reaction_confirmation",
+    message: "",
+    operation: { kind: "message-reaction", reaction: "heart" },
+    replyToMessageId: messageId,
+    sessionId: "session_reaction_confirmation",
+    threadId: target,
+    threadIsDirect: true,
+    turnId: "turn_reaction_confirmation",
+    vault: workspace.vaultRoot,
+  });
+  const effect = buildHostedAssistantDeliveryEffect({
+    dedupeKey: intent.dedupeKey,
+    deliveryPhase: "background_retry",
+    effectId: intent.intentId,
+    payload: {
+      actorId: intent.actorId,
+      answeredMailboxItemIds: intent.answeredMailboxItemIds,
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      channel: "linq",
+      deliverySourceKey: null,
+      explicitTarget: null,
+      idempotencyKey:
+        intent.deliveryIdempotencyKey ?? `assistant-outbox:${intent.intentId}`,
+      identityId: intent.identityId,
+      media: [],
+      message: "",
+      replyToMessageId: messageId,
+      sessionId: intent.sessionId,
+      subject: null,
+      threadId: target,
+      threadIsDirect: true,
+      transportIdempotent: intent.deliveryTransportIdempotent,
+      turnId: intent.turnId,
+    },
+  });
+
+  return {
+    effect,
+    intent,
+    linqDeliveryContext: {
+      directRecipientPhoneNumber: null,
+      fromPhoneNumber: null,
+      replyToMessageId: messageId,
+      routeAuthority: null,
+      service: "iMessage" as const,
+      target,
+      threadIsDirect: true,
+    },
+    mailboxItemId,
+    messageId,
+    vaultRoot: workspace.vaultRoot,
+    wake: buildHostedExecutionRuntimeTimerWake({
+      eventId: "evt_hosted_reaction_confirmation",
+      occurredAt: "2026-08-06T20:00:00.000Z",
+      triggerKind: "runtime_timer",
+      userId: "member_reaction_confirmation",
     }),
   };
 }
