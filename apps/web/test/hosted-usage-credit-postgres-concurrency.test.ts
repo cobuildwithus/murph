@@ -4815,10 +4815,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             ),
           },
         });
+        expect(persistedPayload).toMatchObject({
+          notification: {
+            externalThreadRouteAuthority: {
+              channel: "linq",
+              containerMemberId: memberId,
+              threadId: sourceThreadId,
+            },
+          },
+        });
         const serializedPayload = JSON.stringify(persistedPayload);
-        expect(serializedPayload).not.toContain(
-          '"externalThreadRouteAuthority"',
-        );
         expect(serializedPayload).not.toContain('"conversationHistory"');
         expect(serializedPayload).not.toContain('"messages"');
         expect(serializedPayload).not.toContain('"referrer"');

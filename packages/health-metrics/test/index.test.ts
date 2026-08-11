@@ -28,6 +28,7 @@ import {
   selectMetricTrend,
   selectMetricValue,
   selectMetricWindowComparison,
+  wearableMetricCatalog,
   type GoalMetricTarget,
   type MetricPoint,
   type MetricSeriesPoint,
@@ -177,6 +178,10 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   assert.equal(resolveMetricDefinition("SBP")?.key, "systolic-blood-pressure");
   assert.equal(resolveMetricDefinition("diastolic_bp")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("body_mass_index")?.key, "bmi");
+  assert.equal(resolveMetricDefinition("bodyfat")?.key, "body-fat-percentage");
+  assert.equal(resolveMetricDefinition("bodymassindex")?.key, "bmi");
+  assert.equal(resolveMetricDefinition("systolicbloodpressure")?.key, "systolic-blood-pressure");
+  assert.equal(resolveMetricDefinition("diastolicbloodpressure")?.key, "diastolic-blood-pressure");
   assert.equal(resolveMetricDefinition("self_rated_health")?.key, "self-rated-health");
   assert.equal(resolveMetricDefinition("hypertension_history_proxy_yes")?.key, "hypertension-history-proxy-yes");
   assert.equal(resolveMetricDefinition("diabetes_history_proxy_yes")?.key, "diabetes-history-proxy-yes");
@@ -344,6 +349,49 @@ test("resolves metric aliases, biomarker primary metrics, and normalized metric 
   });
 });
 
+test("resolves every legacy collapsed body and blood-pressure identity from the owning catalog", () => {
+  const relevantDefinitions = listMetricDefinitions().filter((definition) =>
+    definition.category === "body"
+    || definition.key === "systolic-blood-pressure"
+    || definition.key === "diastolic-blood-pressure"
+  );
+
+  assert.ok(relevantDefinitions.length >= 6);
+  for (const definition of relevantDefinitions) {
+    for (const identity of [definition.key, ...definition.aliases]) {
+      const collapsedIdentity = normalizeMetricKey(identity).replace(/-/gu, "");
+      assert.equal(
+        resolveMetricDefinition(collapsedIdentity)?.key,
+        definition.key,
+        `${identity} must retain its canonical identity after legacy writer collapse`,
+      );
+    }
+  }
+
+  for (const wearableKey of [
+    "bmi",
+    "bodyFatPercentage",
+    "leanBodyMassKg",
+    "waistCircumference",
+    "weightKg",
+  ] as const) {
+    const entry = wearableMetricCatalog[wearableKey];
+    for (const identity of [entry.key, ...entry.aliases]) {
+      const definition = resolveMetricDefinition(identity);
+      assert.equal(
+        definition?.category,
+        "body",
+        `${identity} must resolve through the general body identity owner`,
+      );
+      assert.equal(
+        resolveMetricDefinition(normalizeMetricKey(identity).replace(/-/gu, ""))?.key,
+        definition?.key,
+        `${identity} must retain its general body identity after legacy writer collapse`,
+      );
+    }
+  }
+});
+
 test("requires exactly one session capture field for a subjective primary metric", () => {
   assert.deepEqual(assessExperimentPrimaryMetricCapture({
     primaryBiomarkerKey: "biomarker:sleep-quality",
@@ -447,6 +495,28 @@ test("normalizes supported metric units without hiding unsupported unit mismatch
     canonicalUnit: "kg",
     canonicalValue: 81.6466,
     unit: "lb",
+    warnings: [],
+  });
+
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "lean-body-mass",
+    unit: "lb",
+    value: 150,
+  }), {
+    canonicalUnit: "kg",
+    canonicalValue: 68.0389,
+    unit: "lb",
+    warnings: [],
+  });
+
+  assert.deepEqual(normalizeMetricValue({
+    metricKey: "lean-body-mass",
+    unit: "kg",
+    value: 68,
+  }), {
+    canonicalUnit: "kg",
+    canonicalValue: 68,
+    unit: "kg",
     warnings: [],
   });
 
