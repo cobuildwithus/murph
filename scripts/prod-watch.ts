@@ -379,7 +379,7 @@ async function runScheduledCommand(argv: string[]): Promise<void> {
       await writeStateAndProjections(next.state, result.snapshot, abortController.signal);
       throwIfAborted(abortController.signal);
       return next;
-    });
+    }, abortController.signal);
     throwIfAborted(abortController.signal);
     const dispatchedWorkers = parsed.dispatchWorkers
       ? await launchRemediationDispatches(update.dispatches, parsed, abortController.signal)
@@ -2692,21 +2692,25 @@ export async function collectStripeEvidence(input: {
   }
   let primaryFailure: unknown;
   let hasPrimaryFailure = false;
+  const publishFailure = (error: unknown) => {
+    if (!hasPrimaryFailure) {
+      primaryFailure = error;
+      hasPrimaryFailure = true;
+      branchController.abort(error);
+    }
+  };
   const runQuery = async (args: string[]) => {
     try {
       const result = await spawnCaptured("stripe", args, {
         timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
         signal: branchController.signal,
         outputLimitBytes: 4 * MAX_SUBPROCESS_OUTPUT_BYTES,
+        onFailureDetected: publishFailure,
       });
       assertProviderCommandSucceeded("stripe", result);
       return result;
     } catch (error) {
-      if (!hasPrimaryFailure) {
-        primaryFailure = error;
-        hasPrimaryFailure = true;
-        branchController.abort(error);
-      }
+      publishFailure(error);
       throw error;
     }
   };
@@ -3552,17 +3556,25 @@ async function writeStateAndProjections(
   }
 }
 
-async function withStateLock<T>(runId: string, action: () => Promise<T>): Promise<T> {
+async function withStateLock<T>(
+  runId: string,
+  action: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  throwIfAborted(signal);
   const claim = await acquireDirectoryLock({
     lockPath: stateLockPath,
     runId,
     purpose: "production_watch_state",
     waitMs: 5_000,
+    signal,
   });
   if (!claim.acquired) {
+    throwIfAborted(signal);
     throw new Error("state_lock_busy");
   }
   try {
+    throwIfAborted(signal);
     return await action();
   } finally {
     await claim.release?.();
@@ -3595,7 +3607,7 @@ async function resolveRepositorySha(signal?: AbortSignal): Promise<string | unde
   return result.status === 0 && /^[a-f0-9]{7,64}$/u.test(sha) ? sha : undefined;
 }
 
-async function spawnCaptured(
+export async function spawnCaptured(
   command: string,
   args: string[],
   options: {
@@ -3605,6 +3617,7 @@ async function spawnCaptured(
     outputLimitBytes: number;
     cwd?: string;
     env?: NodeJS.ProcessEnv;
+    onFailureDetected?: (error: unknown) => void;
   },
 ): Promise<{ status: number; stdout: string; stderr: string; timedOut: boolean }> {
   if (options.signal?.aborted === true) {
@@ -3625,6 +3638,18 @@ async function spawnCaptured(
     let terminationStarted = false;
     let forceKillTimer: NodeJS.Timeout | undefined;
     let pendingError: unknown;
+    let failureNotified = false;
+    const notifyFailure = (error: unknown) => {
+      if (failureNotified) {
+        return;
+      }
+      failureNotified = true;
+      try {
+        options.onFailureDetected?.(error);
+      } catch {
+        // Failure notification cannot replace subprocess settlement.
+      }
+    };
     const finish = (result: { status: number; stdout: string; stderr: string; timedOut: boolean }) => {
       if (settled) {
         return;
@@ -3637,6 +3662,7 @@ async function spawnCaptured(
       if (settled) {
         return;
       }
+      notifyFailure(error);
       settled = true;
       cleanup();
       reject(error);
@@ -3652,11 +3678,13 @@ async function spawnCaptured(
     };
     const timeout = setTimeout(() => {
       timedOut = true;
+      notifyFailure(Object.assign(new Error("subprocess_timeout"), { code: "ETIMEDOUT" }));
       terminate();
     }, options.timeoutMs);
     timeout.unref();
     const onAbort = () => {
       timedOut = true;
+      notifyFailure(Object.assign(new Error("subprocess_aborted"), { code: "ABORT_ERR" }));
       terminate();
     };
     options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -3673,6 +3701,7 @@ async function spawnCaptured(
         return;
       }
       pendingError ??= error;
+      notifyFailure(pendingError);
       terminate();
     });
     child.stdout?.setEncoding("utf8");
@@ -3684,6 +3713,7 @@ async function spawnCaptured(
       if (Buffer.byteLength(stdout) + Buffer.byteLength(chunk) > options.outputLimitBytes) {
         stdout = "";
         pendingError = Object.assign(new Error("subprocess_stdout_too_large"), { code: "EFBIG" });
+        notifyFailure(pendingError);
         terminate();
         return;
       }

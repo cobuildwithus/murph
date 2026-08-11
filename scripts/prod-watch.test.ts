@@ -69,6 +69,7 @@ import {
   renderLaunchdPlistTemplate,
   renderVerificationSandboxConfig,
   shouldContinueVercelPagination,
+  spawnCaptured,
   spawnCodexJsonChild,
   splitVercelWindow,
   validateRemediationPatch,
@@ -344,6 +345,35 @@ describe("production-watch snapshot contract", () => {
     expect(existsSync(markerPath)).toBe(false);
   });
 
+  it("publishes a subprocess timeout before a resistant child settles", async () => {
+    const runtimeRoot = makeTempRoot();
+    const childPath = path.join(runtimeRoot, "resistant-child.cjs");
+    writeFileSync(childPath, [
+      "process.on('SIGTERM', () => {});",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const startedAt = Date.now();
+    let failureDetectedAt: number | undefined;
+    let failureCode: string | undefined;
+    const result = await spawnCaptured(process.execPath, [childPath], {
+      timeoutMs: 100,
+      outputLimitBytes: 1_024,
+      onFailureDetected(error) {
+        failureDetectedAt = Date.now();
+        failureCode = (error as NodeJS.ErrnoException).code;
+      },
+    });
+    const settledAt = Date.now();
+
+    expect(result.timedOut).toBe(true);
+    expect(failureCode).toBe("ETIMEDOUT");
+    expect(failureDetectedAt).toBeDefined();
+    expect(failureDetectedAt! - startedAt).toBeLessThan(500);
+    expect(settledAt - startedAt).toBeGreaterThanOrEqual(900);
+    expect(settledAt - failureDetectedAt!).toBeGreaterThanOrEqual(700);
+  });
+
   it("aborts and settles the sibling Stripe process after an output-limit failure", async () => {
     const runtimeRoot = makeTempRoot();
     const binRoot = path.join(runtimeRoot, "bin");
@@ -355,11 +385,13 @@ describe("production-watch snapshot contract", () => {
       "const { appendFileSync } = require('node:fs');",
       "const failedDelivery = process.argv.includes('--delivery-success=false');",
       "if (!failedDelivery) {",
+      "  process.on('SIGTERM', () => appendFileSync(process.env.TEST_STRIPE_MARKER, 'oversized-terminated\\n'));",
       "  setTimeout(() => process.stdout.write('x'.repeat(5 * 1024 * 1024)), 100);",
+      "  setInterval(() => {}, 1000);",
       "} else {",
-      "  appendFileSync(process.env.TEST_STRIPE_MARKER, 'started\\n');",
-      "  process.on('SIGTERM', () => { appendFileSync(process.env.TEST_STRIPE_MARKER, 'terminated\\n'); process.exit(0); });",
-      "  setTimeout(() => { appendFileSync(process.env.TEST_STRIPE_MARKER, 'finished\\n'); process.stdout.write('{\"object\":\"list\",\"data\":[],\"has_more\":false}\\n'); }, 1000);",
+      "  appendFileSync(process.env.TEST_STRIPE_MARKER, 'sibling-started\\n');",
+      "  process.on('SIGTERM', () => appendFileSync(process.env.TEST_STRIPE_MARKER, 'sibling-terminated\\n'));",
+      "  setTimeout(() => { appendFileSync(process.env.TEST_STRIPE_MARKER, 'sibling-failed\\n'); process.exit(7); }, 300);",
       "}",
       "",
     ].join("\n"), { mode: 0o755 });
@@ -368,6 +400,7 @@ describe("production-watch snapshot contract", () => {
     const previousMarker = process.env.TEST_STRIPE_MARKER;
     process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
     process.env.TEST_STRIPE_MARKER = markerPath;
+    const startedAt = Date.now();
     try {
       const end = new Date("2026-08-10T20:10:00.000Z");
       await expect(collectStripeEvidence({
@@ -381,9 +414,16 @@ describe("production-watch snapshot contract", () => {
       if (previousMarker === undefined) delete process.env.TEST_STRIPE_MARKER;
       else process.env.TEST_STRIPE_MARKER = previousMarker;
     }
-    expect(readFileSync(markerPath, "utf8")).toBe("started\nterminated\n");
+    const elapsedMs = Date.now() - startedAt;
+    const events = readFileSync(markerPath, "utf8");
+    expect(events).toContain("sibling-started\n");
+    expect(events).toContain("oversized-terminated\n");
+    expect(events).toContain("sibling-terminated\n");
+    expect(events).toContain("sibling-failed\n");
+    expect(elapsedMs).toBeGreaterThanOrEqual(900);
+    expect(elapsedMs).toBeLessThan(2_500);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(readFileSync(markerPath, "utf8")).toBe("started\nterminated\n");
+    expect(readFileSync(markerPath, "utf8")).toBe(events);
   });
 
   it("rejects a Vercel page above the partition row ceiling before normalization", async () => {
@@ -2117,6 +2157,35 @@ describe("production-watch locking and dry-run behavior", () => {
     await winners[0]?.release?.();
   });
 
+  it("aborts a contended directory-lock acquisition and removes its claim", async () => {
+    const lockPath = path.join(makeTempRoot(), "abortable.lock");
+    const holder = await acquireDirectoryLock({
+      lockPath,
+      runId: "holder",
+      purpose: "test",
+      waitMs: 0,
+    });
+    expect(holder.acquired).toBe(true);
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(new Error("test_abort")), 75);
+    const startedAt = Date.now();
+    try {
+      await expect(acquireDirectoryLock({
+        lockPath,
+        runId: "contender",
+        purpose: "test",
+        waitMs: 5_000,
+        signal: controller.signal,
+      })).rejects.toMatchObject({ code: "ABORT_ERR" });
+    } finally {
+      clearTimeout(abortTimer);
+    }
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
+    expect(readdirSync(lockPath).filter((candidate) => candidate.startsWith("claim-")))
+      .toHaveLength(1);
+    await holder.release?.();
+  });
+
   it("records a skipped scheduled run and consumes the overlap marker on recovery", () => {
     const runtimeRoot = makeTempRoot();
     const env = installDatabaseFixtureHelper(runtimeRoot, "healthy");
@@ -2817,7 +2886,6 @@ describe("production-watch locking and dry-run behavior", () => {
 
     const result = runProdWatch([
       "run",
-      "--dry-run",
       "--provider-child",
       "--settling-delay-seconds",
       "0",
@@ -2835,6 +2903,61 @@ describe("production-watch locking and dry-run behavior", () => {
     expect(readFileSync(databaseMarker, "utf8")).toBe("started\nsettled\n");
     expect(existsSync(codexMarker)).toBe(false);
     expect(existsSync(gitMarker)).toBe(false);
+    expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"))).toBe(false);
+    expect(existsSync(path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"))).toBe(false);
+    expect(readdirSync(path.join(runtimeRoot, "tmp", "prod-watch", "run.lock"))).toEqual([]);
+  });
+
+  it("preserves cancellation while waiting for the durable state lock", () => {
+    const runtimeRoot = makeTempRoot();
+    const binRoot = path.join(runtimeRoot, "bin");
+    const stateLockPath = path.join(runtimeRoot, "tmp", "prod-watch", "state.lock");
+    const signalMarker = path.join(runtimeRoot, "signal-sent");
+    mkdirSync(binRoot, { recursive: true });
+    mkdirSync(stateLockPath, { recursive: true });
+    writeFileSync(path.join(stateLockPath, "claim-holder.json"), JSON.stringify({
+      pid: process.pid,
+      runId: "holder",
+      startedAt: new Date().toISOString(),
+    }), { mode: 0o600 });
+
+    const signalerPath = path.join(binRoot, "signal-parent.cjs");
+    writeFileSync(signalerPath, [
+      "const { writeFileSync } = require('node:fs');",
+      "const target = Number(process.argv[2]);",
+      "setTimeout(() => { writeFileSync(process.env.TEST_SIGNAL_MARKER, 'sent'); process.kill(target, 'SIGTERM'); }, 250);",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const gitPath = path.join(binRoot, "git");
+    writeFileSync(gitPath, [
+      "#!/usr/bin/env node",
+      "const { spawn } = require('node:child_process');",
+      "const child = spawn(process.execPath, [process.env.TEST_SIGNALER_PATH, String(process.ppid)], { detached: true, stdio: 'ignore' });",
+      "child.unref();",
+      "process.stdout.write('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n');",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    chmodSync(gitPath, 0o755);
+    const databaseEnv = installDatabaseFixtureHelper(runtimeRoot, "healthy");
+    const startedAt = Date.now();
+    const result = runProdWatch([
+      "run",
+      "--settling-delay-seconds",
+      "0",
+    ], runtimeRoot, {
+      ...databaseEnv,
+      PATH: `${binRoot}:${databaseEnv.PATH}`,
+      TEST_SIGNALER_PATH: signalerPath,
+      TEST_SIGNAL_MARKER: signalMarker,
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("ABORT_ERR");
+    expect(elapsedMs).toBeLessThan(2_000);
+    expect(readFileSync(signalMarker, "utf8")).toBe("sent");
+    expect(readdirSync(stateLockPath).filter((candidate) => candidate.startsWith("claim-")))
+      .toEqual(["claim-holder.json"]);
     expect(existsSync(path.join(runtimeRoot, "operations", "prod-watch", "state.v1.json"))).toBe(false);
     expect(existsSync(path.join(runtimeRoot, "projections", "prod-watch", "latest.snapshot.v1.json"))).toBe(false);
     expect(readdirSync(path.join(runtimeRoot, "tmp", "prod-watch", "run.lock"))).toEqual([]);

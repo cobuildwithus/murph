@@ -2270,10 +2270,13 @@ export async function acquireDirectoryLock(input: {
   purpose: string;
   waitMs: number;
   staleMetadataGraceMs?: number;
+  signal?: AbortSignal;
 }): Promise<LockClaim> {
   const startedAt = Date.now();
   const graceMs = input.staleMetadataGraceMs ?? 10_000;
+  throwIfDirectoryLockAborted(input.signal);
   await ensurePrivateDirectory(input.lockPath);
+  throwIfDirectoryLockAborted(input.signal);
 
   const claimId = `${process.pid}-${randomUUID()}`;
   const claimPath = path.join(input.lockPath, `claim-${claimId}.json`);
@@ -2296,22 +2299,28 @@ export async function acquireDirectoryLock(input: {
 
   let winnerSince: number | undefined;
   try {
+    throwIfDirectoryLockAborted(input.signal);
     while (true) {
+      throwIfDirectoryLockAborted(input.signal);
       const claims = await listLiveLockClaims(input.lockPath, graceMs);
+      throwIfDirectoryLockAborted(input.signal);
       const winner = claims[0];
       if (winner?.claimId === claimId) {
         winnerSince ??= Date.now();
         if (Date.now() - winnerSince >= LOCK_ELECTION_SETTLE_MS) {
+          throwIfDirectoryLockAborted(input.signal);
           return { acquired: true, release };
         }
       } else {
         winnerSince = undefined;
         if (Date.now() - startedAt >= input.waitMs) {
+          throwIfDirectoryLockAborted(input.signal);
           await release();
+          throwIfDirectoryLockAborted(input.signal);
           return { acquired: false, ...(winner?.runId === undefined ? {} : { ownerRunId: winner.runId }) };
         }
       }
-      await sleep(25);
+      await sleep(25, input.signal);
     }
   } catch (error) {
     await release();
@@ -3594,8 +3603,34 @@ function isProcessRunning(pid: number): boolean {
   }
 }
 
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (signal === undefined) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+  throwIfDirectoryLockAborted(signal);
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(directoryLockAbortError(signal));
+    };
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function throwIfDirectoryLockAborted(signal?: AbortSignal): void {
+  if (signal?.aborted === true) {
+    throw directoryLockAbortError(signal);
+  }
+}
+
+function directoryLockAbortError(signal: AbortSignal): NodeJS.ErrnoException {
+  return Object.assign(new Error("directory_lock_aborted", { cause: signal.reason }), {
+    code: "ABORT_ERR",
+  });
 }
 
 function assertUniqueBy<T>(values: T[], key: (value: T) => string, errorCode: string): void {
