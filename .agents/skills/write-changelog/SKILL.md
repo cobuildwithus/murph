@@ -1,6 +1,6 @@
 ---
 name: write-changelog
-description: Write, backfill, or review Murph's public changelog. Use when a PR ships a member-visible feature, improvement, recovery, performance change, copy or UX change; when updating `apps/web/src/lib/changelog.ts`; when adding changelog visuals; when auditing merged work for missing release notes; or when deciding and documenting why a PR is not changelog-worthy.
+description: Write, backfill, or review Murph's public changelog. Use when a PR ships a member-visible feature, improvement, recovery, performance change, copy or UX change; when adding an isolated file under `apps/web/changelog/entries`; when adding changelog visuals; when auditing merged work for missing release notes; or when deciding and documenting why a PR is not changelog-worthy.
 ---
 
 # Write Changelog
@@ -33,8 +33,9 @@ current versions of:
 - `DESIGN.md`, especially the changelog visual language.
 - `agent-docs/product-marketing-context.md` for voice and factual boundaries.
 - `agent-docs/operations/completion-workflow.md` for PR requirements.
-- `apps/web/src/lib/changelog.ts`, the latest edition, and the last recorded
-  source PR.
+- `apps/web/changelog/README.md`, the latest entry-fragment directory, and the
+  last recorded source PR. Read `apps/web/src/lib/changelog.ts` only when the
+  registry contract or historical behavior itself needs inspection.
 - `apps/web/app/changelog/page.tsx`,
   `apps/web/app/changelog/visuals.tsx`, and the design-catalog study before
   adding or changing visuals.
@@ -72,8 +73,27 @@ the product still lets a member approve them independently.
 
 ## 3. Shape editions around member outcomes
 
-Use one dated `ChangelogEdition` per release day. Preserve stable edition IDs,
-item IDs, cursor windows, permalinks, card paths, and feed contracts.
+Add one uniquely named JSON file per item at
+`apps/web/changelog/entries/YYYY-MM-DD/<stable-item-id>.json`. Never add a
+normal item to the frozen `LEGACY_CHANGELOG_EDITIONS` array or a central test
+inventory. The fragment directory date, `publishedOn`, item `id`, and filename
+must agree.
+
+Use `order` to control presentation within the date. Higher values render
+first; equal values use the stable item ID as a deterministic tie-breaker, so
+concurrent PRs do not need to coordinate. Prefer gaps of 100 when editorial
+order matters. Do not renumber other fragments merely to insert one item.
+
+Edition title and summary are optional shared editorial metadata at
+`apps/web/changelog/editions/YYYY-MM-DD.json`. A date without metadata gets a
+stable date heading and summary, so a normal item PR does not need to add or
+edit the shared file. Edit metadata only when the edition-level copy materially
+improves the public archive; one curator should own that change when several
+PRs target the same date.
+
+The web preparation scripts group fragments into one dated `ChangelogEdition`
+in an ignored generated module. Preserve stable edition IDs, item IDs, cursor
+windows, permalinks, card paths, and feed contracts.
 
 Group related PRs into one item when they create or finish the same member
 outcome. Do not group unrelated changes merely to shorten the page. A good item
@@ -170,12 +190,15 @@ case applies.
 
 At minimum, update focused coverage for:
 
-- the exact edition order and item-ID inventory;
 - claim-critical source PRs, boundaries, and `tryIt` behavior;
 - the latest seven-edition page and older navigation;
 - explanatory visual rendering and the synthetic design study;
 - stable feed, card, API, cursor, and permalink behavior affected by the new
   latest items.
+
+The fragment loader automatically checks path/content agreement, allowed
+fields, unique IDs, deterministic ordering, and publication in the combined
+registry. Do not add the item to a hand-maintained full-edition inventory test.
 
 Run the smallest focused Vitest set that covers the changed changelog files,
 then the Web typecheck. Render the design study and latest archive at desktop
@@ -205,10 +228,10 @@ For a truly internal-only change:
 - Reason: Test-only coverage; no member-visible behavior changed.
 ```
 
-The `updated` disposition must correspond to a change in
-`apps/web/src/lib/changelog.ts`. The `not applicable` disposition must explain
-why members cannot experience a change. Never use a placeholder or a generic
-reason such as "not needed."
+The `updated` disposition must correspond to a change under
+`apps/web/changelog/entries/` or `apps/web/changelog/editions/`. The
+`not applicable` disposition must explain why members cannot experience a change.
+Never use a placeholder or a generic reason such as "not needed."
 
 ## Final review checklist
 
@@ -224,6 +247,6 @@ reason such as "not needed."
 - Visual facts are derived from or mechanically checked against their existing
   product owners; no fixture acts as a parallel authority for access or state.
 - Important behavior has a useful responsive visual where possible.
-- The design catalog, registry tests, page tests, and stable archive behavior
-  are updated.
+- The design catalog, focused claim tests, page tests, and stable archive
+  behavior are updated where the item changes those surfaces.
 - The PR has one valid changelog disposition and the required evidence.

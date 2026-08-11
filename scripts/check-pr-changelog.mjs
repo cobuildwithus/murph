@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -8,7 +9,10 @@ import {
   renderedText,
 } from "./check-frontend-design-proof.mjs";
 
-const CHANGELOG_PATH = "apps/web/src/lib/changelog.ts";
+const CHANGELOG_ENTRY_PREFIX = "apps/web/changelog/entries/";
+const CHANGELOG_EDITION_PREFIX = "apps/web/changelog/editions/";
+const CHANGELOG_CONTENT_DESCRIPTION =
+  "apps/web/changelog entries or edition metadata";
 const SECTION_HEADING = "Changelog";
 const VALID_DISPOSITIONS = new Set(["not applicable", "updated"]);
 const ITEM_REFERENCE_PATTERN =
@@ -121,10 +125,11 @@ function readChangelogItemsById(
     new URL("../apps/web/src/lib/changelog.ts", import.meta.url),
     "utf8",
   ),
+  fragmentsRoot = new URL("../apps/web/changelog/entries/", import.meta.url),
 ) {
-  const registryMatch = /const RAW_CHANGELOG_EDITIONS\s*=\s*\[/u.exec(sourceText);
+  const registryMatch = /const LEGACY_CHANGELOG_EDITIONS\s*=\s*\[/u.exec(sourceText);
   if (!registryMatch) {
-    throw new Error("Could not read the authoritative changelog registry.");
+    throw new Error("Could not read the legacy changelog registry.");
   }
   const openIndex = registryMatch.index + registryMatch[0].lastIndexOf("[");
   const closeIndex = findClosingDelimiter(sourceText, openIndex);
@@ -149,7 +154,40 @@ function readChangelogItemsById(
       itemsById.set(itemId, editionId);
     }
   }
+
+  for (const dateEntry of readdirSync(fragmentsRoot, { withFileTypes: true })) {
+    if (!dateEntry.isDirectory()) {
+      throw new Error("The changelog fragment root contains an unsupported entry.");
+    }
+    const dateRoot = new URL(`${dateEntry.name}/`, fragmentsRoot);
+    for (const fileEntry of readdirSync(dateRoot, { withFileTypes: true })) {
+      if (!fileEntry.isFile() || !fileEntry.name.endsWith(".json")) {
+        throw new Error("A changelog fragment directory contains an unsupported entry.");
+      }
+      const fragment = JSON.parse(
+        readFileSync(new URL(fileEntry.name, dateRoot), "utf8"),
+      );
+      const itemId = fragment?.item?.id;
+      const publishedOn = fragment?.publishedOn;
+      if (typeof itemId !== "string" || typeof publishedOn !== "string") {
+        throw new Error("A changelog fragment is missing its stable ID or date.");
+      }
+      if (publishedOn !== dateEntry.name || `${itemId}.json` !== fileEntry.name) {
+        throw new Error("A changelog fragment path does not match its stable ID and date.");
+      }
+      if (itemsById.has(itemId)) {
+        throw new Error(`The changelog registry repeats the item ID \`${itemId}\`.`);
+      }
+      itemsById.set(itemId, publishedOn);
+    }
+  }
   return itemsById;
+}
+
+function isChangelogContentPath(changedPath) {
+  const normalized = changedPath.split(path.sep).join("/");
+  return normalized.startsWith(CHANGELOG_ENTRY_PREFIX)
+    || normalized.startsWith(CHANGELOG_EDITION_PREFIX);
 }
 
 function parseItemReferences(value) {
@@ -222,11 +260,11 @@ function validatePrChangelog({
     return errors;
   }
 
-  const changelogChanged = changedPaths.includes(CHANGELOG_PATH);
+  const changelogChanged = changedPaths.some(isChangelogContentPath);
   if (disposition === "updated") {
     if (!changelogChanged) {
       errors.push(
-        `A \`Changelog: updated\` declaration must change \`${CHANGELOG_PATH}\`.`,
+        `A \`Changelog: updated\` declaration must change ${CHANGELOG_CONTENT_DESCRIPTION}.`,
       );
     }
     const itemEntries = findRenderedListItems(section, "Items");
@@ -276,7 +314,7 @@ function validatePrChangelog({
 
   if (changelogChanged) {
     errors.push(
-      `A PR that changes \`${CHANGELOG_PATH}\` cannot declare \`Changelog: not applicable\`.`,
+      `A PR that changes ${CHANGELOG_CONTENT_DESCRIPTION} cannot declare \`Changelog: not applicable\`.`,
     );
   }
   if (findRenderedListItems(section, "Items").length > 0) {
@@ -338,4 +376,9 @@ if (isDirectRun) {
   }
 }
 
-export { parseItemReferences, readChangelogItemsById, validatePrChangelog };
+export {
+  isChangelogContentPath,
+  parseItemReferences,
+  readChangelogItemsById,
+  validatePrChangelog,
+};

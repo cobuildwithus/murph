@@ -503,24 +503,13 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 10 shipment set", () => {
+  it("preserves the frozen July 20 through August 9 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 22).map((edition) => ({
+      listChangelogEditions().slice(1, 22).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
-      {
-        id: "2026-08-10",
-        itemIds: [
-          "non-expiring-starter-access",
-          "personal-patterns",
-          "reminders-keep-requested-timezone",
-          "web-search-restored",
-          "appointment-reminders-by-default",
-          "workout-card-status-rendering",
-        ],
-      },
       {
         id: "2026-08-09",
         itemIds: [

@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isChangelogContentPath,
   readChangelogItemsById,
   validatePrChangelog,
 } from "./check-pr-changelog.mjs";
 
-const CHANGELOG_PATH = "apps/web/src/lib/changelog.ts";
+const CHANGELOG_ENTRY_PATH =
+  "apps/web/changelog/entries/2026-08-09/public-referral-home.json";
 
 function section(...items) {
   return `
@@ -20,7 +22,7 @@ ${items.map((item) => `<li>${item}</li>`).join("\n")}
 test("accepts an updated declaration with a stable item reference", () => {
   assert.deepEqual(
     validatePrChangelog({
-      changedPaths: [CHANGELOG_PATH, "apps/web/app/changelog/page.tsx"],
+      changedPaths: [CHANGELOG_ENTRY_PATH, "apps/web/app/changelog/page.tsx"],
       prBodyHtml: section(
         "Changelog: updated",
         "Items: 2026-08-09 · public-referral-home",
@@ -78,7 +80,7 @@ test("rejects duplicate sections and disposition bullets", () => {
     }),
     [
       "Keep exactly one `## Changelog` section in the pull request body.",
-      "A `Changelog: updated` declaration must change `apps/web/src/lib/changelog.ts`.",
+      "A `Changelog: updated` declaration must change apps/web/changelog entries or edition metadata.",
       "Add exactly one `Items:` bullet naming the edition date and stable changelog item ID.",
     ],
   );
@@ -101,7 +103,7 @@ test("requires an updated declaration to change the registry and name items", ()
       prBodyHtml: section("Changelog: updated", "Items: TBD"),
     }),
     [
-      "A `Changelog: updated` declaration must change `apps/web/src/lib/changelog.ts`.",
+      "A `Changelog: updated` declaration must change apps/web/changelog entries or edition metadata.",
       "Complete `Items:` with semicolon-separated edition date and stable item ID references, for example `2026-08-09 · stable-item-id`.",
     ],
   );
@@ -111,7 +113,7 @@ test("validates every declared item against the authoritative registry", () => {
   const changelogItemsById = readChangelogItemsById();
   const validateItems = (items) =>
     validatePrChangelog({
-      changedPaths: [CHANGELOG_PATH],
+      changedPaths: [CHANGELOG_ENTRY_PATH],
       changelogItemsById,
       prBodyHtml: section("Changelog: updated", `Items: ${items}`),
     });
@@ -153,11 +155,11 @@ test("validates every declared item against the authoritative registry", () => {
 test("rejects placeholder not-applicable reasons and registry mismatches", () => {
   assert.deepEqual(
     validatePrChangelog({
-      changedPaths: [CHANGELOG_PATH],
+      changedPaths: [CHANGELOG_ENTRY_PATH],
       prBodyHtml: section("Changelog: not applicable", "Reason: N/A"),
     }),
     [
-      "A PR that changes `apps/web/src/lib/changelog.ts` cannot declare `Changelog: not applicable`.",
+      "A PR that changes apps/web/changelog entries or edition metadata cannot declare `Changelog: not applicable`.",
       "Complete `Reason:` with a concrete explanation of why the changelog is not applicable.",
     ],
   );
@@ -166,7 +168,7 @@ test("rejects placeholder not-applicable reasons and registry mismatches", () =>
 test("rejects disposition-specific leftover template bullets", () => {
   assert.deepEqual(
     validatePrChangelog({
-      changedPaths: [CHANGELOG_PATH],
+      changedPaths: [CHANGELOG_ENTRY_PATH],
       prBodyHtml: section(
         "Changelog: updated",
         "Items: 2026-08-09 · public-referral-home",
@@ -188,4 +190,14 @@ test("rejects disposition-specific leftover template bullets", () => {
       "Remove the `Items:` bullet when `Changelog: not applicable` is selected.",
     ],
   );
+});
+
+test("recognizes only isolated changelog content paths", () => {
+  assert.equal(isChangelogContentPath(CHANGELOG_ENTRY_PATH), true);
+  assert.equal(
+    isChangelogContentPath("apps/web/changelog/editions/2026-08-09.json"),
+    true,
+  );
+  assert.equal(isChangelogContentPath("apps/web/src/lib/changelog.ts"), false);
+  assert.equal(isChangelogContentPath("apps/web/test/changelog.test.ts"), false);
 });

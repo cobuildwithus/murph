@@ -1,5 +1,7 @@
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
+import CHANGELOG_FRAGMENT_EDITIONS from "./changelog-fragments.generated";
+
 export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
@@ -61,111 +63,7 @@ export interface ChangelogPage {
   totalPages: number;
 }
 
-const RAW_CHANGELOG_EDITIONS = [
-  {
-    id: "2026-08-10",
-    publishedOn: "2026-08-10",
-    title: "Starter access, patterns, reminders, cards, and web search",
-    summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, and managed OpenAI web search can reach current information again.",
-    items: [
-      {
-        id: "non-expiring-starter-access",
-        kind: "feature",
-        priority: 5,
-        title: "Start with usage that does not expire",
-        summary:
-          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
-        details:
-          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
-        relevanceTags: ["starter", "usage", "billing", "settings"],
-        sourcePullRequests: [1464],
-        tryIt: {
-          href: "/settings#subscription",
-          label: "View Starter usage",
-        },
-      },
-      {
-        id: "personal-patterns",
-        kind: "feature",
-        priority: 5,
-        title: "See what tends to change after repeated actions",
-        summary:
-          "Patterns compares days with and without a repeated activity or logged experiment action, then shows how next-day sleep and recovery differed.",
-        details:
-          "It uses your existing history when enough comparable days are available, requires the direction to repeat across the observation window, and shows association rather than cause. Murph's weekly health insight checks the same evidence and stays quiet when nothing clears the bar.",
-        relevanceTags: [
-          "patterns",
-          "wearables",
-          "sleep",
-          "recovery",
-          "experiments",
-        ],
-        sourcePullRequests: [1563],
-        tryIt: {
-          href: "/patterns",
-          label: "View your patterns",
-        },
-      },
-      {
-        id: "reminders-keep-requested-timezone",
-        kind: "improvement",
-        priority: 4,
-        title: "Reminders keep the time you asked for",
-        summary:
-          "When you schedule a recurring reminder in a named timezone, Murph now preserves that local time through saving and later edits.",
-        details:
-          "The confirmation comes from the saved schedule and scheduler's next deliverable occurrence. If timing cannot be verified, or an old one-time reminder can no longer fire, Murph says so and offers a bounded recovery instead of inventing a time.",
-        relevanceTags: ["reminders", "automations", "timezones", "reliability"],
-        sourcePullRequests: [1546],
-        tryIt: {
-          label: "Schedule a local-time reminder",
-          prompt: "Remind me every day at 9 PM Central to wind down.",
-        },
-      },
-      {
-        id: "web-search-restored",
-        kind: "improvement",
-        priority: 5,
-        title: "Managed OpenAI web search works again",
-        summary:
-          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
-        details:
-          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
-        relevanceTags: ["assistant", "search", "research", "reliability"],
-        sourcePullRequests: [1583],
-      },
-      {
-        id: "appointment-reminders-by-default",
-        kind: "improvement",
-        priority: 4,
-        title: "Confirmed appointments come with a reminder",
-        summary:
-          "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
-        details:
-          "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
-        relevanceTags: ["appointments", "reminders", "automations", "care"],
-        sourcePullRequests: [1586],
-        tryIt: {
-          label: "Tell Murph about an appointment",
-          prompt:
-            "I have a confirmed dentist appointment next Thursday at 2 PM.",
-        },
-      },
-      {
-        id: "workout-card-status-rendering",
-        kind: "improvement",
-        priority: 3,
-        title: "Completed workout rows keep their checkmark",
-        summary:
-          "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
-        details:
-          "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
-        relevanceTags: ["workouts", "imessage", "cards", "reliability"],
-        sourcePullRequests: [1599],
-      },
-    ],
-  },
+const LEGACY_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-09",
     publishedOn: "2026-08-09",
@@ -7039,7 +6937,10 @@ const RAW_CHANGELOG_EDITIONS = [
 ] satisfies readonly ChangelogEdition[];
 
 export const CHANGELOG_EDITIONS: readonly ChangelogEdition[] =
-  validateChangelogEditions(RAW_CHANGELOG_EDITIONS);
+  validateChangelogEditions([
+    ...CHANGELOG_FRAGMENT_EDITIONS,
+    ...LEGACY_CHANGELOG_EDITIONS,
+  ]);
 
 export function listChangelogEditions(): readonly ChangelogEdition[] {
   return CHANGELOG_EDITIONS;
