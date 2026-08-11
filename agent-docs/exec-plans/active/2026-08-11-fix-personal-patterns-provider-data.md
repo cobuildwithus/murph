@@ -8,6 +8,8 @@ Updated: 2026-08-11
 
 - Make Personal Patterns analyze repeated Oura and WHOOP activity against the
   next day's normalized sleep and recovery data when enough evidence exists.
+- Keep Browser Vault and the assistant runtime on the same canonical metric
+  selection path.
 
 ## Success criteria
 
@@ -19,7 +21,8 @@ Updated: 2026-08-11
 
 ## Scope
 
-- In scope: Personal Patterns factor collection and focused query coverage.
+- In scope: Personal Patterns factor collection, normalized metric fallback,
+  Browser Vault refresh generation, and focused query coverage.
 - Out of scope: pattern thresholds, UI design, provider import schemas, and
   persisted data changes.
 
@@ -49,10 +52,13 @@ Updated: 2026-08-11
 
 - Keep the current statistical thresholds unchanged.
 - Treat the exported member data only as local diagnostic evidence.
+- Use canonical metric points and their existing selection policy. Do not use
+  Browser Vault display rows as a second calculation source.
+- Advance the Browser Vault generation so existing empty reports refresh.
 
 ## Verification
 
-- Commands to run: focused Personal Patterns Vitest suite and the owning query
-  package type check.
+- Commands run: focused Personal Patterns, Browser Vault, and hosted-execution
+  Vitest suites, plus the owning query package type check.
 - Expected outcomes: provider-shaped activity reaches tested cells and all
   existing Personal Patterns behavior remains green.

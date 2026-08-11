@@ -1,7 +1,7 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
-import { buildPersonalPatternReportFromWearableBundleAndMetricRows } from "../personal-patterns.ts";
+import { buildPersonalPatternReportFromWearableBundleAndMetricPoints } from "../personal-patterns.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -111,10 +111,10 @@ export async function createBrowserVaultReplica(
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
-    personalPatterns: buildPersonalPatternReportFromWearableBundleAndMetricRows(
+    personalPatterns: buildPersonalPatternReportFromWearableBundleAndMetricPoints(
       input.vault,
       wearableSummaryBundle,
-      metricRows,
+      allMetricPoints,
       { asOf: generatedAt },
     ),
     policy,

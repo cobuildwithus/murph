@@ -9,6 +9,10 @@ import {
   resolveActivityEvidenceLocalDate,
   resolveInterventionSessionLocalDate,
 } from "./experiment-adherence.ts";
+import {
+  selectMetricSeries,
+  type MetricPoint,
+} from "./metrics/index.ts";
 import type { VaultReadModel } from "./read-model.ts";
 import { buildWearableSummaryBundle } from "./wearables.ts";
 import type {
@@ -112,13 +116,6 @@ interface PatternWindow {
   outcomeToDate: string;
 }
 
-export interface PersonalPatternMetricRow {
-  confidence: string | null;
-  date: string;
-  metricKey: string;
-  value: number | null;
-}
-
 export function buildPersonalPatternReport(
   vault: VaultReadModel,
   options: { asOf?: Date | string; windowDays?: number } = {},
@@ -146,10 +143,10 @@ export function buildPersonalPatternReportFromWearableBundle(
   );
 }
 
-export function buildPersonalPatternReportFromWearableBundleAndMetricRows(
+export function buildPersonalPatternReportFromWearableBundleAndMetricPoints(
   vault: VaultReadModel,
   wearableBundle: Pick<WearableSummaryBundle, "recoveryDays" | "sleepNights">,
-  metricRows: readonly PersonalPatternMetricRow[],
+  metricPoints: readonly MetricPoint[],
   options: { asOf?: Date | string; windowDays?: number } = {},
 ): PersonalPatternReport {
   const window = resolveWindow(options);
@@ -159,7 +156,7 @@ export function buildPersonalPatternReportFromWearableBundleAndMetricRows(
     readVaultTimeZone(vault),
   );
   const wearableOutcomeIds = new Set(wearableOutcomes.map((outcome) => outcome.id));
-  const fallbackOutcomes = collectMetricRowRecoveryOutcomeSeries(metricRows, window)
+  const fallbackOutcomes = collectMetricPointRecoveryOutcomeSeries(metricPoints, window)
     .filter((outcome) => !wearableOutcomeIds.has(outcome.id));
 
   return buildPersonalPatternReportFromOutcomeSeries(
@@ -339,33 +336,34 @@ function collectOutcomeSeries(
   ].filter((series) => series.values.size >= MIN_MATCHED_DAYS * 2);
 }
 
-function collectMetricRowRecoveryOutcomeSeries(
-  metricRows: readonly PersonalPatternMetricRow[],
+function collectMetricPointRecoveryOutcomeSeries(
+  metricPoints: readonly MetricPoint[],
   window: PatternWindow,
 ): OutcomeSeries[] {
-  const rows = metricRows.filter((row) =>
-    row.confidence !== "none" &&
-    row.date >= window.fromDate &&
-    row.date <= window.outcomeToDate
-  );
-
   return [
-    metricRowOutcome("recovery-score", "Recovery score", "score", 3, 0.03, "recovery-score", rows),
-    metricRowOutcome("readiness-score", "Readiness score", "score", 3, 0.03, "readiness-score", rows),
-    metricRowOutcome("hrv", "HRV", "ms", 2, 0.05, "hrv-rmssd", rows),
-    metricRowOutcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, "resting-heart-rate", rows),
+    metricPointOutcome("recovery-score", "Recovery score", "score", 3, 0.03, "recovery-score", metricPoints, window),
+    metricPointOutcome("readiness-score", "Readiness score", "score", 3, 0.03, "readiness-score", metricPoints, window),
+    metricPointOutcome("hrv", "HRV", "ms", 2, 0.05, "hrv-rmssd", metricPoints, window),
+    metricPointOutcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, "resting-heart-rate", metricPoints, window),
   ].filter((series) => series.values.size >= MIN_MATCHED_DAYS * 2);
 }
 
-function metricRowOutcome(
+function metricPointOutcome(
   id: string,
   label: string,
   unit: string,
   meaningfulAbsoluteDelta: number,
   meaningfulRelativeDelta: number,
   metricKey: string,
-  rows: readonly PersonalPatternMetricRow[],
+  metricPoints: readonly MetricPoint[],
+  window: PatternWindow,
 ): OutcomeSeries {
+  const rows = selectMetricSeries({
+    from: window.fromDate,
+    metricKey,
+    points: metricPoints,
+    to: window.outcomeToDate,
+  }).rows;
   return {
     id,
     label,
@@ -373,11 +371,11 @@ function metricRowOutcome(
     meaningfulRelativeDelta,
     unit,
     values: new Map(
-      rows
-        .filter((row): row is PersonalPatternMetricRow & { value: number } =>
-          row.metricKey === metricKey && row.value !== null
-        )
-        .map((row) => [row.date, row.value] as const),
+      rows.flatMap((row) =>
+        row.confidence !== "none" && row.value !== null
+          ? [[row.date, row.value] as const]
+          : []
+      ),
     ),
   };
 }
