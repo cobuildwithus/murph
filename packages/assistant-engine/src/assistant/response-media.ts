@@ -118,6 +118,11 @@ export function readAssistantGeneratedImageDeliveryTranscriptMarker(
 }
 
 export function resolveAssistantGeneratedImageDelivery(input: {
+  currentMedia: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    sha256: string
+    sizeBytes: number
+  }
   generatedImageOriginKnown?: boolean
   imageRef: string
   intents: readonly AssistantOutboxIntent[]
@@ -135,6 +140,12 @@ export function resolveAssistantGeneratedImageDelivery(input: {
     }
     matchingMarkerFound = true
     generatedImageOriginKnown = true
+    if (!matchesAssistantGeneratedImageDeliveryMediaIdentity(
+      input.currentMedia,
+      marker,
+    )) {
+      return false
+    }
     return input.intents.some((intent) =>
       intent.operation === null &&
       intent.sessionId === input.sessionId &&
@@ -151,29 +162,48 @@ export function resolveAssistantGeneratedImageDelivery(input: {
   return input.intents.some((intent) =>
     intent.operation === null &&
     intent.sessionId === input.sessionId &&
-    matchesAssistantGeneratedImageDeliveryIntentRef(intent, input.imageRef) &&
+    matchesAssistantGeneratedImageDeliveryIntentMedia(intent, {
+      contentType: input.currentMedia.contentType,
+      ref: input.imageRef,
+      sha256: input.currentMedia.sha256,
+      sizeBytes: input.currentMedia.sizeBytes,
+    }) &&
     hasAssistantOutboxDeliveryEvidence(intent, true)
   )
 }
 
 function matchesAssistantGeneratedImageDeliveryIntentMedia(
   intent: AssistantOutboxIntent,
-  marker: AssistantGeneratedImageDeliveryTranscriptMarker,
+  expected: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    ref: string
+    sha256: string
+    sizeBytes: number
+  },
 ): boolean {
   const media = intent.media.length === 1 ? intent.media[0] : null
   return media?.kind === 'vault_image' &&
-    media.ref === marker.ref &&
-    media.sha256 === marker.sha256 &&
-    media.contentType === marker.contentType &&
-    media.sizeBytes === marker.sizeBytes
+    media.ref === expected.ref &&
+    media.sha256 === expected.sha256 &&
+    media.contentType === expected.contentType &&
+    media.sizeBytes === expected.sizeBytes
 }
 
-function matchesAssistantGeneratedImageDeliveryIntentRef(
-  intent: AssistantOutboxIntent,
-  imageRef: string,
+function matchesAssistantGeneratedImageDeliveryMediaIdentity(
+  actual: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    sha256: string
+    sizeBytes: number
+  },
+  expected: {
+    contentType: AssistantVaultImageResponseMedia['contentType']
+    sha256: string
+    sizeBytes: number
+  },
 ): boolean {
-  const media = intent.media.length === 1 ? intent.media[0] : null
-  return media?.kind === 'vault_image' && media.ref === imageRef
+  return actual.sha256 === expected.sha256 &&
+    actual.contentType === expected.contentType &&
+    actual.sizeBytes === expected.sizeBytes
 }
 
 export function hasAssistantOutboxDeliveryEvidence(

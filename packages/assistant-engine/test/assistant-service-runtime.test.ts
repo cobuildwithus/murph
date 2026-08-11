@@ -4126,6 +4126,7 @@ describe("assistant turn finalizer seam", () => {
       turnId: "turn-generated-avatar-completion-no-reply",
     });
     expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: media,
       imageRef: media.ref,
       intents: [],
       sessionId: session.sessionId,
@@ -4211,6 +4212,7 @@ describe("assistant turn finalizer seam", () => {
         turnId: "turn-generated-avatar-completion-mismatch",
       });
     expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: expectedMedia,
       imageRef: expectedMedia.ref,
       intents: [],
       sessionId: session.sessionId,

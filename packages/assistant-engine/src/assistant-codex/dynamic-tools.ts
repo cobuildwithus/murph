@@ -3943,23 +3943,6 @@ async function executeGroupTool(input: {
       }))
     }
 
-    const avatarSourceRefs = input.request.avatar.source === 'image_ref'
-      ? [input.request.avatar.imageRef]
-      : input.request.avatar.args.referenceImageRefs ?? []
-    const captureSourceRefs = new Set(
-      avatarSourceRefs.filter((imageRef) => imageRef.startsWith('raw/captures/')),
-    )
-    for (const imageRef of captureSourceRefs) {
-      const delivered = await input.hostedToolContext
-        ?.verifyGeneratedImageDelivery?.(imageRef)
-      if (delivered === false) {
-        return toolTextResult(
-          false,
-          'generated image must be visible before it can become the group avatar',
-        )
-      }
-    }
-
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
       captureRequestId: input.toolCallId,
@@ -4578,6 +4561,15 @@ async function prepareGroupAvatarRuntimeRequest(input: {
         input.hostedToolContext?.persistGeneratedImageCapture ?? null,
       providerRequestOrdinal: input.nextUsageOrdinal(),
       requireHostedPrivateImageDelivery: true,
+      ...(input.captureScope === 'group-avatar'
+        ? {
+            validateResolvedReferenceImages: async (references) =>
+              await validateGeneratedGroupAvatarSourceReferences({
+                hostedToolContext: input.hostedToolContext,
+                references,
+              }),
+          }
+        : {}),
       vaultRoot: input.vaultRoot,
     })
     if (!generated.rpcSuccess) {
@@ -4623,6 +4615,7 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     hostedToolContext: input.hostedToolContext,
     imageRef: avatar.imageRef,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+    verifyGeneratedDelivery: true,
     vaultRoot: input.vaultRoot,
   })
   if (!published.rpcSuccess) {
@@ -4641,6 +4634,7 @@ async function publishGroupAvatarImageReference(input: {
   hostedToolContext: AssistantHostedToolContext | null
   imageRef: string
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
+  verifyGeneratedDelivery?: boolean
   vaultRoot: string | null
 }): Promise<
   | { rpcSuccess: true; url: string }
@@ -4685,6 +4679,20 @@ async function publishGroupAvatarImageReference(input: {
     }
   }
 
+  if (input.verifyGeneratedDelivery === true) {
+    const deliveryVerified = await verifyGeneratedGroupAvatarSourceReference({
+      hostedToolContext: input.hostedToolContext,
+      reference,
+    })
+    if (!deliveryVerified) {
+      return {
+        rpcSuccess: false,
+        rpcText:
+          'generated image must be visible before it can become the group avatar',
+      }
+    }
+  }
+
   try {
     const published = await publisher.publishPrivateImageUrl({
       bytes: reference.bytes,
@@ -4697,6 +4705,39 @@ async function publishGroupAvatarImageReference(input: {
       rpcText: 'private group avatar delivery could not be prepared',
     }
   }
+}
+
+async function validateGeneratedGroupAvatarSourceReferences(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  references: readonly ResolvedGenerateImageReference[]
+}): Promise<string | null> {
+  for (const reference of input.references) {
+    const deliveryVerified = await verifyGeneratedGroupAvatarSourceReference({
+      hostedToolContext: input.hostedToolContext,
+      reference,
+    })
+    if (!deliveryVerified) {
+      return 'generated image must be visible before it can become the group avatar'
+    }
+  }
+  return null
+}
+
+async function verifyGeneratedGroupAvatarSourceReference(input: {
+  hostedToolContext: AssistantHostedToolContext | null
+  reference: ResolvedGenerateImageReference
+}): Promise<boolean> {
+  if (!input.reference.sourceRef.startsWith('raw/captures/')) {
+    return true
+  }
+  const verified = await input.hostedToolContext
+    ?.verifyGeneratedImageDelivery?.({
+      contentType: input.reference.mediaType,
+      imageRef: input.reference.sourceRef,
+      sha256: input.reference.sha256,
+      sizeBytes: input.reference.bytes.byteLength,
+    })
+  return verified !== false
 }
 
 function isAbortError(error: unknown): boolean {

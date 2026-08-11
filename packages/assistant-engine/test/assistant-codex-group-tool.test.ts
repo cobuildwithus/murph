@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -87,6 +88,10 @@ function groupToolCall(
       turnId: "turn-test",
     },
   };
+}
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function newsletterToolCall(argumentsValue: unknown): Record<string, unknown> {
@@ -4452,25 +4457,23 @@ describe("murph.group dynamic tool", () => {
     const sessionId = "session_pending_generated_avatar";
     const completionTurnId = "turn_pending_generated_avatar_completion";
     const deliveryTurnId = "turn_pending_generated_avatar_delivery";
+    const imageBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64",
+    );
     const media = {
       alt: "Pending generated avatar",
       contentType: "image/png",
       filename: "avatar.png",
       kind: "vault_image",
       ref: imageRef,
-      sha256: "a".repeat(64),
-      sizeBytes: 68,
+      sha256: sha256Hex(imageBytes),
+      sizeBytes: imageBytes.byteLength,
       source: "gpt-image-2",
     } as const;
     try {
       await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
-      await writeFile(
-        join(vaultRoot, imageRef),
-        Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-          "base64",
-        ),
-      );
+      await writeFile(join(vaultRoot, imageRef), imageBytes);
       const transcriptEntries = await appendAssistantTranscriptEntries(
         vaultRoot,
         sessionId,
@@ -4538,9 +4541,10 @@ describe("murph.group dynamic tool", () => {
           }),
           groupRequest,
           privateImageUrlPublish,
-          verifyGeneratedImageDelivery: async (requestedRef) =>
+          verifyGeneratedImageDelivery: async (candidate) =>
             resolveAssistantGeneratedImageDelivery({
-              imageRef: requestedRef,
+              currentMedia: candidate,
+              imageRef: candidate.imageRef,
               intents: await listAssistantOutboxIntents(vaultRoot),
               sessionId,
               transcriptEntries: await listAssistantTranscriptEntries(
@@ -4586,6 +4590,7 @@ describe("murph.group dynamic tool", () => {
         targetKind: "thread" as const,
       };
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         generatedImageOriginKnown: true,
         imageRef,
         intents: [intent],
@@ -4593,12 +4598,14 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries: [],
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [intent],
         sessionId,
         transcriptEntries: [],
       })).toBe(true);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{
           ...intent,
@@ -4614,6 +4621,7 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries,
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         generatedImageOriginKnown: true,
         imageRef,
         intents: [{
@@ -4625,6 +4633,7 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries: [],
       })).toBe(true);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{
           ...intent,
@@ -4635,12 +4644,14 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries,
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{ ...intent, delivery: delivered, status: "sending" }],
         sessionId,
         transcriptEntries,
       })).toBe(true);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{
           ...intent,
@@ -4655,12 +4666,14 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries,
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{ ...intent, delivery: delivered, status: "failed" }],
         sessionId,
         transcriptEntries,
       })).toBe(true);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{
           ...intent,
@@ -4672,12 +4685,14 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries,
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{ ...intent, delivery: delivered, status: "abandoned" }],
         sessionId,
         transcriptEntries,
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{
           ...intent,
@@ -4694,6 +4709,7 @@ describe("murph.group dynamic tool", () => {
         transcriptEntries,
       })).toBe(false);
       expect(resolveAssistantGeneratedImageDelivery({
+        currentMedia: media,
         imageRef,
         intents: [{ ...intent, status: "failed" }],
         sessionId,
@@ -4720,9 +4736,10 @@ describe("murph.group dynamic tool", () => {
           }),
           groupRequest,
           privateImageUrlPublish,
-          verifyGeneratedImageDelivery: async (requestedRef) =>
+          verifyGeneratedImageDelivery: async (candidate) =>
             resolveAssistantGeneratedImageDelivery({
-              imageRef: requestedRef,
+              currentMedia: candidate,
+              imageRef: candidate.imageRef,
               intents: await listAssistantOutboxIntents(vaultRoot),
               sessionId,
               transcriptEntries: await listAssistantTranscriptEntries(
@@ -4740,6 +4757,48 @@ describe("murph.group dynamic tool", () => {
       expect(deliveredResult.rpcResult.success).toBe(true);
       expect(groupRequest).toHaveBeenCalledTimes(3);
       expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+
+      await writeFile(join(vaultRoot, imageRef), Buffer.from(webpBytes));
+      const replacedResult = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext: createGroupHostedToolContext({
+          currentUserActionScope: () => ({
+            acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+            conversationId: "conversation_pending_avatar",
+            conversationScope: "group",
+            inboundMailboxItemIds: ["mailbox_pending_avatar"],
+            originSessionId: sessionId,
+            recipientKey: "recipient_pending_avatar",
+          }),
+          groupRequest,
+          privateImageUrlPublish,
+          verifyGeneratedImageDelivery: async (candidate) =>
+            resolveAssistantGeneratedImageDelivery({
+              currentMedia: candidate,
+              imageRef: candidate.imageRef,
+              intents: await listAssistantOutboxIntents(vaultRoot),
+              sessionId,
+              transcriptEntries: await listAssistantTranscriptEntries(
+                vaultRoot,
+                sessionId,
+              ),
+            }),
+        }),
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request,
+        vaultRoot,
+      });
+      expect(replacedResult.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(groupRequest).toHaveBeenCalledTimes(4);
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -4755,22 +4814,22 @@ describe("murph.group dynamic tool", () => {
     const sessionId = "session_generated_avatar_reference";
     const completionTurnId = "turn_generated_avatar_reference_completion";
     const deliveryTurnId = "turn_generated_avatar_reference_delivery";
+    const imageBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64",
+    );
     const media = {
       alt: "Generated avatar reference",
       contentType: "image/png",
       filename: "avatar.png",
       kind: "vault_image",
       ref: generatedRef,
-      sha256: "c".repeat(64),
-      sizeBytes: 68,
+      sha256: sha256Hex(imageBytes),
+      sizeBytes: imageBytes.byteLength,
       source: "gpt-image-2",
     } as const;
     try {
       await initializeVault({ vaultRoot });
-      const imageBytes = Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-        "base64",
-      );
       for (const imageRef of [generatedRef, ordinaryRef]) {
         await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
         await writeFile(join(vaultRoot, imageRef), imageBytes);
@@ -4844,9 +4903,10 @@ describe("murph.group dynamic tool", () => {
           hostedToolContext: createGroupHostedToolContext({
             groupRequest,
             privateImageUrlPublish,
-            verifyGeneratedImageDelivery: async (requestedRef) =>
+            verifyGeneratedImageDelivery: async (candidate) =>
               resolveAssistantGeneratedImageDelivery({
-                imageRef: requestedRef,
+                currentMedia: candidate,
+                imageRef: candidate.imageRef,
                 intents: await listAssistantOutboxIntents(vaultRoot),
                 sessionId,
                 transcriptEntries: await listAssistantTranscriptEntries(
@@ -4912,11 +4972,24 @@ describe("murph.group dynamic tool", () => {
       expect(privateImageUrlPublish).toHaveBeenCalledOnce();
       expect(groupRequest).toHaveBeenCalledTimes(4);
 
+      await writeFile(join(vaultRoot, generatedRef), Buffer.from(webpBytes));
+      const replacedResult = await run([generatedRef]);
+      expect(replacedResult.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledTimes(5);
+
       const ordinaryResult = await run([ordinaryRef]);
       expect(ordinaryResult.rpcResult.success).toBe(true);
       expect(fetchImpl).toHaveBeenCalledTimes(2);
       expect(privateImageUrlPublish).toHaveBeenCalledTimes(2);
-      expect(groupRequest).toHaveBeenCalledTimes(6);
+      expect(groupRequest).toHaveBeenCalledTimes(7);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }

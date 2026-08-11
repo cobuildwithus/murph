@@ -2378,6 +2378,11 @@ describe('assistant outbox runtime', () => {
       intent.intentId === generatedDelivery.intentId
     )).toBe(true)
     expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
       generatedImageOriginKnown: true,
       imageRef: generatedRef,
       intents: retained,
@@ -2397,6 +2402,11 @@ describe('assistant outbox runtime', () => {
       intent.intentId === generatedDelivery.intentId
     )).toBe(false)
     expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
       generatedImageOriginKnown: true,
       imageRef: generatedRef,
       intents: retainedAfterAgeCutoff,

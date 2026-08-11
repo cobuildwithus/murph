@@ -814,8 +814,9 @@ export async function sendAssistantMessageLocal(
                 ),
               messageInput: input,
               pendingVaultFilesAvailable,
-              verifyGeneratedImageDelivery: async (imageRef) => {
+              verifyGeneratedImageDelivery: async (candidate) => {
                 try {
+                  const imageRef = candidate.imageRef
                   const knownFromCurrentCompletion =
                     currentInput.hostedImageCompletionEffectRestriction
                       ?.exactMedia?.some((media) => media.ref === imageRef) === true
@@ -834,6 +835,11 @@ export async function sendAssistantMessageLocal(
                       })(),
                     ])
                   return resolveAssistantGeneratedImageDelivery({
+                    currentMedia: {
+                      contentType: candidate.contentType,
+                      sha256: candidate.sha256,
+                      sizeBytes: candidate.sizeBytes,
+                    },
                     generatedImageOriginKnown:
                       knownFromCurrentCompletion ||
                       Object.values(captureLookupIndex.entries).some(
