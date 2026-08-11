@@ -145,6 +145,7 @@ const DESIGN_VISUALS = {
 const LATEST_PRODUCTION_ITEM_IDS = new Set([
   "appointment-reminders-by-default",
   "web-search-restored",
+  "workout-card-status-rendering",
 ]);
 const LATEST_PRODUCTION_SOURCE_EDITION = listChangelogEditions().find(
   (edition) =>

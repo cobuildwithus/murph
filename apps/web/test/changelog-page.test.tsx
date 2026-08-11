@@ -60,9 +60,10 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Generated group photos, Starter access, patterns, reminders, and web search",
+      "Generated group photos, Starter access, patterns, reminders, cards, and web search",
     );
     expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Completed workout rows keep their checkmark");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
     expect(markup).toContain(
