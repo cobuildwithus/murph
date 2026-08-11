@@ -17,6 +17,13 @@ Captures are private canonical vault truth.
 - Durable capture records live in the canonical event ledger as `note` events tagged with `capture`.
 - User-authored immutable media files and manifests live under `raw/captures/**`; assistant-generated payloads use the retention transition below.
 - Generated-image retry and retention lookups live in the compact `derived/captures/generated-image-lookups.json` index as hashed pointers to the capture event and primary media ref. Every generated-image vault write uses this existing lookup-backed capture primitive: tool-call identities remain stable for retry, while writes without one receive a unique retention-only identity. Lookup-backed capture events are immutable after creation except for the standard deleted revision. After 14 days, hosted idle maintenance lazily materializes only the lookup and due raw artifacts, then replaces each assistant-generated image and its manifest artifact metadata with privacy tombstones in one receipt-guarded per-capture transaction and marks the lookup `retiredAt`; replay continues to return deleted instead of recreating the image. A damaged capture is retried later without blocking valid neighbors.
+- The same lookup may reclassify an exact `raw/captures/**` ref as generated
+  after bounded assistant-transcript retention removes its completion marker.
+  That classification grants no delivery or mutation authority: downstream
+  group-avatar reuse still requires a singleton same-session outbox intent for
+  the exact ref with accepted physical-delivery evidence and otherwise fails
+  closed. Refs absent from a retained marker, the current completion
+  restriction, and the lookup retain the ordinary capture path.
 - A successful hosted generated-image write durably merges its exact 14-day
   cutoff into the existing inbox-retention wake during the same canonical
   receipt checkpoint. Hosted private generation fails closed without that

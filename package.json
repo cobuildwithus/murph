@@ -76,7 +76,7 @@
     "plan:open": "bash scripts/open-exec-plan.sh",
     "plan:close": "bash scripts/close-exec-plan.sh",
     "task:finish": "bash scripts/finish-task",
-    "review:gpt": "cobuild-review-gpt --config scripts/review-gpt.config.sh",
+    "review:gpt": "bash scripts/review-gpt-pr-head-preflight.sh --run",
     "benchmark:typescript": "node scripts/run-with-workspace-artifact-lock.mjs 'TypeScript benchmark' -- node scripts/run-with-host-verification-slot.mjs 'TypeScript benchmark' -- node scripts/benchmark-typescript.mjs",
     "onboard": "bash scripts/setup-host.sh",
     "chat": "pnpm exec tsx packages/cli/src/bin.ts assistant chat",

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 650,
+  "item": {
+    "id": "generated-image-group-photo",
+    "kind": "feature",
+    "priority": 5,
+    "title": "Use a generated image as your group photo",
+    "summary": "After Murph creates and sends an image, ask it to use that same image as the current group photo.",
+    "details": "Murph changes the photo only after an explicit group request and after the exact generated image is visible in the conversation. Pending or mismatched media stays blocked.",
+    "relevanceTags": ["groups", "images", "assistant", "privacy"],
+    "sourcePullRequests": [1533]
+  }
+}

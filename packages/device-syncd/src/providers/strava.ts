@@ -407,7 +407,7 @@ function verifyStravaWebhookSignature(input: {
   rawBody: Buffer;
   signingSecret: string | null;
   timestampToleranceMs: number;
-}): void {
+}): string {
   const parsed = parseStravaWebhookSignatureHeader(input.headers.get("x-strava-signature"));
 
   if (!parsed) {
@@ -464,6 +464,8 @@ function verifyStravaWebhookSignature(input: {
       httpStatus: 401,
     });
   }
+
+  return new Date(timestampMs).toISOString();
 }
 
 function buildStravaWebhookPreflightResponse(input: {
@@ -1076,7 +1078,7 @@ export function createStravaDeviceSyncProvider(
       });
     },
     async verifyAndParseWebhook(context: ProviderWebhookContext): Promise<ProviderWebhookResult> {
-      verifyStravaWebhookSignature({
+      const providerSentAt = verifyStravaWebhookSignature({
         headers: context.headers,
         now: context.now,
         rawBody: context.rawBody,
@@ -1105,7 +1107,8 @@ export function createStravaDeviceSyncProvider(
       const aspectType = normalizeWebhookAspectType(record.aspect_type);
       const ownerId = normalizeIdentifier(record.owner_id);
       const objectId = normalizeIdentifier(record.object_id);
-      const occurredAt = epochSecondsToIso(record.event_time) ?? context.now;
+      const eventOccurredAt = epochSecondsToIso(record.event_time);
+      const jobOccurredAt = eventOccurredAt ?? context.now;
 
       if (!objectType || !aspectType || !ownerId || !objectId) {
         throw deviceSyncError({
@@ -1141,7 +1144,7 @@ export function createStravaDeviceSyncProvider(
           dedupeKey: `deauthorize:${ownerId}`,
           payload: {
             eventType,
-            occurredAt,
+            occurredAt: jobOccurredAt,
             resourceId: objectId,
             resourceType: objectType,
           } satisfies StravaWebhookJobPayload & StravaDeviceSyncJobPayloads["deauthorize"],
@@ -1157,11 +1160,11 @@ export function createStravaDeviceSyncProvider(
             resourceType: objectType,
             resourceId: objectId,
             eventType,
-            occurredAt,
+            occurredAt: jobOccurredAt,
           }),
           payload: {
             eventType,
-            occurredAt,
+            occurredAt: jobOccurredAt,
             resourceId: objectId,
             resourceType: objectType,
           } satisfies StravaWebhookJobPayload & StravaDeviceSyncJobPayloads["resource" | "delete"],
@@ -1173,7 +1176,8 @@ export function createStravaDeviceSyncProvider(
         externalAccountId: ownerId,
         eventType,
         traceId,
-        occurredAt,
+        ...(eventOccurredAt ? { occurredAt: eventOccurredAt } : {}),
+        providerSentAt,
         resourceCategory: objectType,
         jobs,
       };

@@ -662,9 +662,11 @@ async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
   // transaction-scoped lock, it remains held until the caller's outer
   // transaction ends. A prepared candidate is inserted here or discarded
   // here; it is never a reason to skip either boundary.
-  await input.tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.domain}))
-  `;
+  await acquireHostedDomainRootAuthorityLockTx({
+    domain: input.domain,
+    tx: input.tx,
+    userId: input.userId,
+  });
 
   const existing = await readActiveHostedDomainRootEnvelopeRow({
     domain: input.domain,
@@ -939,6 +941,16 @@ async function readActiveHostedCryptoDomains(input: {
   return new Set(rows.map((row) => row.domain));
 }
 
+async function acquireHostedDomainRootAuthorityLockTx(input: {
+  domain: HostedCryptoDomain;
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">;
+  userId: string;
+}): Promise<void> {
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.domain}))
+  `;
+}
+
 async function readActiveHostedDomainRootEnvelopeRow(input: {
   domain: HostedCryptoDomain;
   tx: HostedCryptoClient;
@@ -961,6 +973,31 @@ async function readActiveHostedDomainRootEnvelopeRow(input: {
     LIMIT 1
   `;
   return rows[0] ?? null;
+}
+
+/**
+ * Holds the same transaction-scoped authority lock used by root provisioning,
+ * then returns the exact active root id. This is a metadata-only revalidation
+ * boundary: it performs no envelope verification, provider request, or KMS
+ * unwrap and is intended for callers that already prepared the verified root
+ * before opening their transaction.
+ */
+export async function lockAndReadActiveHostedDomainRootKeyIdTx(input: {
+  domain: HostedCryptoDomain;
+  tx: Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw">;
+  userId: string;
+}): Promise<string | null> {
+  await acquireHostedDomainRootAuthorityLockTx(input);
+  const rows = await input.tx.$queryRaw<Array<{ rootKeyId: string }>>`
+    SELECT root_key_id AS "rootKeyId"
+    FROM hosted_user_crypto_envelope
+    WHERE user_id = ${input.userId}
+      AND domain = ${input.domain}::hosted_crypto_domain
+      AND status = 'active'::hosted_crypto_envelope_status
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return rows[0]?.rootKeyId ?? null;
 }
 
 async function readDecryptableHostedDomainRootEnvelopeRow(input: {

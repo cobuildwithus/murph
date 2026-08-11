@@ -19,19 +19,19 @@ import {
 const DESIGN_CHANGELOG_EDITION: ChangelogEdition = {
   id: "2030-01-17",
   publishedOn: "2030-01-17",
-  title: "A week that closes its own loops",
+  title: "A week of follow-through",
   summary:
-    "Synthetic release copy shows the production archive rhythm without reading live product data.",
+    "Synthetic release copy exercises generated group photos and the production archive rhythm without reading live product data.",
   items: [
     {
-      id: "design-follow-up",
+      id: "design-generated-group-photo",
       kind: "feature",
       priority: 5,
-      title: "Follow-ups arrive where the work started",
+      title: "Generated images can become group photos",
       summary:
-        "A finished task returns one useful result to the same conversation, with the next decision easy to spot.",
+        "After an image appears in the conversation, one explicit request can reuse that exact image as the group photo.",
       details:
-        "This fixture exercises a full feature card with supporting detail at desktop and phone widths.",
+        "The generated-photo state exercises the production feature card and its supporting detail at desktop and phone widths.",
       relevanceTags: ["design"],
       sourcePullRequests: [],
     },
@@ -107,12 +107,6 @@ const DESIGN_VISUALS = {
       subtitle="Verified line after setup"
     />
   ),
-  "design-follow-up": (
-    <CalendarMock
-      entries={[{ day: "Tue", time: "2:00 AM", what: "Review the result" }]}
-      label="Scheduled follow-up"
-    />
-  ),
   "design-recovery": (
     <ChecklistMock
       items={[
@@ -150,6 +144,7 @@ const DESIGN_VISUALS = {
 
 const LATEST_PRODUCTION_ITEM_IDS = new Set([
   "appointment-reminders-by-default",
+  "blood-pressure-history-completion",
   "web-search-restored",
   "workout-card-status-rendering",
 ]);
