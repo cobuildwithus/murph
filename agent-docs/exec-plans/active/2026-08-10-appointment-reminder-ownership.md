@@ -285,6 +285,14 @@ fixed and verified, but the repository's hard cap forbids an automatic eighth
 round or merge without a later `ROUND_OUTCOME: PASS`. After the correction,
 the review loop pauses for an explicit continuation decision.
 
+The landed correction makes creation and exact-recovery success disjoint from
+failure reporting. The real hosted adapter/Core proof returns the active owner
+with `created: false` and `replayed: true`; the credential-gated App Server
+fixture now includes the host-derived source ref and requires a recovered or
+active final response with normal move/cancel control. The post-round-7 focused
+subset passes 19 tests with 59 credential-gated cases skipped, and Assistant
+Engine typecheck passes.
+
 ## Tasks
 
 1. [x] Add canonical create-only ownership and hosted current-conversation list.
