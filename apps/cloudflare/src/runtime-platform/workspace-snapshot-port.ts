@@ -27,6 +27,7 @@ import {
 import {
   encodeHostedWorkspaceSnapshotSha256Base64,
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
+  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS,
 } from "../workspace-snapshot-store.ts";
 import { restoreEncryptedWorkspaceSnapshotFromEncryptedStream } from "../workspace-snapshot-local.ts";
 import {
@@ -34,6 +35,7 @@ import {
   type HostedWorkspaceSnapshotPreparedRestore,
 } from "../workspace-snapshot-restore-preparation.ts";
 import { requireHostedRuntimeWriteFenceHeaders, type HostedWorkspaceCheckpointBridgeAuthority } from "./authority-headers.ts";
+import { combineAbortSignalsWithCleanup } from "./control-plane-fetch.ts";
 import {
   buildHostedWorkspaceSnapshotRestoreLogDetails,
   readHostedRuntimeStepElapsedMs,
@@ -50,6 +52,16 @@ import {
   readRequiredHostedRuntimeString,
 } from "./hosted-http.ts";
 
+const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS = 2_000;
+const WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS = 2_000;
+// Session creation records the server heartbeat before its response reaches the
+// runtime. Cap that handshake so an immediate first heartbeat still has one
+// full cadence of margin before replacement may consider the session stale.
+const WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS =
+  HOSTED_WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_STALE_MS
+  - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS
+  - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS;
+
 export function createCloudflareWorkspaceSnapshotPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -58,6 +70,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
   workspaceCheckpointBridge: HostedWorkspaceCheckpointBridgeAuthority;
 }): NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> {
   const sessionWriteFenceHeaders = new Map<string, Headers>();
+  const sessionHeartbeatStops = new Map<string, () => void>();
   const readSessionWriteFenceHeaders = async (
     snapshotId: string,
     description: string,
@@ -71,8 +84,87 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       description,
     );
   };
+  const stopSessionHeartbeat = (snapshotId: string): void => {
+    sessionHeartbeatStops.get(snapshotId)?.();
+    sessionHeartbeatStops.delete(snapshotId);
+  };
+  const startSessionHeartbeat = (
+    snapshotId: string,
+    headers: Headers,
+    signal?: AbortSignal | null,
+  ): void => {
+    stopSessionHeartbeat(snapshotId);
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let failureLogged = false;
+    const schedule = (delayMs: number) => {
+      if (stopped) {
+        return;
+      }
+      timer = setTimeout(() => {
+        timer = null;
+        void heartbeat();
+      }, delayMs);
+    };
+    const heartbeat = async () => {
+      const startedAtMs = Date.now();
+      try {
+        await fetchHostedJson({
+          body: { snapshotId },
+          description: "Hosted workspace snapshot handoff heartbeat",
+          exposeResponseBodyInError: false,
+          fetchImpl: input.fetchImpl,
+          headers: new Headers(headers),
+          method: "POST",
+          redactedLogPath: "/workspace-snapshots/REDACTED/heartbeat",
+          signal: signal ?? null,
+          timeoutMs: Math.min(
+            input.timeoutMs,
+            WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS,
+          ),
+          url: new URL(
+            `/workspace-snapshots/${encodeURIComponent(snapshotId)}/heartbeat`,
+            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+          ),
+        });
+        failureLogged = false;
+      } catch (error) {
+        if (!stopped && signal?.aborted !== true && !failureLogged) {
+          failureLogged = true;
+          console.warn("Hosted workspace snapshot handoff heartbeat failed.", {
+            errorName: error instanceof Error ? error.name : typeof error,
+          });
+        }
+      } finally {
+        schedule(Math.max(
+          0,
+          WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS
+          - (Date.now() - startedAtMs),
+        ));
+      }
+    };
+    const stopForAbort = () => {
+      stopSessionHeartbeat(snapshotId);
+    };
+    const stop = () => {
+      stopped = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      signal?.removeEventListener("abort", stopForAbort);
+    };
+    sessionHeartbeatStops.set(snapshotId, stop);
+    if (signal?.aborted) {
+      stopSessionHeartbeat(snapshotId);
+      return;
+    }
+    signal?.addEventListener("abort", stopForAbort, { once: true });
+    void heartbeat();
+  };
   const port: NonNullable<HostedRuntimePlatform["workspaceSnapshotPort"]> = {
     async abortSnapshotSession(request) {
+      stopSessionHeartbeat(request.snapshotId);
       const headers = await readSessionWriteFenceHeaders(
         request.snapshotId,
         "Hosted workspace snapshot session abort",
@@ -127,6 +219,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ),
         });
       } finally {
+        stopSessionHeartbeat(request.ref.snapshotId);
         sessionWriteFenceHeaders.delete(request.ref.snapshotId);
       }
       const completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
@@ -389,6 +482,14 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         "Hosted workspace snapshot session start",
       );
       assertHostedWorkspaceSnapshotOperationLive(signal);
+      const startTimeoutMs = Math.min(
+        input.timeoutMs,
+        WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS,
+      );
+      const startSignal = combineAbortSignalsWithCleanup(
+        signal ?? null,
+        AbortSignal.timeout(startTimeoutMs),
+      );
       let payload: unknown;
       try {
         payload = await fetchHostedJson({
@@ -398,8 +499,8 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           fetchImpl: input.fetchImpl,
           headers,
           method: "POST",
-          signal,
-          timeoutMs: input.timeoutMs,
+          signal: startSignal.signal,
+          timeoutMs: startTimeoutMs,
           url: new URL(
             "/workspace-snapshots/start",
             `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
@@ -408,10 +509,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       } catch (error) {
         assertHostedWorkspaceSnapshotOperationLive(signal);
         throw error;
+      } finally {
+        startSignal.dispose();
       }
       assertHostedWorkspaceSnapshotOperationLive(signal);
       const started = parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
       sessionWriteFenceHeaders.set(started.snapshotId, new Headers(headers));
+      startSessionHeartbeat(started.snapshotId, headers, signal);
       return started;
     },
   };

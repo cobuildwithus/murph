@@ -1,7 +1,6 @@
 import type Stripe from "stripe";
 
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { assertHostedMemberNotSuspended } from "@/src/lib/hosted-onboarding/entitlement";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   readHostedAccountGroupStripeBillingRef,
@@ -18,7 +17,6 @@ export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
   const prisma = getPrisma();
   const auth = await requireHostedAppSessionFromRequest(request);
-  assertHostedMemberNotSuspended(auth.member);
   const body = await readOptionalJsonObject(request, { limitBytes: 1_024 });
   const billingScope = body.billingScope === "family" ? "family" : "member";
   const stripeCustomerId =

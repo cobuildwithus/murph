@@ -3,6 +3,9 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  buildAssistantProviderMurphToolCall,
+} from "./helpers/hosted-local-e2e-support.js";
+import {
   startHostedLocalFullStackScenario,
   type HostedLocalFullStackScenario,
 } from "./helpers/hosted-local-full-stack-scenario.js";
@@ -27,6 +30,28 @@ const firstReplyText = "I am staying with this group conversation.";
 const secondReplyText = "The group route is still authoritative.";
 const groupReplyPath = `/chats/${encodeURIComponent(groupChatId)}/messages`;
 const canonicalChatPath = `/chats/${encodeURIComponent(groupChatId)}`;
+const standingsInboundText =
+  "Group standings fixture: show the current challenge card.";
+const rejectedStandingsReplyText =
+  "I could not verify a complete standings card, so I am keeping this update in text.";
+const challengeCardAuthoringInput = {
+  challengeSlug: "weird-health-week",
+  pageRevisionDigest: "0".repeat(64),
+  participantObservations: [
+    {
+      components: [{
+        componentId: "steps",
+        quantity: 4_000,
+        status: "available",
+      }],
+      participantId: "participant_maya",
+    },
+    {
+      components: [{ componentId: "steps", status: "pending" }],
+      participantId: "participant_jon",
+    },
+  ],
+} as const;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -74,7 +99,12 @@ describe("hosted local Linq group route drift e2e", () => {
       scenarioLabel: "Local hosted Linq group route drift e2e",
       streamLogs: streamDevLogs,
     });
-  }, 300_000);
+    await requireScenario().seedActiveHostedLinqMember({
+      homePhone,
+      memberId: ownerMemberId,
+      memberPhone: ownerPhone,
+    });
+  }, 900_000);
 
   afterAll(async () => {
     await scenario?.stop();
@@ -84,11 +114,6 @@ describe("hosted local Linq group route drift e2e", () => {
   }, 180_000);
 
   it("keeps a canonically classified group on its durable route when webhook directness drifts", async () => {
-    await requireScenario().seedActiveHostedLinqMember({
-      homePhone,
-      memberId: ownerMemberId,
-      memberPhone: ownerPhone,
-    });
     requireScenario().queueAssistantResponses([firstReplyText], {
       matchInputContains: firstInboundText,
     });
@@ -193,7 +218,82 @@ describe("hosted local Linq group route drift e2e", () => {
       body.includes(firstInboundText) || body.includes(secondInboundText)
     ).every((body) => body.includes("thread is direct: false"))).toBe(true);
   }, 420_000);
+
+  it("withholds a group card when no trusted read and canonical persistence proof exists", async () => {
+    requireScenario().queueAssistantResponses([
+      buildAssistantProviderMurphToolCall(
+        "attach_response_card",
+        challengeCardAuthoringInput,
+      ),
+    ], {
+      matchInputContains: standingsInboundText,
+    });
+    requireScenario().queueAssistantResponses([
+      { text: rejectedStandingsReplyText },
+    ]);
+
+    const sendBaseline = requireLinqStub().countObservedSends(groupReplyPath);
+    const capabilityBaseline = requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/capability/check_imessage",
+    });
+    const completionPromise = requireScenario().waitForHostedCompletion(
+      ownerMemberId,
+      { timeoutMs: 600_000 },
+    );
+    const response = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      ownerMemberId,
+      groupChatId,
+      {
+        eventId: `evt_group_card_success_${runId}`,
+        isGroup: true,
+        messageId: `msg_group_card_success_${runId}`,
+        service: "iMessage",
+        text: standingsInboundText,
+      },
+    ));
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-thread-route",
+    });
+
+    const completion = await completionPromise;
+    expectHealthyCompletion(completion);
+
+    const send = await requireLinqStub().waitForAdditionalSend({
+      baselineCount: sendBaseline,
+      expectedPath: groupReplyPath,
+      scenario: requireScenario(),
+      userId: ownerMemberId,
+    });
+    expect(requireLinqStub().readObservedMessageText(send)).toBe(
+      rejectedStandingsReplyText,
+    );
+    expect(requireLinqStub().readObservedMessageAppCard(send)).toBeNull();
+    expect(requireLinqStub().countObservedRequests({
+      expectedMethod: "POST",
+      expectedPath: "/capability/check_imessage",
+    })).toBe(capabilityBaseline);
+  }, 900_000);
 });
+
+function expectHealthyCompletion(
+  status: Awaited<ReturnType<HostedLocalFullStackScenario["waitForHostedCompletion"]>>,
+): void {
+  expect(status.lastErrorCode ?? null).toBeNull();
+  expect(
+    (status.recentLogs ?? [])
+      .filter((entry) => entry.level === "error")
+      .map((entry) => ({
+        component: entry.component,
+        errorCode: entry.errorCode ?? null,
+        eventCode: entry.eventCode,
+        phase: entry.phase,
+      })),
+  ).toEqual([]);
+}
 
 function countCanonicalChatReads(): number {
   return requireLinqStub().countObservedRequests({

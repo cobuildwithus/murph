@@ -121,7 +121,7 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
               className="border-t border-border/60 md:border-l md:border-t-0"
               detail={formatWindowChange(input.trialStarts.wowPercent)}
               label="Activate"
-              unit="trial starts"
+              unit="starter activations"
               value={formatInteger(input.trialStarts.trailing7Days)}
             />
             <FunnelCheck
@@ -130,7 +130,7 @@ export function GrowthScorecard(input: GrowthScorecardProps) {
                 ? "No mature cohort"
                 : `${formatInteger(input.conversion.converted)} of ${formatInteger(
                   input.conversion.matureStarted,
-                )} mature trials`}
+                )} mature starter activations`}
               label="Monetize"
               value={input.conversion.percent === null
                 ? "N/A"

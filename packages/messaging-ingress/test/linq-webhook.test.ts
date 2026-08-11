@@ -5,6 +5,8 @@ import { test } from "vitest";
 
 import {
   assertLinqWebhookTimestampFresh,
+  buildLinqMessageText,
+  inspectLinqMessageReceivedParts,
   isLinqWebhookPayloadError,
   isLinqWebhookVerificationError,
   type LinqWebhookEvent,
@@ -1473,32 +1475,132 @@ test("parseLinqMessageReceivedEvent rejects unknown part types", () => {
           eventId: "evt_456",
         }),
       }),
-    /type must be "text", "media", "link", or "voice_memo"/u,
+    /type must be "text", "media", "link", "voice_memo", or "imessage_app"/u,
   );
 });
 
-test("parseLinqMessageReceivedEvent rejects payloads without message parts in either webhook shape", () => {
-  assert.throws(
-    () =>
-      parseLinqMessageReceivedEvent({
-        ...buildV2026MessageReceivedWebhook({
-          data: {
-            chat: {
-              id: "chat_123",
-              owner_handle: {
-                handle: "+15557654321",
-                id: "handle_owner_123",
-                is_me: true,
-                service: "SMS",
-              },
-            },
-            parts: undefined,
-          },
-          eventId: "evt_missing_message",
-        }),
-      }),
-    /message\.parts must be an array/u,
+test("parseLinqMessageReceivedEvent normalizes absent or null message parts to empty", () => {
+  const currentEvent = buildV2026MessageReceivedWebhook({
+    data: {
+      parts: undefined,
+    },
+    eventId: "evt_missing_current_parts",
+  });
+  const legacyEvent: LinqWebhookEvent = {
+    api_version: "v3",
+    created_at: "2026-04-04T01:02:03.000Z",
+    data: {
+      chat: {
+        id: "chat_legacy_missing_parts",
+        owner_handle: {
+          handle: "+15557654321",
+          id: "handle_owner_legacy",
+          is_me: true,
+          service: "SMS",
+        },
+      },
+      chat_id: "chat_legacy_missing_parts",
+      from: "+15551230000",
+      from_handle: {
+        handle: "+15551230000",
+        id: "handle_sender_legacy",
+        service: "SMS",
+      },
+      is_from_me: false,
+      message: {
+        id: "msg_legacy_missing_parts",
+        parts: null,
+      },
+      recipient_handle: {
+        handle: "+15557654321",
+        id: "handle_owner_legacy",
+        is_me: true,
+        service: "SMS",
+      },
+      service: "SMS",
+    },
+    event_id: "evt_missing_legacy_parts",
+    event_type: "message.received",
+    webhook_version: "2025-01-01",
+  };
+
+  assert.deepEqual(parseLinqMessageReceivedEvent(currentEvent).data.message.parts, []);
+  assert.deepEqual(parseLinqMessageReceivedEvent(legacyEvent).data.message.parts, []);
+  assert.deepEqual(inspectLinqMessageReceivedParts(currentEvent), {
+    compatibilityFallback: true,
+    dataKind: "object",
+    messageKind: "missing",
+    nestedActionPresent: false,
+    partCount: null,
+    partKinds: null,
+    partsKind: "missing",
+    partsLocation: "data.parts",
+    payloadShape: "current-top-level",
+    topLevelActionPresent: false,
+    unsupportedPartCount: 0,
+  });
+  assert.deepEqual(inspectLinqMessageReceivedParts(legacyEvent), {
+    compatibilityFallback: true,
+    dataKind: "object",
+    messageKind: "object",
+    nestedActionPresent: false,
+    partCount: null,
+    partKinds: null,
+    partsKind: "null",
+    partsLocation: "data.message.parts",
+    payloadShape: "legacy-nested",
+    topLevelActionPresent: false,
+    unsupportedPartCount: 0,
+  });
+});
+
+test("parseLinqMessageReceivedEvent retains only iMessage app fallback content", () => {
+  const rawEvent = buildV2026MessageReceivedWebhook({
+    data: {
+      parts: [{
+        app: {
+          bundle_id: "com.example.private",
+          name: "Private app name",
+        },
+        fallback_text: "Completed the check-in",
+        layout: {
+          caption: "Private card metadata",
+        },
+        type: "imessage_app",
+        url: "https://example.test/private-capability",
+      }],
+    },
+    eventId: "evt_imessage_app",
+  });
+  const event = parseLinqMessageReceivedEvent(rawEvent);
+
+  assert.deepEqual(event.data.message.parts, [{
+    fallback_text: "Completed the check-in",
+    type: "imessage_app",
+  }]);
+  assert.equal(buildLinqMessageText(event.data.message.parts), "Completed the check-in");
+  assert.deepEqual(inspectLinqMessageReceivedParts(rawEvent), {
+    compatibilityFallback: false,
+    dataKind: "object",
+    messageKind: "missing",
+    nestedActionPresent: false,
+    partCount: 1,
+    partKinds: "imessage_app",
+    partsKind: "array",
+    partsLocation: "data.parts",
+    payloadShape: "current-top-level",
+    topLevelActionPresent: false,
+    unsupportedPartCount: 0,
+  });
+  assert.deepEqual(
+    (minimizeLinqMessageReceivedEvent(event).data as { message: { parts: unknown[] } })
+      .message.parts,
+    [{
+      fallback_text: "Completed the check-in",
+      type: "imessage_app",
+    }],
   );
+  assert.equal(buildLinqMessageText([{ type: "imessage_app" }]), "[iMessage app]");
 });
 
 test("parseLinqMessageReceivedEvent rejects non-array message parts", () => {
@@ -1512,7 +1614,7 @@ test("parseLinqMessageReceivedEvent rejects non-array message parts", () => {
           eventId: "evt_bad_parts",
         }),
       }),
-    /message\.parts must be an array/u,
+    /message\.parts must be an array, null, or absent/u,
   );
 });
 

@@ -76,7 +76,7 @@ export function HostedSignupReferralLanding(props: {
           className="max-w-sm border-t border-border/50 pt-6 text-xs leading-5 text-pretty text-muted-foreground"
           id="referral-attribution-note"
         >
-          Murph credits whoever shared this link. They cannot see your
+          This link tells Murph who introduced you. They cannot see your
           conversations or health information.
         </p>
       </div>

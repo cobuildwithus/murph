@@ -98,6 +98,61 @@ export interface UnwrappedHostedDomainRootReference
 export type PreparedHostedCryptoDomainRootCandidates =
   ReadonlyMap<HostedCryptoDomain, HostedDomainRootKeyEnvelopeV1>;
 
+/**
+ * Seeds the request-scoped unwrap cache from a prepared envelope that has not
+ * been inserted yet. This lets a caller seal values and warm a later
+ * transaction's local encryption path without retaining another plaintext-key
+ * owner. The cache keeps its own copy and wipes it when the request scope
+ * closes; this helper wipes the caller copy immediately.
+ */
+export async function prewarmPreparedHostedCryptoDomainRootForWeb(input: {
+  domain: HostedCryptoDomain;
+  prepared: PreparedHostedCryptoDomainRootCandidates;
+  signal?: AbortSignal;
+  userId: string;
+}): Promise<void> {
+  const envelope = input.prepared.get(input.domain);
+  if (!envelope) {
+    throw new HostedCryptoDomainRootCandidateRequiredError({
+      domain: input.domain,
+    });
+  }
+  if (envelope.domain !== input.domain || envelope.userId !== input.userId) {
+    throw new TypeError("Prepared hosted domain root does not match its prewarm target.");
+  }
+
+  const cache = getHostedDomainRootUnwrapCache();
+  if (!cache) {
+    throw new Error(
+      "Prepared hosted domain-root prewarm requires a request-scoped unwrap cache.",
+    );
+  }
+  const activeCacheKey = `${input.userId}|${input.domain}|@active`;
+  const unwrapped = await unwrapWithScopedCache(
+    activeCacheKey,
+    async () => ({
+      envelope,
+      rootKey: await unwrapEnvelopeForWeb({
+        envelope,
+        signal: input.signal,
+      }),
+    }),
+    true,
+  );
+  try {
+    if (unwrapped.envelope.rootKeyId !== envelope.rootKeyId) {
+      throw new Error("Prepared hosted domain root conflicts with the scoped active root.");
+    }
+    const active = cache.get(activeCacheKey);
+    const concreteCacheKey = `${input.userId}|${input.domain}|${envelope.rootKeyId}`;
+    if (active && !cache.has(concreteCacheKey)) {
+      cache.set(concreteCacheKey, active);
+    }
+  } finally {
+    unwrapped.rootKey.fill(0);
+  }
+}
+
 async function unwrapWithScopedCache(
   cacheKey: string,
   compute: () => Promise<UnwrappedHostedDomainRoot>,
@@ -150,10 +205,31 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (missing.length === 0) {
     return new Map();
   }
-  return new Map(await Promise.all(missing.map(async (domain) => [
-    domain,
-    await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
-  ] as const)));
+  let firstError: unknown;
+  let hasError = false;
+  const settled = await Promise.allSettled(missing.map(async (domain) => {
+    try {
+      return [
+        domain,
+        await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
+      ] as const;
+    } catch (error) {
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
+      throw error;
+    }
+  }));
+  if (hasError) {
+    throw firstError;
+  }
+  return new Map(settled.map((result) => {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+    return result.value;
+  }));
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -199,9 +275,9 @@ export async function provisionPreparedHostedCryptoDomainRootsTx(input: {
 }
 
 /**
- * Legacy all-domain bridge for the two owners that still discover or create a
- * member id after `BEGIN`: thread-container creation and inbound Family member
- * activation. Candidate signing happens before the first per-domain lock, but
+ * Legacy all-domain bridge for inbound Family member activation, whose member
+ * id may still be created after `BEGIN`. Candidate signing happens before the
+ * first per-domain lock, but
  * the caller retains its outer connection and every `pg_advisory_xact_lock`
  * remains held until that outer transaction ends. New transaction code must
  * use the prepared-only commit API above.
@@ -347,6 +423,8 @@ export async function unwrapHostedDomainRootForWebByRootKeyId(input: {
 export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
   prisma?: HostedCryptoClient;
   references: readonly HostedDomainRootReference[];
+  /** Retains provider failures only for the lifetime of the active request scope. */
+  retainFailureInScopedCache?: boolean;
   signal?: AbortSignal;
 }): Promise<UnwrappedHostedDomainRootReference[]> {
   const referencesByKey = new Map<string, HostedDomainRootReference>();
@@ -361,39 +439,97 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
     return [];
   }
 
-  const prisma = input.prisma ?? getPrisma();
-  const rows = await readDecryptableHostedDomainRootEnvelopeRows({
-    prisma,
-    references,
+  const scopedCache = getHostedDomainRootUnwrapCache();
+  const cachedBeforeMetadata = references.flatMap((reference) => {
+    const cached = scopedCache?.get(createHostedDomainRootReferenceKey(reference));
+    return cached ? [cached] : [];
   });
+  if (cachedBeforeMetadata.length > 0) {
+    const settledCached = await Promise.allSettled(cachedBeforeMetadata);
+    const failedCached = settledCached.find((result) => result.status === "rejected");
+    if (failedCached) {
+      throw failedCached.reason;
+    }
+  }
+  const cachedByKey = new Map(
+    references.flatMap((reference) => {
+      const key = createHostedDomainRootReferenceKey(reference);
+      const cached = scopedCache?.get(key);
+      return cached ? [[key, cached] as const] : [];
+    }),
+  );
+  const uncachedReferences = references.filter((reference) =>
+    !cachedByKey.has(createHostedDomainRootReferenceKey(reference))
+  );
+  const prisma = input.prisma ?? getPrisma();
+  let rows: HostedUserCryptoEnvelopeRow[];
+  try {
+    rows = uncachedReferences.length > 0
+      ? await readDecryptableHostedDomainRootEnvelopeRows({
+          prisma,
+          references: uncachedReferences,
+        })
+      : [];
+  } catch (error) {
+    retainHostedDomainRootReferenceFailure({
+      cache: scopedCache,
+      error,
+      references: uncachedReferences,
+      retain: input.retainFailureInScopedCache === true,
+    });
+    throw error;
+  }
   const rowsByKey = new Map(
     rows.map((row) => [createHostedDomainRootReferenceKey(row), row] as const),
   );
-  const verified = [] as Array<{
-    envelope: HostedDomainRootKeyEnvelopeV1;
-    reference: HostedDomainRootReference;
-  }>;
-  for (const reference of references) {
-    const row = rowsByKey.get(createHostedDomainRootReferenceKey(reference));
-    if (!row) {
-      throw new HostedDomainRootEnvelopeUnavailableError({
-        domain: reference.domain,
+  const verifiedByKey = new Map<string, HostedDomainRootKeyEnvelopeV1>();
+  for (const reference of uncachedReferences) {
+    try {
+      const row = rowsByKey.get(createHostedDomainRootReferenceKey(reference));
+      if (!row) {
+        throw new HostedDomainRootEnvelopeUnavailableError({
+          domain: reference.domain,
+        });
+      }
+      verifiedByKey.set(
+        createHostedDomainRootReferenceKey(reference),
+        await parseAssertAndVerifyEnvelope(row, reference),
+      );
+    } catch (error) {
+      retainHostedDomainRootReferenceFailure({
+        cache: scopedCache,
+        error,
+        references: [reference],
+        retain: input.retainFailureInScopedCache === true,
       });
+      throw error;
     }
-    verified.push({
-      envelope: await parseAssertAndVerifyEnvelope(row, reference),
-      reference,
-    });
   }
 
   const unwrapped: UnwrappedHostedDomainRootReference[] = [];
   try {
-    for (let offset = 0; offset < verified.length; offset += WEB_BATCH_UNWRAP_CONCURRENCY) {
-      const chunk = verified.slice(offset, offset + WEB_BATCH_UNWRAP_CONCURRENCY);
+    for (let offset = 0; offset < references.length; offset += WEB_BATCH_UNWRAP_CONCURRENCY) {
+      const chunk = references.slice(offset, offset + WEB_BATCH_UNWRAP_CONCURRENCY);
       const results = await Promise.allSettled(
-        chunk.map(async ({ envelope, reference }) => {
+        chunk.map(async (reference) => {
+          const cacheKey = createHostedDomainRootReferenceKey(reference);
+          const cachedPromise = cachedByKey.get(cacheKey);
+          if (cachedPromise) {
+            const unwrappedRoot = await cachedPromise;
+            return {
+              ...reference,
+              envelope: unwrappedRoot.envelope,
+              rootKey: Uint8Array.from(unwrappedRoot.rootKey),
+            };
+          }
+          const envelope = verifiedByKey.get(cacheKey);
+          if (!envelope) {
+            throw new HostedDomainRootEnvelopeUnavailableError({
+              domain: reference.domain,
+            });
+          }
           const cached = await unwrapWithScopedCache(
-            createHostedDomainRootReferenceKey(reference),
+            cacheKey,
             async () => ({
               envelope,
               rootKey: await unwrapEnvelopeForWeb({
@@ -401,6 +537,7 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
                 signal: input.signal,
               }),
             }),
+            input.retainFailureInScopedCache,
           );
           return {
             ...reference,
@@ -429,6 +566,25 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
       root.rootKey.fill(0);
     }
     throw error;
+  }
+}
+
+function retainHostedDomainRootReferenceFailure(input: {
+  cache: ReturnType<typeof getHostedDomainRootUnwrapCache>;
+  error: unknown;
+  references: readonly HostedDomainRootReference[];
+  retain: boolean;
+}): void {
+  if (!input.cache || !input.retain || input.references.length === 0) {
+    return;
+  }
+  const rejected = Promise.reject<UnwrappedHostedDomainRoot>(input.error);
+  void rejected.catch(() => undefined);
+  for (const reference of input.references) {
+    const cacheKey = createHostedDomainRootReferenceKey(reference);
+    if (!input.cache.has(cacheKey)) {
+      input.cache.set(cacheKey, rejected);
+    }
   }
 }
 

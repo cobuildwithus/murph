@@ -56,6 +56,8 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
   isHostedRuntimeProcessEnv,
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -287,7 +289,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(3);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(5);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -514,11 +516,22 @@ describe("hosted execution coverage gaps", () => {
     expect(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV).toBe(
       "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON",
     );
+    expect(MURPH_ANDROID_APP_ENABLED_ENV).toBe("MURPH_ANDROID_APP_ENABLED");
     expect(
       isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
     ).toBe(true);
     expect(isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: "0" })).toBe(false);
     expect(isHostedRuntimeProcessEnv({})).toBe(false);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: " 1 " }),
+    ).toBe(false);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }),
+    ).toBe(true);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "true" }),
+    ).toBe(false);
+    expect(isMurphAndroidAppEnabled({})).toBe(false);
   });
 
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {

@@ -223,6 +223,7 @@ HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_MONTHLY
 HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_EDGE_MONTHLY
 HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY
 HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY
+HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY
 HOSTED_ONBOARDING_STRIPE_PLAN_CHANGE_PORTAL_CONFIGURATION_ID_LAUNCH_EDGE_MONTHLY
 ```
 
@@ -231,13 +232,12 @@ when the caller needs to select it explicitly.
 
 Use a dedicated Stripe sandbox account only. The four prices and Portal
 configuration are stable, pre-provisioned non-secret IDs. The configured Portal
-configuration is also the sandbox default because the Trial Settings action
-opens the general customer portal. The preflight rejects
-live-mode authority, the wrong sandbox account, malformed IDs, inactive or
-mispriced catalog entries, and a Portal configuration that is not the active
-default with plan updates enabled, Trial upgrades ending immediately, and
-immediate invoicing. The browser journey remains the authoritative proof that
-the provider actually exposes the dedicated Pulse and Edge products.
+configuration is the sandbox default. Preflight rejects live-mode authority,
+the wrong sandbox account, malformed IDs, inactive or mispriced catalog
+entries, and a Portal configuration that is not the active default with plan
+updates enabled and immediate invoicing. The browser journey remains the
+authoritative proof that the provider actually exposes the dedicated Pulse and
+Edge products.
 The test-mode secret remains in the single Vitest coordinator; the web process
 receives only `STRIPE_SECRET_KEY`, the harness-owned Stripe CLI child receives
 only `STRIPE_API_KEY`, and browser/Cloudflare/Temporal/setup children receive
@@ -246,39 +246,31 @@ argument. The matrix sets `MURPH_HOSTED_LOCAL_E2E_STRIPE_LISTENER=1` to claim
 the one isolated listener explicitly; other E2E scenarios still fail closed
 unless `MURPH_DEV_SKIP_STRIPE_LISTEN=1`.
 
-The matrix covers new-member Pulse Trial Checkout, Trial to paid Pulse with
-invoice-authoritative entitlement, the paused-Trial update-before-resume
-incident regression, Trial and paid Pulse upgrades to Edge through Customer
-Portal (with the Trial becoming paid Edge), Edge to Pulse as a renewal
-Subscription Schedule, Family Checkout, and
-contactless web Family invite activation. It separately proves the supported
-paid individual-to-Family path as an in-place update of the existing
+The matrix covers Starter activation followed by paid Pulse Checkout, paid
+Pulse to Edge through Customer Portal, Edge to Pulse as a renewal Subscription
+Schedule, Family Checkout with contactless web invite activation, and paid
+individual-to-Family conversion as an in-place update of the existing
 subscription. The named Family Checkout case starts from an authenticated
-lapsed individual with no active subscription so the browser also exercises
-the real Family Checkout owner. Test Clocks are used only for the paused-Trial
-fixture.
+lapsed individual with no active subscription so the browser exercises the
+real Family Checkout owner.
 
 All created or adopted resources carry an opaque run correlation. Normal
 teardown verifies exact run metadata before expiring Sessions, releasing
-Schedules, canceling Subscriptions, deleting Customers, or deleting ready Test
-Clocks. The standalone cleanup command can recover an interrupted Checkout by
-matching the opaque correlation already present in Murph-owned metadata, tags
-linked resources with exact run ownership, and then applies the same refusal
-checks. It never mutates or deletes shared products, prices, or unrelated
-sandbox objects. Polling is bounded against typed Stripe and Murph state; fixed
-sleeps are not accepted as correctness proof.
+Schedules, canceling Subscriptions, deleting Customers, or detaching
+PaymentMethods. The standalone cleanup command can recover an interrupted
+Checkout by matching the opaque correlation already present in Murph-owned
+metadata, tags linked resources with exact run ownership, and then applies the
+same refusal checks. It never mutates or deletes shared products, prices, or
+unrelated sandbox objects. Polling is bounded against typed Stripe and Murph
+state; fixed sleeps are not accepted as correctness proof.
 
-The matrix contains a real Stripe control call proving that
-`default_payment_method` is rejected by Subscription Resume and then requires
-the product flow to emit a paused update carrying the inherited payment method
-before Resume creates a hosted resumption invoice. The browser observes that
-open positive-balance invoice even while Stripe still marks it unattempted;
-supported test-mode payment must then produce active provider and
-Settings state. The provider contract is pinned to Stripe's
-official documentation for [Subscription Update](https://docs.stripe.com/api/subscriptions/update),
-[Subscription Resume](https://docs.stripe.com/api/subscriptions/resume),
-[trials](https://docs.stripe.com/billing/subscriptions/trials),
-[Test Clocks](https://docs.stripe.com/billing/testing/test-clocks/api-advanced-usage),
+Checkout completion uses Stripe's official fixture boundary. Paid plan changes
+use the supported Subscription Update and Schedule APIs, and webhook delivery
+travels through the harness-owned listener. The provider contract is pinned to
+Stripe's official documentation for
+[Checkout](https://docs.stripe.com/payments/checkout),
+[Subscription Update](https://docs.stripe.com/api/subscriptions/update),
+[subscription schedules](https://docs.stripe.com/billing/subscriptions/subscription-schedules),
 [Portal deep links](https://docs.stripe.com/customer-management/portal-deep-links),
 [webhooks](https://docs.stripe.com/webhooks), and
 [test-mode values](https://docs.stripe.com/testing).

@@ -87,6 +87,12 @@ test("HeroClocksIn renders the solo exchange without animation for reduced motio
   assert.ok(topic);
   const controls = [...view.container.querySelectorAll("input, button")];
   assert.ok(controls.indexOf(composer) < controls.indexOf(topic));
+  assert.ok(
+    view.scrollTo.mock.calls.some(
+      ([options]) =>
+        options?.top === Number.MAX_SAFE_INTEGER && options.behavior === "auto",
+    ),
+  );
 
   await view.cleanup();
 });
@@ -737,7 +743,11 @@ async function renderHero({
   flushInitialTimers?: boolean;
 }) {
   const { document, window } = parseHTML("<html><body><div id='root'></div></body></html>");
-  const cleanupGlobals = installGlobals(window, document, { reducedMotion });
+  const { cleanup: cleanupGlobals, scrollTo } = installGlobals(
+    window,
+    document,
+    { reducedMotion },
+  );
   activeCleanups.add(cleanupGlobals);
   const container = document.getElementById("root");
   assert.ok(container);
@@ -773,6 +783,7 @@ async function renderHero({
       activeCleanups.delete(cleanupGlobals);
     },
     container,
+    scrollTo,
     window,
   };
 }
@@ -805,9 +816,10 @@ function installGlobals(
     configurable: true,
     value: matchMedia,
   });
+  const scrollTo = vi.fn();
   Object.defineProperty(window.HTMLElement.prototype, "scrollTo", {
     configurable: true,
-    value() {},
+    value: scrollTo,
   });
   const originalFocusDescriptor = Object.getOwnPropertyDescriptor(
     window.HTMLElement.prototype,
@@ -895,10 +907,13 @@ function installGlobals(
     setGlobal("IS_REACT_ACT_ENVIRONMENT", true),
   ];
 
-  return () => {
-    for (const restore of restoreEntries.reverse()) {
-      restore();
-    }
+  return {
+    cleanup: () => {
+      for (const restore of restoreEntries.reverse()) {
+        restore();
+      }
+    },
+    scrollTo,
   };
 }
 

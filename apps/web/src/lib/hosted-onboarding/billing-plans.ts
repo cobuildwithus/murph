@@ -1,12 +1,19 @@
 import {
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PLAN_CODES,
+  type HostedFamilyPlanCode,
   type HostedPlanCode,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
 } from "@murphai/hosted-execution/plan-usage";
 
-export { HOSTED_PLAN_CODES, type HostedPlanCode };
+export {
+  HOSTED_FAMILY_PLAN_CODES,
+  HOSTED_PLAN_CODES,
+  type HostedFamilyPlanCode,
+  type HostedPlanCode,
+};
 
 export const HOSTED_BILLING_PLAN_CODES = [
   "launch_monthly",
@@ -26,13 +33,6 @@ export type HostedPublicBillingPlanCode =
   (typeof HOSTED_PUBLIC_BILLING_PLAN_CODES)[number];
 export type HostedBillingPlanInterval = "month";
 
-export const HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS = [
-  "pulse_trial_7d",
-] as const;
-
-export type HostedPublicBillingCheckoutOffer =
-  (typeof HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS)[number];
-
 export const HOSTED_INTERNAL_BILLING_CHECKOUT_OFFERS = [
   "standard",
   "pulse_trial_7d",
@@ -50,10 +50,6 @@ export type HostedBillingPhase = (typeof HOSTED_BILLING_PHASES)[number];
 
 export const HOSTED_STANDARD_CHECKOUT_OFFER = "standard" as const;
 export const HOSTED_PULSE_TRIAL_OFFER = "pulse_trial_7d" as const;
-export const HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV =
-  "HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED";
-export const HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV =
-  "HOSTED_AUTO_PULSE_TRIAL_ENABLED";
 export const HOSTED_PULSE_TRIAL_DAYS = 14;
 export const HOSTED_PULSE_TRIAL_USAGE_LIMIT_USD_MICROS = 4_500_000n;
 export const HOSTED_PULSE_TRIAL_STARTED_AT_OVERRIDE_METADATA_KEY =
@@ -186,22 +182,38 @@ const HOSTED_PLAN_DEFINITIONS = {
 >;
 
 export interface HostedFamilyBillingOfferDefinition {
-  readonly planCode: HostedPlanCode;
+  readonly billingPlanCode: HostedBillingPlanCode;
+  readonly displayName: string;
+  readonly planCode: HostedFamilyPlanCode;
   readonly priceIdEnvKey: string;
   readonly recurringAmountUsdCents: number;
+  readonly runtimePlanCode: HostedPlanCode;
 }
 
 const HOSTED_FAMILY_BILLING_OFFERS = {
   pulse: {
+    billingPlanCode: "launch_monthly",
+    displayName: "Pulse",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_SEAT_MONTHLY",
     recurringAmountUsdCents: 700,
+    runtimePlanCode: "pulse",
   },
   edge: {
+    billingPlanCode: "launch_edge_monthly",
+    displayName: "Edge",
     priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_EDGE_SEAT_MONTHLY",
     recurringAmountUsdCents: 1_900,
+    runtimePlanCode: "edge",
+  },
+  max: {
+    billingPlanCode: "launch_max_monthly",
+    displayName: "Max",
+    priceIdEnvKey: "HOSTED_ONBOARDING_STRIPE_PRICE_ID_LAUNCH_FAMILY_MAX_SEAT_MONTHLY",
+    recurringAmountUsdCents: 4_900,
+    runtimePlanCode: "edge",
   },
 } as const satisfies Record<
-  HostedPlanCode,
+  HostedFamilyPlanCode,
   Omit<HostedFamilyBillingOfferDefinition, "planCode">
 >;
 
@@ -214,9 +226,9 @@ export const HOSTED_FAMILY_PLAN_DISPLAY = {
   minSeats: HOSTED_FAMILY_MIN_SEATS,
   recurringAmountUsdCentsPerSeat:
     HOSTED_FAMILY_BILLING_OFFERS.pulse.recurringAmountUsdCents,
-  plans: HOSTED_PLAN_CODES.map((code) => ({
+  plans: HOSTED_FAMILY_PLAN_CODES.map((code) => ({
     code,
-    displayName: HOSTED_PLAN_DEFINITIONS[code].displayName,
+    displayName: HOSTED_FAMILY_BILLING_OFFERS[code].displayName,
     recurringAmountUsdCents:
       HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
   })),
@@ -230,12 +242,24 @@ export function getHostedPlanDefinition(code: HostedPlanCode): HostedPlanDefinit
 }
 
 export function getHostedFamilyBillingOfferDefinition(
-  code: HostedPlanCode,
+  code: HostedFamilyPlanCode,
 ): HostedFamilyBillingOfferDefinition {
   return {
     ...HOSTED_FAMILY_BILLING_OFFERS[code],
     planCode: code,
   };
+}
+
+export function getHostedFamilyBillingPlanCode(
+  code: HostedFamilyPlanCode,
+): HostedBillingPlanCode {
+  return HOSTED_FAMILY_BILLING_OFFERS[code].billingPlanCode;
+}
+
+export function getHostedFamilyRuntimePlanCode(
+  code: HostedFamilyPlanCode,
+): HostedPlanCode {
+  return HOSTED_FAMILY_BILLING_OFFERS[code].runtimePlanCode;
 }
 
 export function getHostedPlanCodeForBillingPlan(
@@ -263,8 +287,17 @@ export function parseHostedPlanCode(value: unknown): HostedPlanCode | null {
     : null;
 }
 
+export function parseHostedFamilyPlanCode(
+  value: unknown,
+): HostedFamilyPlanCode | null {
+  return typeof value === "string" &&
+    HOSTED_FAMILY_PLAN_CODES.includes(value as HostedFamilyPlanCode)
+    ? value as HostedFamilyPlanCode
+    : null;
+}
+
 export function getHostedFamilyAiUsageMonthlyAllowanceForPlan(
-  code: HostedPlanCode,
+  code: HostedFamilyPlanCode,
 ): bigint {
   return calculateHostedPaidAiUsageAllowanceUsdMicros(
     HOSTED_FAMILY_BILLING_OFFERS[code].recurringAmountUsdCents,
@@ -361,20 +394,6 @@ export function canUpgradeHostedBillingPlan(input: {
     });
 }
 
-export function isHostedPulseTrialCheckoutEnabled(
-  source: Record<string, string | undefined> = process.env,
-): boolean {
-  return source[HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED_ENV] === "1";
-}
-
-export function isHostedAutoPulseTrialEnabled(
-  source: Record<string, string | undefined> = process.env,
-): boolean {
-  const value = source[HOSTED_AUTO_PULSE_TRIAL_ENABLED_ENV]?.trim().toLowerCase();
-
-  return value !== "0" && value !== "false";
-}
-
 export function parseHostedBillingPlanCode(
   value: unknown
 ): HostedBillingPlanCode | null {
@@ -391,15 +410,6 @@ export function parseHostedPublicBillingPlanCode(
         value as HostedPublicBillingPlanCode,
       )
     ? value as HostedPublicBillingPlanCode
-    : null;
-}
-
-export function parseHostedPublicBillingCheckoutOffer(
-  value: unknown,
-): HostedPublicBillingCheckoutOffer | null {
-  return typeof value === "string" &&
-    HOSTED_PUBLIC_BILLING_CHECKOUT_OFFERS.includes(value as HostedPublicBillingCheckoutOffer)
-    ? value as HostedPublicBillingCheckoutOffer
     : null;
 }
 
@@ -468,19 +478,11 @@ export function canScheduleHostedBillingPlanChange(input: {
     return false;
   }
 
-  if (
-    parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
+  return parseHostedBillingPhase(input.currentBillingPhase) === "paid" &&
     isHostedBillingPlanScheduledDowngrade({
       currentPlanCode,
       targetPlanCode,
-    })
-  ) {
-    return true;
-  }
-
-  return currentPlanCode === "launch_monthly" &&
-    targetPlanCode === "launch_group_monthly" &&
-    isHostedPulseTrialBillingState(input);
+    });
 }
 
 export function canSwitchHostedBillingPlanToPulse(input: {
@@ -495,31 +497,6 @@ export function canSwitchHostedBillingPlanToPulse(input: {
     ...input,
     targetPlanCode: "launch_monthly",
   });
-}
-
-export function canStartHostedPulseTrialPaidPlan(input: {
-  billingStatus?: unknown;
-  currentBillingPhase?: unknown;
-  currentBillingPlanCode?: unknown;
-  currentCheckoutOffer?: unknown;
-  hasStripeCustomerId?: unknown;
-  hasStripeSubscriptionId?: unknown;
-  suspendedAt?: unknown;
-}): boolean {
-  const phase = parseHostedBillingPhase(input.currentBillingPhase);
-  const canStartActiveTrial =
-    input.billingStatus === "active" &&
-    phase === "trial";
-  const canRecoverPausedTrial =
-    input.billingStatus === "paused" &&
-    isHostedPulseTrialBillingState(input);
-
-  return parseHostedBillingPlanCode(input.currentBillingPlanCode) === "launch_monthly" &&
-    parseHostedBillingCheckoutOffer(input.currentCheckoutOffer) === HOSTED_PULSE_TRIAL_OFFER &&
-    (canStartActiveTrial || canRecoverPausedTrial) &&
-    !(input.suspendedAt instanceof Date) &&
-    input.hasStripeCustomerId === true &&
-    input.hasStripeSubscriptionId === true;
 }
 
 export function requireHostedPulseTrialPolicy(

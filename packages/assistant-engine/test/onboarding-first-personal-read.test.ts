@@ -184,15 +184,22 @@ describe('onboarding first personal read', () => {
       | null = null
     const automationTool: AssistantHostedAutomationTool = {
       async request(request, context) {
+        if (request.action !== 'save') {
+          throw new Error('Expected an automation save request.')
+        }
         received = request
         receivedContext = context
         return {
           action: 'save',
           automationId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
           created: true,
+          effectiveTimeZone: null,
           lookupId: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
+          nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
           routeBinding: 'current_conversation',
+          schedule: request.schedule,
           status: 'active',
+          timingVerified: true,
         }
       },
     }

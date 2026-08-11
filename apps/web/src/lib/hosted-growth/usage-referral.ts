@@ -48,15 +48,21 @@ import {
 } from "../hosted-onboarding/shared";
 import type { HostedWebhookWakeHandoff } from "../hosted-onboarding/webhook-service-types";
 import {
+  bindHostedAssistantNotificationDestination,
   resolveHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
 import { generateHostedRandomPrefixedId } from "../primitives";
 import { getPrisma } from "../prisma";
-import { isHostedUsageReferralEnabled } from "./usage-referral-policy";
+import {
+  HOSTED_USAGE_REFERRAL_POLICY_VERSION,
+  isHostedUsageReferralEnabled,
+} from "./usage-referral-policy";
+import {
+  formatHostedReferralRewardUsageDays,
+} from "./referral-reward-days";
 
-export const HOSTED_USAGE_REFERRAL_POLICY_VERSION =
-  "hosted-usage-referral-2026-07-v1";
+export { HOSTED_USAGE_REFERRAL_POLICY_VERSION } from "./usage-referral-policy";
 export const HOSTED_USAGE_REFERRAL_INTENT_TTL_MS =
   7 * 24 * 60 * 60 * 1_000;
 export const HOSTED_USAGE_REFERRAL_LATE_EVIDENCE_GRACE_MS =
@@ -82,13 +88,6 @@ const EXPECTED_REFERRAL_UNAVAILABLE_ERRORS = new Set([
   "too_many_referrals_in_progress",
   "usage_referral_not_available",
 ]);
-const HOSTED_USAGE_CREDIT_USD_FORMATTER = new Intl.NumberFormat("en-US", {
-  currency: "USD",
-  maximumFractionDigits: 2,
-  minimumFractionDigits: 2,
-  style: "currency",
-});
-
 type HostedUsageReferralPolicyDefinition = {
   code: HostedUsageReferralPolicyCode;
   requirementsLabel: string;
@@ -100,7 +99,7 @@ const POLICIES = {
   new_person_activation_v1: {
     code: "new_person_activation_v1",
     requirementsLabel:
-      "Bring one new person into a fresh Murph group. Murph handles onboarding, and the mission completes once they join the conversation with their own Murph.",
+      "Bring one new person into a fresh Murph group. Murph handles setup, and the reward is earned once they join the conversation with their own Murph.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_PERSON_REWARD_USD_MICROS,
     title: "Bring someone new to Murph",
   },
@@ -109,7 +108,7 @@ const POLICIES = {
     requirementsLabel:
       "Start a fresh group and make it genuinely active, with multiple people actually talking.",
     rewardUsdMicros: HOSTED_USAGE_REFERRAL_GROUP_REWARD_USD_MICROS,
-    title: "Start an active group",
+    title: "Start a group conversation",
   },
 } as const satisfies Record<
   HostedUsageReferralPolicyCode,
@@ -145,17 +144,14 @@ interface HostedUsageReferralCelebrationStyleBand {
 
 export function buildHostedUsageReferralRewardLabel(input: {
   destinationKind: "group" | "personal";
+  policyCode: HostedUsageReferralPolicyCode;
+  policyVersion: string;
   rewardUsdMicros: bigint;
 }): string {
   const subject = input.destinationKind === "group"
     ? "this room"
     : "your Murph";
-  return `${formatHostedUsageCreditUsd(input.rewardUsdMicros)} of cost-weighted usage credit for ${subject}`;
-}
-
-function formatHostedUsageCreditUsd(usdMicros: bigint): string {
-  const cents = (usdMicros + 5_000n) / 10_000n;
-  return HOSTED_USAGE_CREDIT_USD_FORMATTER.format(Number(cents) / 100);
+  return `${formatHostedReferralRewardUsageDays(input)} for ${subject}`;
 }
 
 function outstandingHostedUsageReferralCommitmentWhere(
@@ -1067,6 +1063,8 @@ async function appendHostedUsageReferralCelebration(input: {
     select: {
       beneficiaryMemberId: true,
       celebrationQueuedAt: true,
+      policyCode: true,
+      policyVersion: true,
       referrerMemberId: true,
       rewardUsdMicros: true,
       rewardedAt: true,
@@ -1158,6 +1156,8 @@ async function appendHostedUsageReferralCelebration(input: {
         notificationKey,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
+          policyCode: referral.policyCode,
+          policyVersion: referral.policyVersion,
           rewardUsdMicros: referral.rewardUsdMicros,
         }),
         rewardedAt,
@@ -1213,30 +1213,10 @@ export function buildHostedUsageReferralCelebrationWake(input: {
   rewardedAt: Date;
   styleBand: HostedUsageReferralCelebrationStyleBand;
 }) {
-  const routeAuthority = input.destination.externalThreadRouteAuthority
-    ?? (
-      input.destination.conversationShape === "direct-member"
-        && input.destination.route.channel === "telegram"
-        && input.destination.route.threadIsDirect === true
-        ? {
-            channel: "telegram" as const,
-            containerMemberId: input.beneficiaryMemberId,
-            threadId: input.destination.route.delivery.target,
-          }
-        : null
-    );
-  const route =
-    input.destination.conversationShape === "direct-member"
-    && input.destination.route.channel === "linq"
-    && input.destination.route.delivery.kind === "thread"
-      ? {
-          ...input.destination.route,
-          delivery: {
-            ...input.destination.route.delivery,
-            kind: "explicit" as const,
-          },
-        }
-      : input.destination.route;
+  const boundDestination = bindHostedAssistantNotificationDestination({
+    destination: input.destination,
+    memberId: input.beneficiaryMemberId,
+  });
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: `assistant.notification.requested:${input.notificationKey}`,
     memberId: input.beneficiaryMemberId,
@@ -1244,9 +1224,10 @@ export function buildHostedUsageReferralCelebrationWake(input: {
       deliveryDedupeToken: input.notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: input.notificationKey,
-      ...(routeAuthority
+      ...(boundDestination.externalThreadRouteAuthority
         ? {
-            externalThreadRouteAuthority: routeAuthority,
+            externalThreadRouteAuthority:
+              boundDestination.externalThreadRouteAuthority,
           }
         : {}),
       instructions: [
@@ -1263,7 +1244,7 @@ export function buildHostedUsageReferralCelebrationWake(input: {
         "Do not mention internal accounting, qualification checks, or the other conversation.",
       ].join(" "),
       responsePolicy: { kind: "require_send" },
-      route,
+      route: boundDestination.route,
     },
     occurredAt: input.rewardedAt.toISOString(),
   });
@@ -1669,6 +1650,7 @@ async function readHostedUsageReferralSnapshot(input: {
     select: {
       expiresAt: true,
       policyCode: true,
+      policyVersion: true,
       rewardUsdMicros: true,
       status: true,
     },
@@ -1717,6 +1699,8 @@ async function readHostedUsageReferralSnapshot(input: {
             policyCode: mission.policyCode,
             rewardLabel: buildHostedUsageReferralRewardLabel({
               destinationKind,
+              policyCode: mission.policyCode,
+              policyVersion: mission.policyVersion,
               rewardUsdMicros: mission.rewardUsdMicros,
             }),
             state: mission.status === "armed" ? "armed" : "target_bound",
@@ -1736,15 +1720,12 @@ async function readHostedUsageReferralSnapshot(input: {
         requirementsLabel: POLICIES[code].requirementsLabel,
         rewardLabel: buildHostedUsageReferralRewardLabel({
           destinationKind,
+          policyCode: code,
+          policyVersion: HOSTED_USAGE_REFERRAL_POLICY_VERSION,
           rewardUsdMicros: POLICIES[code].rewardUsdMicros,
         }),
       })),
-    trialCreditNotice:
-      personalUsage !== null
-      && personalUsage.status !== "unavailable"
-      && personalUsage.accessKind === "trial"
-        ? "Bonus usage does not extend the trial end date."
-        : null,
+    trialCreditNotice: null,
   };
 }
 

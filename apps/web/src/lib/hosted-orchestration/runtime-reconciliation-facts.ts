@@ -41,7 +41,6 @@ import {
 import {
   sendClaimedHostedAiUsageLimitNoticeToLinqChat,
   sendClaimedHostedAiUsageLimitNoticeToTelegramThread,
-  sendHostedTrialConversionNoticeToLinqChat,
 } from "../hosted-execution/usage-limit-notice";
 import { projectHostedAiUsageLimitNoticeForDelivery } from "../hosted-execution/usage-limit-notice-message";
 import { readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
@@ -446,10 +445,7 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
 }): Promise<Date | null> {
   const decision = input.decision;
   if (
-    (
-      decision.reason !== "ai_usage_limit_exceeded"
-      && decision.reason !== "trial_expired_pending_billing"
-    )
+    decision.reason !== "ai_usage_limit_exceeded"
     || !decision.userNotice
     || !hasHostedFreshConversationMailboxLag({
       consumedSeqByLane: input.consumedSeqByLane,
@@ -469,29 +465,6 @@ async function sendHostedRuntimeUsageDeniedNoticeForPendingConversation(input: {
     return null;
   }
 
-  if (decision.reason === "trial_expired_pending_billing") {
-    if (
-      decision.userNotice.code !== "trial_conversion_pending"
-      || !isHostedLinqConversationMessageWake(wake)
-    ) {
-      return null;
-    }
-    await sendHostedTrialConversionNoticeToLinqChat({
-      chatId: wake.message.linqMessage.chatId,
-      memberId: input.userId,
-      message: decision.userNotice.message,
-      occurredAt: wake.occurredAt,
-      prisma: input.prisma,
-      replyToMessageId: wake.message.linqMessage.messageId,
-      routeAuthority: wake.message.routeAuthority ?? null,
-      sourceEventId: wake.eventId,
-    });
-    return null;
-  }
-
-  if (decision.userNotice.code === "trial_conversion_pending") {
-    return null;
-  }
   const attemptedAt = new Date();
   if (isHostedLinqConversationMessageWake(wake)) {
     const result = await sendClaimedHostedAiUsageLimitNoticeToLinqChat({

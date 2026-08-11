@@ -205,6 +205,38 @@ on larger screens it centers at no more than 540px wide.
 ### Signal Cards
 Large Fraunces stat number (the value) + DM Mono unit label + delta in sage green + expected range from protocol underneath. In finished state, show "was X" baseline value under the stat. One card per tracked signal; never grid five-abreast — prefer two or three across with room to breathe.
 
+### iMessage Nutrition Card Image
+Render the macOS and app-absent fallback as the compact default state of the
+shipping SwiftUI balloon, not as a second nutrition dashboard. Keep the wide
+cream field, large calorie value, calorie progress ring, and one-row protein,
+carbohydrates, fat, and fiber readings visually aligned with the Messages
+extension. The bitmap stays rectangular and badge-free because Messages owns
+the outer corner mask. Installed extensions retain their native icon;
+app-absent static cards omit the optional square App Store artwork. Status
+color may tint nutrient values, but
+the ring draws quantitative progress only for a complete calorie total with an
+assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
+the neutral track. The static image does not expose the native card's
+tap-to-reveal target state. The provider caption retains only the date and meal
+count; visible totals and goals are not repeated beneath the image. V1 renders
+an unavailable fiber dash in the image without adding a fiber caption claim.
+
+Compact-table and workout fallback images use the same provider-owned chrome
+contract: keep the bitmap rectangular and badge-free, reserve empty upper-left
+clearance for the icon that Messages overlays, and let Messages supply that icon
+and the outer corner mask. Keep structural rounding only where it communicates
+an inner state, such as a progress track or set-status marker.
+
+### iMessage Challenge Standings Card Image
+Render the app-absent standings fallback as the static counterpart to the
+shipping SwiftUI balloon. Keep the cream field, title, rank or collective
+progress, and score hierarchy aligned with the native card. The bitmap remains
+rectangular and badge-free because Messages owns the outer chrome. Reserve the
+upper-left title gutter for its provider-owned logo without drawing that logo
+into the bitmap. Preserve
+scorer-owned order, scores, progress, and coverage while using the identity-free
+public presentation defined by the challenge standings delivery contract.
+
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
 current MRR, tracked fulfilled usage top-ups, paying-customer growth, active
@@ -417,7 +449,7 @@ check. Keep the semantic radio visually hidden and place the visible check at
 the right edge of the card; do not add a leading radio dot.
 Unavailable choices stay visible but disabled, with the plan or access
 requirement named directly.
-When a choice materially changes cost-weighted included-capacity drawdown,
+When a choice materially changes included-capacity drawdown,
 state that difference before save and keep it visible beside the saved
 selection. It may appear in the option copy or the immediate pending-selection
 summary; do not hide it in a tooltip or mention it only after save.
@@ -425,6 +457,22 @@ Keyboard focus rings the whole card. Keep actions outside the card label so the
 full card remains one predictable radio target. Stack on narrow screens and use
 a compact grid only when the options are true peers. Do not use choice cards as
 navigation or as a substitute for ordinary buttons.
+
+### Group Join Sharing Choices
+
+The group join consent checkpoint may request the complete selectable sharing
+catalog. Keep every requested choice selected for a new invitee until they
+explicitly uncheck it, state the selected count when the catalog is long, and
+place the checklist in one bounded, keyboard-scrollable region so the primary
+join action remains visible. Beside a long-catalog count, include one quiet
+button that clears all optional sharing so joining without health or email
+sharing is a single action; members can then re-enable exact choices below.
+Each row stays a full-width checkbox card with its
+plain-language scope description; do not compress a consequential permission
+into a dense table, hide choices behind categories, or imply that the defaults
+have already been granted. Existing members reopen the same surface with only
+their currently active shares selected, and the list includes both the current
+group request and every older share that member can still revoke.
 
 ### Group Usage Funding
 An authenticated group funding link opens its relevant funding control
@@ -434,6 +482,15 @@ progress. Use `GroupUsageFundingShell` only as the quiet reopen surface beneath
 that control. Do not add a second sales card, decorative status badge, duplicate
 headline, or explanatory paragraph. Retain `Back to Murph` as the quiet
 secondary action.
+
+A signed-out funding link first shows one neutral sign-in handoff and returns to
+the exact funding URL after authentication. Do not reveal whether the group or
+the viewer has a private sponsorship relationship before that handoff. An
+authenticated payer keeps the cancellation path even when the group is no
+longer eligible for new funding; authenticated non-payers see the ordinary
+unavailable state. After cancellation, replace the action with a durable receipt
+that confirms future automatic refills stopped and existing usage credit stays
+with the group. Do not reload into an unrelated unavailable state.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared
@@ -535,9 +592,10 @@ View Transitions API (`<ViewTransition>` from `next/navigation`). No Framer Moti
 - Logo (dark): `apps/web/public/logo-dark.svg`
 - Favicon (auto dark mode): `apps/web/app/icon.svg`
 - Dynamic OG image: `apps/web/app/opengraph-image.tsx` (1200×630, Fraunces + DM Sans, hero.jpg background)
+- Static iMessage response-card image: `apps/web/app/imessage/card/v1/[payload]/route.tsx` (1200px wide, content-sized, DM Sans, immutable bounded V1-V4 snapshot)
 - Canonical hero image: `apps/web/public/hero.jpg` (3583×2000)
 - Supporting texture: `apps/web/public/warmglow.png` (1376×768)
-- Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`)
+- Live brand + component reference: `/design` (`?tab=brand`, `?tab=components`; nutrition and compact-table image studies live on the components tab)
 
 ### Photography
 Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunrise/sunset light, soft haze, low-contrast tonal transitions. One person held small in frame, off-center near an edge; preserve a calm side for copy. Use `public/hero.jpg` as the reference image when continuity matters.
@@ -551,6 +609,12 @@ Wide horizon, small human — spacious, warm, quietly cinematic. Amber-gold sunr
 > Create an ultra-wide social header for Murph. Keep a lone figure small on the right side of the frame and leave a calm, open copy area on the left. Use soft golden-hour light, low-contrast atmosphere, and a grounded natural landscape. The image should feel warm, spacious, and quietly intelligent, not epic or motivational.
 
 Before shipping any Murph image, verify: (1) warm not hyped, (2) breathing room for copy, (3) real place with real light, (4) quiet human presence, (5) still feels like Murph without the logo.
+
+### Personal Patterns Matrix
+
+Use one flat paper surface for repeated action-to-outcome comparisons. Put Quiver-style factor illustrations on rows and next-day outcomes on columns. Circle size shows the size of the difference. Fill color shows the evidence stage: amber for a new clue, sage for a link seen again, and dark sage with a ring for a link worth testing. The plus or minus sign shows direction. Color must not label higher values as good or lower values as bad.
+
+Keep the copy observational. Use “lined up with” or “was associated with.” Never use “caused,” “proved,” or a moral label. Show matched-day counts and comparison means in the cell detail. On narrow screens, keep the row labels readable and scroll the matrix horizontally.
 
 ## 6. Do's and Don'ts
 

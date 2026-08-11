@@ -210,37 +210,37 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
       name: "Apple Health",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/zepp.png",
       description:
         "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
       name: "Zepp / Amazfit",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/mi-fitness.png",
       description:
         "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
       name: "Xiaomi / Mi Fitness",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/ringconn.png",
       description:
         "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
       name: "RingConn",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/coros.png",
       description:
         "Activity, sleep, heart rate, and supported workouts through Apple Health.",
       name: "COROS",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/suunto.png",
       description:
         "Activity, sleep, heart rate, and supported workouts through Apple Health.",
       name: "Suunto",
     },
     {
-      assetPath: "/brand-logos/connect/wearable-relay.svg",
+      assetPath: "/brand-logos/connect/huawei-health.png",
       description:
         "Selected watch and band data through Apple Health, where supported.",
       name: "Huawei Health",
@@ -420,10 +420,12 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch/u);
+  assert.doesNotMatch(markup, /Get Murph for Android/u);
+  assert.doesNotMatch(markup, /play\.google\.com/u);
   assert.match(markup, /aria-label="Oura connection is not available yet"/);
   assert.match(markup, /Apple Health not connected/);
   assert.match(markup, /Oura not connected/);
-  assert.match(markup, />Download app<\/a>/u);
   for (const relayName of [
     "Zepp / Amazfit",
     "Xiaomi / Mi Fitness",
@@ -465,6 +467,10 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.ok(
     sourceHeadingIndex(markup, "Google Fit") <
+      sourceHeadingIndex(markup, "Huawei Health"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Huawei Health") <
       sourceHeadingIndex(markup, "Xiaomi / Mi Fitness"),
   );
   assert.ok(
@@ -473,21 +479,6 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
   );
   assert.ok(
     sourceHeadingIndex(markup, "Zepp / Amazfit") <
-      sourceHeadingIndex(markup, "RingConn"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "RingConn") <
-      sourceHeadingIndex(markup, "COROS"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "COROS") < sourceHeadingIndex(markup, "Suunto"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Suunto") <
-      sourceHeadingIndex(markup, "Huawei Health"),
-  );
-  assert.ok(
-    sourceHeadingIndex(markup, "Huawei Health") <
       sourceHeadingIndex(markup, "Withings"),
   );
   assert.ok(
@@ -497,7 +488,18 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     sourceHeadingIndex(markup, "Oura") < sourceHeadingIndex(markup, "Whoop"),
   );
   assert.ok(
-    sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "Dexcom"),
+    sourceHeadingIndex(markup, "Whoop") < sourceHeadingIndex(markup, "COROS"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "COROS") < sourceHeadingIndex(markup, "Suunto"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "Suunto") <
+      sourceHeadingIndex(markup, "RingConn"),
+  );
+  assert.ok(
+    sourceHeadingIndex(markup, "RingConn") <
+      sourceHeadingIndex(markup, "Dexcom"),
   );
   assert.ok(
     sourceHeadingIndex(markup, "Dexcom (G6 and older)") <
@@ -525,6 +527,23 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
 
     assert.notEqual(source.description.split(/\s+/u)[0], "Sync");
     assert.notEqual(source.description.split(/\s+/u)[0], "Import");
+  }
+
+  for (const relayAssetPath of [
+    "/brand-logos/connect/huawei-health.png",
+    "/brand-logos/connect/mi-fitness.png",
+    "/brand-logos/connect/zepp.png",
+    "/brand-logos/connect/coros.png",
+    "/brand-logos/connect/suunto.png",
+    "/brand-logos/connect/ringconn.png",
+  ]) {
+    assert.match(
+      markup,
+      new RegExp(
+        `<img(?=[^>]*class="[^"]*rounded-md[^"]*")(?=[^>]*src="${escapeRegExp(relayAssetPath)}")[^>]*>`,
+        "u",
+      ),
+    );
   }
 
   for (const staleDescription of [
@@ -802,6 +821,42 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       description: "Workouts.",
       logo,
     },
+    {
+      id: "ringconn",
+      name: "RingConn",
+      description: "Sleep.",
+      logo,
+    },
+    {
+      id: "huawei-health",
+      name: "Huawei Health",
+      description: "Activity.",
+      logo,
+    },
+    {
+      id: "coros",
+      name: "COROS",
+      description: "Training.",
+      logo,
+    },
+    {
+      id: "withings",
+      name: "Withings",
+      description: "Health.",
+      logo,
+    },
+    {
+      id: "xiaomi-mi-fitness",
+      name: "Xiaomi / Mi Fitness",
+      description: "Activity.",
+      logo,
+    },
+    {
+      id: "suunto",
+      name: "Suunto",
+      description: "Training.",
+      logo,
+    },
   ];
 
   assert.deepEqual(
@@ -812,8 +867,14 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       "fitbit",
       "google-fit",
       "strava",
+      "huawei-health",
+      "xiaomi-mi-fitness",
       "zepp",
+      "withings",
       "whoop",
+      "coros",
+      "suunto",
+      "ringconn",
       "dexcom",
       "dexcom-g6-and-older",
       "freestyle-libre",
@@ -857,10 +918,10 @@ test("ConnectSourcesGrid opens the Zepp Apple Health setup guide without claimin
           historicalResetIncomplete: true,
           id: "zepp",
           logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 40,
-            src: "/brand-logos/connect/wearable-relay.svg",
-            width: 64,
+            className: "size-11 rounded-md object-contain",
+            height: 44,
+            src: "/brand-logos/connect/zepp.png",
+            width: 44,
           },
           name: "Zepp / Amazfit",
           recoveryKind: "connection_reset",
@@ -946,10 +1007,10 @@ test("ConnectSourcesGrid opens a reusable Xiaomi Apple Health setup guide", asyn
             "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
           id: "xiaomi-mi-fitness",
           logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 40,
-            src: "/brand-logos/connect/wearable-relay.svg",
-            width: 64,
+            className: "size-11 rounded-md object-contain",
+            height: 44,
+            src: "/brand-logos/connect/mi-fitness.png",
+            width: 44,
           },
           name: "Xiaomi / Mi Fitness",
           setupGuideActionLabel: "Set up sync",
@@ -1002,10 +1063,10 @@ test("ConnectSourcesGrid requires account authentication before opening the Zepp
             "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
           id: "zepp",
           logo: {
-            className: "h-auto max-h-7 w-auto max-w-[8rem] object-contain",
-            height: 40,
-            src: "/brand-logos/connect/wearable-relay.svg",
-            width: 64,
+            className: "size-11 rounded-md object-contain",
+            height: 44,
+            src: "/brand-logos/connect/zepp.png",
+            width: 44,
           },
           name: "Zepp / Amazfit",
           setupGuideActionLabel: "Set up sync",
@@ -1172,7 +1233,7 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   const visibleSourceIds = new Set(
     listVisibleConnectSources().map((source) => source.id),
   );
-  const configuredSourceIds = new Set(
+  const configuredSourceIds = new Set<string>(
     (
       await import("@murphai/device-syncd/config")
     ).DEVICE_CONNECT_SOURCES.filter((source) =>
@@ -1182,6 +1243,12 @@ test("ConnectPage enables every Link source exposed by the shared Junction defau
   assert.deepEqual(
     [...visibleSourceIds].sort(),
     [...configuredSourceIds].sort(),
+  );
+  assert.equal(visibleSourceIds.has("mobvoi-health"), false);
+  assert.equal(
+    listVisibleConnectSources({ MURPH_ANDROID_APP_ENABLED: "1" })
+      .some((source) => source.id === "mobvoi-health"),
+    true,
   );
 
   const logo = {
@@ -1443,6 +1510,46 @@ test("ConnectPage marks iOS Apple Health Junction SDK source connected from host
     sourceHeadingIndex(markup, "Apple Health") <
       sourceHeadingIndex(markup, "Garmin"),
   );
+});
+
+test("ConnectPage keeps Mobvoi statusless when Health Connect is active", async () => {
+  vi.stubEnv("MURPH_ANDROID_APP_ENABLED", "1");
+  mocks.buildHostedDeviceSyncSettingsResponse.mockResolvedValueOnce({
+    generatedAt: "2026-05-01T00:00:00.000Z",
+    ok: true,
+    sources: [
+      {
+        connectionId: "dsc_junction_health_connect",
+        provider: "junction",
+        state: "active",
+        upstreamSources: [
+          {
+            providerLabel: "Health Connect",
+            resourceCount: 4,
+            sourceProviderSlug: "health_connect",
+            status: "connected",
+          },
+        ],
+      },
+    ],
+  });
+
+  const { default: ConnectPage } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const markup = renderToStaticMarkup(await ConnectPage());
+
+  assert.match(
+    markup,
+    /aria-label="Get Murph for Android for Mobvoi \/ TicWatch"/u,
+  );
+  assert.match(
+    markup,
+    /Sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph\./u,
+  );
+  assert.match(markup, /src="\/brand-logos\/connect\/mobvoi-health\.png"/u);
+  assert.match(markup, /rounded-full/u);
+  assert.doesNotMatch(markup, /Mobvoi \/ TicWatch (?:connected|not connected)/u);
 });
 
 test("ConnectPage shows source-scoped disconnects for multi-source Junction accounts", async () => {

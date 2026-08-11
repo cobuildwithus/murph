@@ -25,6 +25,22 @@ import {
   type HealthCommonsBiomarkerDesiredDirectionsArtifact,
 } from "./biomarker-runtime-artifacts.ts";
 import {
+  HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT,
+  HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE,
+  HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
+  searchHealthCommonsKnowledgeIndex,
+  type HealthCommonsKnowledgeSearchResult,
+} from "./knowledge-index.ts";
+export type {
+  HealthCommonsKnowledgeSearchItem,
+  HealthCommonsKnowledgeSearchResult,
+  HealthCommonsKnowledgeSourceReference,
+} from "./knowledge-index.ts";
+export {
+  HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT,
+  HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
+};
+import {
   HEALTH_COMMONS_PROTOCOL_FAMILY_GRAPH_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_INDEX_SCHEMA_VERSION,
   HEALTH_COMMONS_PROTOCOL_RUN_SPECS_SCHEMA_VERSION,
@@ -140,6 +156,12 @@ export interface LoadGeneratedHealthCommonsBiomarkerDesiredDirectionsOptions {
 
 export interface LoadGeneratedHealthCommonsWebArtifactOptions {
   generatedWebRoot?: string | URL;
+}
+
+export interface SearchGeneratedHealthCommonsKnowledgeOptions {
+  knowledgeIndexPath?: string | URL;
+  limit?: number;
+  query: string;
 }
 
 export interface HealthCommonsCompactProtocol {
@@ -377,6 +399,25 @@ const DEFAULT_GENERATED_PROTOCOL_RUN_SPECS_PATH = "generated/protocol-run-specs.
 const DEFAULT_GENERATED_PROTOCOL_FAMILY_GRAPH_PATH = "generated/protocol-family-graph.json";
 const DEFAULT_GENERATED_BIOMARKER_DESIRED_DIRECTIONS_PATH =
   "generated/biomarker-desired-directions.json";
+const DEFAULT_GENERATED_KNOWLEDGE_INDEX_PATH =
+  `generated/${HEALTH_COMMONS_KNOWLEDGE_INDEX_FILE}`;
+
+export function searchGeneratedHealthCommonsKnowledge(
+  options: SearchGeneratedHealthCommonsKnowledgeOptions,
+): HealthCommonsKnowledgeSearchResult {
+  const indexLocation = options.knowledgeIndexPath ?? defaultGeneratedKnowledgeIndexUrl();
+  const databasePath = indexLocation instanceof URL
+    ? fileURLToPath(indexLocation)
+    : indexLocation;
+  return searchHealthCommonsKnowledgeIndex({
+    databasePath,
+    limit: Math.min(
+      options.limit ?? HEALTH_COMMONS_KNOWLEDGE_DEFAULT_LIMIT,
+      HEALTH_COMMONS_KNOWLEDGE_MAX_LIMIT,
+    ),
+    query: options.query,
+  });
+}
 const DEFAULT_LIST_LIMIT = 25;
 const DEFAULT_RELATION_LIMIT = 12;
 const DEFAULT_SEARCH_LIMIT = 20;
@@ -2234,6 +2275,13 @@ function defaultGeneratedProtocolFamilyGraphUrl(): URL {
 function defaultGeneratedBiomarkerDesiredDirectionsUrl(): URL {
   return new URL(
     DEFAULT_GENERATED_BIOMARKER_DESIRED_DIRECTIONS_PATH,
+    defaultHealthCommonsPackageRootUrl(),
+  );
+}
+
+function defaultGeneratedKnowledgeIndexUrl(): URL {
+  return new URL(
+    DEFAULT_GENERATED_KNOWLEDGE_INDEX_PATH,
     defaultHealthCommonsPackageRootUrl(),
   );
 }

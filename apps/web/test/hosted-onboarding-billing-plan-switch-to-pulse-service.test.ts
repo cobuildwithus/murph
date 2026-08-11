@@ -78,7 +78,6 @@ import {
   scheduleHostedBillingPlanSwitch,
   scheduleHostedBillingPlanSwitchToPulse,
 } from "@/src/lib/hosted-onboarding/billing-plan-switch-to-pulse-service";
-import { POST as postSettingsBillingPlanSwitch } from "../app/api/settings/billing/switch-plan/route";
 import {
   createResendFetch,
   makeStripeProviderError,
@@ -115,7 +114,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValue({
       currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_edge_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -331,11 +330,11 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     });
   });
 
-  test("schedules an eligible active Pulse trial into Group at trial end", async () => {
+  test("schedules an eligible paid Pulse plan into Group at period end", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: "trial",
+      currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -345,7 +344,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     });
     mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
       items: ["price_pulse_recurring"],
-      status: "trialing",
+      status: "active",
     }));
     const pendingGroupSchedule = makeSchedule({
       metadata: {},
@@ -466,9 +465,9 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
 
   test("rejects Group selection when membership is no longer eligible", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: "trial",
+      currentBillingPhase: "paid",
       currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -644,7 +643,12 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
   test.each([
     ["customer mismatch", makeSubscription({ customer: "cus_other" }), "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH"],
     ["past due", makeSubscription({ status: "past_due" }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
+    ["scheduled cancellation", makeSubscription({ cancelAt: 1_778_025_600 }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["cancel at period end", makeSubscription({ cancelAtPeriodEnd: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
+    ["manual invoice collection", makeSubscription({ collectionMethod: "send_invoice" }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
+    ["paused collection", makeSubscription({
+      pauseCollection: { behavior: "void", resumes_at: null },
+    }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["pending update", makeSubscription({ pendingUpdate: true }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_STATE_UNSUPPORTED"],
     ["unknown item", makeSubscription({ items: ["price_edge_recurring", "price_unknown"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
     ["metered item", makeSubscription({ items: ["price_edge_recurring", "price_unknown_usage"] }), "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"],
@@ -696,7 +700,7 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     });
   });
 
-  test("rejects non-paid or non-Edge local states before Stripe reads", async () => {
+  test("rejects non-paid local states before Stripe reads", async () => {
     mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
       currentBillingPhase: "trial",
       currentBillingPlanCode: "launch_edge_monthly",
@@ -708,8 +712,8 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     await expect(scheduleHostedBillingPlanSwitchToPulse({
       memberId: "member_123",
     })).rejects.toMatchObject({
-      code: "HOSTED_BILLING_PLAN_SWITCH_UNSUPPORTED",
-      httpStatus: 400,
+      code: "HOSTED_PAID_SUBSCRIPTION_REQUIRED",
+      httpStatus: 409,
     });
 
     expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
@@ -734,162 +738,6 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
   });
 
-  test("requires a usable payment method before scheduling active-trial Group", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
-      id: "group_member_123",
-    });
-    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
-      defaultPaymentMethod: null,
-      items: ["price_pulse_recurring"],
-      status: "trialing",
-    }));
-
-    await expect(scheduleHostedBillingPlanSwitch({
-      memberId: "member_123",
-      now: new Date("2026-05-06T00:00:00.000Z"),
-      targetPlanCode: "launch_group_monthly",
-    })).resolves.toEqual({
-      billingPlanCode: "launch_group_monthly",
-      status: "payment_method_required",
-    });
-
-    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
-    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
-    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
-  });
-
-  test("rejects a trial-end choice after Stripe has already activated billing", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: "trial",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
-      id: "group_member_123",
-    });
-    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
-      items: ["price_pulse_recurring"],
-      status: "active",
-    }));
-
-    await expect(scheduleHostedBillingPlanSwitch({
-      memberId: "member_123",
-      now: new Date("2026-05-06T00:00:00.000Z"),
-      targetPlanCode: "launch_group_monthly",
-    })).rejects.toMatchObject({
-      code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
-      httpStatus: 409,
-    });
-
-    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
-    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
-    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
-  });
-
-  test("requires a payment method for an offer-backed trial with no phase projection", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: null,
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
-      id: "group_member_123",
-    });
-    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
-      defaultPaymentMethod: null,
-      items: ["price_pulse_recurring"],
-      status: "trialing",
-    }));
-
-    await expect(scheduleHostedBillingPlanSwitch({
-      memberId: "member_123",
-      now: new Date("2026-05-06T00:00:00.000Z"),
-      targetPlanCode: "launch_group_monthly",
-    })).resolves.toEqual({
-      billingPlanCode: "launch_group_monthly",
-      status: "payment_method_required",
-    });
-
-    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
-    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
-    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
-  });
-
-  test("authenticated Settings rejects an offer-backed trial after Stripe activation", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: null,
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-    mocks.prismaClient.hostedGroupMember.findFirst.mockResolvedValueOnce({
-      id: "group_member_123",
-    });
-    mocks.stripe.subscriptions.retrieve.mockResolvedValueOnce(makeSubscription({
-      items: ["price_pulse_recurring"],
-      status: "active",
-    }));
-
-    const response = await postSettingsBillingPlanSwitch(
-      new Request("https://example.test/api/settings/billing/switch-plan", {
-        body: JSON.stringify({
-          targetPlanCode: "launch_group_monthly",
-        }),
-        headers: {
-          origin: "https://example.test",
-        },
-        method: "POST",
-      }),
-    );
-
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({
-      error: {
-        code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
-      },
-    });
-    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
-    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
-    expect(mocks.writeHostedMemberStripeBillingRefTx).not.toHaveBeenCalled();
-  });
-
-  test("does not reinterpret a stale trial-end choice as a paid downgrade", async () => {
-    mocks.readHostedMemberStripeBillingRef.mockResolvedValueOnce({
-      currentBillingPhase: "paid",
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    });
-
-    await expect(scheduleHostedBillingPlanSwitch({
-      memberId: "member_123",
-      requiredSourceBillingPhase: "trial",
-      targetPlanCode: "launch_group_monthly",
-    })).rejects.toMatchObject({
-      code: "HOSTED_BILLING_PLAN_SWITCH_SOURCE_CHANGED",
-      httpStatus: 409,
-    });
-
-    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
-  });
 });
 
 describe("hosted Pulse switch schedule pending-field helpers", () => {
@@ -975,12 +823,15 @@ describe("hosted Pulse switch schedule pending-field helpers", () => {
 });
 
 function makeSubscription(input?: {
+  cancelAt?: number | null;
   cancelAtPeriodEnd?: boolean;
+  collectionMethod?: Stripe.Subscription["collection_method"];
   currentPeriodEnd?: number;
   customer?: string;
   defaultPaymentMethod?: string | null;
   items?: string[];
   pendingUpdate?: boolean;
+  pauseCollection?: Stripe.Subscription["pause_collection"];
   schedule?: string | null;
   status?: Stripe.Subscription.Status;
 }): Stripe.Subscription {
@@ -988,7 +839,9 @@ function makeSubscription(input?: {
 
   // @ts-expect-error - the synthetic fixture only includes the Stripe fields exercised here.
   return {
+    cancel_at: input?.cancelAt ?? null,
     cancel_at_period_end: input?.cancelAtPeriodEnd === true,
+    collection_method: input?.collectionMethod ?? "charge_automatically",
     current_period_end: input?.currentPeriodEnd ?? 1_778_068_800,
     customer: input?.customer ?? "cus_123",
     default_payment_method:
@@ -1009,6 +862,7 @@ function makeSubscription(input?: {
     },
     object: "subscription",
     pending_update: input?.pendingUpdate ? {} : null,
+    pause_collection: input?.pauseCollection ?? null,
     schedule: input?.schedule ?? null,
     status: input?.status ?? "active",
   } as Stripe.Subscription;
