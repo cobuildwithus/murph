@@ -62,6 +62,9 @@ companion bearer status
       page ceiling and pin the configured Junction catalog below that bound.
 - [x] Preserve that 64-source authority for unscoped companion status while
       retaining the narrower 32-row exact-source projection.
+- [x] Normal-merge current main, retain both sides of its independent crypto
+      test update, and replace the replay's cross-workspace relative imports
+      with one narrow public assistant-runtime status seam.
 - [x] Run focused tests, direct replay, typecheck, lint, diff, and privacy
       checks.
 - [ ] Complete the terminal exact-head ReviewGPT audit and obtain green
@@ -108,6 +111,17 @@ unscoped iOS companion status route. The correction selects the already-owned
 Connect path remains at 32. This adds no constant, query, owner, state, cursor,
 or lifecycle. Route and real-PostgreSQL proofs exercise the existing status
 function and set projection directly.
+
+Current-main integration retrospective: main advanced after round five and the
+normal merge produced one unrelated textual conflict where both crypto-test
+imports remained live, so the resolution retained both. Main's workspace
+boundary guard also rejected the replay's two relative imports into assistant
+runtime. The correction exposes the existing complete paginator and status
+builder through one package subpath and gives Web a test-only workspace
+dependency plus the repository's standard source-resolution mappings. It adds
+no production caller, query, state, helper implementation, or authority owner;
+the real-PostgreSQL proof still exercises the same production functions. The
+post-merge suite applied all 177 current migrations and passed all five proofs.
 
 ## Rollout
 
