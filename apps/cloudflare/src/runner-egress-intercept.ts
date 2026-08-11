@@ -211,6 +211,10 @@ const OPENAI_EGRESS_POLICY = [
   },
   {
     method: "POST",
+    pathname: "/v1/alpha/search",
+  },
+  {
+    method: "POST",
     pathname: "/v1/images/generations",
   },
   {

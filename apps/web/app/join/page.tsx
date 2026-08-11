@@ -62,10 +62,9 @@ export default async function JoinResumePage(input: {
     redirect(`/join/${encodeURIComponent(invite.inviteCode)}`);
   }
 
-  // Billing to recover is a destination decision, not a generic accessible stage:
-  // the dashboard surfaces a billing action only for a narrow paused-trial shape,
-  // so send these members straight to the Subscription controls. /home stays for
-  // genuinely active or sponsored access.
+  // Billing recovery is a destination decision, not a generic accessible stage.
+  // Send members with a retained provider subscription directly to Subscription;
+  // /home stays for genuinely active Starter, paid, or sponsored access.
   if (
     !sponsoredAccessActive
     && stage !== "blocked"

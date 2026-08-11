@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   assistantResponseCardSchema,
   encodeCompactTableAppCardUrl,
+  buildLinqIMessageAppCardImageUrl,
   renderAssistantResponseCardText,
   renderAssistantResponseCardTranscriptText,
   type AssistantResponseCard,
@@ -117,15 +118,22 @@ describe('compact table response cards', () => {
       footer: 'Assists and spotted reps remain on the exact set note.',
     })
 
-    const acceptedCard = makeBoundaryCard(24)
+    const acceptedCard = makeBoundaryCard(17)
     const { tracking: _acceptedTracking, ...acceptedPresentation } = acceptedCard
-    expect(encodeEnvelopeUrl(acceptedPresentation).length).toBe(2_047)
+    expect(encodeEnvelopeUrl(acceptedPresentation).length).toBe(2_037)
     expect(assistantResponseCardSchema.parse(acceptedCard)).toEqual(acceptedCard)
-    expect(encodeCompactTableAppCardUrl(acceptedCard).length).toBe(2_047)
+    expect(encodeCompactTableAppCardUrl(acceptedCard).length).toBe(2_037)
+    expect(buildLinqIMessageAppCardImageUrl(acceptedCard).length).toBe(2_046)
 
-    const rejectedCard = makeBoundaryCard(25)
+    const rejectedCard = makeBoundaryCard(18)
     const { tracking: _rejectedTracking, ...rejectedPresentation } = rejectedCard
-    expect(encodeEnvelopeUrl(rejectedPresentation).length).toBe(2_048)
+    expect(encodeEnvelopeUrl(rejectedPresentation).length).toBe(2_039)
+    expect(
+      `https://www.withmurph.ai/imessage/card/v1/${Buffer.from(
+        JSON.stringify({ schemaVersion: 3, card: rejectedPresentation }),
+        'utf8',
+      ).toString('base64url')}.png`.length,
+    ).toBe(2_048)
     expect(assistantResponseCardSchema.safeParse(rejectedCard).success).toBe(false)
   })
 

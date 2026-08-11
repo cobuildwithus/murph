@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppLayout,
+  renderAssistantResponseCardText,
   type CompactTableResponseCardV1,
 } from '../src/assistant-response-cards.js'
 
@@ -32,26 +33,41 @@ const TRACKED_TABLE: CompactTableResponseCardV1 = {
 }
 
 describe('response-card static Linq layouts', () => {
-  it('uses generic value-free fallback copy across card kinds', () => {
-    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Ask Murph for this card in text',
+  it('uses value-free fallback copy for generic and workout cards', () => {
+    expect(buildLinqIMessageAppFallbackText(ONE_OFF_TABLE)).toBe(
+      'Your Murph summary. Ask Murph for this card in text',
     )
+    expect(buildLinqIMessageAppFallbackText(TRACKED_TABLE)).toBe(
+      'Your workout. Ask Murph for this card in text',
+    )
+    for (const card of [ONE_OFF_TABLE, TRACKED_TABLE]) {
+      expect(buildLinqIMessageAppFallbackText(card)).not.toMatch(
+        /\d|today|day|time/iu,
+      )
+    }
   })
 
-  it('distinguishes one-off and canonical workout tables without exposing values', () => {
+  it('preserves generic provider details without exposing tracking authority', () => {
     expect(buildLinqIMessageAppLayout(ONE_OFF_TABLE)).toEqual({
-      caption: 'Murph',
-      subcaption: 'Table',
-      trailing_caption: 'OPEN',
+      caption: 'Weekly plan',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: 'Monday: Focus: Upper body',
     })
     expect(buildLinqIMessageAppLayout(TRACKED_TABLE)).toEqual({
-      caption: 'Murph',
-      subcaption: 'Workout table',
-      trailing_caption: 'OPEN',
+      caption: 'Live workout',
+      image_url: expect.stringMatching(
+        /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
+      ),
+      subcaption: 'Exercise A: Set 1: 10',
     })
 
+    expect(renderAssistantResponseCardText(TRACKED_TABLE)).toMatch(
+      /Exercise A|10/u,
+    )
     expect(JSON.stringify(buildLinqIMessageAppLayout(TRACKED_TABLE))).not.toMatch(
-      /Exercise A|10|evt_|2026/u,
+      /evt_|2026/u,
     )
   })
 })

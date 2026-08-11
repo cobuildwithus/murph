@@ -32,10 +32,12 @@ import { ChangelogArchiveStudy } from "../app/design/changelog-archive-study";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
+  buildChangelogItemPath,
   buildChangelogPagePath,
   CHANGELOG_EDITIONS_PER_PAGE,
   CHANGELOG_PREVIEW_CARD_ITEMS,
   listChangelogEditions,
+  listPublishedChangelogItems,
   resolveChangelogEditionPage,
   resolveChangelogPage,
 } from "../src/lib/changelog";
@@ -54,67 +56,52 @@ describe("ChangelogPage", () => {
     mocks.resolveHostedMurphContactOptions.mockResolvedValue([]);
   });
 
-  it("renders the latest seven days with compact older navigation", async () => {
+  it("renders the current archive window with compact older navigation", async () => {
     const markup = renderToStaticMarkup(
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
+    const firstPage = resolveChangelogPage(1);
+    const secondPage = resolveChangelogPage(2);
+    expect(firstPage).not.toBeNull();
+    expect(secondPage).not.toBeNull();
+    if (!firstPage || !secondPage) {
+      throw new TypeError("The changelog fixture must span at least two pages.");
+    }
 
-    expect(markup).toContain("Murph can understand media in X posts");
-    expect(markup).toContain("Local alerts can shape health advice");
-    expect(markup).toContain("More control over data, models, and connections");
-    expect(markup).toContain(
-      "Connected apps recover with a clearer next step",
-    );
-    expect(markup).toContain("Recovery that stops at the right moment");
-    expect(markup).toContain("More ways to finish what you started");
-    expect(markup).toContain("A clearer view of home, stronger follow-through");
-    expect(markup).not.toContain("More ways through, less waiting around");
-    expect(markup).not.toContain("Corrections that carry forward");
-    expect(markup).not.toContain("A first text that goes somewhere");
-    expect(markup).not.toContain(
-      "Updated documents, honest reactions, usage you can see",
-    );
-    expect(markup).not.toContain("Onboarding that sounds like a person");
-    expect(markup).not.toContain("Pick who Murph is");
-    expect(markup).not.toContain(
-      "Standings that explain themselves, payments that finish",
-    );
-    expect(markup).not.toContain(
-      "Medical records, without the integration jargon",
-    );
-    expect(markup).not.toContain("Replies that know what they are answering");
-    expect(markup).toContain("Improvements");
-    expect(markup).not.toContain("Under the hood");
-    expect(markup).not.toContain("Your records and measurements, in one place");
-    expect(markup).not.toContain("More control, less waiting");
-    expect(markup).not.toContain("Better answers, better instincts");
-    expect(markup).not.toContain("Murph referees your group challenge");
+    expect(firstPage.editions).toHaveLength(CHANGELOG_EDITIONS_PER_PAGE);
+    for (const edition of firstPage.editions) {
+      expect(markup).toContain(`id="edition-${edition.id}"`);
+      expect(markup).toContain(renderToStaticMarkup(<>{edition.title}</>));
+      for (const item of edition.items) {
+        expect(markup).toContain(`id="${item.id}"`);
+        expect(markup).toContain(`href="${buildChangelogItemPath(item.id)}"`);
+      }
+    }
+    for (const edition of secondPage.editions) {
+      expect(markup).not.toContain(`id="edition-${edition.id}"`);
+    }
+
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-07-30"');
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-06#x-post-media-understanding"',
-    );
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
-    );
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
-    );
-    expect(markup).toContain(
-      "The physical-note delivery record does not store the postal address",
-    );
-    expect(markup).toContain(
-      "conversation history follows Murph&#x27;s existing retention rules",
-    );
-    expect(markup).not.toContain("plaintext conversation memory");
+    expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
+    expect(markup).toContain('aria-label="Changelog pages"');
+    expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
   });
 
   it("renders the new try-it controls with their exact prompts", async () => {
-    const markup = renderToStaticMarkup(
-      await ChangelogPage({ searchParams: Promise.resolve({}) }),
-    );
+    const itemIds = [
+      "reminders-keep-requested-timezone",
+      "public-referral-home",
+      "murph-max-plan",
+      "clearer-health-source-handoffs",
+      "x-post-media-understanding",
+      "official-local-alert-health-context",
+      "health-data-consent-controls",
+      "daily-nutrition-cards",
+      "single-source-wearable-disconnect",
+    ];
+    const markup = await renderChangelogItems(itemIds);
 
     expect(markup).not.toContain("Open model settings");
     expect(markup).toContain("Ask about today&#x27;s conditions");
@@ -122,14 +109,24 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('href="/settings/data-privacy"');
     expect(markup).toContain("Ask for today&#x27;s nutrition card");
     expect(markup).toContain("Manage connections");
-    expect(markup).toContain("Open Environment");
-    expect(markup).toContain('href="/environment"');
-    expect(markup).toContain("Open Connections");
+    expect(markup).not.toContain("Open Environment");
+    expect(markup).not.toContain('href="/environment"');
+    expect(markup).toContain("Explore referrals");
+    expect(markup).toContain('href="/refer"');
+    expect(markup).toContain("Compare plans");
+    expect(markup).toContain('href="/settings#subscription"');
+    expect(markup).toContain("Browse connections");
     expect(markup).toContain('href="/connect"');
     expect(
       mocks.resolveHostedMurphContactOptions.mock.calls.map(([input]) => input),
     ).toEqual(
       expect.arrayContaining([
+        {
+          message: {
+            body: "Remind me every day at 9 PM Central to wind down.",
+            subject: "Try it: Reminders keep the time you asked for",
+          },
+        },
         {
           message: {
             body: "Look at the images or video in this X post and tell me what they show: [paste X post URL]",
@@ -160,42 +157,91 @@ describe("ChangelogPage", () => {
   });
 
   it("renders explanatory visuals for the major new features", async () => {
-    const [latestPage, olderPage] = await Promise.all([
-      ChangelogPage({ searchParams: Promise.resolve({}) }),
-      ChangelogPage({
-        searchParams: Promise.resolve({ edition: "2026-07-28" }),
-      }),
+    const markup = await renderChangelogItems([
+      "family-usage-top-ups",
+      "usage-top-ups",
+      "generated-contact-card-avatar",
+      "contact-card-after-invite-signup",
+      "group-contact-card-reshare",
+      "overnight-imessage-reminders",
+      "group-funding-one-recovery-owner",
+      "post-onboarding-choice-point",
+      "group-sponsorship-moments",
+      "generated-media-private-path",
+      "group-funding-speaks-in-messages",
+      "live-workout-logging",
+      "biomarker-reference-bands",
+      "turn-local-browser-progress",
+      "clearer-health-source-handoffs",
+      "scheduled-tools-follow-the-route",
+      "feedback-reproduction-guidance",
+      "support-escalation-issue-summary",
+      "runtime-replacement-continuity",
+      "paused-member-retention-cleanup",
+      "daily-nutrition-card-delivery",
+      "maintenance-without-global-pause",
     ]);
-    const markup = [latestPage, olderPage]
-      .map((page) => renderToStaticMarkup(page))
-      .join("\n");
 
     expect(markup).toContain("Add usage");
     expect(markup).toContain("Add to Contacts");
     expect(markup).toContain("Scheduled reminders");
-    expect(markup).toContain("Keep Murph going");
+    expect(markup).toContain("Group funding recovery");
     expect(markup).toContain("Verified line after setup");
     expect(markup).toContain("One-time follow-up");
     expect(markup).toContain("Sponsor this group");
     expect(markup).toContain("Private attachment");
     expect(markup.match(/>Usage credit</gu)).toHaveLength(7);
     expect(markup.toLowerCase()).not.toContain(RETIRED_USAGE_TERM);
+    expect(markup).not.toContain("Ways to earn Murph time");
+    expect(markup).not.toContain("Credit belongs to the room");
+    expect(markup).not.toContain("Group time");
+    expect(markup).toContain("Live workout");
+    expect(markup).toContain("Fasting glucose");
+    expect(markup).toContain("Current browser task");
+    expect(markup).not.toContain("Polar via Apple Health");
+    expect(markup).not.toContain("Via Apple Health");
+    expect(markup).not.toContain("Murph via your connected email");
+    expect(markup).not.toContain("Approved follow-up");
+    expect(markup).not.toContain(
+      "The exact email you approved was sent from the connected account.",
+    );
+    expect(markup).not.toContain("I’ll include");
+    expect(markup).not.toContain("without your private details");
+    expect(markup).not.toContain("Sanitized issue summary");
+    expect(markup).not.toContain(
+      "no raw conversation, credentials, or health details",
+    );
+    expect(markup).toContain("Conversation handoff");
+    expect(markup).toContain("Paused-member privacy cleanup");
+    expect(markup).toContain("Daily nutrition card");
+    expect(markup).toContain("Live storage maintenance");
   });
 
-  it("renders the real archive section against synthetic design data", () => {
+  it("renders the latest production edition and synthetic archive studies", () => {
     const markup = renderToStaticMarkup(<ChangelogArchiveStudy />);
 
     expect(markup).toContain('data-design-study="changelog-archive"');
-    expect(markup).toContain("A week that closes its own loops");
-    expect(markup).toContain("Follow-ups arrive where the work started");
+    expect(markup).toContain('data-design-state="latest-production-edition"');
+    expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Blood-pressure history waits for the whole sync");
+    expect(markup).not.toContain("Ask Murph to search");
+    expect(markup).toContain("A week of follow-through");
+    expect(markup).toContain("Generated images can become group photos");
+    expect(markup).toContain("Confirmed appointments come with a reminder");
+    expect(markup).toContain("Tell Murph about an appointment");
+    expect(markup).toContain("Confirmed appointment");
     expect(markup).toContain("Recovery explains what to do next");
     expect(markup).toContain("Contact details stay tied to the right line");
     expect(markup).toContain("Corrections stay attached to the conversation");
-    expect(markup).toContain("Scheduled follow-up");
+    expect(markup).toContain("Compact tables make dense changes scannable");
+    expect(markup).toContain("Reference context stays visible");
     expect(markup).toContain("Stay in the app");
     expect(markup).toContain("Verified line after setup");
     expect(markup).toContain("Private conversation");
-    expect(markup).toContain('href="#design-follow-up"');
+    expect(markup).toContain("Compact response");
+    expect(markup).toContain("70 mg/dL");
+    expect(markup).toContain('href="#design-generated-group-photo"');
+    expect(markup).toContain('href="#appointment-reminders-by-default"');
     expect(markup).toContain("inert");
     expect(markup).not.toContain("Group memory, clearer recovery");
   });
@@ -310,3 +356,54 @@ describe("ChangelogPage", () => {
     expect(mocks.notFound).toHaveBeenCalledTimes(2);
   });
 });
+
+function extractChangelogItemMarkup(markup: string, itemId: string): string {
+  const start = markup.indexOf(`<article id="${itemId}"`);
+  const end = markup.indexOf("</article>", start);
+  if (start === -1 || end === -1) {
+    throw new TypeError(`Missing rendered changelog item: ${itemId}`);
+  }
+  return markup.slice(start, end + "</article>".length);
+}
+
+async function renderChangelogItems(itemIds: readonly string[]): Promise<string> {
+  const publishedItemsById = new Map(
+    listPublishedChangelogItems().map((item) => [item.id, item]),
+  );
+  const owningEditionIds = [
+    ...new Set(
+      itemIds.map((itemId) => {
+        const item = publishedItemsById.get(itemId);
+        if (!item) {
+          throw new TypeError(`Missing changelog test item: ${itemId}`);
+        }
+        return item.editionId;
+      }),
+    ),
+  ];
+  const pageMarkupByEditionId = new Map(
+    await Promise.all(
+      owningEditionIds.map(async (editionId) => [
+        editionId,
+        renderToStaticMarkup(
+          await ChangelogPage({
+            searchParams: Promise.resolve({ edition: editionId }),
+          }),
+        ),
+      ] as const),
+    ),
+  );
+
+  return itemIds
+    .map((itemId) => {
+      const editionId = publishedItemsById.get(itemId)?.editionId;
+      const pageMarkup = editionId
+        ? pageMarkupByEditionId.get(editionId)
+        : undefined;
+      if (!pageMarkup) {
+        throw new TypeError(`Missing changelog test page for: ${itemId}`);
+      }
+      return extractChangelogItemMarkup(pageMarkup, itemId);
+    })
+    .join("\n");
+}

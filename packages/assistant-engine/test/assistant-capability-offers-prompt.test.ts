@@ -47,7 +47,6 @@ describe('assistant capability-offers prompt contract', () => {
       '`murph.create_phone_call`',
       '`murph.computer_',
       '`murph.connected_apps_',
-      '`murph.newsletter`',
     ]) {
       expect(layers.prompt).not.toContain(externalSurface)
     }
@@ -134,12 +133,9 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('spending, prescription changes')
     expect(section).toContain('body/diagnosis leaderboards')
     expect(section).toContain('Group challenges are group-chat only')
-    expect(section).toContain(
-      'weekly group newsletter is setup-only, never immediate',
-    )
   })
 
-  it('names newsletter and new-group permission mechanics inside hosted-group guidance', () => {
+  it('names generic group-email and new-group permission mechanics inside hosted-group guidance', () => {
     const prompt = buildAssistantSystemPromptLayers(createCommonCodexPromptInput({
         assistantHostedAutomationAvailable: true,
         hostedRuntime: true,
@@ -149,25 +145,19 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(section).toContain('`murph.newsletter`')
-    expect(section).toContain(
-      '`prepare` returns authorized facts from the seven completed local days',
-    )
-    expect(section).toContain('compose only from `result.members`')
+    expect(section).toContain('`murph.group action="read_shared" audience="group_email"`')
+    expect(section).toContain('Preparation returns only currently authorized address-free facts')
     expect(section).not.toContain('`vault-cli group weekly')
-    expect(section).toContain('`send` rechecks authorization')
-    expect(section).toContain('never returns raw email addresses')
-    expect(section).toContain('never invent a sync or permission cause')
-    expect(section).toContain('the historical cause is unknown')
-    expect(section).toContain(
-      'permission or data availability as current state, never as the cause',
-    )
-    expect(section).not.toContain('direct tool evidence')
-    expect(section).toContain('never send the first edition immediately')
-    expect(section).toContain('Create the newsletter cron through `murph.automation`')
+    expect(section).toContain('Send revalidates recipients and grants')
+    expect(section).toContain('`accepted` means pending, not delivered')
+    expect(section).toContain('never exposes recipient addresses to the model')
+    expect(section).toContain('Email sharing requires `group-email.v0`')
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
     expect(section).toContain('`action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
+    expect(section).not.toContain('explicit current visibility of a consented shared metric')
+    expect(section).not.toContain('call exact-scope `read_shared` once first')
+    expect(section).not.toContain('granted plus missing means not currently visible')
     expect(section).toContain('Model-size `status="partial"` lists current `omittedParticipantIds`')
     expect(section).toContain('never infer their departure, score, diagnostics, or permission')
     expect(section).toContain('or call the standings complete')
@@ -292,6 +282,10 @@ describe('assistant capability-offers prompt contract', () => {
     expect(prompt).toContain('sleep timing/total; source-aware deep/REM')
     expect(prompt).toContain('`workouts.v0`: day-local start/duration/type')
     expect(prompt).toContain('canonical event zone (vault fallback)')
+    expect(prompt).toContain('explicit current visibility of a consented shared metric')
+    expect(prompt).toContain('call exact-scope `read_shared` once first')
+    expect(prompt).toContain('granted plus missing means not currently visible, cause unknown')
+    expect(prompt).toContain('unrelated "now"/"yet" questions')
     expect(prompt).toContain(
       'no timestamp/route/location/HR/provider ID',
     )

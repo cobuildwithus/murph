@@ -4472,8 +4472,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         return new Response(JSON.stringify({
           action: "read",
           result: {
+            mainPersona: "classic",
             model: "gpt-5.6-terra",
             solAvailable: false,
+            supportingPersona: null,
             tone: "formal",
             voice: "warm",
           },
@@ -4588,8 +4590,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .resolves.toEqual({
         action: "read",
         result: {
+          mainPersona: "classic",
           model: "gpt-5.6-terra",
           solAvailable: false,
+          supportingPersona: null,
           tone: "formal",
           voice: "warm",
         },
@@ -4883,6 +4887,85 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
     expect(request.headers.get("x-hosted-execution-signature"))
       .toMatch(/^[A-Za-z0-9\-_]+$/u);
+  });
+
+  it("binds private Assistant Ask completion proof to its exact authorized direct route", async () => {
+    const privateCompletionRequest = {
+      answeredMailboxItemIds: ["aask_done_private_provider_entry"],
+      assistantAskCompletionExpiresAt: "2026-08-09T18:00:00.000Z",
+      idempotencyKey:
+        "assistant-ask-private:aask_done_private_provider_entry",
+      responseTextDigest:
+        "01e93e1ac156d325ccf1df0f18518b899140ae48588be6a01876aa20ece0cadd",
+      route: {
+        actorId: null,
+        channel: "telegram" as const,
+        delivery: {
+          kind: "thread" as const,
+          target: "telegram_direct_456",
+        },
+        identityId: `hid_${"1".repeat(32)}`,
+        threadId: `hid_${"2".repeat(32)}`,
+        threadIsDirect: true,
+      },
+    };
+    let authorized = true;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(
+        HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH,
+      );
+      await expect(request.json()).resolves.toEqual({
+        authority: privateCompletionRequest.route,
+        privateAssistantAskCompletion: {
+          answeredMailboxItemIds: privateCompletionRequest.answeredMailboxItemIds,
+          expiresAt: privateCompletionRequest.assistantAskCompletionExpiresAt,
+          idempotencyKey: privateCompletionRequest.idempotencyKey,
+          responseTextDigest: privateCompletionRequest.responseTextDigest,
+        },
+      });
+      return new Response(JSON.stringify({ authorized }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertAssistantAskPrivateCompletionAuthority =
+      platform.effectsPort.assertAssistantAskPrivateCompletionAuthority;
+    if (!assertAssistantAskPrivateCompletionAuthority) {
+      throw new Error("Expected private Assistant Ask completion authority effect.");
+    }
+
+    await expect(
+      assertAssistantAskPrivateCompletionAuthority(privateCompletionRequest),
+    ).resolves.toBeUndefined();
+
+    const request = requireFetchRequest(
+      fetchMock.mock.calls[0],
+      "private Assistant Ask completion authority request",
+    );
+    expect(request.url).toBe(
+      `https://web.example.test${HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH}`,
+    );
+    expectDefaultRuntimeWriteFenceHeaders(request);
+    expect(request.headers.get("x-hosted-execution-user-id")).toBe("member_123");
+    expect(request.headers.get("x-hosted-execution-signature"))
+      .toMatch(/^[A-Za-z0-9\-_]+$/u);
+
+    authorized = false;
+    await expect(
+      assertAssistantAskPrivateCompletionAuthority(privateCompletionRequest),
+    ).rejects.toThrow(
+      "Hosted Assistant Ask private completion authority response is invalid.",
+    );
   });
 
   it("carries reviewed Assistant Ask proof through external route authority", async () => {
@@ -7754,7 +7837,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const mealPhotoKey = "a".repeat(40);
     const mealPhotoResult = await effectsPort.readMealPhoto?.(mealPhotoKey);
     await effectsPort.deleteMealPhoto?.(mealPhotoKey);
+    const groupEmailAuthorizationProof = "a".repeat(64);
     const sendResult = await effectsPort.sendEmail({
+      groupEmailAuthorizationProof,
       message: "hello",
       subject: "subject",
       target: "assistant@example.com",
@@ -7787,6 +7872,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     );
     expect(mealPhotoDeleteRequest.method).toBe("DELETE");
     expect(sendRequest.url).toBe("http://results.worker/send");
+    await expect(sendRequest.json()).resolves.toEqual({
+      groupEmailAuthorizationProof,
+      message: "hello",
+      subject: "subject",
+      target: "assistant@example.com",
+      targetKind: "explicit",
+    });
   });
 
   it("preserves hosted email pre-provider failure proof across the effects port", async () => {

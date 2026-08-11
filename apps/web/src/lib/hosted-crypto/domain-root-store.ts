@@ -205,10 +205,31 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   if (missing.length === 0) {
     return new Map();
   }
-  return new Map(await Promise.all(missing.map(async (domain) => [
-    domain,
-    await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
-  ] as const)));
+  let firstError: unknown;
+  let hasError = false;
+  const settled = await Promise.allSettled(missing.map(async (domain) => {
+    try {
+      return [
+        domain,
+        await createSignedHostedDomainRootEnvelope({ domain, userId: input.userId }),
+      ] as const;
+    } catch (error) {
+      if (!hasError) {
+        firstError = error;
+        hasError = true;
+      }
+      throw error;
+    }
+  }));
+  if (hasError) {
+    throw firstError;
+  }
+  return new Map(settled.map((result) => {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+    return result.value;
+  }));
 }
 
 export async function provisionHostedCryptoDomainRootsForUser(input: {
@@ -419,6 +440,17 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
   }
 
   const scopedCache = getHostedDomainRootUnwrapCache();
+  const cachedBeforeMetadata = references.flatMap((reference) => {
+    const cached = scopedCache?.get(createHostedDomainRootReferenceKey(reference));
+    return cached ? [cached] : [];
+  });
+  if (cachedBeforeMetadata.length > 0) {
+    const settledCached = await Promise.allSettled(cachedBeforeMetadata);
+    const failedCached = settledCached.find((result) => result.status === "rejected");
+    if (failedCached) {
+      throw failedCached.reason;
+    }
+  }
   const cachedByKey = new Map(
     references.flatMap((reference) => {
       const key = createHostedDomainRootReferenceKey(reference);
@@ -430,27 +462,48 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
     !cachedByKey.has(createHostedDomainRootReferenceKey(reference))
   );
   const prisma = input.prisma ?? getPrisma();
-  const rows = uncachedReferences.length > 0
-    ? await readDecryptableHostedDomainRootEnvelopeRows({
-        prisma,
-        references: uncachedReferences,
-      })
-    : [];
+  let rows: HostedUserCryptoEnvelopeRow[];
+  try {
+    rows = uncachedReferences.length > 0
+      ? await readDecryptableHostedDomainRootEnvelopeRows({
+          prisma,
+          references: uncachedReferences,
+        })
+      : [];
+  } catch (error) {
+    retainHostedDomainRootReferenceFailure({
+      cache: scopedCache,
+      error,
+      references: uncachedReferences,
+      retain: input.retainFailureInScopedCache === true,
+    });
+    throw error;
+  }
   const rowsByKey = new Map(
     rows.map((row) => [createHostedDomainRootReferenceKey(row), row] as const),
   );
   const verifiedByKey = new Map<string, HostedDomainRootKeyEnvelopeV1>();
   for (const reference of uncachedReferences) {
-    const row = rowsByKey.get(createHostedDomainRootReferenceKey(reference));
-    if (!row) {
-      throw new HostedDomainRootEnvelopeUnavailableError({
-        domain: reference.domain,
+    try {
+      const row = rowsByKey.get(createHostedDomainRootReferenceKey(reference));
+      if (!row) {
+        throw new HostedDomainRootEnvelopeUnavailableError({
+          domain: reference.domain,
+        });
+      }
+      verifiedByKey.set(
+        createHostedDomainRootReferenceKey(reference),
+        await parseAssertAndVerifyEnvelope(row, reference),
+      );
+    } catch (error) {
+      retainHostedDomainRootReferenceFailure({
+        cache: scopedCache,
+        error,
+        references: [reference],
+        retain: input.retainFailureInScopedCache === true,
       });
+      throw error;
     }
-    verifiedByKey.set(
-      createHostedDomainRootReferenceKey(reference),
-      await parseAssertAndVerifyEnvelope(row, reference),
-    );
   }
 
   const unwrapped: UnwrappedHostedDomainRootReference[] = [];
@@ -516,6 +569,25 @@ export async function unwrapHostedDomainRootsForWebByRootKeyIds(input: {
   }
 }
 
+function retainHostedDomainRootReferenceFailure(input: {
+  cache: ReturnType<typeof getHostedDomainRootUnwrapCache>;
+  error: unknown;
+  references: readonly HostedDomainRootReference[];
+  retain: boolean;
+}): void {
+  if (!input.cache || !input.retain || input.references.length === 0) {
+    return;
+  }
+  const rejected = Promise.reject<UnwrappedHostedDomainRoot>(input.error);
+  void rejected.catch(() => undefined);
+  for (const reference of input.references) {
+    const cacheKey = createHostedDomainRootReferenceKey(reference);
+    if (!input.cache.has(cacheKey)) {
+      input.cache.set(cacheKey, rejected);
+    }
+  }
+}
+
 export async function readHostedRuntimeCryptoContextForWorker(input: {
   prisma?: HostedCryptoClient;
   userId: string;
@@ -572,9 +644,11 @@ async function provisionActiveHostedDomainRootEnvelopeForUserOnlyTx(input: {
   // transaction-scoped lock, it remains held until the caller's outer
   // transaction ends. A prepared candidate is inserted here or discarded
   // here; it is never a reason to skip either boundary.
-  await input.tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.domain}))
-  `;
+  await acquireHostedDomainRootAuthorityLockTx({
+    domain: input.domain,
+    tx: input.tx,
+    userId: input.userId,
+  });
 
   const existing = await readActiveHostedDomainRootEnvelopeRow({
     domain: input.domain,
@@ -849,6 +923,16 @@ async function readActiveHostedCryptoDomains(input: {
   return new Set(rows.map((row) => row.domain));
 }
 
+async function acquireHostedDomainRootAuthorityLockTx(input: {
+  domain: HostedCryptoDomain;
+  tx: Pick<Prisma.TransactionClient, "$executeRaw">;
+  userId: string;
+}): Promise<void> {
+  await input.tx.$executeRaw`
+    SELECT pg_advisory_xact_lock(hashtext(${input.userId}), hashtext(${input.domain}))
+  `;
+}
+
 async function readActiveHostedDomainRootEnvelopeRow(input: {
   domain: HostedCryptoDomain;
   tx: HostedCryptoClient;
@@ -871,6 +955,31 @@ async function readActiveHostedDomainRootEnvelopeRow(input: {
     LIMIT 1
   `;
   return rows[0] ?? null;
+}
+
+/**
+ * Holds the same transaction-scoped authority lock used by root provisioning,
+ * then returns the exact active root id. This is a metadata-only revalidation
+ * boundary: it performs no envelope verification, provider request, or KMS
+ * unwrap and is intended for callers that already prepared the verified root
+ * before opening their transaction.
+ */
+export async function lockAndReadActiveHostedDomainRootKeyIdTx(input: {
+  domain: HostedCryptoDomain;
+  tx: Pick<Prisma.TransactionClient, "$executeRaw" | "$queryRaw">;
+  userId: string;
+}): Promise<string | null> {
+  await acquireHostedDomainRootAuthorityLockTx(input);
+  const rows = await input.tx.$queryRaw<Array<{ rootKeyId: string }>>`
+    SELECT root_key_id AS "rootKeyId"
+    FROM hosted_user_crypto_envelope
+    WHERE user_id = ${input.userId}
+      AND domain = ${input.domain}::hosted_crypto_domain
+      AND status = 'active'::hosted_crypto_envelope_status
+    ORDER BY created_at DESC
+    LIMIT 1
+  `;
+  return rows[0]?.rootKeyId ?? null;
 }
 
 async function readDecryptableHostedDomainRootEnvelopeRow(input: {

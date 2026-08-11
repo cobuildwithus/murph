@@ -91,7 +91,8 @@ function isHostedStripeSubscriptionSourceType(sourceType: string): boolean {
     sourceType === "stripe.customer.subscription.updated" ||
     sourceType === "stripe.customer.subscription.deleted" ||
     sourceType === "stripe.customer.subscription.paused" ||
-    sourceType === "stripe.customer.subscription.resumed";
+    sourceType === "stripe.customer.subscription.resumed" ||
+    sourceType === "stripe.customer.subscription.trial_will_end";
 }
 
 function isExpiredPulseTrialSubscriptionStatusWrite(input: {

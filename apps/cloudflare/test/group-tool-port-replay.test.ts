@@ -57,6 +57,21 @@ const replaySafeRequests = [
       result: { status: "accepted" },
     },
   },
+  {
+    action: "message_current_sender",
+    request: {
+      action: "message_current_sender",
+      origin: {
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    response: {
+      action: "message_current_sender",
+      result: { status: "accepted" },
+    },
+  },
 ] as const satisfies readonly {
   action: string;
   request: HostedRuntimeGroupToolRequest;

@@ -93,6 +93,7 @@ import {
 } from "./group-assistant-ask";
 import {
   requestHostedGroupCurrentSenderAssistantAsk,
+  requestHostedGroupCurrentSenderPrivateAssistantAsk,
 } from "./group-current-sender-assistant-ask";
 import {
   admitHostedGroupDisclosurePermissionAppendTx,
@@ -108,9 +109,7 @@ import {
   buildHostedGroupUsageFundingUrl,
   readHostedGroupFundingRecoveryStatus,
 } from "./group-usage-funding";
-import {
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
-} from "./group-newsletter";
+import { prepareHostedGroupEmail } from "./group-email";
 import {
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
   leaveHostedGroupMemberTx,
@@ -182,6 +181,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
   ask_current_sender: "participant_aware",
+  message_current_sender: "participant_aware",
   ask_member: "participant_aware",
   arm_usage_referral: "participant_aware",
   cancel_usage_referral: "participant_aware",
@@ -192,6 +192,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   list_memberships: "personal_active",
   post_disclosure_request: "owner_active",
   post_join_offer: "owner_active",
+  prepare_email: "participant_aware",
   prepare_next_group: "personal_active",
   preflight_set_chat_avatar: "owner_active",
   read_chat_name: "participant_aware",
@@ -249,6 +250,17 @@ export async function handleHostedRuntimeGroupTool(input: {
       await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask_current_sender", result: admission.result };
+  }
+
+  if (input.request.action === "message_current_sender") {
+    const admission = await requestHostedGroupCurrentSenderPrivateAssistantAsk({
+      groupRuntimeMemberId: input.memberId,
+      origin: input.request.origin,
+    });
+    if (admission.mailboxWake) {
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "message_current_sender", result: admission.result };
   }
 
   if (input.request.action === "ask_member") {
@@ -424,6 +436,15 @@ export async function handleHostedRuntimeGroupTool(input: {
         },
       };
     }
+  }
+
+  if (input.request.action === "prepare_email") {
+    return {
+      action: "prepare_email",
+      result: await prepareHostedGroupEmail({
+        runtimeMemberId: input.memberId,
+      }),
+    };
   }
 
   if (input.request.action === "read_usage") {
@@ -1094,12 +1115,6 @@ async function handleHostedRuntimeGroupCreateJoinLink(input: {
     // Durable grant already committed; the owner's runtime offers the
     // projection on a later wake if this best-effort signal fails.
   }
-  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
-    group: created.group,
-    ownerMemberId: created.ownerMemberId,
-    prisma,
-  });
-
   return {
     action: "create_join_link",
     result: {
@@ -1385,12 +1400,6 @@ async function handleHostedRuntimeGroupPostJoinOffer(input: {
     // The group and offer binding are durable; owner runtime maintenance can
     // catch up on its next organic wake.
   }
-  await enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort({
-    group: created.group,
-    ownerMemberId: created.ownerMemberId,
-    prisma,
-  });
-
   return {
     action: "post_join_offer",
     result: {
@@ -1558,31 +1567,6 @@ export function buildHostedGroupJoinOfferMessage(input: {
 
 const HOSTED_GROUP_JOIN_OFFER_SHARE_SCOPE_PLACEHOLDER = "{{share_scope}}";
 const HOSTED_GROUP_JOIN_OFFER_JOIN_URL_PLACEHOLDER = "{{join_url}}";
-
-async function enqueueGroupOwnerNewsletterEmailNeededNudgeIfGrantedBestEffort(input: {
-  group: {
-    id: string;
-    members: readonly {
-      grantedVaultShareProjectionKinds: readonly HostedVaultShareProjectionKind[];
-      memberId: string;
-    }[];
-  };
-  ownerMemberId: string;
-  prisma: PrismaClient;
-}): Promise<void> {
-  if (!input.group.members.some((member) =>
-    member.memberId === input.ownerMemberId
-    && member.grantedVaultShareProjectionKinds.includes("group-email.v0")
-  )) {
-    return;
-  }
-
-  await enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-    groupId: input.group.id,
-    memberId: input.ownerMemberId,
-    prisma: input.prisma,
-  });
-}
 
 function normalizeHostedGroupChatIconUrl(value: string): string | null {
   const normalized = value.trim();

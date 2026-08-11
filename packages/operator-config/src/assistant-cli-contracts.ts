@@ -786,6 +786,7 @@ const assistantChannelCleanupMessageSchema = z
 
 export const assistantProviderMessageEffectSchema = z
   .object({
+    carriesIntentMedia: z.literal(true).optional(),
     providerMessageId: z.string().min(1),
     message: z.string().min(1).nullable(),
   })
@@ -967,6 +968,13 @@ export const assistantOutboxIntentSchema = z
     deliveryConfirmationPending: z.boolean().default(false),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
+    groupEmailAuthorizationProof: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/u)
+      .nullable()
+      .optional(),
+    // Read-only migration support for durable intents accepted before the
+    // generic group-email field shipped. New writes use the field above.
     newsletterAuthorizationProof: z
       .string()
       .regex(/^[0-9a-f]{64}$/u)
@@ -996,7 +1004,25 @@ export const assistantOutboxIntentSchema = z
       })
     }
 
-    if (intent.card !== null && intent.threadIsDirect !== true) {
+    if (
+      intent.card?.kind === 'challenge_standings' &&
+      !(
+        intent.threadIsDirect === false &&
+        intent.channel?.trim().toLowerCase() === 'linq'
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message:
+          'Challenge standings response cards require an authenticated Linq group conversation.',
+        path: ['card'],
+      })
+    }
+    if (
+      intent.card !== null &&
+      intent.card.kind !== 'challenge_standings' &&
+      intent.threadIsDirect !== true
+    ) {
       context.addIssue({
         code: 'custom',
         message: 'Assistant response cards require a private direct conversation.',

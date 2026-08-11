@@ -309,6 +309,9 @@
       "@murphai/device-syncd/providers/oura": [
         "../../packages/device-syncd/src/providers/oura.ts"
       ],
+      "@murphai/device-syncd/providers/strava": [
+        "../../packages/device-syncd/src/providers/strava.ts"
+      ],
       "@murphai/device-syncd/public-ingress": [
         "../../packages/device-syncd/src/public-ingress.ts"
       ],

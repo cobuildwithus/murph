@@ -23,7 +23,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
-      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going. In a hosted group, a request to start or manage a Murph Family plan, seats, or invites is not room funding or a room usage top-up; use murph-family unless the same request explicitly asks about funding or usage for the current room.',
+      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep Starter, Core, a paid plan, Family-sponsored Murph, or a hosted group conversation going. In a hosted group, a request to start or manage a Murph Family plan, seats, or invites is not room funding or a room usage top-up; use murph-family unless the same request explicitly asks about funding or usage for the current room.',
   },
   {
     slug: 'signup-link',
@@ -137,7 +137,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'tracked-table',
     name: 'tracked-table',
     triggerHint:
-      'Use when a private member asks for a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
+      'Use when a private member asks to start or resume a live workout, requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
   },
   {
     slug: 'strength-training',
@@ -167,7 +167,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
+      'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, daily nutrition-card goal setup, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
   },
   {
     slug: 'sleep-recovery-readiness',

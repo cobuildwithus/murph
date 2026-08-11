@@ -2,10 +2,14 @@ import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 
 import {
-  IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
-  IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX,
+  IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH,
+  IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX,
   dailyNutritionResponseCardV1Schema,
   dailyNutritionResponseCardV2Schema,
+  challengeStandingsResponseCardV1Schema,
+  parseCompactTableAppCardEnvelope,
+  type ChallengeStandingsResponseCardV1,
+  type CompactTablePresentationCardV1,
   type DailyNutritionResponseCard,
 } from "@murphai/contracts";
 import { ImageResponse } from "next/og";
@@ -15,13 +19,21 @@ import {
   IMESSAGE_NUTRITION_CARD_IMAGE_SIZE,
   NutritionCardImage,
 } from "@/src/components/imessage/nutrition-card-image";
+import {
+  CompactTableCardImage,
+  getCompactTableCardImageSize,
+} from "@/src/components/imessage/compact-table-card-image";
+import {
+  ChallengeStandingsCardImage,
+  getChallengeStandingsCardImageSize,
+} from "@/src/components/imessage/challenge-standings-card-image";
 
 export const dynamic = "force-dynamic";
 
 const PAYLOAD_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const PRIVATE_IMAGE_HEADERS = {
   "Cache-Control": "private, no-store",
-  "Content-Disposition": 'inline; filename="murph-nutrition-card.png"',
+  "Content-Disposition": 'inline; filename="murph-response-card.png"',
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex, nofollow, noarchive",
 } as const;
@@ -40,17 +52,26 @@ export async function GET(
   }
 
   const { payload: segment } = await context.params;
-  const card = parseNutritionCardPayload(segment);
+  const card = parseResponseCardPayload(segment);
   if (card === null) {
     return invalidPayloadResponse();
   }
 
   const dmSans400 = await readFile(dmSans400FontPath).then(toArrayBuffer);
+  const size = card.kind === "daily_nutrition"
+    ? IMESSAGE_NUTRITION_CARD_IMAGE_SIZE
+    : card.kind === "compact_table"
+      ? getCompactTableCardImageSize(card)
+      : getChallengeStandingsCardImageSize(card);
 
   return new ImageResponse(
-    <NutritionCardImage card={card} />,
+    card.kind === "daily_nutrition"
+      ? <NutritionCardImage card={card} />
+      : card.kind === "compact_table"
+        ? <CompactTableCardImage card={card} />
+        : <ChallengeStandingsCardImage card={card} />,
     {
-      ...IMESSAGE_NUTRITION_CARD_IMAGE_SIZE,
+      ...size,
       fonts: [
         { name: "DM Sans", data: dmSans400, weight: 400 },
       ],
@@ -59,19 +80,23 @@ export async function GET(
   );
 }
 
-export function parseNutritionCardPayload(
+export function parseResponseCardPayload(
   segment: string,
-): DailyNutritionResponseCard | null {
-  if (!segment.endsWith(IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX)) {
+):
+  | DailyNutritionResponseCard
+  | CompactTablePresentationCardV1
+  | ChallengeStandingsResponseCardV1
+  | null {
+  if (!segment.endsWith(IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX)) {
     return null;
   }
   const encoded = segment.slice(
     0,
-    -IMESSAGE_NUTRITION_CARD_IMAGE_PATH_SUFFIX.length,
+    -IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX.length,
   );
   if (
     encoded.length === 0
-    || encoded.length > IMESSAGE_NUTRITION_CARD_IMAGE_PAYLOAD_MAX_LENGTH
+    || encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH
     || !PAYLOAD_PATTERN.test(encoded)
   ) {
     return null;
@@ -98,7 +123,11 @@ export function parseNutritionCardPayload(
     const result = dailyNutritionResponseCardV2Schema.safeParse(parsed.card);
     return result.success ? result.data : null;
   }
-  return null;
+  if (parsed.schemaVersion === 5) {
+    const result = challengeStandingsResponseCardV1Schema.safeParse(parsed.card);
+    return result.success ? result.data : null;
+  }
+  return parseCompactTableAppCardEnvelope(parsed);
 }
 
 function isExactEnvelope(
@@ -113,7 +142,7 @@ function isExactEnvelope(
 }
 
 function invalidPayloadResponse(): Response {
-  return new Response("Nutrition card image not found.", {
+  return new Response("Response card image not found.", {
     headers: PRIVATE_IMAGE_HEADERS,
     status: 404,
   });

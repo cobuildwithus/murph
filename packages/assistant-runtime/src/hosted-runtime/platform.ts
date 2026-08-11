@@ -37,8 +37,6 @@ import type {
   HostedRuntimeAssistantAskControlResponse,
   HostedRuntimeGroupToolRequest,
   HostedRuntimeGroupToolResponse,
-  HostedRuntimeNewsletterToolRequest,
-  HostedRuntimeNewsletterToolResponse,
   HostedRuntimeProductFeedbackRecord,
   HostedRuntimeProductFeedbackRecordResponse,
   HostedCodexAuthUpdate,
@@ -69,6 +67,9 @@ import type {
   HostedBrowserVaultReplicaRef,
   HostedExecutionExternalThreadRouteAuthority,
 } from "@murphai/hosted-execution/contracts";
+import type {
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+} from "@murphai/hosted-execution";
 import type {
   HostedVaultShareDeliverRequest,
   HostedVaultShareDeliverResponse,
@@ -336,6 +337,9 @@ export interface HostedRuntimeAssistantAskCompletionAuthority {
   idempotencyKey: string;
 }
 
+export type HostedRuntimeAssistantAskPrivateCompletionAuthority =
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority;
+
 export interface HostedRuntimeExternalThreadRouteAuthorityResult {
   assistantAskFallbackRequired?: boolean | null;
 }
@@ -405,6 +409,10 @@ type HostedRuntimeEffectsPortBase = {
       signal?: AbortSignal | null;
     },
   ): Promise<HostedRuntimeExternalThreadRouteAuthorityResult | void>;
+  assertAssistantAskPrivateCompletionAuthority?(
+    authority: HostedRuntimeAssistantAskPrivateCompletionAuthority,
+    context?: { signal?: AbortSignal | null },
+  ): Promise<void>;
   resolveCurrentVerifiedEmailRecipient?(
     context?: { signal?: AbortSignal | null },
   ): Promise<string | null>;
@@ -538,12 +546,6 @@ export interface HostedRuntimeGroupToolPort {
   directAttachmentRouteStatus?():
     | { status: "ok" }
     | { status: "unavailable"; unavailableReason: string };
-}
-
-export interface HostedRuntimeNewsletterToolPort {
-  request(
-    request: HostedRuntimeNewsletterToolRequest,
-  ): Promise<HostedRuntimeNewsletterToolResponse>;
 }
 
 export interface HostedRuntimeCodexAuthPort {
@@ -712,7 +714,6 @@ export interface HostedRuntimePlatform {
   labsToolPort?: HostedRuntimeLabsToolPort | null;
   logPort?: HostedRuntimeLogPort | null;
   mailboxPort?: HostedRuntimeMailboxPort | null;
-  newsletterToolPort?: HostedRuntimeNewsletterToolPort | null;
   planUsageToolPort?: HostedRuntimePlanUsageToolPort | null;
   physicalNotes?: HostedRuntimePhysicalNotePort | null;
   privateImageUrlPublisher?: AssistantHostedPrivateImageUrlPublisher | null;

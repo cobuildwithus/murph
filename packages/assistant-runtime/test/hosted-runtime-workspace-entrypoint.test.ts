@@ -154,6 +154,7 @@ const mocks = vi.hoisted(() => ({
     null as HasCompleteAssistantAutoReplyDeliveryTerminalEvidence | null,
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
   enqueueHostedPendingAssistantInputId: vi.fn(),
+  executeConsentedReadOnlyAssistantAsk: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
   hasCompleteAssistantAutoReplyDeliveryTerminalEvidence:
     vi.fn<HasCompleteAssistantAutoReplyDeliveryTerminalEvidence>(),
@@ -194,6 +195,10 @@ vi.mock("@murphai/assistant-engine/assistant-ask", async (importOriginal) => {
 
   return {
     ...actual,
+    executeConsentedReadOnlyAssistantAsk:
+      mocks.executeConsentedReadOnlyAssistantAsk.mockImplementation(
+        actual.executeConsentedReadOnlyAssistantAsk,
+      ),
     executeReadOnlyAssistantAsk:
       mocks.executeReadOnlyAssistantAsk.mockImplementation(
         actual.executeReadOnlyAssistantAsk,
@@ -2671,6 +2676,71 @@ describe("hosted workspace runtime entrypoint", () => {
           process.env[key] = value;
         }
       }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("projects the trusted Android rollout gate into the assistant turn env", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const runtimeEnvs: Readonly<Record<string, string>>[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          forwardedEnv: {
+            MURPH_ANDROID_APP_ENABLED: "1",
+          },
+          platformEnv: {
+            MURPH_ANDROID_APP_ENABLED: "1",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import" ? "5".repeat(64) : "6".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-android-gate.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_android_gate",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            runtimeEnvs.push(input.runtimeEnv);
+            return {
+              progressed: false,
+              redactedStatus: {
+                hostedAssistantProgressed: false,
+              },
+            };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(runtimeEnvs.length, 1);
+      assert.equal(runtimeEnvs[0]?.MURPH_ANDROID_APP_ENABLED, "1");
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });
@@ -7323,6 +7393,11 @@ describe("hosted workspace runtime entrypoint", () => {
       preCheckpointSafe: true,
     },
     {
+      dedupeKey: "aask_done_private_synthetic",
+      label: "private Assistant Ask completion",
+      preCheckpointSafe: true,
+    },
+    {
       dedupeKey:
         "assistant.notification.requested:generic:notification_synthetic",
       label: "generic notification",
@@ -7439,11 +7514,18 @@ describe("hosted workspace runtime entrypoint", () => {
       dedupeKey:
         "assistant.notification.requested:phone-call-result:phone_call_real_path",
       label: "phone-call result",
+      privateCompletion: false,
     },
     {
       dedupeKey:
         "assistant.notification.requested:usage-referral-reward:referral_real_path",
       label: "usage-referral reward",
+      privateCompletion: false,
+    },
+    {
+      dedupeKey: `aask_done_${"b".repeat(64)}`,
+      label: "private Assistant Ask completion",
+      privateCompletion: true,
     },
   ].flatMap((completion) =>
     ([
@@ -7475,10 +7557,15 @@ describe("hosted workspace runtime entrypoint", () => {
       const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
       const mailboxItems: HostedMailboxItem[] = [];
       const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
-      const deliveryKey = completion.dedupeKey.replace(
-        "assistant.notification.requested:",
-        "",
-      );
+      const privateAskExecutionRelease = createDeferred<void>();
+      const privateProductionDelayShutdown = new AbortController();
+      const deliveryKey = completion.privateCompletion
+        ? `assistant-ask-private:${completion.dedupeKey}`
+        : completion.dedupeKey.replace(
+            "assistant.notification.requested:",
+            "",
+          );
+      const requestId = `aask_req_${"a".repeat(64)}`;
       let activeVaultRoot = vaultRoot;
       let assistantPhaseCalls = 0;
       let currentPhaseIsForegroundCausal = false;
@@ -7529,6 +7616,27 @@ describe("hosted workspace runtime entrypoint", () => {
         }
         return new Response(null, { status: 204 });
       });
+      if (completion.privateCompletion) {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date(TEST_NOW));
+        mailboxItems.push(createMailboxItem({
+          dedupeKey: requestId,
+          expiresAt: "2026-04-27T00:10:00.000Z",
+          id: requestId,
+          kind: "assistant.ask.requested",
+          lane: "system",
+          laneSeq: "1",
+        }));
+        mocks.executeConsentedReadOnlyAssistantAsk.mockImplementationOnce(
+          async () => {
+            await privateAskExecutionRelease.promise;
+            return {
+              answer: "Mission complete.",
+              outcome: "answered" as const,
+            };
+          },
+        );
+      }
 
       try {
         await initializeVault({ createdAt: TEST_NOW, vaultRoot });
@@ -7562,9 +7670,16 @@ describe("hosted workspace runtime entrypoint", () => {
             request: {
               attemptId:
                 `attempt_synthetic_external_completion_real_${
-                  completion.label === "phone-call result" ? "phone" : "referral"
+                  completion.privateCompletion
+                    ? "private"
+                    : completion.label === "phone-call result"
+                      ? "phone"
+                      : "referral"
                 }_${transport.channel}`,
-              idleCheckpointDelayMs: 200,
+              idleCheckpointDelayMs:
+                completion.privateCompletion && transport.channel === "linq"
+                  ? 180_000
+                  : 200,
               leaseGeneration: "7",
               userId: TEST_USER_ID,
               workspaceVersion: "0",
@@ -7588,6 +7703,15 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             async importItem(item) {
               events.push(`mailbox.importItem:${item.item.id}`);
+              if (item.item.kind === "assistant.ask.requested") {
+                return await enqueueHostedSystemMailboxItem({
+                  item,
+                  vaultRoot: activeVaultRoot,
+                  wake: createPrivateCurrentSenderAssistantAskRequestedWake({
+                    eventId: requestId,
+                  }),
+                });
+              }
               const outcome = await enqueueHostedSystemMailboxItem({
                 item,
                 vaultRoot: activeVaultRoot,
@@ -7599,6 +7723,7 @@ describe("hosted workspace runtime entrypoint", () => {
                     deliveryDedupeToken: deliveryKey,
                     deliveryIdempotencyKey: deliveryKey,
                     ...(transport.channel === "linq"
+                      && !completion.privateCompletion
                       ? {
                           externalThreadRouteAuthority: {
                             accountLookupKey: "linq-account-key",
@@ -7609,6 +7734,14 @@ describe("hosted workspace runtime entrypoint", () => {
                         }
                       : {}),
                     instructions: "Send the fixed completion text.",
+                    ...(completion.privateCompletion
+                      ? {
+                          privateAssistantAskCompletion: {
+                            expiresAt: "2026-04-27T00:10:00.000Z",
+                            requestId,
+                          },
+                        }
+                      : {}),
                     responsePolicy: {
                       kind: "require_send_exact_text",
                       text: "Mission complete.",
@@ -7622,7 +7755,9 @@ describe("hosted workspace runtime entrypoint", () => {
                       },
                       identityId: transport.identityId,
                       threadId: transport.target,
-                      threadIsDirect: transport.threadIsDirect,
+                      threadIsDirect:
+                        completion.privateCompletion
+                        || transport.threadIsDirect,
                     },
                   },
                   occurredAt: TEST_NOW,
@@ -7632,6 +7767,44 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             platform: {
               ...createPlatform({
+                assistantAskPort: completion.privateCompletion
+                  ? {
+                      async request(request) {
+                        if (request.action === "prepare") {
+                          events.push("ask.prepare");
+                          return {
+                            action: "prepare",
+                            disclosure: {
+                              permissionText:
+                                "One-time private owner-only answer.",
+                            },
+                            question: "What is my shoulder-safe workout?",
+                            status: "ready",
+                            targetLabel: null,
+                          };
+                        }
+                        assert.deepEqual(request.result, {
+                          answer: "Mission complete.",
+                          outcome: "answered",
+                        });
+                        events.push("ask.complete");
+                        if (!mailboxItems.some((item) =>
+                          item.dedupeKey === completion.dedupeKey
+                        )) {
+                          mailboxItems.push(createMailboxItem({
+                            dedupeKey: completion.dedupeKey,
+                            expiresAt: "2026-04-27T00:10:00.000Z",
+                            id: completion.dedupeKey,
+                            kind: "assistant.notification.requested",
+                            lane: "system",
+                            laneSeq: "2",
+                          }));
+                        }
+                        runtimeWakeSignal.notify();
+                        return { action: "complete", status: "completed" };
+                      },
+                    }
+                  : null,
                 mailboxPort: createMailboxPort({
                   events,
                   items: mailboxItems,
@@ -7643,7 +7816,16 @@ describe("hosted workspace runtime entrypoint", () => {
                 }),
               }),
               effectsPort: {
+                async assertAssistantAskPrivateCompletionAuthority(authority) {
+                  assert.equal(
+                    authority.answeredMailboxItemIds[0],
+                    completion.dedupeKey,
+                  );
+                  assert.equal(authority.idempotencyKey, deliveryKey);
+                  events.push(`authority.private:${completion.dedupeKey}`);
+                },
                 async assertExternalThreadRouteAuthority(authority) {
+                  assert.equal(completion.privateCompletion, false);
                   assert.equal(authority.threadId, transport.target);
                 },
                 async assertLinqRecentInboundEngagement(request) {
@@ -7663,6 +7845,9 @@ describe("hosted workspace runtime entrypoint", () => {
               providerFetch,
             },
             runtimeWakeSignal,
+            ...(completion.privateCompletion && transport.channel === "linq"
+              ? { shutdownSignal: privateProductionDelayShutdown.signal }
+              : {}),
             async runAssistantPhase(input) {
               assistantPhaseCalls += 1;
               currentPhaseIsForegroundCausal =
@@ -7670,6 +7855,11 @@ describe("hosted workspace runtime entrypoint", () => {
               events.push(`assistant.phase:${assistantPhaseCalls}`);
               if (assistantPhaseCalls === 1) {
                 activeVaultRoot = input.restored.vaultRoot;
+                if (completion.privateCompletion) {
+                  REAL_SET_TIMEOUT(() => {
+                    privateAskExecutionRelease.resolve();
+                  }, 100);
+                }
                 await prepareHostedWakeContext(
                   activeVaultRoot,
                   buildHostedExecutionMemberActivatedWake({
@@ -7689,16 +7879,18 @@ describe("hosted workspace runtime entrypoint", () => {
                     operatorHomeRoot: input.restored.operatorHomeRoot,
                   },
                 );
-                setTimeout(() => {
-                  mailboxItems.push(createMailboxItem({
-                    dedupeKey: completion.dedupeKey,
-                    id: `mailbox_item_${deliveryKey.replaceAll(":", "_")}`,
-                    kind: "assistant.notification.requested",
-                    lane: "system",
-                    laneSeq: "1",
-                  }));
-                  runtimeWakeSignal.notify();
-                }, 0);
+                if (!completion.privateCompletion) {
+                  setTimeout(() => {
+                    mailboxItems.push(createMailboxItem({
+                      dedupeKey: completion.dedupeKey,
+                      id: `mailbox_item_${deliveryKey.replaceAll(":", "_")}`,
+                      kind: "assistant.notification.requested",
+                      lane: "system",
+                      laneSeq: "1",
+                    }));
+                    runtimeWakeSignal.notify();
+                  }, 0);
+                }
                 return {
                   checkpointReason: "assistant_runtime_commit",
                   progressed: true,
@@ -7731,13 +7923,21 @@ describe("hosted workspace runtime entrypoint", () => {
                 );
               }
               const phaseResult = await runHostedWorkspaceAssistantPhase(input);
+              const outboxStatuses =
+                (await listAssistantOutboxIntents(activeVaultRoot))
+                  .map((intent) => intent.status);
               events.push(
-                `outbox.after-phase:${
-                  (await listAssistantOutboxIntents(activeVaultRoot))
-                    .map((intent) => intent.status)
-                    .join("|")
-                }`,
+                `outbox.after-phase:${outboxStatuses.join("|")}`,
               );
+              if (
+                completion.privateCompletion
+                && transport.channel === "linq"
+                && outboxStatuses.includes("sent")
+              ) {
+                privateProductionDelayShutdown.abort(
+                  new Error("Stop after production-delay private delivery."),
+                );
+              }
               return phaseResult;
             },
             vaultRoot,
@@ -7750,6 +7950,33 @@ describe("hosted workspace runtime entrypoint", () => {
           () => events.join(","),
         );
         const providerEvent = `provider.send:${deliveryKey}`;
+        if (completion.privateCompletion) {
+          const consentedAskInput =
+            mocks.executeConsentedReadOnlyAssistantAsk.mock.calls.at(-1)?.[0];
+          assert.equal(consentedAskInput?.answerMode, "direct_recipient");
+          assert.ok(
+            requireEventIndex(events, "ask.complete")
+              < requireEventIndex(
+                events,
+                `mailbox.importItem:${completion.dedupeKey}`,
+              ),
+            events.join(","),
+          );
+          assert.equal(
+            events.filter((event) =>
+              event === `authority.private:${completion.dedupeKey}`
+            ).length,
+            1,
+            events.join(","),
+          );
+          assert.ok(
+            requireEventIndex(
+              events,
+              `authority.private:${completion.dedupeKey}`,
+            ) < requireEventIndex(events, providerEvent),
+            events.join(","),
+          );
+        }
 
         if (transport.channel === "telegram") {
           const finalIntents = await listAssistantOutboxIntents(activeVaultRoot);
@@ -7804,10 +8031,180 @@ describe("hosted workspace runtime entrypoint", () => {
         );
         assert.ok(assistantPhaseCalls >= 3);
       } finally {
+        privateAskExecutionRelease.resolve();
+        privateProductionDelayShutdown.abort(new Error("Test cleanup."));
+        if (completion.privateCompletion) {
+          vi.useRealTimers();
+        }
         await removeTempRoot(vaultRoot);
       }
     });
   }
+
+  test("runs an imported private completion before checkpoint despite a newer unrelated system prefix", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-workspace-entrypoint-"),
+    );
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const mailboxItems: HostedMailboxItem[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const completionDedupeKey = `aask_done_${"c".repeat(64)}`;
+    const completionItem = createMailboxItem({
+      dedupeKey: completionDedupeKey,
+      id: "mailbox_item_private_completion_imported",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    let assistantPhaseCalls = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const enqueueCompletion = async () => {
+        await enqueueHostedSystemMailboxItem({
+          item: {
+            item: completionItem,
+            payload: {
+              payloadCiphertext: "ciphertext",
+              payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+              requestId: "request_private_completion_imported",
+              source: "inline",
+              status: "resolved",
+            },
+            route: {
+              action: "dispatch-assistant-notification",
+              advanceProgress: true,
+              itemRef: {
+                id: completionItem.id,
+                kind: completionItem.kind,
+                lane: completionItem.lane,
+                laneSeq: completionItem.laneSeq,
+              },
+              state: "route",
+            },
+          },
+          vaultRoot,
+          wake: buildHostedExecutionAssistantNotificationRequestedWake({
+            eventId: completionDedupeKey,
+            memberId: TEST_USER_ID,
+            notification: {
+              deliveryDispatchMode: "queue-only",
+              deliveryDedupeToken: `assistant-ask-private:${completionDedupeKey}`,
+              deliveryIdempotencyKey:
+                `assistant-ask-private:${completionDedupeKey}`,
+              instructions: "Send the fixed completion text.",
+              privateAssistantAskCompletion: {
+                expiresAt: "2026-04-27T00:10:00.000Z",
+                requestId: `aask_req_${"d".repeat(64)}`,
+              },
+              responsePolicy: {
+                kind: "require_send_exact_text",
+                text: "Mission complete.",
+              },
+              route: {
+                actorId: null,
+                channel: "linq",
+                delivery: {
+                  kind: "thread",
+                  target: "+15555550123",
+                },
+                identityId: "linq_identity_private_completion_imported",
+                threadId: "+15555550123",
+                threadIsDirect: true,
+              },
+            },
+            occurredAt: TEST_NOW,
+          }),
+        });
+      };
+
+      const result = await withRealTimeout(
+        runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: "attempt_private_completion_mixed_system_prefix",
+              idleCheckpointDelayMs: 50,
+              leaseGeneration: "7",
+              userId: TEST_USER_ID,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot(snapshotInput) {
+              events.push(`snapshot:${snapshotInput.reason}`);
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "c".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + "private-completion-mixed-system-prefix.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem(item) {
+              events.push(`mailbox.importItem:${item.item.id}`);
+              return { status: "imported" };
+            },
+            platform: createPlatform({
+              mailboxPort: createMailboxPort({
+                events,
+                items: mailboxItems,
+              }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({ version: "0" }),
+              }),
+            }),
+            runtimeWakeSignal,
+            async runAssistantPhase(input) {
+              assistantPhaseCalls += 1;
+              events.push(`assistant.phase:${assistantPhaseCalls}`);
+              if (assistantPhaseCalls === 1) {
+                await enqueueCompletion();
+                // The completion is already local when newer unrelated remote
+                // system work wakes the dirty pre-checkpoint pass.
+                setTimeout(() => {
+                  mailboxItems.push(createMailboxItem({
+                    dedupeKey:
+                      "assistant.notification.requested:generic:"
+                      + "private_completion_later_generic",
+                    id: "mailbox_item_private_completion_later_generic",
+                    kind: "assistant.notification.requested",
+                    lane: "system",
+                    laneSeq: "1",
+                  }));
+                  runtimeWakeSignal.notify();
+                }, 0);
+                return {
+                  checkpointReason: "assistant_runtime_commit",
+                  progressed: true,
+                };
+              }
+              if (assistantPhaseCalls === 2) {
+                assert.equal(input.foregroundCausalOnly, true);
+              }
+              return { progressed: false };
+            },
+            vaultRoot,
+          },
+        ),
+        3_000,
+        () => events.join(","),
+      );
+
+      assert.ok(
+        requireEventIndex(events, "assistant.phase:2")
+          < requireEventIndex(events, "snapshot:idle_shutdown"),
+        events.join(","),
+      );
+      assert.equal(result.status, "idle");
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
 
   test("runs a joined-group completion before the dirty idle checkpoint", async () => {
     const vaultRoot = await mkdtemp(
@@ -29145,6 +29542,100 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("retries the requested browser-vault refresh after a browser-only wake", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+    const browserItems: HostedMailboxItem[] = [];
+    const refreshImplementation =
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
+    let assistantPhaseCount = 0;
+    let refreshCount = 0;
+
+    mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(async () => {
+      refreshCount += 1;
+      if (refreshCount === 1) {
+        events.push("browser.refresh:deferred");
+        browserItems.push(createMailboxItem({
+          dedupeKey: "runtime-control:browser-vault-refresh:later",
+          id: "mailbox_browser_refresh_later",
+          kind: "runtime.browser-vault-refresh-requested",
+          lane: "system",
+          laneSeq: "1",
+        }));
+        runtimeWakeSignal.notify();
+        return {
+          source: { fileCount: 0, totalBytes: 0 },
+          status: "deferred_runtime_wake",
+        };
+      }
+      events.push("browser.refresh:completed");
+      return { status: "skipped_no_port" };
+    });
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_browser_refresh_browser_only_wake",
+            idleCheckpointDelayMs: 1,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "b".repeat(64),
+                key: "users/bundles/member-synthetic/browser-refresh-order.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({ events, items: browserItems }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            assistantPhaseCount += 1;
+            return assistantPhaseCount === 1
+              ? {
+                  browserVaultReplicaRefreshRequested: true,
+                  checkpointReason: "canonical_runtime_commit",
+                  progressed: true,
+                }
+              : { progressed: false };
+          },
+          runtimeWakeSignal,
+          vaultRoot,
+        },
+      );
+
+      const deferredIndex = events.indexOf("browser.refresh:deferred");
+      const completedIndex = events.indexOf("browser.refresh:completed");
+      expect(deferredIndex).toBeGreaterThan(-1);
+      expect(completedIndex).toBeGreaterThan(deferredIndex);
+      expect(events.slice(deferredIndex + 1, completedIndex)).toContain("mailbox.fetch");
+    } finally {
+      if (refreshImplementation) {
+        mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockImplementation(
+          refreshImplementation,
+        );
+      }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("skips no-progress browser-vault refresh after shutdown begins", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
@@ -31032,6 +31523,31 @@ function createConsentedMemberAssistantAskRequestedWake(input: {
   };
 }
 
+function createPrivateCurrentSenderAssistantAskRequestedWake(input: {
+  eventId: string;
+}): HostedExecutionAssistantAskRequestedWake {
+  return {
+    ask: {
+      expiresAt: "2026-04-27T00:10:00.000Z",
+      origin: {
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group_private_completion",
+      },
+      question: "What is my shoulder-safe workout?",
+      target: {
+        groupRuntimeMemberId: "member_group_runtime",
+        kind: "group_sender_private",
+        permissionDigest: "f".repeat(64),
+      },
+    },
+    eventId: input.eventId,
+    kind: "assistant.ask.requested",
+    occurredAt: TEST_NOW,
+    userId: TEST_USER_ID,
+  };
+}
+
 function createResolvedRuntimeControlSystemMailboxItem(
   item: HostedMailboxItem,
 ): HostedMailboxResolvedImportItem {
@@ -31439,11 +31955,13 @@ def finish_turn(turn_id, message):
     send({
         "method": "item/completed",
         "params": {
+            "completedAtMs": 1,
             "item": {
                 "id": "assistant-image-failure-" + str(turn_ordinal),
+                "memoryCitation": None,
                 "phase": "final_answer",
                 "text": message,
-                "type": "agent_message",
+                "type": "agentMessage",
             },
             "threadId": thread_id,
             "turnId": turn_id,
@@ -31452,9 +31970,17 @@ def finish_turn(turn_id, message):
     send({
         "method": "turn/completed",
         "params": {
-            "status": "completed",
             "threadId": thread_id,
-            "turnId": turn_id,
+            "turn": {
+                "completedAt": 1,
+                "durationMs": 1,
+                "error": None,
+                "id": turn_id,
+                "items": [],
+                "itemsView": "full",
+                "startedAt": 0,
+                "status": "completed",
+            },
         },
     })
 
@@ -31498,7 +32024,19 @@ for line in sys.stdin:
         send({"id": request.get("id"), "result": {"turn": {"id": turn_id}}})
         send({
             "method": "turn/started",
-            "params": {"threadId": thread_id, "turnId": turn_id},
+            "params": {
+                "threadId": thread_id,
+                "turn": {
+                    "completedAt": None,
+                    "durationMs": None,
+                    "error": None,
+                    "id": turn_id,
+                    "items": [],
+                    "itemsView": "full",
+                    "startedAt": 0,
+                    "status": "inProgress",
+                },
+            },
         })
         params = request.get("params") or {}
         serialized_input = json.dumps(params.get("input", params))
@@ -31519,6 +32057,7 @@ for line in sys.stdin:
                     "prompt": "Edit image 1 so the subject faces left.",
                     "referenceImageRefs": [${JSON.stringify(input.referenceImageRef)}],
                 },
+                "callId": "image-failure-call-" + str(turn_ordinal),
                 "namespace": "murph",
                 "threadId": thread_id,
                 "tool": "generate_image",

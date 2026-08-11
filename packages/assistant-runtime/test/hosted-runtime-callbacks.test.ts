@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionRuntimeTimerWake,
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
 } from "@murphai/hosted-execution";
@@ -51,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   hasAssistantAutoReplyChannel: vi.fn(),
   listAssistantCronPendingDeliveryIntentIds: vi.fn(),
   listAssistantOutboxIntents: vi.fn(),
+  linqProviderFetchAttemptCount: vi.fn(() => 1),
   markAssistantOutboxIntentMirrorTerminalById: vi.fn(),
   normalizeAssistantDeliveryError: vi.fn(),
   readAssistantAutomationState: vi.fn(),
@@ -121,7 +124,17 @@ vi.mock("@murphai/assistant-engine", async () => {
     saveAssistantOutboxIntentIfUnchanged:
       mocks.saveAssistantOutboxIntentIfUnchanged,
     sendLinqMessage: mocks.sendLinqMessage,
-    sendTelegramMessage: mocks.sendTelegramMessage,
+    async sendTelegramMessage(
+      ...args: Parameters<typeof actual.sendTelegramMessage>
+    ) {
+      if (
+        args[1]?.env?.TELEGRAM_BOT_TOKEN
+          === "telegram-actual-runtime-token"
+      ) {
+        return await actual.sendTelegramMessage(...args);
+      }
+      return await mocks.sendTelegramMessage(...args);
+    },
     sendTelegramVoiceMemoMessage: mocks.sendTelegramVoiceMemoMessage,
     shouldDispatchAssistantOutboxIntent: mocks.shouldDispatchAssistantOutboxIntent,
   };
@@ -143,11 +156,18 @@ vi.mock("@murphai/assistant-engine/assistant-channel-runtime", async () => {
       if (!providerFetch) {
         throw new Error("Expected hosted Linq provider fetch boundary.");
       }
-      const boundaryResponse = await providerFetch("https://api.linq.example/test", {
-        method: "POST",
-      });
-      if (boundaryResponse instanceof Response && !boundaryResponse.ok) {
-        throw new Error("Hosted Linq provider entry was denied.");
+      for (
+        let attempt = 0;
+        attempt < mocks.linqProviderFetchAttemptCount();
+        attempt += 1
+      ) {
+        const boundaryResponse = await providerFetch(
+          "https://api.linq.example/test",
+          { method: "POST" },
+        );
+        if (boundaryResponse instanceof Response && !boundaryResponse.ok) {
+          throw new Error("Hosted Linq provider entry was denied.");
+        }
       }
       return await mocks.sendLinqMessage(...args);
     },
@@ -433,6 +453,7 @@ function createPreparedPreviousDispatchState(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.linqProviderFetchAttemptCount.mockReturnValue(1);
   mocks.applyAssistantVaultFileSendApprovalResult.mockImplementation(
     ({ intent }) => intent,
   );
@@ -1570,7 +1591,7 @@ describe("hosted runtime callbacks", () => {
       channel: "email",
       dedupeKey: "dedupe_unrelated_newsletter_recipient",
       deliveryIdempotencyKey:
-        "group-newsletter:automation_unrelated:2026-04-08T00:00:00.000Z:group_unrelated",
+        "group-email-effect:automation_unrelated:2026-04-08T00:00:00.000Z:group_unrelated",
       deliveryTransportIdempotent: false,
       explicitTarget: serializeHostedEmailThreadTarget({
         groupId: "group_unrelated",
@@ -4307,7 +4328,7 @@ describe("hosted runtime callbacks", () => {
     });
   });
 
-  it("collects newsletter HTML and authorization proof from the durable parent intent", async () => {
+  it("collects a legacy accepted group-email parent through the generic effect boundary", async () => {
     const groupTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Weekly health note",
@@ -4353,20 +4374,20 @@ describe("hosted runtime callbacks", () => {
         effectId: "intent_newsletter",
         payload: expect.objectContaining({
           emailHtml: "<p>Weekly</p>",
-          newsletterAuthorizationProof: "a".repeat(64),
+          groupEmailAuthorizationProof: "a".repeat(64),
         }),
       }),
     ]);
   });
 
-  it("does not select newsletter recipients until their parent manifest is sent", async () => {
+  it("does not select group-email recipients until their parent manifest is sent", async () => {
     mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
       intent.status === "pending"
       || intent.status === "retryable"
       || intent.status === "sending"
     );
     const deliveryIdempotencyKey =
-      "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123";
+      "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123";
     const parentTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Weekly health note",
@@ -4440,7 +4461,7 @@ describe("hosted runtime callbacks", () => {
     ]);
   });
 
-  it("abandons newsletter recipients whose parent manifest was not sent", async () => {
+  it("abandons group-email recipients whose parent manifest was not sent", async () => {
     mocks.shouldDispatchAssistantOutboxIntent.mockImplementation((intent) =>
       intent.status === "pending"
       || intent.status === "retryable"
@@ -4460,7 +4481,7 @@ describe("hosted runtime callbacks", () => {
         createdAt: "2026-07-12T13:00:01.000Z",
         dedupeKey: "dedupe_newsletter_child",
         deliveryIdempotencyKey:
-          "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123",
+          "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123",
         deliveryTransportIdempotent: false,
         explicitTarget: childTarget,
         identityId: null,
@@ -4486,7 +4507,7 @@ describe("hosted runtime callbacks", () => {
     })).resolves.toEqual([]);
     expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith({
       error: expect.objectContaining({
-        code: "ASSISTANT_NEWSLETTER_PARENT_UNAVAILABLE",
+        code: "ASSISTANT_GROUP_EMAIL_PARENT_UNAVAILABLE",
       }),
       intentId: "intent_newsletter_child",
       onlyCurrentStatuses: ["awaiting_approval", "pending", "retryable", "sending"],
@@ -8627,6 +8648,751 @@ describe("hosted runtime callbacks", () => {
         authorityBoundTarget: routeAuthority.threadId,
       }),
     );
+  });
+
+  it("revalidates a live private Assistant Ask completion at Telegram provider entry", async () => {
+    const completionId = "aask_done_private_telegram_provider_entry";
+    const expiresAt = "2099-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const responseText = "Exact private answer.";
+    const target = "telegram_direct_123";
+    const effect = createEffect({
+      actorId: null,
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      identityId: null,
+      message: responseText,
+      threadId: "hid_telegram_direct_123",
+      threadIsDirect: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      actorId: null,
+      answeredMailboxItemIds: [completionId],
+      automationAuthority: null,
+      bindingDelivery: { kind: "thread", target },
+      card: null,
+      channel: "telegram",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliverySource: null,
+      emailHtml: null,
+      explicitTarget: null,
+      externalThreadRouteAuthority: null,
+      identityId: null,
+      intentId: effect.effectId,
+      media: [],
+      message: responseText,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+      subject: null,
+      threadId: "hid_telegram_direct_123",
+      threadIsDirect: true,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    mocks.sendTelegramMessage.mockImplementationOnce(async (
+      _request: unknown,
+      dependencies: { fetchImplementation?: typeof fetch },
+    ) => {
+      await dependencies.fetchImplementation?.(
+        "https://api.telegram.example/private",
+        { method: "POST" },
+      );
+      return {
+        providerMessageId: "provider_private_telegram_123",
+        target,
+      };
+    });
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        const delivery = await dependencies.sendTelegram({
+          idempotencyKey,
+          message: responseText,
+          replyToMessageId: null,
+          target,
+        });
+        return createDispatchResult({
+          delivery: createDelivery({
+            idempotencyKey,
+            messageLength: responseText.length,
+            providerMessageId: delivery.providerMessageId,
+            target: delivery.target,
+            targetKind: "thread",
+          }),
+          status: "sent",
+        });
+      },
+    );
+    const assertAssistantAskPrivateCompletionAuthority = vi.fn(
+      async () => undefined,
+    );
+    const providerFetch = vi.fn<typeof fetch>();
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertAssistantAskPrivateCompletionAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://api.telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({ deliveryStatus: "sent" }),
+    ]);
+
+    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledWith(
+      {
+        answeredMailboxItemIds: [completionId],
+        assistantAskCompletionExpiresAt: expiresAt,
+        idempotencyKey,
+        responseTextDigest: createHash("sha256")
+          .update(responseText)
+          .digest("hex"),
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: { kind: "thread", target },
+          identityId: null,
+          threadId: "hid_telegram_direct_123",
+          threadIsDirect: true,
+        },
+      },
+      { signal: null },
+    );
+    expect(
+      assertAssistantAskPrivateCompletionAuthority.mock.invocationCallOrder[0],
+    ).toBeLessThan(providerFetch.mock.invocationCallOrder[0] ?? 0);
+  });
+
+  it("pins private Telegram delivery against provider migration", async () => {
+    const completionId = "aask_done_private_telegram_migration";
+    const idempotencyKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const target = "123";
+    const responseText = "Exact private Telegram answer.";
+    const effect = createEffect({
+      actorId: null,
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      identityId: null,
+      message: responseText,
+      threadId: "hid_telegram_direct_123",
+      threadIsDirect: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      actorId: null,
+      answeredMailboxItemIds: [completionId],
+      automationAuthority: null,
+      bindingDelivery: { kind: "thread", target },
+      card: null,
+      channel: "telegram",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliverySource: null,
+      emailHtml: null,
+      explicitTarget: null,
+      externalThreadRouteAuthority: null,
+      identityId: null,
+      intentId: effect.effectId,
+      media: [],
+      message: responseText,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
+      subject: null,
+      threadId: "hid_telegram_direct_123",
+      threadIsDirect: true,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        await dependencies.sendTelegram({
+          idempotencyKey,
+          message: responseText,
+          replyToMessageId: null,
+          target,
+        });
+        throw new Error("unreachable after Telegram migration rejection");
+      },
+    );
+    const assertAssistantAskPrivateCompletionAuthority = vi.fn(
+      async () => undefined,
+    );
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({
+        description: "chat migrated",
+        error_code: 400,
+        ok: false,
+        parameters: { migrate_to_chat_id: "456" },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 400,
+      })
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertAssistantAskPrivateCompletionAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_STALE",
+      deliveryMayHaveSucceeded: false,
+      retryable: false,
+    });
+    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledOnce();
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("revalidates private Telegram authority before an internal provider retry", async () => {
+    const completionId = "aask_done_private_telegram_retry";
+    const idempotencyKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const target = "123";
+    const responseText = "Exact private Telegram retry answer.";
+    const effect = createEffect({
+      actorId: null,
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      idempotencyKey,
+      identityId: null,
+      message: responseText,
+      threadId: "hid_telegram_direct_retry",
+      threadIsDirect: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      actorId: null,
+      answeredMailboxItemIds: [completionId],
+      automationAuthority: null,
+      bindingDelivery: { kind: "thread", target },
+      card: null,
+      channel: "telegram",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliverySource: null,
+      emailHtml: null,
+      explicitTarget: null,
+      externalThreadRouteAuthority: null,
+      identityId: null,
+      intentId: effect.effectId,
+      media: [],
+      message: responseText,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
+      subject: null,
+      threadId: "hid_telegram_direct_retry",
+      threadIsDirect: true,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        await dependencies.sendTelegram({
+          idempotencyKey,
+          message: responseText,
+          replyToMessageId: null,
+          target,
+        });
+        throw new Error("unreachable after Telegram retry rejection");
+      },
+    );
+    const assertAssistantAskPrivateCompletionAuthority = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new VaultCliError(
+        "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
+        "Private Assistant Ask route changed before retry.",
+        { retryable: false },
+      ));
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(JSON.stringify({
+        description: "retry later",
+        error_code: 429,
+        ok: false,
+        parameters: { retry_after: 0 },
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 429,
+      })
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertAssistantAskPrivateCompletionAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {
+        TELEGRAM_API_BASE_URL: "https://telegram.example",
+        TELEGRAM_BOT_TOKEN: "telegram-actual-runtime-token",
+        TELEGRAM_FILE_BASE_URL: "https://files.telegram.example",
+      },
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
+    });
+    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledTimes(2);
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("fails a private Linq completion when its live route authority is rejected", async () => {
+    const completionId = "aask_done_private_linq_route_rejected";
+    const expiresAt = "2099-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const responseText = "Exact private Linq answer.";
+    const target = "linq_direct_123";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      channel: "linq",
+      idempotencyKey,
+      message: responseText,
+      threadId: "hid_linq_direct_123",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      actorId: "actor_123",
+      answeredMailboxItemIds: [completionId],
+      automationAuthority: null,
+      bindingDelivery: { kind: "thread", target },
+      card: null,
+      channel: "linq",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliverySource: null,
+      emailHtml: null,
+      explicitTarget: null,
+      externalThreadRouteAuthority: null,
+      identityId: "identity_123",
+      intentId: effect.effectId,
+      media: [],
+      message: responseText,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+      subject: null,
+      threadId: "hid_linq_direct_123",
+      threadIsDirect: true,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        await dependencies.sendLinq({
+          answeredMailboxItemIds: [completionId],
+          idempotencyKey,
+          media: [],
+          message: responseText,
+          target,
+          targetKind: "thread",
+        });
+        throw new Error("unreachable after private route rejection");
+      },
+    );
+    mocks.linqProviderFetchAttemptCount.mockReturnValue(2);
+    let authorityAttempt = 0;
+    const assertAssistantAskPrivateCompletionAuthority = vi.fn(async () => {
+      authorityAttempt += 1;
+      if (authorityAttempt === 2) {
+        throw new VaultCliError(
+          "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
+          "Private Assistant Ask route changed.",
+          { retryable: false },
+        );
+      }
+    });
+    const providerFetch = vi.fn<typeof fetch>(async () =>
+      new Response(null, { status: 204 })
+    );
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertAssistantAskPrivateCompletionAuthority,
+      }),
+      forwardedEnv: {},
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE",
+    });
+    expect(assertAssistantAskPrivateCompletionAuthority).toHaveBeenCalledTimes(2);
+    expect([
+      ...assertAssistantAskPrivateCompletionAuthority.mock.invocationCallOrder
+        .map((order) => ({ kind: "authority", order })),
+      ...providerFetch.mock.invocationCallOrder
+        .map((order) => ({ kind: "provider", order })),
+    ].sort((left, right) => left.order - right.order).map(({ kind }) => kind))
+      .toEqual(["authority", "provider", "authority"]);
+    expect(providerFetch).toHaveBeenCalledOnce();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not re-home a missing private Linq thread", async () => {
+    const completionId = "aask_done_private_linq_missing_thread";
+    const expiresAt = "2099-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const responseText = "Exact private answer for the existing route.";
+    const target = "linq_direct_stale";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      channel: "linq",
+      idempotencyKey,
+      message: responseText,
+      threadId: "hid_linq_direct_stale",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      actorId: "actor_123",
+      answeredMailboxItemIds: [completionId],
+      automationAuthority: null,
+      bindingDelivery: { kind: "thread", target },
+      card: null,
+      channel: "linq",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliverySource: null,
+      emailHtml: null,
+      explicitTarget: null,
+      externalThreadRouteAuthority: null,
+      identityId: "identity_123",
+      intentId: effect.effectId,
+      media: [],
+      message: responseText,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+      subject: null,
+      threadId: "hid_linq_direct_stale",
+      threadIsDirect: true,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        await dependencies.sendLinq({
+          answeredMailboxItemIds: [completionId],
+          directRecipientPhoneNumber: "+15550001001",
+          fromPhoneNumber: "+15550001002",
+          homeRouteFallbackAllowed: true,
+          idempotencyKey,
+          media: [],
+          message: responseText,
+          target,
+          targetKind: "thread",
+        });
+        throw new Error("unreachable after missing private Linq route");
+      },
+    );
+    const assertAssistantAskPrivateCompletionAuthority = vi.fn(
+      async () => undefined,
+    );
+    const assertLinqRecentInboundEngagement = vi.fn(async (request: {
+      authorityCheckOnly: boolean;
+    }) => request.authorityCheckOnly
+      ? {}
+      : { providerDispatchClaimed: true });
+    const providerFetch = vi.fn<typeof fetch>(async (request) => {
+      const url = String(request);
+      if (url.endsWith(`/chats/${target}/messages`)) {
+        return new Response(JSON.stringify({ code: "CHAT_NOT_FOUND" }), {
+          headers: { "content-type": "application/json" },
+          status: 404,
+        });
+      }
+      throw new Error(`Unexpected Linq recovery request: ${url}`);
+    });
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertAssistantAskPrivateCompletionAuthority,
+        assertLinqRecentInboundEngagement,
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      platformEnv: {},
+      providerFetch,
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).rejects.toMatchObject({
+      code: "LINQ_API_REQUEST_FAILED",
+      context: expect.objectContaining({ status: 404 }),
+    });
+    const providerUrls = providerFetch.mock.calls.map(([request]) =>
+      String(request)
+    );
+    expect(
+      providerUrls.filter((url) => url.endsWith(`/chats/${target}/messages`)),
+    ).toHaveLength(1);
+    expect(providerUrls).not.toContain(
+      "https://api.linq.example/api/partner/v3/chats",
+    );
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+  });
+
+  it("terminally expires a private Linq completion that crosses expiry after preflight", async () => {
+    vi.useFakeTimers();
+    const completionId = "aask_done_private_linq_expired_at_provider_entry";
+    const expiresAt = "2026-04-08T00:15:00.000Z";
+    const idempotencyKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const responseText = "Private answer expiring at dispatch.";
+    const target = "linq_direct_123";
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: target,
+      channel: "linq",
+      idempotencyKey,
+      message: responseText,
+      threadId: "hid_linq_direct_123",
+      threadIsDirect: true,
+      transportIdempotent: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      actorId: "actor_123",
+      answeredMailboxItemIds: [completionId],
+      automationAuthority: null,
+      bindingDelivery: { kind: "thread", target },
+      card: null,
+      channel: "linq",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliverySource: null,
+      emailHtml: null,
+      explicitTarget: null,
+      externalThreadRouteAuthority: null,
+      identityId: "identity_123",
+      intentId: effect.effectId,
+      media: [],
+      message: responseText,
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt: expiresAt,
+      subject: null,
+      threadId: "hid_linq_direct_123",
+      threadIsDirect: true,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    mocks.readAssistantOutboxIntent.mockResolvedValue(storedIntent);
+    const assertAssistantAskPrivateCompletionAuthority = vi.fn(
+      async () => undefined,
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dependencies, dispatchHooks }) => {
+        await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:14:59.999Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        vi.setSystemTime(new Date(expiresAt));
+        await dependencies.sendLinq({
+          answeredMailboxItemIds: [completionId],
+          idempotencyKey,
+          media: [],
+          message: responseText,
+          target,
+          targetKind: "thread",
+        });
+        throw new Error("unreachable after private completion expiry");
+      },
+    );
+
+    try {
+      vi.setSystemTime(new Date("2026-04-08T00:14:59.999Z"));
+      await expect(drainHostedPreparedAssistantDeliveries({
+        assistantDeliveryEffects: [effect],
+        effectsPort: createHostedRuntimeEffectsPortStub({
+          assertAssistantAskPrivateCompletionAuthority,
+        }),
+        forwardedEnv: { LINQ_API_TOKEN: "linq-token" },
+        platformEnv: {},
+        providerFetch: vi.fn<typeof fetch>(),
+        vaultRoot: HOSTED_WAKE.vaultRoot,
+        wake: HOSTED_WAKE.wake,
+      })).rejects.toMatchObject({
+        code: "ASSISTANT_ASK_PRIVATE_COMPLETION_EXPIRED",
+        context: expect.objectContaining({ retryable: false }),
+      });
+      expect(assertAssistantAskPrivateCompletionAuthority).not.toHaveBeenCalled();
+      expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+      expect(mocks.saveAssistantOutboxIntentIfUnchanged).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a reserved private completion key on a non-messaging outbox route", async () => {
+    const completionId = "aask_done_private_wrong_channel";
+    const idempotencyKey =
+      createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      );
+    const effect = createEffect({
+      answeredMailboxItemIds: [completionId],
+      bindingDeliveryKind: "thread",
+      bindingDeliveryTarget: "email-thread",
+      channel: "email",
+      idempotencyKey,
+      message: "This must never reach a provider.",
+      threadIsDirect: true,
+    });
+    const storedIntent = createPendingHostedDeliveryIntent({
+      answeredMailboxItemIds: [completionId],
+      automationAuthority: null,
+      bindingDelivery: { kind: "thread", target: "email-thread" },
+      card: null,
+      channel: "email",
+      deliveryIdempotencyKey: idempotencyKey,
+      deliverySource: null,
+      emailHtml: null,
+      explicitTarget: null,
+      externalThreadRouteAuthority: null,
+      intentId: effect.effectId,
+      media: [],
+      message: "This must never reach a provider.",
+      operation: null,
+      reviewedAssistantAskCompletionExpiresAt:
+        "2099-04-08T00:15:00.000Z",
+      subject: null,
+      threadIsDirect: true,
+    }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValueOnce(
+      createMirrorState(storedIntent),
+    );
+    const failedIntent = {
+      ...storedIntent,
+      lastError: {
+        code: "ASSISTANT_ASK_PRIVATE_COMPLETION_OUTBOX_PROOF_INVALID",
+        message: "Private Assistant Ask completion outbox proof is invalid.",
+      },
+      status: "failed" as const,
+    };
+    mocks.markAssistantOutboxIntentMirrorTerminalById.mockResolvedValueOnce(
+      failedIntent,
+    );
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(
+      async ({ dispatchHooks }) => {
+        const preflight = await dispatchHooks?.preflightDispatchIntent?.({
+          intent: storedIntent,
+          now: new Date("2026-04-08T00:00:30.000Z"),
+          vault: HOSTED_WAKE.vaultRoot,
+        });
+        expect(preflight).toEqual({
+          action: "stop",
+          intent: failedIntent,
+        });
+        return createDispatchResult(
+          failedIntent,
+          failedIntent.lastError,
+        );
+      },
+    );
+    const sendEmail = vi.fn(async () => undefined);
+
+    await expect(drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({ sendEmail }),
+      forwardedEnv: {},
+      platformEnv: {},
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: HOSTED_WAKE.wake,
+    })).resolves.toEqual([
+      expect.objectContaining({
+        deliveryErrorCode:
+          "ASSISTANT_ASK_PRIVATE_COMPLETION_OUTBOX_PROOF_INVALID",
+        deliveryStatus: "failed",
+      }),
+    ]);
+    expect(
+      mocks.markAssistantOutboxIntentMirrorTerminalById,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      intentId: storedIntent.intentId,
+      onlyCurrentStatuses: ["pending", "retryable"],
+      status: "failed",
+    }));
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(mocks.sendTelegramMessage).not.toHaveBeenCalled();
   });
 
   it("blocks a reviewed Telegram completion whose persisted route authority is missing", async () => {
@@ -15173,7 +15939,7 @@ describe("hosted runtime callbacks", () => {
       html: null,
       idempotencyKey: "assistant-outbox:intent_123",
       message: "hello from hosted",
-      newsletterAuthorizationProof: null,
+      groupEmailAuthorizationProof: null,
       planGroupFanout: true,
       replyToMessageId: lastMessageId,
       subject,
@@ -15339,7 +16105,7 @@ describe("hosted runtime callbacks", () => {
       identityId: "identity_123",
       emailHtml: "<p>Group reply</p>",
       message: "Group reply",
-      newsletterAuthorizationProof: "a".repeat(64),
+      groupEmailAuthorizationProof: "a".repeat(64),
       subject: null,
       threadId: "thread_123",
       threadIsDirect: false,
@@ -15402,7 +16168,7 @@ describe("hosted runtime callbacks", () => {
       identityId: "identity_123",
       emailHtml: "<p>Group reply</p>",
       message: "Group reply",
-      newsletterAuthorizationProof: "a".repeat(64),
+      groupEmailAuthorizationProof: "a".repeat(64),
       subject: null,
       threadId: "thread_123",
       threadIsDirect: false,
@@ -15460,14 +16226,14 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.createAssistantOutboxIntent).not.toHaveBeenCalled();
   });
 
-  it("does not recreate sent, ambiguous, or exhausted newsletter recipients from the same parent attempt", async () => {
+  it("does not recreate sent, ambiguous, or exhausted group-email recipients from the same parent attempt", async () => {
     const fanoutTarget = serializeHostedEmailThreadTarget({
       groupId: "group_123",
       subject: "Group subject",
       targetKind: "group",
     });
     const deliveryIdempotencyKey =
-      "group-newsletter:automation_123:2026-07-12T13:00:00.000Z:group_123";
+      "group-email-effect:automation_123:2026-07-12T13:00:00.000Z:group_123";
     const effect = createEffect({
       bindingDeliveryKind: "thread",
       bindingDeliveryTarget: fanoutTarget,

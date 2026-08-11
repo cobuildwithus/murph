@@ -1,4 +1,5 @@
 import {
+  normalizeIanaTimeZone,
   resolveSystemTimeZone,
   type AutomationSupportKind,
 } from '@murphai/contracts'
@@ -6,6 +7,7 @@ import { loadVault, upsertAutomation } from '@murphai/core'
 import {
   listAutomations as listCanonicalAutomations,
   listScheduledLogs as listCanonicalScheduledLogs,
+  readAutomationByRelativePath as readCanonicalAutomationByRelativePath,
   type AutomationQueryRecord,
 } from '@murphai/query'
 import {
@@ -25,8 +27,7 @@ import {
 } from './runtime-state.js'
 import { resolveAssistantConversationKey } from '../bindings.js'
 import {
-  buildGroupNewsletterScheduledExecutionPrompt,
-  resolveGroupNewsletterAutomationDelivery,
+  appendLegacyGroupNewsletterSkillInstructions,
 } from '../group-newsletter-automation.js'
 import { computeAssistantCronNextRunAt } from './schedule.js'
 import {
@@ -39,6 +40,7 @@ import {
 } from './store.js'
 
 export const ASSISTANT_CRON_JOB_SCHEMA = 'murph.assistant-cron-job.v1'
+export const ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS = 60 * 60 * 1000
 
 export interface CanonicalAutomationAssistantCronJobRecord {
   kind: 'automation'
@@ -46,6 +48,7 @@ export interface CanonicalAutomationAssistantCronJobRecord {
   automationId: string
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
+  scheduleAnchorAt?: string
   instructions: string
   route: AutomationQueryRecord['route']
   assistantTargetOverride: AutomationQueryRecord['assistantTargetOverride']
@@ -118,6 +121,34 @@ export function requireCanonicalAssistantCronRecord(
   }
 
   return normalized
+}
+
+export async function readCanonicalAssistantCronAutomationByRelativePath(input: {
+  defaultTimeZone: string
+  relativePath: string
+  vault: string
+}): Promise<CanonicalAutomationAssistantCronJobRecord> {
+  const record = await readCanonicalAutomationByRelativePath(
+    input.vault,
+    input.relativePath,
+  )
+  if (!record) {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_JOB_NOT_FOUND',
+      'Canonical automation was not found at its persisted path.',
+    )
+  }
+  const source = requireCanonicalAssistantCronRecord(
+    record,
+    input.defaultTimeZone,
+  )
+  if (source.kind !== 'automation') {
+    throw new VaultCliError(
+      'ASSISTANT_CRON_INVALID_AUTOMATION',
+      'Canonical automation timing projection resolved a non-automation source.',
+    )
+  }
+  return source
 }
 
 export function findCanonicalAssistantCronRecordInList(
@@ -260,6 +291,108 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
   source: CanonicalAssistantCronJobRecord,
   runtimeState: AssistantCronCanonicalRuntimeRecord,
 ): string | null {
+  return boundCanonicalAssistantCronOccurrenceByActiveUntil(
+    source,
+    resolveCanonicalAssistantCronUnboundedOccurrenceAt(source, runtimeState),
+  )
+}
+
+export function resolveCanonicalAssistantCronNextDeliverableOccurrenceProjection(
+  source: CanonicalAssistantCronJobRecord,
+  runtimeState: AssistantCronCanonicalRuntimeRecord,
+  now: Date,
+): {
+  nextOccurrenceAt: string | null
+  verified: boolean
+} {
+  if (
+    runtimeState.state.pendingOccurrenceAt !== null ||
+    runtimeState.state.retryAfterAt !== null ||
+    runtimeState.state.pendingDeliveryIntentId !== null ||
+    runtimeState.state.runningAt !== null
+  ) {
+    return {
+      nextOccurrenceAt: null,
+      verified: false,
+    }
+  }
+
+  const occurrenceAt = resolveCanonicalAssistantCronUnboundedOccurrenceAt(
+    source,
+    runtimeState,
+  )
+  if (
+    occurrenceAt === null ||
+    (source.kind === 'automation' &&
+      source.activeUntil !== null &&
+      (now.getTime() >= Date.parse(source.activeUntil) ||
+        Date.parse(occurrenceAt) >= Date.parse(source.activeUntil)))
+  ) {
+    return {
+      nextOccurrenceAt: null,
+      verified: true,
+    }
+  }
+
+  if (
+    source.kind === 'automation' &&
+    !isCanonicalAssistantCronNotificationOccurrenceDeliverable({
+      now,
+      occurrenceAt,
+      source,
+    })
+  ) {
+    return {
+      nextOccurrenceAt: null,
+      verified: source.schedule.kind === 'at',
+    }
+  }
+
+  return {
+    nextOccurrenceAt: occurrenceAt,
+    verified: true,
+  }
+}
+
+export function isAssistantCronNotificationOccurrenceFresh(input: {
+  now: Date
+  occurrenceAt: string
+}): boolean {
+  const nowMs = input.now.getTime()
+  const occurrenceMs = Date.parse(input.occurrenceAt)
+  if (!Number.isFinite(nowMs) || !Number.isFinite(occurrenceMs)) {
+    return true
+  }
+
+  return nowMs - occurrenceMs <= ASSISTANT_CRON_NOTIFICATION_EXPIRES_AFTER_MS
+}
+
+export function isCanonicalAssistantCronNotificationOccurrenceDeliverable(
+  input: {
+    now: Date
+    occurrenceAt: string
+    source: CanonicalAssistantCronJobRecord
+  },
+): boolean {
+  if (input.source.kind === 'scheduledLog') {
+    return true
+  }
+
+  if (
+    input.source.schedule.kind === 'at' &&
+    input.source.activeUntil !== null &&
+    input.now.getTime() < Date.parse(input.source.activeUntil)
+  ) {
+    return true
+  }
+
+  return isAssistantCronNotificationOccurrenceFresh(input)
+}
+
+function resolveCanonicalAssistantCronUnboundedOccurrenceAt(
+  source: CanonicalAssistantCronJobRecord,
+  runtimeState: AssistantCronCanonicalRuntimeRecord,
+): string | null {
   if (!isCanonicalAssistantCronSourceEnabled(source)) {
     return null
   }
@@ -278,7 +411,9 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
   }
 
   const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt({
-    pendingOccurrenceIgnored: Boolean(runtimeState.state.pendingOccurrenceAt),
+    pendingOccurrenceIgnored:
+      runtimeState.state.pendingOccurrenceAt !== null &&
+      pendingOccurrenceAt === null,
     source,
     state: runtimeState.state,
   })
@@ -286,15 +421,12 @@ export function resolveCanonicalAssistantCronOccurrenceAt(
     return null
   }
 
-  return boundCanonicalAssistantCronOccurrenceByActiveUntil(
-    source,
-    computeAssistantCronNextRunAt(
-      resolveAssistantCronResolvedSchedule({
-        schedule: source.schedule,
-        timeZone: source.timeZone,
-      }),
-      new Date(anchorAt),
-    ),
+  return computeAssistantCronNextRunAt(
+    resolveAssistantCronResolvedSchedule({
+      schedule: source.schedule,
+      timeZone: source.timeZone,
+    }),
+    new Date(anchorAt),
   )
 }
 
@@ -309,7 +441,7 @@ export function resolveAssistantCronResolvedSchedule(input: {
     return {
       kind: 'cron',
       expression: input.schedule.expression,
-      timeZone: input.timeZone ?? 'UTC',
+      timeZone: input.schedule.timeZone ?? input.timeZone ?? 'UTC',
     }
   }
 
@@ -317,7 +449,7 @@ export function resolveAssistantCronResolvedSchedule(input: {
     return {
       kind: 'dailyLocal',
       localTime: input.schedule.localTime,
-      timeZone: input.timeZone ?? 'UTC',
+      timeZone: input.schedule.timeZone ?? input.timeZone ?? 'UTC',
     }
   }
 
@@ -339,6 +471,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
   assistantTargetOverride?: CanonicalAutomationAssistantCronJobRecord['assistantTargetOverride']
   continuityPolicy?: CanonicalAutomationAssistantCronJobRecord['continuityPolicy']
   instructions: string
+  now?: Date
   route: CanonicalAutomationAssistantCronJobRecord['route']
   schedule: AssistantCronSchedule
   slug?: string
@@ -350,6 +483,7 @@ export function buildCanonicalAutomationUpsertInput(input: {
 }): Parameters<typeof upsertAutomation>[0] {
   return {
     vaultRoot: input.vault,
+    now: input.now,
     automationId: input.automationId,
     slug: input.slug ?? input.automation?.slug,
     title: input.title,
@@ -381,13 +515,32 @@ export function buildVisibleLocalAssistantCronStore(
 export async function resolveAssistantCronDefaultTimeZone(
   vault: string,
 ): Promise<string> {
+  return (await resolveAssistantCronDefaultTimeZoneProjection(vault)).timeZone
+}
+
+export async function resolveAssistantCronDefaultTimeZoneProjection(
+  vault: string,
+): Promise<{
+  timeZone: string
+  vaultTimeZoneVerified: boolean
+}> {
+  const vaultTimeZone = await resolveAssistantCronVaultTimeZone(vault)
+  return {
+    timeZone: vaultTimeZone ?? resolveSystemTimeZone(),
+    vaultTimeZoneVerified: vaultTimeZone !== null,
+  }
+}
+
+export async function resolveAssistantCronVaultTimeZone(
+  vault: string,
+): Promise<string | null> {
   try {
     const loadedVault = await loadVault({
       vaultRoot: vault,
     })
-    return loadedVault.metadata.timezone ?? resolveSystemTimeZone()
+    return normalizeIanaTimeZone(loadedVault.metadata.timezone)
   } catch {
-    return resolveSystemTimeZone()
+    return null
   }
 }
 
@@ -421,6 +574,7 @@ function normalizeCanonicalAssistantCronRecord(
     automationId: record.automationId,
     continuityPolicy: record.continuityPolicy,
     createdAt: record.createdAt,
+    scheduleAnchorAt: record.scheduleAnchorAt ?? record.createdAt,
     instructions,
     route: record.route,
     assistantTargetOverride: record.assistantTargetOverride,
@@ -432,7 +586,7 @@ function normalizeCanonicalAssistantCronRecord(
     tags: [...record.tags],
     timeZone:
       record.schedule.kind === 'cron' || record.schedule.kind === 'dailyLocal'
-        ? timeZone
+        ? record.schedule.timeZone ?? timeZone
         : null,
     title: record.title,
     updatedAt: record.updatedAt,
@@ -473,18 +627,8 @@ function buildCanonicalAssistantCronJobPrompt(
   source: CanonicalAssistantCronJobRecord,
 ): string {
   switch (source.kind) {
-    case 'automation': {
-      const newsletterDelivery = resolveGroupNewsletterAutomationDelivery(source)
-      return newsletterDelivery === null
-        ? source.instructions
-        : [
-            source.instructions,
-            buildGroupNewsletterScheduledExecutionPrompt({
-              delivery: newsletterDelivery,
-              newsletterName: source.title,
-            }),
-          ].join('\n\n')
-    }
+    case 'automation':
+      return appendLegacyGroupNewsletterSkillInstructions(source.instructions)
     case 'scheduledLog':
       return `Auto-log scheduled log "${source.title}" as ${source.actionKind}.`
   }
@@ -536,6 +680,7 @@ function normalizeAssistantCronPublicSchedule(
     return assistantCronScheduleSchema.parse({
       kind: 'cron',
       expression: schedule.expression,
+      ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
     })
   }
 
@@ -543,6 +688,7 @@ function normalizeAssistantCronPublicSchedule(
     return assistantCronScheduleSchema.parse({
       kind: 'dailyLocal',
       localTime: schedule.localTime,
+      ...(schedule.timeZone ? { timeZone: schedule.timeZone } : {}),
     })
   }
 
@@ -575,8 +721,11 @@ function resolveCanonicalAssistantCronNextRunAt(input: {
   }
 
   const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt({
-    ...input,
-    pendingOccurrenceIgnored: Boolean(input.state.pendingOccurrenceAt),
+    pendingOccurrenceIgnored:
+      input.state.pendingOccurrenceAt !== null &&
+      pendingOccurrenceAt === null,
+    source: input.source,
+    state: input.state,
   })
   if (!anchorAt) {
     return null
@@ -624,7 +773,7 @@ function resolveCurrentCanonicalPendingOccurrenceAt(input: {
     return pendingOccurrenceAt
   }
 
-  if (!canonicalSourceChangedAfterRuntimeState(input)) {
+  if (!canonicalSourceScheduleTransitionIsUnconsumed(input)) {
     return pendingOccurrenceAt
   }
 
@@ -637,9 +786,36 @@ function resolveCurrentCanonicalPendingOccurrenceAt(input: {
     : null
 }
 
-function canonicalSourceChangedAfterRuntimeState(input: {
+function canonicalSourceScheduleTransitionIsUnconsumed(input: {
   runtimeUpdatedAt: string
   source: CanonicalAssistantCronJobRecord
+  state: AssistantCronCanonicalRuntimeState
+}): boolean {
+  if (input.source.kind === 'scheduledLog') {
+    return canonicalScheduledLogSourceChangedAfterRuntimeState({
+      runtimeUpdatedAt: input.runtimeUpdatedAt,
+      source: input.source,
+    })
+  }
+
+  const sourceScheduleAnchorMs = Date.parse(
+    resolveCanonicalAssistantCronSourceScheduleAnchorAt(input.source),
+  )
+  const consumedAnchorAt = resolveCanonicalAssistantCronConsumedAnchorAt(
+    input.state,
+  )
+  const consumedAnchorMs = consumedAnchorAt
+    ? Date.parse(consumedAnchorAt)
+    : Number.NEGATIVE_INFINITY
+  return (
+    Number.isFinite(sourceScheduleAnchorMs) &&
+    sourceScheduleAnchorMs > consumedAnchorMs
+  )
+}
+
+function canonicalScheduledLogSourceChangedAfterRuntimeState(input: {
+  runtimeUpdatedAt: string
+  source: CanonicalScheduledLogAssistantCronJobRecord
 }): boolean {
   const sourceCreatedMs = Date.parse(input.source.createdAt)
   const sourceUpdatedMs = Date.parse(input.source.updatedAt)
@@ -665,12 +841,22 @@ function isCanonicalPendingOccurrenceForCurrentSchedule(input: {
     return false
   }
 
+  const sourceScheduleAnchorMs = Date.parse(
+    resolveCanonicalAssistantCronSourceScheduleAnchorAt(input.source),
+  )
+  if (
+    Number.isFinite(sourceScheduleAnchorMs) &&
+    pendingOccurrenceMs <= sourceScheduleAnchorMs
+  ) {
+    return false
+  }
+
   if (input.source.schedule.kind === 'at') {
     return input.pendingOccurrenceAt === input.source.schedule.at
   }
 
   if (input.source.schedule.kind === 'every') {
-    const anchorAt = resolveCanonicalAssistantCronConsumedAnchorAt(input.state)
+    const anchorAt = resolveCanonicalAssistantCronScheduleAnchorAt(input)
     if (!anchorAt) {
       return true
     }
@@ -693,15 +879,29 @@ function isCanonicalPendingOccurrenceForCurrentSchedule(input: {
 }
 
 function resolveCanonicalAssistantCronScheduleAnchorAt(input: {
-  pendingOccurrenceIgnored: boolean
+  pendingOccurrenceIgnored?: boolean
   source: CanonicalAssistantCronJobRecord
   state: AssistantCronCanonicalRuntimeState
 }): string | null {
-  if (input.pendingOccurrenceIgnored) {
+  if (
+    input.source.kind === 'scheduledLog' &&
+    input.pendingOccurrenceIgnored === true
+  ) {
     return input.source.updatedAt
   }
 
-  return resolveCanonicalAssistantCronConsumedAnchorAt(input.state)
+  return latestAssistantCronTimestamp([
+    resolveCanonicalAssistantCronConsumedAnchorAt(input.state),
+    resolveCanonicalAssistantCronSourceScheduleAnchorAt(input.source),
+  ])
+}
+
+function resolveCanonicalAssistantCronSourceScheduleAnchorAt(
+  source: CanonicalAssistantCronJobRecord,
+): string {
+  return source.kind === 'automation'
+    ? source.scheduleAnchorAt ?? source.createdAt
+    : source.createdAt
 }
 
 function resolveCanonicalAssistantCronConsumedAnchorAt(
@@ -712,7 +912,8 @@ function resolveCanonicalAssistantCronConsumedAnchorAt(
   return latestAssistantCronTimestamp([
     state.lastSucceededAt,
     consumedFailedAt,
-  ]) ?? state.activatedAt
+    state.activatedAt,
+  ])
 }
 
 function latestAssistantCronTimestamp(

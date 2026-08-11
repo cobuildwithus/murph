@@ -1,20 +1,16 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 import { HostedBillingStatus } from "@prisma/client";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   getHostedPrivySession: vi.fn(),
   isHostedBillingPlanSelectionAvailable: vi.fn(),
   getPrisma: vi.fn(),
-  readHostedPulseTrialContinuationCookie: vi.fn(),
-  PulseTrialBillingContinuation: vi.fn((props: {
-    action: "continue_pulse" | "start_pulse_now";
-  }) =>
-    React.createElement("div", null, `Confirm Pulse ${props.action}`)),
   CustomizeMurphSettings: vi.fn((props: {
     assistant?: unknown;
     murphPhoneNumber?: string | null;
@@ -88,18 +84,16 @@ const mocks = vi.hoisted(() => ({
   HostedBillingSettings: vi.fn((props: {
     authenticated: boolean;
     canStartFamily?: boolean;
-    canStartPaidPulse?: boolean;
     canSwitchToGroup?: boolean;
     canUpgradeToPulse?: boolean;
     canUpgradeToEdge?: boolean;
     currentBillingPhase?: unknown;
-    currentCheckoutOffer?: unknown;
     currentBillingPlanCode?: unknown;
+    familyBillingOwner?: boolean;
     familyState?: "none" | "owner" | "sponsored";
     groupPaymentMethodSaved?: boolean;
     payerMemberId?: string | null;
     planChangePending?: boolean;
-    pulseTrialBillingContinuationPending?: boolean;
     showGroupPlan?: boolean;
     usageActivityDetail?: React.ReactNode;
     usageStatus?: unknown;
@@ -183,11 +177,6 @@ vi.mock("@/src/lib/hosted-onboarding/page-auth", () => ({
   getHostedDashboardPageAuthSnapshot: mocks.getHostedPageAuthSnapshot,
 }));
 
-vi.mock("@/src/lib/hosted-onboarding/billing-pulse-trial-continuation", () => ({
-  readHostedPulseTrialContinuationCookie:
-    mocks.readHostedPulseTrialContinuationCookie,
-}));
-
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
@@ -263,10 +252,6 @@ vi.mock("@/src/components/settings/hosted-billing-settings", () => ({
   HostedBillingSettings: mocks.HostedBillingSettings,
 }));
 
-vi.mock("@/src/components/settings/hosted-start-paid-pulse-button", () => ({
-  PulseTrialBillingContinuation: mocks.PulseTrialBillingContinuation,
-}));
-
 vi.mock("@/src/components/settings/hosted-account-settings-cards", () => ({
   HostedAccountSettingsCards: mocks.HostedAccountSettingsCards,
 }));
@@ -300,6 +285,10 @@ vi.mock("@/src/components/settings/hosted-passkey-settings", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
+  isHostedFamilyBillingPortalManageable: (billingStatus: string) =>
+    ["active", "incomplete", "past_due", "paused", "unpaid"].includes(
+      billingStatus,
+    ),
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
 }));
@@ -382,7 +371,6 @@ beforeEach(() => {
     status: "unavailable",
   });
   mocks.readHostedSecureApprovalStatus.mockResolvedValue({ status: "unavailable" });
-  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValue(null);
   mocks.prisma.hostedGroupMember.findFirst.mockResolvedValue(null);
 });
 
@@ -640,31 +628,6 @@ test("SettingsPage redirects signed-out visitors before reading member settings"
   expect(mocks.getHostedPrivySession).not.toHaveBeenCalled();
 });
 
-test("SettingsPage keeps a signed-out Stripe payment return recoverable", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-    authenticatedMember: null,
-    session: null,
-  });
-
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-
-  const markup = renderToStaticMarkup(await SettingsPage({
-    searchParams: Promise.resolve({
-      action: "start_pulse_now",
-      expires: "4102444800000",
-      signature: "signed",
-    }),
-  }));
-
-  // Nothing is verified before sign-in: the signature is bound to a member id
-  // absent from the URL, so anyone could craft these parameters. Murph must not
-  // vouch for a payment it has not checked.
-  assert.match(markup, /One more step/);
-  assert.match(markup, /Sign in to verify and finish your billing update\./);
-  assert.doesNotMatch(markup, /card is saved/i);
-  expect(mocks.getPrisma).not.toHaveBeenCalled();
-});
 
 test("SettingsPage keeps a signed-out Core payment return recoverable", async () => {
   mocks.getHostedPageAuthSnapshot.mockResolvedValue({
@@ -684,6 +647,27 @@ test("SettingsPage keeps a signed-out Core payment return recoverable", async ()
   assert.match(markup, /One more step/);
   assert.doesNotMatch(markup, /Payment method saved/);
   assert.doesNotMatch(markup, /Core has not started/);
+  expect(mocks.getPrisma).not.toHaveBeenCalled();
+});
+
+test("SettingsPage keeps a signed-out usage-credit return recoverable", async () => {
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: false,
+    authenticatedMember: null,
+    session: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  const markup = renderToStaticMarkup(await SettingsPage({
+    searchParams: Promise.resolve({
+      usageCheckout: "success",
+      usagePurchase: "hucp_abcdefghijklmnop",
+    }),
+  }));
+
+  assert.match(markup, /One more step/);
+  assert.match(markup, /Sign in to verify and finish your billing update\./);
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
@@ -748,138 +732,10 @@ test("SettingsPage strips an authenticated plan-change cancellation return", asy
   expect(mocks.getPrisma).not.toHaveBeenCalled();
 });
 
-test("SettingsPage hands a signed-in Stripe payment return back to the continuation route", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: HostedBillingStatus.active,
-      id: "member_123",
-      suspendedAt: null,
-    },
-    session: { privyUserId: "did:privy:1", sessionId: "hws_session_123" },
-  });
 
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
 
-  // Only that route can verify the member-bound signature and set the
-  // session-scoped cookie the completion POST requires.
-  await expect(SettingsPage({
-    searchParams: Promise.resolve({
-      action: "start_pulse_now",
-      expires: "4102444800000",
-      signature: "signed",
-    }),
-  })).rejects.toThrow(
-    "NEXT_REDIRECT:/api/settings/billing/pulse-trial-continuation?action=start_pulse_now&expires=4102444800000&signature=signed",
-  );
-});
 
-test("SettingsPage ignores a partial payment return instead of looping back to the route", async () => {
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: false,
-    authenticatedMember: null,
-    session: null,
-  });
 
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-
-  await expect(SettingsPage({
-    searchParams: Promise.resolve({ action: "start_pulse_now" }),
-  })).rejects.toThrow("NEXT_REDIRECT:/");
-});
-
-test("SettingsPage resumes the Pulse action only for a marked return with a bound claim", async () => {
-  mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    },
-    session: {
-      privyUserId: "did:privy:user_123",
-      sessionId: "hws_session_123",
-    },
-  });
-  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValueOnce("continue_pulse");
-
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-
-  const markup = renderToStaticMarkup(await SettingsPage({
-    searchParams: Promise.resolve({
-      startPulse: "complete",
-    }),
-  }));
-
-  expect(mocks.readHostedPulseTrialContinuationCookie).toHaveBeenCalledWith({
-    memberId: "member_123",
-    sessionId: "hws_session_123",
-  });
-  expect(mocks.PulseTrialBillingContinuation).toHaveBeenCalledTimes(1);
-  expect(mocks.PulseTrialBillingContinuation).toHaveBeenCalledWith({
-    action: "continue_pulse",
-  }, undefined);
-  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
-    pulseTrialBillingContinuationPending: true,
-  }), undefined);
-  assert.match(markup, /Confirm Pulse continue_pulse/);
-});
-
-test("SettingsPage treats the return marker as inert without its bound claim", async () => {
-  mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    },
-    session: {
-      privyUserId: "did:privy:user_123",
-      sessionId: "hws_session_123",
-    },
-  });
-
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-
-  const markup = renderToStaticMarkup(await SettingsPage({
-    searchParams: Promise.resolve({
-      startPulse: "complete",
-    }),
-  }));
-
-  expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
-  assert.doesNotMatch(markup, /Confirm Pulse/);
-});
-
-test("SettingsPage treats a surviving claim as inert without the marked return", async () => {
-  mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "active",
-      id: "member_123",
-      suspendedAt: null,
-    },
-    session: {
-      privyUserId: "did:privy:user_123",
-      sessionId: "hws_session_123",
-    },
-  });
-  mocks.readHostedPulseTrialContinuationCookie.mockResolvedValueOnce("start_pulse_now");
-
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-
-  const markup = renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
-
-  expect(mocks.readHostedPulseTrialContinuationCookie).not.toHaveBeenCalled();
-  expect(mocks.PulseTrialBillingContinuation).not.toHaveBeenCalled();
-  assert.doesNotMatch(markup, /Confirm Pulse/);
-});
 
 test("SettingsPage reads the app session and persisted account settings into the settings tree", async () => {
   const originalPrivyAppId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
@@ -1048,10 +904,8 @@ test("SettingsPage reads the app session and persisted account settings into the
     expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
       authenticated: true,
       canStartFamily: true,
-      canStartPaidPulse: false,
       canUpgradeToEdge: true,
       currentBillingPhase: "paid",
-      currentCheckoutOffer: "standard",
       currentBillingPlanCode: "launch_monthly",
       payerMemberId: "member_123",
       showGroupPlan: false,
@@ -2347,46 +2201,6 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
   );
 });
 
-test("SettingsPage exposes Start Pulse recovery for a paused Pulse Trial subscription", async () => {
-  mocks.getPrisma.mockReturnValue(mocks.prisma);
-  mocks.getHostedPrivySession.mockResolvedValue(null);
-  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
-    authenticated: true,
-    authenticatedMember: {
-      billingStatus: "paused",
-      id: "member_123",
-      suspendedAt: null,
-    },
-    linkedAccounts: [],
-    session: {
-      privyUserId: "did:privy:user_123",
-    },
-  });
-  mockSettingsPageSnapshot({
-    billingRef: {
-      currentBillingPhase: null,
-      currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
-      memberId: "member_123",
-      stripeCustomerId: "cus_123",
-      stripeSubscriptionId: "sub_123",
-    },
-  });
-
-  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
-
-  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
-
-  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
-    authenticated: true,
-    canStartPaidPulse: true,
-    canSwitchToPulse: false,
-    canUpgradeToEdge: false,
-    currentBillingPhase: null,
-    currentBillingPlanCode: "launch_monthly",
-    currentCheckoutOffer: "pulse_trial_7d",
-  }), undefined);
-});
 
 test("SettingsPage preserves the Group payment-method receipt and fresh start action", async () => {
   mocks.getPrisma.mockReturnValue(mocks.prisma);
@@ -2408,7 +2222,7 @@ test("SettingsPage preserves the Group payment-method receipt and fresh start ac
     billingRef: {
       currentBillingPhase: null,
       currentBillingPlanCode: "launch_monthly",
-      currentCheckoutOffer: "pulse_trial_7d",
+      currentCheckoutOffer: "standard",
       memberId: "member_123",
       stripeCustomerId: "cus_123",
       stripeSubscriptionId: "sub_123",
@@ -2424,7 +2238,6 @@ test("SettingsPage preserves the Group payment-method receipt and fresh start ac
   }));
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
-    canStartPaidPulse: true,
     groupPaymentMethodSaved: true,
     showGroupPlan: true,
   }), undefined);
@@ -2480,11 +2293,70 @@ test("SettingsPage does not mark an unpaid family owner group as the current pla
 
   expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(expect.objectContaining({
     canStartFamily: true,
+    familyBillingOwner: false,
     familyState: "none",
   }), undefined);
   expect(mocks.HostedFamilySettings).toHaveBeenCalledWith(
     expect.objectContaining({
       usageTopUpOffers: [],
+    }),
+    undefined,
+  );
+});
+
+test.each([
+  HostedBillingStatus.incomplete,
+  HostedBillingStatus.past_due,
+  HostedBillingStatus.paused,
+  HostedBillingStatus.unpaid,
+])("SettingsPage keeps %s Family billing recoverable from Subscription", async (billingStatus) => {
+  mocks.getPrisma.mockReturnValue(mocks.prisma);
+  mocks.getHostedPrivySession.mockResolvedValue(null);
+  mocks.getHostedPageAuthSnapshot.mockResolvedValue({
+    authenticated: true,
+    authenticatedMember: {
+      billingStatus: "active",
+      id: "member_123",
+      suspendedAt: null,
+    },
+    linkedAccounts: [],
+    session: {
+      privyUserId: "did:privy:user_123",
+    },
+  });
+  mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+    billingActive: false,
+    billingStatus,
+    displayName: null,
+    groupId: "group_123",
+    invites: [],
+    members: [],
+    ownerMemberId: "member_123",
+    plans: {
+      edge: { active: 0, billed: 0, invited: 0, remaining: 0, used: 0 },
+      pulse: { active: 1, billed: 2, invited: 0, remaining: 1, used: 1 },
+    },
+    seats: {
+      active: 1,
+      billed: 2,
+      invited: 0,
+      max: 6,
+      min: 2,
+      remaining: 1,
+      used: 1,
+    },
+    suspendedAt: null,
+  });
+
+  const { default: SettingsPage } = await import("../app/(dashboard)/settings/page");
+
+  renderToStaticMarkup(await SettingsPage({ searchParams: Promise.resolve({}) }));
+
+  expect(mocks.HostedBillingSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      canStartFamily: false,
+      familyBillingOwner: true,
+      familyState: "none",
     }),
     undefined,
   );
@@ -2789,5 +2661,33 @@ test("SettingsPage ignores Privy Telegram display hints from a stale Privy sessi
   expect(mocks.withServerApprovedPrivyAccountHints).toHaveBeenCalledWith({
     snapshot: accountSnapshot,
     serverApprovedPrivyLinkedAccounts: null,
+  });
+});
+
+describe("settings subscription composition", () => {
+  const settingsPage = new URL(
+    "../app/(dashboard)/settings/page.tsx",
+    import.meta.url,
+  );
+
+  test("keeps acquisition separate from existing-billing recovery", async () => {
+    const source = await readFile(settingsPage, "utf8");
+
+    assert.match(source, /hasHostedMemberOwnPaidBilling/);
+    assert.match(source, /hasHostedRecoverableBilling/);
+    assert.match(source, /const hasRecoverableBilling/);
+    assert.match(source, /const canStartDirectPlan/);
+    assert.match(source, /!hasRecoverableBilling/);
+    assert.match(source, /ownPaidBillingActive \|\| hasRecoverableBilling/);
+    assert.match(source, /canStartDirectPlan=\{canStartDirectPlan\}/);
+  });
+
+  test("contains no timed-trial continuation surface", async () => {
+    const source = await readFile(settingsPage, "utf8");
+
+    assert.doesNotMatch(source, /PulseTrialBillingContinuation/);
+    assert.doesNotMatch(source, /readHostedPulseTrialContinuationCookie/);
+    assert.doesNotMatch(source, /StartPaidPulseButton/);
+    assert.doesNotMatch(source, /trial end|days left|expires/i);
   });
 });

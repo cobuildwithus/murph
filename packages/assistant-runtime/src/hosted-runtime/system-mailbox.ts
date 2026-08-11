@@ -24,6 +24,9 @@ import {
   isHostedAssistantAskCompletionPreemptedError,
 } from "./events/assistant-ask-completion-errors.ts";
 import type {
+  HostedLegacyUsageReferralAuthorityClassification,
+} from "./events/assistant-notification.ts";
+import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
 } from "./mailbox-import.ts";
@@ -67,11 +70,16 @@ export type {
 
 export type HostedSystemMailboxCheckpointPreparation =
   | {
+      attemptCount: number;
       errorCode: string | null;
       errorMessage: string | null;
       itemId: string;
+      legacyUsageReferralAuthorityClassification:
+        HostedLegacyUsageReferralAuthorityClassification | null;
       nextWakeAt: string;
+      routeAction: HostedSystemMailboxRouteAction;
       status: "retryable_failed";
+      wakeKind: HostedExecutionSystemWake["kind"];
     }
   | {
       item: HostedSystemMailboxPendingItem;
@@ -407,12 +415,30 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       },
       vaultRoot: input.vaultRoot,
     });
+    const legacyUsageReferralAuthorityClassification =
+      prepared.wake.kind === "assistant.notification.requested"
+        ? (await import("./events/assistant-notification.ts"))
+          .classifyLegacyHostedUsageReferralDirectLinqAuthority({
+            executionContext:
+              input.executionContext
+              ?? buildHostedSystemMailboxExecutionContext({
+                runtime: input.runtime,
+                wake: prepared.wake,
+              }),
+            mailboxDedupeKey: prepared.mailboxDedupeKey,
+            wake: prepared.wake,
+          })
+        : null;
     return {
+      attemptCount: prepared.attemptCount,
       errorCode: normalized.code,
       errorMessage: normalized.message,
       itemId: prepared.itemId,
+      legacyUsageReferralAuthorityClassification,
       nextWakeAt,
+      routeAction: prepared.routeAction,
       status: "retryable_failed",
+      wakeKind: prepared.wake.kind,
     };
   }
 }
@@ -583,6 +609,41 @@ async function executePendingHostedSystemMailboxItem(input: {
       runtime: input.runtime,
       wake: input.pendingItem.wake,
     });
+  let wake = input.pendingItem.wake;
+
+  if (wake.kind === "assistant.notification.requested") {
+    const {
+      prepareHostedAssistantNotificationSystemMailboxWake,
+    } = await import("./events/assistant-notification.ts");
+    const preparation =
+      await prepareHostedAssistantNotificationSystemMailboxWake({
+        assertExternalThreadRouteAuthority:
+          input.runtime.platform.effectsPort
+            .assertExternalThreadRouteAuthority,
+        executionContext,
+        mailboxDedupeKey: input.pendingItem.mailboxDedupeKey,
+        signal: input.signal,
+        wake,
+      });
+    if (preparation.kind === "terminal_no_send") {
+      const outcome = preparation.outcome;
+      return {
+        bootstrapResult: null,
+        conversationMetrics: outcome.conversationMetrics,
+        ...(outcome.deliveryIntentIds === undefined
+          ? {}
+          : { deliveryIntentIds: outcome.deliveryIntentIds }),
+        mailboxLane: outcome.mailboxLane,
+        nextWakeAt: outcome.nextWakeAt ?? null,
+        ...(Object.hasOwn(outcome, "nextWakeReason")
+          ? { nextWakeReason: outcome.nextWakeReason ?? null }
+          : {}),
+        postCheckpointRecord: outcome.postCheckpointRecord ?? null,
+        redactedLogEntries: outcome.redactedLogEntries ?? [],
+      };
+    }
+    wake = preparation.wake;
+  }
 
   return executeHostedMailboxEvent({
     executionContext,
@@ -602,7 +663,7 @@ async function executePendingHostedSystemMailboxItem(input: {
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,
     vaultRoot: input.vaultRoot,
-    wake: input.pendingItem.wake,
+    wake,
   });
 }
 

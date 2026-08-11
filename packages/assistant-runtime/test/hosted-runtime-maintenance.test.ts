@@ -33,12 +33,18 @@ const mocks = vi.hoisted(() => ({
   syncHostedDeviceSyncControlPlaneState: vi.fn(),
 }));
 
-vi.mock("@murphai/device-syncd/config", () => ({
-  createConfiguredDeviceSyncProvidersFromConfigs:
-    mocks.createConfiguredDeviceSyncProvidersFromConfigs,
-  readConfiguredJunctionDeviceSyncProviderConfig:
-    mocks.readConfiguredJunctionDeviceSyncProviderConfig,
-}));
+vi.mock("@murphai/device-syncd/config", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@murphai/device-syncd/config")
+  >();
+  return {
+    ...actual,
+    createConfiguredDeviceSyncProvidersFromConfigs:
+      mocks.createConfiguredDeviceSyncProvidersFromConfigs,
+    readConfiguredJunctionDeviceSyncProviderConfig:
+      mocks.readConfiguredJunctionDeviceSyncProviderConfig,
+  };
+});
 
 vi.mock("@murphai/device-syncd/registry", () => ({
   createDeviceSyncRegistry: mocks.createDeviceSyncRegistry,
@@ -224,7 +230,7 @@ function createHostedAutomationRuntime(input: {
 }
 
 beforeEach(async () => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   await rm(FIXED_MAINTENANCE_VAULT_ROOT, {
     force: true,
     recursive: true,
@@ -1700,6 +1706,179 @@ describe("runHostedDeviceSyncPass", () => {
     );
   });
 
+  it("builds a member-only provider runtime from one credential-bearing snapshot", async () => {
+    const memberProviderConfigs = {
+      strava: {
+        clientId: "member-client",
+        clientSecret: "member-secret",
+      },
+    };
+    const snapshot = {
+      connections: [{ connection: { id: "dsc_strava", status: "active" } }],
+      providerConfigs: memberProviderConfigs,
+      userId: "member_123",
+    };
+    const port = createMaintenanceDeviceSyncPortStub();
+    port.fetchSnapshot.mockResolvedValue(snapshot);
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 0),
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    mocks.createConfiguredDeviceSyncProvidersFromConfigs.mockReturnValue(["strava"]);
+    mocks.createDeviceSyncRegistry.mockReturnValue({
+      list: () => ["strava"],
+    });
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_member_provider_config",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      {
+        providerConfigs: {},
+        publicBaseUrl: "https://device-sync.example.test",
+        secret: "secret_123",
+      },
+      port,
+      45_000,
+    );
+
+    expect(port.fetchSnapshot).toHaveBeenCalledTimes(1);
+    expect(port.fetchSnapshot).toHaveBeenCalledWith({
+      includeCredentialMaterial: true,
+      signal: null,
+    });
+    expect(mocks.createConfiguredDeviceSyncProvidersFromConfigs).toHaveBeenCalledWith(
+      memberProviderConfigs,
+    );
+    expect(mocks.createHostedRuntimeDeviceSyncService).toHaveBeenCalledTimes(1);
+    expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot,
+      }),
+    );
+    expect(
+      mocks.syncHostedDeviceSyncControlPlaneState.mock.calls[0]?.[0]?.snapshot,
+    ).toBe(snapshot);
+  });
+
+  it("logs stage-specific wearable import latency after successful dirty payload work", async () => {
+    const service = {
+      close: vi.fn(),
+      drainWorker: vi.fn(async () => 1),
+      getNextWakeAt: () => null,
+      listJobFailureDiagnostics: vi.fn(() => []),
+      listAccounts: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    };
+    const logPort = {
+      write: vi.fn(async (request: HostedRuntimeLogRequest) => ({
+        loggedCount: request.entries.length,
+      })),
+    };
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue(service);
+    mocks.promoteHostedCompletedDirtyPayloadAcks.mockReturnValueOnce([{
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: "2026-04-08T00:05:00.000Z",
+      jobCreatedAt: "2026-04-08T00:04:30.000Z",
+      jobKind: "resource",
+      provider: "junction",
+      providerSendToWebhookMs: 60_000,
+    }, {
+      eventToProviderSendBucket: "5_to_30_minutes",
+      firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
+      importCompletedAt: "2026-04-08T00:06:00.000Z",
+      importExecutionStartedAt: null,
+      jobCreatedAt: "2026-04-08T00:07:00.000Z",
+      jobKind: "resource",
+      provider: "strava",
+      providerSendToWebhookMs: null,
+    }]);
+
+    await runHostedDeviceSyncPass(
+      {
+        eventId: "evt_import_timing",
+        kind: "runtime.timer",
+        occurredAt: "2026-04-08T00:06:00.000Z",
+        triggerKind: "runtime_timer",
+        userId: "member_123",
+      },
+      "/tmp/vault-root",
+      DEVICE_SYNC_CONFIG,
+      createMaintenanceDeviceSyncPortStub(),
+      45_000,
+      {
+        runtimeLogPlatform: { logPort },
+      },
+    );
+
+    await vi.waitFor(() => {
+      expect(logPort.write).toHaveBeenCalled();
+    });
+    const requests = logPort.write.mock.calls.map(([request]) => request);
+    const entry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.eventCode === "device-sync.import_completed");
+    assert.ok(entry);
+    expect(entry).toEqual({
+      at: "2026-04-08T00:06:00.000Z",
+      component: "device-sync",
+      eventCode: "device-sync.import_completed",
+      level: "info",
+      phase: "invoke",
+      redactedJson: {
+        eventToProviderSendBucket: "under_5_minutes",
+        importExecutionMs: 60_000,
+        jobKind: "resource",
+        provider: "junction",
+        providerSendToWebhookMs: 60_000,
+        runtimeQueueMs: 30_000,
+        webhookToImportMs: 120_000,
+      },
+    });
+    const skewedEntry = requests
+      .flatMap((request) => request.entries)
+      .find((candidate) => candidate.redactedJson?.provider === "strava");
+    assert.ok(skewedEntry);
+    expect(skewedEntry.redactedJson).toMatchObject({
+      eventToProviderSendBucket: "5_to_30_minutes",
+      provider: "strava",
+      webhookToImportMs: 180_000,
+    });
+    expect(skewedEntry.redactedJson).not.toHaveProperty("providerSendToWebhookMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("runtimeQueueMs");
+    expect(skewedEntry.redactedJson).not.toHaveProperty("importExecutionMs");
+    for (const privateField of [
+      "eventCount",
+      "eventToImportMs",
+      "eventToProviderSendMs",
+      "eventType",
+      "importCompletedAt",
+      "importExecutionStartedAt",
+      "jobCreatedAt",
+      "oldestEventOccurredAt",
+      "oldestProviderSentAt",
+      "oldestWebhookReceivedAt",
+      "resource",
+      "resourceCategory",
+      "sourceProvider",
+    ]) {
+      expect(entry.redactedJson).not.toHaveProperty(privateField);
+      expect(skewedEntry.redactedJson).not.toHaveProperty(privateField);
+    }
+  });
+
   it("stops a superseded connection wake after hydration without running device-sync work", async () => {
     const close = vi.fn();
     const drainWorker = vi.fn(async () => 0);
@@ -2831,8 +3010,8 @@ describe("runHostedDeviceSyncPass", () => {
     expect(runSchedulerOnce).not.toHaveBeenCalled();
     expect(drainWorker).not.toHaveBeenCalled();
     expect(mocks.reconcileHostedDeviceSyncControlPlaneState).not.toHaveBeenCalled();
-    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
-    expect(close).toHaveBeenCalledTimes(1);
+    await expectDenseRawRetentionMailboxWakeAt(null);
+    expect(close).not.toHaveBeenCalled();
   });
 
   it("carries staged dirty acks when foreground input arrives after dirty fetch", async () => {
@@ -2840,6 +3019,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValue(true);
 
@@ -2918,6 +3098,7 @@ describe("runHostedDeviceSyncPass", () => {
     const runSchedulerOnce = vi.fn(async () => undefined);
     const drainWorker = vi.fn(async () => 0);
     const shouldYield = vi.fn()
+      .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValueOnce(false)
       .mockReturnValue(true);

@@ -720,7 +720,7 @@ export async function sendLinqMessage(
     input.directRecipientPhoneNumber,
   )
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
-  const shouldAttemptNativeCard =
+  const shouldAttemptDirectNativeCard =
     card !== null &&
     card.kind !== 'exercise_routine' &&
     input.targetKind === 'thread' &&
@@ -728,34 +728,44 @@ export async function sendLinqMessage(
     input.nativeReplyRequested !== true &&
     directRecipientPhoneNumber !== null &&
     idempotencyKey !== null
+  const shouldAttemptGroupChallengeCard =
+    card?.kind === 'challenge_standings' &&
+    (input.targetKind === 'thread' || input.targetKind === 'explicit') &&
+    input.threadIsDirect === false &&
+    input.nativeReplyRequested !== true &&
+    idempotencyKey !== null
+  const shouldAttemptNativeCard =
+    shouldAttemptDirectNativeCard || shouldAttemptGroupChallengeCard
   let appCardFallbackIdempotencyKey: string | null = null
   if (shouldAttemptNativeCard) {
-    let capabilityAvailable = false
-    try {
-      capabilityAvailable = await checkLinqIMessageCapability(
-        {
-          address: directRecipientPhoneNumber,
-          from: normalizeOptionalText(input.fromPhoneNumber),
-        },
-        {
-          env,
-          fetchImplementation:
-            dependencies.appCardCapabilityFetchImplementation
-            ?? dependencies.fetchImplementation,
-          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
-        },
-      )
-    } catch (error) {
-      if (
-        dependencies.signal?.aborted
-        || providerRequestWasSkipped(error)
-      ) {
-        throw error
+    let capabilityAvailable = shouldAttemptGroupChallengeCard
+    if (shouldAttemptDirectNativeCard) {
+      try {
+        capabilityAvailable = await checkLinqIMessageCapability(
+          {
+            address: directRecipientPhoneNumber,
+            from: normalizeOptionalText(input.fromPhoneNumber),
+          },
+          {
+            env,
+            fetchImplementation:
+              dependencies.appCardCapabilityFetchImplementation
+              ?? dependencies.fetchImplementation,
+            ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+          },
+        )
+      } catch (error) {
+        if (
+          dependencies.signal?.aborted
+          || providerRequestWasSkipped(error)
+        ) {
+          throw error
+        }
+        dependencies.onAppCardFallbackError?.({
+          error,
+          reason: 'capability_check_failed',
+        })
       }
-      dependencies.onAppCardFallbackError?.({
-        error,
-        reason: 'capability_check_failed',
-      })
     }
     if (capabilityAvailable) {
       try {
@@ -2403,6 +2413,9 @@ async function sendTelegramTextChunkOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (providerRequestWasSkipped(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(

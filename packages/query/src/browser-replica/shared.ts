@@ -13,6 +13,7 @@ import type {
   OverviewMetric,
   OverviewWeeklySampleSummary,
 } from "../overview.ts";
+import type { PersonalPatternReport } from "../personal-patterns.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { TimelineEntry } from "../timeline.ts";
 import type {
@@ -253,6 +254,8 @@ export interface BrowserVaultReplica {
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
+  /** Absent only on replicas produced before Personal Patterns shipped. */
+  personalPatterns?: PersonalPatternReport;
   policy: BrowserVaultReplicaPolicy;
   schema: typeof BROWSER_VAULT_REPLICA_SCHEMA;
   searchRows: BrowserVaultSearchRow[];
@@ -342,6 +345,7 @@ export interface BrowserVaultQueryClient {
 export interface BrowserVaultOverviewView {
   experimentSummary: OverviewExperimentSummary;
   metrics: OverviewMetric[];
+  personalPatterns: PersonalPatternReport;
   recentJournals: OverviewJournalEntry[];
   trackedExperiments: OverviewExperiment[];
   weeklySampleSummaries: OverviewWeeklySampleSummary[];

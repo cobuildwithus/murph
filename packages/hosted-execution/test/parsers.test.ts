@@ -13,13 +13,14 @@ import {
   parseHostedExecutionDirectRoute,
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
+  parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   parseHostedExecutionWake,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
   parseHostedRuntimeGroupToolRequest,
   parseHostedRuntimeGroupToolResponse,
-  parseHostedRuntimeNewsletterToolRequest,
-  parseHostedRuntimeNewsletterToolResponse,
+  parseHostedRuntimeGroupEmailEffectRequest,
+  parseHostedRuntimeGroupEmailEffectResponse,
 } from "../src/parsers.ts";
 
 describe("parseHostedExecutionDirectRoute", () => {
@@ -36,6 +37,54 @@ describe("parseHostedExecutionDirectRoute", () => {
       threadId: "chat_123",
       threadIsDirect: true,
     })).toThrow(/unsupported field "threadIsDirect"/u);
+  });
+});
+
+describe("parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority", () => {
+  it("accepts one exact completion proof and rejects extra fields", () => {
+    const authority = {
+      answeredMailboxItemIds: [`aask_done_${"b".repeat(64)}`],
+      assistantAskCompletionExpiresAt: "2026-04-08T00:10:00.000Z",
+      idempotencyKey: `assistant-ask-private:aask_done_${"b".repeat(64)}`,
+      responseTextDigest: "c".repeat(64),
+      route: {
+        actorId: null,
+        channel: "telegram",
+        delivery: { kind: "thread", target: "private-thread" },
+        identityId: null,
+        threadId: "private-thread",
+        threadIsDirect: true,
+      },
+    };
+    expect(
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority(
+        authority,
+      ),
+    ).toEqual(authority);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        assistantAskFallback: false,
+      })
+    ).toThrow(/unsupported field "assistantAskFallback"/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        answeredMailboxItemIds: [""],
+      })
+    ).toThrow(/answeredMailboxItemIds\[0\] must be a non-empty string/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        idempotencyKey: "",
+      })
+    ).toThrow(/idempotencyKey must be a non-empty string/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        idempotencyKey: "assistant-ask-private:wrong-completion",
+      })
+    ).toThrow(/idempotencyKey is invalid/u);
   });
 });
 
@@ -472,6 +521,10 @@ describe("parseHostedExecutionEvent", () => {
             markSeenOnDeliveryAccepted: true,
           },
           instructions: "Send exactly the signup welcome.",
+          privateAssistantAskCompletion: {
+            expiresAt: "2026-04-08T00:10:00.000Z",
+            requestId: `aask_req_${"a".repeat(64)}`,
+          },
           responsePolicy: {
             kind: "require_send_exact_text",
             text: "Welcome to Murph, your personal health assistant.",
@@ -504,6 +557,10 @@ describe("parseHostedExecutionEvent", () => {
           markSeenOnDeliveryAccepted: true,
         },
         instructions: "Send exactly the signup welcome.",
+        privateAssistantAskCompletion: {
+          expiresAt: "2026-04-08T00:10:00.000Z",
+          requestId: `aask_req_${"a".repeat(64)}`,
+        },
         responsePolicy: {
           kind: "require_send_exact_text",
           text: "Welcome to Murph, your personal health assistant.",
@@ -526,6 +583,32 @@ describe("parseHostedExecutionEvent", () => {
       },
       userId: "user-1",
     });
+  });
+
+  it("strictly parses private Assistant Ask completion notification proof", () => {
+    const event = {
+      kind: "assistant.notification.requested",
+      notification: {
+        instructions: "Send the exact private answer.",
+        privateAssistantAskCompletion: {
+          expiresAt: "2026-04-08T00:10:00.000Z",
+          requestId: `aask_req_${"a".repeat(64)}`,
+          unsupported: true,
+        },
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: { kind: "thread", target: "private-thread" },
+          identityId: null,
+          threadId: "private-thread",
+          threadIsDirect: true,
+        },
+      },
+      userId: "user-1",
+    };
+    expect(() => parseHostedExecutionEvent(event)).toThrow(
+      "privateAssistantAskCompletion contains unsupported field",
+    );
   });
 
   it("round-trips external thread route authority for group notifications", () => {
@@ -659,40 +742,6 @@ describe("parseHostedExecutionEvent", () => {
       provider: "oura",
       reason: "webhook_hint",
       userId: "user-1",
-    });
-  });
-
-  it("parses group newsletter email-needed events and wakes", () => {
-    expect(parseHostedExecutionEvent({
-      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      userId: "member_123",
-    })).toEqual({
-      directRoute: { channel: "linq", threadId: "linq_home_thread_123" },
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      userId: "member_123",
-    });
-
-    expect(parseHostedExecutionWake({
-      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
-      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      occurredAt: "2026-04-26T00:00:00.000Z",
-      userId: "member_123",
-    })).toEqual({
-      directRoute: { channel: "telegram", threadId: "telegram_thread_123" },
-      eventId: "group-newsletter.email-needed:member_123:hgrp_123",
-      groupDisplayName: "Tempo Crew",
-      groupId: "hgrp_123",
-      kind: "group-newsletter.email-needed",
-      occurredAt: "2026-04-26T00:00:00.000Z",
-      userId: "member_123",
     });
   });
 
@@ -2208,6 +2257,31 @@ describe("parseHostedRuntimeGroupTool", () => {
     })).toThrow(/not allowed/u);
   });
 
+  it("accepts the former eight-scope newsletter recipe only for email preparation", () => {
+    const projectionScopes = [
+      { projectionKind: "steps-days.v0" },
+      { projectionKind: "activity-days.v0" },
+      { projectionKind: "workout-days.v0" },
+      { projectionKind: "workouts.v0" },
+      { projectionKind: "sleep-duration-days.v0" },
+      { projectionKind: "sleep-times.v0" },
+      { projectionKind: "resting-heart-rate-days.v0" },
+      { projectionKind: "hrv-days.v0" },
+    ];
+
+    expect(parseHostedRuntimeGroupToolRequest({
+      action: "prepare_email",
+      projectionScopes,
+    })).toEqual({
+      action: "prepare_email",
+      projectionScopes,
+    });
+    expect(() => parseHostedRuntimeGroupToolRequest({
+      action: "read_shared",
+      projectionScopes: projectionScopes.slice(0, 4),
+    })).toThrow(/between 1 and 3 entries/u);
+  });
+
   it("parses referral requests with channel-qualified trusted sender evidence", () => {
     expect(parseHostedRuntimeGroupToolRequest({
       action: "read_usage_referral",
@@ -3475,7 +3549,7 @@ describe("parseHostedRuntimeGroupTool", () => {
   });
 });
 
-describe("parseHostedRuntimeNewsletterTool", () => {
+describe("parseHostedRuntimeGroupEmailEffect", () => {
   const AUTHORIZATION_PROOF = "a".repeat(64);
   const PARTICIPANT = {
     authorizedShares: [],
@@ -3484,46 +3558,55 @@ describe("parseHostedRuntimeNewsletterTool", () => {
   };
 
   it("parses prepare and send requests", () => {
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
-      groupId: "group_123",
+    expect(parseHostedRuntimeGroupEmailEffectRequest({
+      action: "prepare_email",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "workout-days.v0" },
+        { projectionKind: "sleep-duration-days.v0" },
+      ],
     })).toEqual({
-      action: "prepare",
+      action: "prepare_email",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "workout-days.v0" },
+        { projectionKind: "sleep-duration-days.v0" },
+      ],
     });
-    expect(() => parseHostedRuntimeNewsletterToolRequest({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectRequest({
+      action: "prepare_email",
       groupId: "group_123",
-      retiredVersionMarker: true,
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
     })).toThrow(/not allowed/u);
 
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "send",
-      groupId: "group_123",
+    expect(parseHostedRuntimeGroupEmailEffectRequest({
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: "Weekly health note",
     })).toEqual({
-      action: "send",
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: "Weekly health note",
     });
 
-    expect(parseHostedRuntimeNewsletterToolRequest({
-      action: "send",
-      groupId: "group_123",
+    expect(parseHostedRuntimeGroupEmailEffectRequest({
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
     })).toEqual({
-      action: "send",
+      action: "send_email",
       html: "<p>Weekly health note</p>",
       subject: "Weekly health note",
       text: null,
     });
 
     expect(() =>
-      parseHostedRuntimeNewsletterToolRequest({
-        action: "send",
+      parseHostedRuntimeGroupEmailEffectRequest({
+        action: "send_email",
         groupId: "group_123",
         html: "<p>Weekly health note</p>",
         scheduledAutomationAuthority: {
@@ -3534,30 +3617,28 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       })
     ).toThrow(/not allowed/u);
     expect(() =>
-      parseHostedRuntimeNewsletterToolRequest({
-        action: "send",
-        groupId: "group_123",
+      parseHostedRuntimeGroupEmailEffectRequest({
+        action: "send_email",
         html: " ",
         subject: "Weekly health note",
       })
     ).toThrow(/html must not be blank/u);
     expect(() =>
-      parseHostedRuntimeNewsletterToolRequest({
-        action: "send",
-        groupId: "group_123",
+      parseHostedRuntimeGroupEmailEffectRequest({
+        action: "send_email",
         html: "<p>Weekly health note</p>",
         subject: " ",
       })
     ).toThrow(/subject must not be blank/u);
-    expect(() => parseHostedRuntimeNewsletterToolRequest({
+    expect(() => parseHostedRuntimeGroupEmailEffectRequest({
       action: "retired_action",
       groupId: "group_123",
     })).toThrow(/action is not supported/u);
   });
 
   it("requires authorization snapshots in successful prepare responses", () => {
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         groupId: "group_123",
         missingEmailParticipants: [],
@@ -3566,8 +3647,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     })).toThrow(/authorizationProof/u);
 
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3583,8 +3664,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         { projectionScopeKey: "steps-days.v0", shareId: "share_steps" },
       ],
     };
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3593,7 +3674,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         status: "ok",
       },
     })).toEqual({
-      action: "prepare",
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3603,14 +3684,14 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
       },
     })).toEqual({
-      action: "prepare",
+      action: "prepare_email",
       result: {
         status: "unavailable",
         unavailableReason: "not_group_runtime",
@@ -3618,8 +3699,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     });
 
     expect(() =>
-      parseHostedRuntimeNewsletterToolResponse({
-        action: "prepare",
+      parseHostedRuntimeGroupEmailEffectResponse({
+        action: "prepare_email",
         result: {
           authorizationProof: AUTHORIZATION_PROOF,
           groupId: "group_123",
@@ -3631,7 +3712,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     ).toThrow(/not allowed/u);
   });
 
-  it("bounds newsletter participants and per-participant authorization snapshots", () => {
+  it("bounds group email participants and per-participant authorization snapshots", () => {
     const participant = {
       ...PARTICIPANT,
       authorizedShares: Array.from({ length: 101 }, (_, index) => ({
@@ -3639,8 +3720,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         shareId: `share_${index}`,
       })),
     };
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3650,8 +3731,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     })).toThrow(/authorizedShares must contain at most 100 entries/u);
 
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
-      action: "prepare",
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
+      action: "prepare_email",
       result: {
         authorizationProof: AUTHORIZATION_PROOF,
         groupId: "group_123",
@@ -3663,7 +3744,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
   });
 
   it("rejects unsupported response actions", () => {
-    expect(() => parseHostedRuntimeNewsletterToolResponse({
+    expect(() => parseHostedRuntimeGroupEmailEffectResponse({
       action: "retired_action",
       result: {
         status: "unavailable",
@@ -3672,16 +3753,16 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     })).toThrow(/not supported/u);
   });
 
-  it("parses newsletter send outcomes and validates partial counts", () => {
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+  it("parses group email send outcomes and validates partial counts", () => {
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
         status: "accepted",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
@@ -3689,15 +3770,15 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
         status: "sent",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         participantCount: 2,
         skippedNoEmailMemberIds: ["member_without_email"],
@@ -3705,8 +3786,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         failedRecipientCount: 1,
         participantCount: 3,
@@ -3715,7 +3796,7 @@ describe("parseHostedRuntimeNewsletterTool", () => {
         status: "partial_failure",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         failedRecipientCount: 1,
         participantCount: 3,
@@ -3725,15 +3806,15 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         participantCount: 0,
         skippedNoEmailMemberIds: ["member_without_email"],
         status: "no_recipients",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         participantCount: 0,
         skippedNoEmailMemberIds: ["member_without_email"],
@@ -3741,14 +3822,14 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       },
     });
 
-    expect(parseHostedRuntimeNewsletterToolResponse({
-      action: "send",
+    expect(parseHostedRuntimeGroupEmailEffectResponse({
+      action: "send_email",
       result: {
         status: "unavailable",
         unavailableReason: "scheduled_authority_required",
       },
     })).toEqual({
-      action: "send",
+      action: "send_email",
       result: {
         status: "unavailable",
         unavailableReason: "scheduled_authority_required",
@@ -3756,8 +3837,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
     });
 
     expect(() =>
-      parseHostedRuntimeNewsletterToolResponse({
-        action: "send",
+      parseHostedRuntimeGroupEmailEffectResponse({
+        action: "send_email",
         result: {
           participantCount: 1,
           skippedNoEmailMemberIds: [],
@@ -3766,8 +3847,8 @@ describe("parseHostedRuntimeNewsletterTool", () => {
       })
     ).toThrow(/participantCount must be 0/u);
     expect(() =>
-      parseHostedRuntimeNewsletterToolResponse({
-        action: "send",
+      parseHostedRuntimeGroupEmailEffectResponse({
+        action: "send_email",
         result: {
           failedRecipientCount: -1,
           participantCount: 1,
@@ -3787,6 +3868,17 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
     })).toEqual({
       action: "start_checkout",
     });
+    expect(parseHostedRuntimeFamilyPlanToolRequest({
+      action: "start_checkout",
+      confirmedTrialConversion: true,
+    })).toEqual({
+      action: "start_checkout",
+      confirmedTrialConversion: true,
+    });
+    expect(() => parseHostedRuntimeFamilyPlanToolRequest({
+      action: "start_checkout",
+      confirmedTrialConversion: false,
+    })).toThrow(/confirmedTrialConversion must be true/u);
 
     expect(parseHostedRuntimeFamilyPlanToolRequest({
       action: "create_invite",
@@ -3878,9 +3970,21 @@ describe("parseHostedRuntimeFamilyPlanTool", () => {
           pulse: { active: 1, billed: 1, invited: 0, remaining: 0, used: 1 },
         },
         seats: { active: 3, billed: 4, invited: 1, max: 6, min: 2, remaining: 0, used: 4 },
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
+        },
       },
     })).toMatchObject({
       result: {
+        activeTrialConversion: {
+          includedPulseSeats: 2,
+          monthlyAmountUsdCents: 1_400,
+          perSeatMonthlyAmountUsdCents: 700,
+          trialEndsImmediately: true,
+        },
         members: [{ planCode: "pulse" }, { planCode: "edge" }, { planCode: "max" }],
         pendingInvites: [{ planCode: "edge" }],
         plans: {

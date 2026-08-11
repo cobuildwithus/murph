@@ -44,11 +44,6 @@ import {
   DatabaseHealthDurableObject,
 } from "../../src/worker/database-health-durable-object.ts";
 import {
-  armTemporalMailboxSignalFaultForTest,
-  clearTemporalMailboxSignalFaultForTest,
-  consumeTemporalMailboxSignalFaultForTest,
-} from "../support/temporal-mailbox-signal-fault-control.ts";
-import {
   armInvalidRunnerOutputBundleFault,
   clearRunnerInvocationState,
   clearRunnerOutputBundleFault,
@@ -329,51 +324,6 @@ export default {
 
 async function handleTestRoute(request: Request): Promise<Response | null> {
   const url = new URL(request.url);
-  const temporalMailboxSignalFaultRoute =
-    readTemporalMailboxSignalFaultRoute(url.pathname);
-
-  if (
-    temporalMailboxSignalFaultRoute
-    && request.method === "POST"
-  ) {
-    const { action, userId } = temporalMailboxSignalFaultRoute;
-    if (action === "clear") {
-      return Response.json({
-        ...clearTemporalMailboxSignalFaultForTest(userId),
-        ok: true,
-      });
-    }
-
-    const body: unknown = await request.json();
-    if (!isTemporalMailboxSignalFaultRequestBody(body)) {
-      return Response.json(
-        { error: "mailboxItemId is required." },
-        { status: 400 },
-      );
-    }
-
-    if (action === "arm") {
-      try {
-        return Response.json(armTemporalMailboxSignalFaultForTest({
-          mailboxItemId: body.mailboxItemId,
-          userId,
-        }));
-      } catch (error) {
-        return Response.json(
-          { error: error instanceof Error ? error.message : String(error) },
-          { status: 409 },
-        );
-      }
-    }
-
-    return Response.json({
-      consume: await consumeTemporalMailboxSignalFaultForTest({
-        mailboxItemId: body.mailboxItemId,
-        userId,
-      }, 30_000),
-    });
-  }
-
   if (url.pathname === "/__test/wake-with-outcome" && request.method === "POST") {
     const wakePayload: unknown = await request.json();
     const wake = readTestWake(wakePayload);
@@ -489,51 +439,6 @@ async function handleTestRoute(request: Request): Promise<Response | null> {
   }
 
   return null;
-}
-
-interface TemporalMailboxSignalFaultRoute {
-  action: "arm" | "clear" | "consume";
-  userId: string;
-}
-
-function readTemporalMailboxSignalFaultRoute(
-  pathname: string,
-): TemporalMailboxSignalFaultRoute | null {
-  const match = pathname.match(
-    /^\/__test\/users\/([^/]+)\/temporal-mailbox-signal-fault\/(arm|clear|consume)$/u,
-  );
-  if (!match) {
-    return null;
-  }
-
-  const encodedUserId = match[1];
-  const action = match[2];
-  if (!encodedUserId || !isTemporalMailboxSignalFaultAction(action)) {
-    return null;
-  }
-
-  try {
-    const userId = decodeURIComponent(encodedUserId).trim();
-    return userId ? { action, userId } : null;
-  } catch {
-    return null;
-  }
-}
-
-function isTemporalMailboxSignalFaultAction(
-  value: string,
-): value is TemporalMailboxSignalFaultRoute["action"] {
-  return value === "arm" || value === "clear" || value === "consume";
-}
-
-function isTemporalMailboxSignalFaultRequestBody(
-  value: unknown,
-): value is { mailboxItemId: string } {
-  return typeof value === "object"
-    && value !== null
-    && "mailboxItemId" in value
-    && typeof value.mailboxItemId === "string"
-    && value.mailboxItemId.trim().length > 0;
 }
 
 function getUserRunnerStub(userId: string) {

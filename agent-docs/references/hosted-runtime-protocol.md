@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 
 ## Decision
 
@@ -40,9 +40,11 @@ The live ownership split is:
   The runtime, not the host, keeps dirty state warm through the configured idle
   floor. The exact assistant wake projected directly by the current foreground
   assistant phase may run once before that floor without checkpointing. The
-  exact phone-call-result and usage-referral-reward notification families may
-  also run queue-only through their causal outbox intent after fresh
-  conversation work has priority; generic notifications remain excluded.
+  exact phone-call-result, usage-referral-reward, and `aask_done_*` private
+  Assistant Ask notification families may also run queue-only through their
+  causal outbox intent after fresh conversation work has priority; generic
+  notifications remain excluded. Non-idempotent provider work still waits for
+  the resulting durable checkpoint.
   Inherited or committed wakes and durability barriers remain checkpoint-first.
   At the idle floor, or on shutdown, the runtime checkpoints remaining dirty
   state before returning success. When Cloudflare reports container activity
@@ -115,9 +117,9 @@ pull pending device-sync dirty rows
 for Linq input with link parts, attachment-bearing non-email input, and direct raw email, run best-effort local inbox projection plus audio/video transcript enrichment without checkpointing it
 run local runtime work until idle or budget
 while dirty and before the idle floor, service fresh foreground input, the
-  exact safe Assistant Ask shapes, and only replay-safe phone-call-result or
-  usage-referral-reward notifications without publishing a snapshot; other
-  wakes do not shorten the floor
+  exact safe Assistant Ask shapes, and only replay-safe phone-call-result,
+  usage-referral-reward, or `aask_done_*` private Assistant Ask notifications
+  without publishing a snapshot; other wakes do not shorten the floor
 at the idle floor, or on shutdown, checkpoint final dirty runtime state with
   checkpoint reason idle_shutdown; commit
   the valid workspace-CAS snapshot even when web observes newer conversation input
@@ -258,6 +260,24 @@ active runtime, wrong runner, wrong user, wrong provider, missing signing
 config, or validator failure all fail closed without provider secret
 injection. `ctx.containerId` and RunnerContainer active-user recovery are not
 provider-egress authority.
+Codex-native managed OpenAI standalone search uses that same boundary with one
+additional exact operation: `POST /v1/alpha/search`. The Worker rejects every
+other OpenAI search method or path, validates the signed OpenAI provider
+credential against the active user and runner, strips caller and runtime
+authority headers, and injects the Worker-owned OpenAI credential only after
+authorization succeeds.
+The pinned Codex release has a test-only, version-bound route-disposition
+inventory whose authoritative review input is the upstream
+`codex-rs/codex-api/src` tree. Required Linux CI resolves the version-derived
+OpenAI tag and verifies its exact commit and source-tree object, so stale
+provenance cannot pass after a pin change. Offline tests scan the installed
+native artifact for conservative `/v1/**` plus separated provider-relative
+candidates, require every discovered candidate to be explicitly classified,
+corroborate enabled source-owned Codex paths, and run a real App Server
+web-search turn through the production Worker interceptor. The inventory never
+generates or widens the Worker policy: a new source identity or binary candidate
+fails closed until its origin, method, transport, hosted reachability, and
+production policy are reviewed.
 Runtime-controlled delivery/control provider integrations such as Linq and
 Telegram still use provider-egress token proof when exact runtime
 authority headers are absent. There is no tokenless active-user-fence provider
@@ -326,7 +346,20 @@ time. It excludes connection, account, device, and provider identifiers,
 credentials, provider payloads and errors, raw health values, and private
 diagnostics. A connection sync-job time is not evidence that a health record or
 challenge metric arrived. Device data is never produced by the grantor runtime
-or stored in the share snapshot column.
+or stored in the share snapshot column. Duplicate public labels select one
+complete observation from the latest connection `connectedAt` and source
+`lastSeenAt` generation; fields from different generations are never combined.
+
+Reported Deep and REM sleep rows for the member's current local date are
+available immediately. The producer still rejects rows dated after the
+member-local current date, but it does not attach a calendar-only provisional
+flag to a reported value. When a user explicitly asks whether shared data is
+visible now, yet, or after a source change, the group-authorized answer model
+must invoke one fresh exact-scope `read_shared` call before answering instead
+of relying on earlier tool output, conversation context, or connection
+timestamps. For a private group consultation, the private root still only
+admits `ask`; the detached joined-group child owns this read and returns the
+bounded answer through the existing durable completion path.
 
 The runtime's shared reader is a synchronous no-I/O adapter. Constructing it,
 starting or resuming App Server, and admitting foreground, scheduled,
@@ -604,13 +637,29 @@ cancellation, or mailbox-budget exhaustion stops the drain.
 
 The same bounded pass admits only
 `assistant.notification.requested:phone-call-result:*` and
-`assistant.notification.requested:usage-referral-reward:*`. Import eligibility
-does not grant dispatch authority: the foreground-causal system-mailbox selector
-must match the exact dedupe-key family again, then collect only the outbox intent
-returned by that mailbox execution. Its persisted `sending` transition precedes
-provider entry, replay observes the same intent, and an older generic
-notification or unrelated pending delivery cannot hitchhike. Fresh conversation
-input continues to preempt this pass.
+`assistant.notification.requested:usage-referral-reward:*`, plus exact private
+Assistant Ask completions under `aask_done_*`. Import eligibility does not grant
+dispatch authority: the foreground-causal system-mailbox selector must match the
+exact dedupe-key family again, then collect only the outbox intent returned by
+that mailbox execution. Its persisted `sending` transition precedes provider
+entry, replay observes the same intent, and an older generic notification or
+unrelated pending delivery cannot hitchhike. Private completions retain their
+Web-owned exact-text, member, expiry, and direct-route assertion at every
+provider attempt; non-idempotent transport work remains checkpoint-gated. Fresh
+conversation input continues to preempt this pass.
+
+A legacy usage-referral notification can be authority-less even after Web has
+repaired its producer, because the local system mailbox may already have
+persisted the old wake and advanced the import watermark. The bounded Web scan
+therefore re-signals only the existing pointer. Immediately before system-
+mailbox execution, the runtime recognizes only the exact direct-Linq explicit
+referral identity and asks the existing signed external-route authority owner
+to reassert its frozen member, channel, directness, and target. An authorized
+candidate gains proof only in the in-memory wake and then uses the ordinary
+audience guard and provider-entry recheck. The exact non-retryable unauthorized code records a terminal no-send for the same pending item so the contiguous handled-through
+sequence can advance; missing transport, timeout, and other retryable failures
+leave that item ordered and pending. No payload mutation, replacement item,
+cursor rewind, or fallback route exists.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
@@ -2269,12 +2318,27 @@ their own replica-version checks. Workspace checkpoint timestamps are not
 content-version signals for replica freshness. Stale session reads may still
 serve a usable replica, but they must mark it stale and request refresh after the
 HTTP response.
+An explicit authenticated browser refresh may also mark a metadata-current
+replica pending after a product-owned write handoff. The current readable
+replica stays visible while the shared browser-vault client uses its existing
+fast-then-slow pending polling. An in-memory marker keeps that explicit cycle
+pending until the requested ref changes or the provider ends; ordinary current
+non-pending replicas do not poll, and the assistant runtime remains the sole
+owner of replica hashing and publication.
 Web represents that request as ordinary low-priority runtime work only when its
 freshness policy explicitly asks for it; normal nudges do not become browser-vault
 refresh sweeps just because a workspace has no replica yet. Foreground work may
 schedule refresh as ordinary runtime work, but workspace snapshot checkpoints
 write only the workspace snapshot ref; they do not publish browser-vault
 replicas.
+The browser refresh control identity is stable for one workspace version.
+Repeated browser polls reuse the durable mailbox row and do not signal Temporal
+again. A later workspace checkpoint creates the next refresh identity. The
+existing scheduled mailbox handoff sweep re-signals an unconsumed browser
+refresh row when its first Temporal signal failed. If a workspace checkpoint
+creates another browser-only wake before the requested refresh finishes, the
+runtime finishes or terminally defers that refresh before it imports the later
+request. Conversation and other foreground work still preempt refresh work.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a

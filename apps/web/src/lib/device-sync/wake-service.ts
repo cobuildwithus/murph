@@ -8,6 +8,7 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
 import type {
+  DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
   DeviceSyncJobInput,
   DeviceSyncRegistry,
@@ -29,6 +30,8 @@ import {
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
 import {
+  bucketHostedDeviceSyncEventToProviderSendDelay,
+  measureHostedDeviceSyncProviderSendToWebhookMs,
   sanitizeHostedRuntimeErrorCode,
   sanitizeHostedRuntimeErrorText,
   type HostedExecutionDeviceSyncJobHint,
@@ -67,6 +70,10 @@ import {
   isHostedSourceDisconnectFenced,
 } from "./connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore, type HostedPrismaTransactionClient } from "./prisma-store";
+import {
+  normalizeHostedDeviceSyncLifecycleStatus,
+  normalizeHostedDeviceSyncSetupPhase,
+} from "./prisma-store/connection-records";
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import {
@@ -960,6 +967,8 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
 export async function disconnectHostedDeviceSyncConnection(input: {
   connectionId: string;
   registry: DeviceSyncRegistry;
+  revokeAccess?: DeviceConnectionHandler["revokeAccess"] | null;
+  revokeUnavailableWarning?: { code: string; message: string } | null;
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<{
@@ -1016,8 +1025,9 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   let revokeFailure: { code: string; message: string } | undefined;
 
   if (storedAccount) {
-    const provider = input.registry.get(existing.provider);
-    const revokeAccess = provider?.connectionHandler?.revokeAccess;
+    const revokeAccess = input.revokeAccess === undefined
+      ? input.registry.get(existing.provider)?.connectionHandler?.revokeAccess
+      : input.revokeAccess ?? undefined;
 
     const shouldRevoke = revokeAccess && (
       existing.status !== "disconnected"
@@ -1038,6 +1048,8 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
         revokeFailure = { code, message };
       }
+    } else if (input.revokeUnavailableWarning) {
+      revokeFailure = input.revokeUnavailableWarning;
     }
   }
 
@@ -1641,12 +1653,13 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
   };
   claimToken: string;
   now: string;
+  ownerId: string | null;
   store: PrismaDeviceSyncControlPlaneStore;
   traceId?: string | null;
   webhook: DeviceSyncIngressWebhook;
 }): Promise<void> {
   const traceId = normalizeNullableString(input.traceId);
-  const ownerId = await input.store.getConnectionOwnerId(input.account.id);
+  const ownerId = normalizeNullableString(input.ownerId);
 
   if (!ownerId) {
     console.warn("Rejecting hosted device-sync webhook without an owner mapping.", {
@@ -1665,8 +1678,11 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
 
   const resourceCategory = normalizeNullableString(input.webhook.resourceCategory);
   const dirtyResources = buildHostedWebhookDirtyResources({
+    eventOccurredAt: input.webhook.occurredAt ?? null,
     jobs: input.webhook.jobs ?? [],
     provider: input.account.provider,
+    providerSentAt: input.webhook.providerSentAt ?? null,
+    webhookReceivedAt: input.now,
   });
   await persistHostedDeviceSyncWebhookAccepted({
     acceptedAt: input.now,
@@ -2200,23 +2216,50 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
       input.userId,
       input.connectionId,
       async (tx) => {
-      const current = await input.store.getConnectionForUser(
-        input.userId,
-        input.connectionId,
-        tx,
-      );
+      const current = await tx.deviceConnection.findUnique({
+        where: {
+          id: input.connectionId,
+        },
+        select: {
+          connectedAt: true,
+          provider: true,
+          providerApplicationId: true,
+          providerApplicationRevision: true,
+          setupPhase: true,
+          status: true,
+          userId: true,
+        },
+      });
       if (
         !current
+        || current.userId !== input.userId
         || current.provider !== input.provider
-        || current.status !== "active"
-        || current.connectedAt !== input.expectedConnectedAt
+        || normalizeHostedDeviceSyncLifecycleStatus(current.status) !== "active"
+        || current.connectedAt.toISOString() !== input.expectedConnectedAt
       ) {
         await completeHostedWebhookTraceTx(input, tx);
         return {
           wakeMailboxItemId: null,
         };
       }
-      if (isDeviceSyncConnectionSetupPending(current)) {
+      // The hosted webhook endpoint authenticates only the shared/operator
+      // provider application. A provider-account row may have been rebound to
+      // a private application after the webhook's initial account lookup, so
+      // the durable admission owner must reject that stale authority while it
+      // holds the connection lock. Private connections continue through their
+      // scheduled reconciliation path until private webhook ownership exists.
+      if (
+        current.providerApplicationId !== null
+        || current.providerApplicationRevision !== null
+      ) {
+        await completeHostedWebhookTraceTx(input, tx);
+        return {
+          wakeMailboxItemId: null,
+        };
+      }
+      if (isDeviceSyncConnectionSetupPending({
+        setupPhase: normalizeHostedDeviceSyncSetupPhase(current.setupPhase),
+      })) {
         throw deviceSyncError({
           code: "WEBHOOK_ACCOUNT_NOT_READY",
           message: "Device sync setup changed before webhook work could be committed.",
@@ -2240,19 +2283,8 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         }
       }
 
-      // Level webhooks may be coalesced only after committed dirty state exists.
-      // Durable webhook work must be persisted or retried; dirty state alone never satisfies it.
-      // Dirty state dedupes work; only the clean-to-dirty transition appends a durable runtime handoff.
-      if (
-        input.acceptanceMode === "level_dirty_hint"
-        && await input.store.hasPendingDirtyConnection(input.connectionId, tx)
-      ) {
-        await completeHostedWebhookTraceTx(input, tx);
-        return {
-          wakeMailboxItemId: null,
-        };
-      }
-
+      // Every accepted hint merges into dirty state so coalesced timing remains
+      // representative. Only the clean-to-dirty transition appends a wake.
       const dirtyUpdate = await input.store.upsertDirtyConnection({
         connectionId: input.connectionId,
         dirtyAt: input.occurredAt,
@@ -2308,19 +2340,24 @@ async function persistHostedDeviceSyncWebhookAccepted(input: {
         }
         wakeMailboxItemId = mailboxAppend.item.id;
       }
-      await input.store.createSignal({
-        userId: input.userId,
-        connectionId: input.connectionId,
-        provider: input.provider,
-        kind: "webhook_hint",
-        occurredAt: input.occurredAt,
-        traceId: input.traceId,
-        eventType: input.eventType,
-        resourceCategory: input.resourceCategory ?? null,
-        sourceProviderSlug: input.dataSourceProviderSlug,
-        createdAt: input.acceptedAt,
-        tx,
-      });
+      if (
+        input.acceptanceMode !== "level_dirty_hint"
+        || dirtyUpdate.shouldRequestWake
+      ) {
+        await input.store.createSignal({
+          userId: input.userId,
+          connectionId: input.connectionId,
+          provider: input.provider,
+          kind: "webhook_hint",
+          occurredAt: input.occurredAt,
+          traceId: input.traceId,
+          eventType: input.eventType,
+          resourceCategory: input.resourceCategory ?? null,
+          sourceProviderSlug: input.dataSourceProviderSlug,
+          createdAt: input.acceptedAt,
+          tx,
+        });
+      }
 
       return {
         wakeMailboxItemId,
@@ -2469,8 +2506,11 @@ function normalizeHostedDeviceSyncJobHints(input: {
 }
 
 function buildHostedWebhookDirtyResources(input: {
+  eventOccurredAt?: string | null;
   jobs: readonly DeviceSyncJobInput[];
   provider: string;
+  providerSentAt?: string | null;
+  webhookReceivedAt?: string | null;
 }): HostedDeviceSyncDirtyResource[] {
   const resources: HostedDeviceSyncDirtyResource[] = [];
 
@@ -2478,6 +2518,7 @@ function buildHostedWebhookDirtyResources(input: {
     const payload = shapeHostedDeviceSyncJobHintPayload(input.provider, job);
     resources.push({
       count: 1,
+      ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: job.kind,
       payload: readHostedDirtyResourcePayload(payload),
       resource: readHostedDirtyResourceString(payload.resource),
@@ -2491,6 +2532,7 @@ function buildHostedWebhookDirtyResources(input: {
   if (resources.length === 0) {
     resources.push({
       count: 1,
+      ...buildHostedWebhookDirtyResourceTiming(input),
       jobKind: "reconcile",
       resource: null,
       resourceCategory: null,
@@ -2501,6 +2543,32 @@ function buildHostedWebhookDirtyResources(input: {
   }
 
   return resources;
+}
+
+function buildHostedWebhookDirtyResourceTiming(input: {
+  eventOccurredAt?: string | null;
+  providerSentAt?: string | null;
+  webhookReceivedAt?: string | null;
+}): Pick<
+  HostedDeviceSyncDirtyResource,
+  "eventToProviderSendBucket" | "firstWebhookReceivedAt" | "providerSendToWebhookMs"
+> | Record<string, never> {
+  const eventToProviderSendBucket = bucketHostedDeviceSyncEventToProviderSendDelay({
+    eventOccurredAt: input.eventOccurredAt,
+    providerSentAt: input.providerSentAt,
+  });
+  const firstWebhookReceivedAt = normalizeNullableString(input.webhookReceivedAt);
+  const providerSendToWebhookMs = measureHostedDeviceSyncProviderSendToWebhookMs({
+    providerSentAt: input.providerSentAt,
+    webhookReceivedAt: input.webhookReceivedAt,
+  });
+  return eventToProviderSendBucket || firstWebhookReceivedAt || providerSendToWebhookMs !== null
+    ? {
+        eventToProviderSendBucket,
+        firstWebhookReceivedAt,
+        providerSendToWebhookMs,
+      }
+    : {};
 }
 
 function readHostedDirtyResourceString(value: unknown): string | null {

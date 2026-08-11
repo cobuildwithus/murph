@@ -188,12 +188,14 @@ beforeEach(() => {
   mocks.setOpenMobile.mockClear();
 });
 
-test("Sidebar does not render the Overview page as a navigation item", () => {
+test("Sidebar hides Patterns and the internal Overview route", () => {
   mocks.usePathname.mockReturnValue("/experiments");
 
   const markup = renderToStaticMarkup(createElement(Sidebar));
 
   assert.match(markup, /href="\/home"[^>]*>\s*<svg/);
+  assert.doesNotMatch(markup, /href="\/patterns"/);
+  assert.doesNotMatch(markup, />Patterns<\/a>/);
   assert.doesNotMatch(markup, /href="\/overview"/);
   assert.doesNotMatch(markup, />Overview<\/a>/);
 });
@@ -237,6 +239,15 @@ test("Sidebar keeps the read-only Labs catalog out of navigation", () => {
 
   assert.doesNotMatch(markup, /href="\/labs"/);
   assert.doesNotMatch(markup, />Labs<\/a>/);
+});
+
+test("Sidebar keeps the private Training page out of navigation", () => {
+  mocks.usePathname.mockReturnValue("/training");
+
+  const markup = renderToStaticMarkup(createElement(Sidebar));
+
+  assert.doesNotMatch(markup, /href="\/training"/);
+  assert.doesNotMatch(markup, />Training<\/a>/);
 });
 
 test("Sidebar keeps the Biomarkers tab active across biomarker section routes", () => {

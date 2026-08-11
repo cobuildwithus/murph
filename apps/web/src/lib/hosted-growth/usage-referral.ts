@@ -48,6 +48,7 @@ import {
 } from "../hosted-onboarding/shared";
 import type { HostedWebhookWakeHandoff } from "../hosted-onboarding/webhook-service-types";
 import {
+  bindHostedAssistantNotificationDestination,
   resolveHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
 } from "../hosted-routing/assistant-notification-destination";
@@ -1212,30 +1213,10 @@ export function buildHostedUsageReferralCelebrationWake(input: {
   rewardedAt: Date;
   styleBand: HostedUsageReferralCelebrationStyleBand;
 }) {
-  const routeAuthority = input.destination.externalThreadRouteAuthority
-    ?? (
-      input.destination.conversationShape === "direct-member"
-        && input.destination.route.channel === "telegram"
-        && input.destination.route.threadIsDirect === true
-        ? {
-            channel: "telegram" as const,
-            containerMemberId: input.beneficiaryMemberId,
-            threadId: input.destination.route.delivery.target,
-          }
-        : null
-    );
-  const route =
-    input.destination.conversationShape === "direct-member"
-    && input.destination.route.channel === "linq"
-    && input.destination.route.delivery.kind === "thread"
-      ? {
-          ...input.destination.route,
-          delivery: {
-            ...input.destination.route.delivery,
-            kind: "explicit" as const,
-          },
-        }
-      : input.destination.route;
+  const boundDestination = bindHostedAssistantNotificationDestination({
+    destination: input.destination,
+    memberId: input.beneficiaryMemberId,
+  });
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: `assistant.notification.requested:${input.notificationKey}`,
     memberId: input.beneficiaryMemberId,
@@ -1243,9 +1224,10 @@ export function buildHostedUsageReferralCelebrationWake(input: {
       deliveryDedupeToken: input.notificationKey,
       deliveryDispatchMode: "queue-only",
       deliveryIdempotencyKey: input.notificationKey,
-      ...(routeAuthority
+      ...(boundDestination.externalThreadRouteAuthority
         ? {
-            externalThreadRouteAuthority: routeAuthority,
+            externalThreadRouteAuthority:
+              boundDestination.externalThreadRouteAuthority,
           }
         : {}),
       instructions: [
@@ -1262,7 +1244,7 @@ export function buildHostedUsageReferralCelebrationWake(input: {
         "Do not mention internal accounting, qualification checks, or the other conversation.",
       ].join(" "),
       responsePolicy: { kind: "require_send" },
-      route,
+      route: boundDestination.route,
     },
     occurredAt: input.rewardedAt.toISOString(),
   });
@@ -1743,12 +1725,7 @@ async function readHostedUsageReferralSnapshot(input: {
           rewardUsdMicros: POLICIES[code].rewardUsdMicros,
         }),
       })),
-    trialCreditNotice:
-      personalUsage !== null
-      && personalUsage.status !== "unavailable"
-      && personalUsage.accessKind === "trial"
-        ? "Bonus usage does not extend the trial end date."
-        : null,
+    trialCreditNotice: null,
   };
 }
 

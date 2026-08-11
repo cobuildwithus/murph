@@ -15,6 +15,7 @@ import {
 import type {
   HostedExecutionAssistantNotificationRequestedWake,
   HostedExecutionAssistantNotificationRoute,
+  HostedExecutionExternalThreadRouteAuthority,
   HostedExecutionLogLevel,
   HostedExecutionLogPhase,
   HostedExecutionMemberActivatedWake,
@@ -24,11 +25,15 @@ import type {
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
 import {
+  buildHostedExecutionAssistantNotificationRequestedWake,
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   deriveHostedExecutionErrorCode,
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
 } from "@murphai/hosted-execution";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { emitHostedAssistantContextTraceLog } from "../context-diagnostics.ts";
+import type { HostedRuntimeEffectsPort } from "../platform.ts";
 import { HOSTED_ASSISTANT_WAKE_REASON } from "../wake-candidates.ts";
 import {
   createNoopMailboxEffect,
@@ -37,6 +42,109 @@ import {
 import { emitHostedAssistantProviderTraceLog } from "./provider-trace-log.ts";
 
 type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0];
+
+const HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX =
+  "assistant.notification.requested:";
+const HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX =
+  "usage-referral-reward:";
+
+type HostedAssistantNotificationSystemMailboxPreparation =
+  | {
+      kind: "execute";
+      wake: HostedExecutionAssistantNotificationRequestedWake;
+    }
+  | {
+      kind: "terminal_no_send";
+      outcome: HostedMailboxOutcome;
+      reason: "external_route_authority_stale";
+    };
+
+export type HostedLegacyUsageReferralAuthorityClassification =
+  | "eligible"
+  | "identity_mismatch"
+  | "member_mismatch"
+  | "not_usage_referral"
+  | "policy_mismatch"
+  | "route_mismatch";
+
+/**
+ * Recovers only the one authority-less usage-referral notification shape that
+ * shipped before direct Linq route proof was carried into the mailbox wake.
+ * The local system mailbox already owns the imported payload, so recovery must
+ * happen here rather than by mutating the Web row behind its import watermark.
+ */
+export async function prepareHostedAssistantNotificationSystemMailboxWake(
+  input: {
+    assertExternalThreadRouteAuthority:
+      HostedRuntimeEffectsPort["assertExternalThreadRouteAuthority"];
+    executionContext: AssistantExecutionContext;
+    mailboxDedupeKey: string;
+    signal: AbortSignal | null;
+    wake: HostedExecutionAssistantNotificationRequestedWake;
+  },
+): Promise<HostedAssistantNotificationSystemMailboxPreparation> {
+  const authority = readLegacyHostedUsageReferralDirectLinqAuthority(input);
+  if (!authority) {
+    return {
+      kind: "execute",
+      wake: input.wake,
+    };
+  }
+
+  const assertAuthority = input.assertExternalThreadRouteAuthority;
+  if (!assertAuthority) {
+    throw new VaultCliError(
+      "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
+      "Hosted legacy usage-referral delivery requires live route authority before model work.",
+      { retryable: true },
+    );
+  }
+
+  try {
+    await assertAuthority(authority, { signal: input.signal });
+  } catch (error) {
+    if (!isHostedThreadRouteEgressUnauthorizedError(error)) {
+      throw error;
+    }
+
+    return {
+      kind: "terminal_no_send",
+      outcome: createNoopMailboxEffect({
+        conversationMetrics: null,
+        deliveryIntentIds: [],
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [
+          emitHostedAssistantNotificationLifecycleLog({
+            extraDetails: {
+              eventCode:
+                "assistant.notification.legacy_usage_referral_terminal_no_send",
+              terminalDisposition: "external_route_authority_stale",
+            },
+            level: "warn",
+            message:
+              "Hosted legacy usage-referral notification ended without delivery because its frozen route is no longer authorized.",
+            phase: "wake.running",
+            wake: input.wake,
+          }),
+        ],
+      }),
+      reason: "external_route_authority_stale",
+    };
+  }
+
+  return {
+    kind: "execute",
+    wake: buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: input.wake.eventId,
+      memberId: input.wake.userId,
+      notification: {
+        ...input.wake.notification,
+        externalThreadRouteAuthority: authority,
+      },
+      occurredAt: input.wake.occurredAt,
+    }),
+  };
+}
 
 export async function executeHostedMemberActivatedWake(input: {
   wake: HostedExecutionMemberActivatedWake;
@@ -648,6 +756,11 @@ function buildAssistantNotificationInput(
   turnEnvironment: AssistantTurnEnvironment | null,
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void,
 ): AssistantNotificationInput {
+  const privateAssistantAskCompletion =
+    wake.notification.privateAssistantAskCompletion ?? null;
+  if (privateAssistantAskCompletion) {
+    requireHostedPrivateAssistantAskCompletionNotification(wake);
+  }
   return buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
@@ -678,6 +791,13 @@ function buildAssistantNotificationInput(
       : {}),
     recordLogEntry,
     responsePolicy: wake.notification.responsePolicy ?? null,
+    ...(privateAssistantAskCompletion
+      ? {
+          answeredMailboxItemIds: [wake.eventId],
+          reviewedAssistantAskCompletionExpiresAt:
+            privateAssistantAskCompletion.expiresAt,
+        }
+      : {}),
     route: wake.notification.route,
     sourceMailboxItemId,
     turnEnvironment,
@@ -688,6 +808,7 @@ function buildAssistantNotificationInput(
 }
 
 function buildAssistantNotificationInputFromRoute(input: {
+  answeredMailboxItemIds?: AssistantNotificationInput["answeredMailboxItemIds"];
   assistantTurnOrdinal: string;
   deliveryDedupeToken: AssistantNotificationInput["deliveryDedupeToken"];
   deliveryDispatchMode: AssistantNotificationInput["deliveryDispatchMode"];
@@ -701,6 +822,8 @@ function buildAssistantNotificationInputFromRoute(input: {
   notificationPromptProfile?: AssistantNotificationInput["notificationPromptProfile"];
   recordLogEntry: (entry: HostedExecutionRedactedLogEntry) => void;
   responsePolicy: AssistantNotificationInput["responsePolicy"];
+  reviewedAssistantAskCompletionExpiresAt?:
+    AssistantNotificationInput["reviewedAssistantAskCompletionExpiresAt"];
   route: HostedExecutionAssistantNotificationRoute;
   sourceMailboxItemId: string | null;
   turnEnvironment: AssistantTurnEnvironment | null;
@@ -713,8 +836,15 @@ function buildAssistantNotificationInputFromRoute(input: {
 
   return {
     actorId: route.actorId,
-    bindingDeliveryTarget:
-      delivery.kind === "explicit" ? null : delivery.target,
+    ...(input.answeredMailboxItemIds
+      ? { answeredMailboxItemIds: input.answeredMailboxItemIds }
+      : {}),
+    bindingDeliveryTarget: resolveAssistantNotificationBindingDeliveryTarget({
+      executionContext: input.executionContext,
+      externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
+      route,
+      wake: input.wake,
+    }),
     channel: route.channel,
     deliveryDedupeToken: input.deliveryDedupeToken,
     deliveryDispatchMode: input.deliveryDispatchMode,
@@ -774,12 +904,160 @@ function buildAssistantNotificationInputFromRoute(input: {
         }
       : {}),
     responsePolicy: input.responsePolicy,
+    ...(input.reviewedAssistantAskCompletionExpiresAt
+      ? {
+          reviewedAssistantAskCompletionExpiresAt:
+            input.reviewedAssistantAskCompletionExpiresAt,
+        }
+      : {}),
     threadId: route.threadId,
     threadIsDirect: route.threadIsDirect,
     turnEnvironment: input.turnEnvironment,
     turnTrigger: input.turnTrigger,
     vault: input.vault,
   };
+}
+
+function requireHostedPrivateAssistantAskCompletionNotification(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): void {
+  const completion = wake.notification.privateAssistantAskCompletion;
+  const expectedDeliveryKey =
+    createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+      wake.eventId,
+    );
+  if (
+    !completion
+    || !Number.isFinite(Date.parse(completion.expiresAt))
+    || wake.notification.deliveryDedupeToken !== expectedDeliveryKey
+    || wake.notification.deliveryIdempotencyKey !== expectedDeliveryKey
+    || wake.notification.deliveryDispatchMode !== "queue-only"
+    || wake.notification.externalThreadRouteAuthority != null
+    || wake.notification.firstContact != null
+    || wake.notification.notificationPromptProfile != null
+    || wake.notification.route.threadIsDirect !== true
+    || (
+      wake.notification.route.channel !== "linq"
+      && wake.notification.route.channel !== "telegram"
+    )
+    || wake.notification.responsePolicy?.kind !== "require_send_exact_text"
+  ) {
+    throw new TypeError(
+      "Hosted private Assistant Ask completion notification proof is invalid.",
+    );
+  }
+}
+
+function resolveAssistantNotificationBindingDeliveryTarget(input: {
+  executionContext: AssistantExecutionContext;
+  externalThreadRouteAuthority:
+    AssistantNotificationInput["outboxExternalThreadRouteAuthority"] | null;
+  route: HostedExecutionAssistantNotificationRoute;
+  wake: HostedRuntimeEvent;
+}): string | null {
+  const delivery = input.route.delivery;
+  if (delivery.kind !== "explicit") {
+    return delivery.target;
+  }
+
+  const authority = input.externalThreadRouteAuthority;
+  const hostedMemberId = input.executionContext.hosted?.memberId ?? null;
+  return (
+    authority
+    && hostedMemberId
+    && input.wake.userId === hostedMemberId
+    && authority.containerMemberId === hostedMemberId
+    && authority.channel === input.route.channel
+    && input.route.threadIsDirect === true
+    && authority.threadId === delivery.target
+  )
+    ? delivery.target
+    : null;
+}
+
+function readLegacyHostedUsageReferralDirectLinqAuthority(input: {
+  executionContext: AssistantExecutionContext;
+  mailboxDedupeKey: string;
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+}): HostedExecutionExternalThreadRouteAuthority | null {
+  if (classifyLegacyHostedUsageReferralDirectLinqAuthority(input) !== "eligible") {
+    return null;
+  }
+
+  const delivery = input.wake.notification.route.delivery;
+  return {
+    channel: "linq",
+    containerMemberId: input.wake.userId,
+    threadId: delivery.target,
+  };
+}
+
+export function classifyLegacyHostedUsageReferralDirectLinqAuthority(input: {
+  executionContext: AssistantExecutionContext;
+  mailboxDedupeKey: string;
+  wake: HostedExecutionAssistantNotificationRequestedWake;
+}): HostedLegacyUsageReferralAuthorityClassification {
+  const { notification, userId } = input.wake;
+  const route = notification.route;
+  const delivery = route.delivery;
+  const notificationKey = notification.deliveryDedupeToken;
+  const target = delivery.target.trim();
+
+  if (
+    typeof notificationKey !== "string"
+    || !notificationKey.startsWith(
+      HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX,
+    )
+    || notificationKey.length
+      === HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX.length
+    || notificationKey !== notificationKey.trim()
+  ) {
+    return "not_usage_referral";
+  }
+
+  if (
+    input.mailboxDedupeKey
+      !== `${HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX}${notificationKey}`
+    || input.wake.eventId !== input.mailboxDedupeKey
+    || notification.deliveryIdempotencyKey !== notificationKey
+  ) {
+    return "identity_mismatch";
+  }
+
+  if (
+    notification.deliveryDispatchMode !== "queue-only"
+    || notification.externalThreadRouteAuthority != null
+    || notification.firstContact != null
+    || notification.notificationPromptProfile != null
+    || notification.responsePolicy?.kind !== "require_send"
+  ) {
+    return "policy_mismatch";
+  }
+
+  if (input.executionContext.hosted?.memberId !== userId) {
+    return "member_mismatch";
+  }
+
+  if (
+    route.channel !== "linq"
+    || route.threadIsDirect !== true
+    || delivery.kind !== "explicit"
+    || delivery.source != null
+    || target.length === 0
+    || target !== delivery.target
+  ) {
+    return "route_mismatch";
+  }
+
+  return "eligible";
+}
+
+function isHostedThreadRouteEgressUnauthorizedError(error: unknown): boolean {
+  return error instanceof Error
+    && "code" in error
+    && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
+    && "retryable" in error
+    && error.retryable === false;
 }
 
 function isHostedSignupWelcomeNotification(

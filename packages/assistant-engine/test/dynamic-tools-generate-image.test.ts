@@ -1,3 +1,4 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { Buffer } from 'node:buffer'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,7 +12,7 @@ import {
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL,
   executeMurphDynamicToolRequest,
-  readMurphDynamicToolRequest,
+  readMurphDynamicToolRequest as readExactMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
 import type {
   AssistantHostedToolContext,
@@ -522,8 +523,8 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
-  it('keeps the minimal legacy prompt-only call valid', () => {
-    const request = readMurphDynamicToolRequest({
+  it('keeps the minimal canonical prompt-only arguments valid', () => {
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -547,9 +548,21 @@ describe('murph.generate_image dynamic tool schema', () => {
     })
   })
 
+  it('rejects a tool request without the pinned protocol identity fields', () => {
+    expect(readExactMurphDynamicToolRequest({
+      id: 'request-missing-identity',
+      method: 'item/tool/call',
+      params: {
+        arguments: { prompt: 'Draw a simple image.' },
+        namespace: 'murph',
+        tool: 'generate_image',
+      },
+    })).toBeNull()
+  })
+
   it('parses an exact effect-authorizing message outside provider arguments', () => {
     const messageRef = `ain_${'c'.repeat(32)}`
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -569,7 +582,7 @@ describe('murph.generate_image dynamic tool schema', () => {
   })
 
   it('accepts up to sixteen ordered reference image refs', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -596,7 +609,7 @@ describe('murph.generate_image dynamic tool schema', () => {
   })
 
   it('accepts the canonical Murph character sheet skill asset ref', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -617,7 +630,7 @@ describe('murph.generate_image dynamic tool schema', () => {
   })
 
   it('rejects more than sixteen reference image refs', () => {
-    const request = readMurphDynamicToolRequest({
+    const request = readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: {
@@ -671,7 +684,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       sizeBytes: 1234,
       source: 'murph.experiment-progress-card',
     }
-    expect(readMurphDynamicToolRequest({
+    expect(readTestMurphDynamicToolRequest({
       method: 'item/tool/call',
       params: {
         arguments: { media: [media] },

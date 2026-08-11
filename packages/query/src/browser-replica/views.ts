@@ -6,6 +6,7 @@ import {
   summarizeRecentOverviewJournals,
 } from "../overview.ts";
 import type { VaultReadModel } from "../read-model.ts";
+import { emptyPersonalPatternReport } from "../personal-patterns.ts";
 import {
   selectBrowserVaultExperimentSummary as selectExperimentSummaryFromReplica,
   selectBrowserVaultTrackedExperiments as selectTrackedExperimentsFromReplica,
@@ -25,6 +26,8 @@ export function selectBrowserVaultOverview(client: BrowserVaultQueryClient): Bro
   return {
     experimentSummary: selectExperimentSummaryFromReplica(client),
     metrics: buildOverviewMetrics(vault),
+    personalPatterns: client.replica.personalPatterns
+      ?? emptyPersonalPatternReport(client.replica.generatedAt.slice(0, 10)),
     recentJournals: summarizeRecentOverviewJournals(vault, RECENT_JOURNAL_LIMIT),
     trackedExperiments: selectTrackedExperimentsFromReplica(client),
     weeklySampleSummaries: client.replica.weeklySampleSummaries.slice(),

@@ -343,6 +343,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
 
     expect(updated).toMatchObject({
       displayName: "Oura Ring A",
+      firstSeenAt: "2026-03-25T01:00:00.000Z",
       lastErrorCode: "SOURCE_UNAVAILABLE",
       resourceAvailabilitySummary: {
         profile: true,

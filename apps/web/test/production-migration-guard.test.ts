@@ -378,6 +378,41 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the detached automatic-refill failure exception to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810050000_relax_detached_automatic_refill_failure";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_purchase"',
+          '  DROP CONSTRAINT "hosted_usage_credit_purchase_active_payer_required",',
+          '  ADD CONSTRAINT "hosted_usage_credit_purchase_active_payer_required"',
+          '    CHECK ("payer_member_id" IS NOT NULL);',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the referral ledger constraint predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -467,6 +502,80 @@ describe("hosted web production migration guard", () => {
           '  ADD CONSTRAINT "sponsorship_shape"',
           '    CHECK ("group_sponsorship_authorization_id" IS NULL) NOT VALID;',
           'DROP INDEX "hosted_usage_credit_purchase_active_payer_key";',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the Starter ledger constraint predeploy exception to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260807204000_non_expiring_starter_usage";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_entry"',
+          '  DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",',
+          '  ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+          '    CHECK ("kind" IN (\'starter_grant\', \'purchase_grant\')) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits grant projection predeploy compatibility to its proved NOT NULL DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810150000_hosted_usage_credit_grant_slot_release";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_grant"',
+          '  ALTER COLUMN "beneficiary_member_id" SET NOT NULL,',
+          '  ALTER COLUMN "beneficiary_sequence" SET NOT NULL;',
           'DROP TABLE "hosted_member";',
         ].join("\n"),
       );
@@ -1304,6 +1413,7 @@ describe("hosted web production migration guard", () => {
       "pnpm --dir ../.. exec tsx apps/web/scripts/prepare-prisma-client-for-build.ts",
     );
     assert.match(buildScript, /pnpm typecheck:prepared/u);
+    assert.match(buildScript, /pnpm changelog:generate/u);
     assert.match(buildScript, /bash scripts\/run-production-next-build\.sh/u);
     assert.doesNotMatch(buildScript, /&& next build &&/u);
     assert.equal(
@@ -1312,11 +1422,11 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       preparedTypecheckScript,
-      "pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
+      "pnpm changelog:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs web -p tsconfig.json --pretty false",
     );
     assert.equal(
       watchTypecheckScript,
-      "pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
+      "pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
     );
     assert.match(
       buildScript,
@@ -1354,6 +1464,11 @@ describe("hosted web production migration guard", () => {
       buildScript.indexOf("pnpm prisma:generate:build") <
         buildScript.indexOf("run-production-next-build.sh"),
       "non-mutating build prep must finish before next build",
+    );
+    assert.ok(
+      buildScript.indexOf("pnpm changelog:generate") <
+        buildScript.indexOf("pnpm typecheck:prepared"),
+      "the changelog module must exist before the TypeScript source check",
     );
     assert.ok(
       buildScript.indexOf("pnpm typecheck:prepared") <

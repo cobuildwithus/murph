@@ -22,6 +22,9 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
+import {
   isHostedThreadContainerNotificationDestination,
   requireHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
@@ -38,6 +41,9 @@ import {
   readRetellCallEndAt,
   type RetellCallPayload,
 } from "./retell-payloads";
+import type {
+  PreparedRetellCallResult,
+} from "./retell-result-lifecycle";
 import { isHostedPhoneCallProviderCleanupPending } from "./authority";
 import {
   readRetellWebhookCallTarget,
@@ -80,6 +86,7 @@ interface HostedPhoneCallWebhookStore extends HostedPhoneCallWebhookDatabase {
   appendResultNotification(
     call: HostedPhoneCall,
     result?: HostedPhoneCallResult,
+    requiresTransferFollowUp?: boolean,
   ): Promise<HostedPhoneCallResultNotificationAppend>;
   encryptResult(input: {
     callId: string;
@@ -153,6 +160,7 @@ export async function handleRetellCallAnalyzed(input: {
   call: RetellCallPayload;
   crypto?: HostedPhoneCallCrypto;
   prisma?: HostedPhoneCallWebhookStore;
+  requiresTransferFollowUp?: boolean;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   assertRetellStorageMode(input.call);
   const crypto = input.crypto ?? hostedPhoneCallCrypto;
@@ -172,6 +180,7 @@ export async function handleRetellCallAnalyzed(input: {
       return appendRetellCallAnalyzedNotification({
         call: target.call,
         prisma,
+        requiresTransferFollowUp: input.requiresTransferFollowUp === true,
       });
     }
 
@@ -238,6 +247,7 @@ export async function handleRetellCallAnalyzed(input: {
         return appendRetellCallAnalyzedNotification({
           call: stored,
           prisma,
+          requiresTransferFollowUp: input.requiresTransferFollowUp === true,
         });
       }
       throw hostedOnboardingError({
@@ -254,18 +264,49 @@ export async function handleRetellCallAnalyzed(input: {
     return appendRetellCallAnalyzedNotification({
       call: target.call,
       prisma,
+      requiresTransferFollowUp: input.requiresTransferFollowUp === true,
       result,
     });
+  });
+}
+
+export async function finalizePreparedRetellCallResult(
+  prepared: PreparedRetellCallResult,
+  options: {
+    abortSignal?: AbortSignal;
+    prisma?: HostedPhoneCallWebhookStore;
+    signalRuntime?: typeof signalHostedMailboxAppendRuntime;
+  } = {},
+): Promise<void> {
+  const result = await handleRetellCallAnalyzed({
+    call: prepared.call,
+    ...(prepared.requiresTransferFollowUp
+      ? { requiresTransferFollowUp: true }
+      : {}),
+    ...(options.prisma ? { prisma: options.prisma } : {}),
+  });
+  if (!result.notificationMailboxItemId) {
+    return;
+  }
+  await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
+    abortSignal: options.abortSignal,
+    expectedUserId: result.notificationUserId,
+    mailboxItemId: result.notificationMailboxItemId,
   });
 }
 
 async function appendRetellCallAnalyzedNotification(input: {
   call: HostedPhoneCall;
   prisma: HostedPhoneCallWebhookStore;
+  requiresTransferFollowUp: boolean;
   result?: HostedPhoneCallResult;
 }): Promise<RetellCallAnalyzedHandlingResult> {
   try {
-    return await input.prisma.appendResultNotification(input.call, input.result);
+    return await input.prisma.appendResultNotification(
+      input.call,
+      input.result,
+      input.requiresTransferFollowUp,
+    );
   } catch (error) {
     // Account deletion can cascade the call away during route resolution or
     // mailbox append. Confirm that exact terminal race before suppressing the
@@ -283,6 +324,7 @@ async function appendRetellCallAnalyzedNotification(input: {
 async function appendPhoneCallResultNotification(input: {
   call: HostedPhoneCall;
   prisma: PrismaClient;
+  requiresTransferFollowUp?: boolean;
   result?: HostedPhoneCallResult;
 }): Promise<HostedPhoneCallResultNotificationAppend> {
   const call = input.call;
@@ -343,6 +385,7 @@ async function appendPhoneCallResultNotification(input: {
     callId: call.id,
     destination,
     memberId: call.memberId,
+    requiresTransferFollowUp: input.requiresTransferFollowUp === true,
     result,
   });
 
@@ -375,9 +418,12 @@ export function buildPhoneCallResultNotificationWake(input: {
   callId: string;
   destination: HostedAssistantNotificationDestination;
   memberId: string;
+  requiresTransferFollowUp?: boolean;
   result: HostedPhoneCallResult;
 }) {
   const notificationKey = buildPhoneCallResultNotificationKey(input.callId);
+  const requireSend = input.requiresTransferFollowUp === true
+    || isHostedThreadContainerNotificationDestination(input.destination);
   return buildHostedExecutionAssistantNotificationRequestedWake({
     eventId: buildPhoneCallResultNotificationEventId(input.callId),
     memberId: input.memberId,
@@ -393,20 +439,14 @@ export function buildPhoneCallResultNotificationWake(input: {
         : {}),
       instructions: buildPhoneCallResultNotificationInstructions({
         brief: input.brief,
-        requireSend: isHostedThreadContainerNotificationDestination(
-          input.destination,
-        ),
+        requireSend,
+        requiresTransferFollowUp: input.requiresTransferFollowUp === true,
         result: input.result,
       }),
-      // A room asked for this call collectively, so the room must always hear
-      // how it ended. Skipping is only tolerable for a direct 1:1 result, where
-      // the single recipient already knows they asked and silence is recoverable
-      // by asking again. In a group the paid, externally visible call has
-      // already happened, so an omitted result is an unrecoverable silent
-      // failure for every other participant.
-      responsePolicy: isHostedThreadContainerNotificationDestination(
-        input.destination,
-      )
+      // A room must always hear how its call ended. A successful direct
+      // transfer must also ask the member what happened after Murph left;
+      // either omission would be an unrecoverable silent failure.
+      responsePolicy: requireSend
         ? { kind: "require_send" }
         : { kind: "allow_send_or_skip" },
       route: input.destination.route,
@@ -460,10 +500,11 @@ function resolveHostedPhoneCallWebhookStore(
     $transaction: (callback) => prisma.$transaction((tx) =>
       callback(buildHostedPhoneCallWebhookDatabase(tx))
     ),
-    appendResultNotification: (call, result) =>
+    appendResultNotification: (call, result, requiresTransferFollowUp) =>
       appendPhoneCallResultNotification({
         call,
         prisma,
+        requiresTransferFollowUp,
         result,
       }),
     encryptResult: (input) => crypto.encryptResult({
@@ -533,16 +574,26 @@ export function mapRetellCallAnalysis(call: RetellCallPayload): HostedPhoneCallR
 export function buildPhoneCallResultNotificationInstructions(input: {
   brief: HostedPhoneCallBrief;
   requireSend?: boolean;
+  requiresTransferFollowUp?: boolean;
   result: HostedPhoneCallResult;
 }): string {
   const target = input.brief.to.label?.trim() || "the requested phone number";
-  const lines = [
-    input.requireSend
-      ? "The Murph phone call has finished. Report the final result to this group chat."
-      : "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
-    input.requireSend
-      ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The group asked for this call, so never stay silent about it."
-      : "If there is nothing meaningful to report, you may skip sending a message.",
+  const lines = input.requiresTransferFollowUp
+    ? [
+        "The Murph phone call successfully transferred the user to the call recipient, and that human conversation has now ended.",
+        "Always send one concise follow-up. State that Murph completed the handoff and left the conversation, and that what happened afterward is unknown.",
+        "Ask the user what happened after the handoff and whether the call goal was completed.",
+        "Do not claim that the post-handoff goal was completed or failed.",
+      ]
+    : [
+        input.requireSend
+          ? "The Murph phone call has finished. Report the final result to this group chat."
+          : "The Murph phone call has finished. Notify the user of the final result if it is worth sharing.",
+        input.requireSend
+          ? "Always send a concise summary of how the call ended, whether it completed, did not complete, or needs the requester. The group asked for this call, so never stay silent about it."
+          : "If there is nothing meaningful to report, you may skip sending a message.",
+      ];
+  lines.push(
     "Use normal Murph wording; do not send a hard-coded template.",
     "Do not claim a new call was made. This is the result of a call Murph already placed.",
     "Only notify the user about this completed call. Do not perform private reads, writes, tool calls, calendar updates, follow-up outreach, or unrelated actions in this notification turn.",
@@ -555,7 +606,7 @@ export function buildPhoneCallResultNotificationInstructions(input: {
       outcome: input.result.outcome,
       summary: input.result.summary,
     }),
-  ];
+  );
   if (input.result.outcome === "completed" && !input.result.followUp) {
     lines.push("If you do notify the user, tell them that no follow-up is needed.");
   }

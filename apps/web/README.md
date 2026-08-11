@@ -221,6 +221,8 @@ specimens omit the comparator.
 
 The `/settings` Data & privacy export uses that same in-browser browser-vault replica path. It downloads the decrypted `murph.browser-vault-replica` JSON that dashboard pages can already read, rather than making the primary user export the older hosted account metadata bundle.
 
+The Overview Personal Patterns section also uses the encrypted browser-vault replica. The query projection compares repeated activity or intervention days with existing daily wearable sleep and recovery summaries. The browser receives only the derived report. Raw device observations stay outside the replica. The same query result is available to the assistant through `vault-cli wearables patterns`.
+
 ## Core responsibilities
 
 - Garmin connect plus Oura, Strava, and WHOOP OAuth start/callback flows
@@ -742,11 +744,12 @@ Hosted onboarding extras:
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
 - `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` enables the five-minute production
-  reply-latency monitor when the shared Resend operational-alert transport is
-  fully configured through `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`,
-  and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
-  shared operational configuration; the latency path never sends through or
-  falls back to Linq/iMessage. The monitor uses the fixed 30-second product
+  reply-latency and runtime-progress monitors when the shared Resend
+  operational-alert transport is fully configured through `RESEND_API_KEY`,
+  `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`. The historical
+  Linq-prefixed email names are shared operational configuration; neither path
+  sends through or falls back to Linq/iMessage. The latency monitor uses the
+  fixed 30-second product
   boundary for the first accepted user-visible response: either a progress
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
@@ -782,6 +785,19 @@ Hosted onboarding extras:
   expires clears the incident. Persisted evidence remains aggregate
   counts/timings plus sanitized provider failure status in the existing
   operational-alert row.
+  The separate progress monitor detects an active runtime whose live
+  conversation or system mailbox lane has retained work beyond its durable
+  clean-handling high-water for at least 15 minutes. It uses the mailbox
+  owner's existing expiry and 14-day retention rules plus the canonical exact
+  runtime AI-access decision, including current group-participant authority and
+  health-data consent. A conversation
+  head with a valid AI-usage denial and no later execution evidence is an
+  intentional pause rather than a stall; resumed work ages from its first
+  post-denial staging, provider, delivery, or durable consumption milestone.
+  The monitor reports aggregate runtime,
+  lane, age, and pending-item counts only. It has its own singleton incident
+  row, so an active reply-latency incident cannot suppress a newly discovered
+  progress stall; recovery silently rearms each monitor independently.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
@@ -860,6 +876,7 @@ Hosted AI usage metering:
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
 - Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
 - Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
+- Family conversion reuses an exact active direct paid or Trial Subscription in place under the owner lock; a Trial ends immediately and Trial-only metadata is cleared. Web and the private Family tool both disclose the current server-owned immediate-conversion terms and require fresh explicit confirmation before ending an active Trial. Automatic phone/email invite capacity carries its normalized target into the capacity owner, which repeats the active-member check under the same lock immediately before Stripe; acceptance repeats admission checks transactionally, while Telegram remains open-seat-only. Suspended direct members retain exact-customer Portal management, inactive Family billing projects a Portal recovery action, and sponsorship payers retain cancellation-only management after beneficiary authority disappears. The first event that recognizes a competing Family-sponsored direct subscription performs exact cancel/refund inspection before local terminalization; complex refund shapes remain support-required.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
 - Conversational usage referrals reserve their fixed server-catalog reward
@@ -875,17 +892,27 @@ Hosted AI usage metering:
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
-  Recovery also re-signals bounded oldest unconsumed celebration items after a
-  failed Temporal signal. Personal arming freezes
-  only the source channel, blinded exact-thread locator, and directness fact;
-  celebration requires the same direct thread, and personal Linq delivery uses
-  an explicit source target that cannot fall back to a newer home route. Group
-  celebration carries live thread authority. The isolated completion formatter
+  Recovery selects each lane containing a live pending celebration and
+  re-signals only its first live item above the canonical lane-consumption
+  cursor. Live-row filtering skips retention-old or expired prefixes. That head
+  may be an earlier non-referral predecessor, so a failed Temporal signal remains
+  recoverable in ordinary lane order while the existing no-progress backoff
+  coalesces repeat passes. Web does not read or rewrite encrypted payloads. If an
+  authority-less legacy direct-Linq wake was already imported,
+  the local runtime reasserts its frozen target through Web's existing route
+  owner before model work. An exact live match continues through the normal
+  audience and provider-entry guards, a definitive stale match ends without a
+  send so ordered work advances, and unavailable authority retains normal
+  retry. Personal arming freezes only the source channel, blinded exact-thread
+  locator, and directness fact; celebration requires the same direct thread,
+  and personal Linq delivery uses an explicit source target that cannot fall
+  back to a newer home route. Group celebration carries live thread authority.
+  The isolated completion formatter
   receives only resolved tone, Humor, and Unhinged values, never transcript
   history.
   Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
   silent and outside assistant access; direct setup behavior is unchanged.
-- Web owns the separate `murph.subscription` callback for an explicit private member choice to continue Pulse at trial end, start Pulse now, or upgrade Pulse to Edge. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Pulse activation keeps its existing Stripe-hosted invoice or Customer Portal handoff when payment is required; a pending Edge change returns Customer Portal without a separate invoice lookup. No custom checkout or second billing owner is introduced.
+- Web owns the separate `murph.subscription` callback for an explicit private member choice to start an eligible paid plan or change an existing paid plan. It binds the runtime-supplied accepted input id to the callback member, atomically claims the first action on that existing mailbox row, re-derives current eligibility, and delegates to the existing billing services. An exact retry is allowed and a conflicting action fails closed. Starter-to-paid activation uses the ordinary Stripe-hosted checkout boundary; paid plan changes retain their existing Customer Portal or schedule owner. No custom checkout or second billing owner is introduced.
 - Homepage period facts come from the same allowance owner. Spend accounting ensure-creates a fresh billing or calendar period inside the spend transaction, with no reset cron.
 - Web applies the composed access-and-usage gate in runtime reconciliation and
   mailbox fetch/payload routes before exhausted work reaches the runner.
@@ -893,7 +920,7 @@ Hosted AI usage metering:
   receives no billing or credit projection. Runtime usage is recorded after it
   exists.
 - Assistant usage recording may carry the exact authority-bound originating Linq group route for a proactive thread-cap crossing notice. Web reuses the existing claimed Linq delivery path, never derives a group target from personal home routing, and keeps the next-inbound gate notice as the backstop when the target is missing or ambiguous.
-- Pulse Trial uses the same enforced allowance system with a phase-aware 4.50 USD threshold. Trial members cannot buy usage credit; paid phase is authoritative for normal Pulse allowance, while stale or malformed trial entitlement fails admission before any calendar fallback.
+- Starter access uses the same enforced allowance system with one non-expiring $4.50 ledger grant and a lifetime usage meter. Account age and historical trial timestamps are not admission inputs. Paid phase remains authoritative for recurring plan allowance, while purchased and referral credit continue to compose through the same credit ledger.
 - Included-allowance accounting starts from the deployment that enables allowance accounting on imports. Existing current-period usage rows are not backfilled by default.
 
 `apps/web` records every hosted assistant usage row by member in `HostedAiUsage`.
@@ -1037,6 +1064,13 @@ Callback auth contract:
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK` stays in the Cloudflare worker
   boundary; the isolated execution child talks back through the worker-owned
   `web-control.worker` proxy instead of receiving the signing key directly
+- after signature, key-id, timestamp/freshness, method/path/search/member, and
+  payload binding succeed, `apps/web` consumes the SHA-256 nonce with one
+  primary-Postgres insert; the `nonce_hash` primary-key conflict rejects a
+  replay, and callback admission never sweeps expired rows
+- the existing hourly hosted-retention cron removes only strictly expired nonce
+  rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
+  account deletion still independently deletes the member's nonce rows
 - Hosted member private fields, device-sync credentials, mailbox payloads, and
   runtime execution state use signed hosted domain-root secure-box envelopes;
   lookup fingerprints/indexes use separate HMAC-only keys.
@@ -1063,6 +1097,12 @@ hostname mismatch before provider authorization begins.
 
 Set these under `Settings -> Environment Variables` in the Vercel project that
 deploys `apps/web`. Production is the minimum.
+
+Keep `MURPH_ANDROID_APP_ENABLED` unset or set to `0` until the Android app is
+public. Only the exact value `1` reveals Android-only Connect Devices and design
+catalog content. Enabling the complete journey also requires the same flag in
+the Cloudflare GitHub Environment so new runner containers receive matching
+assistant guidance; follow the tandem activation order in `apps/cloudflare/DEPLOY.md`.
 
 Provision `HOSTED_APP_SESSION_HMAC_KEY` in every hosted-web environment that
 will serve authenticated traffic before deploying the strict v2 session code.
@@ -1109,7 +1149,7 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
-- To receive reply-latency emails, configure `RESEND_API_KEY`,
+- To receive reply-latency and runtime-progress emails, configure `RESEND_API_KEY`,
   `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`, then set
   `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's IANA time zone.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
@@ -1168,6 +1208,15 @@ The signed assertion must include hosted user claims plus:
 
 Each assertion nonce is consumed once so replayed assertions fail even if the
 user tuple is unchanged.
+The assertion uses integer-second `exp` claims and the shared 60-second skew
+policy, so it remains admissible through the millisecond before
+`(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
+rows persist that first-invalid horizon, while request admission performs one
+primary-key insert and treats only the exact nonce conflict as replay. The
+bounded hourly hosted-retention owner deletes only rows whose stored
+`expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
+full acceptance window and deliberately retains new-format rows for an
+additional 61 seconds.
 There is no unauthenticated development-user fallback; local development must
 exercise the same signed assertion contract.
 
@@ -1659,8 +1708,8 @@ Notes:
 - Hosted internal cron paths accept only Vercel cron bearer auth via
   `CRON_SECRET`.
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
-  latency facts every five minutes. It does not signal Temporal, wake
-  Cloudflare, or participate in message processing.
+  latency and durable mailbox-progress facts every five minutes. It does not
+  signal Temporal, wake Cloudflare, or participate in message processing.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning. Later successful invoices for an already
@@ -1698,11 +1747,16 @@ Assertion-authenticated browser-to-agent bridge routes:
 
 Public provider-facing routes:
 
-- `GET /imessage/card/v1/:payload.png` renders one bounded immutable nutrition
-  snapshot for Linq's static Messages fallback. It accepts no query string,
-  identity, reference, credential, or authority; it performs no database or
-  remote read and returns private no-store/no-index headers. Deploy this route
-  before any runtime starts producing its URL.
+- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V5
+  nutrition, generic-table, workout, or challenge-standings presentation for
+  Linq's static Messages fallback. Production challenge-standings producers
+  replace the challenge title and ranked labels with fixed ordinal presentation
+  before encoding, while exact names remain only in the native fragment and
+  semantic captions. The route accepts no query string, canonical reference,
+  credential, tracking reference, or authority; it performs no database or
+  remote read and returns private no-store/no-index headers. Deploy the
+  compatible native reader first, this route second, and its runtime producer
+  last.
 - `GET /api/device-sync/oauth/:provider/callback`
 - `POST /api/device-sync/webhooks/:provider`
 - `GET /api/device-sync/webhooks/oura`
@@ -1784,11 +1838,11 @@ The onboarding lane is intentionally thin:
   successful hosted completion issues a strict opaque v2 app session whose
   database row stores a dedicated-key HMAC over its bearer, session id, member,
   Privy identity, and expiry. Legacy unsigned cookies are rejected.
-- Hosted onboarding Checkout uses subscription mode. `invoice.paid` remains
-  the normal positive entitlement source, with one metadata-gated exception: a
-  valid Pulse Trial Checkout completion can activate Pulse in `trial` phase.
-  The separate authenticated Settings usage-credit flow uses one-time payment
-  mode and never changes entitlement.
+- Hosted onboarding grants one non-expiring starter-usage balance without
+  creating Stripe state. Paid-plan Checkout uses subscription mode and
+  `invoice.paid` is the positive subscription-entitlement source. The separate
+  authenticated Settings usage-credit flow uses one-time payment mode and
+  never changes subscription entitlement.
 - Hosted webhook receipts are retry journals for receipt-local side effects,
   not a second execution lifecycle authority.
 - Temporal-bound execution from onboarding and exact message ingress appends
@@ -1803,16 +1857,15 @@ The onboarding lane is intentionally thin:
 
 Current hosted billing assumptions:
 
-- Hosted onboarding Checkout uses Stripe subscription mode. Current one-time
-  Checkout uses the fixed usage-credit catalog for eligible personal, hosted
-  group, and Family-member destinations.
+- Starter enrollment requires no Checkout. Paid hosted onboarding uses Stripe
+  subscription mode, while current one-time Checkout uses the fixed
+  usage-credit catalog for eligible personal, hosted group, and Family-member
+  destinations.
 - The launch tiers are monthly Stripe subscription prices; annual checkout is disabled for now.
 - `invoice.paid` is the paid activation and paid-cycle source of truth.
-- `checkout.session.completed` normally binds refs only, except for the
-  Pulse Trial offer (`pulse_trial_7d`) when metadata, member ownership, and
-  the expanded/retrieved subscription prove an active policy-bound trial.
-- `customer.subscription.*` does not newly activate access and cannot promote
-  a Pulse Trial to paid before the accepted paid invoice.
+- `checkout.session.completed` binds subscription references only;
+  `customer.subscription.*` does not newly activate paid access before the
+  accepted paid invoice.
 - Subscription chargebacks, disputes, and refunds suspend hosted access pending
   manual review. Matching usage-credit financial reversals are intercepted
   before subscription handling. Live financial-state changes append capped
@@ -1820,17 +1873,10 @@ Current hosted billing assumptions:
   credit, with positive entries restoring only value previously revoked.
   Reconciliation failures remain in the durable Stripe retry lane and never
   silently suspend the subscription.
-- No-card Pulse Trial signup is the default checkout-stage path when billing is
-  configured and messaging setup is complete. Set
-  `HOSTED_AUTO_PULSE_TRIAL_ENABLED=0` only to force card checkout fallback.
-- Card-based Pulse Trial checkout fallback is gated by
-  `HOSTED_PULSE_TRIAL_CHECKOUT_ENABLED=1`.
-- `/ops/trials` is the operator-only manual Pulse Trial extension surface. Enter
-  exactly one hosted member ID and Preview before Apply. Preview reads the
-  member's current local billing record and exact Stripe subscription without
-  mutation. Apply checks the same short-lived opaque proof under the shared
-  hosted-member Stripe mutation lock, adds exactly seven days, and reconciles
-  the local trial and usage-period window in that operation.
+- New eligible hosted members receive one semantic-keyed $4.50 starter grant
+  through the existing usage-credit ledger. Duplicate web, companion, invite,
+  retry, and direct-iMessage enrollment paths converge on that grant. There is
+  no trial expiry, trial-extension operation, or new-user Stripe subscription.
 - `/ops/usage` is the operator-only allowance inspection and recovery surface.
   It derives personal-member and synthetic-group message activity from retained
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
@@ -1850,18 +1896,16 @@ Current hosted billing assumptions:
   delivery ID and provider idempotency key. Generic runtime and webhook
   delivery fences keep deterministic durable IDs for latency and receipt
   correlation.
-- A live `trialing` Pulse Trial extends from its current Stripe trial end. A
-  lapsed `paused` no-card Pulse Trial restarts for seven days from Preview time.
-  The proof expires after 15 minutes. Active Family sponsorship and paid,
-  scheduled, canceling, canceled, incomplete, past-due, unpaid, foreign, or
-  otherwise mismatched direct billing are displayed as ineligible and are never
-  mutated. The route does not search for members, process cohorts or batches,
-  or clean up provider subscriptions.
-- Stripe reads and writes use one 80-second attempt. Apply gives the member lock
-  at most 25 seconds to acquire and the locked transaction at most 190 seconds.
-  The provider update uses no proration and carries a proof-derived idempotency
-  key and metadata marker. A retry after Stripe success reconciles local billing
-  instead of adding another seven days.
+- Delayed legacy Stripe trial objects remain eligible only for exact bounded
+  reconciliation or cleanup. They cannot create, extend, or restore free
+  access; starter capacity and paid invoices are the current authorities.
+- The legacy provider-object drain is complete: an authenticated production
+  apply retired 69 exact candidates, then its automatic verification reported
+  zero remaining candidates and convergence. The one-time Ops control, batch
+  route and service, and CLI were removed. Keep the accepted
+  legacy Pulse Price and per-member cleanup/event guards through the maximum
+  delayed-event and manual-replay horizon; then remove that bounded
+  compatibility together in a separate contracting change.
 - `/ops/email` is the operator-only member email composer. It accepts up to 100
   explicit hosted member IDs plus one plain-text subject and body. Preview
   resolves verified email first and falls back to the stored Stripe checkout

@@ -148,7 +148,7 @@ export interface HostedAssistantDeliveryPayload {
   media: readonly HostedAssistantDeliveryMedia[];
   message: string;
   nativeReplyRequested?: true;
-  newsletterAuthorizationProof?: string | null;
+  groupEmailAuthorizationProof?: string | null;
   subject: string | null;
   replyToMessageId: string | null;
   sessionId: string;
@@ -692,10 +692,24 @@ function parseHostedAssistantDeliveryPayload(
     record.threadIsDirect ?? null,
     `${label}.threadIsDirect`,
   );
-  if (card !== null && threadIsDirect !== true) {
+  const channel = requireNullableString(
+    record.channel ?? null,
+    `${label}.channel`,
+  );
+  if (card?.kind === "challenge_standings") {
+    if (channel !== "linq" || threadIsDirect !== false) {
+      throw new TypeError(
+        `${label}.card requires an authenticated Linq group conversation.`,
+      );
+    }
+  } else if (card !== null && threadIsDirect !== true) {
     throw new TypeError(`${label}.card requires a private direct conversation.`);
   }
-
+  if (record.newsletterAuthorizationProof !== undefined) {
+    throw new TypeError(
+      `${label}.newsletterAuthorizationProof belongs to a retired runner wire contract.`,
+    );
+  }
   return {
     actorId: requireNullableString(record.actorId ?? null, `${label}.actorId`),
     answeredMailboxItemIds: parseHostedAssistantDeliveryAnsweredMailboxItemIds(
@@ -710,7 +724,7 @@ function parseHostedAssistantDeliveryPayload(
       record.bindingDeliveryTarget ?? null,
       `${label}.bindingDeliveryTarget`,
     ),
-    channel: requireNullableString(record.channel ?? null, `${label}.channel`),
+    channel,
     ...(record.card === undefined ? {} : { card }),
     deliverySourceKey: requireNullableString(
       record.deliverySourceKey ?? null,
@@ -737,12 +751,12 @@ function parseHostedAssistantDeliveryPayload(
             `${label}.nativeReplyRequested`,
           ),
         }),
-    ...(record.newsletterAuthorizationProof === undefined
+    ...(record.groupEmailAuthorizationProof === undefined
       ? {}
       : {
-          newsletterAuthorizationProof: requireNullableNewsletterAuthorizationProof(
-            record.newsletterAuthorizationProof,
-            `${label}.newsletterAuthorizationProof`,
+          groupEmailAuthorizationProof: requireNullableGroupEmailAuthorizationProof(
+            record.groupEmailAuthorizationProof,
+            `${label}.groupEmailAuthorizationProof`,
           ),
         }),
     subject: requireNullableString(record.subject ?? null, `${label}.subject`),
@@ -775,7 +789,7 @@ function parseHostedAssistantResponseCard(
   return parsed.data;
 }
 
-function requireNullableNewsletterAuthorizationProof(
+function requireNullableGroupEmailAuthorizationProof(
   value: unknown,
   label: string,
 ): string | null {

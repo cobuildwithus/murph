@@ -56,6 +56,8 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNTIME_PROCESS_ENV,
   isHostedRuntimeProcessEnv,
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
   normalizeHostedExecutionBaseUrl,
   normalizeHostedExecutionString,
 } from "../src/env.ts";
@@ -287,7 +289,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(4);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(6);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -514,11 +516,22 @@ describe("hosted execution coverage gaps", () => {
     expect(HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV).toBe(
       "MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON",
     );
+    expect(MURPH_ANDROID_APP_ENABLED_ENV).toBe("MURPH_ANDROID_APP_ENABLED");
     expect(
       isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: " 1 " }),
     ).toBe(true);
     expect(isHostedRuntimeProcessEnv({ [HOSTED_RUNTIME_PROCESS_ENV]: "0" })).toBe(false);
     expect(isHostedRuntimeProcessEnv({})).toBe(false);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: " 1 " }),
+    ).toBe(false);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "1" }),
+    ).toBe(true);
+    expect(
+      isMurphAndroidAppEnabled({ [MURPH_ANDROID_APP_ENABLED_ENV]: "true" }),
+    ).toBe(false);
+    expect(isMurphAndroidAppEnabled({})).toBe(false);
   });
 
   it("exports canonical hosted execution contracts without staged payload helpers", async () => {
@@ -531,7 +544,6 @@ describe("hosted execution coverage gaps", () => {
       "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
-      "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
@@ -727,7 +739,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_LOG_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
-      "HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
@@ -749,9 +760,6 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH).toBe(
       "/api/internal/hosted-runtime/email-egress/recipient",
-    );
-    expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
-      "/api/internal/hosted-execution/groups/newsletter-tool",
     );
     expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/assistant-configuration/tool",

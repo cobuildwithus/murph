@@ -47,9 +47,19 @@ programmatically appropriate.
    response media:
    - If any movement being taught is likely unfamiliar or uncommon, attach at
      least one useful returned catalog image and normally two in the same
-     response. Prioritize the least familiar or most technique-sensitive
-     movements and the setup or endpoint frames that best explain them; attach
-     more only when different movements still need visual explanation.
+     response. Count useful frames per unfamiliar movement, not only across the
+     whole response. Prioritize the least familiar or most technique-sensitive
+     movements, and attach the available frames in exercise order so each
+     illustrated movement shows its setup, important transitions or side
+     changes, and endpoint across the full range of motion. Use at least two
+     frames for a simple start/end motion and three or more when an intermediate
+     phase is needed to make the path clear.
+   - Do not satisfy this rule with one static frame for each of several
+     unfamiliar movements. If teaching every movement completely would create a
+     long media dump, teach fewer movements at a time rather than sacrificing
+     sequence clarity. If only one useful catalog frame exists for a movement,
+     say the catalog does not yet show the full motion and keep the written cue
+     simple rather than presenting that frame as a complete walkthrough.
    - If the user clearly demonstrates relevant training fluency and every
      movement being taught is common or already familiar, omit exercise images
      unless the user asks for them.

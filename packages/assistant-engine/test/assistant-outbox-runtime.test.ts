@@ -31,6 +31,7 @@ import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
+import { resolveAssistantGeneratedImageDelivery } from '../src/assistant/response-media.ts'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -73,6 +74,7 @@ import {
   readAssistantCronCanonicalRuntimeStore,
   writeAssistantCronCanonicalRuntimeStore,
 } from '../src/assistant/cron/runtime-state.ts'
+import { computeAssistantCronNextRunAt } from '../src/assistant/cron/schedule.ts'
 import { listAssistantCronJobs } from '../src/assistant-cron.ts'
 import { ensureAssistantState } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
@@ -124,6 +126,7 @@ const TEST_LINQ_DELIVERY_SOURCE: NonNullable<
 
 const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
+  version: 2,
   localDate: '2026-07-28',
   mealCount: 3,
   totals: {
@@ -131,6 +134,62 @@ const NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: 193.125, mealCount: 3 },
     fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: { target: 2_100, status: 'under_target' },
+    proteinGrams: { target: 100, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'on_target' },
+    fatGrams: { target: 40, status: 'on_target' },
+    fiberGrams: { target: 30, status: 'under_target' },
+  },
+}
+
+const CHALLENGE_STANDINGS_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'challenge_standings',
+  version: 1,
+  format: 'individual',
+  title: 'Weird Health Week',
+  subtitle: 'Day 4 of 7',
+  objective: { kind: 'ranking' },
+  entries: [{
+    label: 'Maya',
+    points: 120,
+    coverage: 'complete',
+    detail: null,
+  }],
+  footer: null,
+}
+
+const WORKOUT_RESPONSE_CARD: AssistantResponseCard = {
+  kind: 'compact_table',
+  version: 1,
+  title: 'Push day',
+  subtitle: null,
+  footer: null,
+  tracking: {
+    kind: 'workout',
+    entityId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    snapshotAt: '2026-08-09T19:45:00.000Z',
+  },
+  workout: {
+    version: 1,
+    state: 'active',
+    exercises: [{
+      name: 'Bench press',
+      sets: [
+        {
+          status: 'completed',
+          target: '185 lb × 8',
+          actual: '185 lb × 8',
+        },
+        {
+          status: 'pending',
+          target: '185 lb × 6–8',
+          actual: null,
+        },
+      ],
+    }],
   },
 }
 
@@ -606,6 +665,57 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-too-many-answered-mailbox',
       }),
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
+  })
+
+  it('persists new group email proof only under the generic outbox field', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-email-proof-rollback-',
+    )
+    const groupEmailAuthorizationProof = 'a'.repeat(64)
+    const parentTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group_123',
+      subject: 'Group subject',
+      targetKind: 'group',
+    })
+    const targets = [
+      parentTarget,
+      serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        recipientMemberId: 'member_123',
+        subject: 'Group subject',
+        targetKind: 'group',
+      }),
+    ]
+
+    for (const [index, explicitTarget] of targets.entries()) {
+      const intent = await createAssistantOutboxIntent({
+        channel: 'email',
+        deliveryIdempotencyKey: `group-email-effect:proof:${index}`,
+        explicitTarget,
+        groupEmailAuthorizationProof,
+        message: 'Group email body',
+        sessionId: `session_group_email_${index}`,
+        threadIsDirect: false,
+        turnId: `turn_group_email_${index}`,
+        vault: vaultRoot,
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const persisted = JSON.parse(await readFile(
+        resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
+        'utf8',
+      )) as Record<string, unknown>
+
+      expect(Object.keys(persisted).filter((key) =>
+        key.endsWith('AuthorizationProof')
+      )).toEqual(['groupEmailAuthorizationProof'])
+      expect(persisted.groupEmailAuthorizationProof).toBe(
+        groupEmailAuthorizationProof,
+      )
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId))
+        .resolves.toMatchObject({
+          groupEmailAuthorizationProof,
+        })
+    }
   })
 
   it('monotonically widens answered mailbox ids when a grouped reply is rebatched', async () => {
@@ -1096,6 +1206,15 @@ describe('assistant outbox runtime', () => {
   it('persists and dispatches response cards through the existing outbox owner', async () => {
     const { vaultRoot } = await createAssistantVault('assistant-outbox-card-')
     const rendered = renderAssistantResponseCardText(NUTRITION_RESPONSE_CARD)
+    for (const target of [
+      '2,100 calories (under target)',
+      '100g protein (on target)',
+      '220g carbs (on target)',
+      '40g fat (on target)',
+      '30g fiber (under target)',
+    ]) {
+      expect(rendered).toContain(target)
+    }
     const intent = await createAssistantOutboxIntent({
       actorId: '+15550001',
       card: NUTRITION_RESPONSE_CARD,
@@ -1181,6 +1300,128 @@ describe('assistant outbox runtime', () => {
     })).rejects.toMatchObject({
       code: 'ASSISTANT_RESPONSE_CARD_DIRECT_AUDIENCE_REQUIRED',
     })
+  })
+
+  it('persists and dispatches challenge standings cards for Linq groups only', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-challenge-card-',
+    )
+    const rendered = renderAssistantResponseCardText(
+      CHALLENGE_STANDINGS_RESPONSE_CARD,
+    )
+    const intent = await createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-group-challenge-card-token',
+      message: 'model-authored text must not become the durable card message',
+      sessionId: 'session-group-challenge-card',
+      threadId: 'thread-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-group-challenge-card',
+      vault: vaultRoot,
+    })
+
+    expect(intent.card).toEqual(CHALLENGE_STANDINGS_RESPONSE_CARD)
+    expect(intent.message).toBe(rendered)
+    expect(intent.threadIsDirect).toBe(false)
+
+    mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'linq-group-challenge-card-delivered',
+        target: 'thread-group-challenge-card',
+        targetKind: 'thread',
+      }),
+      deliveryDeduplicated: false,
+      deliveryTransportIdempotent: true,
+      outboxIntentId: null,
+      session: undefined,
+    })
+
+    const dispatched = await dispatchAssistantOutboxIntent({
+      force: true,
+      intentId: intent.intentId,
+      vault: vaultRoot,
+    })
+
+    expect(dispatched.intent.status).toBe('sent')
+    expect(mockedDeliverAssistantMessageOverBinding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+        message: rendered,
+        threadIsDirect: false,
+      }),
+      expect.any(Object),
+    )
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'linq',
+      message: rendered,
+      sessionId: 'session-direct-challenge-card',
+      threadId: 'thread-direct-challenge-card',
+      threadIsDirect: true,
+      turnId: 'turn-direct-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+    })
+
+    await expect(createAssistantOutboxIntent({
+      card: CHALLENGE_STANDINGS_RESPONSE_CARD,
+      channel: 'telegram',
+      message: rendered,
+      sessionId: 'session-telegram-group-challenge-card',
+      threadId: 'thread-telegram-group-challenge-card',
+      threadIsDirect: false,
+      turnId: 'turn-telegram-group-challenge-card',
+      vault: vaultRoot,
+    })).rejects.toMatchObject({
+      code: 'ASSISTANT_CHALLENGE_RESPONSE_CARD_GROUP_AUDIENCE_REQUIRED',
+    })
+  })
+
+  it('round-trips workout cards through local outbox save, list, and read owners', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-workout-card-',
+    )
+    const intent = await createAssistantOutboxIntent({
+      actorId: '+15550001',
+      card: WORKOUT_RESPONSE_CARD,
+      channel: 'linq',
+      dedupeToken: 'stable-workout-card-token',
+      message: 'ignored model prose',
+      sessionId: 'session-workout-card',
+      threadId: 'thread-workout-card',
+      threadIsDirect: true,
+      turnId: 'turn-workout-card',
+      vault: vaultRoot,
+    })
+
+    const retryable = await saveAssistantOutboxIntent(vaultRoot, {
+      ...intent,
+      lastError: {
+        code: 'ASSISTANT_DELIVERY_RETRYABLE',
+        message: 'retry later',
+      },
+      nextAttemptAt: '2026-08-09T20:00:00.000Z',
+      status: 'retryable',
+      updatedAt: '2026-08-09T19:46:00.000Z',
+    })
+
+    await expect(
+      readAssistantOutboxIntent(vaultRoot, retryable.intentId),
+    ).resolves.toMatchObject({
+      card: WORKOUT_RESPONSE_CARD,
+      status: 'retryable',
+    })
+    await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toEqual([
+      expect.objectContaining({
+        card: WORKOUT_RESPONSE_CARD,
+        intentId: retryable.intentId,
+        status: 'retryable',
+      }),
+    ])
   })
 
   it('persists one text-only fallback identity before acceptance and reuses it after restart', async () => {
@@ -2177,6 +2418,36 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-03-01T00:05:00.000Z',
     })
 
+    const generatedRef = 'raw/captures/2026/04/generated/generated.webp'
+    const generatedDelivery = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-18T00:00:00.000Z',
+      media: [{
+        alt: 'Visible generated image',
+        contentType: 'image/webp',
+        filename: 'generated.webp',
+        kind: 'vault_image',
+        ref: generatedRef,
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+        source: 'gpt-image-2',
+      }],
+      message: 'visible generated image',
+      sessionId: 'session-generated-delivery',
+      turnId: 'turn-generated-delivery',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...generatedDelivery,
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'generated-delivery-message',
+        sentAt: '2026-04-18T00:05:00.000Z',
+      }),
+      sentAt: '2026-04-18T00:05:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-18T00:05:00.000Z',
+    })
+
     const recentTerminalIntents = Array.from({ length: 101 }, (_, index) => {
       const createdAt = new Date(Date.UTC(2026, 3, 19, 0, index, 0)).toISOString()
       const message = `terminal-${index}`
@@ -2243,15 +2514,54 @@ describe('assistant outbox runtime', () => {
     ).resolves.toBe(2)
 
     const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
-    expect(retained).toHaveLength(101)
+    expect(retained).toHaveLength(102)
     expect(retained.filter((intent) => intent.status === 'retryable')).toHaveLength(1)
     expect(
       retained.some((intent) => intent.message === 'old terminal intent'),
     ).toBe(false)
-    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
+    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(101)
+    expect(retained.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(true)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retained,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(true)
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-05-02T00:06:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(1)
+    const retainedAfterAgeCutoff = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retainedAfterAgeCutoff.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(false)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retainedAfterAgeCutoff,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(false)
   })
 
-  it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {
+  it('retains legacy group newsletter terminal occurrence evidence during outbox pruning', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-newsletter-retention-',
     )
@@ -3911,10 +4221,11 @@ describe('assistant outbox runtime', () => {
         now: new Date('2026-04-09T13:32:00.000Z'),
         vaultRoot,
       })
-      await expect(showAutomation({
+      const convertedAutomation = await showAutomation({
         automationId: automation.record.automationId,
         vaultRoot,
-      })).resolves.toMatchObject({
+      })
+      expect(convertedAutomation).toMatchObject({
         continuityPolicy: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.continuityPolicy,
         instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
         schedule: expect.objectContaining({ kind: 'dailyLocal' }),
@@ -3923,20 +4234,36 @@ describe('assistant outbox runtime', () => {
         tags: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags,
         title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
       })
+      if (convertedAutomation?.schedule.kind !== 'dailyLocal') {
+        throw new Error('Expected the predecessor to use the current daily schedule.')
+      }
       const convertedRuntimeStore =
         await readAssistantCronCanonicalRuntimeStore(paths)
       expect(convertedRuntimeStore.jobs).toContainEqual(expect.objectContaining({
         jobId: automation.record.automationId,
         state: expect.objectContaining({
+          activatedAt: schedule.kind === 'at'
+            ? '2026-04-09T13:32:00.000Z'
+            : automation.record.createdAt,
           pendingOccurrenceAt: occurrenceAt,
         }),
       }))
+      const expectedNextRunAt = schedule.kind === 'every'
+        ? computeAssistantCronNextRunAt(
+            {
+              kind: 'dailyLocal',
+              localTime: convertedAutomation.schedule.localTime,
+              timeZone: 'UTC',
+            },
+            new Date('2026-04-09T13:32:00.000Z'),
+          )
+        : '2026-04-09T13:31:30.000Z'
       await expect(listAssistantCronJobs(vaultRoot)).resolves.toContainEqual(
         expect.objectContaining({
           jobId: automation.record.automationId,
           prompt: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
           state: expect.objectContaining({
-            nextRunAt: '2026-04-09T13:31:30.000Z',
+            nextRunAt: expectedNextRunAt,
           }),
         }),
       )

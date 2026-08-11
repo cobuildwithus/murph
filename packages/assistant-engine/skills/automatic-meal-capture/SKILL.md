@@ -174,55 +174,136 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. After inspection, enrichment, read-back, and photo cleanup, consider current
-   nutrition targets only from canonical active goals. Run `vault-cli goal list
-   --status active --limit 200 --format json`, then `vault-cli goal show
-   <goal-id> --format json` for only the records that may contain an explicit
-   daily calorie, protein, carbohydrate, fat, or fiber target. If the list
-   returns 200 records, its bounded result may be incomplete: skip goal detail
-   reads and leave every card goal `null`. Otherwise, inspect the complete
-   returned set and use a target for a metric only when exactly one qualifying
-   active record unambiguously names that daily nutrition metric, unit, and
-   target value. Zero matches, multiple matches (even if their values agree),
-   range-like targets, conflicting candidates, and goals for another unit or
-   time window all leave that metric's card goal `null`. Never infer a target
-   from the day's total or generic health advice. Then run the exact canonical
+6. After inspection, enrichment, read-back, and photo cleanup, first prove the
+   active Goal read is complete. Run `vault-cli goal list --status active
+   --limit 200 --format json`. If it returns 200 records, fail closed with the
+   ordinary compact closeout: run no Goal detail reads, perform no Goal or
+   measurement mutation, ask no question, and attach no card. Otherwise, run
+   `vault-cli goal show <goal-id> --format json` for every returned active Goal
+   whose list item reports a nonzero `data.metricTargetsCount`. Do not select
+   detail reads by title, slug, domain, context-snapshot visibility, or the
+   default list prefix. Resolve metric identity, unit, comparator, effective
+   date, conflicts, and the 1,200-kcal boundary only after inspecting that
+   complete detail set. This active-target authority read is separate from any
+   all-status Goal lookup used to reuse or honor Murph's managed paused or
+   abandoned proposal; never substitute that lookup here. Then read and apply
+   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
+   before resolving a card, even when five accepted goals already exist. This
+   first requires `vault-cli memory show --format json`; if that complete
+   canonical memory read fails or is unreadable, keep the ordinary compact
+   closeout, perform no Goal or measurement mutation, ask no question, and
+   attach no card. A clearly current saved age under 18 or clearly current
+   intuitive-eating or number-sensitive preference uses the same non-numeric,
+   no-write, no-question, no-card path. Missing or ambiguous age alone does not
+   block a scheduled closeout and never authorizes a question. The gate also
+   requires both `vault-cli condition list --status active --limit 200 --format
+   json` and `vault-cli regimen list --status active --limit 200 --format json`.
+   If either returns exactly 200 records or fails, run no condition or regimen
+   detail reads, keep the ordinary compact closeout, perform no Goal or
+   measurement mutation, ask no question, and attach no card. Otherwise, run
+   `vault-cli condition show <condition-id> --format json` for every returned
+   condition and `vault-cli regimen show <regimen-id> --format json` for every
+   returned regimen before applying the safety gate. Never use the five-record
+   context projection, a title, substance, severity, or the default list prefix
+   to select the safety set. If any required detail read fails or is unreadable,
+   use the same ordinary-text, no-write, no-question, no-card failure behavior.
+   Also run `vault-cli event list --kind procedure --limit 200 --format json`
+   and follow the shared gate's procedure-item inspection and conditional detail
+   reads. A completed bariatric procedure uses the same non-numeric,
+   no-write, no-question, no-card path; failed, unreadable, or saturated
+   procedure discovery uses the failure path. Also run `vault-cli event list
+   --kind encounter --limit 200 --format json`, detail-read every returned item
+   with nonzero `data.diagnosesCount`, and apply the shared gate's current active
+   diagnosis rules. A relevant active documented or suspected diagnosis uses
+   the same non-numeric path; failed, unreadable, saturated, required-detail,
+   or unresolved safety-relevant diagnosis discovery uses the failure path.
+   Then run the shared gate's bounded body-measurement read, separate
+   `pregnancy-test` measurement read, and bounded canonical test-event list plus
+   every required test detail read. A failed read, a body-measurement read
+   saturated without resolving usable BMI evidence, or a saturated
+   pregnancy-evidence read uses the same failure behavior. An explicit positive
+   pregnancy-test result from either canonical owner
+   uses the same non-numeric, no-write, no-question, no-card path. Reuse all
+   complete gate reads for the current turn. If the active target bundle is
+   incomplete after those reads, the first eligible managed closeout has one
+   proposal-only exception. Read and follow
+   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`,
+   then run `vault-cli goal list --limit 200 --format json` and detail-read only
+   candidate managed records. If that read fails, is unreadable, is saturated,
+   or finds any Goal with slug `murph-daily-nutrition-starting-targets` in any
+   status, do not create, change, or automatically repeat a numeric proposal.
+   Keep the ordinary compact closeout and attach no card. The absence of that
+   managed Goal is the first-run authority; add no flag or second state owner.
+   When the complete lookup proves absence, the safety gate passed, compatible
+   explicit targets are unambiguous, and already-known inputs prove one
+   responsible five-target bundle, create that single canonical Goal as
+   `paused`, with `window.startAt` equal to the selected capture/card local date.
+   Read it back, then explain all five provisional values, their material facts
+   and assumptions, and the effective date in ordinary text. Ask no question,
+   attach no card, and never activate it on the scheduled turn. If responsible
+   inputs are missing or the bundle is infeasible, write nothing and keep the
+   ordinary closeout. Member correction, acceptance, or decline remains an
+   interactive turn. If numeric presentation is suppressed, or the active
+   target bundle is ambiguous, unit-incompatible, or comparator-incompatible,
+   retain the ordinary compact closeout and do not attach a card. Keep the occurrence
+   local date from step 1 only as the work and retry boundary. Resolve target
+   applicability against the single selected card `localDate`: the capture date
+   whose totals and card are being closed out, including a historical catch-up
+   date. A target
+   qualifies only when that card date is on or after the containing Goal's
+   `window.startAt`, on or before its optional `window.targetAt`, and inside the
+   target's optional inclusive `startAt`/`targetAt` interval. Ignore an
+   out-of-window target for current authority and conflict resolution; never
+   copy, expose, derive from, or mutate a Goal because of it. If fewer than five
+   applicable targets remain, ask no question and use ordinary closeout text.
+   A card-qualifying target must use the exact canonical metric/unit pair:
+   `dietary-calories` with `kcal`, and
+   `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.
+   A target in another unit remains authoritative, but never compare, convert,
+   or copy its raw value into this fixed-unit card; on a scheduled occurrence,
+   ask no question and use ordinary closeout text. Never infer a target from
+   this day's meal total or one wearable day. A card-qualifying target must also
+   be an exact point: its selected-value comparator is `between` with identical
+   numeric `value` and `highValue`. A one-sided `<`, `<=`, `>`, or `>=`
+   threshold, non-identical range, or other shape remains authoritative but is
+   incompatible with this point-target card. Never expose, compare, copy, or
+   derive from its bound, and never create, replace, or remove a managed target
+   around it. On a scheduled occurrence, ask no question, perform no Goal or
+   measurement mutation, and use ordinary closeout text without a card.
+7. Only when all five qualifying exact point targets resolve from active
+   canonical Goals, run the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date
-   range. Run it immediately before any response-card attachment; do not reuse
-   an earlier total or calculate nutrition independently.
-7. When the run covers exactly one local date, the canonical read includes a
-   calorie total, and numerical output is permitted for the member, call
+   range immediately before any response-card attachment; do not reuse an
+   earlier total or calculate nutrition independently. When the run covers
+   exactly one local date, the canonical read includes a calorie total, and
+   the card-time safety gate from step 6 still passes, call
    `murph.attach_response_card` with this exact mapping:
    `card: { kind: "daily_nutrition", version: 2, localDate: <the single
    selected date>, mealCount: <top-level mealCount>, totals: { calories,
    proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,
    proteinGrams, carbsGrams, fatGrams, fiberGrams } }`. Copy every metric's
    complete `{ total, mealCount }` pair unchanged from the canonical read,
-   including `fiberGrams`. Each goal entry is either `null` or
-   `{ target: <exact canonical daily target>, status: <assessment> }`. Use only
-   an eligible target found in step 6. The assessment must be one of
-   `far_under_target`, `under_target`, `on_target`, `over_target`,
-   `far_over_target`, or `unavailable`. A metric whose total is missing or whose
-   `mealCount` is below the top-level `mealCount` must use `unavailable`; do not
-   color an incomplete total as under, on, or over target. Use the member's
-   explicit tolerance, intensity, or goal wording when present. Otherwise make
-   a forgiving, context-aware assessment: broadly aligned is `on_target`, a
-   modest miss is `under_target` or `over_target`, and only a clearly material
+   including `fiberGrams`. Each goal entry is
+   `{ target: <exact canonical daily target>, status: <assessment> }`. Never
+   translate a threshold or range comparator into this point-target payload.
+   The assessment must be one of `far_under_target`, `under_target`, `on_target`,
+   `over_target`, `far_over_target`, or `unavailable`. A metric whose total is
+   missing or whose `mealCount` is below the top-level `mealCount` must use
+   `unavailable`; do not color an incomplete total as under, on, or over target.
+   Use the member's explicit tolerance or intensity when present. Otherwise
+   make a forgiving, context-aware assessment: broadly aligned is `on_target`,
+   a modest miss is `under_target` or `over_target`, and only a clearly material
    miss is `far_under_target` or `far_over_target`. There is no universal
-   percentage threshold. Use `unavailable` when a valid target exists but the
-   day's total cannot support an assessment. Use `null` when no trustworthy
-   target exists; never fabricate one merely to color the card. After the tool
-   succeeds,
-   return a `send_message` decision without repeating nutrition values in its
-   text; the runtime replaces that text with the deterministic closeout derived
-   from the card. Do not author a second nutrition summary. The runtime labels
-   partial totals as partial and identifies missing or under-supported
-   nutrition honestly. For
-   multi-date catch-up, missing calories, or intuitive-eating,
-   eating-disorder-risk, or number-sensitive suppression, retain the current
-   compact text or suppression behavior. Never attach the photos. Suppress the
-   message only when neither a retained photo nor a same-occurrence removal
-   revision is selected.
+   percentage threshold. After the tool succeeds, return a `send_message`
+   decision without repeating nutrition values in its text; the runtime
+   replaces that text with the deterministic closeout derived from the card.
+   Do not author a second nutrition summary. The runtime labels partial totals
+   as partial and identifies missing or under-supported nutrition honestly. For
+   multi-date catch-up, missing calories, an incomplete or conflicting active
+   target bundle, or numerical suppression, retain the current compact text,
+   one-question, or non-numeric behavior and do not attach a card. Never attach
+   the photos. Suppress the message only when neither a retained photo nor a
+   same-occurrence removal revision is selected.
 
 ## Handle edge cases
 

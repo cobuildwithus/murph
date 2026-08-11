@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type {
@@ -27,11 +28,8 @@ import type { ScheduledLogQueryRecord } from '@murphai/query'
 import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-} from '../src/assistant/group-newsletter-automation.js'
-import {
-  createAssistantNewsletterOutboxTool,
-} from '../src/assistant/newsletter-outbox.js'
+  createAssistantGroupEmailOutboxTool,
+} from '../src/assistant/group-email-outbox.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import * as assistantOutboxReceiptRepair from '../src/assistant/outbox/receipt-repair.js'
 import {
@@ -48,6 +46,7 @@ type MockAutomationRecord = {
   } | null
   continuityPolicy: 'fresh' | 'preserve'
   createdAt: string
+  scheduleAnchorAt?: string
   instructions: string
   route: AutomationRoute
   schedule: AutomationSchedule
@@ -170,6 +169,7 @@ vi.mock('@murphai/operator-config/operator-config', () => ({
 import {
   addAssistantCronJob,
   getAssistantCronJob,
+  getAssistantCronAutomationTimingProjection,
   getAssistantCronStatus,
   listAssistantCronJobs,
   listAssistantCronPendingDeliveryIntentIds,
@@ -480,6 +480,7 @@ beforeEach(() => {
       assistantTargetOverride?: MockAutomationRecord['assistantTargetOverride']
       continuityPolicy?: 'fresh' | 'preserve'
       instructions: string
+      now?: Date
       route: MockAutomationRecord['route']
       schedule: AutomationSchedule
       slug?: string
@@ -490,13 +491,18 @@ beforeEach(() => {
       vaultRoot: string
     }) => {
       const records = getVaultAutomationStore(input.vaultRoot)
-      const now = new Date().toISOString()
+      const now = (input.now ?? new Date()).toISOString()
       const existingIndex = input.automationId
         ? records.findIndex((record) => record.automationId === input.automationId)
         : -1
 
       if (existingIndex >= 0) {
         const existing = records[existingIndex] as MockAutomationRecord
+        const scheduleAnchorAt =
+          !isDeepStrictEqual(existing.schedule, input.schedule) ||
+            (existing.status !== 'active' && input.status === 'active')
+            ? now
+            : existing.scheduleAnchorAt ?? existing.createdAt
         const updated: MockAutomationRecord = {
           ...existing,
           activeUntil:
@@ -511,6 +517,7 @@ beforeEach(() => {
           instructions: input.instructions,
           route: { ...input.route },
           schedule: input.schedule,
+          scheduleAnchorAt,
           slug: input.slug,
           status: input.status,
           summary: input.summary,
@@ -524,13 +531,16 @@ beforeEach(() => {
         }
       }
 
+      const automationId = `automation-${cronMocks.nextAutomationId++}`
       const created: MockAutomationRecord = {
         activeUntil: input.activeUntil ?? null,
-        automationId: `automation-${cronMocks.nextAutomationId++}`,
+        automationId,
         assistantTargetOverride: input.assistantTargetOverride ?? null,
         continuityPolicy: input.continuityPolicy ?? 'preserve',
         createdAt: now,
+        scheduleAnchorAt: now,
         instructions: input.instructions,
+        relativePath: `bank/automations/${input.slug ?? automationId}.md`,
         route: { ...input.route },
         schedule: input.schedule,
         slug: input.slug,
@@ -780,6 +790,450 @@ describe('assistant cron runtime orchestration', () => {
       'archived',
     )
     expect(cronMocks.upsertAutomation).toHaveBeenCalledTimes(3)
+  })
+
+  it('keeps an explicit recurring timezone instead of reinterpreting its wall clock in the vault timezone', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-explicit-automation-timezone-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const job = await upsertAssistantCronAutomation({
+      activeUntil: '2026-08-16T04:59:59.000Z',
+      instructions: 'Send the daily group update.',
+      now: new Date('2026-08-09T23:27:19.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'cron',
+        expression: '0 21 * * *',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'daily-group-update',
+      title: 'Daily group update',
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected explicit-timezone automation to be saved.')
+    }
+
+    expect(job.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 21 * * *',
+      timeZone: 'America/Chicago',
+    })
+    expect(job.state.nextRunAt).toBe('2026-08-10T02:00:00.000Z')
+    expect(findCanonicalAutomation(vaultRoot, 'daily-group-update')?.schedule).toEqual({
+      kind: 'cron',
+      expression: '0 21 * * *',
+      timeZone: 'America/Chicago',
+    })
+  })
+
+  it('reanchors reactivated and revised recurring sources to an exact future occurrence', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-revised-automation-timezone-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const created = await upsertAssistantCronAutomation({
+      instructions: 'Send the daily group update.',
+      now: new Date('2026-08-01T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'revised-daily-group-update',
+      title: 'Revised daily group update',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected revised recurring automation to be saved.')
+    }
+
+    await setAssistantCronJobEnabled(vaultRoot, created.jobId, false)
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-02T02:00:01.000Z',
+      state: {
+        ...record.state,
+        activatedAt: '2026-08-01T12:00:00.000Z',
+        lastRunAt: '2026-08-02T02:00:00.000Z',
+        lastSucceededAt: '2026-08-02T02:00:00.000Z',
+      },
+    }))
+
+    vi.setSystemTime(new Date('2026-08-10T00:27:19.000Z'))
+    const reactivated = await setAssistantCronJobEnabled(
+      vaultRoot,
+      created.jobId,
+      true,
+    )
+    expect(reactivated.state.nextRunAt).toBe('2026-08-10T02:00:00.000Z')
+
+    vi.setSystemTime(new Date('2026-08-10T00:28:19.000Z'))
+    const source = findCanonicalAutomation(vaultRoot, created.jobId)
+    if (!source) {
+      throw new Error('Expected revised recurring automation source.')
+    }
+    source.schedule = {
+      kind: 'dailyLocal',
+      localTime: '22:00',
+      timeZone: 'America/Chicago',
+    }
+    source.scheduleAnchorAt = '2026-08-10T00:28:19.000Z'
+    source.updatedAt = '2026-08-10T00:28:19.000Z'
+
+    const revised = await getAssistantCronJob(vaultRoot, created.jobId)
+    expect(revised.updatedAt).toBe('2026-08-10T00:28:19.000Z')
+    expect(revised.schedule).toEqual({
+      kind: 'dailyLocal',
+      localTime: '22:00',
+      timeZone: 'America/Chicago',
+    })
+    expect(revised.state.nextRunAt).toBe('2026-08-10T03:00:00.000Z')
+
+    const { claimed } = await claimFirstCanonicalCronJob(vaultRoot)
+    expect(claimed.runtimeState.state.pendingOccurrenceAt).toBe(
+      '2026-08-10T03:00:00.000Z',
+    )
+  })
+
+  it('preserves due work across non-timing edits and replaces it on schedule edits', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T12:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-timing-transition-pending-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const created = await upsertAssistantCronAutomation({
+      instructions: 'Send the scheduled summary.',
+      now: new Date('2026-08-01T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'group-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'group-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '21:00',
+        timeZone: 'America/Chicago',
+      },
+      slug: 'timing-transition-pending',
+      title: 'Timing transition pending',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected timing-transition automation to be saved.')
+    }
+
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-10T02:00:01.000Z',
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-08-10T02:00:00.000Z',
+      },
+    }))
+    const source = findCanonicalAutomation(vaultRoot, created.jobId)
+    if (!source) {
+      throw new Error('Expected timing-transition automation source.')
+    }
+
+    source.instructions = 'Send the refreshed scheduled summary.'
+    source.updatedAt = '2026-08-10T02:05:00.000Z'
+    await expect(getAssistantCronJob(vaultRoot, created.jobId)).resolves
+      .toMatchObject({
+        state: { nextRunAt: '2026-08-10T02:00:00.000Z' },
+      })
+
+    source.schedule = {
+      kind: 'dailyLocal',
+      localTime: '22:00',
+      timeZone: 'America/Chicago',
+    }
+    source.scheduleAnchorAt = '2026-08-10T02:06:00.000Z'
+    source.updatedAt = '2026-08-10T02:06:00.000Z'
+    await expect(getAssistantCronJob(vaultRoot, created.jobId)).resolves
+      .toMatchObject({
+        state: { nextRunAt: '2026-08-10T03:00:00.000Z' },
+      })
+  })
+
+  it('separates deliverable occurrences from finite cutoffs and retry wakes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-09T12:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-deliverable-occurrence-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: {
+        timezone: 'America/New_York',
+      },
+    })
+
+    const created = await upsertAssistantCronAutomation({
+      activeUntil: '2026-08-10T17:00:00.000Z',
+      instructions: 'Send the finite daily update.',
+      now: new Date('2026-08-09T12:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'finite-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'finite-room',
+        threadIsDirect: false,
+      },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '09:00',
+        timeZone: 'America/New_York',
+      },
+      slug: 'finite-daily-update',
+      title: 'Finite daily update',
+      vault: vaultRoot,
+    })
+    if (!created) {
+      throw new Error('Expected finite recurring automation to be saved.')
+    }
+    await setAssistantCronJobEnabled(vaultRoot, created.jobId, false)
+    await setAssistantCronJobEnabled(vaultRoot, created.jobId, true)
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-10T13:00:01.000Z',
+      state: {
+        ...record.state,
+        lastRunAt: '2026-08-10T13:00:00.000Z',
+        lastSucceededAt: '2026-08-10T13:00:00.000Z',
+      },
+    }))
+    const source = findCanonicalAutomation(vaultRoot, created.jobId)
+    if (!source?.relativePath) {
+      throw new Error('Expected finite recurring automation source.')
+    }
+    source.instructions = 'Send the revised finite daily update.'
+    source.updatedAt = '2026-08-10T16:00:00.000Z'
+
+    const completed = await getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      source.relativePath,
+      'America/New_York',
+    )
+    expect(completed.job.state.nextRunAt).toBe('2026-08-10T17:00:00.000Z')
+    expect(completed).toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+
+    await updateCanonicalRuntimeState(vaultRoot, created.jobId, (record) => ({
+      ...record,
+      updatedAt: '2026-08-10T16:05:00.000Z',
+      state: {
+        ...record.state,
+        pendingOccurrenceAt: '2026-08-10T13:00:00.000Z',
+        retryAfterAt: '2026-08-10T16:30:00.000Z',
+      },
+    }))
+    const retrying = await getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      source.relativePath,
+      'America/New_York',
+    )
+    expect(retrying.job.state.nextRunAt).toBe('2026-08-10T16:30:00.000Z')
+    expect(retrying).toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: false,
+    })
+  })
+
+  it('projects one-shot occurrences with the same freshness boundaries as execution', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-10T06:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-one-shot-projection-freshness-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const route = {
+      channel: 'linq' as const,
+      deliverySource: null,
+      deliveryTarget: 'projection-room',
+      identityId: null,
+      participantId: null,
+      threadId: 'projection-room',
+      threadIsDirect: false,
+    }
+    const saveOneShot = async (input: {
+      activeUntil?: string
+      at: string
+      slug: string
+    }) => {
+      const job = await upsertAssistantCronAutomation({
+        ...(input.activeUntil === undefined
+          ? {}
+          : { activeUntil: input.activeUntil }),
+        instructions: 'Send the one-time check-in.',
+        now: new Date('2026-08-10T06:00:00.000Z'),
+        route,
+        schedule: { at: input.at, kind: 'at' },
+        slug: input.slug,
+        title: 'One-time check-in',
+        vault: vaultRoot,
+      })
+      if (!job) {
+        throw new Error('Expected one-shot automation to be saved.')
+      }
+      const source = findCanonicalAutomation(vaultRoot, job.jobId)
+      if (!source?.relativePath) {
+        throw new Error('Expected one-shot automation source.')
+      }
+      return { job, relativePath: source.relativePath }
+    }
+
+    const future = await saveOneShot({
+      at: '2026-08-10T09:30:00.000Z',
+      slug: 'future-one-shot-projection',
+    })
+    const boundary = await saveOneShot({
+      at: '2026-08-10T08:00:00.000Z',
+      slug: 'boundary-one-shot-projection',
+    })
+    const stale = await saveOneShot({
+      at: '2026-08-10T07:59:59.999Z',
+      slug: 'stale-one-shot-projection',
+    })
+    const finite = await saveOneShot({
+      activeUntil: '2026-08-10T11:00:00.000Z',
+      at: '2026-08-10T07:00:00.000Z',
+      slug: 'finite-one-shot-projection',
+    })
+    const elapsedFinite = await saveOneShot({
+      activeUntil: '2026-08-10T08:45:00.000Z',
+      at: '2026-08-10T08:30:00.000Z',
+      slug: 'elapsed-finite-one-shot-projection',
+    })
+    vi.setSystemTime(new Date('2026-08-10T09:00:00.000Z'))
+
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      future.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T09:30:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      boundary.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T08:00:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      stale.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      finite.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: '2026-08-10T07:00:00.000Z',
+      occurrenceVerified: true,
+    })
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      elapsedFinite.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: true,
+    })
+  })
+
+  it('does not certify a stale recurring occurrence that execution will consume', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-01T09:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-recurring-projection-freshness-',
+    )
+    cronMocks.loadVault.mockResolvedValue({
+      metadata: { timezone: 'America/New_York' },
+    })
+    const job = await upsertAssistantCronAutomation({
+      instructions: 'Send the daily check-in.',
+      now: new Date('2026-08-01T09:00:00.000Z'),
+      route: {
+        channel: 'linq',
+        deliverySource: null,
+        deliveryTarget: 'recurring-projection-room',
+        identityId: null,
+        participantId: null,
+        threadId: 'recurring-projection-room',
+        threadIsDirect: false,
+      },
+      schedule: { everyMs: 86_400_000, kind: 'every' },
+      slug: 'stale-recurring-projection',
+      title: 'Daily check-in',
+      vault: vaultRoot,
+    })
+    if (!job) {
+      throw new Error('Expected recurring automation to be saved.')
+    }
+    const source = findCanonicalAutomation(vaultRoot, job.jobId)
+    if (!source?.relativePath) {
+      throw new Error('Expected recurring automation source.')
+    }
+
+    vi.setSystemTime(new Date('2026-08-03T12:00:00.000Z'))
+    await expect(getAssistantCronAutomationTimingProjection(
+      vaultRoot,
+      source.relativePath,
+      'America/New_York',
+    )).resolves.toMatchObject({
+      nextOccurrenceAt: null,
+      occurrenceVerified: false,
+    })
   })
 
   it('materializes a finite latest-slot occurrence with execution budget and preserves it on reseed', async () => {
@@ -4992,7 +5446,7 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
-  it('withholds newsletter send authority until the latest configuration opt-out window elapses', async () => {
+  it('makes optional group email authority available at the first natural cron occurrence', async () => {
     async function runOccurrence(occurrenceAt: string) {
       vi.setSystemTime(new Date(occurrenceAt))
       const { vaultRoot } = await createRuntimeContext(
@@ -5010,11 +5464,13 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
           expression: '0 * * * *',
         },
+        scheduleAnchorAt: '2026-07-06T10:00:00.000Z',
         slug: 'group-health-newsletter',
         status: 'active',
         summary: null,
@@ -5069,7 +5525,7 @@ describe('assistant cron runtime orchestration', () => {
         throw new Error('Expected scheduled notification input.')
       }
       const authority = input.scheduledAutomationAuthority ?? null
-      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      expect(result.run.status).toBe('succeeded')
       return authority
     }
 
@@ -5077,7 +5533,10 @@ describe('assistant cron runtime orchestration', () => {
     try {
       await expect(
         runOccurrence('2026-07-06T11:59:59.999Z'),
-      ).resolves.toBeNull()
+      ).resolves.toEqual({
+        automationId: 'automation-newsletter-window',
+        occurrenceAt: '2026-07-06T11:00:00.000Z',
+      })
       await expect(
         runOccurrence('2026-07-06T12:00:00.000Z'),
       ).resolves.toEqual({
@@ -5089,7 +5548,7 @@ describe('assistant cron runtime orchestration', () => {
     }
   })
 
-  it('only grants scheduled newsletter send authority for cron schedules', async () => {
+  it('only grants generic group email authority for group cron schedules', async () => {
     async function runSchedule(
       schedule: AutomationSchedule,
       tags: string[] = ['assistant', 'scheduled'],
@@ -5110,6 +5569,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule,
         slug: 'group-health-newsletter',
@@ -5167,7 +5627,7 @@ describe('assistant cron runtime orchestration', () => {
         throw new Error('Expected scheduled notification input.')
       }
       const authority = input.scheduledAutomationAuthority ?? null
-      expect(result.run.status).toBe(authority ? 'failed' : 'succeeded')
+      expect(result.run.status).toBe('succeeded')
       return {
         authority,
         instructions: input.instructions ?? '',
@@ -5184,10 +5644,8 @@ describe('assistant cron runtime orchestration', () => {
           automationId: 'automation-newsletter-schedule-kind',
           occurrenceAt: '2026-07-06T12:00:00.000Z',
         },
-        instructions: expect.stringContaining(
-          'Call `murph.newsletter` with `action="prepare"` exactly once and with no group or route identifier.',
-        ),
-        status: 'failed',
+        instructions: expect.stringContaining('Compose the group health newsletter.'),
+        status: 'succeeded',
       })
       await expect(
         runSchedule({ kind: 'at', at: '2026-07-06T12:00:00.000Z' }),
@@ -5195,22 +5653,6 @@ describe('assistant cron runtime orchestration', () => {
       await expect(
         runSchedule({ kind: 'every', everyMs: 3_600_000 }),
       ).resolves.toMatchObject({ authority: null, status: 'succeeded' })
-      await expect(
-        runSchedule(
-          { kind: 'cron', expression: '0 * * * *' },
-          [
-            'assistant',
-            'scheduled',
-            GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-          ],
-        ),
-      ).resolves.toMatchObject({
-        authority: null,
-        instructions: expect.stringContaining(
-          'delivered to the current group chat through the ordinary scheduled assistant response',
-        ),
-        status: 'succeeded',
-      })
     } finally {
       vi.useRealTimers()
     }
@@ -5219,32 +5661,28 @@ describe('assistant cron runtime orchestration', () => {
   it.each([
     {
       label: 'every email recipient fails',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         status: 'unavailable' as const,
         unavailableReason: 'send_failed',
       },
     },
     {
       label: 'recipient authorization changes after preparation',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         status: 'unavailable' as const,
-        unavailableReason: 'newsletter_authorization_changed',
+        unavailableReason: 'group_email_authorization_changed',
       },
     },
     {
       label: 'durable recipient delivery is still pending',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         participantCount: 2,
         skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
       },
     },
-    {
-      label: 'the model exits without a newsletter send result',
-      newsletterSendResult: null,
-    },
-  ])('fails and preserves a scheduled newsletter occurrence when $label', async ({
-    newsletterSendResult,
+  ])('fails and preserves a scheduled group email occurrence when $label', async ({
+    groupEmailSendResult,
   }) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-07-12T13:00:00.000Z'))
@@ -5264,6 +5702,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -5317,9 +5756,9 @@ describe('assistant cron runtime orchestration', () => {
           privateSummary: 'Newsletter delivery failed.',
           text: 'Newsletter delivery failed.',
         },
-        ...(newsletterSendResult
+        ...(groupEmailSendResult
           ? {
-              postTurnDeliveryExpectations: { newsletterSendResult },
+              postTurnDeliveryExpectations: { groupEmailSendResult },
             }
           : {}),
         response: 'Newsletter delivery failed.',
@@ -5337,7 +5776,7 @@ describe('assistant cron runtime orchestration', () => {
 
       expect(result.run.status).toBe('failed')
       expect(result.run.error).toBe(
-        'Group health newsletter delivery did not complete.',
+        'Group email delivery did not complete.',
       )
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
@@ -5357,8 +5796,8 @@ describe('assistant cron runtime orchestration', () => {
       expectedRunReason: 'no_delivery',
       expectedRunStatus: 'succeeded',
       label: 'partial newsletter delivery',
-      newsletterPendingDeliveryIntentId: null,
-      newsletterSendResult: {
+      groupEmailPendingDeliveryIntentId: null,
+      groupEmailSendResult: {
         failedRecipientCount: 1,
         participantCount: 3,
         sentRecipientCount: 2,
@@ -5373,8 +5812,8 @@ describe('assistant cron runtime orchestration', () => {
       expectedRunReason: 'no_delivery',
       expectedRunStatus: 'succeeded',
       label: 'newsletter with no recipients',
-      newsletterPendingDeliveryIntentId: null,
-      newsletterSendResult: {
+      groupEmailPendingDeliveryIntentId: null,
+      groupEmailSendResult: {
         participantCount: 0,
         skippedNoEmailMemberIds: ['member_without_email'],
         status: 'no_recipients' as const,
@@ -5387,8 +5826,8 @@ describe('assistant cron runtime orchestration', () => {
       expectedRunReason: 'delivery_pending',
       expectedRunStatus: 'skipped',
       label: 'durable newsletter fanout is pending',
-      newsletterPendingDeliveryIntentId: 'outbox-newsletter-parent',
-      newsletterSendResult: {
+      groupEmailPendingDeliveryIntentId: 'outbox-newsletter-parent',
+      groupEmailSendResult: {
         participantCount: 3,
         skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
@@ -5402,9 +5841,9 @@ describe('assistant cron runtime orchestration', () => {
         'delivery_pending_after_ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
       expectedRunStatus: 'skipped',
       label: 'durable newsletter acceptance precedes a notification error',
-      newsletterPendingDeliveryIntentId:
+      groupEmailPendingDeliveryIntentId:
         'outbox-newsletter-parent-after-error',
-      newsletterSendResult: {
+      groupEmailSendResult: {
         participantCount: 3,
         skippedNoEmailMemberIds: [],
         status: 'accepted' as const,
@@ -5416,8 +5855,8 @@ describe('assistant cron runtime orchestration', () => {
     expectedRunOutcome,
     expectedRunReason,
     expectedRunStatus,
-    newsletterPendingDeliveryIntentId,
-    newsletterSendResult,
+    groupEmailPendingDeliveryIntentId,
+    groupEmailSendResult,
     throwsAfterAcceptance,
   }) => {
     vi.useFakeTimers()
@@ -5438,6 +5877,7 @@ describe('assistant cron runtime orchestration', () => {
           identityId: null,
           participantId: null,
           threadId: 'group-chat-1',
+          threadIsDirect: false,
         },
         schedule: {
           kind: 'cron',
@@ -5488,14 +5928,14 @@ describe('assistant cron runtime orchestration', () => {
       if (throwsAfterAcceptance) {
         cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async (
           notificationInput: {
-            onNewsletterPendingDeliveryIntentId?: (intentId: string) => void
+            onGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
           },
         ) => {
-          if (!newsletterPendingDeliveryIntentId) {
+          if (!groupEmailPendingDeliveryIntentId) {
             throw new Error('Expected a pending newsletter parent id.')
           }
-          notificationInput.onNewsletterPendingDeliveryIntentId?.(
-            newsletterPendingDeliveryIntentId,
+          notificationInput.onGroupEmailPendingDeliveryIntentId?.(
+            groupEmailPendingDeliveryIntentId,
           )
           throw new VaultCliError(
             'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
@@ -5510,10 +5950,10 @@ describe('assistant cron runtime orchestration', () => {
             text: 'Newsletter handled.',
           },
           postTurnDeliveryExpectations: {
-            ...(newsletterPendingDeliveryIntentId
-              ? { newsletterPendingDeliveryIntentId }
+            ...(groupEmailPendingDeliveryIntentId
+              ? { groupEmailPendingDeliveryIntentId }
               : {}),
-            newsletterSendResult,
+            groupEmailSendResult,
           },
           response: 'Newsletter handled.',
           session: {
@@ -5536,12 +5976,12 @@ describe('assistant cron runtime orchestration', () => {
       const currentStore = await readAssistantCronCanonicalRuntimeStore(paths)
       const current = currentStore.jobs.find((record) => record.jobId === source.automationId)
       expect(current?.state.pendingOccurrenceAt).toBe(
-        newsletterPendingDeliveryIntentId
+        groupEmailPendingDeliveryIntentId
           ? '2026-07-12T13:00:00.000Z'
           : null,
       )
       expect(current?.state.pendingDeliveryIntentId ?? null).toBe(
-        newsletterPendingDeliveryIntentId,
+        groupEmailPendingDeliveryIntentId,
       )
       expect(current?.state.consecutiveFailures).toBe(0)
       expect(current?.state.lastFailedAt).toBeNull()
@@ -5693,15 +6133,15 @@ describe('assistant cron runtime orchestration', () => {
         ).mockRejectedValueOnce(failure)
       }
       cronMocks.sendAssistantMessageLocal.mockImplementationOnce(async () => {
-        const tool = createAssistantNewsletterOutboxTool({
+        const tool = createAssistantGroupEmailOutboxTool({
           automationAuthority: {
             automationId,
             expectedUpdatedAt: source.updatedAt,
           },
           authority: { automationId, occurrenceAt },
-          newsletterTool: {
+          groupTool: {
             request: async () => ({
-              action: 'prepare',
+              action: 'prepare_email',
               result: {
                 authorizationProof: 'a'.repeat(64),
                 groupId: 'group_1',
@@ -5719,9 +6159,9 @@ describe('assistant cron runtime orchestration', () => {
           turnId: 'turn_newsletter_post_write_failure',
           vault: vaultRoot,
         })
-        await tool.request({ action: 'prepare' })
+        await tool.request({ action: 'prepare_email', projectionScopes: [] })
         await tool.request({
-          action: 'send',
+          action: 'send_email',
           html: '<p>Weekly</p>',
           subject: 'Weekly',
           text: 'Weekly',
@@ -12570,6 +13010,7 @@ async function createClaimedNewsletterCronJob(input: {
       identityId: null,
       participantId: null,
       threadId: 'group-chat-1',
+          threadIsDirect: false,
     },
     schedule: {
       kind: 'cron',
@@ -12646,7 +13087,7 @@ function buildTestNewsletterParentIntent(input: {
       subject: 'Weekly',
       targetKind: 'group',
     }),
-    newsletterAuthorizationProof: 'a'.repeat(64),
+    groupEmailAuthorizationProof: 'a'.repeat(64),
     threadIsDirect: false,
   })
 }

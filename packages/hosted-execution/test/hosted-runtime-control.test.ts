@@ -31,6 +31,7 @@ import {
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
+  HOSTED_RETIRED_MAILBOX_KINDS,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_BYTE_SIZE_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_LOG_SHA_STATUS_KEY,
   HOSTED_CANONICAL_WRITE_RECEIPT_RECOVERY_PRIOR_WAKE_AT_STATUS_KEY,
@@ -45,6 +46,7 @@ import {
   buildHostedAiUsageAllowDecisionBody,
   isHostedMailboxKind,
   isHostedMailboxLane,
+  isHostedRetiredMailboxKind,
   isHostedRuntimeFutureMailboxContinuation,
   isHostedRuntimeMailboxContinuation,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
@@ -238,10 +240,10 @@ describe("hosted runtime control contracts", () => {
       "clinical-records.sync-requested",
       "device-sync.wake",
       "environment-voice.captured",
-      "group-newsletter.email-needed",
       "meal-photo.captured",
       "vault-share.delivery",
       "vault-share.revoke",
+      "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
@@ -250,6 +252,11 @@ describe("hosted runtime control contracts", () => {
       "runtime.device-sync-recovery-requested",
       "runtime.mailbox-lag-observed",
     ]);
+    expect(HOSTED_RETIRED_MAILBOX_KINDS).toEqual([
+      "group-newsletter.email-needed",
+    ]);
+    expect(isHostedRetiredMailboxKind("group-newsletter.email-needed")).toBe(true);
+    expect(isHostedRetiredMailboxKind("conversation.message")).toBe(false);
     expect(HOSTED_WORKSPACE_CHECKPOINT_REASONS).toEqual([
       "import",
       "active_turn_input",
@@ -272,6 +279,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.onboarding_followup_reconciled",
     );
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.dense_raw_retention");
+    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.import_completed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.job_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");

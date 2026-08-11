@@ -1,10 +1,12 @@
-import type {
-  DailyNutritionResponseCard,
-  DailyNutritionResponseCardV2,
-  NutritionCardGoalSnapshot,
-  NutritionCardGoalStatus,
-  NutritionCardMetric,
+import {
+  nutritionCardGoalStatusLabels,
+  type DailyNutritionResponseCard,
+  type DailyNutritionResponseCardV2,
+  type NutritionCardGoalSnapshot,
+  type NutritionCardMetric,
 } from "@murphai/contracts";
+
+import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
 
 export const IMESSAGE_NUTRITION_CARD_IMAGE_SIZE = {
   width: 1200,
@@ -17,13 +19,7 @@ const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
 });
 
 const COLOR = {
-  balloon: "#FFF5E6",
-  badge: "#FCFAF5",
-  badgeBorder: "rgba(20,18,23,0.08)",
-  badgeMark: "rgba(186,130,74,0.55)",
-  primary: "#141217",
-  secondary: "#666163",
-  progressTrack: "rgba(102,97,99,0.12)",
+  ...IMESSAGE_CARD_COLOR,
   farFromTarget: "#B3332B",
   offTarget: "#995E08",
   onTarget: "#337338",
@@ -42,8 +38,8 @@ const EMPTY_METRIC: NutritionCardMetric = {
 
 /**
  * Static counterpart to the shipping SwiftUI nutrition balloon's default
- * state. Detailed dates, completeness, goals, and statuses remain in Linq's
- * native captions so the visual can stay aligned with the compact card.
+ * state. The provider owns the outer card chrome, so this image deliberately
+ * avoids its own badge and corner mask.
  */
 export function NutritionCardImage({
   card,
@@ -85,23 +81,21 @@ export function NutritionCardImage({
         display: "flex",
         width: "100%",
         height: "100%",
-        overflow: "hidden",
-        borderRadius: 105,
         backgroundColor: COLOR.balloon,
         color: COLOR.primary,
         fontFamily: "DM Sans",
       }}
     >
-      <SystemBadge />
-
       <div
+        data-calorie-goal-status={calorieGoal?.status ?? "no-goal"}
         style={{
           position: "absolute",
           top: 146,
           left: 45,
           display: "flex",
-          alignItems: "baseline",
-          gap: 18,
+          flexDirection: "column",
+          alignItems: "flex-start",
+          gap: 10,
           maxWidth: 800,
           whiteSpace: "nowrap",
         }}
@@ -109,26 +103,35 @@ export function NutritionCardImage({
         <div
           style={{
             display: "flex",
-            fontSize: 143,
-            fontWeight: 600,
-            lineHeight: 1,
-            letterSpacing: "-0.045em",
-            fontVariantNumeric: "tabular-nums",
+            alignItems: "baseline",
+            gap: 18,
           }}
         >
-          {calories === null ? "—" : formatNumber(calories)}
+          <div
+            style={{
+              display: "flex",
+              fontSize: 143,
+              fontWeight: 600,
+              lineHeight: 1,
+              letterSpacing: "-0.045em",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {calories === null ? "—" : formatNumber(calories)}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              color: COLOR.secondary,
+              fontSize: 56,
+              fontWeight: 500,
+              lineHeight: 1,
+            }}
+          >
+            cal
+          </div>
         </div>
-        <div
-          style={{
-            display: "flex",
-            color: COLOR.secondary,
-            fontSize: 56,
-            fontWeight: 500,
-            lineHeight: 1,
-          }}
-        >
-          cal
-        </div>
+        <GoalStatusLabel fontSize={27} goal={calorieGoal} />
       </div>
 
       <CalorieRing
@@ -152,61 +155,6 @@ export function NutritionCardImage({
           <Metric key={presentation.label} presentation={presentation} />
         ))}
       </div>
-    </div>
-  );
-}
-
-function SystemBadge() {
-  const dotOffsets = [
-    [0, -23],
-    [23, 0],
-    [0, 23],
-    [-23, 0],
-  ] as const;
-
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        position: "absolute",
-        top: 30,
-        left: 30,
-        display: "flex",
-        width: 135,
-        height: 101,
-        border: `2px solid ${COLOR.badgeBorder}`,
-        borderRadius: 999,
-        backgroundColor: COLOR.badge,
-        boxShadow: "0 2px 4px rgba(20,18,23,0.08)",
-      }}
-    >
-      <span
-        style={{
-          position: "absolute",
-          top: 43,
-          left: 60,
-          display: "flex",
-          width: 15,
-          height: 15,
-          borderRadius: 999,
-          backgroundColor: COLOR.badgeMark,
-        }}
-      />
-      {dotOffsets.map(([x, y]) => (
-        <span
-          key={`${x}:${y}`}
-          style={{
-            position: "absolute",
-            top: 46 + y,
-            left: 63 + x,
-            display: "flex",
-            width: 10,
-            height: 10,
-            borderRadius: 999,
-            backgroundColor: COLOR.badgeMark,
-          }}
-        />
-      ))}
     </div>
   );
 }
@@ -334,8 +282,46 @@ function Metric({
       >
         {metric.total === null ? "—" : `${formatNumber(metric.total)}g`}
       </div>
+      <GoalStatusLabel fontSize={23} goal={goal} />
     </div>
   );
+}
+
+function GoalStatusLabel({
+  fontSize,
+  goal,
+}: {
+  fontSize: number;
+  goal: NutritionCardGoalSnapshot | null | undefined;
+}) {
+  if (goal === null || goal === undefined || goal.status === "unavailable") {
+    return null;
+  }
+
+  return (
+    <div
+      data-goal-status-label={goal.status}
+      style={{
+        display: "flex",
+        color: getStatusColor(goal),
+        fontSize,
+        fontWeight: 700,
+        lineHeight: 1,
+        letterSpacing: "0.04em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {formatGoalStatusLabel(goal.status)}
+    </div>
+  );
+}
+
+function formatGoalStatusLabel(
+  status: NutritionCardGoalSnapshot["status"],
+): string {
+  const label = nutritionCardGoalStatusLabels[status];
+  return (status === "on_target" ? label : label.replace(" target", ""))
+    .toUpperCase();
 }
 
 function getCalorieProgress(
@@ -368,7 +354,10 @@ function getStatusColor(
     over_target: COLOR.offTarget,
     unavailable: COLOR.secondary,
     under_target: COLOR.offTarget,
-  } as const satisfies Record<NutritionCardGoalStatus, string>;
+  } as const satisfies Record<
+    NutritionCardGoalSnapshot["status"],
+    string
+  >;
   return colors[goal.status];
 }
 

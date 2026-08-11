@@ -6,6 +6,7 @@ import { renderClientComponent } from "./render-client-component";
 const mocks = vi.hoisted(() => ({
   authDialogProps: null as null | {
     autoSendPastedPhoneNumber?: boolean;
+    onOpenChange: (open: boolean) => void;
     open: boolean;
     privyRuntime?: { kind: string };
   },
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: {
     autoSendPastedPhoneNumber?: boolean;
+    onOpenChange: (open: boolean) => void;
     open: boolean;
     privyRuntime?: { kind: string };
   }) {
@@ -75,7 +77,7 @@ afterEach(() => {
   mocks.authDialogProps = null;
 });
 
-test("a homepage click before idle opens immediately and starts the shared runtime", async () => {
+test("a homepage click before background warm-up opens immediately and starts the shared runtime", async () => {
   vi.useFakeTimers();
   const { HomepageAuthRuntimeProvider } = await import(
     "@/src/components/hosted-onboarding/homepage-auth-runtime-provider"
@@ -101,20 +103,31 @@ test("a homepage click before idle opens immediately and starts the shared runti
       );
     });
 
-    expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
-    expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
+    expect(mocks.runtimeMount).not.toHaveBeenCalled();
     expect(mocks.authDialogProps).toMatchObject({
       autoSendPastedPhoneNumber: true,
       open: true,
-      privyRuntime: { kind: "configured" },
     });
 
+    await flushRuntimeLoad();
+
+    expect(mocks.runtimeModuleLoad).toHaveBeenCalledTimes(1);
+    expect(mocks.runtimeMount).not.toHaveBeenCalled();
+    expect(mocks.runtimeUnmount).not.toHaveBeenCalled();
+    expect(mocks.authDialogProps).toMatchObject({ open: true });
+    expect(mocks.authDialogProps?.privyRuntime).toBeUndefined();
+
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_200);
+      mocks.authDialogProps?.onOpenChange(false);
+      await Promise.resolve();
     });
 
     expect(mocks.runtimeMount).toHaveBeenCalledTimes(1);
     expect(mocks.runtimeUnmount).not.toHaveBeenCalled();
+    expect(mocks.authDialogProps).toMatchObject({
+      open: false,
+      privyRuntime: { kind: "configured" },
+    });
   } finally {
     await rendered.cleanup();
   }
@@ -128,4 +141,11 @@ function homepageLocation() {
     pathname: "/",
     search: "",
   };
+}
+
+async function flushRuntimeLoad() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }

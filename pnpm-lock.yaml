@@ -91,6 +91,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.1.6
         version: 4.1.6(vitest@4.1.6)
+      frog:
+        specifier: 1.1.0
+        version: 1.1.0
       tsx:
         specifier: ^4.20.6
         version: 4.21.0
@@ -429,8 +432,8 @@ importers:
         version: link:../vault-usecases
     devDependencies:
       '@openai/codex':
-        specifier: 0.145.0
-        version: 0.145.0
+        specifier: 0.147.0
+        version: 0.147.0
       openai:
         specifier: 6.45.0
         version: 6.45.0(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
@@ -715,6 +718,9 @@ importers:
       '@murphai/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:../health-metrics
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state
@@ -1016,6 +1022,9 @@ importers:
       '@murphai/health-commons':
         specifier: workspace:*
         version: link:../health-commons
+      '@murphai/health-metrics':
+        specifier: workspace:*
+        version: link:../health-metrics
       '@murphai/importers':
         specifier: workspace:*
         version: link:../importers
@@ -1344,8 +1353,16 @@ packages:
   '@clack/core@0.5.0':
     resolution: {integrity: sha512-p3y0FIOwaYRUPRcMO7+dlmLh8PSRcrjuTndsiA0WAFbWES0mLZlrjVoBRZ9DzkPFJZG6KGkJmoEAY0ZcVWTkow==}
 
+  '@clack/core@1.4.3':
+    resolution: {integrity: sha512-/kr3UWNtdJfxZtPgDqUOmG2pvwlmcLGheex5yiZKdwbzZJxhV+HMNR9QNmyY5cGwTNV6LrR7Jtp+KjhUAP1qBQ==}
+    engines: {node: '>= 20.12.0'}
+
   '@clack/prompts@0.11.0':
     resolution: {integrity: sha512-pMN5FcrEw9hUkZA4f+zLlzivQSeQf5dRGJjSUbvVYDLvpKCdQx5OaknvKzgbtXOizhP+SJJJjqEbOe55uKKfAw==}
+
+  '@clack/prompts@1.7.0':
+    resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
+    engines: {node: '>= 20.12.0'}
 
   '@cloudflare/containers@0.3.6':
     resolution: {integrity: sha512-8RrbK/Et165gjvXccui3pgkUuySVWysTC6bJRXfgqmbCA2vAmh8pm7cAKDh2nZFR/GSjW4BgxeKpffCTD8SJEg==}
@@ -2303,6 +2320,10 @@ packages:
       '@cfworker/json-schema':
         optional: true
 
+  '@modelcontextprotocol/server@2.0.0-alpha.4':
+    resolution: {integrity: sha512-/KEo3ZJ50HlagHp0lz2vPgfBZFtXHu6zTBXT9XqPc+4O9i4+IbBVWKq/a9yAfv/ifp0u3+mRo8SUk5kMKzhN8A==}
+    engines: {node: '>=20'}
+
   '@msgpack/msgpack@3.1.2':
     resolution: {integrity: sha512-JEW4DEtBzfe8HvUYecLU9e6+XJnKDlUAIve8FvPzF3Kzs6Xo/KuZkZJsDH0wJXl/qEZbeeE7edxDNY3kMs39hQ==}
     engines: {node: '>= 18'}
@@ -2605,6 +2626,64 @@ packages:
     resolution: {integrity: sha512-5N/X/FzlJaYfpaHwDC0YHzOzKDWa41s9t+4FpCDu4f9OMReds4JeNBaaWk9rlIzdKjh2M6AC5Q18ORfECRkHGA==}
     engines: {node: '>=18.0.0'}
 
+  '@octokit/auth-token@6.0.0':
+    resolution: {integrity: sha512-P4YJBPdPSpWTQ1NU4XYdvHvXJJDxM6YwpS0FZHRgP7YFkdVxsWcpWGy/NVqlAA7PcPCnMacXlRm1y2PFZRWL/w==}
+    engines: {node: '>= 20'}
+
+  '@octokit/core@7.0.7':
+    resolution: {integrity: sha512-DcB0M3KFgr9ECI328lhBMVsyFT2DnmNucSBTqEN3exyNKUzkkpUSCHmTRcunF41Eou2TIQKW4seewri8ON9bSA==}
+    engines: {node: '>= 20'}
+
+  '@octokit/endpoint@11.0.4':
+    resolution: {integrity: sha512-f1cOWoHPmxryJFknxbtDdjODWfV8A9tc8Aae6ermXPNgHFZ/x91AtHIz4gicEjL8hkJiip+u21QHJORfBv/qiA==}
+    engines: {node: '>= 20'}
+
+  '@octokit/graphql@9.0.4':
+    resolution: {integrity: sha512-5s15CCiY8XXQ+FG+b1YQcl6Z2FA++nwAz/tg2VUrTmnMncP+2nnGUEYANImdnxsA2Fnq+Mbl7hDjUTw7cFAwcg==}
+    engines: {node: '>= 20'}
+
+  '@octokit/openapi-types@27.0.0':
+    resolution: {integrity: sha512-whrdktVs1h6gtR+09+QsNk2+FO+49j6ga1c55YZudfEG+oKJVvJLQi3zkOm5JjiUXAagWK2tI2kTGKJ2Ys7MGA==}
+
+  '@octokit/openapi-types@28.0.0':
+    resolution: {integrity: sha512-0rFyLuyHvIj6uuZWuDslxkowFYdPXoNIkeAv4b27dzm2Tf4vGWXnPsMcxs7d65kLdMERgP3wc1AEPlqMz8e1cQ==}
+
+  '@octokit/plugin-paginate-rest@14.0.0':
+    resolution: {integrity: sha512-fNVRE7ufJiAA3XUrha2omTA39M6IXIc6GIZLvlbsm8QOQCYvpq/LkMNGyFlB1d8hTDzsAXa3OKtybdMAYsV/fw==}
+    engines: {node: '>= 20'}
+    peerDependencies:
+      '@octokit/core': '>=6'
+
+  '@octokit/plugin-request-log@6.0.0':
+    resolution: {integrity: sha512-UkOzeEN3W91/eBq9sPZNQ7sUBvYCqYbrrD8gTbBuGtHEuycE4/awMXcYvx6sVYo7LypPhmQwwpUe4Yyu4QZN5Q==}
+    engines: {node: '>= 20'}
+    peerDependencies:
+      '@octokit/core': '>=6'
+
+  '@octokit/plugin-rest-endpoint-methods@17.0.0':
+    resolution: {integrity: sha512-B5yCyIlOJFPqUUeiD0cnBJwWJO8lkJs5d8+ze9QDP6SvfiXSz1BF+91+0MeI1d2yxgOhU/O+CvtiZ9jSkHhFAw==}
+    engines: {node: '>= 20'}
+    peerDependencies:
+      '@octokit/core': '>=6'
+
+  '@octokit/request-error@7.1.1':
+    resolution: {integrity: sha512-+eaY7G2VVpSf2pc5Gn1+mph837V/d/TYTJAgWL9Tb0ogGYcpN3IlAVFgjL+Vv93F/sevrxkvsYCedtpLdcFLzA==}
+    engines: {node: '>= 20'}
+
+  '@octokit/request@10.0.13':
+    resolution: {integrity: sha512-v2269YxL9Yf+x3d+gRI63FP0vFQEiWgLyBzxe/Y+0yFDg2B/Tzf5dhh9VNfccVAQnfcfwQWyk/y6Bn7rUXXs7A==}
+    engines: {node: '>= 20'}
+
+  '@octokit/rest@22.0.1':
+    resolution: {integrity: sha512-Jzbhzl3CEexhnivb1iQ0KJ7s5vvjMWcmRtq5aUsKmKDrRW6z3r84ngmiFKFvpZjpiU/9/S6ITPFRpn5s/3uQJw==}
+    engines: {node: '>= 20'}
+
+  '@octokit/types@16.0.0':
+    resolution: {integrity: sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg==}
+
+  '@octokit/types@17.0.0':
+    resolution: {integrity: sha512-ByP1v7YL5SMveFPP7+sj0/ZuWCOOg/Chs4NafOMpq6WNIM/hdGY0S7C0TCGDBWu1aGmOxmUIhMx3cO+IdwYZ1Q==}
+
   '@onkernel/sdk@0.76.0':
     resolution: {integrity: sha512-jswopogv6wJEyvhPgZu+XJZgN87Heuo8nO+gpxsdvJtWFhUbAZME/oLjpIdtS57CRqHQLEf+p0+bavXCMYi72w==}
 
@@ -2620,43 +2699,43 @@ packages:
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
 
-  '@openai/codex@0.145.0':
-    resolution: {integrity: sha512-/PSPSFujjjmiyVFvG2yu/grOFhsWdokTH8t2KGWhXSo/M5n/dIDsnbsnO82/7bLtIoDuzQf7ATBUMWqPWQINlQ==}
+  '@openai/codex@0.147.0':
+    resolution: {integrity: sha512-EQLEXecAG2ptxI7UpBMo2TR/ga5596/c/OsYF/0LoUDh5JANZ7IoGqlzBEWbuEVQ76JePIbtTW/ihCkp1a7Z3w==}
     engines: {node: '>=16'}
     hasBin: true
 
-  '@openai/codex@0.145.0-darwin-arm64':
-    resolution: {integrity: sha512-h6aQ0UxnaP8mIM/9/qPAH9MNkRliJo88toq1T36IxNM2L5JSU0TFamu+MZn7YkFgDsrp0RfiI+97Tm8AVVxqtA==}
+  '@openai/codex@0.147.0-darwin-arm64':
+    resolution: {integrity: sha512-BEUVkiOW7kLcRyrMLfAr/h9wF8sRVJyZDy6OHtVn6QGDXiv3BvAZVTY1Pu9xF7KdIdkYXbp4uayN0aDQQaAUJw==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [darwin]
 
-  '@openai/codex@0.145.0-darwin-x64':
-    resolution: {integrity: sha512-FCYzVKCa9VoLtg9gVyzKpqylonfgZrfcWZN6HsXAZPeuo8CukdMqdgTUOhDn2V6h3MbqS0z6VqQVKUllN/yKhA==}
+  '@openai/codex@0.147.0-darwin-x64':
+    resolution: {integrity: sha512-Tb8McE5SvJIH0Vs5R6sq7u+quiC931yan2KOOl6km1OdZ82+Wi7eF5XrSFPs5CF7xCgoIK4Vs+byMbT5hN+ZUw==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [darwin]
 
-  '@openai/codex@0.145.0-linux-arm64':
-    resolution: {integrity: sha512-8OLcPXaAol/FOrRoDxWhIiHIFa73KRsM41EKocjRZOwiT4TcelzJWn3dHyiuSb7teWF25rrslvSPyvhULYRRCQ==}
+  '@openai/codex@0.147.0-linux-arm64':
+    resolution: {integrity: sha512-SLC1JXw2TYfr/c3HhrJubyyLelq7vTOLWVmiThFA+z0+WgzCPmaseJ/kzDD3Gge/TO7fCnnj7UcPmC0d2c8XAg==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [linux]
 
-  '@openai/codex@0.145.0-linux-x64':
-    resolution: {integrity: sha512-u8w8LLv3DvsfrDCoswLIemZ0SoNEXyi511WsfFsSiYUazk9qMsB/NtU8N9vhAfN7mZAxLFoMex4v66JjHuZWwA==}
+  '@openai/codex@0.147.0-linux-x64':
+    resolution: {integrity: sha512-0W9MBxPpWW0cSkNqrTDN2jR7rzzT7oNMhQY5446lT2Lw5cz5yhDTck4Va9rjkQEm+HlFzP/dmEMSZbXfJsINmw==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [linux]
 
-  '@openai/codex@0.145.0-win32-arm64':
-    resolution: {integrity: sha512-sub61rjEFevi1i3Zx7nAd4JM5XxoNFqMqFc5LfTo2xSI8ixHjFvEYDFDXwXOftT04n3Ht1Wh271ioUZpDiEjEg==}
+  '@openai/codex@0.147.0-win32-arm64':
+    resolution: {integrity: sha512-e2ZstJ8zT8Rm1nvR7CUVO+Gr3cTChE41+VfOzGhynzDXEoW0wfbjUQbc2bWbh1arG94LMm4y3dqBtUIbSrfeGA==}
     engines: {node: '>=16'}
     cpu: [arm64]
     os: [win32]
 
-  '@openai/codex@0.145.0-win32-x64':
-    resolution: {integrity: sha512-u0h9lk094CaXRSqE34SBW2dRaQTPa6fASXqehczWH9QdsU62mBsiAgAdp6tCG4i+YzPmmhjD8FdXNnYGNmwuMg==}
+  '@openai/codex@0.147.0-win32-x64':
+    resolution: {integrity: sha512-oT7Ss5fAPf2fiWE9QNURqZcQGAAawSVxmIUdgPzckq4KFZAM+pRz9JbM4Rr498CjtbNgTOjWvDJ+DXvIBSfOPA==}
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
@@ -3255,6 +3334,10 @@ packages:
     resolution: {integrity: sha512-6ORQfwtEJYpalCeVO21L4XXGSdbEMfyp2hEv6cP82afKXSwvse6d3sdelgaPWUxHIsFRkWvHDdzh8IyyKHZKxw==}
     engines: {node: '>=16'}
     deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+
+  '@scalar/openapi-types@0.8.0':
+    resolution: {integrity: sha512-WmaxVSfvY5K/TwcG2B2TU1WOe1As1uc2s7myswtP6dBlcjU3hM08SApxv/jmyGaCE8t4gO5BBhmHY4pDUfmr2g==}
+    engines: {node: '>=22'}
 
   '@scure/base@1.1.9':
     resolution: {integrity: sha512-8YKhl8GHiNI/pU2VMaofa2Tor7PJRAjwQLBBuilkJ9L5+13yVbC7JO/wS7piioAvPSwR3JKM1IJ/u4xQzbcXKg==}
@@ -5176,6 +5259,9 @@ packages:
     engines: {node: '>=6.0.0'}
     hasBin: true
 
+  before-after-hook@4.0.0:
+    resolution: {integrity: sha512-q6tR3RPqIB1pMiTRMFcZwuG5T8vwp+vUvEG0vuI6B+Rikh5BfPp2fQ82c925FOs+b0lcFQ8CFrL+KbilfZFhOQ==}
+
   better-result@2.9.1:
     resolution: {integrity: sha512-tPWnUPD8oLESRXMykkuTvi9tJVwaFSVfdhp1/WRd1q04SqengKdYt27avogObRC/BgH+zDqSo713dUEKkXbG5w==}
 
@@ -5511,6 +5597,10 @@ packages:
   content-type@1.0.5:
     resolution: {integrity: sha512-nTjqfcBFEipKdXCv4YDQWCfmcLZKm81ldF0pAopTvyrFGVbcR6P/VAAd5G7N+0tTr8QqiU0tFadD6FK4NtJwOA==}
     engines: {node: '>= 0.6'}
+
+  content-type@2.0.0:
+    resolution: {integrity: sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ==}
+    engines: {node: '>=18'}
 
   convert-hrtime@5.0.0:
     resolution: {integrity: sha512-lOETlkIeYSJWcbbcvjRKGxVMXJR+8+OQb/mTPbA4ObPMytYIsUbuOE0Jzy60hjARYszq1id0j8KgVhC+WGZVTg==}
@@ -6429,6 +6519,11 @@ packages:
     resolution: {integrity: sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==}
     engines: {node: '>= 0.8'}
 
+  frog@1.1.0:
+    resolution: {integrity: sha512-dOUldqOw6uDybLcvDwUtp1e0JS/TD0DO3VdvBbh2wUdKHEU+xB4U55d+t0dfzDkvQ+eJyZDTb8dwNcmO9D1RRA==}
+    engines: {node: '>=22'}
+    hasBin: true
+
   fs-constants@1.0.0:
     resolution: {integrity: sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow==}
 
@@ -6732,6 +6827,11 @@ packages:
   imurmurhash@0.1.4:
     resolution: {integrity: sha512-JmXMZ6wuvDmLiHEml9ykzqO6lwFbof0GG4IkcGaENdCRDDmMVnny7s5HsIgHCbaq0w2MyPhDqkhTUgS2LU2PHA==}
     engines: {node: '>=0.8.19'}
+
+  incur@0.4.25:
+    resolution: {integrity: sha512-UHMc8OAafcalvhtfPs8rIPAUksRQ7gbR59zq8CWYFUaX1kVssfFQ6aYEb3mWglP4NMfh5HO+IfvzqhwPuCyMmg==}
+    engines: {node: '>=22'}
+    hasBin: true
 
   incur@0.4.5:
     resolution: {integrity: sha512-4WFlqm5e+IKNoX+lDIjjpebO8ResPx3vPUBChxNfnNo3oGp0ooo6piiiTspOMub2dq2mcG/AmlUq0ejuGfKobg==}
@@ -7126,6 +7226,9 @@ packages:
 
   json-stable-stringify-without-jsonify@1.0.1:
     resolution: {integrity: sha512-Bdboy+l7tA3OGW6FjyFHWkP5LuByj1Tk33Ljyq0axyzdk9//JSi2u3fP1QSmd1KNwq6VOKYGlAu87CisVir6Pw==}
+
+  json-with-bigint@3.5.10:
+    resolution: {integrity: sha512-Vcx+JVNEBts/xfcoCS69sKrOhOk/3TVlvlT+XzUOefVKnnrbYSCKpDCm10pohsJFtsJVYnwa/cXRZ4eElzaM6w==}
 
   json5@1.0.2:
     resolution: {integrity: sha512-g1MWMLBiz8FKi1e4w0UyVL3w+iJceWAFBAaBnnGKOpNa5f8TLktkbre1+s6oICydWAm+HRUGTmI+//xv2hvXYA==}
@@ -8165,6 +8268,10 @@ packages:
 
   postgres@3.4.7:
     resolution: {integrity: sha512-Jtc2612XINuBjIl/QTWsV5UvE8UHuNblcO3vVADSrKsrc6RqGX6lOW1cEo3CM2v0XG4Nat8nI+YM7/f26VxXLw==}
+    engines: {node: '>=12'}
+
+  postgres@3.4.9:
+    resolution: {integrity: sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw==}
     engines: {node: '>=12'}
 
   powershell-utils@0.1.0:
@@ -9307,6 +9414,9 @@ packages:
   unicorn-magic@0.4.0:
     resolution: {integrity: sha512-wH590V9VNgYH9g3lH9wWjTrUoKsjLF6sGLjhR4sH1LWpLmCOH0Zf7PukhDA8BiS7KHe4oPNkcTHqYkj7SOGUOw==}
     engines: {node: '>=20'}
+
+  universal-user-agent@7.0.3:
+    resolution: {integrity: sha512-TmnEAEAsBJVZM/AADELsK76llnwcf9vMKuPz8JflO1frO8Lchitr0fNaN9d+Ap0BjKtqWqd/J17qeDnXh8CL2A==}
 
   universalify@2.0.1:
     resolution: {integrity: sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw==}
@@ -10469,10 +10579,22 @@ snapshots:
       picocolors: 1.1.1
       sisteransi: 1.0.5
 
+  '@clack/core@1.4.3':
+    dependencies:
+      fast-wrap-ansi: 0.2.0
+      sisteransi: 1.0.5
+
   '@clack/prompts@0.11.0':
     dependencies:
       '@clack/core': 0.5.0
       picocolors: 1.1.1
+      sisteransi: 1.0.5
+
+  '@clack/prompts@1.7.0':
+    dependencies:
+      '@clack/core': 1.4.3
+      fast-string-width: 3.0.2
+      fast-wrap-ansi: 0.2.0
       sisteransi: 1.0.5
 
   '@cloudflare/containers@0.3.6': {}
@@ -11463,6 +11585,10 @@ snapshots:
     optionalDependencies:
       '@cfworker/json-schema': 4.1.1
 
+  '@modelcontextprotocol/server@2.0.0-alpha.4':
+    dependencies:
+      zod: 4.4.3
+
   '@msgpack/msgpack@3.1.2': {}
 
   '@mswjs/interceptors@0.41.8':
@@ -11723,6 +11849,75 @@ snapshots:
     dependencies:
       '@oclif/core': 4.8.1
 
+  '@octokit/auth-token@6.0.0': {}
+
+  '@octokit/core@7.0.7':
+    dependencies:
+      '@octokit/auth-token': 6.0.0
+      '@octokit/graphql': 9.0.4
+      '@octokit/request': 10.0.13
+      '@octokit/request-error': 7.1.1
+      '@octokit/types': 17.0.0
+      before-after-hook: 4.0.0
+      universal-user-agent: 7.0.3
+
+  '@octokit/endpoint@11.0.4':
+    dependencies:
+      '@octokit/types': 17.0.0
+      universal-user-agent: 7.0.3
+
+  '@octokit/graphql@9.0.4':
+    dependencies:
+      '@octokit/request': 10.0.13
+      '@octokit/types': 17.0.0
+      universal-user-agent: 7.0.3
+
+  '@octokit/openapi-types@27.0.0': {}
+
+  '@octokit/openapi-types@28.0.0': {}
+
+  '@octokit/plugin-paginate-rest@14.0.0(@octokit/core@7.0.7)':
+    dependencies:
+      '@octokit/core': 7.0.7
+      '@octokit/types': 16.0.0
+
+  '@octokit/plugin-request-log@6.0.0(@octokit/core@7.0.7)':
+    dependencies:
+      '@octokit/core': 7.0.7
+
+  '@octokit/plugin-rest-endpoint-methods@17.0.0(@octokit/core@7.0.7)':
+    dependencies:
+      '@octokit/core': 7.0.7
+      '@octokit/types': 16.0.0
+
+  '@octokit/request-error@7.1.1':
+    dependencies:
+      '@octokit/types': 17.0.0
+
+  '@octokit/request@10.0.13':
+    dependencies:
+      '@octokit/endpoint': 11.0.4
+      '@octokit/request-error': 7.1.1
+      '@octokit/types': 17.0.0
+      content-type: 2.0.0
+      json-with-bigint: 3.5.10
+      universal-user-agent: 7.0.3
+
+  '@octokit/rest@22.0.1':
+    dependencies:
+      '@octokit/core': 7.0.7
+      '@octokit/plugin-paginate-rest': 14.0.0(@octokit/core@7.0.7)
+      '@octokit/plugin-request-log': 6.0.0(@octokit/core@7.0.7)
+      '@octokit/plugin-rest-endpoint-methods': 17.0.0(@octokit/core@7.0.7)
+
+  '@octokit/types@16.0.0':
+    dependencies:
+      '@octokit/openapi-types': 27.0.0
+
+  '@octokit/types@17.0.0':
+    dependencies:
+      '@octokit/openapi-types': 28.0.0
+
   '@onkernel/sdk@0.76.0': {}
 
   '@open-draft/deferred-promise@2.2.0': {}
@@ -11736,31 +11931,31 @@ snapshots:
 
   '@open-draft/until@2.1.0': {}
 
-  '@openai/codex@0.145.0':
+  '@openai/codex@0.147.0':
     optionalDependencies:
-      '@openai/codex-darwin-arm64': '@openai/codex@0.145.0-darwin-arm64'
-      '@openai/codex-darwin-x64': '@openai/codex@0.145.0-darwin-x64'
-      '@openai/codex-linux-arm64': '@openai/codex@0.145.0-linux-arm64'
-      '@openai/codex-linux-x64': '@openai/codex@0.145.0-linux-x64'
-      '@openai/codex-win32-arm64': '@openai/codex@0.145.0-win32-arm64'
-      '@openai/codex-win32-x64': '@openai/codex@0.145.0-win32-x64'
+      '@openai/codex-darwin-arm64': '@openai/codex@0.147.0-darwin-arm64'
+      '@openai/codex-darwin-x64': '@openai/codex@0.147.0-darwin-x64'
+      '@openai/codex-linux-arm64': '@openai/codex@0.147.0-linux-arm64'
+      '@openai/codex-linux-x64': '@openai/codex@0.147.0-linux-x64'
+      '@openai/codex-win32-arm64': '@openai/codex@0.147.0-win32-arm64'
+      '@openai/codex-win32-x64': '@openai/codex@0.147.0-win32-x64'
 
-  '@openai/codex@0.145.0-darwin-arm64':
+  '@openai/codex@0.147.0-darwin-arm64':
     optional: true
 
-  '@openai/codex@0.145.0-darwin-x64':
+  '@openai/codex@0.147.0-darwin-x64':
     optional: true
 
-  '@openai/codex@0.145.0-linux-arm64':
+  '@openai/codex@0.147.0-linux-arm64':
     optional: true
 
-  '@openai/codex@0.145.0-linux-x64':
+  '@openai/codex@0.147.0-linux-x64':
     optional: true
 
-  '@openai/codex@0.145.0-win32-arm64':
+  '@openai/codex@0.147.0-win32-arm64':
     optional: true
 
-  '@openai/codex@0.145.0-win32-x64':
+  '@openai/codex@0.147.0-win32-x64':
     optional: true
 
   '@opentelemetry/api@1.9.0':
@@ -12852,6 +13047,8 @@ snapshots:
       - zod
 
   '@safe-global/safe-gateway-typescript-sdk@3.23.1': {}
+
+  '@scalar/openapi-types@0.8.0': {}
 
   '@scure/base@1.1.9': {}
 
@@ -15913,6 +16110,8 @@ snapshots:
 
   baseline-browser-mapping@2.10.29: {}
 
+  before-after-hook@4.0.0: {}
+
   better-result@2.9.1: {}
 
   better-sqlite3@12.6.2:
@@ -16265,6 +16464,8 @@ snapshots:
   content-disposition@2.0.1: {}
 
   content-type@1.0.5: {}
+
+  content-type@2.0.0: {}
 
   convert-hrtime@5.0.0: {}
 
@@ -17391,6 +17592,14 @@ snapshots:
 
   fresh@2.0.0: {}
 
+  frog@1.1.0:
+    dependencies:
+      '@clack/prompts': 1.7.0
+      '@octokit/rest': 22.0.1
+      incur: 0.4.25
+      postgres: 3.4.9
+      yaml: 2.9.0
+
   fs-constants@1.0.0:
     optional: true
 
@@ -17701,6 +17910,16 @@ snapshots:
       resolve-from: 4.0.0
 
   imurmurhash@0.1.4: {}
+
+  incur@0.4.25:
+    dependencies:
+      '@cfworker/json-schema': 4.1.1
+      '@modelcontextprotocol/server': 2.0.0-alpha.4
+      '@scalar/openapi-types': 0.8.0
+      '@toon-format/toon': 2.2.0
+      tokenx: 1.3.0
+      yaml: 2.9.0
+      zod: 4.4.3
 
   incur@0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e):
     dependencies:
@@ -18052,6 +18271,8 @@ snapshots:
   json-schema-typed@8.0.2: {}
 
   json-stable-stringify-without-jsonify@1.0.1: {}
+
+  json-with-bigint@3.5.10: {}
 
   json5@1.0.2:
     dependencies:
@@ -19140,6 +19361,8 @@ snapshots:
       xtend: 4.0.2
 
   postgres@3.4.7: {}
+
+  postgres@3.4.9: {}
 
   powershell-utils@0.1.0: {}
 
@@ -20541,6 +20764,8 @@ snapshots:
   unicorn-magic@0.3.0: {}
 
   unicorn-magic@0.4.0: {}
+
+  universal-user-agent@7.0.3: {}
 
   universalify@2.0.1: {}
 

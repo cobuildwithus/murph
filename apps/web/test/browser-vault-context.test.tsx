@@ -6,6 +6,7 @@ import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   type BrowserVaultReplica,
 } from "@murphai/query/browser";
+import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/browser-vault";
 import { act, useState } from "react";
 import { createElement } from "react";
 import type { ReactNode } from "react";
@@ -632,6 +633,100 @@ test("browser-vault provider polls pending refreshes without a global sync indic
   await rendered.cleanup();
 });
 
+test("browser-vault provider adopts a refreshed Patterns replica after the fast polling window", async () => {
+  vi.useFakeTimers();
+  const legacyRef = createReplicaRef({
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
+  });
+  const currentRef = createReplicaRef({
+    dataVersion: "e".repeat(64),
+    keyId: "browser-vault-replica:e",
+  });
+  let currentReplicaPublished = false;
+  const fetchMock = vi.fn(() => {
+    if (fetchMock.mock.calls.length === 1) {
+      return Promise.resolve(jsonResponse({
+        encryptedReplica: createReplicaEnvelope(),
+        freshness: "stale",
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: legacyRef,
+        refreshPending: true,
+        state: "ready",
+      }));
+    }
+
+    if (!currentReplicaPublished) {
+      return Promise.resolve(jsonResponse({
+        encryptedReplica: null,
+        freshness: "stale",
+        memberId: "member_123",
+        replicaAad: null,
+        replicaKeyEnvelope: null,
+        replicaRef: legacyRef,
+        refreshPending: true,
+        state: "not_modified",
+      }));
+    }
+
+    return Promise.resolve(jsonResponse({
+      encryptedReplica: createReplicaEnvelope("e"),
+      freshness: "fresh",
+      replicaAad: createReplicaAad("member_123", "e"),
+      replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "e"),
+      replicaRef: currentRef,
+      refreshPending: false,
+      state: "ready",
+    }));
+  });
+
+  installBrowserVaultCryptoMocks();
+  const legacyReplica = createReplica({
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION - 1,
+  });
+  delete legacyReplica.personalPatterns;
+  mocks.decryptHostedStoragePayload
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(legacyReplica)))
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      personalPatterns: {
+        asOfDate: "2026-04-30",
+        cells: [],
+        factors: [],
+        lagDays: 1,
+        notes: [],
+        outcomes: [],
+        repeatableCellCount: 0,
+        testedCellCount: 0,
+        windowDays: 120,
+      },
+      source: {
+        dataVersion: currentRef.dataVersion,
+        sourceBundleHash: currentRef.sourceBundleHash,
+      },
+    }))));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(createElement(BrowserVaultPatternsProbe)),
+    { requireButton: false },
+  );
+
+  await waitForText(rendered.container, "legacy:pending");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(25_000);
+  });
+  assert.equal(rendered.container.textContent, "legacy:pending");
+
+  currentReplicaPublished = true;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(15_000);
+  });
+  await waitForText(rendered.container, "patterns:ready");
+  assert.equal(fetchMock.mock.calls.length > 2, true);
+
+  await rendered.cleanup();
+});
+
 test("current endpoint denial never adopts a matching warm snapshot", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()
@@ -1081,6 +1176,816 @@ test("browser-vault provider keeps admitted content visible during focus revalid
   assert.equal(mocks.unwrapHostedBrowserSessionKey.mock.calls.length, 1);
 
   await rendered.cleanup();
+});
+
+test("a runtime refresh request survives an in-flight focus read and waits through a nonmatching replica", async () => {
+  vi.useFakeTimers();
+  const currentRef = createReplicaRef();
+  const unrelatedRef = createReplicaRef({
+    dataVersion: "e".repeat(64),
+    keyId: "browser-vault-replica:e",
+    objectKey: "users/browser-vault-replicas/opaque/unrelated.json",
+    sourceBundleHash: "b".repeat(64),
+  });
+  const replacementRef = {
+    ...currentRef,
+    dataVersion: "f".repeat(64),
+    keyId: "browser-vault-replica:f",
+    objectKey: "users/browser-vault-replicas/opaque/replacement.json",
+    sourceBundleHash: "c".repeat(64),
+  };
+  let pendingPollCount = 0;
+  const focusResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => focusResponse.promise)
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      refreshPending: true,
+      state: "not_modified",
+    }))
+    .mockImplementation(() => {
+      pendingPollCount += 1;
+      if (pendingPollCount <= 2) {
+        return Promise.resolve(jsonResponse({
+          encryptedReplica: null,
+          memberId: "member_123",
+          replicaAad: null,
+          replicaKeyEnvelope: null,
+          replicaRef: currentRef,
+          state: "not_modified",
+        }));
+      }
+      if (pendingPollCount === 3) {
+        return Promise.resolve(jsonResponse({
+          encryptedReplica: createReplicaEnvelope("e"),
+          replicaAad: createReplicaAad("member_123", "e", {
+            objectKey: unrelatedRef.objectKey,
+            sourceBundleHash: unrelatedRef.sourceBundleHash,
+          }),
+          replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "e"),
+          replicaRef: unrelatedRef,
+          state: "ready",
+        }));
+      }
+      if (pendingPollCount <= 5) {
+        return Promise.resolve(jsonResponse({
+          encryptedReplica: null,
+          memberId: "member_123",
+          replicaAad: null,
+          replicaKeyEnvelope: null,
+          replicaRef: unrelatedRef,
+          state: "not_modified",
+        }));
+      }
+      return Promise.resolve(jsonResponse({
+        encryptedReplica: createReplicaEnvelope("f"),
+        replicaAad: createReplicaAad("member_123", "f", {
+          objectKey: replacementRef.objectKey,
+          sourceBundleHash: replacementRef.sourceBundleHash,
+        }),
+        replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
+        replicaRef: replacementRef,
+        state: "ready",
+      }));
+    });
+
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload
+    .mockReset()
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica())))
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      source: {
+        dataVersion: unrelatedRef.dataVersion,
+        sourceBundleHash: unrelatedRef.sourceBundleHash,
+      },
+    }))))
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      source: {
+        dataVersion: replacementRef.dataVersion,
+        sourceBundleHash: replacementRef.sourceBundleHash,
+      },
+    }))));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+  });
+  await waitForCondition(() => fetchMock.mock.calls.length === 2, "focus read");
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  focusResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: currentRef,
+    state: "not_modified",
+  }));
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 3,
+    "runtime refresh request",
+  );
+
+  const focusBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  const refreshBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+  assert.equal(focusBody.requestRefresh, undefined);
+  assert.equal(refreshBody.requestRefresh, true);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  await waitForText(
+    rendered.container,
+    `${unrelatedRef.sourceBundleHash}:${unrelatedRef.dataVersion}:pending`,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+  await waitForText(
+    rendered.container,
+    `${replacementRef.sourceBundleHash}:${replacementRef.dataVersion}:ready`,
+  );
+  for (const [, init] of fetchMock.mock.calls.slice(3)) {
+    const pollBody = JSON.parse(String(init?.body));
+    assert.equal(pollBody.requestRefresh, undefined);
+  }
+  assert.equal(fetchMock.mock.calls.length, 9);
+
+  await rendered.cleanup();
+});
+
+test("a matching ordinary read retires its queued stronger refresh", async () => {
+  const currentRef = createReplicaRef();
+  const matchingRef = createReplicaRef({
+    dataVersion: "f".repeat(64),
+    keyId: "browser-vault-replica:f",
+    objectKey: "users/browser-vault-replicas/opaque/matching.json",
+    sourceBundleHash: "c".repeat(64),
+  });
+  const focusResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockImplementationOnce(() => focusResponse.promise)
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: matchingRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload
+    .mockReset()
+    .mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify(createReplica())),
+    )
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      source: {
+        dataVersion: matchingRef.dataVersion,
+        sourceBundleHash: matchingRef.sourceBundleHash,
+      },
+    }))));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+  });
+  await waitForCondition(() => fetchMock.mock.calls.length === 2, "focus read");
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+
+  focusResponse.resolve(jsonResponse({
+    encryptedReplica: createReplicaEnvelope("f"),
+    replicaAad: createReplicaAad("member_123", "f", {
+      objectKey: matchingRef.objectKey,
+      sourceBundleHash: matchingRef.sourceBundleHash,
+    }),
+    replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
+    replicaRef: matchingRef,
+    state: "ready",
+  }));
+  await waitForText(
+    rendered.container,
+    `${matchingRef.sourceBundleHash}:${matchingRef.dataVersion}:ready`,
+  );
+  for (let flush = 0; flush < 6; flush += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  assert.equal(fetchMock.mock.calls.length, 2);
+  assert.equal(peekBrowserVaultInFlightLoad(), null);
+
+  mocks.usePathname.mockReturnValue("/history");
+  await rendered.rerender(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+  );
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 3,
+    "replacement route authority request",
+  );
+  const routeBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+  assert.equal(routeBody.requestRefresh, undefined);
+  await waitForText(
+    rendered.container,
+    `${matchingRef.sourceBundleHash}:${matchingRef.dataVersion}:ready`,
+  );
+
+  await rendered.cleanup();
+});
+
+test("a matching explicit refresh leaves no generic poll behind", async () => {
+  vi.useFakeTimers();
+  const currentRef = createReplicaRef();
+  const matchingRef = createReplicaRef({
+    dataVersion: "f".repeat(64),
+    keyId: "browser-vault-replica:f",
+    objectKey: "users/browser-vault-replicas/opaque/matching-explicit.json",
+    sourceBundleHash: "c".repeat(64),
+  });
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope("f"),
+      replicaAad: createReplicaAad("member_123", "f", {
+        objectKey: matchingRef.objectKey,
+        sourceBundleHash: matchingRef.sourceBundleHash,
+      }),
+      replicaKeyEnvelope: createReplicaKeyEnvelope("member_123", "f"),
+      replicaRef: matchingRef,
+      refreshPending: false,
+      state: "ready",
+    }))
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: matchingRef,
+      refreshPending: false,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  mocks.decryptHostedStoragePayload
+    .mockReset()
+    .mockResolvedValueOnce(
+      new TextEncoder().encode(JSON.stringify(createReplica())),
+    )
+    .mockResolvedValueOnce(new TextEncoder().encode(JSON.stringify(createReplica({
+      source: {
+        dataVersion: matchingRef.dataVersion,
+        sourceBundleHash: matchingRef.sourceBundleHash,
+      },
+    }))));
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForText(
+    rendered.container,
+    `${matchingRef.sourceBundleHash}:${matchingRef.dataVersion}:ready`,
+  );
+  assert.equal(fetchMock.mock.calls.length, 2);
+  assert.equal(peekBrowserVaultInFlightLoad(), null);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, 2);
+
+  mocks.usePathname.mockReturnValue("/history");
+  await rendered.rerender(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+  );
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 3,
+    "replacement route authority request",
+  );
+  const routeBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+  assert.equal(routeBody.requestRefresh, undefined);
+  await waitForText(
+    rendered.container,
+    `${matchingRef.sourceBundleHash}:${matchingRef.dataVersion}:ready`,
+  );
+
+  await rendered.cleanup();
+});
+
+test("a runtime refresh wait ends after its in-memory deadline", async () => {
+  vi.useFakeTimers();
+  const currentRef = createReplicaRef();
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:pending`,
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_001);
+  });
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  const fetchCountAtDeadline = fetchMock.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAtDeadline);
+
+  await rendered.cleanup();
+});
+
+test("a handoff deadline retires its stalled session poll before route and retry", async () => {
+  vi.useFakeTimers();
+  const currentRef = createReplicaRef();
+  const stalledResponse = createDeferred<Response>();
+  const stalledSignals: AbortSignal[] = [];
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      refreshPending: true,
+      state: "not_modified",
+    }))
+    .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
+      if (init?.signal) {
+        stalledSignals.push(init.signal);
+      }
+      return stalledResponse.promise;
+    })
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_500);
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 3,
+    "stalled session poll",
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:pending`,
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(58_501);
+  });
+  await waitForCondition(
+    () => peekBrowserVaultInFlightLoad() === null,
+    "retired runtime refresh slot",
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  assert.equal(stalledSignals[0]?.aborted, true);
+  assert.ok(getBrowserVaultReadySnapshot());
+
+  const fetchCountAtDeadline = fetchMock.mock.calls.length;
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(30_000);
+  });
+  assert.equal(fetchMock.mock.calls.length, fetchCountAtDeadline);
+
+  mocks.usePathname.mockReturnValue("/history");
+  await rendered.rerender(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+  );
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === fetchCountAtDeadline + 1,
+    "replacement route authority request",
+  );
+  const routeBody = JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body));
+  assert.equal(routeBody.requestRefresh, undefined);
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === fetchCountAtDeadline + 2,
+    "replacement runtime refresh",
+  );
+  const replacementBody = JSON.parse(
+    String(fetchMock.mock.calls.at(-1)?.[1]?.body),
+  );
+  assert.equal(replacementBody.requestRefresh, true);
+
+  await rendered.cleanup();
+});
+
+test("an old Training deadline cannot abort the next route authority request", async () => {
+  vi.useFakeTimers();
+  const currentRef = createReplicaRef();
+  const routeResponse = createDeferred<Response>();
+  const routeSignals: AbortSignal[] = [];
+  let requestCount = 0;
+  let routeChanged = false;
+  const fetchMock = vi.fn((_input: unknown, init?: RequestInit) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return Promise.resolve(jsonResponse({
+        encryptedReplica: createReplicaEnvelope(),
+        replicaAad: createReplicaAad(),
+        replicaKeyEnvelope: createReplicaKeyEnvelope(),
+        replicaRef: currentRef,
+        state: "ready",
+      }));
+    }
+    if (routeChanged) {
+      if (init?.signal) {
+        routeSignals.push(init.signal);
+      }
+      return routeResponse.promise;
+    }
+    return Promise.resolve(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+  });
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  await act(async () => {
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:pending`,
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(59_000);
+  });
+
+  routeChanged = true;
+  mocks.usePathname.mockReturnValue("/history");
+  await rendered.rerender(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+  );
+  await waitForCondition(
+    () => routeSignals.length === 1,
+    "replacement route authority request",
+  );
+  assert.equal(routeSignals[0]?.aborted, false);
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+  assert.equal(routeSignals[0]?.aborted, false);
+
+  routeResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: currentRef,
+    state: "not_modified",
+  }));
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  assert.equal(routeSignals[0]?.aborted, false);
+
+  await rendered.cleanup();
+});
+
+test("provider unmount invalidates a runtime refresh queued behind an ordinary read", async () => {
+  const currentRef = createReplicaRef();
+  const focusResponse = createDeferred<Response>();
+  const focusSignals: AbortSignal[] = [];
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
+      if (init?.signal) {
+        focusSignals.push(init.signal);
+      }
+      return focusResponse.promise;
+    })
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  const readyClient = getBrowserVaultReadySnapshot()?.client;
+  assert.ok(readyClient);
+
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "ordinary read with queued runtime refresh",
+  );
+
+  await rendered.cleanup();
+  assert.equal(focusSignals[0]?.aborted, true);
+  focusResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: currentRef,
+    state: "not_modified",
+  }));
+  for (let flush = 0; flush < 6; flush += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+
+  assert.equal(fetchMock.mock.calls.length, 2);
+  assert.equal(getBrowserVaultReadySnapshot()?.client, readyClient);
+});
+
+test("provider unmount aborts a deferred runtime refresh after it starts", async () => {
+  const currentRef = createReplicaRef();
+  const focusResponse = createDeferred<Response>();
+  const runtimeResponse = createDeferred<Response>();
+  const focusSignals: AbortSignal[] = [];
+  const runtimeSignals: AbortSignal[] = [];
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
+      if (init?.signal) {
+        focusSignals.push(init.signal);
+      }
+      return focusResponse.promise;
+    })
+    .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
+      if (init?.signal) {
+        runtimeSignals.push(init.signal);
+      }
+      return runtimeResponse.promise;
+    })
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  const readyClient = getBrowserVaultReadySnapshot()?.client;
+  assert.ok(readyClient);
+
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "ordinary read with queued runtime refresh",
+  );
+
+  focusResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: currentRef,
+    state: "not_modified",
+  }));
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 3,
+    "deferred runtime refresh",
+  );
+  assert.equal(focusSignals[0]?.aborted, false);
+  assert.equal(runtimeSignals[0]?.aborted, false);
+
+  await rendered.cleanup();
+  assert.equal(runtimeSignals[0]?.aborted, true);
+  assert.equal(peekBrowserVaultInFlightLoad(), null);
+
+  runtimeResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: currentRef,
+    state: "not_modified",
+  }));
+  for (let flush = 0; flush < 6; flush += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  assert.equal(getBrowserVaultReadySnapshot()?.client, readyClient);
+
+  const remounted = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+  await waitForText(
+    remounted.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  assert.equal(fetchMock.mock.calls.length, 4);
+  await remounted.cleanup();
 });
 
 test("browser-vault provider keeps access-denied recovery pages mounted without redirecting", async () => {
@@ -1909,6 +2814,51 @@ test("aborting an older load cannot clobber a newer in-flight load", async () =>
   assert.equal(secondOutcome.status, "ready");
 });
 
+test("aborting an ordinary load invalidates its queued stronger refresh", async () => {
+  const ordinaryResponse = createDeferred<Response>();
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(() => ordinaryResponse.promise)
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: null,
+      state: "empty",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const ordinaryLoad = startBrowserVaultWarmLoad();
+  await waitForCondition(() => fetchMock.mock.calls.length === 1, "ordinary load");
+  const queuedRefresh = startBrowserVaultWarmLoad({ requestRefresh: true });
+
+  abortBrowserVaultInFlightLoad();
+  ordinaryResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: null,
+    state: "empty",
+  }));
+
+  assert.equal((await ordinaryLoad).status, "superseded");
+  assert.equal((await queuedRefresh).status, "superseded");
+  assert.equal(fetchMock.mock.calls.length, 1);
+  assert.equal(peekBrowserVaultInFlightLoad(), null);
+
+  const retry = startBrowserVaultWarmLoad({ requestRefresh: true });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "new stronger refresh",
+  );
+  const retryBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+  assert.equal(retryBody.requestRefresh, true);
+  assert.equal((await retry).status, "empty");
+});
+
 function createAuthenticatedBrowserVaultElement(child: ReactNode) {
   return (
     <AuthProvider authenticated>
@@ -1936,6 +2886,22 @@ function BrowserVaultBackgroundRefreshProbe() {
     "button",
     { onClick: () => void vault.refresh({ background: true }) },
     `${vault.status}:${vault.dataVersion ?? "none"}`,
+  );
+}
+
+function BrowserVaultRuntimeRefreshProbe() {
+  const vault = useBrowserVault();
+
+  return createElement(
+    "button",
+    {
+      onClick: () => void vault.refresh({
+        background: true,
+        requestRuntimeRefreshUntil: (client) =>
+          client.replica.source.dataVersion === "f".repeat(64),
+      }),
+    },
+    `${vault.ref?.sourceBundleHash ?? "none"}:${vault.dataVersion ?? "none"}:${vault.runtimeRefreshPending ? "pending" : "ready"}`,
   );
 }
 
@@ -1967,6 +2933,17 @@ function PublicDashboardRouteProbe() {
     "div",
     null,
     `public:${vault.status}:${vault.dataVersion ?? "none"}`,
+  );
+}
+
+function BrowserVaultPatternsProbe() {
+  const vault = useBrowserVault();
+  const patternsAvailable = vault.client?.replica.personalPatterns !== undefined;
+
+  return createElement(
+    "div",
+    null,
+    `${patternsAvailable ? "patterns" : "legacy"}:${vault.refreshPending ? "pending" : "ready"}`,
   );
 }
 
@@ -2021,7 +2998,16 @@ function createDeferred<T>() {
   return { promise, reject, resolve };
 }
 
-function createReplicaRef() {
+function createReplicaRef(
+  overrides: Partial<HostedBrowserVaultReplicaRef> = {},
+): HostedBrowserVaultReplicaRef {
+  return {
+    ...createReplicaRefBase(),
+    ...overrides,
+  };
+}
+
+function createReplicaRefBase(): HostedBrowserVaultReplicaRef {
   return {
     byteLength: 128,
     dataVersion: "d".repeat(64),
@@ -2036,33 +3022,41 @@ function createReplicaRef() {
   };
 }
 
-function createReplicaAad(memberId = "member_123") {
+function createReplicaAad(
+  memberId = "member_123",
+  version = "d",
+  overrides: Partial<Pick<
+    ReturnType<typeof createReplicaRef>,
+    "objectKey" | "sourceBundleHash"
+  >> = {},
+) {
   return {
-    dataVersion: "d".repeat(64),
+    dataVersion: version.repeat(64),
     objectKey: "users/browser-vault-replicas/opaque/replica.json",
     purpose: "browser-vault-replica" as const,
     runtimeRootKeyId: "udrk:runtime:test-root",
     schema: "murph.browser-vault-replica" as const,
     sourceBundleHash: "a".repeat(64),
     userId: memberId,
+    ...overrides,
   };
 }
 
-function createReplicaEnvelope() {
+function createReplicaEnvelope(version = "d") {
   return {
     algorithm: "AES-GCM" as const,
     ciphertext: "ciphertext",
     iv: "iv",
-    keyId: "browser-vault-replica:d",
+    keyId: `browser-vault-replica:${version}`,
     schema: "murph.hosted-cipher.v1",
     scope: "browser-vault-replica" as const,
   };
 }
 
-function createReplicaKeyEnvelope(memberId = "member_123") {
+function createReplicaKeyEnvelope(memberId = "member_123", version = "d") {
   return {
     createdAt: "2026-04-20T08:00:00.000Z",
-    keyId: "browser-vault-replica:d",
+    keyId: `browser-vault-replica:${version}`,
     purpose: "browser-vault-replica" as const,
     recipients: [
       {
@@ -2074,7 +3068,7 @@ function createReplicaKeyEnvelope(memberId = "member_123") {
           y: "ephemeral-y",
         },
         iv: "iv",
-        keyId: "browser-vault-replica:d",
+        keyId: `browser-vault-replica:${version}`,
         kind: "browser-session" as const,
       },
     ],

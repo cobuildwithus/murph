@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   canonicalizeHostedGroupDisclosurePermissionText: vi.fn(),
   createHostedGroupDisclosurePermissionProviderIdempotencyKey: vi.fn(),
   createHostedGroupJoinLinkForOwnedThreadContainerTx: vi.fn(),
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort: vi.fn(),
   fetchMurphHostedLinqContactCardVcfPhoto: vi.fn(),
   finishHostedOnboardingTiming: vi.fn(),
   getHostedLinqChatHandles: vi.fn(),
@@ -39,6 +38,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
   requestHostedGroupCurrentSenderAssistantAsk: vi.fn(),
+  requestHostedGroupCurrentSenderPrivateAssistantAsk: vi.fn(),
   requestHostedGroupMemberAssistantAsk: vi.fn(),
   readHostedGroupByRuntimeMemberId: vi.fn(),
   readHostedGroupIdByRuntimeMemberId: vi.fn(),
@@ -212,11 +212,6 @@ vi.mock("@/src/lib/hosted-groups/group-store", () => ({
     mocks.updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 }));
 
-vi.mock("@/src/lib/hosted-groups/group-newsletter", () => ({
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort:
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
-}));
-
 vi.mock("@/src/lib/hosted-groups/pending-group-setup", () => ({
   armHostedPendingGroupSetupTx: mocks.armHostedPendingGroupSetupTx,
   cancelHostedPendingGroupSetupTx: mocks.cancelHostedPendingGroupSetupTx,
@@ -231,6 +226,8 @@ vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
 vi.mock("@/src/lib/hosted-groups/group-current-sender-assistant-ask", () => ({
   requestHostedGroupCurrentSenderAssistantAsk:
     mocks.requestHostedGroupCurrentSenderAssistantAsk,
+  requestHostedGroupCurrentSenderPrivateAssistantAsk:
+    mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk,
 }));
 
 vi.mock("@/src/lib/hosted-groups/group-disclosure-store", () => ({
@@ -568,9 +565,6 @@ describe("handleHostedRuntimeGroupTool", () => {
       kind: "post",
       offerGeneration: OFFER_GENERATION_A,
     });
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort.mockResolvedValue(
-      undefined,
-    );
     mocks.recordHostedGroupJoinOfferTx.mockResolvedValue({
       groupId: GROUP_SUMMARY.id,
       messageIdSuffix: "offer_msg",
@@ -597,6 +591,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
+    mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
     mocks.requestHostedGroupMemberAssistantAsk.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
@@ -607,6 +605,7 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
       ask_current_sender: "participant_aware",
+      message_current_sender: "participant_aware",
       ask_member: "participant_aware",
       arm_usage_referral: "participant_aware",
       cancel_usage_referral: "participant_aware",
@@ -617,6 +616,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       list_memberships: "personal_active",
       post_disclosure_request: "owner_active",
       post_join_offer: "owner_active",
+      prepare_email: "participant_aware",
       prepare_next_group: "personal_active",
       preflight_set_chat_avatar: "owner_active",
       read_chat_name: "participant_aware",
@@ -938,6 +938,42 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_sender",
       mailboxItemId: "aask_req_current_sender",
+    });
+  });
+
+  it("dispatches a current-sender private continuation and schedules its personal wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    const origin = {
+      assistantInputId: `ain_${"d".repeat(32)}`,
+      kind: "accepted_input" as const,
+      sessionId: "session_group",
+    };
+    mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_sender",
+        mailboxItemId: "aask_req_private_sender",
+      },
+      result: { status: "accepted" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_group_runtime",
+      request: { action: "message_current_sender", origin },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "message_current_sender",
+      result: { status: "accepted" },
+    });
+
+    expect(
+      mocks.requestHostedGroupCurrentSenderPrivateAssistantAsk,
+    ).toHaveBeenCalledWith({
+      groupRuntimeMemberId: "member_group_runtime",
+      origin,
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_sender",
+      mailboxItemId: "aask_req_private_sender",
     });
   });
 
@@ -1988,12 +2024,6 @@ describe("handleHostedRuntimeGroupTool", () => {
     );
     expect(mocks.readActiveHostedGroupDisclosureGrantsForGroup)
       .not.toHaveBeenCalled();
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .toHaveBeenCalledWith({
-        groupId: GROUP_SUMMARY.id,
-        memberId: "member_owner",
-        prisma: expect.any(Object),
-      });
   });
 
   it("requests every selectable permission for a standalone link when scopes are omitted", async () => {
@@ -2809,7 +2839,7 @@ describe("hosted group join policy", () => {
     ])).toEqual([
       {
         description:
-          "Shares your email so the group's Murph can send the newsletter. Visible to the group.",
+          "Shares your email so the group's Murph can send group emails. Visible to the group.",
         label: "Email address",
         projectionKind: "group-email.v0",
         projectionScope: { projectionKind: "group-email.v0" },
@@ -2996,8 +3026,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       messageLookupKey: "hbidx:linq-message:v1:offer",
       projectionKinds: ["sleep-times.v0"],
     });
-    mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort
-      .mockResolvedValue(undefined);
     mocks.readActiveHostedGroupDisclosureGrantsForGroup.mockResolvedValue([]);
     mocks.lookupHostedMemberIdentityByPhoneNumber.mockReset();
     mocks.readHostedOwnerAddressBookAdvisoryNames.mockReset();
@@ -3553,12 +3581,6 @@ describe("handleHostedRuntimeGroupTool chat-scoped actions", () => {
       projectionScopes: NEWSLETTER_DEFAULT_SCOPES,
       tx: fakeTx,
     });
-    expect(mocks.enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort)
-      .toHaveBeenCalledWith({
-        groupId: GROUP_SUMMARY.id,
-        memberId: "member_owner",
-        prisma: expect.any(Object),
-      });
     expect(mocks.sendHostedLinqAttachmentMessage).not.toHaveBeenCalled();
   });
 

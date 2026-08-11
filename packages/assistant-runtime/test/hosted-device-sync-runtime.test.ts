@@ -45,6 +45,7 @@ import {
   promoteHostedCompletedDirtyPayloadAcks,
   reconcileHostedDeviceSyncControlPlaneState,
   syncHostedDeviceSyncControlPlaneState,
+  type HostedDeviceSyncRuntimeSyncState,
 } from "../src/hosted-device-sync-runtime.ts";
 import {
   HostedRuntimeArtifactWriteError,
@@ -1153,7 +1154,7 @@ describe("hosted device-sync runtime", () => {
   test.each([
     {
       initialTargetStatus: "missing",
-      label: "account summary with an absent runner source",
+      label: "account summary whose source appears disconnected before projection",
       resource: "activity",
       resourceCategory: "summary",
       windowEnd: "2026-07-29T00:00:00.000Z",
@@ -1202,6 +1203,7 @@ describe("hosted device-sync runtime", () => {
           resourceCount: 2,
           resourceAvailabilitySummary: {
             activity: true,
+            blood_pressure: true,
             blood_oxygen: true,
           },
           sourceInstanceKey,
@@ -1274,6 +1276,7 @@ describe("hosted device-sync runtime", () => {
                     name: "Garmin",
                     resource_availability: {
                       activity: true,
+                      blood_pressure: true,
                       blood_oxygen: true,
                     },
                     slug: "garmin",
@@ -1284,6 +1287,7 @@ describe("hosted device-sync runtime", () => {
                     name: "Oura",
                     resource_availability: {
                       activity: true,
+                      blood_pressure: true,
                       blood_oxygen: true,
                     },
                     slug: "oura",
@@ -1352,7 +1356,8 @@ describe("hosted device-sync runtime", () => {
           },
           region: "us",
           summaryResources: ["activity"],
-          timeseriesResources: ["blood_oxygen"],
+          timeseriesBackfillDays: 5,
+          timeseriesResources: ["blood_oxygen", "blood_pressure"],
         },
       });
       assert.ok(provider);
@@ -1382,6 +1387,10 @@ describe("hosted device-sync runtime", () => {
         });
         const localAccountId = initialState.hostedToLocalAccountIds.get(hostedConnectionId);
         assert.ok(localAccountId);
+        assert.equal(
+          getStore(service).listConnectionSources({ connectionId: localAccountId }).length,
+          testCase.initialTargetStatus === "missing" ? 1 : 2,
+        );
         getStore(service).enqueueJob({
           accountId: localAccountId,
           availableAt: "2026-07-30T00:00:00.000Z",
@@ -1408,9 +1417,17 @@ describe("hosted device-sync runtime", () => {
           deniedImport,
           /garmin|provider-garmin-1|garmin-activity-1|4321|"value":97/u,
         );
+        const deniedSources = getStore(service).listConnectionSources({
+          connectionId: localAccountId,
+        });
+        assert.equal(deniedSources.length, 2);
         assert.equal(
-          getStore(service).listConnectionSources({ connectionId: localAccountId }).length,
-          testCase.initialTargetStatus === "missing" ? 1 : 2,
+          deniedSources.find((source) => source.sourceProviderSlug === "garmin")?.status,
+          "connected",
+        );
+        assert.equal(
+          deniedSources.find((source) => source.sourceProviderSlug === "garmin")?.firstSeenAt,
+          "2026-07-27T00:00:00.000Z",
         );
 
         hostedSnapshot = buildSnapshot("connected");
@@ -1451,6 +1468,36 @@ describe("hosted device-sync runtime", () => {
             connectionId: hostedConnectionId,
             sourceProviderSlug: "garmin",
           }),
+        );
+        assert.equal(
+          finalSources.find((source) => source.sourceProviderSlug === "garmin")
+            ?.firstSeenAt,
+          "2026-07-27T00:00:00.000Z",
+        );
+        const recoveredAccount = getStore(service).getAccountById(localAccountId);
+        assert.ok(recoveredAccount);
+        const createScheduledJobs = provider.jobExecutor?.createScheduledJobs;
+        assert.ok(createScheduledJobs);
+        const scheduledPressureHistory = createScheduledJobs(
+          recoveredAccount,
+          "2026-07-30T00:10:00.000Z",
+        ).jobs.find((job) =>
+          job.kind === "resource"
+          && job.payload?.resource === "blood_pressure"
+          && job.payload?.sourceProviderSlug === "garmin"
+        );
+        assert.ok(scheduledPressureHistory);
+        assert.equal(
+          scheduledPressureHistory.payload?.historicalWindowStart,
+          "2026-07-22T00:00:00.000Z",
+        );
+        assert.equal(
+          scheduledPressureHistory.payload?.windowStart,
+          "2026-07-22T00:00:00.000Z",
+        );
+        assert.equal(
+          scheduledPressureHistory.payload?.windowEnd,
+          "2026-07-27T00:00:00.000Z",
         );
         assert.equal(
           liveSnapshotRequests.some((input) =>
@@ -2904,7 +2951,7 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
-  test("device-sync wakes pull pending dirty state and enqueue semantic resource jobs", async () => {
+  test("device-sync wakes track successful timed compact resource imports", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
     );
@@ -2932,7 +2979,9 @@ describe("hosted device-sync runtime", () => {
         dirtyResources: [
           {
             count: 12,
-            dirtyPayloadId: "dsp_payload_steps_1",
+            eventToProviderSendBucket: "under_5_minutes",
+            firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
+            providerSendToWebhookMs: 60_000,
             jobKind: "resource",
             resource: "steps",
             resourceCategory: "timeseries",
@@ -3019,9 +3068,14 @@ describe("hosted device-sync runtime", () => {
       assert.equal(jobs.length, 1);
       assert.deepEqual(state.pendingDirtyPayloadJobs, [{
         connectionId: "hosted_conn_dirty_wake",
-        dirtyPayloadId: "dsp_payload_steps_1",
+        dirtyPayloadId: null,
         jobId: jobs[0]?.id,
         processedRevision: "42",
+        timing: {
+          eventToProviderSendBucket: "under_5_minutes",
+          firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
+          providerSendToWebhookMs: 60_000,
+        },
       }]);
       assert.deepEqual(
         {
@@ -3048,12 +3102,127 @@ describe("hosted device-sync runtime", () => {
       );
 
       assert.equal(await service.drainWorker(1), 1);
-      promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      const completedImports = promoteHostedCompletedDirtyPayloadAcks({ service, state });
+      const [completedImport] = completedImports;
+      assert.ok(completedImport);
+      assert.match(completedImport.importCompletedAt, /^\d{4}-\d{2}-\d{2}T/u);
+      assert.match(completedImport.importExecutionStartedAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.match(completedImport.jobCreatedAt, /^\d{4}-\d{2}-\d{2}T/u);
+      assert.deepEqual({
+        ...completedImport,
+        importCompletedAt: "<timestamp>",
+        importExecutionStartedAt: "<timestamp>",
+        jobCreatedAt: "<timestamp>",
+      }, {
+        eventToProviderSendBucket: "under_5_minutes",
+        firstWebhookReceivedAt: "2026-04-04T10:00:00.000Z",
+        importCompletedAt: "<timestamp>",
+        importExecutionStartedAt: "<timestamp>",
+        jobCreatedAt: "<timestamp>",
+        jobKind: "resource",
+        provider: "demo",
+        providerSendToWebhookMs: 60_000,
+      });
+      assert.equal(completedImports.length, 1);
       assert.deepEqual(state.pendingDirtyAcks, [{
         connectionId: "hosted_conn_dirty_wake",
         nextWakeAt: null,
-        processedDirtyPayloadIds: ["dsp_payload_steps_1"],
         processedRevision: "42",
+      }]);
+      assert.deepEqual(state.pendingDirtyPayloadJobs, []);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test("deduplicated local imports emit one timing event and acknowledge every payload", async () => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-deduped-timing-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const service = createDeviceSyncServiceForVault(vaultRoot);
+
+    try {
+      const begin = await service.startConnection({ provider: "demo" });
+      const connected = await service.handleOAuthCallback({
+        code: "deduped-timing",
+        provider: "demo",
+        state: begin.state,
+      });
+      const store = getStore(service);
+      const enqueue = () => store.enqueueJob({
+        accountId: connected.account.id,
+        dedupeKey: "hosted-dirty:demo:reconcile:provider:category:resource",
+        kind: "reconcile",
+        payload: {},
+        provider: "demo",
+      });
+      const firstJob = enqueue();
+      const secondJob = enqueue();
+      assert.equal(firstJob.id, secondJob.id);
+      assert.equal(readJobsForAccount(service, connected.account.id).length, 1);
+
+      const state = {
+        hostedToLocalAccountIds: new Map([["hosted_conn_deduped", connected.account.id]]),
+        localToHostedAccountIds: new Map([[connected.account.id, "hosted_conn_deduped"]]),
+        observedTokenVersions: new Map<string, number | null>(),
+        pendingDirtyAcks: [{
+          connectionId: "hosted_conn_deduped",
+          nextWakeAt: null,
+          processedRevision: "9",
+        }],
+        pendingDirtyPayloadJobs: [{
+          connectionId: "hosted_conn_deduped",
+          dirtyPayloadId: "dsp_deduped_1",
+          jobId: firstJob.id,
+          processedRevision: "9",
+          timing: {
+            eventToProviderSendBucket: "under_5_minutes",
+            firstWebhookReceivedAt: "2026-04-08T00:04:00.000Z",
+            providerSendToWebhookMs: 60_000,
+          },
+        }, {
+          connectionId: "hosted_conn_deduped",
+          dirtyPayloadId: "dsp_deduped_2",
+          jobId: secondJob.id,
+          processedRevision: "9",
+          timing: {
+            eventToProviderSendBucket: "5_to_30_minutes",
+            firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
+            providerSendToWebhookMs: 120_000,
+          },
+        }],
+        snapshot: null,
+      } satisfies HostedDeviceSyncRuntimeSyncState;
+
+      assert.equal(await service.drainWorker(1), 1);
+      const completedImports = promoteHostedCompletedDirtyPayloadAcks({ service, state });
+
+      assert.equal(completedImports.length, 1);
+      const [completedImport] = completedImports;
+      assert.ok(completedImport);
+      assert.match(completedImport.importCompletedAt, /^\d{4}-\d{2}-\d{2}T/u);
+      assert.match(completedImport.importExecutionStartedAt ?? "", /^\d{4}-\d{2}-\d{2}T/u);
+      assert.deepEqual({
+        ...completedImport,
+        importCompletedAt: "<timestamp>",
+        importExecutionStartedAt: "<timestamp>",
+      }, {
+        eventToProviderSendBucket: "5_to_30_minutes",
+        firstWebhookReceivedAt: "2026-04-08T00:03:00.000Z",
+        importCompletedAt: "<timestamp>",
+        importExecutionStartedAt: "<timestamp>",
+        jobCreatedAt: firstJob.createdAt,
+        jobKind: "reconcile",
+        provider: "demo",
+        providerSendToWebhookMs: 120_000,
+      });
+      assert.deepEqual(state.pendingDirtyAcks, [{
+        connectionId: "hosted_conn_deduped",
+        nextWakeAt: null,
+        processedDirtyPayloadIds: ["dsp_deduped_1", "dsp_deduped_2"],
+        processedRevision: "9",
       }]);
       assert.deepEqual(state.pendingDirtyPayloadJobs, []);
     } finally {

@@ -452,19 +452,19 @@ test('linq runtime checks iMessage capability and sends the exact one-part app c
         idempotency_key: 'card-delivery-1',
         parts: [{
           app: {
-            app_store_id: 6786145859,
             bundle_id: 'ai.withmurph.app.messages',
             name: 'Murph',
             team_id: 'G9DJH2XUMK',
           },
-          fallback_text: 'Ask Murph for this card in text',
+          fallback_text:
+            'Your daily nutrition. Ask Murph for this card in text',
           interactive: true,
           layout: {
             caption: 'Jul 28 · 4 meals',
             image_url: expect.stringMatching(
               /^https:\/\/www\.withmurph\.ai\/imessage\/card\/v1\/[A-Za-z0-9_-]+\.png$/u,
             ),
-            subcaption: '1,490.25 cal · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber · partial totals · Goals: calories goal unavailable; protein goal unavailable; carbs goal unavailable; fat goal unavailable; fiber goal unavailable',
+            subcaption: 'Some calorie and nutrition estimates were partial.',
           },
           type: 'imessage_app',
           url: buildLinqIMessageAppCardUrl(NUTRITION_CARD),
@@ -861,6 +861,107 @@ test('linq runtime sends a terminal payment URL as a separate rich-link message'
   ])
 })
 
+test('linq runtime preserves accepted primary media ownership when the rich-link request fails', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return createJsonResponse({
+        chat_id: 'chat-123',
+        message: { id: 'message-generated-image' },
+      })
+    }
+    return createJsonResponse(
+      { error: 'rich-link request failed' },
+      { status: 401 },
+    )
+  })
+
+  await assert.rejects(
+    () => sendLinqChatMessage(
+      {
+        chatId: 'chat-123',
+        idempotencyKey: 'generated-image-123',
+        media: [{ url: 'https://cdn.example.test/generated-image.png' }],
+        message: 'Generated image\nhttps://example.test/source',
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => {
+      const partial = error as {
+        code?: unknown
+        context?: { providerMessageEffects?: unknown }
+        providerMessageIds?: unknown
+      }
+      assert.deepEqual(partial.context?.providerMessageEffects, [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId: 'message-generated-image',
+      }])
+      return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+        && JSON.stringify(partial.providerMessageIds)
+          === JSON.stringify(['message-generated-image'])
+    },
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
+test('linq runtime preserves created-chat media ownership when the rich-link request fails', async () => {
+  const env = {
+    LINQ_API_BASE_URL: 'https://linq.example.test',
+    LINQ_API_TOKEN: 'linq-token',
+  } satisfies NodeJS.ProcessEnv
+  let requestCount = 0
+  const fetchImplementation = vi.fn(async () => {
+    requestCount += 1
+    if (requestCount === 1) {
+      return createJsonResponse({
+        chat: {
+          id: 'chat-created',
+          message: { id: 'message-generated-image' },
+        },
+      })
+    }
+    return createJsonResponse(
+      { error: 'rich-link request failed' },
+      { status: 401 },
+    )
+  })
+
+  await assert.rejects(
+    () => createLinqChat(
+      {
+        from: '+15550000000',
+        idempotencyKey: 'created-generated-image-123',
+        media: [{ url: 'https://cdn.example.test/generated-image.png' }],
+        message: 'Generated image\nhttps://example.test/source',
+        to: ['+15550000001'],
+      },
+      { env, fetchImplementation },
+    ),
+    (error) => {
+      const partial = error as {
+        code?: unknown
+        context?: { providerMessageEffects?: unknown }
+        providerMessageIds?: unknown
+      }
+      assert.deepEqual(partial.context?.providerMessageEffects, [{
+        carriesIntentMedia: true,
+        message: 'Generated image',
+        providerMessageId: 'message-generated-image',
+      }])
+      return partial.code === 'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY'
+        && JSON.stringify(partial.providerMessageIds)
+          === JSON.stringify(['message-generated-image'])
+    },
+  )
+  expect(fetchImplementation).toHaveBeenCalledTimes(2)
+})
+
 test.each(incompleteTwoPartMessageIdentityCases)(
   'linq runtime keeps an existing-chat rich-link delivery terminal with $label',
   async ({
@@ -1102,7 +1203,7 @@ test('linq runtime sanitizes but still promotes an uppercase terminal HTTPS URL'
   }])
 })
 
-test('linq runtime creates a chat with caller text before the rich-link follow-up', async () => {
+test('linq runtime keeps created-chat media on the primary message before the rich-link follow-up', async () => {
   const env = {
     LINQ_API_BASE_URL: 'https://linq.example.test',
     LINQ_API_TOKEN: 'linq-token',
@@ -1131,7 +1232,8 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
     {
       from: '+15550000000',
       idempotencyKey: 'create-123',
-      message: 'Your secure payment link:\nhttps://pay.example.test/checkout/session_123',
+      media: [{ url: 'https://cdn.example.test/generated-avatar.png' }],
+      message: 'Generated image\nhttps://example.test/source',
       to: ['+15550000001'],
     },
     { env, fetchImplementation },
@@ -1141,7 +1243,8 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
   assert.deepEqual(result.providerMessageIds, ['message-text', 'message-link'])
   assert.deepEqual(result.providerMessageEffects, [
     {
-      message: 'Your secure payment link:',
+      carriesIntentMedia: true,
+      message: 'Generated image',
       providerMessageId: 'message-text',
     },
     {
@@ -1157,7 +1260,10 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
           idempotency_key: 'create-123',
           parts: [{
             type: 'text',
-            value: 'Your secure payment link:',
+            value: 'Generated image',
+          }, {
+            type: 'media',
+            url: 'https://cdn.example.test/generated-avatar.png',
           }],
         },
         to: ['+15550000001'],
@@ -1170,7 +1276,7 @@ test('linq runtime creates a chat with caller text before the rich-link follow-u
           idempotency_key: 'create-123:link',
           parts: [{
             type: 'link',
-            value: 'https://pay.example.test/checkout/session_123',
+            value: 'https://example.test/source',
           }],
         },
       },

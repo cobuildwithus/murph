@@ -9,7 +9,10 @@ import { AsksGridSection } from "@/src/components/homepage/asks-section";
 import { FaqSection } from "@/src/components/homepage/faq-section";
 import { HeroClocksIn } from "@/src/components/homepage/hero-clocks-in";
 import { HowItWorksSection } from "@/src/components/homepage/how-it-works-section";
+import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
+import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { DEFAULT_MURPH_HEADSHOT } from "@/src/components/homepage/murph-headshot-avatar";
+import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
 import { ReferralSection } from "@/src/components/homepage/referral-section";
 import { SecurityTeaserSection } from "@/src/components/homepage/security-teaser-section";
@@ -25,9 +28,11 @@ import {
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
+import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
+import { ValidationSlide } from "../pitch/_components/slides";
 import {
   projectHostedVaultShareProjectionDisplays,
   resolveHostedGroupAccessOfferProjectionScopes,
@@ -55,12 +60,16 @@ import { HomeLoadStateStudy } from "./home-load-state-study";
 import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
-import { PersonaOnboardingStudy } from "./persona-onboarding-study";
-import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
+import { OpsUsageStudy } from "./ops-usage-study";
+import {
+  PersonaOnboardingStudy,
+  PersonaSettingsStudy,
+} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
+import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -68,6 +77,7 @@ import {
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { EnvironmentProgressStudy } from "./environment-progress-study";
 import { EnvironmentPrintStudy } from "./environment-print-study";
+import { PersonalPatternsStudy } from "./personal-patterns-study";
 
 function StudySection({
   children,
@@ -102,6 +112,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
+          data-design-state="soft-topic-labels"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -218,7 +229,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings custom inference routing and endpoint">
+      <StudySection title="Settings inference routing, locked models, and endpoint">
         <SettingsCustomInferenceStudy />
       </StudySection>
 
@@ -250,20 +261,52 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Private Environment print report">
+      <StudySection title="Private Environment print report loading and ready states">
         <EnvironmentPrintStudy />
       </StudySection>
 
       <Separator />
 
+      <StudySection title="Private training dashboard">
+        <div
+          id="private-training-dashboard"
+          data-design-section="private-training-dashboard"
+          inert
+        >
+          <TrainingDashboardStudy />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Patterns page">
+        <PersonalPatternsStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Homepage experiment flow">
-        <HowItWorksSection />
+        <div
+          id="homepage-experiment-flow"
+          data-design-section="homepage-experiment-flow"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <HowItWorksSection />
+        </div>
       </StudySection>
 
       <Separator />
 
       <StudySection title="Homepage personas">
-        <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+        <div
+          id="homepage-personas"
+          data-design-section="homepage-personas"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <PersonasSection murphHeadshotSrc={DEFAULT_MURPH_HEADSHOT} />
+        </div>
       </StudySection>
 
       <Separator />
@@ -277,6 +320,45 @@ export function SectionsContent() {
         >
           <TogetherSection />
           <AsksGridSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage nutrition research">
+        <div
+          id="homepage-nutrition-research"
+          data-design-section="homepage-nutrition-research"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <NutritionSection />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage integrations">
+        <div
+          id="homepage-integrations"
+          data-design-section="homepage-integrations"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <IntegrationsSection authenticated={false} />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Homepage local installation">
+        <div
+          id="homepage-local-installation"
+          data-design-section="homepage-local-installation"
+          className="-mx-5 sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <LocalRunSection installCommandUrl="https://www.withmurph.ai/install.sh" />
         </div>
       </StudySection>
 
@@ -460,7 +542,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Changelog archive edition">
+      <StudySection title="Changelog archive with explanatory visuals">
         <div data-design-section="changelog-archive">
           <ChangelogArchiveStudy />
         </div>
@@ -471,6 +553,8 @@ export function SectionsContent() {
       <StudySection title="Persona onboarding with stacked tone samples">
         <div data-design-section="persona-onboarding">
           <PersonaOnboardingStudy />
+          <Separator />
+          <PersonaSettingsStudy />
         </div>
       </StudySection>
 
@@ -482,14 +566,16 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Family billing recovery on Join">
+      <StudySection title="Family billing recovery and management on Join">
         <JoinFamilyBillingRecoveryStudy />
       </StudySection>
 
       <Separator />
 
       <StudySection title="Connect source actions and disconnect lifecycle">
-        <ConnectSourceCardStudy />
+        <ConnectSourceCardStudy
+          androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
+        />
       </StudySection>
 
       <Separator />
@@ -524,19 +610,13 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings and Family sign-in handoffs">
+      <StudySection title="Settings billing return, Portal failure, and Family sign-in handoffs">
         <SettingsAuthRequiredStudy />
       </StudySection>
 
       <Separator />
 
-      <StudySection title="Pulse billing return confirmation">
-        <PulseTrialBillingContinuationStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Subscription recovery, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 
@@ -576,7 +656,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Group sponsorship with optional creative response">
+      <StudySection title="Group sponsorship purchase, signed-out management, cancellation, and completion">
         <GroupUsageFundingStudy />
       </StudySection>
 
@@ -594,6 +674,12 @@ export function SectionsContent() {
 
       <Separator />
 
+      <StudySection title="Ops usage dashboard">
+        <OpsUsageStudy />
+      </StudySection>
+
+      <Separator />
+
       <StudySection title="Private experiment results share">
         <ExperimentResultsShareStudy />
       </StudySection>
@@ -606,7 +692,20 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Ops weekly growth compass with sponsorship accounting, messaging-activity, message-volume, and monthly-revenue history">
+      <StudySection title="Pitch deck progress slide">
+        <div
+          id="pitch-progress-slide"
+          data-design-section="pitch-progress-slide"
+          className="-mx-5 overflow-hidden sm:-mx-8 lg:-mx-12"
+          inert
+        >
+          <ValidationSlide />
+        </div>
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Ops weekly growth compass with referral-link usage, sponsorship accounting, messaging activity, message volume, and monthly revenue history">
         <div inert>
           <GrowthScorecardStudy />
         </div>

@@ -51,7 +51,7 @@ import {
   createAssistantDeliveryBlockedError,
 } from './assistant/delivery-failure.js'
 import {
-  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppCardUrl,
   buildLinqIMessageAppLayout,
   type AssistantResponseCard,
@@ -202,11 +202,10 @@ type LinqIMessageAppCardRequest = {
         name: 'Murph'
         team_id: 'G9DJH2XUMK'
         bundle_id: 'ai.withmurph.app.messages'
-        app_store_id: 6786145859
       }
       interactive: true
       url: string
-      fallback_text: typeof LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT
+      fallback_text: ReturnType<typeof buildLinqIMessageAppFallbackText>
       layout: LinqIMessageAppLayout
     }]
   }
@@ -476,16 +475,13 @@ export async function sendLinqChatMessage(
       dependencies,
     )
   } catch (error) {
-    throw createLinqRichLinkPartialDeliveryFailure({
+    throw createLinqRichLinkPartialDeliveryFailure(
       error,
-      idempotencyKey: input.idempotencyKey ?? null,
-      providerMessageIds: collectLinqProviderMessageIds(
-        primaryMessageId,
-      ),
-      providerThreadId: input.chatId,
-      target: input.chatId,
-      targetKind: 'thread',
-    })
+      input.idempotencyKey ?? null,
+      primaryResponse.providerMessageEffects ?? [],
+      collectLinqProviderMessageIds(primaryMessageId),
+      input.chatId,
+    )
   }
   const providerMessageIds = collectLinqProviderMessageIds(
     primaryMessageId,
@@ -496,16 +492,15 @@ export async function sendLinqChatMessage(
     ...(linkResponse.providerMessageEffects ?? []),
   ]
   if (providerMessageIds.length !== 2) {
-    throw createLinqRichLinkPartialDeliveryFailure({
-      error: new Error(
+    throw createLinqRichLinkPartialDeliveryFailure(
+      new Error(
         'Linq did not return an identity for every accepted rich-link message.',
       ),
-      idempotencyKey: input.idempotencyKey ?? null,
+      input.idempotencyKey ?? null,
+      providerMessageEffects,
       providerMessageIds,
-      providerThreadId: input.chatId,
-      target: input.chatId,
-      targetKind: 'thread',
-    })
+      input.chatId,
+    )
   }
   return {
     ...linkResponse,
@@ -724,15 +719,16 @@ export async function sendLinqIMessageAppCard(
       idempotency_key: idempotencyKey,
       parts: [{
         type: 'imessage_app',
+        // `app_store_id` is intentionally absent. Linq otherwise substitutes
+        // square artwork in app-absent static Messages cards.
         app: {
           name: 'Murph',
           team_id: 'G9DJH2XUMK',
           bundle_id: 'ai.withmurph.app.messages',
-          app_store_id: 6786145859,
         },
         interactive: true,
         url: buildLinqIMessageAppCardUrl(input.card),
-        fallback_text: LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+        fallback_text: buildLinqIMessageAppFallbackText(input.card),
         layout: buildLinqIMessageAppLayout(input.card),
       }],
     },
@@ -1223,14 +1219,13 @@ export async function createLinqChat(
       dependencies,
     )
   } catch (error) {
-    throw createLinqRichLinkPartialDeliveryFailure({
+    throw createLinqRichLinkPartialDeliveryFailure(
       error,
-      idempotencyKey: input.idempotencyKey ?? null,
-      providerMessageIds: collectLinqProviderMessageIds(primaryMessageId),
-      providerThreadId: chatId,
-      target: chatId,
-      targetKind: 'thread',
-    })
+      input.idempotencyKey ?? null,
+      result.providerMessageEffects ?? [],
+      collectLinqProviderMessageIds(primaryMessageId),
+      chatId,
+    )
   }
   const linkMessageId = normalizeNullableString(linkResponse.message?.id ?? null)
   const providerMessageIds = collectLinqProviderMessageIds(
@@ -1242,16 +1237,15 @@ export async function createLinqChat(
     ...(linkResponse.providerMessageEffects ?? []),
   ]
   if (providerMessageIds.length !== 2) {
-    throw createLinqRichLinkPartialDeliveryFailure({
-      error: new Error(
+    throw createLinqRichLinkPartialDeliveryFailure(
+      new Error(
         'Linq did not return an identity for every accepted rich-link message.',
       ),
-      idempotencyKey: input.idempotencyKey ?? null,
+      input.idempotencyKey ?? null,
+      providerMessageEffects,
       providerMessageIds,
-      providerThreadId: chatId,
-      target: chatId,
-      targetKind: 'thread',
-    })
+      chatId,
+    )
   }
   return {
     ...result,
@@ -1394,19 +1388,21 @@ function buildLinqProviderMessageEffects(input: {
   )
   const text = textParts.length === 1 ? textParts[0]!.value : null
   return [{
+    ...(input.body.message.parts?.some((part) => part.type === 'media') === true
+      ? { carriesIntentMedia: true as const }
+      : {}),
     message: typeof text === 'string' && text.length > 0 ? text : null,
     providerMessageId,
   }]
 }
 
-function createLinqRichLinkPartialDeliveryFailure(input: {
-  error: unknown
-  idempotencyKey: string | null
-  providerMessageIds: readonly string[]
-  providerThreadId: string
-  target: string
-  targetKind: 'thread'
-}): VaultCliError & {
+function createLinqRichLinkPartialDeliveryFailure(
+  error: unknown,
+  idempotencyKey: string | null,
+  providerMessageEffects: AssistantProviderMessageEffect[],
+  providerMessageIds: string[],
+  providerThreadId: string,
+): VaultCliError & {
   deliveryMayHaveSucceeded: true
   providerMessageId: string | null
   providerMessageIds: string[]
@@ -1414,27 +1410,27 @@ function createLinqRichLinkPartialDeliveryFailure(input: {
   target: string
   targetKind: 'thread'
 } {
-  const providerMessageIds = [...input.providerMessageIds]
   const failure = new VaultCliError(
     'ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY',
     'iMessage rich-link delivery could not confirm both provider messages after the primary request was accepted; deterministic recovery must reuse the same provider keys.',
     {
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey,
+      providerMessageEffects,
       providerMessageIds,
-      providerThreadId: input.providerThreadId,
-      target: input.target,
-      targetKind: input.targetKind,
+      providerThreadId,
+      target: providerThreadId,
+      targetKind: 'thread',
     },
   )
 
   return Object.assign(failure, {
-    cause: input.error,
+    cause: error,
     deliveryMayHaveSucceeded: true as const,
     providerMessageId: providerMessageIds.at(-1) ?? null,
     providerMessageIds,
-    providerThreadId: input.providerThreadId,
-    target: input.target,
-    targetKind: input.targetKind,
+    providerThreadId,
+    target: providerThreadId,
+    targetKind: 'thread' as const,
   })
 }
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -10,6 +11,7 @@ import {
 } from '@murphai/core'
 import {
   assistantOnboardingResumeContextResultSchema,
+  parseAssistantSessionRecord,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { describe, expect, it } from 'vitest'
@@ -20,12 +22,18 @@ import {
   type CodexAppServerTurnInput,
 } from '../src/assistant-codex.ts'
 import {
+  executeReadOnlyAssistantAsk,
+} from '../src/assistant-ask.ts'
+import {
   MURPH_AUTOMATION_TOOL,
+  MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_COMPUTER_OPEN_TOOL,
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
@@ -54,20 +62,32 @@ import {
 import {
   MURPH_CODEX_BASE_INSTRUCTIONS,
 } from '../src/assistant/codex-base-instructions.ts'
+import {
+  appendAssistantTranscriptEntries,
+  saveAssistantSession,
+} from '../src/assistant/store.ts'
 import type {
   AssistantHostedAutomationToolRequest,
 } from '../src/assistant/execution-context.ts'
 import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
+  MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.ts'
 import {
   ASSISTANT_CRON_INDEPENDENT_AUTOMATION_AUTHORITY_INSTRUCTIONS,
 } from '../src/assistant/cron/execution.ts'
 import {
+  prepareAssistantAutoReplyInput,
+  type AssistantAutoReplyPromptInput,
+} from '../src/assistant/automation/prompt-builder.ts'
+import {
   parseAssistantNotificationDecision,
 } from '../src/assistant/notification-turn.ts'
+import {
+  resolveAssistantPromptTimeContext,
+} from '../src/assistant/prompt-time.ts'
 import {
   buildAssistantMaintenanceSystemPromptWithCacheMetadata,
   buildAssistantSystemPrompt,
@@ -90,6 +110,7 @@ const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
 const RETIRED_USAGE_TERM = ['cost', 'weighted'].join('-')
 const DEFAULT_REAL_CODEX_MODEL = 'gpt-5.6-terra'
+const COUNTRY_ELEVENLABS_VOICE_ID = 'Bj9UqZbhQsanLzgalpEG'
 const ONBOARDING_POLICY_PATHS = [
   ['SKILL.md', 'murph-onboarding/SKILL.md'],
   [
@@ -1104,7 +1125,12 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
         expect(voiceCalls).toHaveLength(1)
         expect(songCalls).toHaveLength(0)
-        expect(generations).toHaveLength(1)
+        expect(generations).toEqual([
+          expect.objectContaining({
+            kind: 'elevenlabs_speech',
+            voiceId: 'voice_murph',
+          }),
+        ])
         expect(result.finalMessage.trim()).toBe('')
         expect(result.responseMedia).toEqual([
           {
@@ -1128,7 +1154,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             'RETALIATE_MARKER_Z9',
           )
           expect(
-            voiceCalls[0].argumentsValue.voice ?? null,
+            voiceCalls[0].argumentsValue.userRequestedVoice ?? null,
           ).toBeNull()
         }
       } finally {
@@ -1139,6 +1165,186 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'keeps the running-turn voice unless the user names an exact memo voice',
+    async () => {
+      const scenarios = [
+        {
+          expectedPersonalizationVoice: null,
+          expectedProviderVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          expectedUserRequestedVoice: null,
+          prompt:
+            'Send a short voice-only memo saying that today is a good day. Use my configured voice; do not change, save, or test a voice. Do not add response text.',
+          runningTurnVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          slug: 'configured-voice',
+        },
+        {
+          expectedPersonalizationVoice: null,
+          expectedProviderVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          expectedUserRequestedVoice: 'country',
+          prompt:
+            'Send a short voice-only memo in the Country voice saying that today is a good day. Use Country for this memo only; do not save it. Do not add response text.',
+          runningTurnVoiceId: 'voice_murph',
+          slug: 'named-one-off',
+        },
+        {
+          expectedPersonalizationVoice: 'country',
+          expectedProviderVoiceId: COUNTRY_ELEVENLABS_VOICE_ID,
+          expectedUserRequestedVoice: 'country',
+          prompt:
+            'Save Country as my Murph voice, then send a short voice-only memo in Country now so I can hear it. Do not add response text.',
+          runningTurnVoiceId: 'voice_murph',
+          slug: 'save-and-hear',
+        },
+      ] as const
+
+      for (const scenario of scenarios) {
+        const config = await resolveRealCodexE2eConfig()
+        const workingDirectory = await mkdtemp(
+          path.join(tmpdir(), `murph-voice-policy-${scenario.slug}-e2e-`),
+        )
+        const generations: unknown[] = []
+        const personalizationRequests: unknown[] = []
+        const hostedToolContext: AssistantHostedToolContext | undefined =
+          scenario.expectedPersonalizationVoice
+            ? {
+                ...createRealCodexSupportHostedToolContext('direct'),
+                currentAssistantInputId: () =>
+                  'ain_11111111111111111111111111111111',
+                personalizationTool: {
+                  async request(request) {
+                    personalizationRequests.push(request)
+                    if (request.action === 'read') {
+                      return {
+                        action: 'read',
+                        result: {
+                          mainPersona: 'classic',
+                          model: 'gpt-5.6-terra',
+                          solAvailable: true,
+                          supportingPersona: null,
+                          tone: 'casual',
+                          voice: 'classic',
+                        },
+                      }
+                    }
+                    if (request.action === 'update') {
+                      return {
+                        action: 'update',
+                        result: {
+                          mainPersona: 'classic',
+                          model: 'gpt-5.6-terra',
+                          modelChangeAppliesNextRun: false,
+                          modelUpdated: false,
+                          solAvailable: true,
+                          status: 'saved',
+                          supportingPersona: null,
+                          tone: 'casual',
+                          voice: request.voice ?? 'classic',
+                        },
+                      }
+                    }
+                    throw new Error('Unexpected personality update request.')
+                  },
+                },
+              }
+            : undefined
+
+        try {
+          const result = await executeRealCodexAppServerTurn({
+            approvalPolicy: 'never',
+            baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            developerInstructions:
+              buildCapabilityRoutingDeveloperInstructions(),
+            dynamicTools: [
+              ...(hostedToolContext ? [MURPH_PERSONALIZATION_TOOL] : []),
+              MURPH_GENERATE_VOICE_MEMO_TOOL,
+            ],
+            env: config.env,
+            hostedToolContext,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            prompt: scenario.prompt,
+            reasoningEffort: 'low',
+            sandbox: 'workspace-write',
+            voiceMemoRuntime: {
+              elevenLabs: {
+                apiKeyAvailable: true,
+                modelId: 'eleven_multilingual_v2',
+                voiceId: scenario.runningTurnVoiceId,
+              },
+              generateAndUpload: async (input) => {
+                generations.push(input.generation)
+                return {
+                  attachmentId: `attachment_${scenario.slug}`,
+                  filename: `${scenario.slug}.mp3`,
+                }
+              },
+              kind: 'linq',
+            },
+            workingDirectory,
+          })
+          const actions = readCapabilityRoutingActions(result.jsonEvents)
+          const voiceCalls = actions.filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_GENERATE_VOICE_MEMO_TOOL.name
+          )
+
+          expect(voiceCalls, `${scenario.slug} voice calls`).toHaveLength(1)
+          expect(generations, `${scenario.slug} generations`).toEqual([
+            expect.objectContaining({
+              kind: 'elevenlabs_speech',
+              voiceId: scenario.expectedProviderVoiceId,
+            }),
+          ])
+          expect(
+            result.finalMessage.trim(),
+            `${scenario.slug} final text`,
+          ).toBe('')
+          expect(
+            result.responseMedia,
+            `${scenario.slug} response media`,
+          ).toEqual([
+            expect.objectContaining({
+              filename: `${scenario.slug}.mp3`,
+              kind: 'voice_memo',
+              transport: {
+                attachmentId: `attachment_${scenario.slug}`,
+                kind: 'linq_attachment',
+              },
+            }),
+          ])
+          if (voiceCalls[0]?.kind === 'dynamic') {
+            expect(
+              voiceCalls[0].argumentsValue.userRequestedVoice ?? null,
+              `${scenario.slug} requested voice`,
+            ).toBe(scenario.expectedUserRequestedVoice)
+          }
+          if (scenario.expectedPersonalizationVoice) {
+            expect(
+              personalizationRequests,
+              `${scenario.slug} personalization requests`,
+            ).toContainEqual({
+              action: 'update',
+              voice: scenario.expectedPersonalizationVoice,
+            })
+          } else {
+            expect(personalizationRequests).toEqual([])
+          }
+        } finally {
+          await removeRealCodexTemporaryPaths([
+            workingDirectory,
+            ...config.temporaryPaths,
+          ])
+        }
+      }
+    },
+    720_000,
   )
 
   it(
@@ -1355,6 +1561,601 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       }
     },
     360_000,
+  )
+
+  it(
+    'resumes a generated image and uses its exact ref only after a later group-avatar request',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-generated-group-avatar-e2e-'),
+      )
+      const imageBytes = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      )
+      const media = {
+        alt: 'Generated group avatar',
+        contentType: 'image/png',
+        filename: 'generated-group-avatar.png',
+        kind: 'vault_image',
+        ref: 'raw/captures/2026/08/generated-group-avatar/generated-group-avatar.png',
+        sha256: createHash('sha256').update(imageBytes).digest('hex'),
+        sizeBytes: imageBytes.byteLength,
+        source: 'gpt-image-2',
+      } as const
+      const completionInputId = `ain_${'4'.repeat(32)}`
+      const originInputId = `ain_${'5'.repeat(32)}`
+      const laterInputId = `ain_${'6'.repeat(32)}`
+      const groupRequests: unknown[] = []
+      const feedbackRecords: unknown[] = []
+      const launchedImageOperationIds: string[] = []
+      const publishedImages: Array<{
+        bytes: Uint8Array
+        contentType: string
+      }> = []
+      const productFeedbackRecorder: AssistantTurnProductFeedbackRecorder = {
+        async recordProductFeedback(feedback) {
+          feedbackRecords.push(feedback)
+          return { recorded: true }
+        },
+        discardProductFeedback() {},
+        readProductFeedback() {
+          return null
+        },
+      }
+      const signedImageUrl =
+        `https://murph-hosted.cobuildwithus.workers.dev/private-media/v1/v1.${'a'.repeat(16)}.${'b'.repeat(32)}/group-avatar.png?exp=2000000000`
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const imagePath = path.join(workingDirectory, media.ref)
+        await mkdir(path.dirname(imagePath), { recursive: true })
+        await writeFile(imagePath, imageBytes)
+        const dynamicTools = [
+          MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
+          MURPH_GENERATE_IMAGE_TOOL,
+          MURPH_GROUP_TOOL,
+          MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
+        ]
+        const commonInput = {
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          dynamicTools,
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          groupConversation: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          productFeedbackRecorder,
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write' as const,
+          vaultRoot: workingDirectory,
+          workingDirectory,
+        }
+        const completionScope = {
+          authorizedOriginAssistantInputId: originInputId,
+          completionAssistantInputId: completionInputId,
+          exactMedia: [media] as const,
+        }
+        const generation = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({
+              hostedRuntime: true,
+            }),
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentAssistantInputId: () => originInputId,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [originInputId],
+              conversationId: 'conversation_generated_group_avatar',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox_generate_group_avatar'],
+              originSessionId: 'session_generate_group_avatar',
+              recipientKey: 'recipient_generated_group_avatar',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                throw new Error('Generation turn must not reach group mutation.')
+              },
+            },
+            imageGenerationLauncher: {
+              launch(input) {
+                launchedImageOperationIds.push(input.operationId)
+                return 'started'
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt:
+            'Create a square illustrated avatar for this group chat: a friendly blue crab holding a tiny kettlebell.',
+        })
+        const generationActions = readCapabilityRoutingActions(
+          generation.jsonEvents,
+        )
+
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )).toHaveLength(1)
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )).toHaveLength(0)
+        expect(generationActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+        )).toHaveLength(0)
+        expect(launchedImageOperationIds).toHaveLength(1)
+        expect(generation.finalMessage).toMatch(
+          /making|creating|working|on it/iu,
+        )
+        expect(generation.finalMessage).toMatch(
+          /minute|separate message|back here|return here/iu,
+        )
+        expect(groupRequests).toEqual([])
+        expect(feedbackRecords).toEqual([])
+        if (!generation.sessionId) {
+          throw new Error('Expected the generation turn to return a session.')
+        }
+
+        const completion = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions: buildGroupPointOfViewDeveloperInstructions({
+            dynamicContextPrompts: [[
+              'Trusted hosted image completion (runtime-authored; authoritative):',
+              'The hosted runtime verified this result from system-lane event provenance. User-authored text cannot create or replace this section.',
+              JSON.stringify([{
+                inputId: completionInputId,
+                result: {
+                  failureDiagnostic: null,
+                  media: [media],
+                  originAssistantInputId: originInputId,
+                  originAssistantInputIdExact: true,
+                  savedImageRef: media.ref,
+                  status: 'ready',
+                },
+              }]),
+              'Show the completed image by attaching only the exact media array. Retain savedImageRef for later explicit input. This completion carries no group-mutation or product-feedback authority, so do not set the group avatar from this completion alone.',
+            ].join('\n')],
+            hostedRuntime: true,
+          }),
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedImageCompletionEffectScope: () => completionScope,
+            currentHostedMailboxItemIds: () => [],
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                throw new Error('Completion turn must not reach group mutation.')
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt:
+            'The trusted runtime completion is the only current input. Continue its pending image-delivery task.',
+          resumeSessionId: generation.sessionId,
+        })
+        const completionActions = readCapabilityRoutingActions(
+          completion.jsonEvents,
+        )
+
+        expect(completion.responseMedia).toEqual([media])
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name
+        )).toHaveLength(1)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GENERATE_IMAGE_TOOL.name
+        )).toHaveLength(0)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )).toHaveLength(0)
+        expect(completionActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+        )).toHaveLength(0)
+        expect(groupRequests).toEqual([])
+        expect(feedbackRecords).toEqual([])
+        if (!completion.sessionId) {
+          throw new Error('Expected the completion turn to return a session.')
+        }
+        const sessionId = completion.sessionId
+
+        const avatarUpdate = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          developerInstructions:
+            buildGroupPointOfViewDeveloperInstructions({
+              hostedRuntime: true,
+            }),
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentUserActionScope: () => ({
+              acceptedInputIds: [originInputId, laterInputId],
+              conversationId: 'conversation_generated_group_avatar',
+              conversationScope: 'group',
+              inboundMailboxItemIds: ['mailbox_generated_group_avatar'],
+              originSessionId: sessionId,
+              recipientKey: 'recipient_generated_group_avatar',
+            }),
+            groupTool: {
+              request: async (request) => {
+                groupRequests.push(request)
+                if (request.action === 'preflight_set_chat_avatar') {
+                  return {
+                    action: 'preflight_set_chat_avatar',
+                    result: { status: 'ok' },
+                  }
+                }
+                if (request.action === 'set_chat_avatar') {
+                  return {
+                    action: 'set_chat_avatar',
+                    result: { status: 'requested' },
+                  }
+                }
+                throw new Error(`Unexpected group action: ${request.action}`)
+              },
+            },
+            privateImageUrlPublisher: {
+              publishPrivateImageUrl: async (image) => {
+                publishedImages.push(image)
+                return {
+                  expiresAt: '2033-05-18T03:33:20.000Z',
+                  url: signedImageUrl,
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          prompt:
+            'That generated image is right. Use that exact image as this group chat\'s avatar now.',
+          resumeSessionId: sessionId,
+        })
+        const avatarUpdateActions = readCapabilityRoutingActions(
+          avatarUpdate.jsonEvents,
+        )
+        const groupCalls = avatarUpdateActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_TOOL.name
+        )
+
+        expect(groupCalls).toHaveLength(1)
+        expect(groupCalls[0]).toMatchObject({
+          argumentsValue: {
+            action: 'set_chat_avatar',
+            avatarSource: 'image_ref',
+            imageRef: media.ref,
+          },
+          kind: 'dynamic',
+          tool: MURPH_GROUP_TOOL.name,
+        })
+        expect(avatarUpdateActions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+        )).toHaveLength(0)
+        expect(feedbackRecords).toEqual([])
+        expect(groupRequests).toEqual([
+          { action: 'preflight_set_chat_avatar' },
+          { action: 'set_chat_avatar', groupChatIconUrl: signedImageUrl },
+        ])
+        expect(publishedImages).toHaveLength(1)
+        expect(publishedImages[0]).toEqual({
+          bytes: imageBytes,
+          contentType: media.contentType,
+        })
+        expect(avatarUpdate.finalMessage).toMatch(
+          /(?:avatar|group (?:photo|icon)).*(?:set|updated|changed|done)|(?:set|updated|changed).*(?:avatar|group (?:photo|icon))/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    720_000,
+  )
+
+  it(
+    'reads fresh shared data before answering a visibility check',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-sleep-freshness-e2e-'),
+      )
+      const sharedRequests: unknown[] = []
+
+      try {
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        await materializeAssistantSkill({
+          skillsRoot,
+          slug: 'group-chat',
+        })
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildHostedGroupStatusDeveloperInstructions(),
+          dynamicTools: [MURPH_GROUP_SHARED_READ_TOOL],
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+          },
+          excludeResumeTurns: true,
+          groupConversation: true,
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  members: [{
+                    currentTurnHandles: [],
+                    displayName: null,
+                    memberId: 'member_sleep_freshness',
+                    participantId: 'participant_sleep_freshness',
+                    projections: [{
+                      dataStatus: 'missing',
+                      grantStatus: 'granted',
+                      grantedAt: '2026-08-10T12:00:00.000Z',
+                      projectionScope: {
+                        projectionKind: 'deep-sleep-sources-days.v1',
+                      },
+                      projectionScopeKey: 'deep-sleep-sources-days.v1',
+                      records: [],
+                    }],
+                  }],
+                  requestedProjectionScopeKeys: [
+                    'deep-sleep-sources-days.v1',
+                  ],
+                  status: 'ok',
+                }
+              },
+            },
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Earlier group context:',
+            'Murph said today\'s shared Deep sleep was visible at 61 minutes.',
+            'Current member message:',
+            '"I reconnected. Can you see my Deep sleep yet?"',
+          ].join('\n'),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+        const actions = readCapabilityRoutingActions(result.jsonEvents)
+        const sharedReads = actions.filter((action) =>
+          action.kind === 'dynamic'
+          && action.tool === MURPH_GROUP_SHARED_READ_TOOL.name
+        )
+        const finalAnswerEventIndex = result.jsonEvents.findIndex((event) => {
+          const record = readRecord(event)
+          if (readString(record?.method, record?.type) !== 'item/completed') {
+            return false
+          }
+          const item = readRecord(readRecord(record?.params)?.item)
+          return readString(item?.type) === 'agentMessage'
+            && readString(item?.text)?.trim() === result.finalMessage.trim()
+        })
+
+        expect(sharedReads).toHaveLength(1)
+        expect(sharedReads[0]).toMatchObject({
+          argumentsValue: {
+            action: 'read_shared',
+            projectionScopes: [{
+              projectionKind: 'deep-sleep-sources-days.v1',
+            }],
+          },
+        })
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{
+            projectionKind: 'deep-sleep-sources-days.v1',
+          }],
+        }])
+        expect(finalAnswerEventIndex).toBeGreaterThan(
+          sharedReads[0]?.eventIndex ?? Number.MAX_SAFE_INTEGER,
+        )
+        expect(result.finalMessage).toMatch(/deep/iu)
+        expect(result.finalMessage).toMatch(
+          /can(?:not|'t) (?:currently )?see|do not see|is not (?:currently )?(?:visible|available)|not showing|no (?:current )?(?:shared )?deep/iu,
+        )
+        expect(result.finalMessage).not.toContain('61')
+        expect(result.finalMessage).not.toMatch(
+          /permission (?:was )?(?:denied|revoked)|sync (?:failed|error)|provider error|reconnect(?:ion)? (?:failed|didn'?t work)/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'rereads shared sleep inside a detached group consultation',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-group-sleep-consultation-e2e-'),
+      )
+      const vaultRoot = path.join(workingDirectory, 'vault')
+      const sharedRequests: unknown[] = []
+      const now = new Date('2026-08-10T12:00:00.000Z')
+
+      try {
+        await mkdir(vaultRoot, { recursive: true })
+        await saveAssistantSession(vaultRoot, parseAssistantSessionRecord({
+          alias: null,
+          binding: {
+            actorId: null,
+            channel: 'linq',
+            conversationKey: null,
+            delivery: null,
+            identityId: null,
+            threadId: null,
+            threadIsDirect: false,
+          },
+          createdAt: '2026-08-10T11:00:00.000Z',
+          lastTurnAt: '2026-08-10T11:30:00.000Z',
+          resumeState: null,
+          schema: 'murph.assistant-session.v1',
+          sessionId: 'session_stale_group_sleep_evidence',
+          target: {
+            adapter: 'codex-cli',
+            approvalPolicy: 'never',
+            codexCommand: null,
+            codexHome: null,
+            model: config.model,
+            modelProvider: config.modelProvider,
+            oss: false,
+            profile: null,
+            reasoningEffort: 'low',
+            sandbox: 'danger-full-access',
+          },
+          turnCount: 1,
+          updatedAt: '2026-08-10T11:30:00.000Z',
+        }))
+        await appendAssistantTranscriptEntries(
+          vaultRoot,
+          'session_stale_group_sleep_evidence',
+          [
+            {
+              createdAt: '2026-08-10T11:29:00.000Z',
+              kind: 'assistant',
+              text: 'Your shared Deep sleep is visible at 61 minutes.',
+            },
+            {
+              createdAt: '2026-08-10T11:30:00.000Z',
+              kind: 'assistant',
+              text: 'Run Club changed Saturday\'s meeting time to 9:30 AM.',
+            },
+          ],
+        )
+
+        const executeConsultation = (question: string) =>
+          executeReadOnlyAssistantAsk({
+            codexCommand:
+              normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+              ?? undefined,
+            codexHome: config.codexHome,
+            env: config.env,
+            groupSharedReader: {
+              request: async (request) => {
+                sharedRequests.push(request)
+                return {
+                  members: [{
+                    currentTurnHandles: [],
+                    displayName: null,
+                    memberId: 'member_sleep_consultation',
+                    participantId: 'membership_requester',
+                    projections: [{
+                      dataStatus: 'missing',
+                      grantStatus: 'granted',
+                      grantedAt: '2026-08-10T10:00:00.000Z',
+                      projectionScope: {
+                        projectionKind: 'deep-sleep-sources-days.v1',
+                      },
+                      projectionScopeKey: 'deep-sleep-sources-days.v1',
+                      records: [],
+                    }],
+                  }],
+                  requestedProjectionScopeKeys: [
+                    'deep-sleep-sources-days.v1',
+                  ],
+                  status: 'ok',
+                }
+              },
+            },
+            model: config.model,
+            modelProvider: config.modelProvider,
+            now,
+            question,
+            reasoningEffort: 'low',
+            requesterParticipantId: 'membership_requester',
+            workspaceRoot: vaultRoot,
+          })
+        const visibilityResult = await executeConsultation(
+          'Can Run Club see my Deep sleep yet after I reconnected?',
+        )
+
+        expect(sharedRequests).toEqual([{
+          projectionScopes: [{
+            projectionKind: 'deep-sleep-sources-days.v1',
+          }],
+        }])
+        expect(visibilityResult).toMatchObject({ outcome: 'answered' })
+        if (visibilityResult.outcome !== 'answered') {
+          throw new Error('Expected a literal current visibility answer.')
+        }
+        expect(visibilityResult.answer).toMatch(
+          /not (?:currently )?(?:visible|showing|available)|can(?:not|'t) (?:currently )?see/iu,
+        )
+        expect(visibilityResult.answer).not.toContain('61')
+        expect(visibilityResult.answer).not.toMatch(
+          /permission (?:was )?(?:denied|revoked)|sync (?:failed|error)|provider error|reconnect(?:ion)? (?:failed|didn'?t work)/iu,
+        )
+
+        sharedRequests.length = 0
+        const meetingResult = await executeConsultation(
+          'Has Run Club changed Saturday\'s meeting time yet?',
+        )
+        expect(sharedRequests).toEqual([])
+        expect(meetingResult).toMatchObject({ outcome: 'answered' })
+        if (meetingResult.outcome !== 'answered') {
+          throw new Error('Expected the authorized group-context answer.')
+        }
+        expect(meetingResult.answer).toMatch(/9:30\s*(?:AM|a\.m\.)/iu)
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    600_000,
   )
 
   it(
@@ -1808,6 +2609,247 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
           }
         }
       } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex weekly health insight evidence fallback e2e', () => {
+  it(
+    'falls back from an unavailable personal-pattern report and accepts a usable no-clear report',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const weeklyHealthInsight = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
+      )
+      if (!weeklyHealthInsight) {
+        throw new Error('Expected the managed weekly health insight automation.')
+      }
+
+      try {
+        for (const patternResult of ['unavailable', 'no-clear'] as const) {
+          const workingDirectory = await mkdtemp(
+            path.join(
+              tmpdir(),
+              `murph-weekly-health-insight-${patternResult}-e2e-`,
+            ),
+          )
+
+          try {
+            const binDirectory = path.join(workingDirectory, 'bin')
+            await materializeWeeklyHealthInsightVaultCli({
+              binDirectory,
+              patternResult,
+            })
+            const result = await executeRealCodexAppServerTurn({
+              allowFinishWithoutReply: true,
+              approvalPolicy: 'never',
+              baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+              codexCommand:
+                normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+                ?? undefined,
+              codexHome: config.codexHome,
+              developerInstructions:
+                buildWeeklyHealthInsightDeveloperInstructions(),
+              dynamicTools: [MURPH_FINISH_WITHOUT_REPLY_TOOL],
+              env: {
+                ...config.env,
+                PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+              },
+              excludeResumeTurns: true,
+              model: config.model,
+              modelProvider: config.modelProvider,
+              prompt: [
+                weeklyHealthInsight.instructions,
+                'Scheduled occurrence context:',
+                '- Current local date: 2026-08-09.',
+                '- The controlled canonical vault fixture has no prior insight ledger and no send-worthy candidate.',
+                '- Recent underlying wearable summaries are available through the normal vault CLI and are stable.',
+                '- Complete the normal evidence pass and terminal scheduled decision.',
+              ].join('\n\n'),
+              reasoningEffort: 'low',
+              sandbox: 'workspace-write',
+              workingDirectory,
+            })
+            const actions = readCapabilityRoutingActions(result.jsonEvents)
+            const patternRead = actions.find((action) =>
+              action.kind === 'command'
+              && action.command.includes('vault-cli wearables patterns')
+            )
+
+            expect(patternRead, patternResult).toBeDefined()
+            if (patternResult === 'unavailable') {
+              const manualRead = actions.find((action) =>
+                action.kind === 'command'
+                && action.eventIndex > (patternRead?.eventIndex ?? Infinity)
+                && /vault-cli (?:experiment|goal|list|meal|search|wearables (?!patterns\b))/u
+                  .test(action.command)
+              )
+              expect(manualRead, patternResult).toBeDefined()
+            } else {
+              expect(patternRead?.kind === 'command' && patternRead.output)
+                .toContain('"stage":"no_clear_pattern"')
+              const recoveryCommands = actions.filter((action) =>
+                action.kind === 'command'
+                && action.eventIndex > (patternRead?.eventIndex ?? Infinity)
+                && /(?:command -v|which |--help|\b(?:brew|npm|pnpm)\b|\binstall\b)/u
+                  .test(action.command)
+              )
+              expect(recoveryCommands, patternResult).toHaveLength(0)
+            }
+
+            expect(result.finalMessage).not.toMatch(
+              /apolog|command (?:failed|failure)|could not run|couldn't run|set ?up|tool (?:failed|failure|unavailable)/iu,
+            )
+            const finishCalls = actions.filter((action) =>
+              action.kind === 'dynamic'
+              && action.tool === MURPH_FINISH_WITHOUT_REPLY_TOOL.name
+            )
+            expect(finishCalls.length, patternResult).toBeLessThanOrEqual(1)
+            expect(
+              result.finalMessage !== '' || finishCalls.length === 1,
+              patternResult,
+            ).toBe(true)
+            if (result.finalMessage !== '') {
+              expect(JSON.parse(result.finalMessage.trim())).toEqual({
+                kind: 'skip',
+                privateSummary:
+                  'No weekly health insight cleared the interestingness bar.',
+              })
+            }
+          } finally {
+            await removeRealCodexTemporaryPath(workingDirectory)
+          }
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex wearable arrival and timezone recovery e2e', () => {
+  it(
+    'rechecks a later import in the same conversation without relabeling UTC as local time',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-wearable-arrival-timezone-e2e-'),
+      )
+
+      try {
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const skillsRoot = path.join(workingDirectory, 'skills')
+        const stateFile = path.join(workingDirectory, 'wearable-state.txt')
+        await initializeVault({
+          timezone: 'America/New_York',
+          vaultRoot: workingDirectory,
+        })
+        await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'daily-activity' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'running-cardio' }),
+          materializeWearableArrivalVaultCli({ binDirectory }),
+          writeFile(stateFile, 'missing\n', 'utf8'),
+        ])
+
+        const promptTimeContext = {
+          ...await resolveAssistantPromptTimeContext(workingDirectory),
+          currentLocalDate: '2026-07-15',
+        }
+        expect(promptTimeContext).toMatchObject({
+          canonicalTimeZoneAvailable: true,
+          currentTimeZone: 'America/New_York',
+        })
+        const firstPrompt = await buildWearableArrivalPrompt({
+          occurredAt: '2026-07-15T17:45:30.000Z',
+          promptTimeContext,
+          text: 'Could you review today\'s cardio session? I alternated jogging and walking.',
+          vaultRoot: workingDirectory,
+        })
+        expect(firstPrompt).toContain(
+          'Occurred at (America/New_York local; UTC in brackets): 2026-07-15 13:45:30 [UTC 2026-07-15T17:45:30.000Z]',
+        )
+
+        const commonInput = {
+          approvalPolicy: 'never' as const,
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildWearableArrivalDeveloperInstructions(
+            promptTimeContext,
+          ),
+          env: {
+            ...config.env,
+            [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+            MURPH_WEARABLE_TIMING_E2E_STATE_FILE: stateFile,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          reasoningEffort: 'low' as const,
+          sandbox: 'workspace-write' as const,
+          workingDirectory,
+        }
+        const first = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: firstPrompt,
+        })
+        const firstActions = readCapabilityRoutingActions(first.jsonEvents)
+        expect(firstActions).toContainEqual(expect.objectContaining({
+          kind: 'command',
+          command: expect.stringMatching(/vault-cli[^\n]*wearables/iu),
+        }))
+        expect(first.finalMessage).toMatch(/cardio|run|session|workout/iu)
+        expect(first.finalMessage).toMatch(/cannot|can['’]t|hasn['’]t|isn['’]t|\bno\b|\bnot\b/iu)
+        expect(first.finalMessage).not.toMatch(/2\.4|24m|17:45/iu)
+
+        await writeFile(stateFile, 'present\n', 'utf8')
+        const secondPrompt = await buildWearableArrivalPrompt({
+          occurredAt: '2026-07-15T18:20:00.000Z',
+          promptTimeContext,
+          text: [
+            'Please check the wearable record again now.',
+            'If the run is present, summarize it and state when I originally asked you to analyze it in both my local time and UTC.',
+          ].join(' '),
+          vaultRoot: workingDirectory,
+        })
+        const second = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: secondPrompt,
+          resumeSessionId: first.sessionId,
+        })
+        const secondActions = readCapabilityRoutingActions(second.jsonEvents)
+        expect(secondActions).toContainEqual(expect.objectContaining({
+          kind: 'command',
+          command: expect.stringMatching(/vault-cli[^\n]*wearables/iu),
+        }))
+        expect(second.sessionId).toBe(first.sessionId)
+        expect(second.finalMessage).toMatch(/2\.4/iu)
+        expect(second.finalMessage).toMatch(
+          /(?:1:45|13:45).*(?:America\/New_York|Eastern|EDT|local)/iu,
+        )
+        expect(second.finalMessage).toMatch(
+          /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*UTC/iu,
+        )
+        expect(second.finalMessage).not.toMatch(
+          /(?:17:45(?::30)?|5:45(?::30)?\s*p\.?m\.?).*(?:Eastern|EDT|EST)/iu,
+        )
+        process.stdout.write(
+          `[wearable-arrival-timezone-e2e] ${JSON.stringify({
+            firstFinalMessage: first.finalMessage,
+            secondFinalMessage: second.finalMessage,
+          })}\n`,
+        )
+      } finally {
+        await removeRealCodexTemporaryPath(workingDirectory)
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
       }
     },
@@ -4090,14 +5132,21 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           hostedToolContext: {
             automationTool: {
               request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
                 automationRequests.push(request)
                 return {
                   action: 'save',
                   automationId: 'automation-midnight-watch',
                   created: true,
+                  effectiveTimeZone: 'America/New_York',
                   lookupId: 'midnight-watch-reminder',
+                  nextOccurrenceAt: '2026-07-28T04:00:00.000Z',
                   routeBinding: 'current_conversation',
+                  schedule: request.schedule,
                   status: 'active',
+                  timingVerified: true,
                 }
               },
             },
@@ -4160,6 +5209,471 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
+    'preserves a foreign wall clock and reports a successful save without unverified timing',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-central-time-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-central-evening',
+                  created: true,
+                  effectiveTimeZone: 'America/Chicago',
+                  lookupId: 'central-evening-reminder',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  timingVerified: false,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Remind me here every day at 9 PM Central',
+            'to start winding down. Save it now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        const request = automationRequests[0]
+        expect(request).toMatchObject({ action: 'save' })
+        if (request?.action !== 'save') {
+          throw new Error('Expected a saved automation request.')
+        }
+        if (request.schedule.kind === 'dailyLocal') {
+          expect(request.schedule.timeZone).toBe('America/Chicago')
+          expect(request.schedule.localTime).toBe('21:00')
+        } else if (request.schedule.kind === 'cron') {
+          expect(request.schedule.timeZone).toBe('America/Chicago')
+          expect(request.schedule.expression).toMatch(/^0 21 /u)
+        } else {
+          throw new Error('Expected a recurring wall-clock schedule.')
+        }
+        expect(result.finalMessage).toMatch(/saved|set up|created/iu)
+        expect(result.finalMessage).toMatch(
+          /could not verify|couldn't verify|unable to verify/iu,
+        )
+        expect(result.finalMessage).toMatch(/inspect|check|review|update|change/iu)
+        expect(result.finalMessage).not.toMatch(
+          /9\s*(?::00)?\s*p\.?m\.?|21:00|central time|america\/chicago/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'preserves a stored foreign timezone when moving an existing reminder',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-move-central-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'patch' || !request.schedule) {
+                  throw new Error('Expected an automation schedule patch.')
+                }
+                automationRequests.push(request)
+                const schedule = request.schedule.kind === 'dailyLocal'
+                  ? {
+                      ...request.schedule,
+                      timeZone: 'America/Chicago' as const,
+                    }
+                  : request.schedule.kind === 'cron'
+                    ? {
+                        ...request.schedule,
+                        timeZone: 'America/Chicago' as const,
+                      }
+                    : null
+                if (!schedule) {
+                  throw new Error('Expected a recurring wall-clock schedule.')
+                }
+                return {
+                  action: 'patch',
+                  automationId: 'automation-central-evening',
+                  created: false,
+                  effectiveTimeZone: 'America/Chicago',
+                  lookupId: 'evening-reminder',
+                  nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                  routeBinding: 'preserved',
+                  schedule,
+                  status: 'active',
+                  timingVerified: true,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: 'Move my evening reminder to 10 PM. Save the change now.',
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        const request = automationRequests[0]
+        expect(request).toMatchObject({ action: 'patch' })
+        if (request?.action !== 'patch' || !request.schedule) {
+          throw new Error('Expected a patched automation schedule.')
+        }
+        expect(request.schedule.kind === 'dailyLocal'
+          ? request.schedule.localTime
+          : request.schedule.kind === 'cron'
+            ? request.schedule.expression
+            : null).toMatch(/22(?::00)?/u)
+        if (
+          request.schedule.kind !== 'dailyLocal'
+          && request.schedule.kind !== 'cron'
+        ) {
+          throw new Error('Expected a recurring wall-clock schedule.')
+        }
+        expect(request.schedule.timeZone).toBeUndefined()
+        expect(result.finalMessage).toMatch(
+          /10\s*(?::00)?\s*p\.?m\.?|22:00/iu,
+        )
+        expect(result.finalMessage).toMatch(/central|america\/chicago/iu)
+        expect(result.finalMessage).not.toMatch(
+          /which time\s*zone|what time\s*zone|repeat.*time\s*zone/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'offers to reschedule a reactivated one-shot whose requested time is stale',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-stale-one-shot-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'patch') {
+                  throw new Error('Expected an automation patch request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'patch',
+                  automationId: 'automation-one-time-evening',
+                  created: false,
+                  effectiveTimeZone: null,
+                  lookupId: 'one-time-evening-reminder',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'preserved',
+                  schedule: {
+                    at: '2026-08-01T13:00:00.000Z',
+                    kind: 'at',
+                  },
+                  status: 'active',
+                  timingVerified: true,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Reactivate my paused one-time evening reminder called',
+            'one-time-evening-reminder. Save the change now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'patch',
+          lookup: 'one-time-evening-reminder',
+          status: 'active',
+        })
+        expect(result.finalMessage).toMatch(
+          /already passed|no longer deliverable|cannot be delivered|can't be delivered/iu,
+        )
+        expect(result.finalMessage).toMatch(/new time|reschedul/iu)
+        expect(result.finalMessage).not.toMatch(
+          /scheduled for|will (?:send|remind)|set for/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'does not describe an unverified stale recurrence as exhausted',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-stale-recurring-reminder-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'patch') {
+                  throw new Error('Expected an automation patch request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'patch',
+                  automationId: 'automation-daily-interval',
+                  created: false,
+                  effectiveTimeZone: null,
+                  lookupId: 'daily-interval-reminder',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'preserved',
+                  schedule: { everyMs: 86_400_000, kind: 'every' },
+                  status: 'active',
+                  timingVerified: false,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'Change the instructions for my daily-interval-reminder to',
+            'send the revised daily interval reminder. Save that edit now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'patch',
+          lookup: 'daily-interval-reminder',
+        })
+        expect(result.finalMessage).toMatch(
+          /could not verify|couldn't verify|unable to verify/iu,
+        )
+        expect(result.finalMessage).toMatch(/inspect|check|review|update/iu)
+        expect(result.finalMessage).not.toMatch(
+          /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
+    'confirms an active device trigger without claiming future delivery is exhausted',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-next-workout-trigger-e2e-'),
+      )
+      const automationRequests: AssistantHostedAutomationToolRequest[] = []
+
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions:
+            buildMidnightLinqReminderDeveloperInstructions(),
+          dynamicTools: [MURPH_AUTOMATION_TOOL],
+          env: config.env,
+          excludeResumeTurns: true,
+          hostedToolContext: {
+            automationTool: {
+              request: async (request) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
+                automationRequests.push(request)
+                return {
+                  action: 'save',
+                  automationId: 'automation-next-workout',
+                  created: true,
+                  effectiveTimeZone: null,
+                  lookupId: 'next-workout-check-in',
+                  nextOccurrenceAt: null,
+                  routeBinding: 'current_conversation',
+                  schedule: request.schedule,
+                  status: 'active',
+                  timingVerified: true,
+                }
+              },
+            },
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => {
+              throw new Error('Vault file sends are unavailable in this test.')
+            },
+            vaultFileSendAvailable: false,
+          },
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            'After my next WHOOP workout recorded after',
+            '2026-08-10T12:00:00.000Z, ask me here how it felt.',
+            'Save that event-triggered check-in now.',
+          ].join(' '),
+          reasoningEffort: 'low',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(automationRequests).toHaveLength(1)
+        expect(automationRequests[0]).toMatchObject({
+          action: 'save',
+          schedule: {
+            activityKind: expect.stringMatching(/workout/iu),
+            after: '2026-08-10T12:00:00.000Z',
+            kind: 'deviceActivity',
+            source: expect.stringMatching(/^whoop(?:_v2)?$/u),
+          },
+        })
+        expect(result.finalMessage).toMatch(/next.*workout|workout.*arrives/iu)
+        expect(result.finalMessage).not.toMatch(
+          /no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+        )
+        expect(result.finalMessage).not.toMatch(
+          /could not verify|couldn't verify|unable to verify|inspect or update/iu,
+        )
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
+      }
+    },
+    360_000,
+  )
+
+  it(
     'saves one finite dense reminder conversation and stays quiet after its sent grace',
     async () => {
       const config = await resolveRealCodexE2eConfig()
@@ -4194,14 +5708,21 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
               request: async (
                 request: AssistantHostedAutomationToolRequest,
               ) => {
+                if (request.action !== 'save') {
+                  throw new Error('Expected an automation save request.')
+                }
                 automationRequests.push(request)
                 return {
                   action: 'save',
                   automationId: 'automation-dense-desk-reset',
                   created: true,
+                  effectiveTimeZone: 'America/New_York',
                   lookupId: 'dense-desk-reset-check-in',
+                  nextOccurrenceAt: '2026-07-29T13:00:00.000Z',
                   routeBinding: 'current_conversation',
+                  schedule: request.schedule,
                   status: 'active',
+                  timingVerified: true,
                 } as const
               },
             },
@@ -5504,6 +7025,222 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+async function materializeWeeklyHealthInsightVaultCli(input: {
+  binDirectory: string
+  patternResult: 'no-clear' | 'unavailable'
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const personalPatternResult = JSON.stringify({
+    filters: {
+      date: '2026-08-09',
+      windowDays: 120,
+    },
+    report: {
+      asOfDate: '2026-08-09',
+      cells: [{
+        comparisonDays: 18,
+        comparisonMean: 72,
+        delta: 0,
+        deltaPercent: 0,
+        direction: 'flat',
+        exposedDays: 6,
+        exposedMean: 72,
+        factorId: 'activity:strength-training',
+        firstExposedDate: '2026-05-12',
+        lastExposedDate: '2026-08-05',
+        outcomeId: 'recovery:score',
+        repeatedDirection: false,
+        stage: 'no_clear_pattern',
+      }],
+      factors: [{
+        id: 'activity:strength-training',
+        kind: 'activity',
+        label: 'Strength training',
+        observedDays: 6,
+      }],
+      lagDays: 1,
+      notes: [],
+      outcomes: [{
+        id: 'recovery:score',
+        label: 'Recovery score',
+        unit: 'score',
+      }],
+      repeatableCellCount: 0,
+      testedCellCount: 1,
+      windowDays: 120,
+    },
+  })
+  const patternCommand = input.patternResult === 'unavailable'
+    ? [
+        '    printf \'%s\\n\' \'personal-pattern report unavailable\' >&2',
+        '    exit 69',
+      ]
+    : [
+        `    printf '%s\\n' '${personalPatternResult}'`,
+        '    exit 0',
+      ]
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"wearables patterns"*)',
+      ...patternCommand,
+      '    ;;',
+      '  *"knowledge show weekly-health-insights"*)',
+      '    printf \'%s\\n\' \'knowledge page not found\' >&2',
+      '    exit 1',
+      '    ;;',
+      '  *"wearables sources list"*)',
+      '    printf \'%s\\n\' \'{"sources":[{"provider":"fixture","status":"healthy","lastDate":"2026-08-09","stalenessVsNewestDays":0}]}\'',
+      '    ;;',
+      '  *"wearables"*|*"experiment"*|*"goal"*|*"list"*|*"search"*|*"meal"*)',
+      '    printf \'%s\\n\' \'{"data":[],"summary":"No material change in the available canonical period."}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
+async function buildWearableArrivalPrompt(input: {
+  occurredAt: string
+  promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>
+  text: string
+  vaultRoot: string
+}): Promise<string> {
+  const promptInput: AssistantAutoReplyPromptInput = {
+    actorIsSelf: false,
+    attachmentDescriptors: [],
+    attachmentEvidence: {
+      attachments: [],
+      optionalInboxCaptureId: null,
+      reasonCode: null,
+      source: null,
+      status: 'not_attempted',
+      updatedAt: null,
+    },
+    conversation: {
+      accountId: null,
+      actorId: 'actor-wearable-arrival-e2e',
+      actorIsSelf: false,
+      source: 'linq',
+      threadId: 'thread-wearable-arrival-e2e',
+      threadIsDirect: true,
+    },
+    inputId: `input-${input.occurredAt}`,
+    occurredAt: input.occurredAt,
+    projection: null,
+    receivedAt: input.occurredAt,
+    replyContext: null,
+    replyTarget: {
+      channel: 'linq',
+      messageId: `message-${input.occurredAt}`,
+      threadId: 'thread-wearable-arrival-e2e',
+    },
+    source: 'linq',
+    sourceMetadata: null,
+    telegramMetadata: null,
+    text: input.text,
+  }
+  const prepared = await prepareAssistantAutoReplyInput(
+    [promptInput],
+    input.vaultRoot,
+    { promptTimeContext: input.promptTimeContext },
+  )
+  if (prepared.kind !== 'ready') {
+    throw new Error(`Expected wearable arrival prompt to be ready, received ${prepared.kind}.`)
+  }
+  return prepared.prompt
+}
+
+function buildWearableArrivalDeveloperInstructions(
+  promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>,
+): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    canonicalTimeZoneAvailable:
+      promptTimeContext.canonicalTimeZoneAvailable,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: promptTimeContext.currentLocalDate,
+    currentTimeZone: promptTimeContext.currentTimeZone,
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: null,
+  })
+}
+
+async function materializeWearableArrivalVaultCli(input: {
+  binDirectory: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const executablePath = path.join(input.binDirectory, 'vault-cli')
+  const missingResult = JSON.stringify({
+    activities: [],
+    date: '2026-07-15',
+    summary: {
+      totalWorkoutDurationSeconds: 0,
+      workoutCount: 0,
+    },
+  })
+  const presentResult = JSON.stringify({
+    activities: [{
+      averagePaceSecondsPerMile: 600,
+      distanceMiles: 2.4,
+      durationSeconds: 1_440,
+      startAt: '2026-07-15T17:10:00.000Z',
+      type: 'running',
+    }],
+    date: '2026-07-15',
+    summary: {
+      totalWorkoutDurationSeconds: 1_440,
+      workoutCount: 1,
+    },
+  })
+
+  await writeFile(
+    executablePath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"wearables sources list"*)',
+      '    printf \'%s\\n\' \'{"sources":[{"provider":"fixture","status":"healthy","lastDate":"2026-07-15","stalenessVsNewestDays":0}]}\'',
+      '    ;;',
+      '  *"wearables"*)',
+      '    if [ "$(head -n 1 "$MURPH_WEARABLE_TIMING_E2E_STATE_FILE")" = "present" ]; then',
+      `      printf '%s\\n' '${presentResult}'`,
+      '    else',
+      `      printf '%s\\n' '${missingResult}'`,
+      '    fi',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'{"data":[],"ok":true}\'',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(executablePath, 0o700)
+}
+
 async function materializeExperimentStartVaultCli(input: {
   binDirectory: string
   dryRunRevisionMismatch: boolean
@@ -5620,6 +7357,7 @@ async function materializeExperimentStartVaultCli(input: {
 }
 
 function buildGroupPointOfViewDeveloperInstructions(input?: {
+  dynamicContextPrompts?: readonly string[]
   hostedRuntime?: boolean
   humor?: number
 }): string {
@@ -5628,6 +7366,7 @@ function buildGroupPointOfViewDeveloperInstructions(input?: {
     assistantContextSnapshotPrompt: null,
     assistantHostedDeviceConnectAvailable: false,
     assistantHostedDeviceConnectProviders: [],
+    assistantDynamicContextPrompts: input?.dynamicContextPrompts ?? [],
     assistantKnowledgeToolsAvailable: false,
     assistantPersonality:
       input?.humor === undefined
@@ -6192,6 +7931,28 @@ function buildWeatherAlertDeveloperInstructions(scheduled: boolean): string {
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
     turnTrigger: scheduled ? 'automation-cron' : null,
+  })
+}
+
+function buildWeeklyHealthInsightDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-09',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
   })
 }
 

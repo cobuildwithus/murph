@@ -20,7 +20,6 @@ export type HostedBillingBrowserSurface =
   | "murph-join"
   | "murph-settings"
   | "stripe-checkout"
-  | "stripe-invoice"
   | "stripe-portal";
 
 export interface HostedBillingBrowserDiagnostic {
@@ -40,11 +39,6 @@ export interface HostedBillingBrowserActor {
   context: BrowserContext;
   page: Page;
   close(): Promise<void>;
-}
-
-export interface HostedBillingBrowserApiResult {
-  status: string | null;
-  paymentUrlPresent: boolean;
 }
 
 export interface HostedBillingCheckoutStart {
@@ -109,33 +103,46 @@ export class HostedBillingBrowserDriver {
     };
   }
 
-  async beginPulseTrialCheckout(
+  async activateStarterUsage(
     actor: HostedBillingBrowserActor,
     inviteCode: string,
-  ): Promise<HostedBillingCheckoutStart> {
-    return this.runStep("pulse-trial-checkout-open", "murph-join", async () => {
-      const navigation = await actor.page.goto(
-        this.murphUrl(`/join/${encodeURIComponent(inviteCode)}`),
-        {
-          waitUntil: "commit",
-        },
-      );
+  ): Promise<void> {
+    await this.runStep("starter-usage-activate", "murph-join", async () => {
+      const [response, navigation] = await Promise.all([
+        actor.page.waitForResponse(
+          isApiResponse("/api/hosted-onboarding/starter/enroll", "POST"),
+        ),
+        actor.page.goto(
+          this.murphUrl(`/join/${encodeURIComponent(inviteCode)}`),
+          { waitUntil: "commit" },
+        ),
+      ]);
       assertSuccessfulNavigation(navigation, "Murph invite");
-      const trialButton = actor.page.getByRole("button", {
-        exact: true,
-        name: "Start 14-day trial",
-      });
-      await waitForExpectedBillingControl({
-        control: trialButton,
-        label: "Pulse Trial checkout",
-        page: actor.page,
-        webBaseUrl: this.webBaseUrl,
-      });
+      await assertSuccessfulResponse(response);
+      await actor.page.waitForURL(
+        (url) => url.origin === new URL(this.webBaseUrl).origin
+          && url.pathname === "/home",
+      );
+    });
+  }
+
+  async beginDirectPlanCheckout(
+    actor: HostedBillingBrowserActor,
+    planName: "Edge" | "Pulse",
+  ): Promise<HostedBillingCheckoutStart> {
+    return this.runStep("direct-plan-checkout-open", "murph-settings", async () => {
+      await this.openSettings(actor);
       const [response] = await Promise.all([
         actor.page.waitForResponse(
-          isApiResponse("/api/hosted-onboarding/billing/checkout", "POST"),
+          isApiResponse("/api/settings/billing/checkout", "POST"),
         ),
-        clickHydratedMurphControl(actor.page, trialButton),
+        clickHydratedMurphControl(
+          actor.page,
+          actor.page.getByRole("button", {
+            exact: true,
+            name: `Choose ${planName}`,
+          }),
+        ),
       ]);
       await assertSuccessfulResponse(response);
       await this.waitForStripeSurface(actor.page, "checkout");
@@ -201,86 +208,10 @@ export class HostedBillingBrowserDriver {
       assertStripeSurface(actor.page.url(), "checkout");
       await assertStripeHostedCardFieldsReady(actor.page, this.timeoutMs);
       await assertStripePositiveActionVisible(actor.page, [
-        /^Start trial$/iu,
         /^Subscribe$/iu,
         /^Pay$/iu,
         /^Complete order$/iu,
       ]);
-    });
-  }
-
-  async startPaidPulse(
-    actor: HostedBillingBrowserActor,
-  ): Promise<HostedBillingBrowserApiResult> {
-    return this.runStep("settings-start-paid-pulse", "murph-settings", async () => {
-      await this.openSettings(actor);
-      await clickHydratedMurphControl(
-        actor.page,
-        actor.page.getByRole("button", {
-          exact: true,
-          name: "Start Pulse plan",
-        }),
-      );
-      const dialog = actor.page.getByRole("dialog");
-      await dialog.getByRole("heading", {
-        exact: true,
-        name: "Start Pulse",
-      }).waitFor();
-      const invoiceNavigation = actor.page.waitForURL(
-        (url) => readStripeSurfaceForTest(url) === "invoice",
-        {
-          timeout: 15_000,
-          waitUntil: "commit",
-        },
-      ).then(() => true, () => false);
-      const [response, , paymentUrlPresent] = await Promise.all([
-        actor.page.waitForResponse(
-          isApiResponse("/api/settings/billing/start-paid-pulse", "POST"),
-        ),
-        clickHydratedMurphControl(
-          actor.page,
-          dialog.getByRole("button", { exact: true, name: "Start Pulse" }),
-        ),
-        invoiceNavigation,
-      ]);
-      await assertSuccessfulResponse(response);
-      return {
-        paymentUrlPresent,
-        status: null,
-      };
-    });
-  }
-
-  async assertStripeHostedInvoiceReady(actor: HostedBillingBrowserActor): Promise<void> {
-    await this.runStep("stripe-invoice-provider-boundary", "stripe-invoice", async () => {
-      assertStripeSurface(actor.page.url(), "invoice");
-      await assertStripePositiveActionVisible(actor.page, [
-        /^Pay$/iu,
-        /^Confirm payment$/iu,
-        /^Complete payment$/iu,
-        /^Submit$/iu,
-      ]);
-    });
-  }
-
-  async openEdgeFromTrialPortal(actor: HostedBillingBrowserActor): Promise<void> {
-    await this.runStep("settings-trial-open-edge-portal", "murph-settings", async () => {
-      await this.openSettings(actor);
-      const [response] = await Promise.all([
-        actor.page.waitForResponse(
-          isApiResponse("/api/settings/billing/portal", "POST"),
-        ),
-        clickHydratedMurphControl(
-          actor.page,
-          actor.page.getByRole("button", {
-            exact: true,
-            name: "Choose Edge",
-          }),
-        ),
-      ]);
-      await assertSuccessfulResponse(response);
-      await this.waitForStripeSurface(actor.page, "portal");
-      await assertStripePortalPlanAvailable(actor.page, "Edge", this.timeoutMs);
     });
   }
 
@@ -534,7 +465,7 @@ export class HostedBillingBrowserDriver {
 
   private async waitForStripeSurface(
     page: Page,
-    expected: "checkout" | "invoice" | "portal",
+    expected: "checkout" | "portal",
   ): Promise<void> {
     await page.waitForURL((url) => readStripeSurfaceForTest(url) === expected, {
       timeout: this.timeoutMs,
@@ -779,7 +710,7 @@ function readStripeCheckoutSessionId(url: string): string {
 
 export function readStripeSurfaceForTest(
   url: URL,
-): "checkout" | "invoice" | "portal" | null {
+): "checkout" | "portal" | null {
   const host = url.hostname.toLowerCase();
   if (host === "checkout.stripe.com") {
     return "checkout";
@@ -787,19 +718,12 @@ export function readStripeSurfaceForTest(
   if (host === "billing.stripe.com") {
     return "portal";
   }
-  if (
-    host === "invoice.stripe.com"
-    || host === "payments.stripe.com"
-    || host.endsWith(".stripe.com") && /invoice|payment/iu.test(url.pathname)
-  ) {
-    return "invoice";
-  }
   return null;
 }
 
 function assertStripeSurface(
   rawUrl: string,
-  expected: "checkout" | "invoice" | "portal",
+  expected: "checkout" | "portal",
 ): void {
   if (readStripeSurfaceForTest(new URL(rawUrl)) !== expected) {
     throw new Error(`Browser was not on the expected Stripe ${expected} surface.`);
@@ -875,28 +799,6 @@ async function assertStripePositiveActionVisible(
     await page.waitForTimeout(250);
   }
   throw new Error("Stripe hosted UI did not expose the expected action.");
-}
-
-async function assertStripePortalPlanAvailable(
-  page: Page,
-  planName: string,
-  timeoutMs: number,
-): Promise<void> {
-  assertStripeSurface(page.url(), "portal");
-  const navigation = page.getByRole("link", {
-    exact: true,
-    name: "Update subscription",
-  }).or(page.getByRole("button", {
-    name: /^(?:Change plan|Update plan)$/iu,
-  })).first();
-  await navigation.waitFor({ state: "visible", timeout: timeoutMs });
-  await navigation.click();
-  await assertStripePlanActionVisible({
-    actionNames: [/^Select$/iu],
-    page,
-    planName,
-    timeoutMs,
-  });
 }
 
 async function assertStripePlanActionVisible(input: {

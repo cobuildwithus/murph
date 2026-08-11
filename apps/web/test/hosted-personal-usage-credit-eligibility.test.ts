@@ -28,6 +28,7 @@ describe("readHostedPersonalUsageCreditOfferCodes", () => {
   it.each([
     "launch_monthly",
     "launch_edge_monthly",
+    "launch_max_monthly",
   ] as const)("authorizes configured personal offers for paid %s", async (
     currentBillingPlanCode,
   ) => {

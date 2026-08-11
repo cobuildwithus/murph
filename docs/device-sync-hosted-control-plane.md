@@ -131,7 +131,7 @@ Postgres should keep only opaque ids, blind indexes, typed summaries, sparse sig
 
 `device_connect_intent` stores short-lived first-party Murph connect claims for hosted assistant-initiated wearable linking. The signed internal connect-link route returns only the first-party `/device/connect/:claim` URL to the runner. Opening that URL requires the authenticated Murph app session for the same member before provider OAuth starts. The hosted browser start also requires its configured provider callback base to use that request's hostname; a mismatch fails before OAuth state creation or provider authorization. Start sets a short-lived provider-, state-, member-, and session-bound host-only proof. The provider callback GET validates that proof, passes `expectedOwnerId` into shared ingress, and redirects back into the app without an interstitial. A missing proof burns the OAuth state and returns to Connect so the callback URL cannot be relayed. Intent rows must not store raw provider or Junction authorization URLs.
 
-`device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids.
+`device_sync_dirty_connection` is the coalescing point for high-cardinality device webhook backfills. It is keyed by hosted connection ID and tracks `dirty_revision`, `processed_revision`, first/latest dirty timestamps, widened safe windows, compact resource/source counters, and a compact `dirty_resources_json` map. It must not store raw provider request bodies, provider tokens, raw samples, or user-visible health facts. Provider-owned durable webhook work, such as Junction direct data or exact resource/delete/deauthorization jobs needed for later import, is event-triggered work and is stored in `device_sync_dirty_payload` as bounded encrypted/compressed payload rows until the runtime consumes and explicitly acknowledges those row ids. Each new row also stores one server-derived `credential_independent` boolean beside the ciphertext. Store-owned dirty writes classify, compress, and seal before their transaction. Consent-gated webhook and companion admissions do that work inside the existing member-row transaction after locking and re-reading health-data consent, but before the dirty-marker lock or mutation, so completed withdrawal prevents later payload processing without adding another authority owner. During mixed-version rollout the bit is nullable. The steady-state reconnect path reads no payload and resets the compact marker plus deletes credential-scoped rows with set-based writes. Nullable legacy rows are the other bounded consent-ordered path: reconnect classifies at most 800 inside the existing member transaction after locking and re-reading health-data consent and then locking the dirty marker. Acknowledgement takes that same marker-before-payload order, preventing a reconnect/acknowledgement deadlock. A larger null backlog fails retryably until runtime acknowledgement reduces it.
 
 The companion overnight PRV lane reuses that encrypted payload owner. Its only
 public health payload contains `schema`, `methodVersion`, `nightDate`,
@@ -267,7 +267,18 @@ These are read/manage wearable routes for the hosted settings page. Ordinary rea
 
 - `POST /api/device-sync/agents/pair`
 
-These are browser-initiated but lower-level than the settings surface. They must use short-lived signed assertions with replay protection.
+These are browser-initiated but lower-level than the settings surface. They
+must use short-lived signed assertions with the existing HMAC, member,
+audience, method, path, and origin bindings plus single-use nonce replay
+protection. The shared browser-assertion policy makes an integer-second `exp`
+first invalid exactly at `(exp + 61) * 1000`; every earlier millisecond remains
+admissible. New nonce rows persist that first-invalid instant, while request
+admission performs one primary-key insert and treats only the exact nonce
+conflict as replay. For mixed-version rollout, the bounded hourly
+hosted-retention owner deletes only rows whose stored
+`expiresAt <= now - 61 seconds`, retaining legacy raw-`exp` rows through the
+full accepted window and intentionally retaining new-format rows for one extra
+61-second interval.
 
 ### Hosted companion routes
 

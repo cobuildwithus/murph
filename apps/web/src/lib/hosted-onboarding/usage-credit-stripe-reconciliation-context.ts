@@ -69,6 +69,7 @@ export const HOSTED_USAGE_CREDIT_PURCHASE_SELECT = {
   checkoutRequestPolicyVersion: true,
   checkoutSuccessUrl: true,
   createdAt: true,
+  grantSlotReleasedAt: true,
   grantUsdMicros: true,
   id: true,
   payerMemberId: true,

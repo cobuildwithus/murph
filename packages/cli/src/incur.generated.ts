@@ -211,6 +211,7 @@ declare module 'incur' {
       'meal show': { args: { id: string }; options: { requestId?: string } }
       'meal totals': { args: {}; options: { requestId?: string; from?: string; to?: string } }
       'measurement add': { args: {}; options: { requestId?: string; metric?: string[]; value?: number[]; unit?: string[]; qualifier?: string[]; measurementNote?: string[]; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; tag?: string[]; timeZone?: string } }
+      'measurement entry list': { args: {}; options: { requestId?: string; metric: string[]; from?: string; to?: string; limit: number } }
       'measurement import-json': { args: {}; options: { requestId?: string; input: string; note?: string; title?: string; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[] } }
       'measurement list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
@@ -310,6 +311,7 @@ declare module 'incur' {
       'wearables latest': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[] } }
       'wearables metric latest': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
       'wearables metric trend': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
+      'wearables patterns': { args: {}; options: { requestId?: string; date?: string; windowDays: number } }
       'wearables recovery list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'wearables sleep pattern': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; timeZone?: string; windowDays: number } }
@@ -332,7 +334,7 @@ declare module 'incur' {
       'workout manifest': { args: { id: string }; options: { requestId?: string } }
       'workout payload-schema': { args: {}; options: {} }
       'workout set clear': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number } }
-      'workout set log': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number; type?: "normal" | "warmup" | "dropset" | "failure"; note?: string; reps?: number; weight?: number; weightUnit?: "lb" | "kg"; durationSeconds?: number; distanceMeters?: number; rpe?: number; bodyweightKg?: number; assistanceKg?: number; addedWeightKg?: number } }
+      'workout set log': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number; requireExistingSet?: boolean; type?: "normal" | "warmup" | "dropset" | "failure"; note?: string; reps?: number; weight?: number; weightUnit?: "lb" | "kg"; durationSeconds?: number; distanceMeters?: number; rpe?: number; bodyweightKg?: number; assistanceKg?: number; addedWeightKg?: number } }
       'workout show': { args: { id: string }; options: { requestId?: string } }
       'workout start': { args: { name?: string }; options: { requestId?: string; routine?: string; type?: string; note?: string; startedAt?: string } }
       'workout units set': { args: {}; options: { requestId?: string; weight?: "lb" | "kg"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }

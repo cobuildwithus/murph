@@ -175,6 +175,22 @@ function createHostedPreferenceHandoffCandidateStore(
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
         ),
+        "pending_browser_vault_refresh_users" AS (
+          SELECT DISTINCT ON ("item"."user_id")
+            "item"."id" AS "mailboxItemId",
+            "item"."user_id" AS "userId",
+            "item"."created_at" AS "createdAt",
+            "item"."lane_seq" AS "laneSeq"
+          FROM "hosted_mailbox_item" AS "item"
+          LEFT JOIN "hosted_mailbox_lane_counter" AS "lane_counter"
+            ON "lane_counter"."user_id" = "item"."user_id"
+            AND "lane_counter"."lane" = "item"."lane"
+          WHERE "item"."kind" = 'runtime.browser-vault-refresh-requested'
+            AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
+            AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
+            AND "item"."created_at" >= ${retainedAt}
+          ORDER BY "item"."user_id", "item"."lane_seq" ASC
+        ),
         "pending_clinical_record_users" AS (
           SELECT
             "item"."id" AS "mailboxItemId",
@@ -204,6 +220,9 @@ function createHostedPreferenceHandoffCandidateStore(
         "pending_handoff_candidates" AS (
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
           FROM "pending_preference_users"
+          UNION ALL
+          SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
+          FROM "pending_browser_vault_refresh_users"
           UNION ALL
           SELECT "mailboxItemId", "userId", "createdAt", "laneSeq"
           FROM "pending_clinical_record_users"

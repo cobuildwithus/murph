@@ -67,7 +67,6 @@ export const HOSTED_EXECUTION_EVENT_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
-  "group-newsletter.email-needed",
   ...HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS,
 ] as const;
 
@@ -90,7 +89,6 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "clinical-records.sync-requested",
   "device-sync.wake",
   "environment-voice.captured",
-  "group-newsletter.email-needed",
   "meal-photo.captured",
   "vault-share.delivery",
   "vault-share.revoke",
@@ -242,6 +240,11 @@ export interface HostedExecutionAssistantNotificationFirstContactPolicy {
   markSeenOnDeliveryAccepted: boolean;
 }
 
+export interface HostedExecutionPrivateAssistantAskCompletionNotification {
+  expiresAt: string;
+  requestId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
@@ -250,7 +253,16 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
+  privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
+  route: HostedExecutionAssistantNotificationRoute;
+}
+
+export interface HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority {
+  answeredMailboxItemIds: readonly string[];
+  assistantAskCompletionExpiresAt: string;
+  idempotencyKey: string;
+  responseTextDigest: string;
   route: HostedExecutionAssistantNotificationRoute;
 }
 
@@ -285,10 +297,17 @@ export interface HostedExecutionAssistantAskGroupSenderTarget {
   permissionDigest: string;
 }
 
+export interface HostedExecutionAssistantAskPrivateGroupSenderTarget {
+  groupRuntimeMemberId: string;
+  kind: "group_sender_private";
+  permissionDigest: string;
+}
+
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget;
+  | HostedExecutionAssistantAskGroupSenderTarget
+  | HostedExecutionAssistantAskPrivateGroupSenderTarget;
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -338,10 +357,18 @@ export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
   target: HostedExecutionAssistantAskGroupSenderTarget;
 }
 
+export interface HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  question: string;
+  target: HostedExecutionAssistantAskPrivateGroupSenderTarget;
+}
+
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
-  | HostedExecutionAssistantAskGroupSenderRequestedPayload;
+  | HostedExecutionAssistantAskGroupSenderRequestedPayload
+  | HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;
@@ -454,20 +481,6 @@ export type HostedExecutionDirectRoute =
 export type HostedExecutionDirectRouteChannel =
   HostedExecutionDirectRoute["channel"];
 
-/** @deprecated Use HostedExecutionDirectRouteChannel. */
-export type HostedExecutionGroupNewsletterEmailNeededDirectRouteChannel =
-  HostedExecutionDirectRouteChannel;
-/** @deprecated Use HostedExecutionDirectRoute. */
-export type HostedExecutionGroupNewsletterEmailNeededDirectRoute =
-  HostedExecutionDirectRoute;
-
-export interface HostedExecutionGroupNewsletterEmailNeededEvent extends HostedExecutionBaseEvent {
-  directRoute?: HostedExecutionDirectRoute | null;
-  groupDisplayName: string | null;
-  groupId: string;
-  kind: "group-newsletter.email-needed";
-}
-
 export interface HostedExecutionPlainRuntimeControlRequestedEvent
   extends HostedExecutionBaseEvent {
   kind: HostedExecutionPlainRuntimeControlWakeKind;
@@ -500,7 +513,6 @@ export type HostedExecutionEvent =
   | HostedExecutionAssistantAskCompletedEvent
   | HostedExecutionClinicalRecordsSyncRequestedEvent
   | HostedExecutionDeviceSyncWakeEvent
-  | HostedExecutionGroupNewsletterEmailNeededEvent
   | HostedExecutionRuntimeControlRequestedEvent;
 
 export interface HostedExecutionBaseWake {
@@ -779,13 +791,6 @@ export interface HostedExecutionEnvironmentVoiceCapturedWake
   kind: "environment-voice.captured";
 }
 
-export interface HostedExecutionGroupNewsletterEmailNeededWake extends HostedExecutionBaseWake {
-  directRoute?: HostedExecutionDirectRoute | null;
-  groupDisplayName: string | null;
-  groupId: string;
-  kind: "group-newsletter.email-needed";
-}
-
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
@@ -839,7 +844,6 @@ export type HostedExecutionWake =
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
   | HostedExecutionEnvironmentVoiceCapturedWake
-  | HostedExecutionGroupNewsletterEmailNeededWake
   | HostedExecutionMealPhotoCapturedWake
   | HostedExecutionVaultShareDeliveryWake
   | HostedExecutionVaultShareRevokeWake

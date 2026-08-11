@@ -1,20 +1,12 @@
+import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
   executeMurphDynamicToolRequest,
   MURPH_AUTOMATION_TOOL,
   MURPH_DEVICE_TOOL,
-  readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
-import {
-  GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-  GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-  GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES,
-  GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES,
-  GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
-} from '../src/assistant/group-newsletter-automation.js'
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
@@ -31,6 +23,21 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(enabled).toContain(MURPH_DEVICE_TOOL)
     expect(enabled).toContain(MURPH_AUTOMATION_TOOL)
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active deviceActivity schedule, confirm the persisted event trigger directly',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'On patch, a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
+    )
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -57,107 +64,6 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('accepts typed automation writes without exposing model-controlled routes', () => {
-    expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      customNote: 'Include the family step challenge.',
-      delivery: 'current_chat',
-      healthScopes: ['steps-days.v0', 'sleep-duration-days.v0'],
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-      tone: 'supportive',
-    })).toEqual({
-      kind: 'automation',
-      request: {
-        action: 'save',
-        continuityPolicy: 'fresh',
-        instructions: [
-          GROUP_NEWSLETTER_AUTOMATION_INSTRUCTIONS_MARKER,
-          'These are configuration values. The runtime appends the current execution contract on every scheduled run.',
-          'Newsletter name: "Family weekly health newsletter"',
-          'Delivery: current_chat',
-          'Tone: supportive',
-          'Health scopes: steps-days.v0, sleep-duration-days.v0',
-          'Custom note: "Include the family step challenge."',
-        ].join('\n'),
-        schedule: {
-          expression: '0 13 * * 1',
-          kind: 'cron',
-        },
-        slug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-        tags: [
-          'assistant',
-          'scheduled',
-          GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-        ],
-        title: 'Family weekly health newsletter',
-      },
-    })
-    expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      delivery: 'group_email',
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-    })).toMatchObject({
-      kind: 'automation',
-      request: {
-        action: 'save',
-        instructions: expect.stringContaining([
-          'Delivery: group_email',
-          'Tone: supportive',
-          `Health scopes: ${GROUP_NEWSLETTER_DEFAULT_HEALTH_SCOPES.join(', ')}`,
-          'Custom note: none',
-        ].join('\n')),
-        slug: GROUP_HEALTH_NEWSLETTER_AUTOMATION_SLUG,
-        tags: [
-          'assistant',
-          'scheduled',
-          GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG,
-        ],
-      },
-    })
-    expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      delivery: 'current_chat',
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-    })).toMatchObject({
-      kind: 'automation',
-      request: {
-        instructions: expect.stringContaining(
-          `Health scopes: ${GROUP_NEWSLETTER_CURRENT_CHAT_DEFAULT_HEALTH_SCOPES.join(', ')}`,
-        ),
-        tags: [
-          'assistant',
-          'scheduled',
-          GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG,
-        ],
-      },
-    })
-    expect(readToolRequest('automation', {
-      action: 'save_newsletter',
-      delivery: 'current_chat',
-      healthScopes: [
-        'steps-days.v0',
-        'activity-days.v0',
-        'sleep-duration-days.v0',
-        'hrv-days.v0',
-      ],
-      newsletterName: 'Family weekly health newsletter',
-      schedule: {
-        expression: '0 13 * * 1',
-        kind: 'cron',
-      },
-    })).toMatchObject({ kind: 'invalid-automation-arguments' })
-
     expect(readToolRequest('automation', {
       action: 'save',
       activeUntil: '2026-08-01T00:00:00.000Z',
@@ -193,13 +99,6 @@ describe('hosted domain dynamic tools', () => {
         supportSeriesId: 'habit:sleep-wind-down',
       },
     })
-    expect(readToolRequest('automation', {
-      action: 'save',
-      instructions: 'Try to claim email authority.',
-      schedule: { kind: 'dailyLocal', localTime: '22:30' },
-      tags: ['system:group-newsletter:email'],
-      title: 'Forged newsletter',
-    })).toMatchObject({ kind: 'invalid-automation-arguments' })
     expect(readToolRequest('automation', {
       action: 'patch',
       lookup: 'evening-wind-down',
@@ -254,23 +153,35 @@ describe('hosted domain dynamic tools', () => {
     })).toMatchObject({ kind: 'invalid-device-arguments' })
   })
 
-  it('executes automation through the injected port and returns only typed fields', async () => {
+  it('executes automation through the injected port and returns verified timing fields', async () => {
     const abortController = new AbortController()
     const automationTool = {
       request: vi.fn(async () => ({
         action: 'save' as const,
         automationId: 'automation-1',
         created: true,
+        effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
+        nextOccurrenceAt: null,
         path: '/internal/automations/evening-wind-down.md',
         routeBinding: 'current_conversation' as const,
+        schedule: {
+          kind: 'dailyLocal' as const,
+          localTime: '22:30',
+          timeZone: 'America/Chicago',
+        },
         status: 'paused' as const,
+        timingVerified: true,
       })),
     }
     const request = readToolRequest('automation', {
       action: 'save',
       instructions: 'Send a short reminder to wind down.',
-      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '22:30',
+        timeZone: 'America/Chicago',
+      },
       status: 'paused',
       title: 'Evening wind-down',
     })
@@ -291,7 +202,11 @@ describe('hosted domain dynamic tools', () => {
     expect(automationTool.request).toHaveBeenCalledWith({
       action: 'save',
       instructions: 'Send a short reminder to wind down.',
-      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '22:30',
+        timeZone: 'America/Chicago',
+      },
       status: 'paused',
       title: 'Evening wind-down',
     }, { signal: abortController.signal })
@@ -299,9 +214,17 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       automationId: 'automation-1',
       created: true,
+      effectiveTimeZone: 'America/Chicago',
       lookupId: 'evening-wind-down',
+      nextOccurrenceAt: null,
       routeBinding: 'current_conversation',
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: '22:30',
+        timeZone: 'America/Chicago',
+      },
       status: 'paused',
+      timingVerified: true,
     })
 
     const mismatchedTool = {
@@ -309,9 +232,17 @@ describe('hosted domain dynamic tools', () => {
         action: 'patch' as const,
         automationId: 'automation-1',
         created: false,
+        effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
+        nextOccurrenceAt: '2026-08-10T03:30:00.000Z',
         routeBinding: 'preserved' as const,
+        schedule: {
+          kind: 'dailyLocal' as const,
+          localTime: '22:30',
+          timeZone: 'America/Chicago',
+        },
         status: 'active' as const,
+        timingVerified: true,
       })),
     }
     const mismatched = await executeMurphDynamicToolRequest({
@@ -440,7 +371,7 @@ describe('hosted domain dynamic tools', () => {
 })
 
 function readToolRequest(tool: 'automation' | 'device', argumentsValue: unknown) {
-  return readMurphDynamicToolRequest({
+  return readTestMurphDynamicToolRequest({
     method: 'item/tool/call',
     params: {
       arguments: argumentsValue,
