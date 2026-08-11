@@ -112,7 +112,9 @@ export function ImessageCompactTableCardStudy() {
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The image fallback keeps a targetless first pending set honest and
-          measures every wrapped row in the dense four-column boundary.
+          measures every wrapped row in the dense four-column boundary. Stacked
+          fields keep each header above its full-width value so contract-limit
+          text cannot collide or clip.
           The rectangular raster embeds the canonical Murph mark in the native
           badge footprint, while Messages supplies the outer corner mask.
           Provider chrome stays concise; the complete semantic fallback remains

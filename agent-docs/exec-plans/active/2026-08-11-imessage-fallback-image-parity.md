@@ -39,9 +39,9 @@ Updated: 2026-08-11
    production SwiftUI reference states in Simulator.
 2. [x] Record first-principles audit findings and settle one shared logo/header
    contract for every fallback kind.
-3. [ ] Implement the smallest shared renderer correction and update all studies.
-4. [ ] Add focused structural and real-raster regression coverage.
-5. [ ] Capture and inspect corrected fallback images beside native references.
+3. [x] Implement the smallest shared renderer correction and update all studies.
+4. [x] Add focused structural and real-raster regression coverage.
+5. [x] Capture and inspect corrected fallback images beside native references.
 6. [ ] Complete focused verification, review gates, exact-head CI, and PR handoff.
 
 ## Verification
@@ -51,3 +51,8 @@ Updated: 2026-08-11
 - Documentation drift and diff hygiene.
 - Simulator screenshots for every native card family and direct rendered PNGs
   for every fallback family, inspected at native presentation scale.
+
+Current focused proof: 81 route/component/asset tests pass, hosted Web typecheck
+passes, and Web lint reports zero errors with 39 unrelated warnings. ReviewGPT
+round 1 found two static-renderer containment/meaning gaps; both now have
+production-route raster regressions and refreshed desktop/mobile studies.

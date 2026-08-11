@@ -101,16 +101,22 @@ const CARD_WITH_PARTIAL_UNAVAILABLE_CALORIES: DailyNutritionResponseCardV2 = {
     calories: { total: 1_840, mealCount: 2 },
   },
   goals: {
-    ...CARD.goals,
     calories: { target: 2_200, status: "unavailable" },
+    proteinGrams: { target: 120, status: "unavailable" },
+    carbsGrams: { target: 220, status: "unavailable" },
+    fatGrams: { target: 65, status: "unavailable" },
+    fiberGrams: { target: 30, status: "unavailable" },
   },
 };
 
 const CARD_WITH_COMPLETE_UNAVAILABLE_CALORIES: DailyNutritionResponseCardV2 = {
   ...CARD,
   goals: {
-    ...CARD.goals,
     calories: { target: 2_200, status: "unavailable" },
+    proteinGrams: { target: 120, status: "unavailable" },
+    carbsGrams: { target: 220, status: "unavailable" },
+    fatGrams: { target: 65, status: "unavailable" },
+    fiberGrams: { target: 30, status: "unavailable" },
   },
 };
 
@@ -173,6 +179,23 @@ const POSITIVE_KERNING_TABLE_CARD: CompactTablePresentationCardV1 = {
   rows: [{
     label: "Recovery",
     values: ["slow gait, ankle impact, or load", "Stable", "Up", "Review"],
+  }],
+  footer: null,
+};
+
+const MAX_STACKED_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Maximum-width field proof",
+  subtitle: null,
+  rowHeader: "MaximumMetricLabelField",
+  columns: Array.from({ length: 4 }, () => "MaximumHeartRatePercentX"),
+  rows: [{
+    label: "Contract valid row label with deliberate maximum width text",
+    values: Array.from(
+      { length: 4 },
+      () => "CountermovementJumpAsymmetryXXXX",
+    ),
   }],
   footer: null,
 };
@@ -324,7 +347,7 @@ test("nutrition card image mirrors the native default-state composition", async 
   );
 });
 
-test("nutrition card image colors every assessed goal direction without extra status copy", async () => {
+test("nutrition card image preserves every assessed goal direction without target amounts", async () => {
   const { NutritionCardImage } = await import(
     "@/src/components/imessage/nutrition-card-image"
   );
@@ -345,7 +368,16 @@ test("nutrition card image colors every assessed goal direction without extra st
   assert.match(serialized, /color:#B3332B/u);
   assert.match(serialized, /color:#995E08/u);
   assert.match(serialized, /color:#337338/u);
-  assert.doesNotMatch(serialized, /FAR UNDER|ON TARGET|FAR OVER/u);
+  for (const label of [
+    "FAR UNDER",
+    "UNDER",
+    "ON TARGET",
+    "OVER",
+    "FAR OVER",
+  ]) {
+    assert.match(serialized, new RegExp(`>${label}<`, "u"));
+  }
+  assert.equal(serialized.match(/data-goal-status-label=/gu)?.length, 5);
   assert.doesNotMatch(serialized, /3,000|130g|210g|50g|10g/u);
 });
 
@@ -399,6 +431,9 @@ test.each([
 
     assert.match(serialized, /data-calorie-progress="unavailable"/u);
     assert.doesNotMatch(serialized, /stroke-dasharray/u);
+    if (card.goals.calories?.status === "unavailable") {
+      assert.doesNotMatch(serialized, /data-goal-status-label=/u);
+    }
   },
 );
 
@@ -591,7 +626,37 @@ test("dense contract-valid tables wrap every value into measured row height", as
   assert.match(serialized, /1xxxxxxxxxxxxxxxxxxxxx/u);
 });
 
-test("four-column rows use exact DM Sans advances for word breaks and height", async () => {
+test("stacked tables place every maximum header above its full-width value", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: MAX_STACKED_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /data-compact-table-layout="stacked"/u);
+  assert.equal(
+    serialized.match(/>MaximumHeartRatePercentX</gu)?.length,
+    4,
+  );
+  assert.equal(
+    serialized.match(/>CountermovementJumpAsymmetryXXXX</gu)?.length,
+    4,
+  );
+  assert.match(
+    serialized,
+    />MaximumHeartRatePercentX<\/div><div[^>]*width:100%/u,
+  );
+  assert.doesNotMatch(serialized, /max-width:720px/u);
+});
+
+test("four-column rows use exact DM Sans advances for full-width field height", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const payload = encodePayload({
     schemaVersion: 3,
@@ -605,12 +670,15 @@ test("four-column rows use exact DM Sans advances for word breaks and height", a
   assert.equal(response.status, 200);
   const [imageTree] = getImageResponseCall();
   const serialized = renderToStaticMarkup(imageTree);
-  assert.match(serialized, /deep sleep and mood\nguidance/u);
-  assert.match(serialized, /min-height:561px/u);
-  assert.match(serialized, /data-card-text-lines="2"[^>]*>deep sleep/u);
+  assert.match(serialized, /deep sleep and mood guidance/u);
+  assert.match(serialized, /min-height:742px/u);
+  assert.match(
+    serialized,
+    /data-card-text-lines="1"[^>]*>deep sleep/u,
+  );
 });
 
-test("positive DM Sans kerning cannot reflow text beyond its measured row", async () => {
+test("positive DM Sans kerning remains inside its measured full-width field", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const payload = encodePayload({
     schemaVersion: 3,
@@ -624,9 +692,9 @@ test("positive DM Sans kerning cannot reflow text beyond its measured row", asyn
   assert.equal(response.status, 200);
   const [imageTree] = getImageResponseCall();
   const serialized = renderToStaticMarkup(imageTree);
-  assert.match(serialized, /slow gait, ankle impact, or\nload/u);
-  assert.match(serialized, /min-height:561px/u);
-  assert.match(serialized, /data-card-text-lines="2"[^>]*>slow gait,/u);
+  assert.match(serialized, /slow gait, ankle impact, or load/u);
+  assert.match(serialized, /min-height:742px/u);
+  assert.match(serialized, /data-card-text-lines="1"[^>]*>slow gait,/u);
 });
 
 test("response-card image route renders the exact V5 standings snapshot", async () => {

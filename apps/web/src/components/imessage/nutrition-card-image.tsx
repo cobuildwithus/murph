@@ -1,4 +1,5 @@
 import {
+  nutritionCardGoalStatusLabels,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
@@ -105,6 +106,7 @@ export function NutritionCardImage({
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-start",
+          gap: 8,
           maxWidth: 800,
           whiteSpace: "nowrap",
         }}
@@ -140,6 +142,7 @@ export function NutritionCardImage({
             cal
           </div>
         </div>
+        <GoalStatusLabel fontSize={27} goal={calorieGoal} />
       </div>
 
       <CalorieRing
@@ -288,8 +291,46 @@ function Metric({
       >
         {metric.total === null ? "—" : `${formatWholeNumber(metric.total)}g`}
       </div>
+      <GoalStatusLabel fontSize={23} goal={goal} />
     </div>
   );
+}
+
+function GoalStatusLabel({
+  fontSize,
+  goal,
+}: {
+  fontSize: number;
+  goal: NutritionCardGoalSnapshot | null | undefined;
+}) {
+  if (goal === null || goal === undefined || goal.status === "unavailable") {
+    return null;
+  }
+
+  return (
+    <div
+      data-goal-status-label={goal.status}
+      style={{
+        display: "flex",
+        color: getStatusColor(goal),
+        fontSize,
+        fontWeight: 600,
+        lineHeight: 1,
+        letterSpacing: "0.04em",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {formatGoalStatusLabel(goal.status)}
+    </div>
+  );
+}
+
+function formatGoalStatusLabel(
+  status: NutritionCardGoalSnapshot["status"],
+): string {
+  const label = nutritionCardGoalStatusLabels[status];
+  return (status === "on_target" ? label : label.replace(" target", ""))
+    .toUpperCase();
 }
 
 function getCalorieProgress(

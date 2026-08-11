@@ -5,6 +5,7 @@ import { inflateSync } from "node:zlib";
 import type {
   ChallengeStandingsResponseCardV1,
   CompactTablePresentationCardV1,
+  DailyNutritionResponseCardV2,
 } from "@murphai/contracts";
 import { test } from "vitest";
 
@@ -74,6 +75,132 @@ const MAX_TARGET_CARD: ChallengeStandingsResponseCardV1 = {
   }],
 };
 
+const DIRECTIONAL_NUTRITION_CARD: DailyNutritionResponseCardV2 = {
+  kind: "daily_nutrition",
+  version: 2,
+  localDate: "2026-08-11",
+  mealCount: 3,
+  totals: {
+    calories: { total: 1_400, mealCount: 3 },
+    proteinGrams: { total: 100, mealCount: 3 },
+    carbsGrams: { total: 220, mealCount: 3 },
+    fatGrams: { total: 80, mealCount: 3 },
+    fiberGrams: { total: 50, mealCount: 3 },
+  },
+  goals: {
+    calories: { target: 2_200, status: "far_under_target" },
+    proteinGrams: { target: 140, status: "under_target" },
+    carbsGrams: { target: 220, status: "on_target" },
+    fatGrams: { target: 70, status: "over_target" },
+    fiberGrams: { target: 30, status: "far_over_target" },
+  },
+};
+
+const PARTIAL_NUTRITION_CARD: DailyNutritionResponseCardV2 = {
+  ...DIRECTIONAL_NUTRITION_CARD,
+  totals: {
+    calories: { total: 1_400, mealCount: 2 },
+    proteinGrams: { total: 100, mealCount: 2 },
+    carbsGrams: { total: null, mealCount: 0 },
+    fatGrams: { total: 80, mealCount: 2 },
+    fiberGrams: { total: 20, mealCount: 2 },
+  },
+  goals: {
+    calories: { target: 2_200, status: "unavailable" },
+    proteinGrams: { target: 140, status: "unavailable" },
+    carbsGrams: { target: 220, status: "unavailable" },
+    fatGrams: { target: 70, status: "unavailable" },
+    fiberGrams: { target: 30, status: "unavailable" },
+  },
+};
+
+const MAX_HEADER = "MaximumHeartRatePercentX";
+const MAX_VALUE = "CountermovementJumpAsymmetryXXXX";
+
+function getMaximumStackedCard(
+  columnCount: number,
+): CompactTablePresentationCardV1 {
+  return {
+    kind: "compact_table",
+    version: 1,
+    title: "Maximum-width field proof",
+    subtitle: null,
+    rowHeader: "MaximumMetricLabelField",
+    columns: Array.from({ length: columnCount }, () => MAX_HEADER),
+    rows: [{
+      label: "Contract valid row label with deliberate maximum width text",
+      values: Array.from({ length: columnCount }, () => MAX_VALUE),
+    }],
+    footer: null,
+  };
+}
+
+test("real-font nutrition labels preserve direction without color", async () => {
+  const image = await renderCard({
+    schemaVersion: 2,
+    card: DIRECTIONAL_NUTRITION_CARD,
+  });
+  assert.deepEqual([image.width, image.height], [1_200, 509]);
+
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.right <= 1_155);
+  assert.ok(bounds.bottom <= image.height - 38);
+  assert.equal(
+    hasGrayscaleDarkPixel(
+      image,
+      { left: 45, right: 390, top: 250, bottom: 292 },
+    ),
+    true,
+  );
+  assert.equal(
+    hasGrayscaleDarkPixel(
+      image,
+      { left: 45, right: 1_155, top: 424, bottom: 466 },
+    ),
+    true,
+  );
+});
+
+test("real-font partial nutrition remains neutral and contained", async () => {
+  const image = await renderCard({
+    schemaVersion: 2,
+    card: PARTIAL_NUTRITION_CARD,
+  });
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.right <= 1_155);
+  assert.ok(bounds.bottom <= image.height - 38);
+  assert.equal(
+    hasAccentPixel(image, { left: 45, right: 1_155, top: 250, bottom: 466 }),
+    false,
+  );
+});
+
+test.each([1, 2, 3, 4])(
+  "real-font stacked table contains maximum header/value pairs across %i columns",
+  async (columnCount) => {
+    const image = await renderCard({
+      schemaVersion: 3,
+      card: getMaximumStackedCard(columnCount),
+    });
+    const bounds = findNonBackgroundBounds(image);
+    assert.ok(bounds !== null);
+    assert.ok(bounds.left >= 20);
+    assert.ok(bounds.right <= 1_155);
+    assert.ok(bounds.bottom <= image.height - 40);
+    assert.equal(
+      hasDarkPixel(image, {
+        left: 45,
+        right: 1_155,
+        top: 260,
+        bottom: image.height - 42,
+      }),
+      true,
+    );
+  },
+);
+
 test("real-font route keeps positive-kerning text above the stacked-row divider", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const payload = encodePayload({
@@ -88,7 +215,7 @@ test("real-font route keeps positive-kerning text above the stacked-row divider"
   assert.equal(response.status, 200);
   const png = Buffer.from(await response.arrayBuffer());
   const image = decodePng(png);
-  assert.deepEqual([image.width, image.height], [1_200, 1_366]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_795]);
 
   const dividerBands = findHorizontalDividerBands(image);
   assert.ok(dividerBands.length >= 1);
@@ -299,6 +426,23 @@ function hasDarkPixel(
       ) {
         return true;
       }
+    }
+  }
+  return false;
+}
+
+function hasGrayscaleDarkPixel(
+  image: DecodedPng,
+  rect: { bottom: number; left: number; right: number; top: number },
+): boolean {
+  for (let y = rect.top; y < rect.bottom; y += 1) {
+    for (let x = rect.left; x < rect.right; x += 1) {
+      const offset = (y * image.width + x) * 4;
+      const luminance =
+        (image.pixels[offset] ?? 255) * 0.2126
+        + (image.pixels[offset + 1] ?? 255) * 0.7152
+        + (image.pixels[offset + 2] ?? 255) * 0.0722;
+      if (luminance < 140) return true;
     }
   }
   return false;

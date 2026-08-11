@@ -62,6 +62,7 @@ type CompactTableCardImageLayout = {
     height: number;
     rowHeader: WrappedCardText;
     rowHeaderWidth: number;
+    stackedColumns: WrappedCardText[];
   };
   tableRows?: GenericRowLayout[];
   workoutRows?: WorkoutExerciseLayout[];
@@ -419,7 +420,7 @@ function GenericTableSnapshot({
   rows: GenericRowLayout[];
 }) {
   if (mode === "stacked") {
-    return <GenericStackedRows card={card} rows={rows} />;
+    return <GenericStackedRows card={card} header={header} rows={rows} />;
   }
 
   const valueFontSize = SUBHEADLINE_FONT_SIZE;
@@ -525,9 +526,11 @@ function GenericTableSnapshot({
 
 function GenericStackedRows({
   card,
+  header,
   rows,
 }: {
   card: Exclude<CompactTablePresentationCardV1, { workout: unknown }>;
+  header: CompactTableCardImageLayout["tableHeader"];
   rows: GenericRowLayout[];
 }) {
   return (
@@ -569,28 +572,32 @@ function GenericStackedRows({
               key={valueIndex}
               style={{
                 display: "flex",
-                alignItems: "baseline",
+                flexDirection: "column",
                 marginTop: 23,
-                gap: 30,
+                gap: 8,
               }}
             >
               <div
+                data-card-text-lines={
+                  header?.stackedColumns[valueIndex]?.lineCount
+                }
                 style={{
                   display: "flex",
                   color: IMESSAGE_CARD_COLOR.secondary,
                   fontSize: CAPTION_FONT_SIZE,
-                  fontWeight: 500,
+                  fontWeight: 600,
                   lineHeight: 1.2,
+                  whiteSpace: "pre-wrap",
                 }}
               >
-                {card.columns[valueIndex]}
+                {header?.stackedColumns[valueIndex]?.text
+                  ?? card.columns[valueIndex]}
               </div>
-              <div style={{ display: "flex", flex: 1 }} />
               <div
                 data-card-text-lines={rows[rowIndex]?.values[valueIndex]?.lineCount}
                 style={{
                   display: "flex",
-                  maxWidth: 720,
+                  width: "100%",
                   justifyContent: "flex-end",
                   fontSize: SUBHEADLINE_FONT_SIZE,
                   fontVariantNumeric: "tabular-nums",
@@ -679,6 +686,9 @@ function getCompactTableCardImageLayout(
       0.07,
     )
   );
+  const stackedColumns = card.columns.map((column) =>
+    wrapCardText(column, CARD_CONTENT_WIDTH, CAPTION_FONT_SIZE, 600)
+  );
   const tableHeaderHeight = Math.max(
     75,
     26 + Math.ceil(
@@ -700,7 +710,7 @@ function getCompactTableCardImageLayout(
         value,
         genericMode === "grid"
           ? gridWidths.columnWidths[index] ?? valueWidth
-          : 720,
+          : CARD_CONTENT_WIDTH,
         SUBHEADLINE_FONT_SIZE,
       )
     );
@@ -713,8 +723,11 @@ function getCompactTableCardImageLayout(
       )
       : label.lineCount * SUBHEADLINE_FONT_SIZE * 1.15
         + values.reduce(
-          (height, value) =>
-            height + 23 + value.lineCount * SUBHEADLINE_FONT_SIZE * 1.2,
+          (height, value, index) =>
+            height + 23
+            + (stackedColumns[index]?.lineCount ?? 1) * CAPTION_FONT_SIZE * 1.2
+            + 8
+            + value.lineCount * SUBHEADLINE_FONT_SIZE * 1.2,
           0,
         );
     return {
@@ -745,6 +758,7 @@ function getCompactTableCardImageLayout(
       height: tableHeaderHeight,
       rowHeader,
       rowHeaderWidth: gridWidths.rowHeaderWidth,
+      stackedColumns,
     },
     tableRows,
     title,

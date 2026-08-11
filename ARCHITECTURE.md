@@ -1611,12 +1611,14 @@ provider app art; every static bitmap embeds the checked-in canonical Murph
 mark in the native 36×27pt upper-left badge footprint instead.
 Their concise native caption keeps only the date and meal count instead of
 repeating visible totals or target amounts. The static default mirrors the
-native visible hierarchy without adding goal-direction labels; the complete
-semantic caption and text fallback remain the non-color status explanation.
+native visible hierarchy, while concise in-image direction labels preserve the
+status meaning otherwise supplied by the native tap and VoiceOver interaction.
 Null, incomplete, and unavailable goal states retain a neutral ring, and a
 short subcaption appears only when some totals are partial. Compact-table
 images retain the table grid or workout progress and exercise rows without a
-large empty icon gutter. Their provider
+large empty icon gutter. Stacked generic fields place each measured header
+above its full-width measured value so contract-valid tokens remain contained.
+Their provider
 chrome stays bounded to the title plus an optional generic subtitle or derived
 workout progress rather than repeating the raster's rows and sets. Complete
 semantic text remains available through the deterministic text renderer and

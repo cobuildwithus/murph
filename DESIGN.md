@@ -215,8 +215,9 @@ mask, but the bitmap itself embeds the canonical Murph mark in the same 36×27pt
 upper-left badge footprint as the native balloon. Installed extensions retain
 their native icon; app-absent static cards omit the optional square App Store
 artwork because the provider request has no App Store id. Status color may tint
-nutrient values, but
-the ring draws quantitative progress only for a complete calorie total with an
+nutrient values, while a concise direction label preserves that status when the
+static bitmap cannot expose the native tap or VoiceOver interaction. The ring
+draws quantitative progress only for a complete calorie total with an
 assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
 the neutral track. The static image does not expose the native card's
 tap-to-reveal target state. The provider caption retains only the date and meal
@@ -228,6 +229,8 @@ the bitmap rectangular, embed the canonical Murph mark in the native badge
 footprint, and let Messages supply only the outer corner mask and caption. Do
 not reserve a larger empty icon gutter. Keep structural rounding only where it
 communicates an inner state, such as a progress track or set-status marker.
+When a generic table uses stacked fields, keep each measured header above its
+full-width measured value so every contract-valid token remains contained.
 
 ### iMessage Challenge Standings Card Image
 Render the app-absent standings fallback as the static counterpart to the
