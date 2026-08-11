@@ -134,7 +134,6 @@ const trainingFixture: BrowserTrainingView = {
     },
   ],
   generatedAt: "2026-08-09T18:00:00.000Z",
-  projectionSignature: "[]",
   recentSessions: [
     {
       activityType: "strength-training",
@@ -221,6 +220,50 @@ const continueContactOptions = [
     label: "Text Murph",
   },
 ];
+
+async function createActiveTrainingClient() {
+  return createBrowserVaultQueryClient(
+    await createBrowserVaultReplica({
+      generatedAt: "2026-08-09T18:00:00.000Z",
+      metricPoints: [],
+      sourceBundleHash: "active-training-baseline",
+      vault: createVaultReadModel({
+        entities: [{
+          attributes: {
+            activityType: "strength-training",
+            source: "manual",
+            title: "Push day",
+            workout: {
+              exercises: [],
+              sourceApp: "murph-live",
+              startedAt: "2026-08-09T17:00:00.000Z",
+            },
+          },
+          body: null,
+          date: "2026-08-09",
+          entityId: "active-workout",
+          experimentSlug: null,
+          family: "event",
+          frontmatter: null,
+          kind: "activity_session",
+          links: [],
+          lookupIds: ["active-workout"],
+          occurredAt: "2026-08-09T17:00:00.000Z",
+          path: "history/events/active-workout.jsonl",
+          primaryLookupId: "active-workout",
+          recordClass: "ledger",
+          relatedIds: [],
+          status: null,
+          stream: null,
+          tags: [],
+          title: null,
+        }],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    }),
+  );
+}
 
 beforeEach(() => {
   mocks.useBrowserVault.mockReturnValue({
@@ -318,18 +361,7 @@ test("Training keeps canonical date-only labels stable across browser time zones
 });
 
 test("Training requests one runtime-owned refresh after its messaging handoff returns", async () => {
-  const unchangedClient = createBrowserVaultQueryClient(
-    await createBrowserVaultReplica({
-      generatedAt: "2026-08-09T18:00:00.000Z",
-      metricPoints: [],
-      sourceBundleHash: "unrelated-source-change",
-      vault: createVaultReadModel({
-        entities: [],
-        metadata: null,
-        vaultRoot: "browser://vault",
-      }),
-    }),
-  );
+  const unchangedClient = await createActiveTrainingClient();
   const changedClient = createBrowserVaultQueryClient(
     await createBrowserVaultReplica({
       generatedAt: "2026-08-09T18:05:00.000Z",
@@ -374,6 +406,7 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
   );
   const refresh = vi.fn<BrowserVaultContextValue["refresh"]>(async () => {});
   mocks.useBrowserVault.mockReturnValue({
+    client: unchangedClient,
     error: null,
     ref: {
       sourceBundleHash: "a".repeat(64),
@@ -419,7 +452,6 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
     );
     const cardioUpdate = selectBrowserVaultTraining(changedClient);
     assert.equal(cardioUpdate.recentSessions[0]?.distanceKm, 4.828032);
-    assert.notEqual(cardioUpdate.projectionSignature, "[]");
 
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
     await Promise.resolve();
@@ -431,10 +463,12 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
 
 test("Training shows bounded recovery when the runtime owner expires a stalled request", async () => {
   let runtimeRefreshPending = false;
+  const client = await createActiveTrainingClient();
   const refresh = vi.fn<BrowserVaultContextValue["refresh"]>(
     () => new Promise<void>(() => {}),
   );
   mocks.useBrowserVault.mockImplementation(() => ({
+    client,
     error: null,
     ref: {
       sourceBundleHash: "a".repeat(64),

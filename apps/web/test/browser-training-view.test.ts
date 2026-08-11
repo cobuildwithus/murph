@@ -8,7 +8,11 @@ import {
   createVaultReadModel,
 } from "@murphai/query/browser";
 
-import { selectBrowserVaultTraining } from "../src/lib/training/browser-training";
+import {
+  createTrainingHandoffBaseline,
+  isTrainingHandoffComplete,
+  selectBrowserVaultTraining,
+} from "../src/lib/training/browser-training";
 
 type CanonicalEntity = Parameters<
   typeof createVaultReadModel
@@ -42,6 +46,142 @@ function createWorkoutEntity(
     title: null,
   };
 }
+
+async function createTrainingClient(
+  entities: CanonicalEntity[],
+  sourceBundleHash: string,
+) {
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-08-09T18:00:00.000Z",
+    metricPoints: [],
+    sourceBundleHash,
+    vault: createVaultReadModel({
+      entities,
+      metadata: null,
+      vaultRoot: "browser://vault",
+    }),
+  });
+  return createBrowserVaultQueryClient(replica);
+}
+
+test("Training handoff completion follows the requested workout instead of any projection change", async () => {
+  const activeWorkout = createWorkoutEntity(
+    "active_workout",
+    {
+      activityType: "strength-training",
+      source: "manual",
+      workout: {
+        exercises: [{
+          name: "Bench press",
+          sets: [{ order: 1, reps: 8, weight: 135 }],
+        }],
+        sourceApp: "murph-live",
+        startedAt: "2026-08-09T17:00:00.000Z",
+      },
+    },
+    "2026-08-09T17:00:00.000Z",
+  );
+  const deviceWorkout = createWorkoutEntity(
+    "device_workout",
+    {
+      activityType: "strength-training",
+      source: "garmin",
+      title: "Device strength",
+    },
+    "2026-08-09T17:30:00.000Z",
+  );
+  const changedActiveWorkout = createWorkoutEntity(
+    "active_workout",
+    {
+      activityType: "strength-training",
+      source: "manual",
+      workout: {
+        exercises: [{
+          name: "Bench press",
+          sets: [{ order: 1, reps: 9, weight: 135 }],
+        }],
+        sourceApp: "murph-live",
+        startedAt: "2026-08-09T17:00:00.000Z",
+      },
+    },
+    "2026-08-09T17:00:00.000Z",
+  );
+  const manualRun = createWorkoutEntity(
+    "manual_run",
+    {
+      activityType: "running",
+      distanceKm: 4.8,
+      source: "manual",
+      workout: { exercises: [] },
+    },
+    "2026-08-09T18:00:00.000Z",
+  );
+
+  const continueBaseline = createTrainingHandoffBaseline(
+    await createTrainingClient([activeWorkout], "continue-baseline"),
+  );
+  assert.equal(continueBaseline.kind, "continue");
+  assert.equal(
+    isTrainingHandoffComplete(
+      continueBaseline,
+      await createTrainingClient(
+        [activeWorkout, deviceWorkout],
+        "unrelated-device-workout",
+      ),
+    ),
+    false,
+  );
+  assert.equal(
+    isTrainingHandoffComplete(
+      continueBaseline,
+      await createTrainingClient(
+        [changedActiveWorkout, deviceWorkout],
+        "continued-workout-update",
+      ),
+    ),
+    true,
+  );
+
+  const startBaseline = createTrainingHandoffBaseline(
+    await createTrainingClient([manualRun], "start-baseline"),
+  );
+  assert.equal(startBaseline.kind, "start");
+  assert.equal(
+    isTrainingHandoffComplete(
+      startBaseline,
+      await createTrainingClient([deviceWorkout], "lookback-removal"),
+    ),
+    false,
+  );
+  assert.equal(
+    isTrainingHandoffComplete(
+      startBaseline,
+      await createTrainingClient(
+        [manualRun, deviceWorkout],
+        "unrelated-device-addition",
+      ),
+    ),
+    false,
+  );
+  assert.equal(
+    isTrainingHandoffComplete(
+      startBaseline,
+      await createTrainingClient(
+        [manualRun, createWorkoutEntity(
+          "new_manual_workout",
+          {
+            activityType: "walking",
+            source: "manual",
+            workout: { exercises: [] },
+          },
+          "2026-08-09T18:10:00.000Z",
+        )],
+        "new-manual-workout",
+      ),
+    ),
+    true,
+  );
+});
 
 test("Training derives the live workout, recent history and exercise progress from canonical sessions", async () => {
   const replica = await createBrowserVaultReplica({

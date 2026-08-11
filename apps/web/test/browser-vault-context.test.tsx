@@ -1651,6 +1651,114 @@ test("provider unmount invalidates a runtime refresh queued behind an ordinary r
   assert.equal(getBrowserVaultReadySnapshot()?.client, readyClient);
 });
 
+test("provider unmount aborts a deferred runtime refresh after it starts", async () => {
+  const currentRef = createReplicaRef();
+  const focusResponse = createDeferred<Response>();
+  const runtimeResponse = createDeferred<Response>();
+  const focusSignals: AbortSignal[] = [];
+  const runtimeSignals: AbortSignal[] = [];
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({
+      encryptedReplica: createReplicaEnvelope(),
+      replicaAad: createReplicaAad(),
+      replicaKeyEnvelope: createReplicaKeyEnvelope(),
+      replicaRef: currentRef,
+      state: "ready",
+    }))
+    .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
+      if (init?.signal) {
+        focusSignals.push(init.signal);
+      }
+      return focusResponse.promise;
+    })
+    .mockImplementationOnce((_input: unknown, init?: RequestInit) => {
+      if (init?.signal) {
+        runtimeSignals.push(init.signal);
+      }
+      return runtimeResponse.promise;
+    })
+    .mockResolvedValue(jsonResponse({
+      encryptedReplica: null,
+      memberId: "member_123",
+      replicaAad: null,
+      replicaKeyEnvelope: null,
+      replicaRef: currentRef,
+      state: "not_modified",
+    }));
+
+  installBrowserVaultCryptoMocks();
+  vi.stubGlobal("fetch", fetchMock);
+
+  const rendered = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+  await waitForText(
+    rendered.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  const readyClient = getBrowserVaultReadySnapshot()?.client;
+  assert.ok(readyClient);
+
+  await act(async () => {
+    rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+    rendered.button?.dispatchEvent(new Event("click", { bubbles: true }));
+  });
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 2,
+    "ordinary read with queued runtime refresh",
+  );
+
+  focusResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: currentRef,
+    state: "not_modified",
+  }));
+  await waitForCondition(
+    () => fetchMock.mock.calls.length === 3,
+    "deferred runtime refresh",
+  );
+  assert.equal(focusSignals[0]?.aborted, false);
+  assert.equal(runtimeSignals[0]?.aborted, false);
+
+  await rendered.cleanup();
+  assert.equal(runtimeSignals[0]?.aborted, true);
+  assert.equal(peekBrowserVaultInFlightLoad(), null);
+
+  runtimeResponse.resolve(jsonResponse({
+    encryptedReplica: null,
+    memberId: "member_123",
+    replicaAad: null,
+    replicaKeyEnvelope: null,
+    replicaRef: currentRef,
+    state: "not_modified",
+  }));
+  for (let flush = 0; flush < 6; flush += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  assert.equal(getBrowserVaultReadySnapshot()?.client, readyClient);
+
+  const remounted = await renderClientComponent(
+    createAuthenticatedBrowserVaultElement(
+      createElement(BrowserVaultRuntimeRefreshProbe),
+    ),
+    { requireButton: false },
+  );
+  await waitForText(
+    remounted.container,
+    `${currentRef.sourceBundleHash}:${currentRef.dataVersion}:ready`,
+  );
+  assert.equal(fetchMock.mock.calls.length, 4);
+  await remounted.cleanup();
+});
+
 test("browser-vault provider keeps access-denied recovery pages mounted without redirecting", async () => {
   const ref = createReplicaRef();
   const fetchMock = vi.fn()

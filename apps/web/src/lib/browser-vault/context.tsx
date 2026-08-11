@@ -414,11 +414,13 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      const ownsRuntimeRefresh = runtimeRefreshCompletionRef.current !== null;
+      runtimeRefreshCompletionRef.current = null;
       if (runtimeRefreshTimeoutRef.current) {
         clearTimeout(runtimeRefreshTimeoutRef.current);
         runtimeRefreshTimeoutRef.current = null;
       }
-      if (providerStartedLoadRef.current) {
+      if (ownsRuntimeRefresh || providerStartedLoadRef.current) {
         abortBrowserVaultInFlightLoad();
         providerStartedLoadRef.current = false;
       }

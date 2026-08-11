@@ -79,10 +79,75 @@ export interface BrowserTrainingView {
   activeSession: TrainingSessionView | null;
   exerciseProgress: TrainingExerciseProgress[];
   generatedAt: string;
-  projectionSignature: string;
   recentSessions: TrainingSessionView[];
   summary: TrainingSummary;
   weeks: TrainingWeek[];
+}
+
+export type TrainingHandoffBaseline =
+  | {
+      activeSessionFingerprint: string;
+      activeSessionId: string;
+      kind: "continue";
+      manualSessionFingerprints: Record<string, string>;
+    }
+  | {
+      kind: "start";
+      manualSessionFingerprints: Record<string, string>;
+    };
+
+type TrainingSessionRecord = TrainingSessionView & {
+  source: string | null;
+};
+
+export function createTrainingHandoffBaseline(
+  client: BrowserVaultQueryClient,
+): TrainingHandoffBaseline {
+  const sessions = listTrainingSessions(client);
+  const manualSessionFingerprints = collectManualSessionFingerprints(sessions);
+  const activeSession = sessions.find(
+    (session) => session.state === "in_progress",
+  );
+
+  return activeSession
+    ? {
+        activeSessionFingerprint: fingerprintTrainingSession(activeSession),
+        activeSessionId: activeSession.id,
+        kind: "continue",
+        manualSessionFingerprints,
+      }
+    : {
+        kind: "start",
+        manualSessionFingerprints,
+      };
+}
+
+export function isTrainingHandoffComplete(
+  baseline: TrainingHandoffBaseline,
+  client: BrowserVaultQueryClient,
+): boolean {
+  const sessions = listTrainingSessions(client);
+  if (baseline.kind === "continue") {
+    const originalSession = sessions.find(
+      (session) => session.id === baseline.activeSessionId,
+    );
+    if (originalSession) {
+      return fingerprintTrainingSession(originalSession)
+        !== baseline.activeSessionFingerprint;
+    }
+
+    const replacementActiveSession = sessions.find(
+      (session) => session.state === "in_progress",
+    );
+    if (replacementActiveSession) {
+      return true;
+    }
+  }
+
+  return hasNewOrChangedManualSession(
+    baseline.manualSessionFingerprints,
+    sessions,
+  );
 }
 
 export function selectBrowserVaultTraining(
@@ -90,10 +155,7 @@ export function selectBrowserVaultTraining(
   options: { now?: Date; timeZone?: string } = {},
 ): BrowserTrainingView {
   const generatedAt = client.replica.generatedAt;
-  const sessions = client.entities
-    .list({ families: ["event"], kinds: ["activity_session"] })
-    .flatMap(parseTrainingSession)
-    .sort(compareSessionsLatestFirst);
+  const sessions = listTrainingSessions(client);
   const currentDate = resolveTrainingCurrentDate(
     options.now ?? new Date(),
     options.timeZone,
@@ -122,7 +184,6 @@ export function selectBrowserVaultTraining(
     activeSession,
     exerciseProgress: buildExerciseProgress(progressSessions),
     generatedAt,
-    projectionSignature: JSON.stringify(sessions),
     recentSessions: completedSessions.slice(0, RECENT_SESSION_LIMIT),
     summary: buildTrainingSummary(summarySessions),
     weeks: buildTrainingWeeks(
@@ -132,7 +193,40 @@ export function selectBrowserVaultTraining(
   };
 }
 
-function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionView[] {
+function listTrainingSessions(
+  client: BrowserVaultQueryClient,
+): TrainingSessionRecord[] {
+  return client.entities
+    .list({ families: ["event"], kinds: ["activity_session"] })
+    .flatMap(parseTrainingSession)
+    .sort(compareSessionsLatestFirst);
+}
+
+function collectManualSessionFingerprints(
+  sessions: readonly TrainingSessionRecord[],
+): Record<string, string> {
+  return Object.fromEntries(
+    sessions
+      .filter((session) => session.source === "manual")
+      .map((session) => [session.id, fingerprintTrainingSession(session)]),
+  );
+}
+
+function hasNewOrChangedManualSession(
+  baseline: Readonly<Record<string, string>>,
+  sessions: readonly TrainingSessionRecord[],
+): boolean {
+  return sessions.some(
+    (session) => session.source === "manual"
+      && baseline[session.id] !== fingerprintTrainingSession(session),
+  );
+}
+
+function fingerprintTrainingSession(session: TrainingSessionRecord): string {
+  return JSON.stringify(session);
+}
+
+function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionRecord[] {
   const training = readRecord(entity.attributes.training);
   if (
     !training
@@ -186,6 +280,7 @@ function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionView[]
     id: entity.id,
     note,
     setCount: sets.length,
+    source: readString(entity.attributes.source),
     startedAt,
     state,
     title,
