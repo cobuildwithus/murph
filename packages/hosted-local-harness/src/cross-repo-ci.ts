@@ -29,6 +29,10 @@ export const hostedLocalCrossRepoCiRequirements = [
     scenario: "linq-scheduled-reminder",
   },
   {
+    reason: "Proves a scheduled skill-authored recipe reaches generic authorized group email fanout.",
+    scenario: "group-email-newsletter",
+  },
+  {
     reason: "Proves the public runtime contracts against the private Temporal owner.",
     scenario: "temporal-orchestration",
   },

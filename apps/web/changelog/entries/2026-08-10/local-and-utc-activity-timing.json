@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-10",
+  "order": 375,
+  "item": {
+    "id": "local-and-utc-activity-timing",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph keeps local and UTC times straight",
+    "summary": "When Murph compares a message with connected health activity, it now sees the local clock beside the exact UTC instant instead of having to relabel a raw timestamp.",
+    "details": "That makes timing explanations more reliable across daylight-saving changes. Wearable imports also separate provider-send, Murph-receipt, and successful-import timing when those clocks are available, without putting health values in operational logs.",
+    "relevanceTags": ["assistant", "wearables", "timezones", "reliability"],
+    "sourcePullRequests": [1626]
+  }
+}

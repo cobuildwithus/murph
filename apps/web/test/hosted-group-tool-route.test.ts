@@ -111,6 +111,50 @@ describe("hosted group tool route", () => {
     expect(handled.requestStartedAtMs).toBeLessThanOrEqual(Date.now());
   });
 
+  it("accepts an eight-scope group email preparation callback", async () => {
+    const body = {
+      action: "prepare_email",
+      projectionScopes: [
+        { projectionKind: "steps-days.v0" },
+        { projectionKind: "activity-days.v0" },
+        { projectionKind: "workout-days.v0" },
+        { projectionKind: "workouts.v0" },
+        { projectionKind: "sleep-duration-days.v0" },
+        { projectionKind: "sleep-times.v0" },
+        { projectionKind: "resting-heart-rate-days.v0" },
+        { projectionKind: "hrv-days.v0" },
+      ],
+    };
+    mocks.handleTool.mockResolvedValueOnce({
+      action: "prepare_email",
+      result: {
+        authorizationProof: "a".repeat(64),
+        groupId: "hgrp_test",
+        missingEmailParticipants: [],
+        participants: [],
+        status: "ok",
+      },
+    });
+    const request = new Request(
+      `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,
+      {
+        body: JSON.stringify(body),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await route.POST(request);
+
+    expect(response.status).toBe(200);
+    expect(mocks.handleTool).toHaveBeenCalledWith({
+      memberId: "member_group_runtime",
+      request: body,
+      requestStartedAtMs: expect.any(Number),
+      scheduleMailboxWake: expect.any(Function),
+    });
+  });
+
   it.each([
     ["P2010", "P2010"],
     ["PRIVATE_CODE", null],

@@ -19,7 +19,7 @@ import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-ser
 import type {
   AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
-import { afterAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
@@ -214,6 +214,16 @@ interface ScriptedResponseRoute {
 type ScriptedResponse = ScriptedResponseRoute & (
   | { text: string }
   | {
+      commentaryAndFunctionCall: {
+        commentary: string
+        functionCall: {
+          arguments: Record<string, unknown>
+          name: string
+          namespace?: string
+        }
+      }
+    }
+  | {
       customToolCall: {
         input: string
         name: string
@@ -258,7 +268,7 @@ interface ScriptedProviderRequestSummary {
     includesReadShared: boolean
     includesResponseCardCompactTableShape: boolean
     includesResponseCardNutritionV2Shape: boolean
-    includesSaveNewsletter: boolean
+    includesGroupEmail: boolean
     includesToolSearch: boolean
   }
   serviceTier: string | null
@@ -1523,8 +1533,9 @@ text(result.output);
         customToolCall: {
           input: `
 const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
+const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
 if (!tool) {
-  text(JSON.stringify({ found: false }));
+  text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
 } else {
   const result = await tools.murph__automation({
     action: "save",
@@ -1532,7 +1543,7 @@ if (!tool) {
     schedule: { kind: "dailyLocal", localTime: "09:00" },
     title: "Morning reminder",
   });
-  text(JSON.stringify({ found: true, result }));
+  text(JSON.stringify({ found: true, foundGroup: Boolean(groupTool), result }));
 }
 `,
           name: 'exec',
@@ -1586,12 +1597,13 @@ if (!tool) {
         includesAllTools: true,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(summaries[0]?.providerRequestDiagnostics?.bytes).toBeGreaterThan(0)
     const automationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(automationOutput).toContain('"foundGroup":true')
     expect(automationOutput).toContain('automation-native-deferred')
     expect(automationOutput).toContain('morning-reminder')
     expect(automationOutput).toContain('active')
@@ -1630,7 +1642,7 @@ if (!tool) {
       providerRequestDiagnostics: {
         includesAutomation: true,
         includesGroup: true,
-        includesSaveNewsletter: true,
+        includesGroupEmail: true,
       },
     })
     expect(
@@ -4590,6 +4602,12 @@ text(result.output);
       {
         toolSearchCall: {
           limit: 8,
+          query: 'Murph group set_chat_avatar current chat icon',
+        },
+      },
+      {
+        toolSearchCall: {
+          limit: 8,
           query: 'create a durable Murph automation reminder',
         },
       },
@@ -4641,7 +4659,7 @@ text(result.output);
         vaultFileSendAvailable: false,
       },
       model: 'gpt-5.4',
-      prompt: 'Save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
+      prompt: 'Discover the supported group-avatar path, save the reminder, then reply exactly NATIVE_TOOL_SEARCH_OK.',
     })
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
@@ -4651,11 +4669,14 @@ text(result.output);
         includesAllTools: false,
         includesAutomation: false,
         includesGroup: false,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
         includesToolSearch: true,
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group"',
+    )
+    expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
     )
     expect(automationRequests).toEqual([{
@@ -4665,7 +4686,7 @@ text(result.output);
       title: 'Morning reminder',
     }])
     expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
-    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
   it('keeps narrow group reads eager beside deferred Terra tools', {
@@ -4733,7 +4754,7 @@ text(JSON.stringify(result));
         includesAutomation: false,
         includesGroup: false,
         includesReadShared: true,
-        includesSaveNewsletter: false,
+        includesGroupEmail: false,
       },
     })
     expect(groupSharedRequests).toEqual([{
@@ -5320,6 +5341,76 @@ text(JSON.stringify(result));
     expect(progressUpdates).toEqual(['Scripted progress update.'])
     expect(result.finalMessage).toBe('DYNAMIC_TOOL_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
+  it('ends an accepted group email effect without another provider request', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupEmailRequests: unknown[] = []
+    const groupEmailSendResultRecorder = vi.fn()
+    const traceEvents: unknown[] = []
+    scenario.stub.queue({
+      commentaryAndFunctionCall: {
+        commentary: 'Preparing the scheduled group update.',
+        functionCall: {
+          arguments: {
+            action: 'send_email',
+            html: '<p>Scheduled update</p>',
+            subject: 'Scheduled update',
+            text: 'Scheduled update',
+          },
+          name: 'group',
+          namespace: 'murph',
+        },
+      },
+    })
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: resolveMurphDynamicTools({
+        groupAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async () => ({
+          action: 'read_chat_participants',
+          result: { participants: [], status: 'ok' },
+        })),
+        groupEmailEffect: {
+          request: async (request) => {
+            groupEmailRequests.push(request)
+            return {
+              action: 'send_email',
+              result: {
+                participantCount: 1,
+                skippedNoEmailMemberIds: [],
+                status: 'accepted',
+              },
+            }
+          },
+        },
+        recordGroupEmailSendResult: groupEmailSendResultRecorder,
+      },
+      onTraceEvent: (event) => {
+        traceEvents.push(event)
+      },
+      prompt: 'Send the prepared scheduled group email.',
+    })
+
+    expect(groupEmailRequests).toEqual([{
+      action: 'send_email',
+      html: '<p>Scheduled update</p>',
+      subject: 'Scheduled update',
+      text: 'Scheduled update',
+    }])
+    expect(result.finalAction).toEqual({ kind: 'none' })
+    expect(result.finalMessage).toBe('')
+    expect(JSON.stringify(traceEvents)).toContain(
+      'Preparing the scheduled group update.',
+    )
+    expect(groupEmailSendResultRecorder).toHaveBeenCalledOnce()
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(1)
   })
 
   it.each([
@@ -6110,56 +6201,91 @@ async function startScriptedResponsesStub(): Promise<ScriptedStub> {
 
     responseSequence += 1
     const responseId = `resp_scripted_${responseSequence}`
-    const outputItem = 'toolSearchCall' in scripted
-      ? {
-          arguments: {
-            query: scripted.toolSearchCall.query,
-            ...(scripted.toolSearchCall.limit === undefined
-              ? {}
-              : { limit: scripted.toolSearchCall.limit }),
+    const outputItems = 'commentaryAndFunctionCall' in scripted
+      ? [
+          {
+            content: [
+              {
+                annotations: [],
+                text: scripted.commentaryAndFunctionCall.commentary,
+                type: 'output_text',
+              },
+            ],
+            id: `msg_${responseId}_commentary`,
+            phase: 'commentary',
+            role: 'assistant',
+            status: 'completed',
+            type: 'message',
           },
-          call_id: `call_${responseId}`,
-          execution: 'client',
-          id: `tsearch_${responseId}`,
-          status: 'completed',
-          type: 'tool_search_call',
-        }
-      : 'customToolCall' in scripted
-      ? {
-          call_id: `call_${responseId}`,
-          id: `ctcall_${responseId}`,
-          input: scripted.customToolCall.input,
-          name: scripted.customToolCall.name,
-          status: 'completed',
-          type: 'custom_tool_call',
-        }
-      : 'functionCall' in scripted
-      ? {
-          arguments: JSON.stringify(scripted.functionCall.arguments),
-          call_id: `call_${responseId}`,
-          id: `fcall_${responseId}`,
-          name: scripted.functionCall.name,
-          ...(scripted.functionCall.namespace
-            ? { namespace: scripted.functionCall.namespace }
-            : {}),
-          status: 'completed',
-          type: 'function_call',
-        }
-      : {
-          content: [
-            {
-              annotations: [],
-              text: scripted.text,
-              type: 'output_text',
-            },
-          ],
-          id: `msg_${responseId}`,
-          role: 'assistant',
-          status: 'completed',
-          type: 'message',
-        }
+          {
+            arguments: JSON.stringify(
+              scripted.commentaryAndFunctionCall.functionCall.arguments,
+            ),
+            call_id: `call_${responseId}_group_email`,
+            id: `fcall_${responseId}_group_email`,
+            name: scripted.commentaryAndFunctionCall.functionCall.name,
+            ...(scripted.commentaryAndFunctionCall.functionCall.namespace
+              ? {
+                  namespace:
+                    scripted.commentaryAndFunctionCall.functionCall.namespace,
+                }
+              : {}),
+            status: 'completed',
+            type: 'function_call',
+          },
+        ]
+      : [
+          'toolSearchCall' in scripted
+            ? {
+                arguments: {
+                  query: scripted.toolSearchCall.query,
+                  ...(scripted.toolSearchCall.limit === undefined
+                    ? {}
+                    : { limit: scripted.toolSearchCall.limit }),
+                },
+                call_id: `call_${responseId}`,
+                execution: 'client',
+                id: `tsearch_${responseId}`,
+                status: 'completed',
+                type: 'tool_search_call',
+              }
+            : 'customToolCall' in scripted
+              ? {
+                  call_id: `call_${responseId}`,
+                  id: `ctcall_${responseId}`,
+                  input: scripted.customToolCall.input,
+                  name: scripted.customToolCall.name,
+                  status: 'completed',
+                  type: 'custom_tool_call',
+                }
+              : 'functionCall' in scripted
+                ? {
+                    arguments: JSON.stringify(scripted.functionCall.arguments),
+                    call_id: `call_${responseId}`,
+                    id: `fcall_${responseId}`,
+                    name: scripted.functionCall.name,
+                    ...(scripted.functionCall.namespace
+                      ? { namespace: scripted.functionCall.namespace }
+                      : {}),
+                    status: 'completed',
+                    type: 'function_call',
+                  }
+                : {
+                    content: [
+                      {
+                        annotations: [],
+                        text: scripted.text,
+                        type: 'output_text',
+                      },
+                    ],
+                    id: `msg_${responseId}`,
+                    role: 'assistant',
+                    status: 'completed',
+                    type: 'message',
+                  },
+        ]
     writeScriptedSseResponse({
-      outputItem,
+      outputItems,
       response,
       responseId,
     })
@@ -6275,7 +6401,7 @@ function readScriptedProviderRequestSummary(
               'target',
               'totals',
             ].every((field) => requestBody.includes(field)),
-            includesSaveNewsletter: requestBody.includes('save_newsletter'),
+            includesGroupEmail: requestBody.includes('send_email'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
           },
         }
@@ -6313,7 +6439,7 @@ function readProviderToolOutputText(value: unknown): string | null {
 }
 
 function writeScriptedSseResponse(input: {
-  outputItem: Record<string, unknown>
+  outputItems: readonly Record<string, unknown>[]
   response: ServerResponse
   responseId: string
 }): void {
@@ -6328,7 +6454,7 @@ function writeScriptedSseResponse(input: {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
     model: SCRIPTED_MODEL,
-    output: [input.outputItem],
+    output: input.outputItems,
     status: 'completed',
     usage,
   }
@@ -6344,19 +6470,21 @@ function writeScriptedSseResponse(input: {
     },
     type: 'response.created',
   })
-  writeScriptedSseEvent(input.response, 'response.output_item.added', {
-    item: {
-      ...input.outputItem,
-      status: 'in_progress',
-    },
-    output_index: 0,
-    type: 'response.output_item.added',
-  })
-  writeScriptedSseEvent(input.response, 'response.output_item.done', {
-    item: input.outputItem,
-    output_index: 0,
-    type: 'response.output_item.done',
-  })
+  for (const [outputIndex, outputItem] of input.outputItems.entries()) {
+    writeScriptedSseEvent(input.response, 'response.output_item.added', {
+      item: {
+        ...outputItem,
+        status: 'in_progress',
+      },
+      output_index: outputIndex,
+      type: 'response.output_item.added',
+    })
+    writeScriptedSseEvent(input.response, 'response.output_item.done', {
+      item: outputItem,
+      output_index: outputIndex,
+      type: 'response.output_item.done',
+    })
+  }
   writeScriptedSseEvent(input.response, 'response.completed', {
     response: completedResponse,
     type: 'response.completed',

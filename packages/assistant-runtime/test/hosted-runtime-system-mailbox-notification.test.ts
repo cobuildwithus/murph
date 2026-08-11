@@ -43,7 +43,9 @@ vi.mock("../src/hosted-runtime/events.ts", () => ({
 }));
 
 import {
+  classifyLegacyHostedUsageReferralDirectLinqAuthority,
   prepareHostedAssistantNotificationSystemMailboxWake,
+  type HostedLegacyUsageReferralAuthorityClassification,
 } from "../src/hosted-runtime/events/assistant-notification.ts";
 import type {
   HostedMailboxResolvedImportItem,
@@ -514,6 +516,10 @@ describe("hosted system mailbox notification execution context", () => {
 
   const legacyUsageReferralLookalikes: Array<{
     contextMemberId?: string;
+    expectedClassification: Exclude<
+      HostedLegacyUsageReferralAuthorityClassification,
+      "eligible"
+    >;
     label: string;
     mailboxDedupeKey?: string;
     mutate: (
@@ -521,6 +527,7 @@ describe("hosted system mailbox notification execution context", () => {
     ) => void;
   }> = [
     {
+      expectedClassification: "identity_mismatch",
       label: "mismatched referral identity",
       mutate(wake) {
         wake.notification.deliveryDedupeToken =
@@ -528,24 +535,28 @@ describe("hosted system mailbox notification execution context", () => {
       },
     },
     {
+      expectedClassification: "identity_mismatch",
       label: "mismatched mailbox identity",
       mailboxDedupeKey:
         "assistant.notification.requested:usage-referral-reward:other",
       mutate() {},
     },
     {
+      expectedClassification: "route_mismatch",
       label: "wrong channel",
       mutate(wake) {
         wake.notification.route.channel = "telegram";
       },
     },
     {
+      expectedClassification: "route_mismatch",
       label: "non-direct route",
       mutate(wake) {
         wake.notification.route.threadIsDirect = false;
       },
     },
     {
+      expectedClassification: "route_mismatch",
       label: "non-explicit delivery",
       mutate(wake) {
         wake.notification.route.delivery.kind = "thread";
@@ -553,8 +564,24 @@ describe("hosted system mailbox notification execution context", () => {
     },
     {
       contextMemberId: "different-runtime-member",
+      expectedClassification: "member_mismatch",
       label: "wrong runtime member",
       mutate() {},
+    },
+    {
+      expectedClassification: "not_usage_referral",
+      label: "non-referral notification key",
+      mutate(wake) {
+        wake.notification.deliveryDedupeToken =
+          "phone-call-result:not-a-referral";
+      },
+    },
+    {
+      expectedClassification: "policy_mismatch",
+      label: "unsupported delivery policy",
+      mutate(wake) {
+        wake.notification.deliveryDispatchMode = "immediate";
+      },
     },
   ];
 
@@ -562,6 +589,7 @@ describe("hosted system mailbox notification execution context", () => {
     "does not recover a legacy referral lookalike with $label",
     async ({
       contextMemberId = "member_123",
+      expectedClassification,
       mailboxDedupeKey,
       mutate,
     }) => {
@@ -575,16 +603,24 @@ describe("hosted system mailbox notification execution context", () => {
       });
       mutate(wake);
       const assertExternalThreadRouteAuthority = vi.fn(async () => undefined);
+      const executionContext: AssistantExecutionContext = {
+        hosted: {
+          memberId: contextMemberId,
+          userEnvKeys: [],
+        },
+      };
+      const resolvedMailboxDedupeKey = mailboxDedupeKey ?? eventId;
+
+      expect(classifyLegacyHostedUsageReferralDirectLinqAuthority({
+        executionContext,
+        mailboxDedupeKey: resolvedMailboxDedupeKey,
+        wake,
+      })).toBe(expectedClassification);
 
       await expect(prepareHostedAssistantNotificationSystemMailboxWake({
         assertExternalThreadRouteAuthority,
-        executionContext: {
-          hosted: {
-            memberId: contextMemberId,
-            userEnvKeys: [],
-          },
-        },
-        mailboxDedupeKey: mailboxDedupeKey ?? eventId,
+        executionContext,
+        mailboxDedupeKey: resolvedMailboxDedupeKey,
         signal: null,
         wake,
       })).resolves.toEqual({
@@ -916,10 +952,14 @@ describe("hosted system mailbox notification execution context", () => {
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,
       })).resolves.toMatchObject({
+        attemptCount: 1,
         errorCode: "ASSISTANT_EXTERNAL_THREAD_ROUTE_AUTHORITY_UNAVAILABLE",
         itemId: "mailbox_referral_retry",
+        legacyUsageReferralAuthorityClassification: "eligible",
         nextWakeAt: "2026-04-27T00:01:00.000Z",
+        routeAction: "dispatch-assistant-notification",
         status: "retryable_failed",
+        wakeKind: "assistant.notification.requested",
       });
       expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
       expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
@@ -1022,6 +1062,7 @@ describe("hosted system mailbox notification execution context", () => {
         vaultRoot: workspace.vaultRoot,
       })).resolves.toMatchObject({
         errorCode: "ASSISTANT_AUDIENCE_UNVERIFIED",
+        legacyUsageReferralAuthorityClassification: "identity_mismatch",
         status: "retryable_failed",
       });
 

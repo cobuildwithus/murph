@@ -69,6 +69,7 @@ import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
+import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -262,6 +263,18 @@ export function SectionsContent() {
 
       <StudySection title="Private Environment print report loading and ready states">
         <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private training dashboard">
+        <div
+          id="private-training-dashboard"
+          data-design-section="private-training-dashboard"
+          inert
+        >
+          <TrainingDashboardStudy />
+        </div>
       </StudySection>
 
       <Separator />

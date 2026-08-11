@@ -2378,9 +2378,9 @@ const LEGACY_CHANGELOG_EDITIONS = [
         summary:
           "When a call Murph started finishes, Murph now sends the meaningful result back through the chat where it can reach you, in its own voice.",
         details:
-          "The result is encrypted at rest, Murph treats the call transcript as untrusted, and a replay cannot send the same outcome twice.",
+          "The result is encrypted at rest, Murph treats the call transcript as untrusted, and a replay cannot send the same outcome twice. After Murph connects you to the recipient, it waits for that conversation to end and asks what happened instead of guessing the outcome.",
         relevanceTags: ["phone-calls", "assistant", "messaging", "reliability"],
-        sourcePullRequests: [857],
+        sourcePullRequests: [857, 1363],
       },
       {
         id: "billing-recovery-finishes",

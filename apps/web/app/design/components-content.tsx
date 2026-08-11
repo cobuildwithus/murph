@@ -2533,7 +2533,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Health data consent actions">
+        <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
         </Section>
 

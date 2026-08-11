@@ -38,7 +38,6 @@ import {
   HOSTED_RUNTIME_FAMILY_PLAN_TOOL_PATH,
   HOSTED_RUNTIME_GROUP_TOOL_PATH,
   HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH,
-  HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
   HOSTED_RUNTIME_ISSUE_RECORD_PATH,
@@ -104,7 +103,6 @@ export type HostedRunnerWebControlOperation =
   | "mailbox_payload_fetch"
   | "linq_delivery_outcome"
   | "linq_egress_engagement"
-  | "newsletter_tool"
   | "plan_usage_tool"
   | "subscription_tool"
   | "thread_route_authority"
@@ -151,7 +149,6 @@ const HOSTED_RUNNER_WEB_CONTROL_POST_POLICY = new Map<string, HostedRunnerWebCon
   [HOSTED_RUNTIME_GROUP_TOOL_PATH, "group_tool"],
   [HOSTED_RUNTIME_IMESSAGE_CONTACT_TOOL_PATH, "imessage_contact_tool"],
   [HOSTED_RUNTIME_LABS_TOOL_PATH, "labs_tool"],
-  [HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH, "newsletter_tool"],
   [HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH, "plan_usage_tool"],
   [HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH, "subscription_tool"],
   [HOSTED_RUNTIME_THREAD_ROUTE_AUTHORITY_PATH, "thread_route_authority"],
