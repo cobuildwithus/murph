@@ -51,7 +51,7 @@ export function MurphCardHandoffDialog({
       <DialogContent
         aria-describedby={DESCRIPTION_ID}
         aria-labelledby={TITLE_ID}
-        className="max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto p-6 sm:max-w-md md:p-7"
+        className="max-h-[calc(100dvh-2rem)] gap-6 overflow-y-auto p-6 sm:max-w-[30rem] md:p-7"
         showCloseButton={false}
       >
         <MurphCardHandoffPanel onDismiss={() => onOpenChange(false)} />
@@ -85,7 +85,7 @@ export function MurphCardHandoffPanel({
           Continue on iPhone
         </h2>
         <p
-          className="max-w-[38ch] text-pretty text-base/7 text-muted-foreground"
+          className="max-w-[42ch] text-pretty text-base/7 text-muted-foreground"
           id={DESCRIPTION_ID}
         >
           Install or open Murph from the App Store. Then return to Messages and

@@ -103,6 +103,14 @@ test("shared-card fragments open a private, accessible App Store handoff", async
     );
     expect(focusIsContained, `${label} dialog should contain focus`).toBe(true);
 
+    if (label === "desktop") {
+      const dialogBox = await dialog.boundingBox();
+      expect(dialogBox, "desktop dialog should have layout").not.toBeNull();
+      expect(dialogBox?.width ?? 0).toBeGreaterThanOrEqual(
+        480 - OVERFLOW_TOLERANCE_PX,
+      );
+    }
+
     const overflowPx = await page.evaluate(() =>
       document.documentElement.scrollWidth
       - document.documentElement.clientWidth
