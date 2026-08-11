@@ -2773,6 +2773,10 @@ versioned delivery contract. V1-V4 carry the same private-direct presentation
 values; V5 uses the identity-free public challenge projection. Neither may
 contain a member identity, canonical record reference, credential, tracking
 reference, or other authority.
+Generic V3 tables choose their one shared-header grid solely from the exact
+intrinsic width of every admitted header and cell track plus its gutters. Only
+genuinely overwide content uses repeated full-width field labels; column count
+does not create a second layout authority.
 The provider request rejects encoded URLs at 2,048 characters, while the
 contract applies the tighter of the fragment and image-path bounds before
 delivery. Compact-table provider chrome uses only bounded title, optional

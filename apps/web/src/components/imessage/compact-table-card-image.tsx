@@ -666,7 +666,6 @@ function getCompactTableCardImageLayout(
 
   const gridWidths = getCompactTableGridWidths(card);
   const genericMode = gridWidths.totalWidth <= CARD_CONTENT_WIDTH
-      && card.columns.length < 4
     ? "grid"
     : "stacked";
   const valueWidth = GENERIC_VALUES_WIDTH / card.columns.length;

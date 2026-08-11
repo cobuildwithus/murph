@@ -77,6 +77,9 @@ bounded queryless image path. The static renderer mirrors the native table or
 workout summary. Generic Linq provider chrome retains its title, optional
 subtitle, rows, and footer. Structured-workout provider chrome stays bounded to
 the title plus derived progress instead of repeating every rendered set.
+Generic static tables keep one shared header whenever exact intrinsic header and
+cell tracks plus gutters fit the raster, regardless of column count; only
+genuinely overwide content uses repeated full-width field labels.
 Complete workout semantics remain available through the deterministic text
 renderer and value-free text-recovery fallback. V3 tracking stays only in
 the semantic transcript and is stripped before both encodings; V4 contains no

@@ -230,7 +230,11 @@ footprint, and let Messages supply only the outer corner mask and caption. Do
 not reserve a larger empty icon gutter. Keep structural rounding only where it
 communicates an inner state, such as a progress track or set-status marker.
 When a generic table uses stacked fields, keep each measured header above its
-full-width measured value so every contract-valid token remains contained.
+full-width measured value so every contract-valid token remains contained. The
+exact intrinsic width of the row-header, column-header, and value tracks plus
+their gutters is the sole layout selector: use the single shared table header
+whenever those tracks fit, including four-column cards, and repeat field labels
+only for genuinely overwide content.
 
 ### iMessage Challenge Standings Card Image
 Render the app-absent standings fallback as the static counterpart to the

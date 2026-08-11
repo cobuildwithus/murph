@@ -100,6 +100,20 @@ const SYNTHETIC_DENSE_TABLE_CARD: CompactTablePresentationCardV1 = {
   footer: "Reply with any exercise, set, and correction.",
 };
 
+const SYNTHETIC_FITTING_FOUR_COLUMN_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Weekly check-in",
+  subtitle: "Eight signals across four days",
+  rowHeader: "Signal",
+  columns: ["Mon", "Tue", "Wed", "Thu"],
+  rows: Array.from({ length: 8 }, (_, index) => ({
+    label: `Signal ${index + 1}`,
+    values: ["1", "2", "3", "4"],
+  })),
+  footer: "Short fields stay in one compact table.",
+};
+
 export function ImessageCompactTableCardStudy() {
   return (
     <div className="rounded-2xl border border-border bg-card p-4 sm:p-8" inert>
@@ -112,9 +126,9 @@ export function ImessageCompactTableCardStudy() {
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The image fallback keeps a targetless first pending set honest and
-          measures every wrapped row in the dense four-column boundary. Stacked
-          fields keep each header above its full-width value so contract-limit
-          text cannot collide or clip.
+          keeps a fitting four-column card in one shared-header table. Genuinely
+          overwide rows use stacked fields with each measured header above its
+          full-width value so contract-limit text cannot collide or clip.
           The rectangular raster embeds the canonical Murph mark in the native
           badge footprint, while Messages supplies the outer corner mask.
           Provider chrome stays concise; the complete semantic fallback remains
@@ -126,11 +140,19 @@ export function ImessageCompactTableCardStudy() {
           card={SYNTHETIC_TARGETLESS_WORKOUT_CARD}
           scale={0.72}
         />
+        <ScaledCompactTableCard
+          card={SYNTHETIC_FITTING_FOUR_COLUMN_CARD}
+          scale={0.72}
+        />
         <ScaledCompactTableCard card={SYNTHETIC_DENSE_TABLE_CARD} scale={0.62} />
       </div>
       <div className="flex flex-col gap-5 sm:hidden">
         <ScaledCompactTableCard
           card={SYNTHETIC_TARGETLESS_WORKOUT_CARD}
+          scale={0.25}
+        />
+        <ScaledCompactTableCard
+          card={SYNTHETIC_FITTING_FOUR_COLUMN_CARD}
           scale={0.25}
         />
         <ScaledCompactTableCard card={SYNTHETIC_DENSE_TABLE_CARD} scale={0.25} />

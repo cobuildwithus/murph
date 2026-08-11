@@ -200,6 +200,20 @@ const MAX_STACKED_TABLE_CARD: CompactTablePresentationCardV1 = {
   footer: null,
 };
 
+const NARROW_FOUR_COLUMN_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "T",
+  subtitle: null,
+  rowHeader: "R",
+  columns: ["A", "B", "C", "D"],
+  rows: Array.from({ length: 8 }, () => ({
+    label: "R",
+    values: ["1", "2", "3", "4"],
+  })),
+  footer: null,
+};
+
 const WORKOUT_CARD: Extract<
   CompactTablePresentationCardV1,
   { workout: unknown }
@@ -654,6 +668,26 @@ test("stacked tables place every maximum header above its full-width value", asy
     />MaximumHeartRatePercentX<\/div><div[^>]*width:100%/u,
   );
   assert.doesNotMatch(serialized, /max-width:720px/u);
+});
+
+test("fitting four-column tables retain one shared header and compact height", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: NARROW_FOUR_COLUMN_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree, init] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.equal(init.height, 1_129);
+  assert.match(serialized, /data-compact-table-layout="grid"/u);
+  assert.equal(serialized.match(/>A<\/div>/gu)?.length, 1);
+  assert.doesNotMatch(serialized, /data-compact-table-layout="stacked"/u);
 });
 
 test("four-column rows use exact DM Sans advances for full-width field height", async () => {

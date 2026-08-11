@@ -52,7 +52,14 @@ Updated: 2026-08-11
 - Simulator screenshots for every native card family and direct rendered PNGs
   for every fallback family, inspected at native presentation scale.
 
-Current focused proof: 81 route/component/asset tests pass, hosted Web typecheck
+Current focused proof: 83 route/component/asset tests pass, hosted Web typecheck
 passes, and Web lint reports zero errors with 39 unrelated warnings. ReviewGPT
 round 1 found two static-renderer containment/meaning gaps; both now have
 production-route raster regressions and refreshed desktop/mobile studies.
+Round 2 required a retrospective because the corrected stacked-field mechanism
+still admitted every four-column card. The recorded complexity-collapse decision
+deletes that cardinality veto: exact measured width now solely selects a single
+shared-header grid or genuinely overwide stacked fields. A production-route
+regression proves the narrow four-column/eight-row case shrank from 1,200×6,259
+to 1,200×1,129, and refreshed desktop/mobile catalog captures prove the grid and
+canonical SVG badge remain contained.

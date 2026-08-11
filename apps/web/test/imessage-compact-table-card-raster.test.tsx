@@ -117,6 +117,20 @@ const PARTIAL_NUTRITION_CARD: DailyNutritionResponseCardV2 = {
 const MAX_HEADER = "MaximumHeartRatePercentX";
 const MAX_VALUE = "CountermovementJumpAsymmetryXXXX";
 
+const NARROW_FOUR_COLUMN_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "T",
+  subtitle: null,
+  rowHeader: "R",
+  columns: ["A", "B", "C", "D"],
+  rows: Array.from({ length: 8 }, () => ({
+    label: "R",
+    values: ["1", "2", "3", "4"],
+  })),
+  footer: null,
+};
+
 function getMaximumStackedCard(
   columnCount: number,
 ): CompactTablePresentationCardV1 {
@@ -200,6 +214,20 @@ test.each([1, 2, 3, 4])(
     );
   },
 );
+
+test("real-font route keeps a fitting four-column eight-row table compact", async () => {
+  const image = await renderCard({
+    schemaVersion: 3,
+    card: NARROW_FOUR_COLUMN_CARD,
+  });
+  assert.deepEqual([image.width, image.height], [1_200, 1_129]);
+
+  const bounds = findNonBackgroundBounds(image);
+  assert.ok(bounds !== null);
+  assert.ok(bounds.left >= 20);
+  assert.ok(bounds.right <= 1_155);
+  assert.ok(bounds.bottom <= image.height - 40);
+});
 
 test("real-font route keeps positive-kerning text above the stacked-row divider", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
