@@ -28,8 +28,8 @@ export { createManagedLinqVoiceMemoRuntimeFromEnv }
 
 export interface GenerateVoiceMemoToolArgs {
   text: string
-  voiceId: string | null
-  voiceOptionId?: AssistantVoiceOptionId | null
+  /** One-off roster voice explicitly named by the current user for this memo or test. */
+  userRequestedVoiceOptionId?: AssistantVoiceOptionId | null
 }
 
 export interface GenerateSongToolArgs {
@@ -186,9 +186,10 @@ function resolveVoiceMemoVoiceId(input: {
   args: GenerateVoiceMemoToolArgs
   runtime: VoiceMemoToolRuntime
 }): string | null {
-  const voiceOptionId = input.args.voiceOptionId ?? null
-  if (voiceOptionId !== null) {
-    const voiceOption = resolveAssistantVoiceOption(voiceOptionId)
+  const userRequestedVoiceOptionId =
+    input.args.userRequestedVoiceOptionId ?? null
+  if (userRequestedVoiceOptionId !== null) {
+    const voiceOption = resolveAssistantVoiceOption(userRequestedVoiceOptionId)
     if (!voiceOption) {
       return null
     }
@@ -197,8 +198,7 @@ function resolveVoiceMemoVoiceId(input: {
       normalizeNullableString(input.runtime.elevenLabs.defaultVoiceId)
   }
 
-  return normalizeNullableString(input.args.voiceId) ??
-    input.runtime.elevenLabs.voiceId
+  return input.runtime.elevenLabs.voiceId
 }
 
 export async function executeGenerateSongTool(input: {
