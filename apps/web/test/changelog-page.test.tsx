@@ -60,8 +60,9 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, referrals, reminders, Terra photos, cards, voices, search, and a lighter homepage",
+      "Starter access, patterns, referrals, reminders, Terra photos, cards, voices, search, lighter pages, and clear reports",
     );
+    expect(markup).toContain("Response cards stay compact in Messages");
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
     expect(markup).toContain("The homepage starts lighter");
