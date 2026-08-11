@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 100,
+  "item": {
+    "id": "group-funding-supporters",
+    "kind": "feature",
+    "priority": 4,
+    "title": "Recognize the people who keep a group going",
+    "summary": "After signing in, group members can see the current monthly sponsor and up to 20 recent one-time contributors on the funding page.",
+    "details": "The list shows each supporter's public alias or Anonymous and the contribution kind, never payment amounts, caps, payer identity, payment details, or refill activity.",
+    "relevanceTags": ["groups", "funding", "privacy"],
+    "sourcePullRequests": [1420]
+  }
+}

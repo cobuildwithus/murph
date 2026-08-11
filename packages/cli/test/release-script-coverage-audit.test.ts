@@ -1595,7 +1595,7 @@ describe('monorepo release flow coverage audit', () => {
       '## Verification Ownership By Delivery Path',
     )
     expect(verificationAndRuntime).toMatch(
-      /run\s+`pnpm verify:acceptance` before pushing/u,
+      /run\s+`pnpm verify:acceptance` once for that direct-push attempt/u,
     )
     expect(completionSpecialistsPrompt).toMatch(
       /Applicability does not depend on a local coverage\s+umbrella command/u,
@@ -1619,10 +1619,31 @@ describe('monorepo release flow coverage audit', () => {
       'Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation',
     )
     expect(completionWorkflow).toContain(
-      'strict up-to-date checks block it',
+      'strict up-to-date checks block the merge',
     )
     expect(completionWorkflow).toContain(
       'Do not start repeated base-refresh/CI loops during preparation.',
+    )
+    expect(completionWorkflow).toContain(
+      'never perform a second base update or restart CI',
+    )
+    expect(prReviewGptLoop).toContain(
+      'The budget remains consumed until merge',
+    )
+    expect(prReviewGptLoop).toContain('report `moving-base race`')
+    expect(prReviewGptLoop).toContain('Do not poll for a quiet base.')
+    expect(agentsGuide).toContain('report `moving-base race` and stop')
+    expect(agentsGuide).toContain(
+      'run `pnpm verify:acceptance` once for that direct-push attempt',
+    )
+    expect(verificationAndRuntime).toContain(
+      'Do not restart full acceptance solely because',
+    )
+    expect(verificationAndRuntime).toMatch(
+      /The\s+one-rebase budget remains consumed until push or handoff/u,
+    )
+    expect(completionWorkflow).toContain(
+      'follow the one-rebase direct-push rule',
     )
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(

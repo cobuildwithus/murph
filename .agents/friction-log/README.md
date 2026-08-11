@@ -43,3 +43,29 @@ A friction-log change on `main` publishes pending entries. Frog-authored issue
 closures and reopenings reconcile immediately, and a daily recovery sweep runs
 at 00:17 UTC. Cleanup is written only to the reviewable `frog/sync` pull request,
 never directly to `main`.
+
+## Workflow authority
+
+The repository-wide `GITHUB_TOKEN` remains read-only and is not allowed to
+create pull requests. The workflow instead mints a short-lived installation
+token for a dedicated GitHub App installed only on this repository. The App has
+only Contents, Issues, and Pull requests read/write permissions; it has no rule
+bypass, organization, or administration authority. The workflow contains no
+approval or merge operation, so review and merge remain human-owned. Its token
+is explicitly narrowed to those three repository permissions for each run and
+is revoked when the job ends.
+
+Repository administrators provide `FROG_APP_CLIENT_ID` and
+`FROG_APP_BOT_LOGIN` as Actions variables and `FROG_APP_PRIVATE_KEY` as a
+secret in the `frog-reconciliation` environment. That environment is limited
+to the `main` branch, and the workflow opts out of deployment records because
+this is credential access rather than a deployment. `FROG_APP_BOT_LOGIN` is
+the App's exact bot login, including the `[bot]` suffix. Never commit or print
+the private key. Missing credentials fail the workflow closed; Frog does not
+fall back to `GITHUB_TOKEN`.
+
+The same job owns Murph PR-body normalization. It selects only the
+repository-owned `frog/sync` pull request created by the configured App bot and
+replaces one private marker-owned Architecture and Changelog footer. Zero
+matches are a no-op, ambiguous or untrusted matches fail closed, and retries are
+byte-identical.

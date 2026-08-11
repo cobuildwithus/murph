@@ -2296,14 +2296,14 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Personality Settings">
+        <Section title="Style Levels">
           <p className="text-sm text-muted-foreground">
             Private Humor, Push, and Detail controls. The mobile preview uses a
             full-height drawer with a safe-area footer; desktop uses a dialog.
           </p>
           <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
             <Button onClick={() => setPersonalitySettingsOpen(true)}>
-              Preview personality settings
+              Preview style levels
             </Button>
           </div>
           <MurphPersonalitySettingsDialog
