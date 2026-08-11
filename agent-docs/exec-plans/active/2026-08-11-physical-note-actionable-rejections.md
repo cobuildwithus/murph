@@ -102,3 +102,9 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   rollout instruction on immediate consumer convergence, exact runner
   fingerprint proof, Web-last deployment, and Web-first rollback. Adding a
   second protocol or compatibility path is not justified.
+- Round 3 found that three new Murph-owned recovery instructions also opened the
+  unrelated product-feedback path, including for transient printer failures.
+  Delete that coupling, leave feedback eligibility with its existing central
+  owner, and prove with both capabilities present that rejection recovery makes
+  no feedback call or candidate. This contracts runtime scope and adds no
+  replacement state or mechanism.

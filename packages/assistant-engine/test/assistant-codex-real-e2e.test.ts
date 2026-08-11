@@ -4710,6 +4710,17 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
           await mkdir(path.dirname(absoluteImagePath), { recursive: true })
           await writeFile(absoluteImagePath, imageBytes)
           let sendCount = 0
+          const feedbackRecords: unknown[] = []
+          const productFeedbackRecorder: AssistantTurnProductFeedbackRecorder = {
+            async recordProductFeedback(feedback) {
+              feedbackRecords.push(feedback)
+              return { recorded: true }
+            },
+            discardProductFeedback() {},
+            readProductFeedback() {
+              return null
+            },
+          }
           const hostedToolContext = {
             computerToolsAvailable: false,
             currentHostedDeliveryContext: () => null,
@@ -4760,6 +4771,7 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
             developerInstructions: buildDirectConversationDeveloperInstructions(),
             dynamicTools: resolveMurphDynamicTools({
               physicalNotesAvailable: true,
+              productFeedbackAvailable: true,
             }),
             env: {
               ...config.env,
@@ -4769,6 +4781,7 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
             hostedToolContext,
             model: config.model,
             modelProvider: config.modelProvider,
+            productFeedbackRecorder,
             prompt: [
               `Message ref: ${messageRef}`,
               'I explicitly approve mailing the already generated note below to Casey at 42 Example Lane, Sampleton, GA 30303.',
@@ -4786,8 +4799,16 @@ describeRealCodex('real Codex physical-note rejection recovery e2e', () => {
             action.kind === 'dynamic'
             && action.tool === MURPH_SEND_PHYSICAL_NOTE_TOOL.name
           )
+          const feedbackCalls = readCapabilityRoutingActions(
+            result.jsonEvents,
+          ).filter((action) =>
+            action.kind === 'dynamic'
+            && action.tool === MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL.name
+          )
 
           expect(physicalNoteCalls).toHaveLength(1)
+          expect(feedbackCalls).toHaveLength(0)
+          expect(feedbackRecords).toHaveLength(0)
           expect(sendCount).toBe(1)
           expect(result.finalMessage).toMatch(
             /nothing was sent|was not sent|wasn't sent/iu,

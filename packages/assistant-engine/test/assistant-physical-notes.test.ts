@@ -363,6 +363,9 @@ describe('assistant physical notes', () => {
       expect(result.rpcResult.contentItems[0]?.text).toMatch(
         /do not .*retry automatically/iu,
       )
+      expect(result.rpcResult.contentItems[0]?.text).not.toMatch(
+        /product feedback|submit_product_feedback/iu,
+      )
       if (
         failureReason === 'service_unavailable'
         || failureReason === 'request_invalid'
