@@ -108,6 +108,16 @@ describe("changelog entry fragments", () => {
     );
   });
 
+  it("fails closed when different dates reuse an item ID", () => {
+    const root = createContentRoot();
+    writeEntry(root, "2026-08-12", "duplicate-item", 100);
+    writeEntry(root, "2026-08-11", "duplicate-item", 100);
+
+    expect(() => loadChangelogFragmentEditions(root)).toThrow(
+      "Duplicate changelog fragment item ID: duplicate-item",
+    );
+  });
+
   it("fails closed on unexpected fragment fields", () => {
     const root = createContentRoot();
     writeEntry(root, "2026-08-12", "unexpected-field", 100, {
