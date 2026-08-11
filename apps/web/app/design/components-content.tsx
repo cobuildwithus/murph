@@ -171,6 +171,7 @@ import {
 } from "../(dashboard)/environment/environment-page-client";
 import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environment-voice-script";
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
+import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
 import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
@@ -178,6 +179,7 @@ import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
 import { PersonalPatternsComponentStudy } from "./personal-patterns-study";
+import { DashboardSidebarStudy } from "./dashboard-sidebar-study";
 
 const DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT =
   "/api/groups/fund/gf1.design_group_runtime.synthetic_funding_signature";
@@ -218,7 +220,7 @@ function Section({
   title: string;
 }) {
   return (
-    <div id={id} className="flex flex-col gap-6">
+    <div id={id} className="flex scroll-mt-24 flex-col gap-6">
       <h2 className="font-mono text-xs uppercase tracking-[0.12em] text-muted-foreground">{title}</h2>
       {children}
     </div>
@@ -637,6 +639,15 @@ export function ComponentsContent() {
           <h1 className="font-serif text-4xl font-semibold tracking-tight text-foreground">Components</h1>
           <p className="mt-2 text-sm text-muted-foreground">Shadcn base UI + custom Murph components. Colors and typography live in the Brand tab.</p>
         </div>
+
+        <Separator />
+
+        <Section title="Dashboard primary navigation">
+          <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+            Production dashboard destinations in their standard visual hierarchy.
+          </p>
+          <DashboardSidebarStudy />
+        </Section>
 
         <Separator />
 
@@ -1442,9 +1453,18 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage compact table card states"
+          title="iMessage workout and compact table fallback states"
         >
           <ImessageCompactTableCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="imessage-challenge-standings-card"
+          title="iMessage challenge standings card"
+        >
+          <ImessageChallengeStandingsCardStudy />
         </Section>
 
         <Separator />

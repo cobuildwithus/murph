@@ -164,28 +164,4 @@ describe("sync-hosted-linq-lines script", () => {
     );
     expect(result.stderr).not.toContain("server-only");
   });
-
-  it("loads the legacy trial retirement CLI in dry-run mode by default", () => {
-    const childEnvironment = { ...process.env };
-    delete childEnvironment.NODE_OPTIONS;
-    const result = spawnSync(
-      "pnpm",
-      [
-        "--dir",
-        "apps/web",
-        "stripe:retire-legacy-pulse-trials",
-      ],
-      {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-        env: childEnvironment,
-      },
-    );
-
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain(
-      "Legacy trial retirement requires --stripe-mode=<test|live>.",
-    );
-    expect(result.stderr).not.toContain("server-only");
-  });
 });

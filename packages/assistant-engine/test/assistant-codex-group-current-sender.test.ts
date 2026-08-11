@@ -160,3 +160,119 @@ describe("murph.group ask_current_sender", () => {
     }
   });
 });
+
+describe("murph.group message_current_sender", () => {
+  function parsePrivateMessageRequest(messageRef = SELECTED_INPUT_ID) {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "message_current_sender",
+      message_ref: messageRef,
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected a parsed murph.group request.");
+    }
+    return request;
+  }
+
+  it("accepts only the exact Message ref as model input", () => {
+    expect(parsePrivateMessageRequest().request).toEqual({
+      action: "message_current_sender",
+      messageRef: SELECTED_INPUT_ID,
+    });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "message_current_sender",
+      message_ref: SELECTED_INPUT_ID,
+      text: "model-authored private message",
+    }))).toMatchObject({ kind: "invalid-group-arguments" });
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "message_current_sender",
+      memberId: "model_selected_member",
+      message_ref: SELECTED_INPUT_ID,
+    }))).toMatchObject({ kind: "invalid-group-arguments" });
+  });
+
+  it("replaces the Message ref with a trusted accepted-input origin", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "message_current_sender" as const,
+      result: { status: "accepted" as const },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parsePrivateMessageRequest(),
+    });
+
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "message_current_sender",
+      origin: {
+        assistantInputId: SELECTED_INPUT_ID,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    });
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"action":"message_current_sender"',
+    );
+  });
+
+  it("returns a missing direct route as a model-visible recovery result", async () => {
+    const groupRequest = vi.fn(async () => ({
+      action: "message_current_sender" as const,
+      result: {
+        status: "unavailable" as const,
+        unavailableReason: "same_channel_direct_route_unavailable",
+      },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ request: groupRequest }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: parsePrivateMessageRequest(),
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"unavailableReason":"same_channel_direct_route_unavailable"',
+    );
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"recovery":"Ask the sender to open a direct Murph chat on the same channel, then retry."',
+    );
+  });
+
+  it("fails closed for a foreign Message ref, private chat, or schedule", async () => {
+    for (const hostedToolContext of [
+      createHostedToolContext({ acceptedInputIds: [OTHER_INPUT_ID] }),
+      createHostedToolContext({ conversationScope: "direct" }),
+      createHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: null,
+          origin: {
+            automationId: "automation_group",
+            kind: "automation_occurrence",
+            occurrenceAt: "2026-07-27T20:00:00.000Z",
+          },
+        }),
+      }),
+    ]) {
+      const groupRequest = hostedToolContext.groupTool?.request;
+      const result = await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 1,
+        progressDelivery: null,
+        request: parsePrivateMessageRequest(),
+      });
+      expect(result.rpcResult.success).toBe(false);
+      expect(result.rpcResult.contentItems[0]?.text).toMatch(
+        /selected accepted message|scheduled group invocations/u,
+      );
+      expect(groupRequest).not.toHaveBeenCalled();
+    }
+  });
+});

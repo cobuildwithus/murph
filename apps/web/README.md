@@ -751,11 +751,12 @@ Hosted onboarding extras:
 - `LINQ_API_TOKEN`
 - `LINQ_API_BASE_URL`
 - `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` enables the five-minute production
-  reply-latency monitor when the shared Resend operational-alert transport is
-  fully configured through `RESEND_API_KEY`, `HOSTED_LINQ_ALERT_EMAIL_FROM`,
-  and `HOSTED_LINQ_ALERT_EMAILS`. The historical Linq-prefixed email names are
-  shared operational configuration; the latency path never sends through or
-  falls back to Linq/iMessage. The monitor uses the fixed 30-second product
+  reply-latency and runtime-progress monitors when the shared Resend
+  operational-alert transport is fully configured through `RESEND_API_KEY`,
+  `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`. The historical
+  Linq-prefixed email names are shared operational configuration; neither path
+  sends through or falls back to Linq/iMessage. The latency monitor uses the
+  fixed 30-second product
   boundary for the first accepted user-visible response: either a progress
   update or the final reply. Completed grouped traces count once by their
   shared Linq delivery, and traces for one in-flight provider request count
@@ -791,6 +792,19 @@ Hosted onboarding extras:
   expires clears the incident. Persisted evidence remains aggregate
   counts/timings plus sanitized provider failure status in the existing
   operational-alert row.
+  The separate progress monitor detects an active runtime whose live
+  conversation or system mailbox lane has retained work beyond its durable
+  clean-handling high-water for at least 15 minutes. It uses the mailbox
+  owner's existing expiry and 14-day retention rules plus the canonical exact
+  runtime AI-access decision, including current group-participant authority and
+  health-data consent. A conversation
+  head with a valid AI-usage denial and no later execution evidence is an
+  intentional pause rather than a stall; resumed work ages from its first
+  post-denial staging, provider, delivery, or durable consumption milestone.
+  The monitor reports aggregate runtime,
+  lane, age, and pending-item counts only. It has its own singleton incident
+  row, so an active reply-latency incident cannot suppress a newly discovered
+  progress stall; recovery silently rearms each monitor independently.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_EXECUTION_CONTROL_TIMEOUT_MS`
 
@@ -885,12 +899,22 @@ Hosted AI usage metering:
   attributed stable-link activations. Conversational referrals also use
   immediate post-commit reconciliation, and that same cron converges on one
   final referral grant and one atomic source-mailbox celebration fence.
-  Recovery also re-signals bounded oldest unconsumed celebration items after a
-  failed Temporal signal. Personal arming freezes
-  only the source channel, blinded exact-thread locator, and directness fact;
-  celebration requires the same direct thread, and personal Linq delivery uses
-  an explicit source target that cannot fall back to a newer home route. Group
-  celebration carries live thread authority. The isolated completion formatter
+  Recovery selects each lane containing a live pending celebration and
+  re-signals only its first live item above the canonical lane-consumption
+  cursor. Live-row filtering skips retention-old or expired prefixes. That head
+  may be an earlier non-referral predecessor, so a failed Temporal signal remains
+  recoverable in ordinary lane order while the existing no-progress backoff
+  coalesces repeat passes. Web does not read or rewrite encrypted payloads. If an
+  authority-less legacy direct-Linq wake was already imported,
+  the local runtime reasserts its frozen target through Web's existing route
+  owner before model work. An exact live match continues through the normal
+  audience and provider-entry guards, a definitive stale match ends without a
+  send so ordered work advances, and unavailable authority retains normal
+  retry. Personal arming freezes only the source channel, blinded exact-thread
+  locator, and directness fact; celebration requires the same direct thread,
+  and personal Linq delivery uses an explicit source target that cannot fall
+  back to a newer home route. Group celebration carries live thread authority.
+  The isolated completion formatter
   receives only resolved tone, Humor, and Unhinged values, never transcript
   history.
   Durable celebration copy is unnamed. Unlinked Telegram group evidence stays
@@ -1125,7 +1149,7 @@ alias proofs, elapsed drain, and post-drain verification as rollout evidence.
 - Enable Vercel OIDC so the app-local hosted-execution auth adapter can present
   workload identity to Cloudflare on dispatch and status requests.
 - Set `CRON_SECRET` for the hosted cron routes under `/api/internal/**/cron`.
-- To receive reply-latency emails, configure `RESEND_API_KEY`,
+- To receive reply-latency and runtime-progress emails, configure `RESEND_API_KEY`,
   `HOSTED_LINQ_ALERT_EMAIL_FROM`, and `HOSTED_LINQ_ALERT_EMAILS`, then set
   `HOSTED_RUNTIME_LATENCY_ALERT_TIME_ZONE` to the operator's IANA time zone.
   The time zone is the monitor opt-in: without it the monitor stays disabled;
@@ -1675,8 +1699,8 @@ Notes:
 - Hosted internal cron paths accept only Vercel cron bearer auth via
   `CRON_SECRET`.
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
-  latency facts every five minutes. It does not signal Temporal, wake
-  Cloudflare, or participate in message processing.
+  latency and durable mailbox-progress facts every five minutes. It does not
+  signal Temporal, wake Cloudflare, or participate in message processing.
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning. Later successful invoices for an already
@@ -1714,9 +1738,12 @@ Assertion-authenticated browser-to-agent bridge routes:
 
 Public provider-facing routes:
 
-- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V4
-  nutrition, generic-table, or workout presentation for Linq's static Messages
-  fallback. It accepts no query string, identity, canonical reference,
+- `GET /imessage/card/v1/:payload.png` renders one bounded immutable V1-V5
+  nutrition, generic-table, workout, or challenge-standings presentation for
+  Linq's static Messages fallback. Production challenge-standings producers
+  replace the challenge title and ranked labels with fixed ordinal presentation
+  before encoding, while exact names remain only in the native fragment and
+  semantic captions. The route accepts no query string, canonical reference,
   credential, tracking reference, or authority; it performs no database or
   remote read and returns private no-store/no-index headers. Deploy the
   compatible native reader first, this route second, and its runtime producer
@@ -1863,12 +1890,13 @@ Current hosted billing assumptions:
 - Delayed legacy Stripe trial objects remain eligible only for exact bounded
   reconciliation or cleanup. They cannot create, extend, or restore free
   access; starter capacity and paid invoices are the current authorities.
-- Drain those objects only through `pnpm stripe:retire-legacy-pulse-trials
-  --stripe-mode=<test|live>`: dry-run is the default, apply requires the exact
-  observed candidate count, and any provider state that may represent paid
-  service aborts preflight. Remove the compatibility owner only after old trial
-  creators are gone, the dry-run reports zero, and the delayed-event horizon has
-  passed.
+- The legacy provider-object drain is complete: an authenticated production
+  apply retired 69 exact candidates, then its automatic verification reported
+  zero remaining candidates and convergence. The one-time Ops control, batch
+  route and service, and CLI were removed. Keep the accepted
+  legacy Pulse Price and per-member cleanup/event guards through the maximum
+  delayed-event and manual-replay horizon; then remove that bounded
+  compatibility together in a separate contracting change.
 - `/ops/email` is the operator-only member email composer. It accepts up to 100
   explicit hosted member IDs plus one plain-text subject and body. Preview
   resolves verified email first and falls back to the stored Stripe checkout

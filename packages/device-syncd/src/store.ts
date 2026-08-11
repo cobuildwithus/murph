@@ -244,6 +244,7 @@ export class SqliteDeviceSyncStore {
       lastDataAt: source.lastDataAt,
       lastSeenAt: source.lastSeenAt,
       resourceCount: countConnectionSourceResources(source.resourceAvailabilitySummary),
+      resourceAvailabilitySummary: source.resourceAvailabilitySummary,
       sourceProviderSlug: source.sourceProviderSlug,
       status: source.status,
     }));

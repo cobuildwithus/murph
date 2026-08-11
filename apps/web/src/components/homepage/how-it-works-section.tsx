@@ -228,7 +228,7 @@ function RunCard() {
             <span className="font-mono font-medium uppercase tracking-[0.1em] text-[#2d3436]">
               Active · Day 1 of 14
             </span>
-            <span className="ml-auto font-mono uppercase tracking-[0.1em] text-[#736a58]/40">
+            <span className="ml-auto font-mono uppercase tracking-[0.1em] text-[#736a58]">
               Analysis
             </span>
           </div>
@@ -292,7 +292,7 @@ function LearnCard() {
               HRV trend · 28d
             </span>
             <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1 text-[0.625rem] text-[#736a58]/60">
+              <span className="flex items-center gap-1 text-[0.625rem] text-[#736a58]">
                 <span className="inline-block h-px w-2.5 border-t border-dashed border-[#c4a882]" />
                 Baseline
               </span>

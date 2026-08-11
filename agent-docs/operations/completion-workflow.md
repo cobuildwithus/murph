@@ -206,8 +206,8 @@ product-decision owners.
 11. Enter the review-resolution loop below. Completion means there are no unresolved accepted/actionable findings, not merely that both jobs ran. The applicable specialist result must be `SPECIALIST_OUTCOME: PASS` or have every accepted finding resolved, and the final gate must reach `ROUND_OUTCOME: PASS` with zero accepted findings.
 12. Rerun the focused local checks affected by remediation, then push so required CI evaluates the exact new PR head. If CI fails, diagnose from the narrowest reproducer outward. For a direct shared-default push, rerun `pnpm verify:acceptance` against the final reconciled candidate.
 13. Run the final review locally as the parent agent after findings from both ReviewGPT stages are resolved: re-read the full diff with fresh eyes, walk changed call paths, inspect any applied coverage patch in context, and check for remaining proof gaps, residual risks, and handoff completeness. Do not spawn a final-review subagent. If that review causes a behavior-bearing change, push it and run the required next final-gate round.
-14. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
-15. For PR-lane work, the task is not complete until the PR branch has no merge conflicts with `main` or its configured base branch. Before final handoff, fetch the latest `main`/base branch and prove the PR head can merge cleanly, or update the branch by a normal merge/rebase, resolve any conflicts, rerun the required checks for the touched surfaces, and push the resolved head. Follow the ReviewGPT loop's base-update and patch-change rerun rules.
+14. Close any active execution plan and create the final scoped commit through the path chosen by the routing doc and `AGENTS.md`; push the resulting head. Include every public-safe Frog entry created or modified during the task in that same scoped commit; do not finish with a task-owned entry untracked, unstaged, or omitted. For plan-bearing work, use `scripts/finish-task <active-plan-path> "summary" <path>...` so the plan is archived. If overlapping dirty work blocks safe closure, preserve the Frog entry, archive the plan with `scripts/close-exec-plan.sh` and report the scoped-commit blocker.
+15. For PR-lane work, fetch the latest `main` or configured base and run `git merge-tree --write-tree HEAD origin/<base>` before final handoff. Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation; do not merge or rebase only to chase a base that can move again while CI runs. If the merge-tree reports conflicts, update the branch normally, resolve and inspect them, rerun affected proof and required CI, and push. If the user authorized the actual merge and strict up-to-date checks block it, use the repository merge queue when available or perform one normal base update at the merge boundary, let required CI gate that head, and merge promptly. Do not start repeated base-refresh/CI loops during preparation. Follow the ReviewGPT loop's base-update and patch-change rules.
 16. An open PR remains active, so preserve its task worktree. If the current turn includes confirmed PR merge or closure, run `scripts/retire-worktree <path>` from another checkout before final handoff. The command is the mandatory task-worktree retirement gate defined in `agent-docs/operations/agent-workflow-routing.md`; preserve and report the checkout when it fails closed.
 17. Final handoff must report required-check results, direct scenario evidence,
     the preliminary specialist lens verdicts, product-experience purpose
@@ -272,6 +272,18 @@ Required:
   cardinality, whether it runs serially or in parallel, its timeout, retry, and
   fallback behavior, and its expected or measured latency. Include before/after
   call counts and focused trace, benchmark, or deterministic call-count proof.
+- **Database collection fanout impact.** If the diff does not add or change a
+  database-touching collection path, write `Not applicable` and give the reason.
+  Otherwise, at the maximum admitted cardinality, report before/after query
+  count, peak pooled connections and concurrent transactions, and peak
+  concurrent external or crypto work for the composed path, including nested
+  helpers. Name set-based or bounded-page reads, reused owner facts, explicit
+  concurrency caps, and the evidence supporting these bounds. For hot, locked,
+  or transactional paths, include deterministic call-count/concurrency proof;
+  confirm that required live authority, lifetime, target, crypto, transaction,
+  and irreversible-effect revalidation checks remain at their owning boundaries.
+  Cross-reference `Hot reply path impact` when it already supplies these facts
+  instead of repeating them.
 - **Murph initial provider input impact.** Report the complete first
   provider-visible input assembled by Murph and Codex for individual and group
   Murph separately. A provider-input-affecting PR must render the PR base and

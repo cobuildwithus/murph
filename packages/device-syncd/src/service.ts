@@ -971,6 +971,9 @@ class DeviceSyncServiceController {
         account: currentAccount,
         now,
         signal: jobAbortController.signal,
+        connectionSourceAdmissionMode: this.listConnectionSourcesForJob
+          ? "listed_only"
+          : "discover_unlisted",
         ...(this.shouldYieldJobExecution
           ? { shouldYield: this.shouldYieldJobExecution }
           : {}),
@@ -984,6 +987,8 @@ class DeviceSyncServiceController {
           });
           const receipt: ProviderSnapshotImportReceipt = {
             canonicalEventCount: readCanonicalDeviceImportEventCount(importResult),
+            canonicalEventExternalRefResourceIds:
+              readCanonicalDeviceImportEventExternalRefResourceIds(importResult),
             durableDeliveryAccepted: true,
           };
           return receipt;
@@ -2106,6 +2111,20 @@ function toPlainRecord(value: unknown): Record<string, unknown> | null {
 function readCanonicalDeviceImportEventCount(value: unknown): number {
   const record = toPlainRecord(value);
   return record && Array.isArray(record.events) ? record.events.length : 0;
+}
+
+function readCanonicalDeviceImportEventExternalRefResourceIds(value: unknown): string[] {
+  const record = toPlainRecord(value);
+  if (!record || !Array.isArray(record.events)) {
+    return [];
+  }
+
+  return record.events.flatMap((event) => {
+    const externalRef = toPlainRecord(toPlainRecord(event)?.externalRef);
+    return typeof externalRef?.resourceId === "string"
+      ? [externalRef.resourceId]
+      : [];
+  });
 }
 
 function formatValidationPath(value: unknown): string {

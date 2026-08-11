@@ -1,6 +1,6 @@
 # Group Challenge Formats and Additive Scorecards
 
-Last verified: 2026-07-29
+Last verified: 2026-08-09
 
 Status: Implemented for new group challenges
 
@@ -232,6 +232,22 @@ result on the existing challenge page in the same turn.
 A command failure is an invalid normalized input or ruling. Murph fixes that input
 instead of silently falling back to model arithmetic.
 
+When a requested Linq group update is eligible for the native standings card, the
+attachment tool accepts only the challenge-page slug, its exact displayed definition
+digest, and normalized observations, rather than accepting a model-authored definition
+or scoreboard. The digest comes from the page revision used to normalize those
+observations. The host reads the closed definition from the current typed challenge
+page, rejects a changed digest, derives the complete scorer input and component
+scopes, requires every successful batch to share the same ordered current-room-member
+and authorized-label roster, requires exact observations for every page participant
+in state `in`, verifies that every definition scope was read, runs the scorer, and
+compare-and-set persists the exact page-derived input and result before attaching.
+Card participants, format, objective, teams, rates, caps, units, points, target,
+order, coverage, counts, ranks, and ties therefore cannot drift from the page at the
+irreversible effect boundary. The model still owns authorized record interpretation;
+the trusted host owns definition authority, revision consistency, read proof,
+arithmetic, and canonical persistence.
+
 ## Durable ownership
 
 The existing group challenge knowledge page is the sole durable owner. There is no
@@ -255,6 +271,59 @@ The page keeps:
 Managed state changes use `knowledge upsert`; append-only social facts may use
 `append-section`. Rules, weights, caps, thresholds, teams, settlement mode, and
 `rulesRevision` never change silently after results are visible.
+
+New challenge pages that may emit native standings use `pageType: challenge` and
+exactly one closed definition section:
+
+````md
+<!-- murph:group-challenge-definition:v1:start -->
+## Challenge definition
+
+Definition digest: `1dcd0de56109132f36094973559cfcf289530dfe1f4d28b5cd8780e6d5be0840`
+
+```json
+{
+  "version": 1,
+  "rulesRevision": 1,
+  "format": { "kind": "individual", "objective": { "kind": "ranking" } },
+  "participants": [
+    { "participantId": "participant_example", "state": "in" }
+  ],
+  "scorecard": {
+    "components": [
+      {
+        "id": "steps",
+        "label": "Steps",
+        "quantityUnit": "steps",
+        "evaluationRule": "Sum settled shared steps in the challenge window.",
+        "projectionScopeKeys": ["steps-days.v0"],
+        "points": 3,
+        "perQuantity": 100,
+        "settlementMode": "window-total"
+      }
+    ]
+  }
+}
+```
+<!-- murph:group-challenge-definition:v1:end -->
+````
+
+The JSON is closed and bounded: one to five components, one to three exact scopes per
+component, positive integer rates, optional non-negative caps, a positive integer
+`rulesRevision`, and participation states `in`, `pending`, `declined`, or
+`withdrawn`. The lowercase digest is SHA-256 over the compact schema-normalized JSON
+and is recomputed whenever any definition field changes. The host validates it against
+the JSON and continues to derive all structural authority from that JSON. A malformed,
+mismatched-digest, duplicate, missing, generic-page, or legacy unstructured definition
+is ordinary-text-only. Attachment never creates or repairs this section.
+
+`vault-cli knowledge show` also returns `pageRevisionDigest`, lowercase SHA-256 over
+the exact returned canonical Markdown bytes. After normalizing observations from that
+page, the model copies this page-revision digest into the attachment request. The host
+re-reads the page and requires the digest to match before scoring, persistence, or
+delivery, so definition-preserving changes to the window, cadence, baselines,
+cumulative settlement, rulings, or prior snapshots reject stale observations. The
+existing expected-Markdown compare-and-set rejects a later change after that check.
 
 ## Long-running cumulative settlement
 
@@ -313,10 +382,10 @@ member into the price of missing the target.
 
 ## Compatibility and rollout
 
-Existing active one-metric challenge pages continue under their frozen rules. New
-challenges may use the format and scorecard contract. A legacy page is migrated only
-through an explicit prospective rules revision; past published snapshots are never
-rewritten.
+Existing active one-metric challenge pages continue under their frozen rules and
+ordinary-text presentation. New challenges use the typed page and closed definition
+contract before native cards are eligible. A legacy page is migrated only through an
+explicit prospective rules revision; past published snapshots are never rewritten.
 
 The static root system prompt is unchanged. `group-challenge-scorecards` is an
 on-demand companion skill loaded for teams, targets, multiple metrics, weighted
@@ -337,6 +406,11 @@ points, or long-running cumulative games.
 - Five distinct scopes compose through bounded reads without widening the transport.
 - A `not_granted` batch stops before a later read can replace its offer evidence.
 - Batches with different ordered participant sets are never combined.
+- A native card requires one typed page with a valid closed definition, at least one
+  successful read, exact observations for all page-owned `in` participants, those
+  participants present in the stable current-room read, definition-owned scopes
+  backed by those reads, and canonical snapshot persistence before attachment.
+  Additional current room members never become challenge participants.
 - Only normalized quantities and statuses reach deterministic scoring.
 - Daily-additive settlement cannot count a settled date twice.
 - Missing or pending dates do not advance the cumulative watermark.

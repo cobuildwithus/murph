@@ -64,6 +64,12 @@ Check, when relevant:
 
 Do not request progress photos, exact calorie logging, body-fat percentage, or daily weighing by default. Offer only the minimum measurement burden that can change a decision.
 
+For a daily nutrition-card calorie target, read
+`$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`.
+This skill owns whether the direction is maintenance/recomp, muscle gain, or fat
+loss; the reference owns the researched estimate, conservative adjustment, and
+explanation-before-card sequence.
+
 ## If Context Is Thin
 
 Ask one high-yield question:

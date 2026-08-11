@@ -270,7 +270,7 @@ describe("hosted local device connect e2e", () => {
   );
 
   it(
-    "binds rejected subscription actions to one real mailbox input across signed Web control",
+    "binds idempotent subscription actions to one real mailbox input across signed Web control",
     async () => {
       await requireScenario().seedActiveHostedMember({
         billingPlanCode: "launch_monthly",
@@ -308,15 +308,15 @@ describe("hosted local device connect e2e", () => {
         assistantInputId,
       };
 
-      await expect(subscriptionPort.request(request)).rejects.toMatchObject({
-        code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
-        status: 409,
-        statusCode: 409,
+      await expect(subscriptionPort.request(request)).resolves.toMatchObject({
+        action: "continue_pulse",
+        plan: { code: "launch_monthly" },
+        status: "no_action_required",
       });
-      await expect(subscriptionPort.request(request)).rejects.toMatchObject({
-        code: "HOSTED_PULSE_TRIAL_START_PAID_UNSUPPORTED",
-        status: 409,
-        statusCode: 409,
+      await expect(subscriptionPort.request(request)).resolves.toMatchObject({
+        action: "continue_pulse",
+        plan: { code: "launch_monthly" },
+        status: "no_action_required",
       });
       await expect(subscriptionPort.request({
         action: "upgrade_edge",

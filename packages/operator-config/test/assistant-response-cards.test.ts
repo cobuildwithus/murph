@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
   LINQ_IMESSAGE_APP_CARD_ORIGIN,
+  assistantResponseCardAuthoringSchema,
   assistantResponseCardJsonSchema,
   assistantResponseCardSchema,
   buildLinqIMessageAppCardUrl,
@@ -42,7 +43,7 @@ const COMPLETE_CARD_V2: DailyNutritionResponseCardV2 = {
   goals: {
     calories: { target: 2_100, status: 'under_target' },
     proteinGrams: { target: 100, status: 'on_target' },
-    carbsGrams: null,
+    carbsGrams: { target: 220, status: 'on_target' },
     fatGrams: { target: 40, status: 'on_target' },
     fiberGrams: { target: 30, status: 'under_target' },
   },
@@ -80,7 +81,8 @@ describe('assistant response cards', () => {
                       type: 'number',
                     },
                   },
-                  type: ['object', 'null'],
+                  required: ['target', 'status'],
+                  type: 'object',
                 },
               },
               properties: {
@@ -103,11 +105,12 @@ describe('assistant response cards', () => {
                       type: 'number',
                     },
                   },
-                  type: ['object', 'null'],
+                  required: ['target', 'status'],
+                  type: 'object',
                 },
                 proteinGrams: {
                   additionalProperties: false,
-                  type: ['object', 'null'],
+                  type: 'object',
                 },
                 carbsGrams: {},
                 fatGrams: {},
@@ -239,6 +242,34 @@ describe('assistant response cards', () => {
       ],
     })
     expect(assistantResponseCardSchema.parse(COMPLETE_CARD)).toEqual(COMPLETE_CARD)
+    expect(assistantResponseCardAuthoringSchema.parse(COMPLETE_CARD_V2)).toEqual(
+      COMPLETE_CARD_V2,
+    )
+    expect(assistantResponseCardAuthoringSchema.safeParse(COMPLETE_CARD).success)
+      .toBe(false)
+
+    for (const metric of [
+      'calories',
+      'proteinGrams',
+      'carbsGrams',
+      'fatGrams',
+      'fiberGrams',
+    ] as const) {
+      const legacyCompatibleCard = {
+        ...COMPLETE_CARD_V2,
+        goals: {
+          ...COMPLETE_CARD_V2.goals,
+          [metric]: null,
+        },
+      }
+      expect(
+        assistantResponseCardAuthoringSchema.safeParse(legacyCompatibleCard)
+          .success,
+      ).toBe(false)
+      expect(assistantResponseCardSchema.parse(legacyCompatibleCard)).toEqual(
+        legacyCompatibleCard,
+      )
+    }
   })
 
   it('rejects malformed, unknown, and implausible daily nutrition values', () => {
@@ -417,7 +448,7 @@ describe('assistant response cards', () => {
     )
 
     expect(renderAssistantResponseCardText(COMPLETE_CARD_V2)).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
     )
     expect(renderAssistantResponseCardText({
       ...COMPLETE_CARD_V2,
@@ -430,8 +461,16 @@ describe('assistant response cards', () => {
         fiberGrams: { target: 30, status: 'unavailable' },
       },
     })).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Some nutrition estimates were partial.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (status unavailable). Some nutrition estimates were partial.',
     )
+
+    expect(renderAssistantResponseCardText({
+      ...COMPLETE_CARD_V2,
+      goals: {
+        ...COMPLETE_CARD_V2.goals,
+        carbsGrams: null,
+      },
+    })).toContain('carbs target unavailable')
   })
 
   it('uses the same bounded display precision as the native card', () => {
@@ -560,14 +599,10 @@ describe('assistant response cards', () => {
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
-      subcaption:
-        'Goals: Calories under · Protein on target · Fat on target · Fiber under',
     })
-    expect(proteinGoalLayout.subcaption).toBe('Goals: Protein on target')
+    expect(proteinGoalLayout).not.toHaveProperty('subcaption')
     expect(completeNoGoalsLayout).not.toHaveProperty('subcaption')
-    expect(directionalGoalsLayout.subcaption).toBe(
-      'Goals: Calories far under · Protein over',
-    )
+    expect(directionalGoalsLayout).not.toHaveProperty('subcaption')
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
       schemaVersion: 2,
       card: {

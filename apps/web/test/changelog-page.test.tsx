@@ -62,12 +62,17 @@ describe("ChangelogPage", () => {
     expect(markup).toContain("A clearer way back to shared cards");
     expect(markup).toContain("Shared cards point back to Murph");
     expect(markup).toContain(
-      "Starter access, patterns, reminders, cards, and web search",
+      "Starter access, patterns, health history, referrals, reminders, cards, voices, search, and clearer pages",
     );
+    expect(markup).toContain("Blood-pressure history waits for the whole sync");
+    expect(markup).toContain("Response cards stay compact in Messages");
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");
+    expect(markup).toContain("The homepage starts lighter");
     expect(markup).not.toContain("Ask Murph to search");
+    expect(markup).toContain("Voice memos keep your chosen voice");
     expect(markup).toContain("Referrals, Max, and a more capable Murph");
+    expect(markup).toContain("Continue a group question privately");
     expect(markup).toContain(
       "Exact experiment links and steadier background work",
     );
@@ -116,7 +121,13 @@ describe("ChangelogPage", () => {
       'href="/changelog?edition=2026-08-10#personal-patterns"',
     );
     expect(markup).toContain(
+      'href="/changelog?edition=2026-08-10#voice-memos-use-your-voice"',
+    );
+    expect(markup).toContain(
       'href="/changelog?edition=2026-08-09#public-referral-home"',
+    );
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-09#private-group-follow-up"',
     );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-06#x-post-media-understanding"',
@@ -241,6 +252,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain('data-design-study="changelog-archive"');
     expect(markup).toContain('data-design-state="latest-production-edition"');
     expect(markup).toContain("Managed OpenAI web search works again");
+    expect(markup).toContain("Blood-pressure history waits for the whole sync");
     expect(markup).not.toContain("Ask Murph to search");
     expect(markup).toContain("A week that closes its own loops");
     expect(markup).toContain("Follow-ups arrive where the work started");
