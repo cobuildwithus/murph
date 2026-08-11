@@ -826,13 +826,19 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. This is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for ask_current_sender, message_current_sender, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the request; this is not a provider message id.',
 } as const
+
+const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF = [
+  'ask_current_sender',
+  'message_current_sender',
+  'revoke_own_email_share',
+] as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
   'The native consent message completes the offer portion. If no other requested output remains, call murph.finish_without_reply. Otherwise answer the remaining request without adding a companion consent acknowledgment.'
 
-export const MURPH_GROUP_TOOL = {
+const MURPH_GROUP_TOOL_BASE = {
   namespace: 'murph',
   name: 'group',
   deferLoading: true,
@@ -1105,6 +1111,46 @@ export const MURPH_GROUP_TOOL = {
       message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
     },
     required: ['action'],
+  },
+} as const
+
+const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
+  MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum.filter((action) =>
+    action !== 'ask_current_sender'
+    && action !== 'message_current_sender'
+    && action !== 'revoke_own_email_share')
+
+export const MURPH_GROUP_TOOL = {
+  ...MURPH_GROUP_TOOL_BASE,
+  inputSchema: {
+    allOf: [
+      MURPH_GROUP_TOOL_BASE.inputSchema,
+      {
+        oneOf: [
+          {
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF,
+              },
+              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+            },
+            required: ['action', 'message_ref'],
+          },
+          {
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF,
+              },
+            },
+            required: ['action'],
+          },
+        ],
+      },
+    ],
   },
 } as const
 
