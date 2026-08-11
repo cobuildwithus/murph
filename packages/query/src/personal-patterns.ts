@@ -341,7 +341,6 @@ function collectMetricPointRecoveryOutcomeSeries(
   window: PatternWindow,
 ): OutcomeSeries[] {
   return [
-    metricPointOutcome("recovery-score", "Recovery score", "score", 3, 0.03, "recovery-score", metricPoints, window),
     metricPointOutcome("readiness-score", "Readiness score", "score", 3, 0.03, "readiness-score", metricPoints, window),
     metricPointOutcome("hrv", "HRV", "ms", 2, 0.05, "hrv-rmssd", metricPoints, window),
     metricPointOutcome("resting-heart-rate", "Resting heart rate", "bpm", 2, 0.03, "resting-heart-rate", metricPoints, window),

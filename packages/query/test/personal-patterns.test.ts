@@ -170,6 +170,39 @@ test("Browser Vault Personal Patterns falls back to its selected metric rows", a
   assert.deepEqual(parseBrowserVaultReplica(reversedReplica).personalPatterns, report);
 });
 
+test("Personal Patterns does not duplicate the canonical readiness metric as recovery", async () => {
+  const start = "2026-01-05";
+  const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
+  const vault = createVaultReadModel({
+    entities: runningDates.map((date, index) => event(`readiness_run_${index}`, date, "activity_session", {
+      activityType: "running",
+    })),
+    vaultRoot: "test://personal-pattern-readiness-alias",
+  });
+  const metricPoints = Array.from({ length: 112 }, (_, index) => {
+    const date = addDays(start, index);
+    return metricPoint(
+      `metric_readiness_${index}`,
+      date,
+      "readiness-score",
+      runningDates.includes(addDays(date, -1)) ? 90 : 70,
+      "score",
+    );
+  });
+
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-27T12:00:00.000Z",
+    metricPoints,
+    sourceBundleHash: "q".repeat(64),
+    vault,
+  });
+  const report = parseBrowserVaultReplica(replica).personalPatterns;
+
+  assert.deepEqual(report?.outcomes.map((outcome) => outcome.id), ["readiness-score"]);
+  assert.deepEqual(report?.cells.map((cell) => cell.outcomeId), ["readiness-score"]);
+  assert.equal(report?.cells[0]?.stage, "seen_again");
+});
+
 test("Personal Patterns qualifies factors before applying the six-row display cap", () => {
   const start = "2026-01-05";
   const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
