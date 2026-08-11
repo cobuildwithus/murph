@@ -136,6 +136,7 @@ const MURPH_DYNAMIC_TOOLS_WITH_STYLE = resolveMurphDynamicTools({
 })
 const DAILY_NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
   kind: 'daily_nutrition',
+  version: 2,
   localDate: '2026-07-28',
   mealCount: 3,
   totals: {
@@ -143,6 +144,14 @@ const DAILY_NUTRITION_RESPONSE_CARD: AssistantResponseCard = {
     proteinGrams: { total: 94.5, mealCount: 3 },
     carbsGrams: { total: 193.125, mealCount: 3 },
     fatGrams: { total: 34.75, mealCount: 3 },
+    fiberGrams: { total: 26.5, mealCount: 3 },
+  },
+  goals: {
+    calories: { target: 2_100, status: 'under_target' },
+    proteinGrams: { target: 100, status: 'on_target' },
+    carbsGrams: { target: 220, status: 'on_target' },
+    fatGrams: { target: 40, status: 'on_target' },
+    fiberGrams: { target: 30, status: 'under_target' },
   },
 }
 const TRACKED_COMPACT_TABLE_RESPONSE_CARD: AssistantResponseCard = {
@@ -20383,7 +20392,7 @@ describe('steered final segments', () => {
       deliveryContextOrdinal: 0,
       media: [],
       response:
-        'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+        'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
     }])
   })
 
@@ -20440,7 +20449,7 @@ describe('steered final segments', () => {
     expect(result.responseCard).toEqual(DAILY_NUTRITION_RESPONSE_CARD)
     expect(result.providerAuthoredFinalMessage).toBe('')
     expect(result.finalMessage).toBe(
-      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat from 3 logged meals.',
+      'Jul 28: about 1,490.25 calories · 94.5g protein · 193.125g carbs · 34.75g fat · 26.5g fiber from 3 logged meals. Targets: 2,100 calories (under target) · 100g protein (on target) · 220g carbs (on target) · 40g fat (on target) · 30g fiber (under target).',
     )
   })
 
