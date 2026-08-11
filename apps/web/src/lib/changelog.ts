@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Training, Starter access, patterns, reminders, cards, voices, and web search",
+      "Training, Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
     summary:
-      "A private Training view brings workouts together, Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep their local time, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Training brings workouts together, Starter usage remains available until used, patterns compare actions with next-day sleep and recovery, referral celebrations stay in the intended conversation, reminders keep local time, completed workout rows stay clear, voice memos keep their selected voice, and managed web search reaches current information.",
     items: [
       {
         id: "private-training-review",
@@ -123,6 +123,18 @@ const RAW_CHANGELOG_EDITIONS = [
           href: "/patterns",
           label: "View your patterns",
         },
+      },
+      {
+        id: "referral-notification-route-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Referral celebrations stay in the right conversation",
+        summary:
+          "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
+        details:
+          "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
+        relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
+        sourcePullRequests: [1592],
       },
       {
         id: "reminders-keep-requested-timezone",
