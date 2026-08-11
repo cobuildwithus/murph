@@ -122,13 +122,11 @@ test("renders separate active and paused consent controls", async () => {
   expect(active.container.textContent).toContain("Withdraw consent");
   const sourceReviewLink = active.container.querySelector('a[href="/connect"]');
   expect(sourceReviewLink?.textContent).toContain("Manage sources");
-  expect(sourceReviewLink?.getAttribute("aria-label")).toBe(
-    "Manage health data sources",
-  );
+  expect(sourceReviewLink?.hasAttribute("aria-label")).toBe(false);
   expect(sourceReviewLink?.parentElement?.getAttribute("aria-live")).toBe(
     "polite",
   );
-  expect(sourceReviewLink?.className).toContain("before:-inset-y-2.5");
+  expect(sourceReviewLink?.className).toContain("min-h-10");
   expect(active.container.firstElementChild?.className).toContain("items-center");
   expect(active.container.firstElementChild?.className).toContain(
     "grid-cols-[auto_minmax(0,1fr)]",
@@ -140,7 +138,8 @@ test("renders separate active and paused consent controls", async () => {
   expect(withdrawButton.parentElement).toBe(active.container.firstElementChild);
   expect(withdrawButton.className).toContain("col-start-2");
   expect(withdrawButton.className).toContain("sm:col-start-3");
-  expect(withdrawButton.className).toContain("bg-destructive/10");
+  expect(withdrawButton.className).toContain("bg-destructive/[0.05]");
+  expect(withdrawButton.className).toContain("hover:bg-destructive/[0.07]");
   expect(withdrawButton.className).toContain("h-9");
   expect(withdrawButton.className).not.toContain("bg-transparent");
 

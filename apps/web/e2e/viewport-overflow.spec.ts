@@ -228,6 +228,9 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
   expect(response?.status(), "health-data consent study should respond 200").toBe(
     200,
   );
+  await page.addStyleTag({
+    content: "nextjs-portal { display: none !important; }",
+  });
 
   const consentStates = [
     { active: true, name: "active-source-and-consent-controls" },
@@ -253,6 +256,14 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
           `[data-design-state="${consentState.name}"]`,
       );
       await expect(state).toBeVisible();
+      await state.evaluate((element) => {
+        element.scrollIntoView({ block: "center" });
+      });
+      if (consentState.active) {
+        await expect(
+          state.getByRole("link", { exact: true, name: "Manage sources" }),
+        ).toHaveAttribute("href", "/connect");
+      }
 
       const layout = await state.evaluate((frame) => {
         const status = frame.querySelector<HTMLParagraphElement>(
@@ -261,9 +272,9 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
         const content = status?.parentElement;
         const title = content?.firstElementChild;
         const button = frame.querySelector<HTMLButtonElement>("button");
-        const manageLink = frame.querySelector<HTMLAnchorElement>(
-          'a[aria-label="Manage health data sources"]',
-        );
+        const manageLink = Array.from(
+          frame.querySelectorAll<HTMLAnchorElement>('a[href="/connect"]'),
+        ).find((link) => link.textContent?.trim() === "Manage sources");
         if (!content || !title || !button) {
           throw new Error("Health-data consent action is missing.");
         }
@@ -273,6 +284,14 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
         const frameRect = frame.getBoundingClientRect();
         const manageLinkRect = manageLink?.getBoundingClientRect();
         const titleRect = title.getBoundingClientRect();
+        const linkOwnsPoint = (x: number, y: number) => {
+          const hit = document.elementFromPoint(x, y);
+          return Boolean(
+            manageLink &&
+              hit &&
+              (hit === manageLink || manageLink.contains(hit)),
+          );
+        };
         return {
           buttonHeight: buttonRect.height,
           buttonLeft: buttonRect.left,
@@ -285,8 +304,21 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
           frameLeft: frameRect.left,
           frameRight: frameRect.right,
           frameScrollWidth: frame.scrollWidth,
+          manageHitBottom: manageLinkRect
+            ? linkOwnsPoint(
+                manageLinkRect.left + manageLinkRect.width / 2,
+                manageLinkRect.bottom - 1,
+              )
+            : null,
+          manageHitTop: manageLinkRect
+            ? linkOwnsPoint(
+                manageLinkRect.left + manageLinkRect.width / 2,
+                manageLinkRect.top + 1,
+              )
+            : null,
           manageLinkHeight: manageLinkRect?.height ?? null,
           manageLinkTop: manageLinkRect?.top ?? null,
+          manageTargetHeight: manageLinkRect?.height ?? null,
           titleBottom: titleRect.bottom,
         };
       });
@@ -336,12 +368,108 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
 
       if (consentState.active) {
         expect(layout.manageLinkHeight).toBeGreaterThanOrEqual(20);
+        expect(layout.manageTargetHeight).toBeGreaterThanOrEqual(40);
+        expect(layout.manageHitTop).toBe(true);
+        expect(layout.manageHitBottom).toBe(true);
         expect(
           layout.manageLinkTop,
           `source management should follow the row title at ${width}px`,
         ).toBeGreaterThanOrEqual(
           layout.titleBottom - OVERFLOW_TOLERANCE_PX,
         );
+
+        if (width === 1440) {
+          const button = state.getByRole("button", {
+            exact: true,
+            name: "Withdraw consent",
+          });
+          const readContrast = () => button.evaluate((element) => {
+            type RgbColor = [number, number, number];
+
+            const canvas = document.createElement("canvas");
+            canvas.width = 1;
+            canvas.height = 1;
+            const context = canvas.getContext("2d", {
+              willReadFrequently: true,
+            });
+            if (!context) {
+              throw new Error("Canvas color parsing is unavailable.");
+            }
+            const parseColor = (value: string) => {
+              context.clearRect(0, 0, 1, 1);
+              context.fillStyle = value;
+              context.fillRect(0, 0, 1, 1);
+              const [red, green, blue, alpha] = context.getImageData(
+                0,
+                0,
+                1,
+                1,
+              ).data;
+              return {
+                alpha: (alpha ?? 0) / 255,
+                rgb: [red ?? 0, green ?? 0, blue ?? 0] as RgbColor,
+              };
+            };
+            const blend = (
+              foreground: ReturnType<typeof parseColor>,
+              background: RgbColor,
+            ): RgbColor =>
+              background.map(
+                (channel, index) =>
+                  (foreground.rgb[index] ?? 0) * foreground.alpha +
+                  channel * (1 - foreground.alpha),
+              ) as RgbColor;
+            const linearize = (channel: number) => {
+              const normalized = channel / 255;
+              return normalized <= 0.04045
+                ? normalized / 12.92
+                : ((normalized + 0.055) / 1.055) ** 2.4;
+            };
+            const luminance = (rgb: number[]) =>
+              0.2126 * linearize(rgb[0] ?? 0) +
+              0.7152 * linearize(rgb[1] ?? 0) +
+              0.0722 * linearize(rgb[2] ?? 0);
+
+            const styles = getComputedStyle(element);
+            const ancestors: HTMLElement[] = [];
+            let ancestor = element.parentElement;
+            while (ancestor) {
+              ancestors.push(ancestor);
+              ancestor = ancestor.parentElement;
+            }
+            const surface = ancestors.reverse().reduce<RgbColor>(
+              (painted, node) =>
+                blend(parseColor(getComputedStyle(node).backgroundColor), painted),
+              [255, 255, 255],
+            );
+            const foreground = parseColor(styles.color);
+            const background = parseColor(styles.backgroundColor);
+            const paintedBackground = blend(background, surface);
+            const paintedForeground = blend(foreground, paintedBackground);
+            const foregroundLuminance = luminance(paintedForeground);
+            const backgroundLuminance = luminance(paintedBackground);
+            return (
+              (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+              (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+            );
+          });
+
+          expect(
+            await readContrast(),
+            "default destructive contrast",
+          ).toBeGreaterThanOrEqual(4.5);
+          await button.hover();
+          expect(
+            await readContrast(),
+            "hover destructive contrast",
+          ).toBeGreaterThanOrEqual(4.5);
+          await page.mouse.move(0, 0);
+          await button.focus();
+          expect(
+            await readContrast(),
+            "focus destructive contrast",
+          ).toBeGreaterThanOrEqual(4.5);
+        }
       }
     }
   }

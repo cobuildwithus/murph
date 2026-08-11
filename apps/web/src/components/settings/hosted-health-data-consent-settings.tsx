@@ -252,8 +252,7 @@ export function HostedHealthDataConsentControl({
         >
           {active ? (
             <Link
-              aria-label="Manage health data sources"
-              className="relative inline-flex items-center font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+              className="inline-flex min-h-10 items-center font-medium text-primary underline-offset-4 hover:underline"
               href="/connect"
             >
               Manage sources
