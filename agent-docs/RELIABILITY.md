@@ -572,6 +572,23 @@ Last verified: 2026-08-10
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence
   and authority failures, other HTTP responses, malformed data, and unclassified
   errors remain terminal; the runtime must not create a second artifact retry queue.
+- Store-owned device-sync dirty writes use a private prepare-then-commit
+  boundary: the dirty store derives the credential-independence authority bit,
+  compresses, and secure-box seals each payload before opening its transaction;
+  no caller can supply a prepared ciphertext or classification bundle.
+  Consent-gated webhook and companion admissions instead perform that
+  preparation inside the existing member-row transaction, after the consent
+  re-read and before the dirty-marker lock or mutation. This keeps completed
+  withdrawal authoritative without adding another fence or state owner. The
+  steady-state connection-replacement path reads no payload and uses set-based writes only.
+  Nullable rows from mixed-version writers are the bounded transitional
+  exception: replacement classifies at most 800 rows after taking the existing
+  member lock, re-reading health-data consent, and locking the dirty marker.
+  It then compare-and-sets the marker and deletes credential-scoped payloads
+  set-wise in that transaction. Reconnect and acknowledgement therefore both
+  lock the dirty marker before touching payload rows.
+  A larger nullable backlog fails retryably until runtime acknowledgement
+  reduces it; classification may never run before the consent fence.
 - Junction Link setup remains retryable but inert before proof-verified callback
   completion. Webhooks for an active `pending_link` or `link_returned` account
   release their trace claim and return a retryable not-ready response; they do
