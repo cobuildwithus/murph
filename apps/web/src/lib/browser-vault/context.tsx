@@ -180,6 +180,10 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
     const awaitingRequestedReplacement = isRuntimeRefreshComplete !== null
       && !isRuntimeRefreshComplete(snapshot.client);
     if (isRuntimeRefreshComplete && !awaitingRequestedReplacement) {
+      // A stronger refresh may be queued behind the load that delivered this
+      // matching snapshot. Fence that now-redundant continuation before it can
+      // claim the shared slot without a remaining predicate or deadline.
+      abortBrowserVaultInFlightLoad();
       clearRuntimeRefreshWait();
     }
     clientRef.current = snapshot.client;
