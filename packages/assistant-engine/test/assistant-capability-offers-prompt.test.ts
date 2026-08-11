@@ -164,7 +164,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain("an exact `Sender:` handle must appear in exactly one returned member's `currentTurnHandles`")
     expect(section).toContain('Scheduled and detached reads have no current-turn handles')
     expect(section).not.toContain('For running-challenge standings')
-    expect(section).toContain('`not_granted`, `pending`, granted plus `missing`, and `available`')
+    expect(section).toContain('`not_granted`, `pending`, `missing`, and `available`')
     expect(prompt).toContain('Deep/REM is stored, not rechecked')
     expect(prompt).toContain('New access uses v1')
     expect(prompt).toContain(

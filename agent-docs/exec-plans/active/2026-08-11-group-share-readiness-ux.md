@@ -106,3 +106,13 @@ Updated: 2026-08-11
   conflict was the durable-doc index; the resolution preserves both main's
   hosted Telegram/projection-fairness entries and this change's immediate wake,
   pending read, and consumer-first rollout entries.
+- Exact-head Assistant Engine CI exposed a one-character resident prompt-budget
+  regression (`57,470` versus the `57,469` ratchet); all 3,568 other tests in
+  that job passed. The pending guidance was tightened without changing its
+  rules, and the four collapsed model statuses are now named directly. The
+  exact failed 73-test file, the 104 focused prompt/tool tests, and the package
+  typecheck pass locally after the correction.
+- The corrected preliminary-specialist ZIP was inspected directly before its
+  retry and contains the PR body, full diff, changed-files and phase manifests,
+  plus both redacted rendered-evidence images. The retry resumes the prior
+  invalid thread on a different managed lane instead of duplicating the audit.
