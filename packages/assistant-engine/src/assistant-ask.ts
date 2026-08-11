@@ -34,6 +34,9 @@ import {
   MURPH_GROUP_SHARED_READ_TOOL,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import {
+  ASSISTANT_INSTRUCTION_SUPPRESSED_THREAD_CONFIG,
+} from './assistant-codex/instruction-suppressed-thread-config.js'
+import {
   MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH_ENV,
   MURPH_ASSISTANT_SKILLS_ROOT_ENV,
 } from './assistant-skill-env.js'
@@ -79,43 +82,8 @@ export const READ_ONLY_ASSISTANT_ASK_OUTPUT_SCHEMA = {
   type: 'object',
 } as const
 
-export const READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG = {
-  allow_login_shell: false,
-  include_apps_instructions: false,
-  include_collaboration_mode_instructions: false,
-  include_environment_context: false,
-  include_permissions_instructions: false,
-  project_doc_max_bytes: 0,
-  web_search: 'disabled',
-  'features.apps': false,
-  'features.browser_use': false,
-  'features.enable_mcp_apps': false,
-  'features.exec_permission_approvals': false,
-  'features.memories': false,
-  'features.multi_agent': false,
-  'features.multi_agent_v2': false,
-  'features.network_proxy': false,
-  'features.plugins': false,
-  'features.request_permissions_tool': false,
-  'features.respect_system_proxy': false,
-  'features.standalone_web_search': false,
-  'features.tool_suggest': false,
-  'features.web_search_cached': false,
-  'features.web_search_request': false,
-  'memories.generate_memories': false,
-  'memories.use_memories': false,
-  'shell_environment_policy.ignore_default_excludes': false,
-  'shell_environment_policy.include_only': [
-    'LANG',
-    'LC_ALL',
-    'LC_CTYPE',
-    'PATH',
-    'TMPDIR',
-  ],
-  'shell_environment_policy.inherit': 'none',
-  'skills.bundled.enabled': false,
-  'skills.include_instructions': false,
-} as const
+export const READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG =
+  ASSISTANT_INSTRUCTION_SUPPRESSED_THREAD_CONFIG
 
 const CONSENTED_READ_ONLY_ASSISTANT_ASK_REVIEW_THREAD_CONFIG = {
   ...READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG,

@@ -19,6 +19,9 @@ import {
   hasHostedCodexModelCatalogFlexTier,
 } from '../assistant-codex/config.js'
 import {
+  ASSISTANT_INSTRUCTION_SUPPRESSED_THREAD_CONFIG,
+} from '../assistant-codex/instruction-suppressed-thread-config.js'
+import {
   executeCodexAssistantTurnAttemptFromInput,
   resolveCodexAssistantTargetCapabilities,
 } from './codex-runtime.js'
@@ -592,9 +595,11 @@ async function executeAssistantCodexAttempt(input: {
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         codexThreadConfig:
-          nativeCapabilitiesRestrictedTurn || restrictedOneShotTurn
-          ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
-          : null,
+          nativeCapabilitiesRestrictedTurn || groupRoomModelMaintenanceTurn
+            ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
+            : memberMemoryMaintenanceTurn || readOnlyAutomationTurn
+              ? ASSISTANT_INSTRUCTION_SUPPRESSED_THREAD_CONFIG
+              : null,
         conversationHistoryMessages:
           attemptPlan.routePlan.conversationHistoryMessages,
         developerInstructions: attemptPlan.routePlan.developerInstructions,
