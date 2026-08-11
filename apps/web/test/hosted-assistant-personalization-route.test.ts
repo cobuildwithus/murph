@@ -48,8 +48,10 @@ describe("hosted assistant personalization internal route", () => {
     mocks.handleHostedRuntimeAssistantPersonalizationTool.mockResolvedValue({
       action: "read",
       result: {
+        mainPersona: "classic",
         model: "gpt-5.6-terra",
         solAvailable: false,
+        supportingPersona: null,
         tone: "formal",
         voice: "warm",
       },

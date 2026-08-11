@@ -1218,8 +1218,10 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                       return {
                         action: 'read',
                         result: {
+                          mainPersona: 'classic',
                           model: 'gpt-5.6-terra',
                           solAvailable: true,
+                          supportingPersona: null,
                           tone: 'casual',
                           voice: 'classic',
                         },
@@ -1229,11 +1231,13 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                       return {
                         action: 'update',
                         result: {
+                          mainPersona: 'classic',
                           model: 'gpt-5.6-terra',
                           modelChangeAppliesNextRun: false,
                           modelUpdated: false,
                           solAvailable: true,
                           status: 'saved',
+                          supportingPersona: null,
                           tone: 'casual',
                           voice: request.voice ?? 'classic',
                         },

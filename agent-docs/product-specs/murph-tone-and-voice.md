@@ -16,7 +16,15 @@ The six controls are:
 5. Detail: an integer from 0 through 10.
 6. Unhinged: an integer from 0 through 10 (default 0).
 
-Tone and voice appear during the hosted first visit and under **How Murph talks** in personal Settings. Humor, Push, and Detail are available through explicit private conversational requests and under **Personality** in personal Settings. Settings shows those three effective 0–10 values in one dialog on desktop and one drawer on mobile; it does not add onboarding steps.
+Tone and voice appear during the hosted first visit and under **How Murph
+talks** in personal Settings. Main and optional supporting personality appear
+under **Personality**. The Settings rows show the effective tone and voice plus
+whether each value is a custom override or the selected personality's default,
+and each editor opens on that same effective value. Humor, Push, and Detail
+remain available through explicit private conversational requests and under
+**Style levels** in personal Settings. Settings shows those three effective
+0–10 values in one dialog on desktop and one drawer on mobile; it does not add
+onboarding steps.
 
 Unhinged is conversational-only. It has no first-visit step and no Settings row, and the browser `POST /api/settings/assistant-style` route rejects it; the only way to change it is to ask Murph in conversation, which uses `murph.assistant_style`. It scales how much Murph self-censors its own style and how much edgy, crude, or adult-flavored latitude it takes among clearly consenting adults. It never changes safety, truth, privacy, consent, authority, tool access, or notification cadence.
 
@@ -108,14 +116,19 @@ conversation authority. The callback target is fixed by the runtime: a person
 member in direct conversation or the synthetic room member in an authenticated
 hosted Linq group. It never accepts a participant target:
 
-- `action: "read"` returns the effective tone and voice plus read-only model and
-  Sol-availability context. Nullable hosted storage is presentation-only
+- `action: "read"` returns the effective main and optional supporting persona,
+  tone, and voice plus read-only model and Sol-availability context. Nullable
+  hosted storage is presentation-only
   normalized to the canonical `formal` tone and `upbeat` ("Classic Murph")
   voice defaults; a read does not persist those defaults.
-- `action: "update"` accepts at least one validated tone or voice field and
-  saves only the fields explicitly requested for the current runtime. It cannot mutate model or
-  reasoning configuration.
-- The result distinguishes `saved` and `unchanged` and returns the effective
+- `action: "update"` accepts tone, voice, or a complete persona pair. Persona
+  updates require both `mainPersona` and `supportingPersona` (null removes
+  support), so Murph reads first when one current part must be preserved. It
+  saves only the fields explicitly requested for the current runtime and cannot
+  mutate model or reasoning configuration.
+- Persona writes require accepted current conversation input; scheduled
+  occurrence authority remains valid for tone and voice but cannot write a
+  persona. The result distinguishes `saved` and `unchanged` and returns the effective
   values after the operation. Its retained model fields are read-only context;
   `modelUpdated` and `modelChangeAppliesNextRun` remain false. A saved tone or
   voice converges through the existing mailbox owner for a later turn; it does
@@ -156,7 +169,7 @@ and voice still flow from the hosted-member capture through
 Settings/runtime convergence. Model and reasoning remain web-owned nullable
 intents with no vault peer. When the typed operations are unavailable,
 `/settings?voice=true` is the narrow voice/sound fallback for a person's direct
-Murph, while `/settings` is the personal fallback for tone, model, or reasoning
+Murph, while `/settings` is the personal fallback for persona, tone, model, or reasoning
 changes. A personal Settings URL is never a fallback for configuring a room.
 
 ## Personality Dial Conversation Control
@@ -395,7 +408,13 @@ The dials never change notification eligibility or frequency, quiet hours, tool 
 
 ## Audience Scope
 
-Style preferences always belong to the active conversation runtime. A person runtime's Tone, Voice, Humor, Push, Detail, and Unhinged remain private to that person's Murph. A synthetic hosted group runtime has its own six settings in its own `HostedMember` projection and canonical room vault. Attended and scheduled group turns apply those room values, and generated group voice output resolves the room voice; none of those paths reads or inherits a participant's private settings.
+Style preferences always belong to the active conversation runtime. A person
+runtime's persona baseline, Tone, Voice, Humor, Push, Detail, and Unhinged
+remain private to that person's Murph. A synthetic hosted group runtime has its
+own persona baseline and six controls in its own `HostedMember` projection and
+canonical room vault. Attended and scheduled group turns apply those room
+values, and generated group voice output resolves the room voice; none of those
+paths reads or inherits a participant's private settings.
 
 Authenticated hosted Linq group turns receive `murph.personalization` and `murph.assistant_style` bound to the room member. The request has no member selector, and Web accepts a container mutation only when the accepted input proves the same current non-direct Linq room. Group email may use the room's already saved style for expression but cannot mutate it. Non-hosted groups and indeterminate routes receive neither personal preferences nor the style operations. `murph.assistant_configuration` remains private-only; group model and reasoning stay relation-derived.
 
@@ -412,10 +431,12 @@ Deploy the Web eligibility and accepted-input route validation before the runner
 
 The web surfaces use the same tone ids and shared voice roster defined above.
 
-`hosted_member.assistant_tone`, `hosted_member.assistant_voice`, and the nullable
+`hosted_member.assistant_persona`, `hosted_member.assistant_tone`,
+`hosted_member.assistant_voice`, and the nullable
 `assistant_humor`, `assistant_push`, `assistant_detail`, and `assistant_unhinged`
 columns capture the latest web projection for mailbox handoff. For person members,
-the three web-visible dial columns also drive personal Settings display;
+the persona projection drives the main/supporting Settings row and the three
+web-visible dial columns drive the separate Style levels row;
 `assistant_unhinged` is projection state for mailbox handoff only and never
 reaches the browser Settings payload. For synthetic room members, all of these
 belong only to the room runtime and have no personal Settings surface. The 0
