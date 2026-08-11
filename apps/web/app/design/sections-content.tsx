@@ -249,7 +249,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings retained data export">
+      <StudySection title="Settings retained export while newer data is processing">
         <DataExportFlowStudy />
       </StudySection>
 
