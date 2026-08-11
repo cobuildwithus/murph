@@ -58,6 +58,7 @@ import type {
 } from './types.js'
 import type {
   AssistantMessageReaction,
+  AssistantProviderMessageEffect,
   AssistantResponseMedia,
   AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -517,6 +518,7 @@ export async function sendLinqMessage(
 ): Promise<{
   idempotencyKey?: string | null
   providerMessageId: string | null
+  providerMessageEffects?: AssistantProviderMessageEffect[]
   providerMessageIds?: string[]
   providerThreadId: string | null
   target: string | null
@@ -576,36 +578,50 @@ export async function sendLinqMessage(
     input.directRecipientPhoneNumber,
   )
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey)
-  const shouldAttemptNativeCard =
+  const shouldAttemptDirectNativeCard =
     card !== null &&
     input.targetKind === 'thread' &&
     input.threadIsDirect === true &&
     input.nativeReplyRequested !== true &&
     directRecipientPhoneNumber !== null &&
     idempotencyKey !== null
+  const shouldAttemptGroupChallengeCard =
+    card?.kind === 'challenge_standings' &&
+    (input.targetKind === 'thread' || input.targetKind === 'explicit') &&
+    input.threadIsDirect === false &&
+    input.nativeReplyRequested !== true &&
+    idempotencyKey !== null
+  const shouldAttemptNativeCard =
+    shouldAttemptDirectNativeCard || shouldAttemptGroupChallengeCard
   let appCardFallbackIdempotencyKey: string | null = null
   if (shouldAttemptNativeCard) {
-    let capabilityAvailable = false
-    try {
-      capabilityAvailable = await checkLinqIMessageCapability(
-        {
-          address: directRecipientPhoneNumber,
-          from: normalizeOptionalText(input.fromPhoneNumber),
-        },
-        {
-          env,
-          fetchImplementation:
-            dependencies.appCardCapabilityFetchImplementation
-            ?? dependencies.fetchImplementation,
-          ...(dependencies.signal ? { signal: dependencies.signal } : {}),
-        },
-      )
-    } catch (error) {
-      if (
-        dependencies.signal?.aborted
-        || providerRequestWasSkipped(error)
-      ) {
-        throw error
+    let capabilityAvailable = shouldAttemptGroupChallengeCard
+    if (shouldAttemptDirectNativeCard) {
+      try {
+        capabilityAvailable = await checkLinqIMessageCapability(
+          {
+            address: directRecipientPhoneNumber,
+            from: normalizeOptionalText(input.fromPhoneNumber),
+          },
+          {
+            env,
+            fetchImplementation:
+              dependencies.appCardCapabilityFetchImplementation
+              ?? dependencies.fetchImplementation,
+            ...(dependencies.signal ? { signal: dependencies.signal } : {}),
+          },
+        )
+      } catch (error) {
+        if (
+          dependencies.signal?.aborted
+          || providerRequestWasSkipped(error)
+        ) {
+          throw error
+        }
+        dependencies.onAppCardFallbackError?.({
+          error,
+          reason: 'capability_check_failed',
+        })
       }
     }
     if (capabilityAvailable) {
@@ -622,8 +638,19 @@ export async function sendLinqMessage(
             ...(dependencies.signal ? { signal: dependencies.signal } : {}),
           },
         )
+        const providerMessageId = normalizeOptionalText(
+          delivered.message?.id ?? null,
+        )
         return {
-          providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+          providerMessageId,
+          ...(providerMessageId
+            ? {
+                providerMessageEffects: [{
+                  message: null,
+                  providerMessageId,
+                }],
+              }
+            : {}),
           providerThreadId: null,
           target,
         }
@@ -634,6 +661,10 @@ export async function sendLinqMessage(
         ) {
           throw error
         }
+        dependencies.onAppCardFallbackError?.({
+          error,
+          reason: 'app_card_rejected',
+        })
         appCardFallbackIdempotencyKey = `${idempotencyKey}:fallback`
       }
     }
@@ -686,6 +717,9 @@ export async function sendLinqMessage(
 
     return {
       providerMessageId: normalizeOptionalText(created.messageId),
+      ...(created.providerMessageEffects && created.providerMessageEffects.length > 0
+        ? { providerMessageEffects: [...created.providerMessageEffects] }
+        : {}),
       ...(created.providerMessageIds && created.providerMessageIds.length > 0
         ? { providerMessageIds: [...created.providerMessageIds] }
         : {}),
@@ -719,6 +753,9 @@ export async function sendLinqMessage(
       ? { idempotencyKey: appCardFallbackIdempotencyKey }
       : {}),
     providerMessageId: normalizeOptionalText(delivered.message?.id ?? null),
+    ...(delivered.providerMessageEffects && delivered.providerMessageEffects.length > 0
+      ? { providerMessageEffects: [...delivered.providerMessageEffects] }
+      : {}),
     ...(delivered.providerMessageIds && delivered.providerMessageIds.length > 0
       ? { providerMessageIds: [...delivered.providerMessageIds] }
       : {}),
@@ -2180,6 +2217,9 @@ async function sendTelegramTextChunkOnce(input: {
       ...result,
     }
   } catch (error) {
+    if (providerRequestWasSkipped(error)) {
+      throw error
+    }
     return {
       kind: 'request-error',
       failure: Object.assign(

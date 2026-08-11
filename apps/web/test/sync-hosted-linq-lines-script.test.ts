@@ -32,19 +32,13 @@ const REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const TEST_KEY = Buffer.alloc(32, 7).toString("base64url");
 
 function createPrismaOwner() {
-  const transactionClient = {};
   const disconnect = vi.fn().mockResolvedValue(undefined);
-  const transaction = vi.fn(async (callback: (tx: object) => Promise<void>) => {
-    await callback(transactionClient);
-  });
 
   return {
     disconnect,
     prisma: {
       $disconnect: disconnect,
-      $transaction: transaction,
     },
-    transaction,
   };
 }
 
@@ -87,8 +81,9 @@ describe("sync-hosted-linq-lines script", () => {
       expect(owner.disconnect).toHaveBeenCalledOnce();
     });
 
-    expect(owner.transaction).toHaveBeenCalledOnce();
-    expect(mocks.syncConfiguredLines).toHaveBeenCalledOnce();
+    expect(mocks.syncConfiguredLines).toHaveBeenCalledWith(expect.objectContaining({
+      prisma: owner.prisma,
+    }));
     expect(mocks.syncProviderInventory).toHaveBeenCalledOnce();
     expect(mocks.assertAssignablePoolReady).toHaveBeenCalledOnce();
     expect(settled).toBe(false);
@@ -99,7 +94,7 @@ describe("sync-hosted-linq-lines script", () => {
   });
 
   it.each([
-    ["transaction", mocks.syncConfiguredLines],
+    ["configured-line sync", mocks.syncConfiguredLines],
     ["provider inventory", mocks.syncProviderInventory],
     ["readiness", mocks.assertAssignablePoolReady],
   ])("disconnects once and preserves a %s failure", async (_stage, failingOperation) => {
@@ -114,21 +109,22 @@ describe("sync-hosted-linq-lines script", () => {
 
   it("omits malformed configured line values from stderr", () => {
     const rawLine = "15551234567";
+    const childEnvironment = { ...process.env };
+    delete childEnvironment.NODE_OPTIONS;
     const result = spawnSync(
       "pnpm",
       [
         "--dir",
         "apps/web",
-        "exec",
-        "tsx",
-        "scripts/sync-hosted-linq-lines.ts",
+        "linq:sync-lines",
+        "--",
         "--skip-provider-inventory",
       ],
       {
         cwd: REPO_ROOT,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...childEnvironment,
           DATABASE_URL: process.env.DATABASE_URL
             ?? "postgresql://postgres:postgres@127.0.0.1:1/murph_test",
           HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION: "v1",
@@ -143,5 +139,29 @@ describe("sync-hosted-linq-lines script", () => {
     expect(result.stderr).toContain("HOSTED_ONBOARDING_LINQ_CONVERSATION_PHONE_NUMBERS");
     expect(result.stderr).not.toContain("bad");
     expect(result.stderr).not.toContain(rawLine);
+  });
+
+  it("loads the legacy Stripe migration CLI without Next server conditions", () => {
+    const childEnvironment = { ...process.env };
+    delete childEnvironment.NODE_OPTIONS;
+    const result = spawnSync(
+      "pnpm",
+      [
+        "--dir",
+        "apps/web",
+        "stripe:migrate-legacy-usage-items",
+      ],
+      {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: childEnvironment,
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Legacy usage migration requires --stripe-mode=<test|live>.",
+    );
+    expect(result.stderr).not.toContain("server-only");
   });
 });

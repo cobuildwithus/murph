@@ -10,19 +10,63 @@ import { describeHostedExecutionSafeLogErrorCode } from "./logging";
 export type HostedDirectRuntimeWakeSource =
   | "assistant-ask-completion"
   | "assistant-ask-request"
-  | "linq"
-  | "linq-instant-start";
+  | "linq";
+
+/**
+ * Issues a consent-serialized container start hint and always settles. This
+ * does not create a write fence, resolve processing ownership, or invoke
+ * workspace work; the ordinary post-Temporal ensure remains authoritative for
+ * all of those steps.
+ */
+export function startHostedRuntimeShellPrewarmBestEffort(input: {
+  source: "linq-instant-start" | "linq-typing-started";
+  userId: string;
+}): Promise<void> {
+  const wakeSource = input.source;
+  let client: ReturnType<typeof readHostedExecutionControlClientIfConfigured>;
+  try {
+    client = readHostedExecutionControlClientIfConfigured();
+  } catch (error) {
+    console.warn("Hosted runtime shell prewarm client is misconfigured.", {
+      errorName: describeHostedExecutionSafeLogErrorCode(error),
+      source: wakeSource,
+    });
+    return Promise.resolve();
+  }
+  if (!client) {
+    return Promise.resolve();
+  }
+
+  try {
+    return client
+      .prewarmRuntimeShell({
+        source: input.source,
+        userId: input.userId,
+      })
+      .then((result) => {
+        console.info("Hosted runtime shell prewarm accepted.", {
+          accepted: result.accepted,
+          source: wakeSource,
+        });
+      })
+      .catch((error: unknown) => {
+        console.warn("Hosted runtime shell prewarm failed.", {
+          errorName: describeHostedExecutionSafeLogErrorCode(error),
+          source: wakeSource,
+        });
+      });
+  } catch (error) {
+    console.warn("Hosted runtime shell prewarm failed.", {
+      errorName: describeHostedExecutionSafeLogErrorCode(error),
+      source: wakeSource,
+    });
+    return Promise.resolve();
+  }
+}
 
 /**
  * Starts the payloadless Cloudflare latency hint and always settles. Temporal
- * must accept the durable mailbox signal before a caller invokes this helper,
- * with one exception: after trial enrollment activates access, the
- * `linq-instant-start` prewarm fires before the active-member replan and
- * conversation signal. That enrollment returns its activation wake as an
- * explicit continuation which runs only after the conversation signal, or
- * immediately on a later failure. The same webhook request then performs the
- * ordinary Temporal-then-direct wake, and the ensure grants no authority
- * either way.
+ * must accept the durable mailbox signal before a caller invokes this helper.
  */
 export function startHostedDirectRuntimeWakeBestEffort(input: {
   onTiming?: (

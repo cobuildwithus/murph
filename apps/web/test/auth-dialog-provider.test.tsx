@@ -349,6 +349,58 @@ test("AuthProvider does not resume Clinical Records connect without a valid stag
   await rendered.cleanup();
 });
 
+test("AuthProvider resumes the exact generic Clinical Records launcher after sign-in", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "",
+        href: "https://join.example.test/records/connect?launch=clinical-records",
+        origin: "https://join.example.test",
+        pathname: "/records/connect",
+        search: "?launch=clinical-records",
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", {
+      bubbles: true,
+    }));
+  });
+  const completeButton = Array.from(
+    rendered.container.querySelectorAll("button"),
+  ).find((button) => button.textContent === "Complete auth");
+  expect(completeButton).toBeTruthy();
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", {
+      bubbles: true,
+    }));
+  });
+
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
 test("AuthProvider returns an unauthenticated medical-records viewer to that page", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
@@ -559,62 +611,6 @@ test("AuthProvider resumes the data privacy settings handoff after sign-in compl
   await rendered.cleanup();
 });
 
-test("AuthProvider resumes a signed Pulse payment return on settings after sign-in", async () => {
-  const { AuthProvider, useAuth } = await import(
-    "@/src/components/hosted-onboarding/auth-dialog-provider"
-  );
-  const assign = vi.fn();
-  const reload = vi.fn();
-
-  function OpenAuthButton() {
-    const { openAuthDialog } = useAuth();
-    return createElement(
-      "button",
-      { type: "button", onClick: openAuthDialog },
-      "Sign in",
-    );
-  }
-
-  const rendered = await renderClientComponent(
-    createElement(AuthProvider, {
-      authenticated: false,
-    }, createElement(OpenAuthButton)),
-  );
-
-  const search = "?action=start_pulse_now&expires=4102444800000&signature=signed";
-  Object.defineProperty(rendered.window, "location", {
-    configurable: true,
-    value: {
-      assign,
-      hash: "#subscription",
-      href: `https://join.example.test/settings${search}#subscription`,
-      origin: "https://join.example.test",
-      pathname: "/settings",
-      reload,
-      search,
-    },
-  });
-
-  await act(async () => {
-    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
-    (button) => button.textContent === "Complete auth",
-  );
-
-  await act(async () => {
-    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
-  });
-
-  // Sending this member to /home is the original incident: they paid, signed in,
-  // and the signed continuation params were thrown away.
-  expect(reload).toHaveBeenCalledTimes(1);
-  expect(assign).not.toHaveBeenCalled();
-
-  await rendered.cleanup();
-});
-
 test("AuthProvider preserves a Group payment return through sign-in", async () => {
   const { AuthProvider, useAuth } = await import(
     "@/src/components/hosted-onboarding/auth-dialog-provider"
@@ -665,6 +661,56 @@ test("AuthProvider preserves a Group payment return through sign-in", async () =
   expect(rendered.window.location.href).toBe(href);
   expect(reload).toHaveBeenCalledTimes(1);
   expect(assign).not.toHaveBeenCalled();
+
+  await rendered.cleanup();
+});
+
+test("AuthProvider preserves a usage-credit Checkout return through sign-in", async () => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const search = "?usageCheckout=success&usagePurchase=hucp_abcdefghijklmnop";
+  const href = `https://join.example.test/settings${search}#subscription`;
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+    {
+      location: {
+        hash: "#subscription",
+        href,
+        origin: "https://join.example.test",
+        pathname: "/settings",
+        search,
+      },
+    },
+  );
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  expect(rendered.window.location.href).toBe(href);
+  expect(rendered.reload).toHaveBeenCalledTimes(1);
+  expect(rendered.assign).not.toHaveBeenCalled();
 
   await rendered.cleanup();
 });

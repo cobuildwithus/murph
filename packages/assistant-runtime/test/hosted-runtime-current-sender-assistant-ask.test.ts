@@ -126,10 +126,90 @@ describe("hosted current-sender Assistant Ask execution", () => {
       assert.equal(executeConsentedAsk.mock.calls.length, 1);
       const reviewedInput = executeConsentedAsk.mock.calls[0]?.[0];
       assert.ok(reviewedInput);
+      assert.equal(reviewedInput.answerMode, "caller_handoff");
       assert.equal(reviewedInput.permissionText, "One-time self-only group disclosure.");
       assert.equal(reviewedInput.question, "Murph tell them about my sleep");
       assert.deepEqual(completedResult, {
         answer: "Reviewed: Murph tell them about my sleep",
+        outcome: "answered",
+      });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+  test("uses the same reviewed personal-vault executor for private delivery", async () => {
+    const vaultRoot = await mkdtemp(
+      path.join(tmpdir(), "murph-private-current-sender-assistant-ask-"),
+    );
+    let completedResult: unknown;
+    const executeAsk = vi.fn();
+    const executeConsentedAsk = vi.fn(async (
+      input: ConsentedReadOnlyAssistantAskInput,
+    ): Promise<ReadOnlyAssistantAskResult> => ({
+      answer: `Privately reviewed: ${input.question}`,
+      outcome: "answered",
+    }));
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      const pending = createPendingCurrentSenderAsk();
+      if (pending.wake.kind !== "assistant.ask.requested") {
+        throw new Error("Expected an Assistant Ask request wake.");
+      }
+      pending.wake.ask.target = {
+        groupRuntimeMemberId: "member_group_runtime",
+        kind: "group_sender_private",
+        permissionDigest: "e".repeat(64),
+      };
+      await updateHostedSystemMailboxState(vaultRoot, () => ({
+        pending: [pending],
+      }));
+
+      const controller = createHostedDetachedAssistantAskController({
+        assistantAskPort: {
+          async request(request) {
+            if (request.action === "prepare") {
+              return {
+                action: "prepare",
+                disclosure: {
+                  permissionText: "One-time private owner-only answer.",
+                },
+                question: "Murph tell them about my sleep",
+                status: "ready",
+                targetLabel: null,
+              };
+            }
+            completedResult = request.result;
+            return { action: "complete", status: "completed" };
+          },
+        },
+        codexHome: null,
+        env: {},
+        executeAsk,
+        executeConsentedAsk,
+        now: () => TEST_NOW,
+        onStateMutation() {},
+        vaultRoot,
+      });
+
+      controller.kick();
+      await waitUntil(async () => {
+        assert.equal((await readHostedSystemMailboxState(vaultRoot)).pending.length, 0);
+      });
+      await controller.closeAndRequeue();
+
+      assert.equal(executeAsk.mock.calls.length, 0);
+      assert.equal(executeConsentedAsk.mock.calls.length, 1);
+      assert.equal(
+        executeConsentedAsk.mock.calls[0]?.[0].answerMode,
+        "direct_recipient",
+      );
+      assert.equal(
+        executeConsentedAsk.mock.calls[0]?.[0].permissionText,
+        "One-time private owner-only answer.",
+      );
+      assert.deepEqual(completedResult, {
+        answer: "Privately reviewed: Murph tell them about my sleep",
         outcome: "answered",
       });
     } finally {

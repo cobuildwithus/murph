@@ -1,4 +1,38 @@
 export {
+  HostedBillingBrowserDriver,
+  type HostedBillingBrowserActor,
+  type HostedBillingBrowserDiagnostic,
+  type HostedBillingCheckoutStart,
+  type HostedFamilyInviteStart,
+} from "./hosted-billing-browser-driver";
+
+export {
+  issueHostedWebInviteForTest,
+  readHostedBillingProjectionForTest,
+  readHostedFamilyProjectionForTest,
+  seedHostedBillingMemberForTest,
+  waitForHostedBillingProjectionForTest,
+  waitForHostedFamilyProjectionForTest,
+  type HostedBillingMemberSeedForTest,
+  type HostedBillingProjectionForTest,
+  type HostedBillingRefSeedForTest,
+  type HostedBillingStatusForTest,
+  type HostedFamilyProjectionForTest,
+} from "./hosted-billing-live-testkit";
+
+export {
+  cleanupHostedStripeBillingRun,
+  HostedStripeBillingLiveError,
+  HostedStripeBillingSandbox,
+  type HostedStripeCleanupSummary,
+  type HostedStripeBillingSandboxInput,
+  type HostedStripeCheckoutOwnership,
+  type HostedStripeScheduleTruth,
+  type HostedStripeSubscriptionFixture,
+  type HostedStripeSubscriptionTruth,
+} from "./hosted-stripe-billing-live";
+
+export {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
   issueHostedAppSessionForTest,
@@ -25,6 +59,8 @@ export {
   type HostedJunctionDeviceSyncReplaySeedResult,
 } from "./hosted-member-seeds";
 
+import { readdir, readFile } from "node:fs/promises";
+
 import type { HostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionSnapshotRef } from "@murphai/hosted-execution/contracts";
 import type { HostedExecutionWake } from "@murphai/hosted-execution/contracts";
@@ -36,10 +72,18 @@ import {
 import type {
   HostedRuntimeLatencyPhaseBreakdown,
 } from "@murphai/hosted-execution/runtime-control";
+import { Client } from "pg";
 
+import { hostedRuntimeLogSubjectKey } from "@/src/lib/hosted-runtime-log/subject-key";
 import { createHostedWebSmokeEnvironment } from "../../next-artifacts";
 import type { HostedRuntimeTemporalSignalClient } from "../../src/lib/hosted-orchestration/temporal-client";
+import type { HostedBillingStatusForTest } from "./hosted-billing-live-testkit";
 
+const hostedRuntimeLogTestMigrationTable = "_murph_e2e_runtime_log_migration";
+const hostedRuntimeLogTestMigrationsRoot = new URL(
+  "../../prisma/runtime-logs/migrations/",
+  import.meta.url,
+);
 const hostedPrismaModuleSpecifier = new URL("../../src/lib/prisma.ts", import.meta.url).href;
 const hostedMailboxStoreModuleSpecifier = new URL(
   "../../src/lib/hosted-mailbox/store.ts",
@@ -135,9 +179,11 @@ interface HostedTestPrismaFactoryClient {
       payloadSchema: string | null;
       userId: string;
     }>;
+    updateMany(args: unknown): Promise<{ count: number }>;
   };
   hostedMember: {
     create(args: unknown): Promise<{ id: string }>;
+    update(args: unknown): Promise<{ id: string }>;
   };
 }
 
@@ -420,6 +466,11 @@ interface HostedTestPrismaModule {
 }
 
 interface HostedMailboxAppendForTestStoreModule {
+  advanceHostedMailboxConsumedSeqByLane(input: {
+    lanes: readonly { consumedSeq: string; lane: string }[];
+    prisma: unknown;
+    userId: string;
+  }): Promise<Array<{ consumedSeq: string; lane: string }>>;
   appendHostedMailboxEnvelopeTx(input: {
     envelope: HostedExecutionWake;
     tx: unknown;
@@ -450,17 +501,6 @@ interface HostedUsageDiagnosticsForTestPrismaClient {
         memberId: string;
       };
     }): Promise<HostedAiUsageForTestPrismaRow[]>;
-  };
-  hostedRuntimeLog: {
-    findMany(input: {
-      orderBy: {
-        at: "asc";
-      };
-      take: number;
-      where: {
-        userId: string;
-      };
-    }): Promise<HostedRuntimeLogForTestPrismaRow[]>;
   };
 }
 
@@ -542,6 +582,15 @@ interface HostedRuntimeSignalModule {
     workflowId: string;
   }>;
   signalHostedRuntimeRecheckRuntime(input: {
+    client?: HostedRuntimeTemporalSignalClient | null;
+    environment?: NodeJS.ProcessEnv;
+    prisma?: HostedTestPrismaClient;
+    userId: string;
+  }): Promise<{
+    signalAccepted: true;
+    workflowId: string;
+  }>;
+  signalHostedRetentionRuntimeRecheck(input: {
     client?: HostedRuntimeTemporalSignalClient | null;
     environment?: NodeJS.ProcessEnv;
     prisma?: HostedTestPrismaClient;
@@ -693,8 +742,8 @@ export interface HostedAiUsageForTestRow {
   triggerKind: string | null;
 }
 
-interface HostedRuntimeLogForTestPrismaRow {
-  at: Date;
+interface HostedRuntimeLogForTestSqlRow extends Record<string, unknown> {
+  at: Date | string;
   attemptId: string | null;
   component: string;
   eventCode: string;
@@ -778,6 +827,55 @@ export async function readHostedMailboxItemForTest(input: {
       lane: item.lane,
       laneSeq: item.laneSeq.toString(),
     };
+  });
+}
+
+export async function ageHostedMailboxItemForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+  mailboxItemId: string;
+  userId: string;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted mailbox item test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const agedAt = new Date(Date.now() - input.ageMs);
+    const updated = await deps.prisma.hostedMailboxItem.updateMany({
+      data: {
+        createdAt: agedAt,
+        occurredAt: agedAt,
+      },
+      where: {
+        id: input.mailboxItemId,
+        userId: input.userId,
+      },
+    });
+    return { updated: updated.count === 1 };
+  });
+}
+
+export async function advanceHostedMailboxConsumedSeqForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  lane: "conversation" | "system";
+  seq: string;
+  userId: string;
+}): Promise<{ consumedSeq: string }> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const advanced = await deps.hostedMailboxStore
+      .advanceHostedMailboxConsumedSeqByLane({
+        lanes: [{ consumedSeq: input.seq, lane: input.lane }],
+        prisma: deps.prisma,
+        userId: input.userId,
+      });
+    const lane = advanced.find((entry) => entry.lane === input.lane);
+    if (!lane) {
+      throw new Error("Hosted mailbox test progress did not return its lane.");
+    }
+    return { consumedSeq: lane.consumedSeq };
   });
 }
 
@@ -918,6 +1016,49 @@ export async function ageHostedRuntimeLatencyAlertForTest(input: {
 
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
     const monitorId = "hosted-runtime-latency-monitor:v1";
+    const state = await deps.prisma.hostedLinqAlert.findUnique({
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    if (!state) {
+      return { updated: false };
+    }
+
+    const agedAt = new Date(Date.now() - input.ageMs);
+    await deps.prisma.hostedLinqAlert.update({
+      data: {
+        lastAttemptedAt: state.lastAttemptedAt ? agedAt : null,
+        sentAt: state.sentAt ? agedAt : null,
+      },
+      select: {
+        lastAttemptedAt: true,
+        sentAt: true,
+      },
+      where: {
+        id: monitorId,
+      },
+    });
+    return { updated: true };
+  });
+}
+
+export async function ageHostedRuntimeProgressAlertForTest(input: {
+  ageMs: number;
+  environment?: NodeJS.ProcessEnv;
+}): Promise<{ updated: boolean }> {
+  if (!Number.isSafeInteger(input.ageMs) || input.ageMs < 0) {
+    throw new RangeError(
+      "Hosted runtime progress alert test age requires a non-negative integer.",
+    );
+  }
+
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const monitorId = "hosted-runtime-progress-monitor:v1";
     const state = await deps.prisma.hostedLinqAlert.findUnique({
       select: {
         lastAttemptedAt: true,
@@ -1153,6 +1294,23 @@ export async function seedHostedWorkspaceInboxMediaRetentionWakeForTest(input: {
         "Hosted-local retention wake seed requires exactly one existing workspace.",
       );
     }
+  });
+}
+
+export async function updateHostedMemberBillingStatusForTest(input: {
+  billingStatus: HostedBillingStatusForTest;
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    await deps.prisma.hostedMember.update({
+      data: {
+        billingStatus: input.billingStatus,
+      },
+      where: {
+        id: input.memberId,
+      },
+    });
   });
 }
 
@@ -1528,30 +1686,108 @@ export async function completeHostedComputerHandoffForTest(input: {
   });
 }
 
+export async function ensureHostedRuntimeLogDatabaseForTest(input: {
+  databaseUrl: string;
+}): Promise<void> {
+  const databaseUrl = new URL(input.databaseUrl);
+  const databaseName = decodeURIComponent(databaseUrl.pathname.replace(/^\/+/, ""));
+  if (!databaseName) {
+    throw new Error("Hosted runtime log test database URL must name a database.");
+  }
+
+  const adminUrl = new URL(databaseUrl);
+  adminUrl.pathname = "/postgres";
+  const adminClient = new Client({ connectionString: adminUrl.toString() });
+  const lockName = `murph:hosted-runtime-log-test-database:${databaseName}`;
+  let created = false;
+
+  try {
+    await adminClient.connect();
+    await adminClient.query(
+      "SELECT pg_advisory_lock(hashtext($1)::bigint)",
+      [lockName],
+    );
+    const existing = await adminClient.query<{ exists: boolean }>(
+      "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1) AS exists",
+      [databaseName],
+    );
+    if (existing.rows[0]?.exists !== true) {
+      await adminClient.query(
+        `CREATE DATABASE ${quoteHostedRuntimeLogTestIdentifier(databaseName)}`,
+      );
+      created = true;
+    }
+
+    try {
+      await applyHostedRuntimeLogMigrationsForTest(databaseUrl.toString());
+    } catch (error) {
+      if (created) {
+        try {
+          await adminClient.query(
+            `DROP DATABASE ${quoteHostedRuntimeLogTestIdentifier(databaseName)} WITH (FORCE)`,
+          );
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "Hosted runtime log test database setup and cleanup failed.",
+          );
+        }
+      }
+      throw error;
+    }
+  } finally {
+    await adminClient.query(
+      "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+      [lockName],
+    ).catch(() => {});
+    await adminClient.end();
+  }
+}
+
 export async function listHostedRuntimeLogsForTest(input: {
   environment?: NodeJS.ProcessEnv;
   fromAt?: Date | string | null;
   limit?: number;
   userId: string;
 }): Promise<HostedRuntimeLogForTestRow[]> {
-  return withHostedWebTestkitDeps(input.environment, async (deps) => {
-    const fromAt = input.fromAt ? new Date(input.fromAt) : null;
-    if (fromAt && !Number.isFinite(fromAt.getTime())) {
-      throw new TypeError("Hosted runtime log test lower bound must be a valid date.");
-    }
-    const rows = await deps.prisma.hostedRuntimeLog.findMany({
-      orderBy: {
-        at: "asc",
-      },
-      take: normalizeHostedTestingLimit(input.limit ?? 1_000),
-      where: {
-        ...(fromAt ? { at: { gte: fromAt } } : {}),
-        userId: input.userId,
-      },
-    });
+  const environment = input.environment ?? process.env;
+  const databaseUrl = environment.HOSTED_RUNTIME_LOG_DATABASE_URL?.trim();
+  if (!databaseUrl) {
+    throw new Error(
+      "Hosted runtime log test helpers require HOSTED_RUNTIME_LOG_DATABASE_URL.",
+    );
+  }
 
-    return rows.map((row) => ({
-      at: row.at.toISOString(),
+  const fromAt = input.fromAt ? new Date(input.fromAt) : null;
+  if (fromAt && !Number.isFinite(fromAt.getTime())) {
+    throw new TypeError("Hosted runtime log test lower bound must be a valid date.");
+  }
+
+  const client = new Client({ connectionString: databaseUrl });
+  try {
+    await client.connect();
+    const rows = await client.query<HostedRuntimeLogForTestSqlRow>(`
+      SELECT
+        at,
+        attempt_id AS "attemptId",
+        component,
+        event_code AS "eventCode",
+        level,
+        phase,
+        redacted_json AS "redactedJson"
+      FROM hosted_runtime_log
+      WHERE subject_key = $1
+        AND ($2::timestamptz IS NULL OR at >= $2)
+      ORDER BY at ASC, id ASC
+      LIMIT $3
+    `, [
+      hostedRuntimeLogSubjectKey(input.userId),
+      fromAt,
+      normalizeHostedTestingLimit(input.limit ?? 1_000),
+    ]);
+
+    return rows.rows.map((row) => ({
+      at: normalizeHostedRuntimeLogTestAt(row.at),
       attemptId: row.attemptId,
       component: row.component,
       eventCode: row.eventCode,
@@ -1559,7 +1795,9 @@ export async function listHostedRuntimeLogsForTest(input: {
       phase: row.phase,
       redactedJson: normalizeHostedTestingRedactedJson(row.redactedJson),
     }));
-  });
+  } finally {
+    await client.end();
+  }
 }
 
 export async function readHostedIngressLatencyTraceForTest(input: {
@@ -1657,6 +1895,24 @@ export async function signalHostedRuntimeRecheckRuntimeForTest(input: {
   return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
     const signalModule = await loadHostedRuntimeSignalModule();
     return await signalModule.signalHostedRuntimeRecheckRuntime({
+      client: deps.temporalSignalClient,
+      environment: deps.environment,
+      prisma: deps.prisma,
+      userId: input.userId,
+    });
+  });
+}
+
+export async function signalHostedRetentionRuntimeRecheckForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+}): Promise<{
+  signalAccepted: true;
+  workflowId: string;
+}> {
+  return withHostedWebSignalTestkitDeps(input.environment, async (deps) => {
+    const signalModule = await loadHostedRuntimeSignalModule();
+    return await signalModule.signalHostedRetentionRuntimeRecheck({
       client: deps.temporalSignalClient,
       environment: deps.environment,
       prisma: deps.prisma,
@@ -1815,6 +2071,8 @@ async function loadHostedMailboxAppendForTestModules(): Promise<HostedMailboxApp
     hostedMailboxStoreModule as HostedMailboxAppendForTestStoreModule;
 
   return {
+    advanceHostedMailboxConsumedSeqByLane:
+      typedHostedMailboxStoreModule.advanceHostedMailboxConsumedSeqByLane,
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
   };
 }
@@ -1906,6 +2164,86 @@ function normalizeHostedTestingRedactedJson(value: unknown): Record<string, unkn
   }
 
   return value as Record<string, unknown>;
+}
+
+function normalizeHostedRuntimeLogTestAt(value: Date | string): string {
+  const at = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(at.getTime())) {
+    throw new TypeError("Hosted runtime log test row has an invalid at timestamp.");
+  }
+  return at.toISOString();
+}
+
+async function applyHostedRuntimeLogMigrationsForTest(databaseUrl: string): Promise<void> {
+  const migrationDirectories = (await readdir(hostedRuntimeLogTestMigrationsRoot, {
+    withFileTypes: true,
+  }))
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  const client = new Client({ connectionString: databaseUrl });
+  const lockName = "murph:hosted-runtime-log-test-migrations";
+
+  try {
+    await client.connect();
+    await client.query(
+      "SELECT pg_advisory_lock(hashtext($1)::bigint)",
+      [lockName],
+    );
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ${quoteHostedRuntimeLogTestIdentifier(
+        hostedRuntimeLogTestMigrationTable,
+      )} (
+        migration_name TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    for (const directory of migrationDirectories) {
+      const migrationName = `${directory}/migration.sql`;
+      const applied = await client.query<{ exists: boolean }>(
+        `SELECT EXISTS (
+          SELECT 1
+          FROM ${quoteHostedRuntimeLogTestIdentifier(hostedRuntimeLogTestMigrationTable)}
+          WHERE migration_name = $1
+        ) AS exists`,
+        [migrationName],
+      );
+      if (applied.rows[0]?.exists === true) {
+        continue;
+      }
+
+      const migrationSql = await readFile(
+        new URL(migrationName, hostedRuntimeLogTestMigrationsRoot),
+        "utf8",
+      );
+      await client.query("BEGIN");
+      try {
+        await client.query(migrationSql);
+        await client.query(
+          `INSERT INTO ${quoteHostedRuntimeLogTestIdentifier(
+            hostedRuntimeLogTestMigrationTable,
+          )} (migration_name)
+           VALUES ($1)`,
+          [migrationName],
+        );
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
+    }
+  } finally {
+    await client.query(
+      "SELECT pg_advisory_unlock(hashtext($1)::bigint)",
+      [lockName],
+    ).catch(() => {});
+    await client.end();
+  }
+}
+
+function quoteHostedRuntimeLogTestIdentifier(value: string): string {
+  return `"${value.replaceAll('"', '""')}"`;
 }
 
 function mapHostedComputerRunForTest(

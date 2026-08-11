@@ -71,31 +71,56 @@ export function isHostedLinqDeliverableFirstContact(input: {
   return isHostedLinqIMessageService(input.event.data.service);
 }
 
-export function hostedLinqFirstContactContainsBlockedContent(input: {
+export type HostedLinqFirstContactContentDisposition =
+  | "allow"
+  | "blocked"
+  | "contentless";
+
+export function resolveHostedLinqFirstContactContentDisposition(input: {
   event: HostedLinqMessageReceivedEvent;
   participantContact: HostedLinqParticipantContact;
-}): boolean {
+}): HostedLinqFirstContactContentDisposition {
   const blocksStandaloneSmsOptOutCommand = shouldBlockStandaloneSmsOptOutCommand({
     participantContact: input.participantContact,
     service: input.event.data.service,
   });
+  let hasContent = false;
 
-  return input.event.data.message.parts.some((part) => {
+  for (const part of input.event.data.message.parts) {
     if (part.type === "link") {
-      return true;
+      return "blocked";
     }
 
-    if (part.type === "text") {
-      return containsUrlLikeText(part.value)
-        || containsSmsOptOutBoilerplate(part.value)
+    if (part.type === "text" || part.type === "imessage_app") {
+      const value = part.type === "imessage_app"
+        ? part.fallback_text?.trim()
+        : part.value;
+      if (!value) {
+        // Preserve legacy blank-text handling while making the new app-card
+        // fallback the only content authority for unknown senders.
+        hasContent ||= part.type === "text";
+        continue;
+      }
+
+      hasContent = true;
+      if (
+        containsUrlLikeText(value)
+        || containsSmsOptOutBoilerplate(value)
         || (
           blocksStandaloneSmsOptOutCommand
-          && containsStandaloneSmsOptOutCommand(part.value)
-        );
+          && containsStandaloneSmsOptOutCommand(value)
+        )
+      ) {
+        return "blocked";
+      }
+      continue;
     }
 
-    return false;
-  });
+    // Media and voice memo first contacts retain their existing behavior.
+    hasContent = true;
+  }
+
+  return hasContent ? "allow" : "contentless";
 }
 
 export function isHostedLinqIMessageService(
@@ -340,7 +365,6 @@ export const HOSTED_LINQ_INACTIVE_MEMBER_NOTICE_REASON: Record<
 > = {
   billing_inactive: "sent-billing-inactive-notice",
   health_data_consent_withdrawn: "sent-health-data-consent-withdrawn-notice",
-  trial_conversion_pending: "sent-trial-conversion-notice",
 };
 
 /**

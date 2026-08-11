@@ -152,9 +152,46 @@ for (const [dependencyName, expectedSpecifier] of Object.entries(bundledIncurRun
     `package.json must declare ${dependencyName}@${expectedSpecifier} while incur is bundled, because npm does not install dependencies declared only by bundled dependency payloads.`,
   )
 }
+const bundledInkRuntimeDependencies: Record<string, string> = {
+  '@alcalzone/ansi-tokenize': '^0.2.4',
+  'ansi-escapes': '^7.3.0',
+  'ansi-styles': '^6.2.1',
+  'auto-bind': '^5.0.1',
+  chalk: '^5.6.0',
+  'cli-boxes': '^3.0.0',
+  'cli-cursor': '^4.0.0',
+  'cli-truncate': '^5.1.1',
+  'code-excerpt': '^4.0.0',
+  'es-toolkit': '^1.39.10',
+  'indent-string': '^5.0.0',
+  'is-in-ci': '^2.0.0',
+  'patch-console': '^2.0.0',
+  'react-reconciler': '^0.33.0',
+  scheduler: '^0.27.0',
+  'signal-exit': '^3.0.7',
+  'slice-ansi': '^8.0.0',
+  'stack-utils': '^2.0.6',
+  'string-width': '^8.1.1',
+  'terminal-size': '^4.0.1',
+  'type-fest': '^5.4.1',
+  'widest-line': '^6.0.0',
+  'wrap-ansi': '^9.0.0',
+  ws: '^8.18.0',
+  'yoga-layout': '~3.2.1',
+}
+for (const [dependencyName, expectedSpecifier] of Object.entries(bundledInkRuntimeDependencies)) {
+  assert(
+    packageJson.dependencies?.[dependencyName] === expectedSpecifier,
+    `package.json must declare ${dependencyName}@${expectedSpecifier} while Ink is bundled, because npm does not install dependencies declared only by bundled dependency payloads.`,
+  )
+}
 assert(
   packageJson.bundleDependencies?.includes('incur') === true,
   'package.json bundleDependencies must include incur so published installs ship the patched lazy optional dependency fix.',
+)
+assert(
+  packageJson.bundleDependencies?.includes('ink') === true,
+  'package.json bundleDependencies must include Ink so published installs ship the patched throttle subpath import.',
 )
 assert(
   packageJson.bin?.['vault-cli'] === 'dist/bin.js',

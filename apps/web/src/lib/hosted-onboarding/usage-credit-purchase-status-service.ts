@@ -32,6 +32,9 @@ import {
   requireHostedUsageCreditPurchasePayerMemberId,
   retrieveAndExpireHostedUsageCreditStripeSession,
 } from "./usage-credit-purchase-stripe";
+import {
+  lockHostedUsageCreditPurchaseReservationOwnersTx,
+} from "./usage-credit-purchase-reservation-lock";
 import { normalizeHostedGroupUsageFundingLocator } from "../hosted-groups/group-usage-funding";
 import { getPrisma } from "../prisma";
 
@@ -340,7 +343,7 @@ function hostedUsageCreditPurchaseTargetsMatch(
     return true;
   }
   if (left.kind === "group" && right.kind === "group") {
-    return left.groupJoinCode === right.groupJoinCode;
+    return true;
   }
   return left.kind === "family" && right.kind === "family" &&
     left.familyGroupId === right.familyGroupId;
@@ -429,19 +432,49 @@ export async function expireHostedUsageCreditCheckout(input: {
     sessionId,
     stripe,
   });
+  const providerState = projectHostedUsageCreditStripeSessionState(session);
 
   return prisma.$transaction(async (tx) => {
-    await lockHostedMemberRow(tx, input.payerMemberId);
+    if (providerState === "expired") {
+      await lockHostedUsageCreditPurchaseReservationOwnersTx({
+        beneficiaryMemberId: purchase.beneficiaryMemberId,
+        payerMemberId: input.payerMemberId,
+        tx,
+      });
+    } else {
+      await lockHostedMemberRow(tx, input.payerMemberId);
+    }
     const current = await tx.hostedUsageCreditPurchase.findUnique({
       where: { id: input.purchaseId },
     });
-    if (!current || current.payerMemberId !== input.payerMemberId) {
+    if (
+      !current ||
+      current.payerMemberId !== input.payerMemberId ||
+      current.beneficiaryMemberId !== purchase.beneficiaryMemberId
+    ) {
       throw buildHostedUsageCreditPurchaseNotFoundError();
     }
+    if (current.status === HostedUsageCreditPurchaseStatus.fulfilled) {
+      return projectHostedUsageCreditPurchaseStatusResult(current);
+    }
+    if (current.grantSlotReleasedAt !== null) {
+      if (
+        current.status !== HostedUsageCreditPurchaseStatus.expired ||
+        current.paidAt !== null ||
+        providerState !== "expired"
+      ) {
+        throw buildHostedUsageCreditInvariantError(
+          "checkout_release_state_invalid",
+        );
+      }
+      return projectHostedUsageCreditPurchaseStatusResult(current);
+    }
     if (
-      current.status === HostedUsageCreditPurchaseStatus.fulfilled ||
-      current.status === HostedUsageCreditPurchaseStatus.expired ||
-      current.status === HostedUsageCreditPurchaseStatus.payment_failed
+      providerState !== "expired" &&
+      (
+        current.status === HostedUsageCreditPurchaseStatus.expired ||
+        current.status === HostedUsageCreditPurchaseStatus.payment_failed
+      )
     ) {
       return projectHostedUsageCreditPurchaseStatusResult(current);
     }
@@ -463,13 +496,13 @@ export async function expireHostedUsageCreditCheckout(input: {
       throw buildHostedUsageCreditInvariantError("checkout_session_identity_changed");
     }
 
-    const providerState = projectHostedUsageCreditStripeSessionState(session);
     if (providerState === "checkout_open") {
       throw buildHostedUsageCreditInvariantError("stripe_session_remained_open");
     }
     const expired = providerState === "expired";
     const updated = await tx.hostedUsageCreditPurchase.updateMany({
       data: {
+        ...(expired ? { grantSlotReleasedAt: now } : {}),
         lastReconciledAt: now,
         reconciliationVersion: { increment: 1n },
         status: expired
@@ -480,6 +513,9 @@ export async function expireHostedUsageCreditCheckout(input: {
       },
       where: {
         id: current.id,
+        ...(expired
+          ? { grantSlotReleasedAt: null, paidAt: null }
+          : {}),
         payerMemberId: input.payerMemberId,
         reconciliationVersion: current.reconciliationVersion,
       },

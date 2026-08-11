@@ -26,6 +26,7 @@ import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from './message-target-selection.js'
 import type {
+  AssistantGenerateSongTurnPolicy,
   AssistantProviderServiceTier,
   AssistantProviderAttemptMetadata,
   AssistantProviderFinishWithoutReplyAcceptedEvent,
@@ -37,13 +38,11 @@ import type {
 import { errorMessage, normalizeNullableString } from './shared.js'
 import {
   recordAssistantRuntimeIssueInputsBestEffort,
+  type AssistantRuntimeIssueInput,
 } from './issue-reporting.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
 } from './onboarding-goal-checkin-automation.js'
-import type {
-  AssistantRuntimeIssueInput,
-} from './issue-reporting.js'
 import type { CodexThreadIdentity } from './codex-thread-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
@@ -96,22 +95,24 @@ import {
   recordCodexAttemptFailed,
 } from './codex-turn/attempt-observability.js'
 import {
-  buildCodexTurnExecutionPlan,
   buildCodexTurnAttemptPlan,
+  buildCodexTurnExecutionPlan,
+  type AssistantCodexAttemptPlan,
+  type AssistantCodexTurnExecutionPlan,
+  type AssistantCodexTurnExecutionProfile,
+  type AssistantCodexTurnThreadScopeProfile,
+  type AssistantRoutePlanningDiagnostics,
 } from './codex-turn/planning.js'
 import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
-import type {
-  AssistantCodexAttemptPlan,
-  AssistantRoutePlanningDiagnostics,
-  AssistantCodexTurnExecutionPlan,
-  AssistantCodexTurnExecutionProfile,
-  AssistantCodexTurnThreadScopeProfile,
-} from './codex-turn/planning.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
+const ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY = {
+  maxAttempts: 1,
+  requiredDurationSeconds: 15,
+} as const satisfies AssistantGenerateSongTurnPolicy
 const ASSISTANT_PROVIDER_PLAN_TRACE_TYPE = 'assistant.provider.plan'
 const ASSISTANT_PROVIDER_FLEX_TURN_DEADLINE_MS = 600_000
 const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
@@ -496,6 +497,9 @@ async function executeAssistantCodexAttempt(input: {
     const nativeCapabilitiesRestrictedTurn =
       outputOnlyTurn ||
       executionPlan.profile.promptProfile === 'creative-notification'
+    const creativeNotificationSongTurn =
+      executionPlan.profile.promptProfile === 'creative-notification' &&
+      executionPlan.profile.toolProfile === 'provider-turn'
     const systemNotificationTurn =
       executionPlan.profile.promptProfile === 'system-notification' ||
       executionPlan.profile.promptProfile === 'creative-notification'
@@ -572,6 +576,12 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
+        ...(creativeNotificationSongTurn
+          ? {
+              generateSongPolicy:
+                ASSISTANT_CREATIVE_NOTIFICATION_SONG_POLICY,
+            }
+          : {}),
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
         hostedToolContext:

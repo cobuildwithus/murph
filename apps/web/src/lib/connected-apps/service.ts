@@ -20,8 +20,8 @@ import {
   assertHostedConnectedAppToolkit,
   buildHostedConnectedAppsPolicyRevision,
   formatHostedConnectedAppToolkitLabel,
-  getHostedConnectedAppsCalendarWritePolicy,
   getHostedConnectedAppsCustomAuthExecution,
+  getHostedConnectedAppsWritePolicy,
   isHostedConnectedAppsServiceTool,
   readHostedConnectedAppsConfig,
   readHostedOpenWeatherApiKey,
@@ -85,6 +85,22 @@ function connectedAppsResultTooLargeError(cause?: unknown) {
     code: "CONNECTED_APPS_RESULT_TOO_LARGE",
     httpStatus: 413,
     message: CONNECTED_APPS_RESULT_TOO_LARGE_MESSAGE,
+  });
+}
+
+function connectedAppsWritePreflightError(
+  error: ComposioConnectedAppsRequestError,
+) {
+  const retryable = error.retryable ?? isRetryableComposioFailure(error);
+  return hostedOnboardingError({
+    cause: error,
+    code: "CONNECTED_APPS_WRITE_PREFLIGHT_UNAVAILABLE",
+    details: buildConnectedAppsProviderErrorDetails(error),
+    httpStatus: retryable ? 503 : 400,
+    message: retryable
+      ? "Connected account verification is temporarily unavailable."
+      : "The connected account could not be verified.",
+    retryable,
   });
 }
 
@@ -166,14 +182,17 @@ async function runHostedConnectedAppsRequest(input: {
           });
         }
 
-        const writePolicy = getHostedConnectedAppsCalendarWritePolicy(toolSlug);
+        const writePolicy = getHostedConnectedAppsWritePolicy(toolSlug);
+        const emailWrite = writePolicy?.kind === "email";
         if (writePolicy) {
           assertHostedConnectedAppToolkit(config, writePolicy.toolkit);
           if (!agentApproved) {
             throw hostedOnboardingError({
               code: "CONNECTED_APPS_AGENT_APPROVAL_REQUIRED",
               httpStatus: 400,
-              message: "Approve the calendar event before adding it.",
+              message: emailWrite
+                ? "Approve the email before sending it."
+                : "Approve the calendar event before adding it.",
             });
           }
           const unsupportedArguments = Object.keys(argumentsValue).filter(
@@ -183,7 +202,21 @@ async function runHostedConnectedAppsRequest(input: {
             throw hostedOnboardingError({
               code: "CONNECTED_APPS_WRITE_ARGUMENT_NOT_ALLOWED",
               httpStatus: 400,
-              message: "That calendar action includes unsupported options.",
+              message: emailWrite
+                ? "That email action includes unsupported options."
+                : "That calendar action includes unsupported options.",
+            });
+          }
+          const missingArguments = writePolicy.requiredArguments.filter((key) =>
+            isMissingConnectedAppsWriteArgument(argumentsValue, key)
+          );
+          if (missingArguments.length > 0) {
+            throw hostedOnboardingError({
+              code: "CONNECTED_APPS_WRITE_ARGUMENT_REQUIRED",
+              httpStatus: 400,
+              message: emailWrite
+                ? "That email action is missing required fields."
+                : "That calendar action is missing required fields.",
             });
           }
         }
@@ -195,19 +228,30 @@ async function runHostedConnectedAppsRequest(input: {
             message: "Choose a connected account before running that tool.",
           });
         }
-        const account = await resolveOwnedConnectedAccount({
-          client,
-          memberId: input.memberId,
-          selector,
-          scope: "configured",
-        });
+        let account: ComposioConnectedAccount;
+        try {
+          account = await resolveOwnedConnectedAccount({
+            client,
+            memberId: input.memberId,
+            selector,
+            scope: "configured",
+            ...(writePolicy ? { toolkit: writePolicy.toolkit } : {}),
+          });
+        } catch (error) {
+          if (writePolicy && error instanceof ComposioConnectedAppsRequestError) {
+            throw connectedAppsWritePreflightError(error);
+          }
+          throw error;
+        }
 
         if (writePolicy) {
           if (account.toolkit.slug.trim().toLowerCase() !== writePolicy.toolkit) {
             throw hostedOnboardingError({
               code: "CONNECTED_APPS_TOOLKIT_MISMATCH",
               httpStatus: 400,
-              message: "Choose an account that matches the calendar action.",
+              message: emailWrite
+                ? "Choose an account that matches the email action."
+                : "Choose an account that matches the calendar action.",
             });
           }
           return await client.executeDirect({
@@ -221,13 +265,17 @@ async function runHostedConnectedAppsRequest(input: {
           }).catch((error: unknown) => {
             if (error instanceof ComposioConnectedAppsRequestError) {
               throw new ComposioConnectedAppsRequestError(
-                "Composio calendar event creation returned an ambiguous result.",
+                `${emailWrite
+                  ? "Composio email sending returned an ambiguous result."
+                  : "Composio calendar event creation returned an ambiguous result."} ${error.message}`,
                 error.status,
                 {
                   cause: error,
                   operationName: toolSlug,
                   retryable: false,
-                  type: error.type ?? "composio_calendar_create_ambiguous",
+                  type: error.type ?? (emailWrite
+                    ? "composio_email_send_ambiguous"
+                    : "composio_calendar_create_ambiguous"),
                 },
               );
             }
@@ -252,6 +300,20 @@ async function runHostedConnectedAppsRequest(input: {
   } catch (error) {
     throw mapConnectedAppsError(error);
   }
+}
+
+function isMissingConnectedAppsWriteArgument(
+  argumentsValue: Readonly<Record<string, unknown>>,
+  key: string,
+): boolean {
+  if (!Object.hasOwn(argumentsValue, key)) {
+    return true;
+  }
+  const value = argumentsValue[key];
+  return value === null
+    || value === undefined
+    || (typeof value === "string" && value.trim().length === 0)
+    || (Array.isArray(value) && value.length === 0);
 }
 
 export async function startHostedConnectedAppConnection(input: {
@@ -631,13 +693,29 @@ async function resolveOwnedConnectedAccount(input: {
   memberId: string;
   selector: string;
   scope: "all-owned" | "configured";
+  toolkit?: string;
 }): Promise<ComposioConnectedAccount> {
   const accounts = await input.client.listAccounts({
-    ...(input.scope === "all-owned" ? { toolkits: null } : {}),
+    ...(input.scope === "all-owned"
+      ? { toolkits: null }
+      : input.toolkit
+        ? { toolkit: input.toolkit }
+        : {}),
     userId: input.memberId,
   });
+  const selectableAccounts = input.scope === "configured"
+    ? accounts.filter((account) =>
+        account.status.trim().toUpperCase() === "ACTIVE"
+        && !account.isDisabled
+      )
+    : accounts;
+  const scopedAccounts = input.toolkit
+    ? selectableAccounts.filter((account) =>
+        account.toolkit.slug.trim().toLowerCase() === input.toolkit
+      )
+    : selectableAccounts;
   const selector = input.selector.trim().toLowerCase();
-  const matches = accounts.filter((account) =>
+  const matches = scopedAccounts.filter((account) =>
     account.id.toLowerCase() === selector
     || account.alias?.toLowerCase() === selector
     || account.wordId?.toLowerCase() === selector

@@ -7,6 +7,7 @@ import {
   HostedUsageCreditPurchaseStatus,
   Prisma,
   type HostedGroupSponsorshipAuthorization,
+  type HostedUsageCreditPurchase,
   type PrismaClient,
 } from "@prisma/client";
 
@@ -20,6 +21,13 @@ import {
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   getHostedUsageCreditOfferDefinition,
 } from "../hosted-onboarding/usage-credit-offers";
+import {
+  readHostedUsageCreditGrantCapacityTx,
+} from "../hosted-execution/usage-credit-grant-capacity";
+import {
+  lockHostedUsageCreditBeneficiaryTx,
+  type LockedHostedUsageCreditBeneficiary,
+} from "../hosted-execution/usage-credit-ledger";
 import {
   hasHostedRuntimeActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
@@ -112,6 +120,30 @@ const LIVE_AUTHORIZATION_STATUSES = [
   HostedGroupSponsorshipAuthorizationStatus.paused,
   HostedGroupSponsorshipAuthorizationStatus.recovery_required,
 ] as const;
+
+type HostedGroupSponsorshipPeriodState = Pick<
+  HostedGroupSponsorshipAuthorization,
+  | "anchorDay"
+  | "anchorEndOfMonth"
+  | "monthlyCapMinor"
+  | "pendingMonthlyCapMinor"
+  | "periodEndsAt"
+  | "periodStartedAt"
+>;
+
+type HostedGroupSponsorshipRefillAccounting = Pick<
+  HostedUsageCreditPurchase,
+  "cashAmountMinor" | "groupSponsorshipChargeOrdinal" | "status"
+>;
+
+type HostedGroupSponsorshipRefillAuthority = Pick<
+  HostedUsageCreditPurchase,
+  | "offerCode"
+  | "payerMemberId"
+  | "status"
+  | "stripeCustomerIdEncrypted"
+  | "stripePriceIdEncrypted"
+>;
 
 export function parseHostedGroupSponsorshipMonthlyCapMinor(
   value: unknown,
@@ -625,6 +657,10 @@ export async function admitHostedGroupSponsorshipRefillTx(input: {
     return null;
   }
   const now = requireValidDate(input.now);
+  const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    tx: input.tx,
+  });
   const current = await readLiveHostedGroupSponsorshipAuthorizationTx({
     beneficiaryMemberId: input.beneficiaryMemberId,
     tx: input.tx,
@@ -643,10 +679,16 @@ export async function admitHostedGroupSponsorshipRefillTx(input: {
   ) {
     return null;
   }
+  if (
+    authorization.payerMemberId !== lockedBeneficiary.beneficiaryMemberId
+  ) {
+    await lockHostedMemberRow(input.tx, authorization.payerMemberId);
+  }
 
   const purchaseId = await readOrCreateHostedGroupSponsorshipRefillPurchaseTx({
     authorization,
     checkoutExpiresAt: authorization.periodEndsAt,
+    lockedBeneficiary,
     now,
     tx: input.tx,
   });
@@ -666,6 +708,10 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
 }): Promise<HostedGroupSponsorshipRecoveryPreparation> {
   const now = requireValidDate(input.now);
   const checkoutExpiresAt = requireValidDate(input.checkoutExpiresAt);
+  const lockedBeneficiary = await lockHostedUsageCreditBeneficiaryTx({
+    beneficiaryMemberId: input.beneficiaryMemberId,
+    tx: input.tx,
+  });
   const current = await readLiveHostedGroupSponsorshipAuthorizationTx({
     beneficiaryMemberId: input.beneficiaryMemberId,
     tx: input.tx,
@@ -677,7 +723,9 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
   ) {
     throw recoveryUnavailable();
   }
-  await lockHostedMemberRow(input.tx, input.payerMemberId);
+  if (input.payerMemberId !== lockedBeneficiary.beneficiaryMemberId) {
+    await lockHostedMemberRow(input.tx, input.payerMemberId);
+  }
   let authorization = await normalizeHostedGroupSponsorshipAuthorizationTx({
     authorization: current,
     now,
@@ -746,6 +794,32 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
     ) {
       return reactivateWithoutCharge();
     }
+    const capacity = await readHostedUsageCreditGrantCapacityTx({
+      ...(failed.grantSlotReleasedAt === null
+        ? { expectedPurchaseId: failed.id }
+        : {}),
+      lockedBeneficiary,
+      tx: input.tx,
+    });
+    if (capacity.state === "overflow") {
+      throw new TypeError(
+        "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+      );
+    }
+    if (
+      failed.grantSlotReleasedAt === null &&
+      !capacity.expectedPurchaseOwnsReservation
+    ) {
+      throw new TypeError(
+        "Hosted group sponsorship refill purchase reservation is missing.",
+      );
+    }
+    if (
+      failed.grantSlotReleasedAt !== null &&
+      capacity.state !== "available"
+    ) {
+      throw recoveryUnavailable();
+    }
     const returnUrls = buildHostedGroupSponsorshipRefillReturnUrls({
       checkoutCancelUrl: failed.checkoutCancelUrl,
       checkoutSuccessUrl: failed.checkoutSuccessUrl,
@@ -755,6 +829,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
       data: {
         checkoutExpiresAt: boundedCheckoutExpiresAt,
         ...returnUrls,
+        grantSlotReleasedAt: null,
         lastReconciledAt: null,
         reconciliationVersion: { increment: 1n },
         status: HostedUsageCreditPurchaseStatus.created,
@@ -763,6 +838,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
       },
       where: {
         id: failed.id,
+        grantSlotReleasedAt: failed.grantSlotReleasedAt,
         reconciliationVersion: failed.reconciliationVersion,
         status: HostedUsageCreditPurchaseStatus.payment_failed,
         stripeCheckoutSessionLookupKey: null,
@@ -782,6 +858,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
   const purchaseId = await readOrCreateHostedGroupSponsorshipRefillPurchaseTx({
     authorization,
     checkoutExpiresAt: boundedCheckoutExpiresAt,
+    lockedBeneficiary,
     now,
     tx: input.tx,
   });
@@ -794,6 +871,7 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
 async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
   authorization: HostedGroupSponsorshipAuthorization;
   checkoutExpiresAt: Date;
+  lockedBeneficiary: LockedHostedUsageCreditBeneficiary;
   now: Date;
   tx: Prisma.TransactionClient;
 }): Promise<string | null> {
@@ -804,7 +882,6 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
       "Hosted group sponsorship refill has no payer authorization.",
     );
   }
-  await lockHostedMemberRow(input.tx, payerMemberId);
   const purchases = await input.tx.hostedUsageCreditPurchase.findMany({
     orderBy: { groupSponsorshipChargeOrdinal: "asc" },
     select: {
@@ -821,13 +898,25 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
       groupSponsorshipPeriodStartedAt: authorization.periodStartedAt,
     },
   });
-  const pendingAutomatic = purchases.find((purchase) =>
-    (purchase.groupSponsorshipChargeOrdinal ?? 0) > 0 &&
-    PENDING_PURCHASE_STATUSES.includes(
-      purchase.status as (typeof PENDING_PURCHASE_STATUSES)[number],
-    )
+  const pendingAutomatic = purchases.find(
+    isHostedGroupSponsorshipRefillPending,
   );
   if (pendingAutomatic) {
+    const capacity = await readHostedUsageCreditGrantCapacityTx({
+      expectedPurchaseId: pendingAutomatic.id,
+      lockedBeneficiary: input.lockedBeneficiary,
+      tx: input.tx,
+    });
+    if (capacity.state === "overflow") {
+      throw new TypeError(
+        "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+      );
+    }
+    if (!capacity.expectedPurchaseOwnsReservation) {
+      throw new TypeError(
+        "Hosted group sponsorship refill purchase reservation is missing.",
+      );
+    }
     if (pendingAutomatic.status === HostedUsageCreditPurchaseStatus.created) {
       await normalizeHostedGroupSponsorshipRefillReturnUrlsTx({
         now: input.now,
@@ -838,16 +927,11 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     return pendingAutomatic.id;
   }
 
-  const committedMinor = purchases.reduce((sum, purchase) =>
-    COMMITTED_PURCHASE_STATUSES.includes(
-      purchase.status as (typeof COMMITTED_PURCHASE_STATUSES)[number],
-    )
-      ? sum + purchase.cashAmountMinor
-      : sum, 0);
-  if (
-    committedMinor + HOSTED_GROUP_SPONSORSHIP_REFILL_AMOUNT_MINOR >
-    authorization.monthlyCapMinor
-  ) {
+  const chargeOrdinal = projectHostedGroupSponsorshipNextRefillChargeOrdinal({
+    monthlyCapMinor: authorization.monthlyCapMinor,
+    purchases,
+  });
+  if (chargeOrdinal === null) {
     return null;
   }
 
@@ -872,25 +956,16 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     });
   if (
     !activationPurchase ||
-    activationPurchase.status !== HostedUsageCreditPurchaseStatus.fulfilled ||
-    activationPurchase.offerCode !== HOSTED_GROUP_SPONSORSHIP_REFILL_OFFER_CODE ||
-    activationPurchase.payerMemberId !== authorization.payerMemberId ||
-    !activationPurchase.stripePriceIdEncrypted ||
-    !activationPurchase.stripeCustomerIdEncrypted
+    !hasHostedGroupSponsorshipRefillPaymentAuthority({
+      activationPurchase,
+      payerMemberId,
+    })
   ) {
     throw new TypeError(
       "Hosted group sponsorship refill lacks a fulfilled activation purchase.",
     );
   }
 
-  const highestOrdinal = purchases.reduce(
-    (highest, purchase) => Math.max(
-      highest,
-      purchase.groupSponsorshipChargeOrdinal ?? 0,
-    ),
-    0,
-  );
-  const chargeOrdinal = highestOrdinal + 1;
   const purchaseId = buildHostedGroupSponsorshipRefillPurchaseId({
     authorizationId: authorization.id,
     chargeOrdinal,
@@ -904,6 +979,18 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     checkoutSuccessUrl: activationPurchase.checkoutSuccessUrl,
     purchaseId,
   });
+  const capacity = await readHostedUsageCreditGrantCapacityTx({
+    lockedBeneficiary: input.lockedBeneficiary,
+    tx: input.tx,
+  });
+  if (capacity.state === "overflow") {
+    throw new TypeError(
+      "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+    );
+  }
+  if (capacity.state === "at_capacity") {
+    return null;
+  }
 
   try {
     await input.tx.hostedUsageCreditPurchase.create({
@@ -922,6 +1009,7 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
           periodStartedAt: authorization.periodStartedAt,
         }),
         createdAt: input.now,
+        grantSlotReleasedAt: null,
         grantUsdMicros: offer.grantUsdMicros,
         groupSponsorshipAuthorizationId: authorization.id,
         groupSponsorshipChargeOrdinal: chargeOrdinal,
@@ -956,6 +1044,21 @@ async function readOrCreateHostedGroupSponsorshipRefillPurchaseTx(input: {
     });
     if (!existing || existing.id !== purchaseId) {
       throw error;
+    }
+    const existingCapacity = await readHostedUsageCreditGrantCapacityTx({
+      expectedPurchaseId: purchaseId,
+      lockedBeneficiary: input.lockedBeneficiary,
+      tx: input.tx,
+    });
+    if (existingCapacity.state === "overflow") {
+      throw new TypeError(
+        "Hosted group sponsorship usage-credit capacity exceeds its contract.",
+      );
+    }
+    if (!existingCapacity.expectedPurchaseOwnsReservation) {
+      throw new TypeError(
+        "Hosted group sponsorship refill purchase reservation is missing.",
+      );
     }
   }
 
@@ -1062,6 +1165,13 @@ export async function hasHostedGroupSponsorshipPaymentAuthorityTx(input: {
     return false;
   }
   await lockHostedMemberRow(input.tx, input.payerMemberId);
+  const payer = await input.tx.hostedMember.findUnique({
+    select: { suspendedAt: true },
+    where: { id: input.payerMemberId },
+  });
+  if (!payer || payer.suspendedAt) {
+    return false;
+  }
   const purchase = await input.tx.hostedUsageCreditPurchase.findUnique({
     select: {
       beneficiaryMemberId: true,
@@ -1332,6 +1442,121 @@ export async function readHostedGroupSponsorshipPublicState(input: {
   return authorization ? "sponsored" : "not_sponsored";
 }
 
+/**
+ * Returns only whether a low room can recover without asking the conversation
+ * for more funding. Payer identity, limits, purchases, and refill state stay
+ * inside Web.
+ */
+export async function hasHostedGroupAutomaticRefillAvailable(input: {
+  beneficiaryMemberId: string;
+  now?: Date;
+  prisma: HostedOnboardingReadClient;
+}): Promise<boolean> {
+  const now = requireValidDate(input.now ?? new Date());
+  const authorizations =
+    await input.prisma.hostedGroupSponsorshipAuthorization.findMany({
+      select: {
+        anchorDay: true,
+        anchorEndOfMonth: true,
+        id: true,
+        monthlyCapMinor: true,
+        payerMemberId: true,
+        pendingMonthlyCapMinor: true,
+        periodEndsAt: true,
+        periodStartedAt: true,
+        purchases: {
+          select: {
+            groupSponsorshipChargeOrdinal: true,
+            groupSponsorshipPeriodStartedAt: true,
+            status: true,
+          },
+          where: {
+            groupSponsorshipChargeOrdinal: { gt: 0 },
+            status: { in: [...PENDING_PURCHASE_STATUSES] },
+          },
+        },
+        status: true,
+      },
+      where: {
+        beneficiaryMemberId: input.beneficiaryMemberId,
+        OR: [
+          { status: HostedGroupSponsorshipAuthorizationStatus.active },
+          {
+            purchases: {
+              some: {
+                groupSponsorshipChargeOrdinal: { gt: 0 },
+                status: HostedUsageCreditPurchaseStatus.payment_pending,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+  for (const candidate of authorizations) {
+    const period = projectHostedGroupSponsorshipPeriod(candidate, now);
+    const pendingRefill = candidate.purchases.some((purchase) =>
+      purchase.groupSponsorshipPeriodStartedAt?.getTime() ===
+        period.periodStartedAt.getTime()
+      && (candidate.status === HostedGroupSponsorshipAuthorizationStatus.active
+        || purchase.status === HostedUsageCreditPurchaseStatus.payment_pending)
+    );
+    if (pendingRefill) {
+      return true;
+    }
+  }
+
+  const authorization = authorizations.find(
+    (candidate) =>
+      candidate.status === HostedGroupSponsorshipAuthorizationStatus.active,
+  );
+  if (!authorization) {
+    return false;
+  }
+
+  const activation = await input.prisma.hostedUsageCreditPurchase.findFirst({
+    select: {
+      offerCode: true,
+      payerMemberId: true,
+      status: true,
+      stripeCustomerIdEncrypted: true,
+      stripePriceIdEncrypted: true,
+    },
+    where: {
+      groupSponsorshipAuthorizationId: authorization.id,
+      groupSponsorshipChargeOrdinal: 0,
+    },
+  });
+  if (!hasHostedGroupSponsorshipRefillPaymentAuthority({
+    activationPurchase: activation,
+    payerMemberId: authorization.payerMemberId,
+  })) {
+    return false;
+  }
+
+  const period = projectHostedGroupSponsorshipPeriod(authorization, now);
+
+  const purchases = await input.prisma.hostedUsageCreditPurchase.findMany({
+    select: {
+      cashAmountMinor: true,
+      groupSponsorshipChargeOrdinal: true,
+      status: true,
+    },
+    where: {
+      groupSponsorshipAuthorizationId: authorization.id,
+      groupSponsorshipPeriodStartedAt: period.periodStartedAt,
+    },
+  });
+  if (purchases.some(isHostedGroupSponsorshipRefillPending)) {
+    return true;
+  }
+
+  return projectHostedGroupSponsorshipNextRefillChargeOrdinal({
+    monthlyCapMinor: period.monthlyCapMinor,
+    purchases,
+  }) !== null;
+}
+
 export async function readHostedGroupSponsorshipAuthorizationByPurchase(input: {
   prisma: HostedOnboardingReadClient;
   purchaseId: string;
@@ -1484,6 +1709,88 @@ export function addHostedGroupSponsorshipCalendarMonth(input: {
   return nextMonthStart;
 }
 
+function projectHostedGroupSponsorshipPeriod(
+  authorization: HostedGroupSponsorshipPeriodState,
+  now: Date,
+) {
+  let monthlyCapMinor = authorization.monthlyCapMinor;
+  let pendingMonthlyCapMinor = authorization.pendingMonthlyCapMinor;
+  let periodEndsAt = authorization.periodEndsAt;
+  let periodStartedAt = authorization.periodStartedAt;
+  let iterations = 0;
+  while (now.getTime() >= periodEndsAt.getTime()) {
+    periodStartedAt = periodEndsAt;
+    periodEndsAt = addHostedGroupSponsorshipCalendarMonth({
+      anchorDay: authorization.anchorDay,
+      anchorEndOfMonth: authorization.anchorEndOfMonth,
+      date: periodStartedAt,
+    });
+    if (pendingMonthlyCapMinor !== null) {
+      monthlyCapMinor = pendingMonthlyCapMinor;
+      pendingMonthlyCapMinor = null;
+    }
+    iterations += 1;
+    if (iterations > 1_200) {
+      throw new TypeError("Hosted group sponsorship period rollover is invalid.");
+    }
+  }
+  return {
+    monthlyCapMinor,
+    pendingMonthlyCapMinor,
+    periodEndsAt,
+    periodStartedAt,
+  };
+}
+
+function isHostedGroupSponsorshipRefillPending(
+  purchase: HostedGroupSponsorshipRefillAccounting,
+): boolean {
+  return (purchase.groupSponsorshipChargeOrdinal ?? 0) > 0 &&
+    PENDING_PURCHASE_STATUSES.includes(
+      purchase.status as (typeof PENDING_PURCHASE_STATUSES)[number],
+    );
+}
+
+function projectHostedGroupSponsorshipNextRefillChargeOrdinal(input: {
+  monthlyCapMinor: number;
+  purchases: readonly HostedGroupSponsorshipRefillAccounting[];
+}): number | null {
+  const committedMinor = input.purchases.reduce((sum, purchase) =>
+    COMMITTED_PURCHASE_STATUSES.includes(
+      purchase.status as (typeof COMMITTED_PURCHASE_STATUSES)[number],
+    )
+      ? sum + purchase.cashAmountMinor
+      : sum, 0);
+  if (
+    committedMinor + HOSTED_GROUP_SPONSORSHIP_REFILL_AMOUNT_MINOR >
+    input.monthlyCapMinor
+  ) {
+    return null;
+  }
+  return input.purchases.reduce(
+    (highest, purchase) => Math.max(
+      highest,
+      purchase.groupSponsorshipChargeOrdinal ?? 0,
+    ),
+    0,
+  ) + 1;
+}
+
+function hasHostedGroupSponsorshipRefillPaymentAuthority(input: {
+  activationPurchase: HostedGroupSponsorshipRefillAuthority | null;
+  payerMemberId: string | null;
+}): boolean {
+  const activation = input.activationPurchase;
+  return Boolean(
+    input.payerMemberId &&
+    activation?.status === HostedUsageCreditPurchaseStatus.fulfilled &&
+    activation.offerCode === HOSTED_GROUP_SPONSORSHIP_REFILL_OFFER_CODE &&
+    activation.payerMemberId === input.payerMemberId &&
+    activation.stripePriceIdEncrypted &&
+    activation.stripeCustomerIdEncrypted,
+  );
+}
+
 function isUtcMonthEnd(date: Date): boolean {
   return date.getUTCDate() === new Date(Date.UTC(
     date.getUTCFullYear(),
@@ -1535,35 +1842,12 @@ async function normalizeHostedGroupSponsorshipAuthorizationTx(input: {
     return authorization;
   }
 
-  let periodStartedAt = authorization.periodStartedAt;
-  let periodEndsAt = authorization.periodEndsAt;
-  let monthlyCapMinor = authorization.monthlyCapMinor;
-  let pendingMonthlyCapMinor = authorization.pendingMonthlyCapMinor;
-  let iterations = 0;
-  while (input.now.getTime() >= periodEndsAt.getTime()) {
-    periodStartedAt = periodEndsAt;
-    periodEndsAt = addHostedGroupSponsorshipCalendarMonth({
-      anchorDay: authorization.anchorDay,
-      anchorEndOfMonth: authorization.anchorEndOfMonth,
-      date: periodStartedAt,
-    });
-    if (pendingMonthlyCapMinor !== null) {
-      monthlyCapMinor = pendingMonthlyCapMinor;
-      pendingMonthlyCapMinor = null;
-    }
-    iterations += 1;
-    if (iterations > 1_200) {
-      throw new TypeError("Hosted group sponsorship period rollover is invalid.");
-    }
-  }
+  const period = projectHostedGroupSponsorshipPeriod(authorization, input.now);
 
   authorization = await updateAuthorizationStateTx({
     authorization,
     data: {
-      monthlyCapMinor,
-      pendingMonthlyCapMinor,
-      periodEndsAt,
-      periodStartedAt,
+      ...period,
       // A payment failure remains fail-closed across period rollover. Only an
       // explicit payer recovery or a successfully reconciled recovery payment
       // may reactivate automatic charges.

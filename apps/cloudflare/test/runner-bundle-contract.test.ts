@@ -41,8 +41,9 @@ describe("runner bundle package closure", () => {
   });
 
   it("builds the extra workspace packages that murph bundles into its tarball", () => {
-    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur"]);
+    expect(publishedMurphBundledExternalPackageNames).toEqual(["incur", "ink"]);
     expect(publishedMurphBundledWorkspacePackageNames).not.toContain("incur");
+    expect(publishedMurphBundledWorkspacePackageNames).not.toContain("ink");
     expect(hostedRunnerBuildPackageNames).toEqual([
       "@murphai/assistant-cli",
       "@murphai/assistant-engine",

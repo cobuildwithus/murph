@@ -1,9 +1,15 @@
+import { Buffer } from "node:buffer";
+
 import { describe, expect, it } from "vitest";
 
 import {
   assistantResponseCardSchema,
   compactTableCardV1Bounds,
   compactTableResponseCardV1Schema,
+  IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX,
+  IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX,
+  MURPH_PRODUCT_ORIGIN,
+  parseCompactTableAppCardEnvelope,
   type CompactTableResponseCardV1,
   type CompactTableTrackingSourceV1,
 } from "../src/index.ts";
@@ -66,6 +72,23 @@ describe("compact table response-card contract", () => {
     expect(compactTableResponseCardV1Schema.parse(oneOffCard)).toEqual(
       oneOffCard,
     );
+  });
+
+  it("restores an exact authority-free V3 image snapshot", () => {
+    const { tracking: _tracking, ...presentationCard } = TRACKED_WORKOUT_CARD;
+    const envelope = { schemaVersion: 3, card: presentationCard };
+
+    expect(parseCompactTableAppCardEnvelope(envelope)).toEqual(
+      presentationCard,
+    );
+    expect(parseCompactTableAppCardEnvelope({
+      ...envelope,
+      card: { ...presentationCard, tracking: WORKOUT_TRACKING },
+    })).toBeNull();
+    expect(parseCompactTableAppCardEnvelope({
+      ...envelope,
+      extra: true,
+    })).toBeNull();
   });
 
   it("keeps the existing nutrition response-card branch readable", () => {
@@ -231,5 +254,46 @@ describe("compact table response-card contract", () => {
     expect(compactTableResponseCardV1Schema.parse(maximumShapeCard)).toEqual(
       maximumShapeCard,
     );
+  });
+
+  it("rejects the exact static-image URL boundary", () => {
+    const makeBoundaryCard = (lastCellLength: number) => ({
+      ...TRACKED_WORKOUT_CARD,
+      title: "Eight-exercise workout",
+      subtitle: "Verified canonical workout snapshot for today",
+      columns: ["Set 1", "Set 2", "Set 3", "Set 4"],
+      rows: Array.from({ length: 8 }, (_, rowIndex) => ({
+        label: `Exercise ${rowIndex + 1} movement pattern`,
+        values: Array.from({ length: 4 }, (_, columnIndex) => {
+          const cellLength = rowIndex === 7 && columnIndex === 3
+            ? lastCellLength
+            : 22;
+          return `${rowIndex + columnIndex + 1}`.padEnd(cellLength, "x");
+        }),
+      })),
+      footer: "Assists and spotted reps remain on the exact set note.",
+      tracking: null,
+    });
+    const encodeImageLength = (card: ReturnType<typeof makeBoundaryCard>) => {
+      const { tracking: _tracking, ...presentationCard } = card;
+      const encoded = Buffer.from(JSON.stringify({
+        schemaVersion: 3,
+        card: presentationCard,
+      }), "utf8").toString("base64url");
+      return `${MURPH_PRODUCT_ORIGIN}${IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX}${
+        encoded
+      }${IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX}`.length;
+    };
+
+    const acceptedCard = makeBoundaryCard(17);
+    expect(encodeImageLength(acceptedCard)).toBe(2_046);
+    expect(compactTableResponseCardV1Schema.parse(acceptedCard)).toEqual(
+      acceptedCard,
+    );
+
+    const rejectedCard = makeBoundaryCard(18);
+    expect(encodeImageLength(rejectedCard)).toBe(2_048);
+    expect(compactTableResponseCardV1Schema.safeParse(rejectedCard).success)
+      .toBe(false);
   });
 });

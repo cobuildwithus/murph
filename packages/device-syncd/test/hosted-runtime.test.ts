@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import * as hostedRuntime from "../src/hosted-runtime.ts";
 import {
+  addJunctionBloodPressureHistoryBackfillCoverage,
   addJunctionHistoricalBackfillEvidence,
+  canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage,
+  hasJunctionBloodPressureHistoryBackfillCoverage,
   readJunctionHistoricalBackfillEvidence,
 } from "../src/junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
@@ -202,6 +205,92 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 });
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
+  it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
+    const coverage = addJunctionBloodPressureHistoryBackfillCoverage({
+      existingValue: "v2|withings",
+      providerSlug: "omron",
+      version: 1,
+    });
+
+    expect(coverage).toBe("v2|withings");
+    expect(hasJunctionBloodPressureHistoryBackfillCoverage(coverage, "omron", 1)).toBe(false);
+    expect(hasJunctionBloodPressureHistoryBackfillCoverage("v1|omron", "omron", 2)).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage(coverage, 1)).toBe(false);
+    expect(canCurrentRuntimeMutateJunctionBloodPressureHistoryBackfillCoverage("v1|omron", 2)).toBe(true);
+    expect(addJunctionBloodPressureHistoryBackfillCoverage({
+      existingValue: coverage,
+      providerSlug: "__proto__",
+      version: 1,
+    })).toBeNull();
+  });
+
+  it("preserves unpublished local blood-pressure source coverage", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: { hostedOnly: true },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+      },
+    });
+
+    expect(result).toEqual({
+      metadata: {
+        hostedOnly: true,
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+      },
+      preservedLocalProgress: true,
+    });
+  });
+
+  it("accepts hosted migration metadata after local state is published", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: { hostedOnly: true },
+      localConnectionStateUnpublished: false,
+      localMetadata: {
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+      },
+    });
+
+    expect(result).toEqual({
+      metadata: { hostedOnly: true },
+      preservedLocalProgress: false,
+    });
+  });
+
+  it("unions hosted and unpublished local source coverage", () => {
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: {
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+      },
+      localConnectionStateUnpublished: true,
+      localMetadata: {
+        junctionBloodPressureHistoryBackfillCoverage: "v1|withings",
+      },
+    });
+
+    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe("v1|omron,withings");
+    expect(result.preservedLocalProgress).toBe(true);
+  });
+
+  it("keeps published source coverage when a bounded union cannot fit", () => {
+    const hostedCoverage = `v1|${Array.from(
+      { length: 12 },
+      (_, index) => `h${index.toString().padStart(9, "0")}`,
+    ).join(",")}`;
+    const localCoverage = `v1|${Array.from(
+      { length: 12 },
+      (_, index) => `l${index.toString().padStart(9, "0")}`,
+    ).join(",")}`;
+    const result = mergeHostedDeviceSyncConnectionMetadata({
+      hostedMetadata: { junctionBloodPressureHistoryBackfillCoverage: hostedCoverage },
+      localConnectionStateUnpublished: true,
+      localMetadata: { junctionBloodPressureHistoryBackfillCoverage: localCoverage },
+    });
+
+    expect(result.metadata.junctionBloodPressureHistoryBackfillCoverage).toBe(hostedCoverage);
+    expect(result.preservedLocalProgress).toBe(false);
+  });
+
   it("preserves current local Junction retry progress over hosted legacy completion", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
@@ -638,6 +727,21 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 });
 
 describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
+  it("preserves blood-pressure source coverage during guarded replacement", () => {
+    expect(mergeGuardedJunctionHistoricalBackfillMetadata({
+      existingMetadata: {
+        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        seedOnlyState: "discard",
+      },
+      replacementMetadata: {
+        callbackOutcome: "complete",
+      },
+    })).toEqual({
+      callbackOutcome: "complete",
+      junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+    });
+  });
+
   it("preserves opaque future historical state without retaining ordinary seed metadata", () => {
     expect(mergeGuardedJunctionHistoricalBackfillMetadata({
       existingMetadata: {
@@ -2632,13 +2736,25 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ]);
   });
 
-  it("parses Junction backfill job hints with a timeseries cursor", () => {
+  it("parses Junction historical backfill job hints", () => {
+    const unresolvedIdentitiesJson = JSON.stringify({
+      v: 1,
+      i: Array.from({ length: 65 }, (_, index) =>
+        `blood-pressure-${index.toString(16).padStart(16, "0")}`
+      ),
+    });
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {
           kind: "backfill",
           payload: {
             emptyBackfillAttempts: 2,
+            historicalBackfill: true,
+            historicalProviderRecordsSeen: true,
+            historicalRecordsSeen: true,
+            historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
+            historicalUnresolvedProviderRecordCount: 65,
+            historicalWindowStart: "2026-03-01T00:00:00Z",
             timeseriesCursor: "2026-04-02T00:00:00Z",
             windowEnd: "2026-04-03T00:00:00Z",
             windowStart: "2026-04-01T00:00:00Z",
@@ -2649,6 +2765,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
       emptyBackfillAttempts: 2,
+      historicalBackfill: true,
+      historicalProviderRecordsSeen: true,
+      historicalRecordsSeen: true,
+      historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
+      historicalUnresolvedProviderRecordCount: 65,
+      historicalWindowStart: "2026-03-01T00:00:00.000Z",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-01T00:00:00.000Z",
@@ -3074,5 +3196,46 @@ describe("sanitizeHostedRuntimeDiagnosticText", () => {
         "user 0123456789abcdef0123456789abcdef01 denied; retry as 00000000-0000-4000-8000-000000000003",
       ),
     ).toBe("user <redacted-id> denied; retry as <redacted-token>");
+  });
+});
+
+describe("member-owned provider runtime snapshot config", () => {
+  it("parses the bounded invocation-scoped provider config", () => {
+    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      connections: [],
+      generatedAt: "2026-08-10T00:00:00.000Z",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+        },
+      },
+      userId: "member_123",
+    })).toEqual({
+      connections: [],
+      generatedAt: "2026-08-10T00:00:00.000Z",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+        },
+      },
+      userId: "member_123",
+    });
+  });
+
+  it("rejects control-plane-only webhook secrets", () => {
+    expect(() => parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      connections: [],
+      generatedAt: "2026-08-10T00:00:00.000Z",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+          webhookSigningSecret: "must-stay-on-web",
+        },
+      },
+      userId: "member_123",
+    })).toThrow(/webhookSigningSecret/u);
   });
 });

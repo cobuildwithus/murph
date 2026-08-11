@@ -40,7 +40,6 @@ import {
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
-  readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx,
   readHostedMailboxWakeAfterDedupeLockTx,
   resolveHostedMailboxRuntimeFetchLaneCursors,
   tryMarkHostedMailboxConversationAiUsageDenied,
@@ -217,9 +216,10 @@ describe("readHostedMailboxRecentLiveConversationItemIds", () => {
   });
 });
 
-describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
-  it("projects the preference sequence from neutral live conversation input authority", async () => {
-    const findMany = vi.fn().mockResolvedValue([{ causalSeq: 7n }]);
+describe("readHostedMailboxConversationInputAuthorityByAssistantInputIdTx", () => {
+  it("projects the logical preference authority from a live conversation input", async () => {
+    const occurredAt = new Date("2026-08-06T14:30:00.000Z");
+    const findMany = vi.fn().mockResolvedValue([{ causalSeq: 7n, occurredAt }]);
     const prisma = {
       hostedMailboxItem: { findMany },
     } as never;
@@ -231,10 +231,10 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
 
     await expect(
       readHostedMailboxConversationInputAuthorityByAssistantInputIdTx(input),
-    ).resolves.toEqual({ causalSeq: "7" });
-    await expect(
-      readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx(input),
-    ).resolves.toBe("7");
+    ).resolves.toEqual({
+      causalSeq: "7",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+    });
   });
 
   it("returns only a live canonical conversation sequence owned by the member", async () => {
@@ -247,6 +247,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
         expiresAt: null,
         kind: "conversation.message",
         lane: "conversation",
+        occurredAt: new Date("2026-08-06T14:30:00.000Z"),
         userId: "member_mailbox_1",
       },
       {
@@ -256,6 +257,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
         expiresAt: null,
         kind: "assistant.notification.requested",
         lane: "system",
+        occurredAt: new Date("2026-08-06T14:31:00.000Z"),
         userId: "member_mailbox_1",
       },
       {
@@ -265,6 +267,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
         expiresAt: null,
         kind: "conversation.message",
         lane: "conversation",
+        occurredAt: new Date("2026-08-06T14:32:00.000Z"),
         userId: "member_mailbox_1",
       },
       {
@@ -274,6 +277,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
         expiresAt: new Date(now.getTime() - 1),
         kind: "conversation.message",
         lane: "conversation",
+        occurredAt: new Date("2026-08-06T14:33:00.000Z"),
         userId: "member_mailbox_1",
       },
       {
@@ -283,11 +287,12 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
         expiresAt: null,
         kind: "conversation.message",
         lane: "conversation",
+        occurredAt: new Date("2026-08-06T14:34:00.000Z"),
         userId: "member_mailbox_1",
       },
     ];
     const findMany = vi.fn(async (args: {
-      select: { causalSeq: true };
+      select: { causalSeq: true; occurredAt: true };
       take: number;
       where: {
         assistantInputLookupKey: { in: string[] };
@@ -316,18 +321,24 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
           )
         ))
         .slice(0, args.take)
-        .map((row) => ({ causalSeq: row.causalSeq }));
+        .map((row) => ({
+          causalSeq: row.causalSeq,
+          occurredAt: row.occurredAt,
+        }));
     });
     const prisma = {
       hostedMailboxItem: { findMany },
     } as never;
 
-    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+    await expect(readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
       assistantInputId: "ain_valid",
       memberId: "member_mailbox_1",
       prisma,
-    })).resolves.toBe("7");
-    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+    })).resolves.toEqual({
+      causalSeq: "7",
+      occurredAt: "2026-08-06T14:30:00.000Z",
+    });
+    await expect(readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
       assistantInputId: "ain_valid",
       memberId: "member_other",
       prisma,
@@ -339,7 +350,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
       "ain_expired",
       "ain_legacy",
     ]) {
-      await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+      await expect(readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
         assistantInputId,
         memberId: "member_mailbox_1",
         prisma,
@@ -349,6 +360,7 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
     expect(findMany).toHaveBeenNthCalledWith(1, {
       select: {
         causalSeq: true,
+        occurredAt: true,
       },
       take: 2,
       where: expectLiveHostedMailboxWhere({
@@ -369,12 +381,12 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
       hostedMailboxItem: { findMany },
     } as never;
 
-    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+    await expect(readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
       assistantInputId: "  ",
       memberId: "member_mailbox_1",
       prisma,
     })).resolves.toBeNull();
-    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+    await expect(readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
       assistantInputId: "ain_valid",
       memberId: "  ",
       prisma,
@@ -385,11 +397,11 @@ describe("readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx", () => {
 
   it("fails closed when more than one lookup-key version matches", async () => {
     const findMany = vi.fn().mockResolvedValue([
-      { causalSeq: 7n },
-      { causalSeq: 8n },
+      { causalSeq: 7n, occurredAt: new Date("2026-08-06T14:30:00.000Z") },
+      { causalSeq: 8n, occurredAt: new Date("2026-08-06T14:31:00.000Z") },
     ]);
 
-    await expect(readHostedMailboxPreferenceCausalSeqByAssistantInputIdTx({
+    await expect(readHostedMailboxConversationInputAuthorityByAssistantInputIdTx({
       assistantInputId: "ain_ambiguous",
       memberId: "member_mailbox_1",
       prisma: {
@@ -818,7 +830,6 @@ describe("appendHostedMailboxItemTx", () => {
       }),
     });
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
   });
 
   it("ignores caller-supplied payload metadata when selecting storage and inserting metadata", async () => {
@@ -1032,7 +1043,6 @@ describe("appendHostedMailboxItemTx", () => {
     );
     expect(executeRawMock.mock.calls[0]?.[2]).toBe("dedupe_existing_1");
     expect(tx.$queryRaw).not.toHaveBeenCalled();
-    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalled();
     expect(consoleWarn).toHaveBeenCalledWith("Hosted mailbox dedupe conflict.", {
       component: "mailbox",
       eventCode: "mailbox.dedupe_conflict",
@@ -1151,11 +1161,6 @@ describe("appendHostedMailboxItemTx", () => {
       },
     });
     expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
-    expect(tx.hostedRuntimeLog.create).not.toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        eventCode: "mailbox.dedupe_conflict",
-      }),
-    });
   });
 });
 
@@ -2878,28 +2883,6 @@ describe("fetchHostedRuntimeMailboxProjection", () => {
         create: vi.fn(),
         findUnique: vi.fn().mockResolvedValue(null),
       },
-      hostedRuntimeLog: {
-        create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
-          at: args.data.at as Date,
-          attemptId: args.data.attemptId as string | null,
-          checkpointVersion: args.data.checkpointVersion as bigint | null,
-          component: String(args.data.component),
-          createdAt: FIXED_NOW,
-          errorCode: args.data.errorCode as string | null,
-          eventCode: String(args.data.eventCode),
-          id: String(args.data.id),
-          leaseGeneration: args.data.leaseGeneration as bigint | null,
-          level: String(args.data.level),
-          mailboxLane: args.data.mailboxLane as string | null,
-          mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
-          mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
-          outboxIntentRef: args.data.outboxIntentRef as string | null,
-          phase: String(args.data.phase),
-          redactedJson: args.data.redactedJson,
-          userId: String(args.data.userId),
-          workspaceVersion: args.data.workspaceVersion as bigint | null,
-        })),
-      },
       hostedThreadRoute: {
         findFirst: vi.fn().mockResolvedValue({
           containerMemberId: containerUserId,
@@ -3223,28 +3206,6 @@ function createHostedMailboxTx(input: {
     hostedMailboxPayload: input.hostedMailboxPayload,
     hostedGroup: input.hostedGroup ?? {
       findUnique: vi.fn(async () => null),
-    },
-    hostedRuntimeLog: {
-      create: vi.fn(async (args: { data: Record<string, unknown> }) => ({
-        at: args.data.at as Date,
-        attemptId: args.data.attemptId as string | null,
-        checkpointVersion: args.data.checkpointVersion as bigint | null,
-        component: String(args.data.component),
-        createdAt: FIXED_NOW,
-        errorCode: args.data.errorCode as string | null,
-        eventCode: String(args.data.eventCode),
-        id: String(args.data.id),
-        leaseGeneration: args.data.leaseGeneration as bigint | null,
-        level: String(args.data.level),
-        mailboxLane: args.data.mailboxLane as string | null,
-        mailboxSeqEnd: args.data.mailboxSeqEnd as bigint | null,
-        mailboxSeqStart: args.data.mailboxSeqStart as bigint | null,
-        outboxIntentRef: args.data.outboxIntentRef as string | null,
-        phase: String(args.data.phase),
-        redactedJson: args.data.redactedJson,
-        userId: String(args.data.userId),
-        workspaceVersion: args.data.workspaceVersion as bigint | null,
-      })),
     },
     hostedThreadContainer: input.hostedThreadContainer ?? {
       findUnique: vi.fn(async () => null),

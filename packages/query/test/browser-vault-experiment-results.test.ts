@@ -1982,6 +1982,163 @@ test("does not manufacture a completed outcome when most sessions are assumed", 
   assert.equal(result?.outcome, null);
 });
 
+test("counts repeated same-day browser adherence occurrences up to the planned count", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-05T12:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_repeated_occurrences",
+          slug: "browser-repeated-occurrences",
+          status: "active",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-04",
+            modality: "strength-practice",
+            targetSessions: 8,
+            minimumUsefulSessions: 4,
+            adherenceTargets: [
+              {
+                targetId: "strength-set",
+                label: "Strength set",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                  targetCountPerDay: 8,
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+                grace: { hours: 0 },
+                rollup: {
+                  targetCompletions: 8,
+                  minimumUsefulCompletions: 4,
+                },
+              },
+            ],
+          },
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_repeated_occurrences",
+          experimentSlug: "browser-repeated-occurrences",
+          id: "evt_browser_repeated_occurrence_1",
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_repeated_occurrences",
+          experimentSlug: "browser-repeated-occurrences",
+          id: "evt_browser_repeated_occurrence_2",
+          occurredAt: "2026-04-04T15:00:00.000Z",
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_repeated_occurrences",
+          experimentSlug: "browser-repeated-occurrences",
+          id: "evt_browser_repeated_occurrence_3",
+          occurredAt: "2026-04-04T17:00:00.000Z",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(
+    client,
+    "browser-repeated-occurrences",
+  );
+
+  assert.equal(result?.progress?.adherence.completedSessions, 3);
+  assert.equal(result?.progress?.adherence.confirmedSessions, 3);
+  assert.equal(result?.progress?.adherence.expectedSessionsByNow, 8);
+  assert.equal(result?.progress?.adherence.loggedSessions, 3);
+  assert.equal(result?.progress?.adherence.missedSessions, 5);
+  assert.equal(result?.progress?.adherence.status, "behind");
+});
+
+test("does not make every repeated occurrence due before grace closes", () => {
+  const client = createBrowserVaultQueryClient(
+    createReplica({
+      generatedAt: "2026-04-04T16:00:00.000Z",
+      entities: [
+        experimentEntity({
+          id: "exp_browser_repeated_before_grace",
+          slug: "browser-repeated-before-grace",
+          status: "active",
+          runPlan: {
+            baselineStart: "2026-04-01",
+            baselineEnd: "2026-04-03",
+            interventionStart: "2026-04-04",
+            interventionEnd: "2026-04-04",
+            modality: "strength-practice",
+            targetSessions: 8,
+            minimumUsefulSessions: 4,
+            adherenceTargets: [
+              {
+                targetId: "strength-set",
+                label: "Strength set",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  timeZone: "America/New_York",
+                  localTime: "20:00",
+                  targetCountPerDay: 8,
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+                grace: { hours: 4 },
+                rollup: {
+                  targetCompletions: 8,
+                  minimumUsefulCompletions: 4,
+                },
+              },
+            ],
+          },
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_repeated_before_grace",
+          experimentSlug: "browser-repeated-before-grace",
+          id: "evt_browser_before_grace_1",
+          occurredAt: "2026-04-04T13:00:00.000Z",
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_repeated_before_grace",
+          experimentSlug: "browser-repeated-before-grace",
+          id: "evt_browser_before_grace_2",
+          occurredAt: "2026-04-04T14:00:00.000Z",
+        }),
+        sessionEvent("2026-04-04", "completed", {
+          attributes: { source: "manual" },
+          experimentId: "exp_browser_repeated_before_grace",
+          experimentSlug: "browser-repeated-before-grace",
+          id: "evt_browser_before_grace_3",
+          occurredAt: "2026-04-04T15:00:00.000Z",
+        }),
+      ],
+    }),
+  );
+
+  const result = selectBrowserVaultExperimentResults(
+    client,
+    "browser-repeated-before-grace",
+  );
+
+  assert.equal(result?.progress?.adherence.completedSessions, 3);
+  assert.equal(result?.progress?.adherence.expectedSessionsByNow, 3);
+  assert.equal(result?.progress?.adherence.loggedSessions, 3);
+  assert.equal(result?.progress?.adherence.missedSessions, 0);
+  assert.equal(result?.progress?.adherence.status, "on_track");
+});
+
 test("keeps completed live measurements separate from a not-yet-saved outcome", () => {
   const client = createBrowserVaultQueryClient(
     createReplica({

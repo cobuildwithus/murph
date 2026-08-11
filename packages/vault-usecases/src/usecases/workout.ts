@@ -556,6 +556,146 @@ export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
   })
 }
 
+const WORKOUT_EXERCISES_PATCH_PREFIX = 'workout.exercises='
+
+type WorkoutExercises = NonNullable<WorkoutSession['exercises']>
+type WorkoutExercise = WorkoutExercises[number]
+
+function parseWorkoutExerciseReplacement(
+  assignments: readonly string[] | undefined,
+): WorkoutExercises | null {
+  const assignment = assignments
+    ?.slice()
+    .reverse()
+    .find((entry) => entry.startsWith(WORKOUT_EXERCISES_PATCH_PREFIX))
+  if (!assignment) {
+    return null
+  }
+
+  let exercises: unknown
+  try {
+    exercises = JSON.parse(assignment.slice(WORKOUT_EXERCISES_PATCH_PREFIX.length))
+  } catch {
+    return null
+  }
+
+  const parsed = workoutSessionSchema.safeParse({ exercises })
+  return parsed.success ? parsed.data.exercises ?? [] : null
+}
+
+function normalizeWorkoutExerciseName(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/gu, ' ')
+}
+
+function findReplacementExerciseIndex(
+  existing: WorkoutExercise,
+  replacement: WorkoutExercises,
+  usedIndexes: ReadonlySet<number>,
+): number | null {
+  const findUnused = (
+    predicate: (candidate: WorkoutExercise) => boolean,
+  ): number | null => {
+    const index = replacement.findIndex(
+      (candidate, candidateIndex) =>
+        !usedIndexes.has(candidateIndex) && predicate(candidate),
+    )
+    return index >= 0 ? index : null
+  }
+
+  if (existing.sourceExerciseId) {
+    const sourceIndex = findUnused(
+      (candidate) => candidate.sourceExerciseId === existing.sourceExerciseId,
+    )
+    if (sourceIndex !== null) {
+      return sourceIndex
+    }
+  }
+
+  const normalizedName = normalizeWorkoutExerciseName(existing.name)
+  if (existing.groupId) {
+    const groupedNameIndex = findUnused(
+      (candidate) =>
+        candidate.groupId === existing.groupId &&
+        normalizeWorkoutExerciseName(candidate.name) === normalizedName,
+    )
+    if (groupedNameIndex !== null) {
+      return groupedNameIndex
+    }
+  }
+
+  const nameIndex = findUnused(
+    (candidate) => normalizeWorkoutExerciseName(candidate.name) === normalizedName,
+  )
+  if (nameIndex !== null) {
+    return nameIndex
+  }
+
+  return findUnused((candidate) => candidate.order === existing.order)
+}
+
+const WORKOUT_STRUCTURE_REPAIR =
+  'Re-read the workout and include every saved exercise and set. Use --clear-workout only when the member explicitly wants to remove all structured workout details while preserving the event, or workout delete only when they want the entire record removed.'
+
+async function assertWorkoutExerciseReplacementPreservesExistingStructure(input: {
+  vault: string
+  lookup: string
+  set?: string[]
+}): Promise<void> {
+  const replacement = parseWorkoutExerciseReplacement(input.set)
+  if (replacement === null) {
+    return
+  }
+
+  const shown = await showWorkoutRecord(input.vault, input.lookup)
+  const savedWorkout = shown.entity.data.workout
+  if (savedWorkout === null || savedWorkout === undefined) {
+    return
+  }
+
+  const current = workoutSessionSchema.safeParse(savedWorkout)
+  if (!current.success) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Workout edit cannot safely replace exercises because the saved workout structure could not be read. ${WORKOUT_STRUCTURE_REPAIR}`,
+    )
+  }
+
+  const usedReplacementIndexes = new Set<number>()
+  for (const existingExercise of current.data.exercises ?? []) {
+    const replacementIndex = findReplacementExerciseIndex(
+      existingExercise,
+      replacement,
+      usedReplacementIndexes,
+    )
+    if (replacementIndex === null) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Workout edit would remove saved exercise ${existingExercise.order} (${existingExercise.name}). ${WORKOUT_STRUCTURE_REPAIR}`,
+      )
+    }
+    usedReplacementIndexes.add(replacementIndex)
+
+    const replacementExercise = replacement[replacementIndex]
+    if (!replacementExercise) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Workout edit could not preserve the saved exercise structure. ${WORKOUT_STRUCTURE_REPAIR}`,
+      )
+    }
+
+    for (const existingSet of existingExercise.sets ?? []) {
+      if (!replacementExercise.sets.some(
+        (candidate) => candidate.order === existingSet.order,
+      )) {
+        throw new VaultCliError(
+          'invalid_option',
+          `Workout edit would remove saved set ${existingSet.order} from exercise ${existingExercise.order} (${existingExercise.name}). ${WORKOUT_STRUCTURE_REPAIR}`,
+        )
+      }
+    }
+  }
+}
+
 export async function editWorkoutRecord(input: {
   vault: string
   lookup: string
@@ -564,6 +704,7 @@ export async function editWorkoutRecord(input: {
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
 }) {
+  await assertWorkoutExerciseReplacementPreservesExistingStructure(input)
   const result = await editEventRecord({
     vault: input.vault,
     lookup: input.lookup,

@@ -13,6 +13,7 @@ import {
   HOSTED_WEB_SMOKE_DIST_DIR,
   createHostedWebSmokeEnvironment,
   isHostedWebDevFileSystemCacheEnabled,
+  isHostedWebSmokeArtifactMode,
   resolveHostedWebDistDir,
 } from "../next-artifacts";
 import {
@@ -32,7 +33,10 @@ import {
   resolvePrivyBaseDomainOrigin,
 } from "../next.config";
 
-const productionNextConfig = buildHostedWebNextConfig(PHASE_PRODUCTION_BUILD);
+const productionNextConfig = buildHostedWebNextConfig(
+  PHASE_PRODUCTION_BUILD,
+  createProcessEnv({}),
+);
 const require = createRequire(import.meta.url);
 const repoRoot = process.cwd();
 const hostedWebWorkspaceEntries = resolveHostedWebWorkspaceSourceEntries(path.join(repoRoot, "apps/web"));
@@ -198,6 +202,11 @@ test("hosted web dist-dir selection reserves a dedicated artifact directory for 
 });
 
 test("hosted web dev smoke uses its own Next artifact directory", () => {
+  assert.equal(isHostedWebSmokeArtifactMode(createProcessEnv({})), false);
+  assert.equal(
+    isHostedWebSmokeArtifactMode(createHostedWebSmokeEnvironment(createProcessEnv({}))),
+    true,
+  );
   assert.equal(
     resolveHostedWebDistDir(
       PHASE_DEVELOPMENT_SERVER,
@@ -212,6 +221,16 @@ test("hosted web dev smoke uses its own Next artifact directory", () => {
     ),
     HOSTED_WEB_SMOKE_DIST_DIR,
   );
+});
+
+test("next.config externalizes the Temporal client only for hosted-local smoke artifacts", () => {
+  const smokeNextConfig = buildHostedWebNextConfig(
+    PHASE_PRODUCTION_BUILD,
+    createHostedWebSmokeEnvironment(createProcessEnv({})),
+  );
+
+  assert.deepEqual(smokeNextConfig.serverExternalPackages, ["@temporalio/client"]);
+  assert.equal(productionNextConfig.serverExternalPackages, undefined);
 });
 
 test("hosted web smoke can isolate concurrent dev and production runs with a dist-dir suffix", () => {
@@ -439,6 +458,19 @@ test("next.config traces generated Health Commons route files without the monoli
   );
 });
 
+test("next.config traces bundled image assets for the iMessage nutrition route", () => {
+  const sharedImageAssets =
+    productionNextConfig.outputFileTracingIncludes?.["/opengraph-image"];
+
+  assert.ok(sharedImageAssets);
+  assert.deepEqual(
+    productionNextConfig.outputFileTracingIncludes?.[
+      "/imessage/card/v1/[payload]"
+    ],
+    sharedImageAssets,
+  );
+});
+
 test("next.config disables the Turbopack dev filesystem cache by default and honors explicit opt-in", () => {
   const previousValue = process.env.MURPH_NEXT_DEV_FILESYSTEM_CACHE;
 
@@ -643,6 +675,7 @@ test("buildHostedWebContentSecurityPolicy includes Privy, WalletConnect, and hos
   assert.match(csp, /connect-src [^;]*wss:\/\/\*\.onkernel\.com:8443/);
   assert.match(csp, /connect-src [^;]*https:\/\/\*\.rpc\.privy\.systems/);
   assert.match(csp, /connect-src [^;]*https:\/\/explorer-api\.walletconnect\.com/);
+  assert.match(csp, /connect-src [^;]*https:\/\/status\.withmurph\.ai/);
   assert.match(csp, /upgrade-insecure-requests/);
   assert.doesNotMatch(csp, /'unsafe-eval'/);
 });

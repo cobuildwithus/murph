@@ -338,6 +338,7 @@ describe("cloudflare worker routes", () => {
     expect(workerInternalRoutes.map(({ name }) => name)).toEqual([
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -363,10 +364,14 @@ describe("cloudflare worker routes", () => {
       "test-container-active-operation-drop",
       "test-read-active-runtime-fence",
       "test-start-stuck-invocation",
+      "test-temporal-mailbox-signal-fault-arm",
+      "test-temporal-mailbox-signal-fault-clear",
+      "test-temporal-mailbox-signal-fault-consume",
       "test-direct-r2-presigned-put",
       "test-direct-r2-locator-marker",
       "deploy-container-smoke",
       "runtime-ensure-processing",
+      "runtime-shell-prewarm",
       "runtime-health-data-consent",
       "inference-verification",
       "user-data-delete",
@@ -1145,6 +1150,95 @@ describe("cloudflare worker routes", () => {
     await expect(response.json()).resolves.toEqual({
       error: "Not found",
     });
+  });
+
+  it("serves the user-bound Temporal mailbox fault lifecycle without OIDC in test mode", async () => {
+    const env = createWorkerEnv(createUserRunnerStub(), {
+      MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+      NODE_ENV: "test",
+    });
+    const baseUrl =
+      "https://runner.example.test/__test/users/member_123/temporal-mailbox-signal-fault";
+    const requestHeaders = {
+      "content-type": "application/json; charset=utf-8",
+      [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+    };
+
+    const mismatchedResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/arm`, {
+        body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+        headers: {
+          ...requestHeaders,
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_other",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(mismatchedResponse.status).toBe(401);
+
+    const armResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/arm`, {
+        body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+        headers: requestHeaders,
+        method: "POST",
+      }),
+      env,
+    );
+    expect(armResponse.status).toBe(200);
+    await expect(armResponse.json()).resolves.toEqual({
+      armed: true,
+      deliveredToPendingConsumer: false,
+    });
+
+    const consumeResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/consume`, {
+        body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+        headers: requestHeaders,
+        method: "POST",
+      }),
+      env,
+    );
+    expect(consumeResponse.status).toBe(200);
+    await expect(consumeResponse.json()).resolves.toEqual({ consume: true });
+
+    const clearResponse = await hostedLocalTestWorker.fetch(
+      new Request(`${baseUrl}/clear`, {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+        },
+        method: "POST",
+      }),
+      env,
+    );
+    expect(clearResponse.status).toBe(200);
+    await expect(clearResponse.json()).resolves.toEqual({
+      cleared: true,
+      ok: true,
+    });
+  });
+
+  it("hides the Temporal mailbox fault control outside hosted-local test mode", async () => {
+    const response = await hostedLocalTestWorker.fetch(
+      new Request(
+        "https://runner.example.test/__test/users/member_123/temporal-mailbox-signal-fault/arm",
+        {
+          body: JSON.stringify({ mailboxItemId: "mailbox-item-1" }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+            [HOSTED_EXECUTION_USER_ID_HEADER]: "member_123",
+          },
+          method: "POST",
+        },
+      ),
+      createWorkerEnv(createUserRunnerStub(), {
+        MURPH_HOSTED_LOCAL_TEST_ROUTES: "1",
+        NODE_ENV: "production",
+      }),
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({ error: "Not found" });
   });
 
   it("keeps wrong methods on enabled hosted-local test routes hidden before auth", async () => {
@@ -2930,6 +3024,140 @@ describe("cloudflare worker routes", () => {
       expect(stub.ensureRuntimeProcessingForUser).not.toHaveBeenCalled();
     });
 
+    it("routes shell startup through the consent-owning user runner", async () => {
+      const prewarmRuntimeShellForUser = vi.fn(async () => undefined);
+      const stub = createUserRunnerStub({ prewarmRuntimeShellForUser });
+      const runnerContainerGetByName = vi.fn();
+      const userRunnerGetByName = vi.fn(() => stub);
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+        USER_RUNNER: { getByName: userRunnerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+          {
+            body: JSON.stringify({ source: "linq-typing-started" }),
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ accepted: true });
+      expect(userRunnerGetByName).toHaveBeenCalledWith("test-user");
+      expect(stub.bindUser).not.toHaveBeenCalled();
+      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
+        "test-user",
+        "linq-typing-started",
+      );
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
+    });
+
+    it("does not recreate runner state for a delayed shell hint after account deletion", async () => {
+      const request = await signControlRequest(new Request(
+        "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+        {
+          body: "{}",
+          headers: { "content-type": "application/json; charset=utf-8" },
+          method: "POST",
+        },
+      ));
+      const harness = createRuntimeControlRunnerHarness({
+        healthDataAdmission: {
+          consentState: "missing",
+          processingAllowed: false,
+        },
+      });
+      await harness.runner.bindUser("test-user");
+      await expect(
+        harness.runner.deleteHostedUserData("test-user"),
+      ).resolves.toMatchObject({ ok: true });
+      vi.mocked(harness.namespace.getByName).mockClear();
+      const bindUser = vi.fn(async (userId: string) =>
+        await harness.runner.bindUser(userId)
+      );
+      const prewarmRuntimeShellForUser = vi.fn(async (userId: string) =>
+        await harness.runner.prewarmRuntimeShellForUser(userId)
+      );
+      const stub = createUserRunnerStub({
+        bindUser,
+        prewarmRuntimeShellForUser,
+      });
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        USER_RUNNER: {
+          getByName: vi.fn(() => stub),
+        },
+      });
+
+      const response = await worker.fetch(request, env);
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ accepted: true });
+      expect(bindUser).not.toHaveBeenCalled();
+      expect(prewarmRuntimeShellForUser).toHaveBeenCalledWith(
+        "test-user",
+        undefined,
+      );
+      expect(harness.namespace.getByName).not.toHaveBeenCalled();
+      expect(
+        harness.sql.exec("SELECT user_id FROM runner_meta").toArray(),
+      ).toEqual([]);
+    });
+
+    it("rejects nonempty shell-prewarm bodies without resolving a runtime owner", async () => {
+      const runnerContainerGetByName = vi.fn();
+      const userRunnerGetByName = vi.fn(() => createUserRunnerStub());
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+        USER_RUNNER: { getByName: userRunnerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signControlRequest(new Request(
+          "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+          {
+            body: JSON.stringify({ wake: true }),
+            headers: { "content-type": "application/json; charset=utf-8" },
+            method: "POST",
+          },
+        )),
+        env,
+      );
+
+      expect(response.status).toBe(400);
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
+      expect(userRunnerGetByName).not.toHaveBeenCalled();
+    });
+
+    it("rejects shell prewarm when the only credential is a web callback signature", async () => {
+      const runnerContainerGetByName = vi.fn();
+      const env = createWorkerEnv(createUserRunnerStub(), {
+        RUNNER_CONTAINER: { getByName: runnerContainerGetByName },
+      });
+
+      const response = await worker.fetch(
+        await signWebCallbackControlRequest(
+          new Request(
+            "https://runner.example.test/internal/users/test-user/runtime/shell-prewarm",
+            {
+              body: "{}",
+              headers: { "content-type": "application/json; charset=utf-8" },
+              method: "POST",
+            },
+          ),
+          env,
+        ),
+        env,
+      );
+
+      expect(response.status).toBe(401);
+      expect(runnerContainerGetByName).not.toHaveBeenCalled();
+    });
+
     it("starts runtime processing without an active fence", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
@@ -2943,7 +3171,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
         userId: "test-user",
       });
 
@@ -2959,6 +3189,11 @@ describe("cloudflare worker routes", () => {
         userId: "test-user",
         workspaceVersion: "7",
       });
+      expect(invoke.mock.calls[0]?.[0].orchestration).toMatchObject({
+        runtimeInvocationOrchestrationAttemptId:
+          "web-ingress-33333333-3333-4333-8333-333333333333",
+        triggeredByWebDirect: true,
+      });
       await vi.waitFor(() =>
         expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
           active_attempt_id: null,
@@ -2971,11 +3206,14 @@ describe("cloudflare worker routes", () => {
     it("sends activation diagnostics for an active fence wake", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-04-27T00:00:00.000Z"));
+      const activeWakeEnsureProcessing = vi.fn<
+        NonNullable<HostedExecutionContainerStubLike["ensureProcessing"]>
+      >(async () => ({
+        action: "woken" as const,
+        kind: "accepted" as const,
+      }));
       const { ensureProcessing, invoke, runner, sql } = createRuntimeControlRunnerHarness({
-        ensureProcessing: vi.fn(async () => ({
-          action: "woken" as const,
-          kind: "accepted" as const,
-        })),
+        ensureProcessing: activeWakeEnsureProcessing,
       });
       const token = await writeRuntimeControlFenceForTest({
         runner,
@@ -2985,7 +3223,9 @@ describe("cloudflare worker routes", () => {
       });
 
       const response = await runner.ensureRuntimeProcessingForUser({
-        orchestrationAttemptId: "orchestration-attempt-test",
+        orchestration: { triggeredByWebDirect: true },
+        orchestrationAttemptId:
+          "web-ingress-44444444-4444-4444-8444-444444444444",
         userId: "test-user",
       });
 
@@ -3003,6 +3243,14 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            triggeredByWebDirect: true,
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",
@@ -3010,6 +3258,9 @@ describe("cloudflare worker routes", () => {
         },
         userId: "test-user",
       });
+      expect(
+        activeWakeEnsureProcessing.mock.calls[0]?.[0].activeRuntime?.orchestration,
+      ).not.toHaveProperty("runtimeInvocationOrchestrationAttemptId");
       expect(invoke).not.toHaveBeenCalled();
       expect(readRunnerMetaForRuntimeControl(sql)).toMatchObject({
         active_attempt_id: token.attemptId,
@@ -3051,6 +3302,13 @@ describe("cloudflare worker routes", () => {
             activeFenceObservedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             activeFenceTargetWasPriorVersion: false,
             activeWakeStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            healthDataAdmissionReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateBindStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadFinishedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runnerStateReadStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
+            runtimeConsentLockAcquiredAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
             userRunnerEnsureStartedAtEpochMs: Date.parse("2026-04-27T00:00:00.000Z"),
           },
           processingMode: "default",
@@ -3587,6 +3845,10 @@ function createRuntimeControlRunnerHarness(input: {
   deleteAlarmError?: Error;
   ensureReadyForProcessing?: HostedExecutionContainerStubLike["ensureReadyForProcessing"];
   ensureProcessing?: HostedExecutionContainerStubLike["ensureProcessing"];
+  healthDataAdmission?: {
+    consentState: "granted" | "missing" | "revoked";
+    processingAllowed: boolean;
+  };
   invocationResults?: Array<Error | HostedWorkspaceInvocationResult>;
   workspace?: HostedWorkspaceState | null;
 } = {}) {
@@ -3601,8 +3863,9 @@ function createRuntimeControlRunnerHarness(input: {
 
     if (url.pathname === HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH) {
       return Response.json({
-        consentState: "granted",
-        processingAllowed: true,
+        consentState: input.healthDataAdmission?.consentState ?? "granted",
+        processingAllowed:
+          input.healthDataAdmission?.processingAllowed ?? true,
         userId: "test-user",
       });
     }
@@ -3615,6 +3878,7 @@ function createRuntimeControlRunnerHarness(input: {
   const sql = createTestSqlStorage();
   const storage: DurableObjectStorageLike = {
     delete: vi.fn(async (key: string) => values.delete(key)),
+    deleteAll: vi.fn(async () => values.clear()),
     deleteAlarm: vi.fn(async () => {
       if (input.deleteAlarmError) {
         throw input.deleteAlarmError;
@@ -4097,6 +4361,7 @@ function createUserRunnerStub(overrides: Record<string, unknown> = {}) {
       recommendedRecheckAt: "2026-04-27T00:00:10.000Z",
       runtimeAttemptId: "runtime-attempt-test",
     })),
+    prewarmRuntimeShellForUser: vi.fn(async () => undefined),
     publishHostedPrivateMedia: vi.fn(async () => ({
       ok: false as const,
       reason: "not-configured" as const,

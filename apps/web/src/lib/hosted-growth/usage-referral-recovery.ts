@@ -1,16 +1,39 @@
 import "server-only";
 
-import type { PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
+import { isHostedMailboxLane } from "@murphai/hosted-execution/runtime-control";
 
+import {
+  HOSTED_MAILBOX_RETENTION_MS,
+} from "../hosted-mailbox/store";
 import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
 import {
+  appendHostedSignupReferralRewardNotice,
+} from "./signup-referral-notification";
+import {
+  isHostedSignupReferralPolicyVersion,
+} from "./signup-referral-policy";
+import {
+  recoverPendingHostedSignupReferralRewards,
+  type HostedSignupReferralRewardRecoveryResult,
+} from "./signup-referral-reward";
+import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "./usage-referral";
 
 export const HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE = 50;
+const HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX =
+  "assistant.notification.requested:usage-referral-reward:";
+
+export interface HostedUsageReferralRecoveryHead {
+  id: string;
+  lane: string;
+  laneSeq: bigint;
+  userId: string;
+}
 
 export interface HostedUsageReferralRecoveryResult {
   failed: number;
@@ -21,18 +44,26 @@ export interface HostedUsageReferralRecoveryResult {
 }
 
 /**
- * Bounded recovery for referrals whose qualifying ingress committed before
- * reward reconciliation, or whose final credit committed before the source
- * celebration reached the durable mailbox.
+ * One bounded recovery owner settles signup-link rewards, reconciles ordinary
+ * referral missions, queues each path's completion notice through the shared
+ * assistant-notification mailbox, and re-signals existing mailbox pointers
+ * after a best-effort wake failure. Already-imported legacy payload recovery
+ * belongs to the local runtime; Web never rewrites mailbox ciphertext here.
  */
 export async function recoverPendingHostedUsageReferrals(input: {
+  now?: Date;
   prisma?: PrismaClient;
 } = {}): Promise<HostedUsageReferralRecoveryResult> {
   const prisma = input.prisma ?? getPrisma();
-  const [referrals, unconsumedCelebrations] = await Promise.all([
+  const now = input.now ?? new Date();
+  const signupRewards = await recoverHostedSignupReferralRewardsSafely(prisma);
+  const [referrals, recoveryHeads] = await Promise.all([
     prisma.hostedUsageReferral.findMany({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
-      select: { id: true },
+      select: {
+        id: true,
+        policyVersion: true,
+      },
       take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
       where: {
         OR: [
@@ -47,35 +78,25 @@ export async function recoverPendingHostedUsageReferrals(input: {
         ],
       },
     }),
-    prisma.hostedMailboxItem.findMany({
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: {
-        id: true,
-        laneSeq: true,
-        userId: true,
-      },
-      take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
-      where: {
-        consumedAt: null,
-        dedupeKey: {
-          startsWith:
-            "assistant.notification.requested:usage-referral-reward:",
-        },
-        kind: "assistant.notification.requested",
-        lane: "system",
-      },
-    }),
+    readHostedUsageReferralRecoveryHeads({ now, prisma }),
   ]);
 
-  let failed = 0;
+  let failed = signupRewards.failed;
   let pending = 0;
   let queued = 0;
   for (const referral of referrals) {
     try {
-      const wake = await reconcileHostedUsageReferralRewardAfterCommit({
-        prisma,
-        referralId: referral.id,
-      });
+      const wake = isHostedSignupReferralPolicyVersion(
+          referral.policyVersion,
+        )
+        ? await appendHostedSignupReferralRewardNotice({
+            prisma,
+            referralId: referral.id,
+          })
+        : await reconcileHostedUsageReferralRewardAfterCommit({
+            prisma,
+            referralId: referral.id,
+          });
       if (!wake) {
         pending += 1;
         continue;
@@ -103,20 +124,26 @@ export async function recoverPendingHostedUsageReferrals(input: {
     }
   }
 
-  for (const celebration of unconsumedCelebrations) {
+  let resignaled = 0;
+  for (const head of recoveryHeads) {
     try {
+      resignaled += 1;
       await signalHostedMailboxAppendRuntime({
-        expectedUserId: celebration.userId,
-        knownCheckpoint: {
-          lane: "system",
-          laneSeq: celebration.laneSeq.toString(),
-          userId: celebration.userId,
-        },
-        mailboxItemId: celebration.id,
+        expectedUserId: head.userId,
+        ...(isHostedMailboxLane(head.lane)
+          ? {
+              knownCheckpoint: {
+                lane: head.lane,
+                laneSeq: head.laneSeq.toString(),
+                userId: head.userId,
+              },
+            }
+          : {}),
+        mailboxItemId: head.id,
         prisma,
       });
     } catch {
-      // The next bounded recovery pass re-signals this same unconsumed item.
+      // The next bounded recovery pass re-signals this same pending item.
     }
   }
 
@@ -124,7 +151,76 @@ export async function recoverPendingHostedUsageReferrals(input: {
     failed,
     pending,
     queued,
-    resignaled: unconsumedCelebrations.length,
-    scanned: referrals.length + unconsumedCelebrations.length,
+    resignaled,
+    scanned:
+      signupRewards.scanned
+      + referrals.length
+      + recoveryHeads.length,
   };
+}
+
+export async function readHostedUsageReferralRecoveryHeads(input: {
+  limit?: number;
+  now?: Date;
+  prisma: PrismaClient;
+}): Promise<HostedUsageReferralRecoveryHead[]> {
+  const now = input.now ?? new Date();
+  const retainedAt = new Date(now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
+  const limit = input.limit ?? HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE;
+
+  return input.prisma.$queryRaw<HostedUsageReferralRecoveryHead[]>(Prisma.sql`
+    WITH pending_referral_lane AS (
+      SELECT DISTINCT
+        referral.user_id,
+        referral.lane,
+        COALESCE(counter.consumed_seq, 0::bigint) AS consumed_seq
+      FROM hosted_mailbox_item AS referral
+      LEFT JOIN hosted_mailbox_lane_counter AS counter
+        ON counter.user_id = referral.user_id
+        AND counter.lane = referral.lane
+      WHERE referral.dedupe_key LIKE
+          ${`${HOSTED_USAGE_REFERRAL_NOTIFICATION_DEDUPE_PREFIX}%`}
+        AND referral.kind = 'assistant.notification.requested'
+        AND referral.consumed_at IS NULL
+        AND referral.lane_seq > COALESCE(counter.consumed_seq, 0::bigint)
+        AND referral.created_at > ${retainedAt}
+        AND (referral.expires_at IS NULL OR referral.expires_at > ${now})
+    )
+    SELECT
+      head.id,
+      head.lane,
+      head.lane_seq AS "laneSeq",
+      head.user_id AS "userId"
+    FROM pending_referral_lane
+    CROSS JOIN LATERAL (
+      SELECT item.id, item.lane, item.lane_seq, item.user_id, item.created_at
+      FROM hosted_mailbox_item AS item
+      WHERE item.user_id = pending_referral_lane.user_id
+        AND item.lane = pending_referral_lane.lane
+        AND item.lane_seq > pending_referral_lane.consumed_seq
+        AND item.created_at > ${retainedAt}
+        AND (item.expires_at IS NULL OR item.expires_at > ${now})
+      ORDER BY item.lane_seq ASC
+      LIMIT 1
+    ) AS head
+    ORDER BY head.created_at ASC, head.id ASC
+    LIMIT ${limit}
+  `);
+}
+
+async function recoverHostedSignupReferralRewardsSafely(
+  prisma: PrismaClient,
+): Promise<HostedSignupReferralRewardRecoveryResult> {
+  try {
+    return await recoverPendingHostedSignupReferralRewards({ prisma });
+  } catch (error) {
+    console.error("Hosted signup referral recovery failed.", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return {
+      failed: 1,
+      rewarded: 0,
+      scanned: 0,
+    };
+  }
 }

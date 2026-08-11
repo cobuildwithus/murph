@@ -2,6 +2,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   hostedRuntimeAssistantPersonalizationModelToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationModelToolRequest,
+  type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from '@murphai/hosted-execution/assistant-personalization'
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
@@ -11,7 +12,7 @@ import {
   hostedRuntimePendingGroupSetupInputSchema,
 } from '@murphai/hosted-execution/pending-group-setup'
 import {
-  HOSTED_PLAN_CODES,
+  HOSTED_FAMILY_PLAN_CODES,
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
@@ -81,7 +82,7 @@ import {
   type AssistantResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  assistantResponseCardSchema,
+  assistantResponseCardAuthoringSchema,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -103,10 +104,24 @@ import {
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES,
   ASSISTANT_HOSTED_GROUP_SHARED_READ_MAX_RESULT_CODE_UNITS,
 } from '../assistant/group-shared-read-limits.js'
+import {
+  buildGroupChallengeResponseCard,
+} from '../assistant/group-challenge-response-card.js'
+import {
+  groupChallengeResponseCardToolInputSchema,
+  readGroupChallengeDefinitionSnapshot,
+  type GroupChallengeResponseCardToolInput,
+  upsertGroupChallengeStandingsSnapshot,
+} from '../assistant/group-challenge-response-card-schema.js'
+import {
+  scoreGroupChallengeJson,
+} from '../assistant/group-challenge-scorecard-schema.js'
 import { GROUP_NEWSLETTER_HEALTH_SCOPE_VALUES } from '../assistant/group-newsletter-automation.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
-import type {
-  AssistantHostedToolContext,
+import {
+  createAssistantHostedScheduledRequestKey,
+  type AssistantHostedInvocationScope,
+  type AssistantHostedToolContext,
 } from '../assistant/hosted-tool-context.js'
 import type {
   AssistantProviderUsageDraft,
@@ -129,9 +144,22 @@ import {
 import type {
   AssistantAcceptedMessageTargetAuthorizer,
 } from '../assistant/message-target-selection.js'
+import {
+  getKnowledgePage,
+  upsertKnowledgePage,
+  type KnowledgeServiceDependencies,
+} from '../knowledge.js'
+import {
+  normalizeKnowledgeBody,
+} from '../knowledge/documents.js'
 import type {
   CodexRpcMessage,
 } from './app-server-rpc.js'
+import {
+  readCodexNonEmptyString,
+  readCodexServerRequest,
+  readCodexString,
+} from './app-server-protocol.js'
 import {
   executeGenerateImageTool,
   type GenerateImageToolArgs,
@@ -166,6 +194,11 @@ import {
   readLabsDynamicToolRequest,
   type LabsDynamicToolRequest,
 } from './dynamic-tools/labs.js'
+import {
+  executePendingVaultFilesDynamicTool,
+  readPendingVaultFilesDynamicToolRequest,
+  type PendingVaultFilesDynamicToolRequest,
+} from './dynamic-tools/pending-vault-files.js'
 import {
   executeGroupRoomModelDynamicTool,
   readGroupRoomModelDynamicToolRequest,
@@ -202,6 +235,7 @@ import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
+  type GenerateSongTurnState,
 } from './dynamic-tools/generate-song.js'
 import {
   executeAskGrokDynamicTool,
@@ -218,6 +252,7 @@ import {
   asRecord,
   ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION,
+  GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT,
   MURPH_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -246,9 +281,25 @@ const CODEX_DYNAMIC_TOOL_CALL_METHOD = 'item/tool/call'
 
 const attachResponseCardArgumentsSchema = z
   .object({
-    card: assistantResponseCardSchema,
+    card: assistantResponseCardAuthoringSchema,
   })
   .strict()
+  .superRefine((value, context) => {
+    if (
+      value.card.kind === 'compact_table' &&
+      'workout' in value.card &&
+      value.card.subtitle !== null
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Structured workout card subtitles must be null.',
+        path: ['card', 'subtitle'],
+      })
+    }
+  })
+
+const attachGroupChallengeResponseCardArgumentsSchema =
+  groupChallengeResponseCardToolInputSchema
 
 const attachResponseMediaArgumentsSchema = z
   .object({
@@ -360,6 +411,14 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('ask_current_sender'),
+      message_ref: z.string().regex(
+        new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
+      ),
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('message_current_sender'),
       message_ref: z.string().regex(
         new RegExp(ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN, 'u'),
       ),
@@ -522,6 +581,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('share_contact_card'),
+      avatarPrompt: z.string().trim().min(1).max(4000).optional(),
     })
     .strict(),
   z
@@ -581,8 +641,22 @@ const newsletterArgumentsSchema = z.discriminatedUnion('action', [
 const sendVaultFileArgumentsSchema = z
   .object({
     ref: z.string().trim().min(1).max(1024),
+    retire_export_pack_ids: z
+      .array(z.string().trim().regex(/^[A-Za-z0-9_-]+$/u))
+      .min(1)
+      .max(20)
+      .optional(),
   })
   .strict()
+  .refine(
+    (value) => !value.retire_export_pack_ids
+      || new Set(value.retire_export_pack_ids).size
+        === value.retire_export_pack_ids.length,
+    {
+      message: 'retire_export_pack_ids must contain unique pack ids',
+      path: ['retire_export_pack_ids'],
+    },
+  )
 
 const finishWithoutReplyArgumentsSchema = z.object({}).strict()
 const planUsageArgumentsSchema = z
@@ -635,18 +709,12 @@ const familyPlanArgumentsSchema = z
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
-      invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
-        targetEmail: z.string().trim().email().max(320).nullable().default(null),
-        targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
-        targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
-        targetTelegramUsername: z.string().trim().min(5).max(32).nullable().default(null),
-      }).strict().nullable().default(null),
+      confirmedTrialConversion: z.literal(true).optional(),
     }).strict(),
     z.object({
       action: z.literal('create_invite'),
       invite: z.object({
-        planCode: z.enum(HOSTED_PLAN_CODES).optional(),
+        planCode: z.enum(HOSTED_FAMILY_PLAN_CODES).optional(),
         targetEmail: z.string().trim().email().max(320).nullable().default(null),
         targetLabel: z.string().trim().min(1).max(80).nullable().default(null),
         targetPhoneNumber: z.string().trim().min(1).max(40).nullable().default(null),
@@ -655,11 +723,7 @@ const familyPlanArgumentsSchema = z
     }).strict(),
   ])
   .superRefine((value, context) => {
-    const invite = value.action === 'create_invite'
-      ? value.invite
-      : value.action === 'start_checkout'
-        ? value.invite
-        : null
+    const invite = value.action === 'create_invite' ? value.invite : null
     if (invite && !invite.targetPhoneNumber && !invite.targetTelegramUsername && !invite.targetEmail) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
@@ -893,6 +957,15 @@ export interface MurphDynamicToolExecutionResult {
   usageDraft?: AssistantProviderUsageDraft | null
 }
 
+export interface MurphGroupSharedReadTurnState {
+  invalid: boolean
+  readProjectionScopeKeyBatches: string[][]
+  roster: Array<{
+    displayName: string | null
+    participantId: string
+  }> | null
+}
+
 interface ParsedDynamicToolCallRequest {
   arguments: unknown
   namespace: string | null
@@ -907,6 +980,7 @@ type MurphGroupToolRequest =
         action:
           | 'ask'
           | 'ask_current_sender'
+          | 'message_current_sender'
           | 'ask_member'
           | 'create_join_link'
           | 'create_signup_referral_link'
@@ -927,6 +1001,10 @@ type MurphGroupToolRequest =
     }
   | {
       action: 'ask_current_sender'
+      messageRef: string
+    }
+  | {
+      action: 'message_current_sender'
       messageRef: string
     }
   | {
@@ -969,12 +1047,20 @@ type MurphGroupToolRequest =
             imageRef: string
           }
     }
+  | {
+      action: 'share_contact_card'
+      avatar: {
+        source: 'generate'
+        args: GenerateImageToolArgs
+      }
+    }
 
 export type MurphDynamicToolRequest =
   | ConnectedAppsDynamicToolRequest
   | AutomationDynamicToolRequest
   | DeviceDynamicToolRequest
   | LabsDynamicToolRequest
+  | PendingVaultFilesDynamicToolRequest
   | GroupRoomModelDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
@@ -984,6 +1070,10 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'attach-response-card'
       card: AssistantResponseCard
+    }
+  | {
+      kind: 'attach-group-challenge-response-card'
+      input: GroupChallengeResponseCardToolInput
     }
   | {
       kind: 'generate-image'
@@ -1029,6 +1119,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'send-vault-file'
       ref: string
+      retireExportPackIds?: string[]
       toolCallId?: string
     }
   | {
@@ -1122,6 +1213,7 @@ export type MurphDynamicToolRequest =
   | {
       kind: 'personalization'
       request: HostedRuntimeAssistantPersonalizationModelToolRequest
+      toolCallId?: string
     }
   | {
       kind: 'plan-usage'
@@ -1217,6 +1309,14 @@ export function readMurphDynamicToolRequest(
     return labsRequest
   }
 
+  const pendingVaultFilesRequest = readPendingVaultFilesDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (pendingVaultFilesRequest) {
+    return pendingVaultFilesRequest
+  }
+
   const groupRoomModelRequest = readGroupRoomModelDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
@@ -1236,6 +1336,7 @@ export function readMurphDynamicToolRequest(
   const assistantStyleRequest = readAssistantStyleDynamicToolRequest({
     arguments: request.arguments,
     tool: request.tool,
+    toolCallId: request.toolCallId,
   })
   if (assistantStyleRequest) {
     return assistantStyleRequest
@@ -1291,8 +1392,15 @@ export function readMurphDynamicToolRequest(
       }
 
       return {
-        kind: 'attach-response-card',
-        card: parsed.card,
+        ...(parsed.groupChallenge
+          ? {
+              input: parsed.input,
+              kind: 'attach-group-challenge-response-card' as const,
+            }
+          : {
+              card: parsed.card,
+              kind: 'attach-response-card' as const,
+            }),
       }
     }
     case MURPH_ATTACH_RESPONSE_MEDIA_TOOL.name: {
@@ -1378,6 +1486,9 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'send-vault-file',
         ref: parsed.ref,
+        ...(parsed.retireExportPackIds
+          ? { retireExportPackIds: parsed.retireExportPackIds }
+          : {}),
         ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
@@ -1456,6 +1567,7 @@ export function readMurphDynamicToolRequest(
       return {
         kind: 'personalization',
         request: parsed.request,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
       }
     }
     case MURPH_ASSISTANT_CONFIGURATION_TOOL.name: {
@@ -1664,13 +1776,13 @@ function currentHostedMailboxItemId(
 
 function buildGeneratedImageCaptureIdempotencyKey(
   input: {
-    scope: 'generate-image' | 'group-avatar'
-    toolCallId: string | null
+    requestId: string | null
+    scope: 'contact-card-avatar' | 'generate-image' | 'group-avatar'
   },
 ): string | null {
-  const toolCallId = normalizeNullableString(input.toolCallId)
-  return toolCallId
-    ? `murph.dynamic-tool.${input.scope}:${toolCallId}`
+  const requestId = normalizeNullableString(input.requestId)
+  return requestId
+    ? `murph.dynamic-tool.${input.scope}:${requestId}`
     : null
 }
 
@@ -1692,6 +1804,9 @@ export async function executeMurphDynamicToolRequest(input: {
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   currentResponseCard?: AssistantResponseCard | null
+  groupSharedReadTurnState?: MurphGroupSharedReadTurnState | null
+  groupChallengeResponseCardAllowed?: boolean | null
+  knowledgePageReadTextFile?: KnowledgeServiceDependencies['readTextFile'] | null
   privateDirectResponseCardAllowed?: boolean | null
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
@@ -1709,6 +1824,7 @@ export async function executeMurphDynamicToolRequest(input: {
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
+  generateSongTurnState?: GenerateSongTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   if (
     isExecutableComputerDynamicToolRequest(input.request) &&
@@ -1727,6 +1843,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':
       return toolTextResult(false, 'invalid labs arguments')
+    case 'invalid-pending-vault-files-arguments':
+      return toolTextResult(false, 'invalid pending vault-file arguments')
     case 'invalid-group-room-model-arguments':
       return toolTextResult(false, 'invalid group room-model arguments')
     case 'invalid-connected-apps-arguments':
@@ -1783,7 +1901,23 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
+    case 'attach-group-challenge-response-card':
+      return await executeGroupChallengeResponseCardAttachment({
+        allowed: input.groupChallengeResponseCardAllowed === true,
+        currentResponseCard: input.currentResponseCard ?? null,
+        currentResponseMedia: input.currentResponseMedia ?? [],
+        knowledgePageReadTextFile: input.knowledgePageReadTextFile ?? null,
+        request: input.request.input,
+        turnState: input.groupSharedReadTurnState ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
     case 'attach-response-card': {
+      if (input.request.card.kind === 'challenge_standings') {
+        return toolTextResult(
+          false,
+          'challenge standings response cards require page-authorized observation input',
+        )
+      }
       if (input.privateDirectResponseCardAllowed !== true) {
         return toolTextResult(
           false,
@@ -1904,11 +2038,20 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
       })
     }
+    case 'pending-vault-files-list':
+    case 'pending-vault-files-cancel':
+      return await executePendingVaultFilesDynamicTool({
+        request: input.request,
+        userActionScope:
+          input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot?.trim() || null,
+      })
     case 'assistant-style': {
       const hostedToolContext = input.hostedToolContext ?? null
       return await executeAssistantStyleDynamicTool({
-        assistantInputId:
-          hostedToolContext?.currentAssistantInputId?.() ?? null,
+        authority: resolveHostedAssistantPersonalizationToolAuthority(
+          hostedToolContext,
+        ),
         available: input.assistantStyleSettingsAvailable === true,
         hosted: hostedToolContext != null,
         hostedPersonalizationTool:
@@ -1950,12 +2093,18 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       try {
-        const result = input.request.toolCallId === undefined
-          ? await sendVaultFile(input.request.ref)
-          : await sendVaultFile(
+        const result = input.request.retireExportPackIds
+          ? await sendVaultFile(
               input.request.ref,
               input.request.toolCallId,
+              input.request.retireExportPackIds,
             )
+          : input.request.toolCallId === undefined
+            ? await sendVaultFile(input.request.ref)
+            : await sendVaultFile(
+                input.request.ref,
+                input.request.toolCallId,
+              )
         switch (result.status) {
           case 'pending':
             return {
@@ -2261,34 +2410,33 @@ export async function executeMurphDynamicToolRequest(input: {
           brief: input.request.brief,
           conversationScope,
         })
-        const groupRequester = conversationScope === 'group'
+        const groupMessageRef = conversationScope === 'group'
+          ? input.request.messageRef
+          : null
+        if (
+          conversationScope === 'group'
+          && (
+            !groupMessageRef
+            || groupMessageRef !== userActionScope?.acceptedInputIds.at(-1)
+          )
+        ) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
+        }
+        const groupRequester = conversationScope === 'group' && groupMessageRef
           ? await authorizeDynamicToolParticipant({
               authorizer: input.authorizeAcceptedMessageTarget ?? null,
               deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
-              messageRef: input.request.messageRef ?? '',
+              messageRef: groupMessageRef,
             })
           : null
-        if (conversationScope === 'group') {
-          const confirmationInputId = input.request.messageRef
-          if (!groupRequester) {
-            return toolTextResult(
-              false,
-              'group phone calling requires the exact accepted Message ref from the participant who confirmed the call preview',
-            )
-          }
-          const previewAuthority = confirmationInputId
-            ? await hostedToolContext
-              .currentGroupPhoneCallPreviewAuthority?.({
-                brief,
-                confirmationInputId,
-              })
-            : null
-          if (!previewAuthority) {
-            return toolTextResult(
-              false,
-              'group phone calling requires an exact preview that was successfully delivered before the referenced current confirmation; deliver or repeat the complete preview, stop, and ask the room to confirm it in a later message',
-            )
-          }
+        if (conversationScope === 'group' && !groupRequester) {
+          return toolTextResult(
+            false,
+            'group phone calling requires the exact current accepted Message ref from the requesting participant',
+          )
         }
         const result = await phoneCalls.start({
           brief,
@@ -2344,20 +2492,32 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
 
+      const invocationScope = hostedToolContext.currentInvocationScope?.() ?? null
       const userActionScope = hostedToolContext.currentUserActionScope?.() ?? null
-      if (
-        !userActionScope
-        || userActionScope.conversationScope !== 'direct'
-        || userActionScope.acceptedInputIds.length === 0
-      ) {
+      const conversationScope =
+        invocationScope?.conversationScope ??
+        userActionScope?.conversationScope ??
+        null
+      const hasAuthority =
+        invocationScope !== null ||
+        (userActionScope?.acceptedInputIds.length ?? 0) > 0
+      if (conversationScope !== 'direct' || !hasAuthority) {
         return toolTextResult(
           false,
-          'Clinical Records connection links require current user input in a private conversation',
+          'Clinical Records connection links require current user input in a private conversation or exact private scheduled automation authority',
         )
       }
 
       try {
         const result = await connectLinkTool.createConnectLink({
+          ...(invocationScope?.origin.kind === 'automation_occurrence'
+            ? {
+                requestKey: createAssistantHostedScheduledRequestKey({
+                  operation: 'clinical-records-connect-link',
+                  origin: invocationScope.origin,
+                }),
+              }
+            : {}),
           signal: input.abortSignal ?? null,
         })
         return toolTextResult(true, safeToolPayloadText({
@@ -2397,6 +2557,7 @@ export async function executeMurphDynamicToolRequest(input: {
       return await executePersonalizationTool({
         hostedToolContext: input.hostedToolContext ?? null,
         request: input.request.request,
+        toolCallId: input.request.toolCallId ?? null,
       })
     case 'assistant-configuration':
       return await executeAssistantConfigurationTool({
@@ -2412,6 +2573,7 @@ export async function executeMurphDynamicToolRequest(input: {
         env: input.env,
         fetchImpl: input.fetchImpl,
         hostedToolContext: input.hostedToolContext ?? null,
+        groupSharedReadTurnState: input.groupSharedReadTurnState ?? null,
         materializeWorkspaceArtifacts:
           input.materializeWorkspaceArtifacts ?? null,
         nextUsageOrdinal: input.nextUsageOrdinal,
@@ -2478,13 +2640,15 @@ export async function executeMurphDynamicToolRequest(input: {
       }
 
       const captureIdempotencyKey = buildGeneratedImageCaptureIdempotencyKey({
-        toolCallId: readGeneratedImageToolCallId(input.request),
+        requestId: readGeneratedImageToolCallId(input.request),
         scope: 'generate-image',
       })
       const imageGenerationLauncher =
         input.hostedToolContext?.imageGenerationLauncher ?? null
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
+      const invocationScope =
+        input.hostedToolContext?.currentInvocationScope?.() ?? null
       const explicitOriginAssistantInputId = input.request.messageRef
         && userActionScope?.acceptedInputIds.includes(input.request.messageRef)
         ? await authorizeDynamicToolEffectOrigin({
@@ -2501,10 +2665,21 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
       const originAssistantInputId = explicitOriginAssistantInputId
-        ?? input.hostedToolContext?.currentAssistantInputId?.()
+        ?? (invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.origin.assistantInputId
+          : invocationScope === null
+            ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+            : null)
         ?? null
       const originAssistantInputIdExact = explicitOriginAssistantInputId !== null
-      const imageGenerationScopeId = userActionScope?.originSessionId ?? null
+      const acceptedInvocationSessionId =
+        invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.originSessionId ?? null
+          : null
+      const imageGenerationScopeId =
+        acceptedInvocationSessionId ??
+        userActionScope?.originSessionId ??
+        null
       const providerRequestOrdinal = input.nextUsageOrdinal()
       const operationId =
         captureIdempotencyKey
@@ -2626,6 +2801,7 @@ export async function executeMurphDynamicToolRequest(input: {
         abortSignal: input.abortSignal ?? null,
         args: input.request.args,
         currentResponseMedia: input.currentResponseMedia ?? [],
+        turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
       })
     }
@@ -2647,9 +2823,14 @@ export async function executeMurphDynamicToolRequest(input: {
           'connected apps are unavailable without hosted connected-app transport',
         )
       }
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
       return await executeConnectedAppsDynamicTool({
         abortSignal: input.abortSignal ?? null,
         connectedApps,
+        emailSendAuthorized:
+          userActionScope?.conversationScope === 'direct'
+          && userActionScope.acceptedInputIds.length > 0,
         request: input.request,
       })
     }
@@ -2836,7 +3017,16 @@ async function executeFamilyPlanTool(input: {
     const result = await familyPlanTool.request(input.request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
-    return toolTextResult(false, 'family plan tool request failed')
+    if (input.request.action === 'read_status') {
+      return toolTextResult(
+        false,
+        'Family status could not be read; no change was attempted; retry the status read',
+      )
+    }
+    return toolTextResult(
+      false,
+      'family plan request was not confirmed; check Family Settings before retrying to avoid a duplicate request',
+    )
   }
 }
 
@@ -3021,26 +3211,52 @@ function isHostedBillingPlanQuoteStaleError(error: unknown): boolean {
     && Reflect.get(error, 'code') === 'HOSTED_BILLING_PLAN_QUOTE_STALE'
 }
 
+function resolveHostedAssistantPersonalizationToolAuthority(
+  hostedToolContext: AssistantHostedToolContext | null,
+): HostedRuntimeAssistantPersonalizationToolAuthority | null {
+  const invocationScope: AssistantHostedInvocationScope | null =
+    hostedToolContext?.currentInvocationScope?.() ?? null
+  if (invocationScope?.origin.kind === 'accepted_input') {
+    return { assistantInputId: invocationScope.origin.assistantInputId }
+  }
+  if (invocationScope?.origin.kind === 'automation_occurrence') {
+    return {
+      automationId: invocationScope.origin.automationId,
+      occurrenceAt: invocationScope.origin.occurrenceAt,
+    }
+  }
+  const assistantInputId =
+    hostedToolContext?.currentAssistantInputId?.() ?? null
+  return assistantInputId ? { assistantInputId } : null
+}
+
 async function executePersonalizationTool(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: HostedRuntimeAssistantPersonalizationModelToolRequest
+  toolCallId: string | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const personalizationTool = input.hostedToolContext?.personalizationTool ?? null
   if (!personalizationTool) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
-  const assistantInputId = input.request.action === 'update'
-    ? input.hostedToolContext?.currentAssistantInputId?.() ?? null
+  const authority = input.request.action === 'update'
+    ? resolveHostedAssistantPersonalizationToolAuthority(
+        input.hostedToolContext,
+      )
     : null
-  if (input.request.action === 'update' && assistantInputId === null) {
+  if (input.request.action === 'update' && authority === null) {
     return toolTextResult(false, 'personalization is unavailable for this turn')
   }
 
   try {
     const result = await personalizationTool.request(
       input.request,
-      assistantInputId === null ? undefined : { assistantInputId },
+      authority === null
+        ? undefined
+        : input.toolCallId
+          ? { ...authority, toolCallId: input.toolCallId }
+          : authority,
     )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch {
@@ -3306,7 +3522,7 @@ function groupSharedModelResult(
  */
 function groupSharedModelResultText(
   modelResult: ReturnType<typeof groupSharedModelResult>,
-): string {
+): { capacityPartial: boolean; text: string } {
   const serialize = (value: unknown): string =>
     JSON.stringify({ action: 'read_shared', result: value })
   let text = serialize(modelResult)
@@ -3315,7 +3531,7 @@ function groupSharedModelResultText(
     || !('members' in modelResult)
     || !Array.isArray(modelResult.members)
   ) {
-    return text
+    return { capacityPartial: false, text }
   }
 
   const members = [...modelResult.members]
@@ -3338,7 +3554,208 @@ function groupSharedModelResultText(
       status: 'partial',
     })
   }
-  return text
+  return {
+    capacityPartial: omittedParticipantIds.length > 0,
+    text,
+  }
+}
+
+const GROUP_CHALLENGE_CARD_UNPROVEN_TEXT =
+  'challenge standings response cards require one complete stable shared-read proof and a successfully persisted canonical snapshot; answer with a truthful ordinary-text update'
+
+async function executeGroupChallengeResponseCardAttachment(input: {
+  allowed: boolean
+  currentResponseCard: AssistantResponseCard | null
+  currentResponseMedia: readonly AssistantResponseMedia[]
+  knowledgePageReadTextFile: KnowledgeServiceDependencies['readTextFile'] | null
+  request: GroupChallengeResponseCardToolInput
+  turnState: MurphGroupSharedReadTurnState | null
+  vaultRoot: string | null
+}): Promise<MurphDynamicToolExecutionResult> {
+  if (!input.allowed) {
+    return toolTextResult(
+      false,
+      'challenge standings response cards require an authenticated Linq group conversation',
+    )
+  }
+  if (input.currentResponseCard !== null) {
+    return toolTextResult(false, 'a response card is already attached')
+  }
+  if (input.currentResponseMedia.length > 0) {
+    return toolTextResult(
+      false,
+      'response cards cannot be combined with response media',
+    )
+  }
+
+  const proof = input.turnState
+  if (
+    !proof
+    || proof.invalid
+    || proof.roster === null
+    || proof.roster.length === 0
+    || proof.readProjectionScopeKeyBatches.length === 0
+    || !input.vaultRoot
+  ) {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
+
+  const participantById = new Map(
+    proof.roster.map((participant) => [participant.participantId, participant]),
+  )
+  if (participantById.size !== proof.roster.length) {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
+
+  try {
+    const pageResult = await getKnowledgePage(
+      {
+        slug: input.request.challengeSlug,
+        vault: input.vaultRoot,
+      },
+      input.knowledgePageReadTextFile
+        ? { readTextFile: input.knowledgePageReadTextFile }
+        : {},
+    )
+    if (pageResult.page.pageType !== 'challenge') {
+      throw new TypeError('Challenge standings require a challenge knowledge page.')
+    }
+    const definitionSnapshot = readGroupChallengeDefinitionSnapshot(
+      pageResult.page.body,
+    )
+    if (input.request.pageRevisionDigest !== pageResult.page.pageRevisionDigest) {
+      throw new TypeError(
+        'Challenge observations must use the current page revision digest.',
+      )
+    }
+    const definition = definitionSnapshot.definition
+    const challengeParticipants = definition.participants.filter(
+      (participant) => participant.state === 'in',
+    )
+    if (challengeParticipants.length === 0) {
+      throw new TypeError('Challenge standings require an opted-in participant.')
+    }
+    const observationById = new Map(
+      input.request.participantObservations.map((observation) => [
+        observation.participantId,
+        observation,
+      ]),
+    )
+    if (
+      observationById.size !== input.request.participantObservations.length
+      || observationById.size !== challengeParticipants.length
+    ) {
+      throw new TypeError(
+        'Challenge observations must cover every opted-in participant exactly once.',
+      )
+    }
+    const participants = challengeParticipants.map((challengeParticipant) => {
+      if (!participantById.has(challengeParticipant.participantId)) {
+        throw new TypeError(
+          'Every challenge participant must be present in the trusted room roster.',
+        )
+      }
+      const observation = observationById.get(challengeParticipant.participantId)
+      if (!observation) {
+        throw new TypeError(
+          'Challenge observations must match the page-owned participant roster.',
+        )
+      }
+      return observation
+    })
+    const componentProjectionScopeKeys = definition.scorecard.components.map(
+      (component) => ({
+        componentId: component.id,
+        projectionScopeKeys: component.projectionScopeKeys,
+      }),
+    )
+    const readProjectionScopeKeys = new Set(
+      proof.readProjectionScopeKeyBatches.flat(),
+    )
+    if (componentProjectionScopeKeys.some((entry) =>
+      entry.projectionScopeKeys.some((scopeKey) =>
+        !readProjectionScopeKeys.has(scopeKey)
+      )
+    )) {
+      throw new TypeError(
+        'Every challenge component scope must be backed by the trusted read.',
+      )
+    }
+    const scoreInput = {
+      format: definition.format,
+      participants,
+      scorecard: {
+        components: definition.scorecard.components.map((component) => ({
+          id: component.id,
+          label: component.label,
+          ...(component.maxPoints === undefined
+            ? {}
+            : { maxPoints: component.maxPoints }),
+          perQuantity: component.perQuantity,
+          points: component.points,
+          quantityUnit: component.quantityUnit,
+        })),
+      },
+    }
+    const participantLabels = scoreInput.format.kind === 'individual'
+      ? scoreInput.participants.map((scoreParticipant) => {
+          const participant = participantById.get(scoreParticipant.participantId)
+          if (!participant) {
+            throw new TypeError(
+              'Every challenge participant must be present in the trusted room roster.',
+            )
+          }
+          if (participant.displayName === null) {
+            throw new TypeError(
+              'Every individual challenge participant requires an authorized label.',
+            )
+          }
+          return {
+            label: participant.displayName,
+            participantId: participant.participantId,
+          }
+        })
+      : []
+    const card = buildGroupChallengeResponseCard({
+      footer: null,
+      participantLabels,
+      scoreInput,
+      subtitle: null,
+      title: pageResult.page.title,
+    })
+    const scoreResult = scoreGroupChallengeJson(scoreInput)
+    const body = upsertGroupChallengeStandingsSnapshot(
+      normalizeKnowledgeBody(pageResult.page.body),
+      {
+        componentProjectionScopeKeys,
+        definitionDigest: definitionSnapshot.definitionDigest,
+        readProjectionScopeKeyBatches:
+          proof.readProjectionScopeKeyBatches,
+        rulesRevision: definition.rulesRevision,
+        scoreInput,
+        scoreResult,
+        version: 1,
+      },
+    )
+    await upsertKnowledgePage({
+      body,
+      expectedMarkdown: pageResult.page.markdown,
+      librarySlugs: pageResult.page.librarySlugs,
+      pageType: pageResult.page.pageType,
+      relatedSlugs: pageResult.page.relatedSlugs,
+      slug: pageResult.page.slug,
+      sourcePaths: pageResult.page.sourcePaths,
+      status: pageResult.page.status,
+      title: pageResult.page.title,
+      vault: input.vaultRoot,
+    })
+    return {
+      ...toolTextResult(true, 'response card attached'),
+      responseCardPatch: { card },
+    }
+  } catch {
+    return toolTextResult(false, GROUP_CHALLENGE_CARD_UNPROVEN_TEXT)
+  }
 }
 
 function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
@@ -3363,6 +3780,21 @@ function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
 }
 
 function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
+  if (
+    response.action === 'message_current_sender'
+    && response.result.status === 'unavailable'
+    && response.result.unavailableReason
+      === 'same_channel_direct_route_unavailable'
+  ) {
+    return {
+      ...response,
+      result: {
+        ...response.result,
+        recovery:
+          'Ask the sender to open a direct Murph chat on the same channel, then retry.',
+      },
+    }
+  }
   if (
     response.action === 'read_chat_participants'
     && response.result.status === 'ok'
@@ -3457,6 +3889,7 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
         ? {
             offeredAt: response.result.offeredAt,
             recencyEvidence: 'eligible' as const,
+            responseHandling: GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
           }
         : { recencyEvidence: 'unavailable' as const }),
       presentation: 'native' as const,
@@ -3468,9 +3901,13 @@ function groupAccessOfferModelResult(response: GroupAccessOfferHostResponse) {
 async function executeGroupSharedRead(input: {
   hostedToolContext: AssistantHostedToolContext | null
   request: Extract<MurphGroupToolRequest, { action: 'read_shared' }>
+  turnState: MurphGroupSharedReadTurnState | null
 }): Promise<MurphDynamicToolExecutionResult> {
   const groupSharedReader = input.hostedToolContext?.groupSharedReader ?? null
   if (!groupSharedReader) {
+    if (input.turnState) {
+      input.turnState.invalid = true
+    }
     return groupSharedUnavailableToolResult('group_shared_reader_unavailable')
   }
 
@@ -3478,13 +3915,71 @@ async function executeGroupSharedRead(input: {
     const result = await groupSharedReader.request({
       projectionScopes: input.request.projectionScopes,
     })
+    const modelResult = groupSharedModelResultText(groupSharedModelResult(result))
+    recordGroupSharedReadProof({
+      capacityPartial: modelResult.capacityPartial,
+      result,
+      turnState: input.turnState,
+    })
     return toolTextResult(
       true,
-      groupSharedModelResultText(groupSharedModelResult(result)),
+      modelResult.text,
     )
   } catch {
+    if (input.turnState) {
+      input.turnState.invalid = true
+    }
     return groupSharedUnavailableToolResult('group_shared_read_failed')
   }
+}
+
+function recordGroupSharedReadProof(input: {
+  capacityPartial: boolean
+  result: AssistantHostedGroupSharedReadResponse
+  turnState: MurphGroupSharedReadTurnState | null
+}): void {
+  const state = input.turnState
+  if (!state || state.invalid) {
+    return
+  }
+  if (
+    input.capacityPartial
+    || input.result.status !== 'ok'
+    || input.result.members.length === 0
+    || input.result.requestedProjectionScopeKeys.length === 0
+    || new Set(input.result.requestedProjectionScopeKeys).size
+      !== input.result.requestedProjectionScopeKeys.length
+  ) {
+    state.invalid = true
+    return
+  }
+  const roster = input.result.members.map((member) => ({
+    displayName: member.displayName,
+    participantId: member.participantId,
+  }))
+  if (
+    new Set(roster.map((participant) => participant.participantId)).size
+      !== roster.length
+    || (
+      state.roster !== null
+      && (
+        !hasExactStringEntries(
+          roster.map((participant) => participant.participantId),
+          state.roster.map((participant) => participant.participantId),
+        )
+        || roster.some((participant, index) =>
+          participant.displayName !== state.roster?.[index]?.displayName
+        )
+      )
+    )
+  ) {
+    state.invalid = true
+    return
+  }
+  state.roster ??= roster
+  state.readProjectionScopeKeyBatches.push([
+    ...input.result.requestedProjectionScopeKeys,
+  ])
 }
 
 function hasExactStringEntries(
@@ -3539,6 +4034,7 @@ async function executeGroupTool(input: {
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
+  groupSharedReadTurnState: MurphGroupSharedReadTurnState | null
   materializeWorkspaceArtifacts: AssistantWorkspaceArtifactMaterializer | null
   nextUsageOrdinal: () => number
   request: MurphGroupToolRequest
@@ -3549,6 +4045,7 @@ async function executeGroupTool(input: {
     return executeGroupSharedRead({
       hostedToolContext: input.hostedToolContext,
       request: input.request,
+      turnState: input.groupSharedReadTurnState,
     })
   }
   const groupTool = input.hostedToolContext?.groupTool ?? null
@@ -3587,6 +4084,77 @@ async function executeGroupTool(input: {
     | null = null
   if (input.request.action === 'offer_access') {
     request = buildGroupAccessOfferHostRequest(input.request)
+  } else if (isPreparedContactCardRequest(input.request)) {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (
+      userActionScope?.conversationScope !== 'direct'
+      || userActionScope.acceptedInputIds.length === 0
+    ) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require a fresh user request in a personal direct conversation',
+      )
+    }
+    // Refuse a route that can never carry the attachment before paying for
+    // generation, capture, and publication. The post-generation binding below
+    // still owns the authoritative thread.
+    const routeStatus = groupTool.directAttachmentRouteStatus?.() ?? null
+    if (routeStatus && routeStatus.status !== 'ok') {
+      return toolTextResult(true, safeToolPayloadText({
+        action: 'share_contact_card',
+        result: routeStatus,
+      }))
+    }
+    const contactCardShareKey = userActionScope.acceptedInputIds.at(-1) ?? null
+    if (!contactCardShareKey) {
+      return toolTextResult(
+        false,
+        'personalized contact cards require fresh user-sourced input for this turn',
+      )
+    }
+    const prepared = await prepareGroupAvatarRuntimeRequest({
+      abortSignal: input.abortSignal,
+      // The accepted request, not the tool call: a replay must reuse this
+      // capture rather than pay for a second stochastic generation.
+      captureRequestId: contactCardShareKey,
+      captureScope: 'contact-card-avatar',
+      env: input.env,
+      fetchImpl: input.fetchImpl,
+      hostedToolContext: input.hostedToolContext,
+      materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
+      nextUsageOrdinal: input.nextUsageOrdinal,
+      request: {
+        action: 'set_chat_avatar',
+        avatar: input.request.avatar,
+      },
+      vaultRoot: input.vaultRoot,
+    })
+    if (!prepared.rpcSuccess) {
+      return {
+        rpcResult: {
+          contentItems: [{ text: prepared.rpcText, type: 'inputText' }],
+          success: false,
+        },
+        usageDraft: prepared.usageDraft ?? null,
+      }
+    }
+    request = {
+      action: 'share_contact_card',
+      contactCardImageUrl: prepared.request.groupChatIconUrl,
+      // Trusted-host request identity, so a retried or replayed turn collapses
+      // to one card while a genuinely new accepted request has its own send
+      // identity. Deliberately not the tool call id: a retry re-emits the
+      // call with a new id but keeps the same accepted input.
+      contactCardShareKey,
+    }
+    usageDraft = prepared.usageDraft ?? null
+    generatedAvatarCapture = prepared.savedImageRef
+      ? {
+          savedCaptureId: prepared.savedCaptureId ?? null,
+          savedImageRef: prepared.savedImageRef,
+        }
+      : null
   } else if (isPreparedGroupAvatarRequest(input.request)) {
     let preflight: Extract<
       HostedRuntimeGroupToolResponse,
@@ -3617,13 +4185,14 @@ async function executeGroupTool(input: {
 
     const prepared = await prepareGroupAvatarRuntimeRequest({
       abortSignal: input.abortSignal,
+      captureRequestId: input.toolCallId,
+      captureScope: 'group-avatar',
       env: input.env,
       fetchImpl: input.fetchImpl,
       hostedToolContext: input.hostedToolContext,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       nextUsageOrdinal: input.nextUsageOrdinal,
       request: input.request,
-      toolCallId: input.toolCallId,
       vaultRoot: input.vaultRoot,
     })
     if (!prepared.rpcSuccess) {
@@ -3668,7 +4237,10 @@ async function executeGroupTool(input: {
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
     }
-  } else if (input.request.action === 'ask_current_sender') {
+  } else if (
+    input.request.action === 'ask_current_sender'
+    || input.request.action === 'message_current_sender'
+  ) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null
     if (
@@ -3677,11 +4249,11 @@ async function executeGroupTool(input: {
     ) {
       return toolTextResult(
         false,
-        'current-sender ask requires the selected accepted message in this group turn',
+        'current-sender actions require the selected accepted message in this group turn',
       )
     }
     request = {
-      action: 'ask_current_sender',
+      action: input.request.action,
       origin: {
         assistantInputId: input.request.messageRef,
         kind: 'accepted_input',
@@ -3904,6 +4476,11 @@ async function executeGroupTool(input: {
       ...(usageDraft ? { usageDraft } : {}),
     }
   } catch (error) {
+    const runtimeIssueInput = buildGroupToolFailureRuntimeIssueInput({
+      action: input.request.action,
+      callerSignalAborted: input.abortSignal?.aborted === true,
+      error,
+    })
     return {
       ...toolTextResult(
         false,
@@ -3911,9 +4488,139 @@ async function executeGroupTool(input: {
           ? buildGroupAskRequestFailureText(error)
           : 'group tool request failed',
       ),
+      ...(runtimeIssueInput ? { runtimeIssueInputs: [runtimeIssueInput] } : {}),
       ...(usageDraft ? { usageDraft } : {}),
     }
   }
+}
+
+type GroupToolFailureCategory =
+  | 'http_4xx'
+  | 'http_5xx'
+  | 'response_schema_invalid'
+  | 'timeout'
+  | 'transport'
+  | 'unknown'
+
+function buildGroupToolFailureRuntimeIssueInput(input: {
+  action: MurphGroupToolRequest['action']
+  callerSignalAborted: boolean
+  error: unknown
+}): AssistantRuntimeIssueInput | null {
+  if (input.callerSignalAborted) {
+    return null
+  }
+  const classification = classifyGroupToolFailure(input.error)
+  return {
+    component: 'assistant.group-tool',
+    operation: input.action,
+    phase: classification.category === 'response_schema_invalid'
+      ? 'tool_result_parse'
+      : 'tool_call',
+    issueKind: classification.category === 'response_schema_invalid'
+      ? 'schema_rejection'
+      : classification.category === 'timeout'
+        ? 'timeout'
+        : 'tool_error',
+    severity: 'warning',
+    errorCode: classification.errorCode,
+    summary: 'Hosted group tool request failed.',
+    details: {
+      action: input.action,
+      failureCategory: classification.category,
+      ...(classification.retryable === null
+        ? {}
+        : { retryable: classification.retryable }),
+      ...(classification.statusClass === null
+        ? {}
+        : { statusClass: classification.statusClass }),
+    },
+  }
+}
+
+function classifyGroupToolFailure(error: unknown): {
+  category: GroupToolFailureCategory
+  errorCode: string
+  retryable: boolean | null
+  statusClass: '4xx' | '5xx' | null
+} {
+  const record = error && typeof error === 'object' && !Array.isArray(error)
+    ? error as Record<string, unknown>
+    : null
+  const retryable = typeof record?.retryable === 'boolean'
+    ? record.retryable
+    : null
+  if (
+    record?.code === 'HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID'
+    && record.name === 'HostedGroupToolResponseSchemaError'
+  ) {
+    return {
+      category: 'response_schema_invalid',
+      errorCode: 'HOSTED_GROUP_TOOL_RESPONSE_SCHEMA_INVALID',
+      retryable,
+      statusClass: null,
+    }
+  }
+
+  const statusCode = readGroupToolFailureStatusCode(record)
+  if (statusCode !== null && statusCode >= 400 && statusCode <= 499) {
+    return {
+      category: 'http_4xx',
+      errorCode: 'HOSTED_GROUP_TOOL_HTTP_4XX',
+      retryable,
+      statusClass: '4xx',
+    }
+  }
+  if (statusCode !== null && statusCode >= 500 && statusCode <= 599) {
+    return {
+      category: 'http_5xx',
+      errorCode: 'HOSTED_GROUP_TOOL_HTTP_5XX',
+      retryable,
+      statusClass: '5xx',
+    }
+  }
+
+  const fetchCauseKind = typeof record?.hostedRuntimeFetchCauseKind === 'string'
+    ? record.hostedRuntimeFetchCauseKind
+    : null
+  const errorName = error instanceof Error ? error.name : null
+  if (
+    fetchCauseKind === 'timeout'
+    || errorName === 'TimeoutError'
+  ) {
+    return {
+      category: 'timeout',
+      errorCode: 'HOSTED_GROUP_TOOL_TIMEOUT',
+      retryable,
+      statusClass: null,
+    }
+  }
+  if (fetchCauseKind !== null || errorName === 'AbortError') {
+    return {
+      category: 'transport',
+      errorCode: 'HOSTED_GROUP_TOOL_TRANSPORT_FAILED',
+      retryable,
+      statusClass: null,
+    }
+  }
+  return {
+    category: 'unknown',
+    errorCode: 'HOSTED_GROUP_TOOL_FAILED',
+    retryable,
+    statusClass: null,
+  }
+}
+
+function readGroupToolFailureStatusCode(
+  record: Record<string, unknown> | null,
+): number | null {
+  const candidate = record?.statusCode ?? record?.status
+  return typeof candidate === 'number'
+      && Number.isInteger(candidate)
+      && candidate >= 100
+      && candidate <= 599
+    ? candidate
+    : null
 }
 
 function buildGroupAskRequestFailureText(error: unknown): string {
@@ -4017,6 +4724,17 @@ async function executeGroupPermissionOffer(input: {
   }
 }
 
+const MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION = 40
+
+function isPreparedContactCardRequest(
+  request: MurphGroupToolRequest,
+): request is Extract<
+  MurphGroupToolRequest,
+  { action: 'share_contact_card'; avatar: unknown }
+> {
+  return request.action === 'share_contact_card' && 'avatar' in request
+}
+
 function isPreparedGroupAvatarRequest(
   request: MurphGroupToolRequest,
 ): request is Extract<
@@ -4028,6 +4746,13 @@ function isPreparedGroupAvatarRequest(
 
 async function prepareGroupAvatarRuntimeRequest(input: {
   abortSignal: AbortSignal | null
+  /**
+   * Identity that owns the generated capture. A replayed turn re-emits the
+   * tool call with a new id, so a caller whose effect must survive a replay
+   * passes its accepted-request id here instead.
+   */
+  captureRequestId: string | null
+  captureScope: 'contact-card-avatar' | 'group-avatar'
   env: NodeJS.ProcessEnv
   fetchImpl: typeof fetch
   hostedToolContext: AssistantHostedToolContext | null
@@ -4037,7 +4762,6 @@ async function prepareGroupAvatarRuntimeRequest(input: {
     MurphGroupToolRequest,
     { action: 'set_chat_avatar'; avatar: unknown }
   >
-  toolCallId: string | null
   vaultRoot: string | null
 }): Promise<
   | {
@@ -4060,10 +4784,15 @@ async function prepareGroupAvatarRuntimeRequest(input: {
   if (avatar.source === 'generate') {
     const generated = await executeGenerateImageTool({
       abortSignal: input.abortSignal,
-      args: avatar.args,
+      args: input.captureScope === 'contact-card-avatar'
+        ? {
+            ...avatar.args,
+            outputCompression: MURPH_CONTACT_CARD_IMAGE_OUTPUT_COMPRESSION,
+          }
+        : avatar.args,
       captureIdempotencyKey: buildGeneratedImageCaptureIdempotencyKey({
-        scope: 'group-avatar',
-        toolCallId: input.toolCallId,
+        requestId: input.captureRequestId,
+        scope: input.captureScope,
       }),
       env: input.env,
       fetchImpl: input.fetchImpl,
@@ -5005,38 +5734,42 @@ function toolTextResult(
 function parseDynamicToolCallRequest(
   message: CodexRpcMessage,
 ): ParsedDynamicToolCallRequest | null {
-  if (message.method !== CODEX_DYNAMIC_TOOL_CALL_METHOD) {
+  const request = readCodexServerRequest(message)
+  if (request?.method !== CODEX_DYNAMIC_TOOL_CALL_METHOD) {
     return null
   }
 
-  const params = asRecord(message.params)
-  if (!params) {
-    return {
-      arguments: null,
-      namespace: null,
-      tool: null,
-      toolCallId: null,
-    }
+  const params = request.params
+  const threadId = readCodexNonEmptyString(params.threadId)
+  const turnId = readCodexNonEmptyString(params.turnId)
+  const toolCallId = readCodexNonEmptyString(params.callId)
+  const tool = readCodexNonEmptyString(params.tool)
+  const namespace = params.namespace === null
+    ? null
+    : readCodexString(params.namespace)
+  if (
+    !threadId ||
+    !turnId ||
+    !toolCallId ||
+    !tool ||
+    (params.namespace !== null && namespace === null) ||
+    !Object.hasOwn(params, 'arguments')
+  ) {
+    return null
   }
 
   return {
     arguments: params.arguments,
-    namespace: normalizeNullableStringValue(params.namespace),
-    tool: normalizeNullableStringValue(params.tool),
-    toolCallId:
-      normalizeNullableStringValue(params.callId) ??
-      normalizeNullableStringValue(params.call_id) ??
-      normalizeNullableStringValue(params.toolCallId) ??
-      normalizeNullableStringValue(params.tool_call_id) ??
-      normalizeNullableStringValue(params.itemId) ??
-      normalizeNullableStringValue(params.item_id),
+    namespace,
+    tool,
+    toolCallId,
   }
 }
 
 function parseSendVaultFileArguments(
   value: unknown,
 ):
-  | { ok: true; ref: string }
+  | { ok: true; ref: string; retireExportPackIds?: string[] }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const parsed = sendVaultFileArgumentsSchema.safeParse(value)
   if (!parsed.success) {
@@ -5046,7 +5779,7 @@ function parseSendVaultFileArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: 'murph.send_vault_file.input',
-        schemaRootKeys: ['ref'],
+        schemaRootKeys: ['ref', 'retire_export_pack_ids'],
         toolName: 'murph.send_vault_file',
       }),
     }
@@ -5054,6 +5787,9 @@ function parseSendVaultFileArguments(
   return {
     ok: true,
     ref: parsed.data.ref,
+    ...(parsed.data.retire_export_pack_ids
+      ? { retireExportPackIds: parsed.data.retire_export_pack_ids }
+      : {}),
   }
 }
 
@@ -5168,24 +5904,12 @@ function parseFamilyPlanArguments(
   if (parsed.data.action === 'start_checkout') {
     return {
       ok: true,
-      request: parsed.data.invite
-        ? {
-            action: 'start_checkout',
-            invite: {
-              ...(parsed.data.invite.planCode
-                ? { planCode: parsed.data.invite.planCode }
-                : {}),
-              ...(parsed.data.invite.targetEmail
-                ? { targetEmail: parsed.data.invite.targetEmail }
-                : {}),
-              targetLabel: parsed.data.invite.targetLabel,
-              targetPhoneNumber: parsed.data.invite.targetPhoneNumber,
-              targetTelegramUsername: parsed.data.invite.targetTelegramUsername,
-            },
-          }
-        : {
-            action: 'start_checkout',
-          },
+      request: {
+        action: 'start_checkout',
+        ...(parsed.data.confirmedTrialConversion
+          ? { confirmedTrialConversion: true as const }
+          : {}),
+      },
     }
   }
 
@@ -5376,11 +6100,14 @@ function parseGroupArguments(
   ) {
     return { ok: true, request: parsed.data }
   }
-  if (parsed.data.action === 'ask_current_sender') {
+  if (
+    parsed.data.action === 'ask_current_sender'
+    || parsed.data.action === 'message_current_sender'
+  ) {
     return {
       ok: true,
       request: {
-        action: 'ask_current_sender',
+        action: parsed.data.action,
         messageRef: parsed.data.message_ref,
       },
     }
@@ -5414,6 +6141,31 @@ function parseGroupArguments(
       request: {
         action: 'leave_membership',
         membershipId: parsed.data.membershipId,
+      },
+    }
+  }
+  if (parsed.data.action === 'share_contact_card') {
+    if (!parsed.data.avatarPrompt) {
+      return { ok: true, request: { action: 'share_contact_card' } }
+    }
+    return {
+      ok: true,
+      request: {
+        action: 'share_contact_card',
+        avatar: {
+          source: 'generate',
+          // One fixed configuration. The card has no recipient-visible alt
+          // channel, and photo quality is not a member-visible choice, so the
+          // schema asks the model only for the picture description.
+          args: {
+            alt: null,
+            outputFormat: 'jpeg',
+            prompt: parsed.data.avatarPrompt,
+            quality: 'medium',
+            referenceImageRefs: [],
+            size: '1024x1024',
+          },
+        },
       },
     }
   }
@@ -5503,7 +6255,6 @@ function parseGroupArguments(
     || parsed.data.action === 'read_chat_name'
     || parsed.data.action === 'read_usage'
     || parsed.data.action === 'read_chat_participants'
-    || parsed.data.action === 'share_contact_card'
   ) {
     return { ok: true, request: { action: parsed.data.action } }
   }
@@ -5764,26 +6515,55 @@ function parseComputerArguments<TArgs>(input: {
 function parseAttachResponseCardArguments(
   value: unknown,
 ):
-  | { ok: true; card: AssistantResponseCard }
+  | { ok: true; card: AssistantResponseCard; groupChallenge: false }
+  | {
+      ok: true
+      groupChallenge: true
+      input: GroupChallengeResponseCardToolInput
+    }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const schemaName = 'murph.attach_response_card.input'
   const toolName = 'murph.attach_response_card'
   const parsed = attachResponseCardArgumentsSchema.safeParse(value)
-  if (!parsed.success) {
+  if (parsed.success) {
+    return {
+      card: parsed.data.card,
+      groupChallenge: false,
+      ok: true,
+    }
+  }
+  if (Object.hasOwn(asRecord(value) ?? {}, 'card')) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
         error: parsed.error,
         rawInput: value,
         schemaName,
-        schemaRootKeys: readZodObjectRootKeys(attachResponseCardArgumentsSchema),
+        schemaRootKeys: ['card'],
+        toolName,
+      }),
+    }
+  }
+  const groupChallengeParsed =
+    attachGroupChallengeResponseCardArgumentsSchema.safeParse(value)
+  if (!groupChallengeParsed.success) {
+    return {
+      ok: false,
+      validationDigest: buildDynamicToolValidationDigest({
+        error: groupChallengeParsed.error,
+        rawInput: value,
+        schemaName,
+        schemaRootKeys: readZodObjectRootKeys(
+          attachGroupChallengeResponseCardArgumentsSchema,
+        ),
         toolName,
       }),
     }
   }
 
   return {
-    card: parsed.data.card,
+    groupChallenge: true,
+    input: groupChallengeParsed.data,
     ok: true,
   }
 }

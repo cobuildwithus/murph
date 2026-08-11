@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/src/components/ui/dialog";
 import { getHostedBillingPlanDefinition } from "@/src/lib/hosted-onboarding/billing-plans";
+import { EDGE_ONLY_FEATURES } from "@/src/lib/hosted-onboarding/plan-features";
 import { cn } from "@/src/lib/utils";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
@@ -95,12 +96,6 @@ export function SwitchToPulseButton(props: {
     </div>
   );
 }
-
-const EDGE_ONLY_FEATURES = [
-  "More usage on latest AI models",
-  "Murph remembers more of your history",
-  "Deeper research and analysis",
-];
 
 function PulseSwitchConfirmationDialog(props: {
   currentPeriodEnd?: string | null;

@@ -220,11 +220,7 @@ export async function enqueueHostedSystemMailboxItem(input: {
     occurredAt: input.item.item.occurredAt,
     postCheckpointRecord: null,
     preferenceCausalSeq: routeAction === "apply-member-preferences"
-      ? (
-        input.wake.kind === "member.preferences.updated"
-          ? (input.wake.preferenceCausalSeq ?? input.item.item.causalSeq ?? null)
-          : (input.item.item.causalSeq ?? null)
-      )
+      ? (input.item.item.causalSeq ?? null)
       : null,
     requestId: input.item.payload.requestId ?? null,
     routeAction,
@@ -587,6 +583,41 @@ async function executePendingHostedSystemMailboxItem(input: {
       runtime: input.runtime,
       wake: input.pendingItem.wake,
     });
+  let wake = input.pendingItem.wake;
+
+  if (wake.kind === "assistant.notification.requested") {
+    const {
+      prepareHostedAssistantNotificationSystemMailboxWake,
+    } = await import("./events/assistant-notification.ts");
+    const preparation =
+      await prepareHostedAssistantNotificationSystemMailboxWake({
+        assertExternalThreadRouteAuthority:
+          input.runtime.platform.effectsPort
+            .assertExternalThreadRouteAuthority,
+        executionContext,
+        mailboxDedupeKey: input.pendingItem.mailboxDedupeKey,
+        signal: input.signal,
+        wake,
+      });
+    if (preparation.kind === "terminal_no_send") {
+      const outcome = preparation.outcome;
+      return {
+        bootstrapResult: null,
+        conversationMetrics: outcome.conversationMetrics,
+        ...(outcome.deliveryIntentIds === undefined
+          ? {}
+          : { deliveryIntentIds: outcome.deliveryIntentIds }),
+        mailboxLane: outcome.mailboxLane,
+        nextWakeAt: outcome.nextWakeAt ?? null,
+        ...(Object.hasOwn(outcome, "nextWakeReason")
+          ? { nextWakeReason: outcome.nextWakeReason ?? null }
+          : {}),
+        postCheckpointRecord: outcome.postCheckpointRecord ?? null,
+        redactedLogEntries: outcome.redactedLogEntries ?? [],
+      };
+    }
+    wake = preparation.wake;
+  }
 
   return executeHostedMailboxEvent({
     executionContext,
@@ -606,7 +637,7 @@ async function executePendingHostedSystemMailboxItem(input: {
       : {}),
     sourceMailboxItemId: input.pendingItem.itemId,
     vaultRoot: input.vaultRoot,
-    wake: input.pendingItem.wake,
+    wake,
   });
 }
 

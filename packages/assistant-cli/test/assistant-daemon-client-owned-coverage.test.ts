@@ -16,7 +16,8 @@ const assistantRuntimeMocks = vi.hoisted(() => ({
   }),
 }))
 
-vi.mock('@murphai/assistantd/client', () => ({
+vi.mock('@murphai/assistantd/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@murphai/assistantd/client')>()),
   resolveAssistantDaemonClientConfig:
     assistantdClientMocks.resolveAssistantDaemonClientConfig,
 }))

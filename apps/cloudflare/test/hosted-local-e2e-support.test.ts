@@ -114,6 +114,55 @@ describe("startAssistantProviderStubServer", () => {
     }
   });
 
+  it("starts held Responses API streams before releasing their content", async () => {
+    let release = (): void => {};
+    let markStarted = (): void => {};
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const server = await startAssistantProviderStubServer({
+      responseState: {
+        queuedResponses: [{
+          beforeResponse: () => releasePromise,
+          onResponseStarted: markStarted,
+          text: "held streamed reply",
+        }],
+      },
+    });
+
+    try {
+      const responsePromise = fetch(
+        `${buildHostLoopbackStubBaseUrl(server, "assistant provider test")}/v1/responses`,
+        {
+          body: JSON.stringify({
+            input: [],
+            model: "gpt-5.6-terra",
+            stream: true,
+          }),
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          method: "POST",
+        },
+      );
+
+      await started;
+      const response = await responsePromise;
+      expect(response.status).toBe(200);
+      release();
+      const body = await response.text();
+      expect(body).toContain("response.created");
+      expect(body).toContain("response.completed");
+      expect(body).toContain("held streamed reply");
+    } finally {
+      release();
+      await stopHttpStubServer(server);
+    }
+  });
+
   it("streams a scripted function_call item for tool-call turns", async () => {
     const server = await startAssistantProviderStubServer({
       responseState: {
@@ -200,6 +249,8 @@ describe("startAssistantProviderStubServer", () => {
       expect(body).toContain("response.completed");
       expect(body).toContain('"type":"custom_tool_call"');
       expect(body).toContain('"name":"exec"');
+      expect(body).toContain("yield_time_ms");
+      expect(body).toContain("30000");
       expect(body).toContain("tools.murph__automation");
       expect(body).toContain("Morning reminder");
     } finally {
@@ -515,6 +566,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       && name !== "murph.select_reply_target"
       && name !== "murph.create_phone_call"
       && name !== "murph.newsletter"
+      && name !== "murph.pending_vault_files"
       && name !== "murph.send_physical_note"
       && name !== "murph.send_vault_file"
       && name !== "murph.ask_grok"
@@ -546,6 +598,23 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools([
       buildResponsesRequest(baseToolNames, "code-mode"),
     ]);
+    // Codex 0.147 wraps the code-mode exec tool in the default functions
+    // namespace inside additional_tools.
+    expectAdvertisedMurphDynamicTools([
+      buildResponsesRequest(baseToolNames, "code-mode-namespaced"),
+    ]);
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.pending_vault_files"])],
+      {
+        pendingVaultFilesAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.send_vault_file"])],
+      {
+        vaultFileSendAvailable: true,
+      },
+    );
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(baseToolNamesWithoutProgress)],
       {
@@ -562,6 +631,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
         imessageContactAvailable: true,
         messageTargetingAvailable: true,
         newsletterAvailable: true,
+        pendingVaultFilesAvailable: true,
         physicalNotesAvailable: true,
         phoneCallsAvailable: true,
         progressUpdatesAvailable: true,
@@ -764,7 +834,11 @@ describe("hosted local e2e scenario registration", () => {
 
 function buildResponsesRequest(
   namespacedToolNames: readonly string[],
-  toolLocation: "additional-tools" | "code-mode" | "top-level" = "top-level",
+  toolLocation:
+    | "additional-tools"
+    | "code-mode"
+    | "code-mode-namespaced"
+    | "top-level" = "top-level",
 ): HostedLocalAssistantProviderStubRequest {
   const tools = [
     {
@@ -775,6 +849,17 @@ function buildResponsesRequest(
       type: "namespace",
     },
   ];
+  const codeModeExecTool = {
+    description: namespacedToolNames
+      .filter((name) =>
+        name !== "murph.automation" && name !== "murph.group"
+      )
+      .map((name) => name.replace(/^murph\./u, "murph__"))
+      .concat("ALL_TOOLS")
+      .join("\n"),
+    name: "exec",
+    type: "custom",
+  };
 
   return {
     body: JSON.stringify(
@@ -790,17 +875,23 @@ function buildResponsesRequest(
           }
         : toolLocation === "code-mode"
         ? {
-            tools: [{
-              description: namespacedToolNames
-                .filter((name) =>
-                  name !== "murph.automation" && name !== "murph.group"
-                )
-                .map((name) => name.replace(/^murph\./u, "murph__"))
-                .concat("ALL_TOOLS")
-                .join("\n"),
-              name: "exec",
-              type: "custom",
-            }],
+            tools: [codeModeExecTool],
+          }
+        : toolLocation === "code-mode-namespaced"
+        ? {
+            input: [
+              {
+                role: "developer",
+                tools: [
+                  {
+                    name: "functions",
+                    tools: [codeModeExecTool],
+                    type: "namespace",
+                  },
+                ],
+                type: "additional_tools",
+              },
+            ],
           }
         : { tools },
     ),

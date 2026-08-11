@@ -1,6 +1,6 @@
 "use client";
 
-import { Mail, Phone, Send } from "lucide-react";
+import { Link2, Mail, Phone, Send } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
@@ -9,6 +9,7 @@ import type { HostedAccountSettingsSnapshot } from "@/src/lib/hosted-onboarding/
 import { MURPH_TELEGRAM_URL } from "@/src/lib/murph-contact-routing";
 
 import { SettingsContactLink } from "./connected-account-card";
+import { HostedSignupReferralLinkButton } from "./hosted-signup-referral-link-button";
 import { formatMaskedPhoneNumber, stripSettingsQueryParam } from "./hosted-settings-utils";
 import { formatHostedTelegramDisplayValue } from "./hosted-telegram-settings-helpers";
 import { SettingsRow, SettingsRowList } from "./settings-row";
@@ -30,12 +31,14 @@ export function HostedAccountSettingsCards({
   murphPhoneNumber,
   openEmailLink = false,
   privySessionMatchesAppSession,
+  signupReferralUrl,
 }: {
   account: HostedAccountSettingsSnapshot;
   expectedPrivyUserId?: string | null;
   murphPhoneNumber?: string | null;
   openEmailLink?: boolean;
   privySessionMatchesAppSession?: boolean;
+  signupReferralUrl?: string | null;
 }) {
   const [linkMode, setLinkMode] = useState<HostedSettingsIdentityLinkMode | null>(
     openEmailLink ? "email" : null,
@@ -121,6 +124,19 @@ export function HostedAccountSettingsCards({
               {emailAddress ? (emailVerified ? "Change" : "Verify") : "Link email"}
             </Button>
           }
+        />
+        <SettingsRow
+          action={(
+            <HostedSignupReferralLinkButton
+              identityKey={
+                account.referralIdentityKey ?? "referral-settings-preview"
+              }
+              signupUrl={signupReferralUrl}
+            />
+          )}
+          icon={<Link2 className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />}
+          label="Referral link"
+          value="Your reusable link for inviting friends"
         />
       </SettingsRowList>
       {linkMode ? (

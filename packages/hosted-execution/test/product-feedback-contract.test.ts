@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   isHostedProductSupportEscalationSummary,
 } from "../src/runtime-control.js";
 import {
@@ -33,6 +34,16 @@ describe("hosted product feedback contracts", () => {
     };
     expect(parseHostedRuntimeProductFeedbackRecordRequest({ feedback })).toEqual({
       feedback,
+    });
+    const maxLengthFeedback = {
+      ...feedback,
+      idempotencyKey: "b".repeat(64),
+      summary: "x".repeat(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH),
+    };
+    expect(parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: maxLengthFeedback,
+    })).toEqual({
+      feedback: maxLengthFeedback,
     });
     expect(parseHostedRuntimeProductFeedbackRecordResponse({
       feedbackId: "product_feedback_123",
@@ -80,7 +91,7 @@ describe("hosted product feedback contracts", () => {
         idempotencyKey: "a".repeat(64),
         kind: "feature_request",
         relatedChangelogItemIds: [],
-        summary: "x".repeat(501),
+        summary: "x".repeat(HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH + 1),
       },
     })).toThrow();
     expect(() => parseHostedRuntimeProductFeedbackRecordRequest({
@@ -186,6 +197,22 @@ describe("hosted product feedback contracts", () => {
         summary: "The dashboard feels slow.",
       },
     });
+  });
+
+  it("preserves a labeled reproduction section while normalizing whitespace", () => {
+    const parsed = parseHostedRuntimeProductFeedbackRecordRequest({
+      feedback: {
+        idempotencyKey: "c".repeat(64),
+        kind: "frustration",
+        relatedChangelogItemIds: [],
+        summary:
+          "A generic workflow returns an incomplete result.\n\nReproduction: Use synthetic records with repeated entries, run the relevant read command, and ask Murph to summarize them. Expected: every entry is included. Observed: one entry is omitted.",
+      },
+    });
+
+    expect(parsed.feedback.summary).toBe(
+      "A generic workflow returns an incomplete result. Reproduction: Use synthetic records with repeated entries, run the relevant read command, and ask Murph to summarize them. Expected: every entry is included. Observed: one entry is omitted.",
+    );
   });
 
   it("redacts high-confidence sensitive tokens from summaries", () => {

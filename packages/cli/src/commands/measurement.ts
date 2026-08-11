@@ -7,6 +7,7 @@ import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   measurementAddResultSchema,
   listResultSchema,
+  localDateSchema,
   pathSchema,
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
@@ -21,6 +22,8 @@ import {
   addMeasurementDraftRecord,
   buildMeasurementEventDraft,
   listMeasurementRecords,
+  listMeasurementEntries,
+  measurementEntryListResultSchema,
   measurementImportManifestResultSchema,
   measurementLookupSchema,
   normalizeMeasurementEntry,
@@ -230,12 +233,16 @@ export const measurementCommandDescriptions = {
     'Prefer this command for all new metrics. Repeat --metric/--value/--unit for grouped measurements. Use measurement import-json --input @file.json only when you need nested links, external references, rawRefs, or stored-media import metadata.',
   show: 'Show one measurement event by canonical event id.',
   list: 'List measurement events with optional date bounds.',
+  entryList: 'List lossless scalar measurement and observation entries for one or more canonical metric identities.',
   manifest: 'Show the immutable raw import manifest for one imported measurement event.',
 } as const
 
 export function registerMeasurementCommands(cli: Cli.Cli) {
   const measurement = Cli.create('measurement', {
     description: measurementCommandDescriptions.root,
+  })
+  const entry = Cli.create('entry', {
+    description: 'Read scalar measurement and observation entries without compacting their metric, value, unit, or parent-event identity.',
   })
 
   const measurementTypedOptionShape = {
@@ -454,6 +461,50 @@ export function registerMeasurementCommands(cli: Cli.Cli) {
       },
     }),
   )
+
+  entry.command('list', {
+    description: measurementCommandDescriptions.entryList,
+    args: z.object({}),
+    examples: [
+      {
+        description: 'Read recent BMI, height, and weight evidence without compacting grouped measurements.',
+        args: {},
+        options: {
+          vault: './vault',
+          metric: ['bmi', 'height', 'weight', 'body-weight'],
+          from: '2026-07-01',
+          to: '2026-08-15',
+          limit: 200,
+        },
+      },
+    ],
+    hint: 'Repeat --metric for OR matching. Registered aliases resolve through the canonical health-metric identity owner; unknown custom metrics retain normalized exact matching, never fuzzy matching. Results preserve stored metric spellings, original values and units, canonical record kind, and parent event ID, with a zero-based measurement index for array-backed records or null for scalar observations.',
+    options: withBaseOptions({
+      metric: z
+        .array(z.string().min(1).max(120))
+        .min(1)
+        .describe('Measurement metric name or slug. Repeat --metric for OR matching. Registered aliases match their canonical metric identity; unknown custom metrics use normalized exact matching, never fuzzy matching.'),
+      from: localDateSchema
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.from),
+      to: localDateSchema
+        .optional()
+        .describe(commonDateRangeOptionDescriptions.to),
+      limit: commonListLimitOptionSchema,
+    }),
+    output: measurementEntryListResultSchema,
+    async run({ options }) {
+      return listMeasurementEntries({
+        vault: options.vault,
+        metrics: options.metric,
+        from: options.from,
+        to: options.to,
+        limit: options.limit,
+      })
+    },
+  })
+
+  measurement.command(entry)
 
   measurement.command('manifest', {
     description: measurementCommandDescriptions.manifest,

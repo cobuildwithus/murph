@@ -1,6 +1,7 @@
 import {
   deviceSyncError,
 } from "@murphai/device-syncd/errors";
+import { Prisma } from "@prisma/client";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createBearerRequest, createJsonPostRequest, createRouteContext } from "./route-test-helpers";
@@ -8,6 +9,7 @@ import { createBearerRequest, createJsonPostRequest, createRouteContext } from "
 const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncAgentSessionContext: vi.fn(),
   createHostedDeviceSyncAgentSessionService: vi.fn(),
+  createHostedDeviceSyncProviderAuthorityAgentSessionService: vi.fn(),
   assertBrowserMutationOrigin: vi.fn(),
   createHostedDeviceSyncProviderAgentSessionService: vi.fn(),
   createHostedDeviceSyncControlPlane: vi.fn(),
@@ -35,6 +37,10 @@ vi.mock("@/src/lib/device-sync/agent-session-service", () => ({
 }));
 vi.mock("@/src/lib/device-sync/agent-session-provider-service", () => ({
   createHostedDeviceSyncProviderAgentSessionService: mocks.createHostedDeviceSyncProviderAgentSessionService,
+}));
+vi.mock("@/src/lib/device-sync/agent-session-provider-authority-service", () => ({
+  createHostedDeviceSyncProviderAuthorityAgentSessionService:
+    mocks.createHostedDeviceSyncProviderAuthorityAgentSessionService,
 }));
 vi.mock("@/src/lib/device-sync/auth", () => ({
   assertBrowserMutationOrigin: mocks.assertBrowserMutationOrigin,
@@ -78,6 +84,11 @@ describe("hosted device-sync agent and webhook routes", () => {
       requireAgentSession: mocks.requireAgentSession,
     });
     mocks.createHostedDeviceSyncProviderAgentSessionService.mockReturnValue({
+      exportTokenBundle: mocks.exportTokenBundle,
+      refreshTokenBundle: mocks.refreshTokenBundle,
+      requireAgentSession: mocks.requireAgentSession,
+    });
+    mocks.createHostedDeviceSyncProviderAuthorityAgentSessionService.mockReturnValue({
       exportTokenBundle: mocks.exportTokenBundle,
       refreshTokenBundle: mocks.refreshTokenBundle,
       requireAgentSession: mocks.requireAgentSession,
@@ -224,7 +235,7 @@ describe("hosted device-sync agent and webhook routes", () => {
     expect(mocks.exportTokenBundle).not.toHaveBeenCalled();
   });
 
-  it("exports token bundles without constructing provider runtime", async () => {
+  it("exports token bundles through the provider-application authority adapter", async () => {
     mocks.exportTokenBundle.mockResolvedValueOnce({
       connection: {
         id: "dsc_123",
@@ -247,7 +258,8 @@ describe("hosted device-sync agent and webhook routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.createHostedDeviceSyncAgentSessionService).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedDeviceSyncProviderAuthorityAgentSessionService).toHaveBeenCalledTimes(1);
+    expect(mocks.createHostedDeviceSyncAgentSessionService).not.toHaveBeenCalled();
     expect(mocks.createHostedDeviceSyncProviderAgentSessionService).not.toHaveBeenCalled();
     expect(mocks.exportTokenBundle).toHaveBeenCalledWith({
       id: "dsa_current",
@@ -376,6 +388,55 @@ describe("hosted device-sync agent and webhook routes", () => {
       orphaned: true,
       provider: "junction",
     });
+  });
+
+  it("returns a retryable 503 when webhook admission loses its bounded member-row lock wait", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // The production adapter-pg shape raised when the webhook admission
+    // transaction's bounded lock_timeout gives up waiting on the member row.
+    mocks.handleWebhook.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError(
+        "Raw query failed. Code: `55P03`.",
+        {
+          clientVersion: "7.8.0",
+          code: "P2010",
+          meta: {
+            driverAdapterError: {
+              cause: {
+                kind: "postgres",
+                message: "canceling statement due to lock timeout",
+                originalCode: "55P03",
+                severity: "ERROR",
+              },
+              name: "DriverAdapterError",
+            },
+          },
+        },
+      ),
+    );
+
+    const response = await webhookRoute.POST(
+      new Request("https://example.test/api/device-sync/webhooks/junction", {
+        method: "POST",
+      }),
+      createRouteContext({ provider: "junction" }),
+    );
+
+    // A 500 would break the provider redelivery contract; the claimed webhook
+    // trace is released by the ingress on failure so the retry reprocesses.
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "STORE_CONTENTION",
+        message: "The device-sync store timed out under contention. Retry later.",
+        retryable: true,
+      },
+    });
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledOnce();
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("short-circuits hosted webhook POSTs when provider preflight returns a response", async () => {

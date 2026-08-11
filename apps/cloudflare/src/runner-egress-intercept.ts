@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 
 import {
+  buildExaResearchScoutBatchLaneRequest,
   buildExaResearchScoutRequest,
   clampExaResearchScoutPublishedWindow,
   EXA_RESEARCH_SCOUT_METHOD,
@@ -207,6 +208,10 @@ const OPENAI_EGRESS_POLICY = [
   {
     method: "POST",
     pathname: "/v1/responses/compact",
+  },
+  {
+    method: "POST",
+    pathname: "/v1/alpha/search",
   },
   {
     method: "POST",
@@ -3675,12 +3680,19 @@ function readHostedExaResearchScoutRequestBody(
 function buildHostedExaResearchScoutCanonicalRequest(
   input: ExaResearchScoutParsedRequest,
 ): ExaResearchScoutRequestBody {
-  return buildExaResearchScoutRequest({
-    maxCandidates: input.numResults,
-    profile: input.profile,
-    since: input.since,
-    until: input.until,
-  });
+  return "mode" in input.profile
+    ? buildExaResearchScoutRequest({
+        maxCandidates: input.numResults,
+        profile: input.profile,
+        since: input.since,
+        until: input.until,
+      })
+    : buildExaResearchScoutBatchLaneRequest({
+        maxCandidates: input.numResults,
+        profile: input.profile,
+        since: input.since,
+        until: input.until,
+      });
 }
 
 async function maybeHandleMapboxRequest(input: {
@@ -3770,9 +3782,20 @@ async function maybeHandleLinqRequest(input: {
     pathMatch.pathnameSuffix,
   );
   if (!providerOperation) {
+    emitHostedLinqProviderPolicyRejection({
+      request: input.request,
+      reason: "operation_not_allowed",
+      userId: input.userId,
+    });
     return disallowedProviderEgress();
   }
   if (!hasBearerCredentialSentinel(input.request.headers)) {
+    emitHostedLinqProviderPolicyRejection({
+      providerOperation,
+      request: input.request,
+      reason: "credential_sentinel_missing",
+      userId: input.userId,
+    });
     return disallowedProviderEgress();
   }
 
@@ -3974,6 +3997,33 @@ function readBearerCredential(headers: Headers): string | null {
 
 function hasHeaderCredentialSentinel(headers: Headers, name: string): boolean {
   return headers.get(name)?.trim() === HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;
+}
+
+function emitHostedLinqProviderPolicyRejection(input: {
+  providerOperation?: HostedLinqProviderOperation;
+  request: Request;
+  reason: "credential_sentinel_missing" | "operation_not_allowed";
+  userId: string | null;
+}): void {
+  emitHostedExecutionStructuredLog({
+    component: "runner",
+    details: {
+      method: readHostedRunnerDiagnosticMethod(input.request.method),
+      providerEgressPolicyRejectReason: input.reason,
+      providerKind: "linq",
+      providerRequestAuthorized: false,
+      ...(input.providerOperation
+        ? { providerOperation: input.providerOperation }
+        : {}),
+      runtimeAuthorityHeadersPresent: hostedRuntimeAuthorityHeadersPresent(
+        input.request.headers,
+      ),
+      userIdPresent: input.userId !== null,
+    },
+    level: "warn",
+    message: "Hosted runner Linq provider egress rejected by policy.",
+    phase: "wake.running",
+  });
 }
 
 function readTelegramSentinelOperation(pathname: string): string | null {

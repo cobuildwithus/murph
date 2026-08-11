@@ -4,7 +4,10 @@ import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 
 import { requestHostedOnboardingJson } from "@/src/components/hosted-onboarding/client-api";
-import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
+import {
+  ActionApprovalDecisionFallback,
+  ActionApprovalScreen,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { Button } from "@/src/components/ui/button";
 import type {
@@ -15,10 +18,12 @@ import type { SensitiveActionChallengeResponse } from "@/src/lib/sensitive-actio
 
 import { useSensitiveActionAuthorization } from "./use-sensitive-action-authorization";
 
-type Submission = "approving" | "denying" | "returning" | null;
-
-const APPROVAL_CAVEAT =
-  "Murph must ask again if the file, destination, or any other detail changes.";
+type Submission =
+  | "approving"
+  | "denying"
+  | "returning-approved"
+  | "returning-denied"
+  | null;
 
 export function ActionApprovalCard({
   approval,
@@ -72,8 +77,16 @@ export function ActionApprovalCard({
       typeof response.redirectTo === "string" && response.redirectTo.length > 0
         ? response.redirectTo
         : null;
+    const returningSubmission = response.status === "approved"
+      ? "returning-approved"
+      : response.status === "denied"
+        ? "returning-denied"
+        : null;
+    if (!returningSubmission) {
+      throw new Error("Secure approval returned an unsupported decision.");
+    }
     setRedirectTo(nextRedirectTo);
-    setSubmission("returning");
+    setSubmission(returningSubmission);
     if (nextRedirectTo) {
       window.location.assign(nextRedirectTo);
     }
@@ -86,13 +99,24 @@ export function ActionApprovalCard({
     ? "Sign in to approve"
     : authorization.setup.pendingLabel
     ?? (submission === "approving" ? "Verifying approval…" : "Approve with passkey");
+  const returningDecision = submission === "returning-approved"
+    ? "approved"
+    : submission === "returning-denied"
+      ? "denied"
+      : null;
   const busyStatus = authorization.setup.pendingLabel
     ?? (submission === "approving"
       ? "Verifying approval…"
       : submission === "denying"
         ? "Denying…"
-        : submission === "returning"
-          ? "Approval saved. Returning to Murph…"
+        : returningDecision === "approved"
+          ? redirectTo
+            ? "Approval recorded. Returning to Murph…"
+            : "Approval recorded."
+          : returningDecision === "denied"
+            ? redirectTo
+              ? "Denied. Returning to Murph…"
+              : "Denied."
           : null);
   const surfacedError = error ?? authorization.setup.error;
 
@@ -100,7 +124,6 @@ export function ActionApprovalCard({
     <ActionApprovalScreen
       badgeIcon={ShieldCheck}
       body={<p className="break-words">{approval.presentation.body}</p>}
-      caveat={APPROVAL_CAVEAT}
       title={approval.presentation.title}
     >
       {surfacedError ? (
@@ -145,7 +168,7 @@ export function ActionApprovalCard({
           </p>
         ) : null}
 
-        {submission === "returning" ? (
+        {returningDecision ? (
           redirectTo ? (
             <p className="mt-5 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               Redirecting…{" "}
@@ -154,9 +177,7 @@ export function ActionApprovalCard({
               </a>
             </p>
           ) : (
-            <p className="mt-5 text-sm leading-6 text-muted-foreground">
-              Approval saved. Return to the Murph thread where you requested this file.
-            </p>
+            <ActionApprovalDecisionFallback decision={returningDecision} />
           )
         ) : null}
       </div>

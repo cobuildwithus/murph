@@ -71,6 +71,55 @@ describe('release workflow guards', () => {
     expect(workflow).not.toContain('npm pack --json')
   })
 
+  it('keeps the artifact guard ahead of every permanent publication boundary', () => {
+    const workflow = readFileSync(releaseWorkflowPath, 'utf8')
+    const packHelper = readFileSync(
+      path.join(repoRoot, 'scripts', 'pack-publishables.mjs'),
+      'utf8',
+    )
+    const publishHelper = readFileSync(
+      path.join(repoRoot, 'scripts', 'publish-publishables.mjs'),
+      'utf8',
+    )
+
+    const uploadStart = workflow.indexOf('uses: actions/upload-artifact@')
+    const uploadEnd = workflow.indexOf('  github-release:')
+    const uploadStep = workflow.slice(uploadStart, uploadEnd)
+    const downloadIndex = workflow.indexOf('uses: actions/download-artifact@', uploadEnd)
+    const downloadedGuardIndex = workflow.indexOf(
+      'node scripts/release-artifact-secret-guard.mjs --pack-output dist/npm/pack-output.json',
+      downloadIndex,
+    )
+    const githubReleaseIndex = workflow.indexOf(
+      'uses: softprops/action-gh-release@',
+      downloadedGuardIndex,
+    )
+    const packGuardIndex = packHelper.lastIndexOf(
+      'await verifyReleaseArtifacts(context.repoRoot, packOutput)',
+    )
+    const manifestWriteIndex = packHelper.indexOf(
+      'await writeJson(packOutputPath, packOutput)',
+      packGuardIndex,
+    )
+    const publishGuardIndex = publishHelper.indexOf(
+      'await verifyReleaseArtifacts(context.repoRoot, packOutput)',
+    )
+    const npmPublishIndex = publishHelper.indexOf(
+      'await execFileStreaming(',
+      publishGuardIndex,
+    )
+
+    expect(uploadStart).toBeGreaterThanOrEqual(0)
+    expect(uploadStep).toContain('retention-days: 1')
+    expect(downloadIndex).toBeGreaterThan(uploadEnd)
+    expect(downloadedGuardIndex).toBeGreaterThan(downloadIndex)
+    expect(githubReleaseIndex).toBeGreaterThan(downloadedGuardIndex)
+    expect(packGuardIndex).toBeGreaterThanOrEqual(0)
+    expect(manifestWriteIndex).toBeGreaterThan(packGuardIndex)
+    expect(publishGuardIndex).toBeGreaterThanOrEqual(0)
+    expect(npmPublishIndex).toBeGreaterThan(publishGuardIndex)
+  })
+
   it('keeps prerelease routing, primary-package release notes, and ordered publish helper usage', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
     const publishHelper = readFileSync(
@@ -100,6 +149,8 @@ describe('release workflow guards', () => {
     expect(publishHelper).toContain('Skipping ${entry.name}@${entry.version}; version already published.')
     expect(publishHelper).toContain('npm trusted publishing is configured per package on npm')
     expect(publishHelper).toContain('node scripts/configure-trusted-publishing.mjs')
+    expect(publishHelper).toContain("new Error('Release publication command failed.')")
+    expect(publishHelper).not.toContain('Command failed: ${command}')
   })
 
   it('pins every action ref used by the npm release path', () => {

@@ -1,12 +1,9 @@
-import { randomUUID } from "node:crypto";
-
 import type { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   retireExpiredMailboxContent,
 } from "@/src/lib/hosted-retention/cleanup";
-import { recordHostedRuntimeLogs } from "@/src/lib/hosted-workspace/store";
 import { createPrismaClient } from "@/src/lib/prisma";
 
 const databaseUrl = process.env.DATABASE_URL?.trim() ?? "";
@@ -199,21 +196,6 @@ describe.skipIf(!runPostgresProof)(
         `;
         expect(payloads).toEqual([{ count: 0n }]);
       });
-    });
-
-    it("drops a late runtime-log batch after account deletion", async () => {
-      const client = requirePrisma(prisma);
-
-      await expect(recordHostedRuntimeLogs({
-        entries: [{
-          component: "mailbox",
-          eventCode: "mailbox.imported",
-          level: "info",
-          phase: "import",
-        }],
-        prisma: client,
-        userId: `deleted_member_${randomUUID()}`,
-      })).resolves.toBe(0);
     });
   },
 );

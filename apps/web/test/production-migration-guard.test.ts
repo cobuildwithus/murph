@@ -27,6 +27,7 @@ import {
   prepareHostedWebPrismaClientForBuild,
 } from "../scripts/prepare-prisma-client-for-build";
 import {
+  assertHostedGroupFundingRecoveryConfiguration,
   hostedRuntimeLogProductionMigrationCommand,
   hostedWebProductionLinqLineSyncCommand,
   hostedWebProductionMigrationCommand,
@@ -98,6 +99,7 @@ describe("hosted web production migration guard", () => {
     const calls: Array<{ args: readonly string[]; command: string }> = [];
     const environment = {
       HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
       VERCEL: "1",
       VERCEL_ENV: "production",
       VERCEL_GIT_COMMIT_REF: "main",
@@ -141,6 +143,62 @@ describe("hosted web production migration guard", () => {
       /HOSTED_APP_SESSION_HMAC_KEY/u,
     );
     assert.equal(commands, 0);
+  });
+
+  test("preflights a signed funding recovery URL on the configured origin", () => {
+    assert.doesNotThrow(() => assertHostedGroupFundingRecoveryConfiguration({
+      HOSTED_APP_SESSION_HMAC_KEY:
+        "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
+    }));
+  });
+
+  test.each([
+    [
+      "missing",
+      undefined,
+      /hosted public base URL is required/u,
+    ],
+    [
+      "malformed",
+      "https://[invalid",
+      /Invalid URL/u,
+    ],
+    [
+      "pathful",
+      "https://join.example.test/app",
+      /must not include a path/u,
+    ],
+    [
+      "non-HTTPS",
+      "http://localhost:3000",
+      /must use HTTPS/u,
+    ],
+  ])("rejects a %s funding recovery origin before migrations", (
+    _label,
+    publicBaseUrl,
+    expected,
+  ) => {
+    assert.throws(
+      () => assertHostedGroupFundingRecoveryConfiguration({
+        HOSTED_APP_SESSION_HMAC_KEY:
+          "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        ...(publicBaseUrl
+          ? { HOSTED_ONBOARDING_PUBLIC_BASE_URL: publicBaseUrl }
+          : {}),
+      }),
+      expected,
+    );
+  });
+
+  test("rejects an unusable funding recovery signing authority", () => {
+    assert.throws(
+      () => assertHostedGroupFundingRecoveryConfiguration({
+        HOSTED_APP_SESSION_HMAC_KEY: "not-canonical",
+        HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
+      }),
+      /HOSTED_APP_SESSION_HMAC_KEY/u,
+    );
   });
 
   test("reuses the Prisma client only after the guarded production migration step", async () => {
@@ -320,6 +378,41 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the detached automatic-refill failure exception to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810050000_relax_detached_automatic_refill_failure";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_purchase"',
+          '  DROP CONSTRAINT "hosted_usage_credit_purchase_active_payer_required",',
+          '  ADD CONSTRAINT "hosted_usage_credit_purchase_active_payer_required"',
+          '    CHECK ("payer_member_id" IS NOT NULL);',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{ migrationId, reason: "DROP TABLE" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits the referral ledger constraint predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),
@@ -409,6 +502,118 @@ describe("hosted web production migration guard", () => {
           '  ADD CONSTRAINT "sponsorship_shape"',
           '    CHECK ("group_sponsorship_authorization_id" IS NULL) NOT VALID;',
           'DROP INDEX "hosted_usage_credit_purchase_active_payer_key";',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the Starter ledger constraint predeploy exception to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260807204000_non_expiring_starter_usage";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_entry"',
+          '  DROP CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid",',
+          '  ADD CONSTRAINT "hosted_usage_credit_entry_amount_direction_valid"',
+          '    CHECK ("kind" IN (\'starter_grant\', \'purchase_grant\')) NOT VALID;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits grant projection predeploy compatibility to its proved NOT NULL DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId =
+      "20260810150000_hosted_usage_credit_grant_slot_release";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_usage_credit_grant"',
+          '  ALTER COLUMN "beneficiary_member_id" SET NOT NULL,',
+          '  ALTER COLUMN "beneficiary_sequence" SET NOT NULL;',
+          'DROP TABLE "hosted_member";',
+        ].join("\n"),
+      );
+
+      const destructiveMigrations =
+        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
+
+      assert.deepEqual(
+        destructiveMigrations.map(({ migrationId: id, reason }) => ({
+          migrationId: id,
+          reason,
+        })),
+        [{
+          migrationId,
+          reason: "DROP TABLE",
+        }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
+  test("limits the complete Family Max plan-code contract to its proved DDL", async () => {
+    const migrationsDir = await mkdtemp(
+      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
+    );
+    const migrationId = "20260809160000_add_hosted_family_max_plan_code";
+
+    try {
+      await writeMigrationSql(
+        migrationsDir,
+        migrationId,
+        [
+          'ALTER TABLE "hosted_account_group_membership"',
+          '  ALTER COLUMN "plan_code" SET NOT NULL,',
+          '  DROP CONSTRAINT "hosted_account_group_membership_plan_code_check",',
+          '  ADD CONSTRAINT "hosted_account_group_membership_plan_code_check"',
+          '    CHECK ("plan_code" IN (\'pulse\', \'edge\', \'max\')) NOT VALID;',
           'DROP TABLE "hosted_member";',
         ].join("\n"),
       );
@@ -554,6 +759,7 @@ describe("hosted web production migration guard", () => {
         runHostedWebProductionMigrationsIfNeeded(
           {
             HOSTED_APP_SESSION_HMAC_KEY: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+            HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://join.example.test",
             VERCEL: "1",
             VERCEL_ENV: "production",
             VERCEL_GIT_COMMIT_REF: "main",
@@ -781,6 +987,7 @@ describe("hosted web production migration guard", () => {
     const migrations = await listHostedWebContractMigrations();
 
     for (const migrationId of [
+      "20260714150000_require_hosted_family_plan_codes",
       "20260720233000_hosted_group_usage_funding_invariants",
       "20260726123000_allow_hosted_usage_referral_credit_entries",
     ]) {
@@ -1312,7 +1519,10 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       releaseMigrationScript,
-      "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
+      // The migration entrypoint imports @murphai/hosted-execution/env at
+      // module load, and on Vercel migrations run before `pnpm build`, so the
+      // package's dist output must be built first or the deploy fails.
+      "pnpm --dir ../../packages/hosted-execution build && pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     );
     assert.equal(
       deploymentProtectionScript,
@@ -1504,7 +1714,26 @@ describe("hosted web production migration guard", () => {
       ),
       {
         path: "/api/internal/hosted-execution/product-feedback/digest/cron",
-        schedule: "*/10 * * * *",
+        schedule: "*/10 22,23 * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) =>
+          cron.path === "/api/internal/hosted-growth/usage-referral/cron",
+      ),
+      {
+        path: "/api/internal/hosted-growth/usage-referral/cron",
+        schedule: "* * * * *",
+      },
+    );
+    assert.deepEqual(
+      (vercelJson.crons ?? []).find(
+        (cron) => cron.path === "/api/internal/hosted-onboarding/stripe/cron",
+      ),
+      {
+        path: "/api/internal/hosted-onboarding/stripe/cron",
+        schedule: "* * * * *",
       },
     );
     assert.deepEqual(

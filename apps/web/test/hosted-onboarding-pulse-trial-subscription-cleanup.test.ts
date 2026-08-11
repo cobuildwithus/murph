@@ -1,6 +1,9 @@
+import { HostedBillingStatus } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
+import type Stripe from "stripe";
 
 import {
+  classifyHostedPulseTrialCandidateDisposition,
   retrieveHostedPulseTrialCleanupTarget,
 } from "@/src/lib/hosted-onboarding/pulse-trial-subscription-cleanup";
 
@@ -9,10 +12,14 @@ const PRICE_ID = "price_launch_monthly";
 const CUSTOMER_ID = "cus_trial";
 const SUBSCRIPTION_ID = "sub_trial";
 
+type StripeSubscriptionRetrieveMock = (
+  ...args: Parameters<Stripe["subscriptions"]["retrieve"]>
+) => Promise<Stripe.Subscription>;
+
 describe("retrieveHostedPulseTrialCleanupTarget", () => {
   it("expands the customer within the bounded authority read", async () => {
     const subscription = makeKnownPulseTrialSubscription();
-    const retrieve = vi.fn().mockResolvedValue(subscription);
+    const retrieve = vi.fn<StripeSubscriptionRetrieveMock>().mockResolvedValue(subscription);
     const requestOptions = {
       maxNetworkRetries: 0,
       timeout: 5_000,
@@ -28,7 +35,7 @@ describe("retrieveHostedPulseTrialCleanupTarget", () => {
         subscriptions: {
           retrieve,
         },
-      } as never,
+      },
       subscriptionId: SUBSCRIPTION_ID,
     })).resolves.toBe(subscription);
 
@@ -41,7 +48,7 @@ describe("retrieveHostedPulseTrialCleanupTarget", () => {
 
   it("preserves the parameter-free retrieve shape for existing callers", async () => {
     const subscription = makeKnownPulseTrialSubscription();
-    const retrieve = vi.fn().mockResolvedValue(subscription);
+    const retrieve = vi.fn<StripeSubscriptionRetrieveMock>().mockResolvedValue(subscription);
 
     await expect(retrieveHostedPulseTrialCleanupTarget({
       expectedCustomerId: CUSTOMER_ID,
@@ -51,7 +58,7 @@ describe("retrieveHostedPulseTrialCleanupTarget", () => {
         subscriptions: {
           retrieve,
         },
-      } as never,
+      },
       subscriptionId: SUBSCRIPTION_ID,
     })).resolves.toBe(subscription);
 
@@ -59,8 +66,49 @@ describe("retrieveHostedPulseTrialCleanupTarget", () => {
   });
 });
 
-function makeKnownPulseTrialSubscription() {
-  return {
+
+
+describe("classifyHostedPulseTrialCandidateDisposition", () => {
+  it("keeps the exact current identity authoritative", () => {
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.incomplete,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: SUBSCRIPTION_ID,
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("current");
+  });
+
+  it("never lets a delayed second trial replace an existing identity", () => {
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.incomplete,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: "sub_existing",
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("loser");
+  });
+
+  it("allows only a clean pre-activation row to adopt the exact legacy event", () => {
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.incomplete,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: null,
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("eligible");
+    expect(classifyHostedPulseTrialCandidateDisposition({
+      billingStatus: HostedBillingStatus.active,
+      currentBillingPhase: null,
+      currentStripeSubscriptionId: null,
+      pulseTrialRedeemedAt: null,
+      subscriptionId: SUBSCRIPTION_ID,
+    })).toBe("loser");
+  });
+});
+
+function makeKnownPulseTrialSubscription(): Stripe.Subscription {
+  return defineStripeSubscriptionFixture({
     customer: {
       id: CUSTOMER_ID,
     },
@@ -90,5 +138,13 @@ function makeKnownPulseTrialSubscription() {
       trialPolicyVersion: "pulse-trial-2026-07-15-v3",
       trialUsageLimitUsdMicros: "4500000",
     },
-  };
+  });
+}
+
+function defineStripeSubscriptionFixture<T extends object>(
+  subscription: T,
+): T & Stripe.Subscription {
+  // Response-only Stripe fields are irrelevant here; request arguments remain
+  // derived from the official retrieve method signature above.
+  return subscription as T & Stripe.Subscription;
 }

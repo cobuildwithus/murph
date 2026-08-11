@@ -252,28 +252,29 @@ export function PivotCard({
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━ MURPH LOOP ━━━━━━━━━━━━━━━━━━━━━━━━━━ */
 
-// Slide 08: useful help now produces relevant context, which makes
-// later help more personal.
+// Slide 08: the product loop. Every source feeds a private health
+// vault you can chat with, which powers habit coordination, which
+// teaches Murph what works — for you and for people like you.
 const MURPH_LOOP = [
   {
-    title: "Start with what matters",
-    detail: "A question · decision · task · data point · desired change",
+    title: "Connect every source",
+    detail: "Wearables · labs · meals · symptoms · manual check-ins",
   },
   {
-    title: "Use known context",
-    detail: "History · goals · constraints · preferences · connected data",
+    title: "Build your health vault",
+    detail: "Baselines · protocols · outcomes · confounders · history",
   },
   {
-    title: "Give useful help now",
-    detail: "Answer · interpret · act · plan · support · experiment",
+    title: "Chat with Murph anywhere",
+    detail: "iMessage · WhatsApp · Telegram · email",
   },
   {
-    title: "Remember what matters",
-    detail: "Attributed context the member can inspect and correct",
+    title: "Coordinate healthy habits",
+    detail: "Challenges · reminders · leaderboards · results",
   },
   {
-    title: "Get more personal over time",
-    detail: "Better answers · actions · timing · follow-through",
+    title: "Learn what works",
+    detail: "For you, your friends, and people like you",
   },
 ] as const;
 
@@ -321,8 +322,8 @@ export function MurphLoop() {
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━ POSITIONING CHART ━━━━━━━━━━━━━━━━━━━ */
 
 // Vertical axis: depth of persistent health context. Horizontal axis:
-// passive insight vs. action and follow-through. Murph sits in the
-// top-right quadrant.
+// individual habits vs. a social health layer. Murph sits alone in
+// the top-right quadrant.
 const POSITIONING_POINTS = [
   { left: 25, name: "ChatGPT / Claude", top: 30 },
   { left: 34, name: "Bevel", top: 47 },
@@ -384,12 +385,12 @@ export function PositioningChart() {
 
         {/* Horizontal-axis poles */}
         <div className="mt-2 flex w-full justify-between font-mono text-[9px] uppercase tracking-[0.1em] text-[#736a58]">
-          <span>Passive insight</span>
-          <span>Action + follow-through</span>
+          <span>Individual</span>
+          <span>Social health layer</span>
         </div>
         {/* Horizontal-axis name */}
         <p className="mt-1 text-center font-mono text-[9px] uppercase tracking-[0.14em] text-[#5a6e32]">
-          Degree of assistance
+          Habit coordination
         </p>
       </div>
     </div>
@@ -398,8 +399,10 @@ export function PositioningChart() {
 
 /* ━━━━━━━━━━━━━━━━━━━━━━━━━ INSIGHT PATHS ━━━━━━━━━━━━━━━━━━━━━━━ */
 
-// Slide 02 contrast, rendered on the dark slide. A dashboard is a one-way
-// view; a context-aware relationship improves across useful interactions.
+// Slide 02 contrast, rendered on the dark slide. A dashboard is a
+// straight line that dead-ends in churn; a challenge is a loop where
+// each finished round seeds the next. The shape carries the argument,
+// so the labels stay terse.
 export function InsightPaths() {
   return (
     <div className="mt-9 grid gap-4 sm:grid-cols-2">
@@ -423,10 +426,10 @@ export function InsightPaths() {
         </div>
       </figure>
 
-      {/* A context-aware relationship: a loop that compounds */}
+      {/* The challenge — a loop that compounds */}
       <figure className="rounded-2xl border border-[#7a8c6e]/45 bg-[#7a8c6e]/[0.1] p-6">
         <PathLabel tone="live" mark="↻">
-          The relationship
+          The challenge
         </PathLabel>
         <div className="relative mt-5 pl-9">
           {/* return path: the last round loops back into the first.
@@ -442,15 +445,15 @@ export function InsightPaths() {
             <span className="absolute left-[27px] top-[8px] h-0 w-0 border-y-[5px] border-l-[7px] border-y-transparent border-l-[#9fb389]" />
           </div>
           <div className="flex flex-col gap-2">
-            <PathStage tone="live">Useful help now</PathStage>
+            <PathStage tone="live">Group challenge</PathStage>
             <PathStep tone="live" />
-            <PathStage tone="live">Context remembered</PathStage>
+            <PathStage tone="live">Competition + accountability</PathStage>
             <PathStep tone="live" />
-            <PathStage tone="live">Better help later</PathStage>
+            <PathStage tone="live">Everyone healthier</PathStage>
           </div>
         </div>
         <p className="mt-4 text-center font-mono text-[10px] uppercase tracking-[0.14em] text-[#9fb389]/80">
-          Every useful thread can improve the next
+          Every round feeds the next
         </p>
       </figure>
     </div>

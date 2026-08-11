@@ -73,6 +73,13 @@ its components recognizable to members rather than mirroring internal services:
 3. Health data connections
 4. Accounts and billing
 
+The shared public footer reads only incident.io's fixed public summary endpoint
+from the browser. Keep that request bodyless and queryless, retain the global
+`strict-origin` referrer policy, and allow only the exact status-page origin in
+`connect-src`. The request must not carry a page path, query, fragment, account
+data, prompt, health content, or message content. Keep incident.io's resulting
+technical-data processing disclosed in the public subprocessor register.
+
 Publish when members are currently affected and a shared update will help them
 understand the symptom, scope, workaround, or recovery. A customer-facing
 `SEV0` or `SEV1` normally belongs on the page immediately. Publish a `SEV2`

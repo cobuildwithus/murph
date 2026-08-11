@@ -152,7 +152,7 @@ describe("hosted provider egress conformance", () => {
       message: {
         idempotency_key: "card_egress_conformance_1",
         preferred_service: "iMessage",
-        parts: [{ interactive: false, type: "imessage_app" }],
+        parts: [{ interactive: true, type: "imessage_app" }],
       },
     });
     expect(forwarded[1]?.url.pathname)

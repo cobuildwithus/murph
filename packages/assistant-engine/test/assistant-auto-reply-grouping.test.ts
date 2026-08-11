@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   ASSISTANT_AUTO_REPLY_COMPOUND_INPUT_MAX,
   collectAssistantAutoReplyGroup,
+  shouldGroupAdjacentAssistantInputCandidates,
   shouldGroupAdjacentConversationInput,
 } from '../src/assistant/automation/grouping.ts'
+import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
 import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 
 function createInputSummary(
@@ -52,6 +54,101 @@ function createAuthenticatedGroupSummary(
     groupRoomBatchingEligible: true,
     ...overrides,
   })
+}
+
+function createAuthenticatedGroupCandidate(input: {
+  completion?: boolean
+  inputId: string
+  projectionStatus?: AssistantInputCandidate['projection']['status']
+  threadId?: string
+}): AssistantInputCandidate {
+  const threadId = input.threadId ?? 'room_1'
+  const sourceRef = {
+    dedupeKey: `dedupe_${input.inputId}`,
+    eventId: `event_${input.inputId}`,
+    itemId: `item_${input.inputId}`,
+    kind: 'hosted-mailbox' as const,
+    lane: input.completion ? 'system' as const : 'conversation' as const,
+    laneSeq: input.completion ? `image-completion:${input.inputId}` : '42',
+    payloadSchema: input.completion
+      ? 'murph.hosted-image-completion.v1'
+      : 'murph.hosted-mailbox-payload.v1',
+    payloadSource: 'inline' as const,
+    source: 'hosted-mailbox' as const,
+    wakeSchema: input.completion
+      ? 'murph.hosted-image-completion.v1'
+      : 'murph.hosted-execution-wake.v1',
+  }
+  return {
+    acceptedInput: {
+      captureIds: [],
+      contentRef: {
+        kind: 'assistant-input-event',
+        refId: input.inputId,
+        version: 'murph.assistant-input-event.v1',
+      },
+      id: input.inputId,
+      source: 'assistant-input',
+    },
+    event: {
+      attachmentCount: 0,
+      attachmentDescriptors: [],
+      attachmentEvidence: {
+        attachments: [],
+        optionalInboxCaptureId: null,
+        reasonCode: null,
+        source: null,
+        status: 'not_attempted',
+        updatedAt: null,
+      },
+      conversation: {
+        accountId: 'acct_1',
+        actorId: input.completion ? null : 'actor_1',
+        actorIsSelf: false,
+        ...(input.completion
+          ? { sessionId: 'asst_image_completion_group' }
+          : {}),
+        source: 'linq',
+        threadId,
+        threadIsDirect: false,
+      },
+      cursor: {
+        createdAt: input.completion
+          ? '2026-04-22T10:01:00.000Z'
+          : '2026-04-22T10:00:00.000Z',
+        inputId: input.inputId,
+        occurredAt: '2026-04-22T10:00:00.000Z',
+        sourceKind: 'hosted-mailbox',
+        sourcePosition: `hosted-mailbox:${sourceRef.lane}:${sourceRef.laneSeq}`,
+      },
+      inputId: input.inputId,
+      occurredAt: '2026-04-22T10:00:00.000Z',
+      receivedAt: '2026-04-22T10:00:01.000Z',
+      replyTarget: {
+        channel: 'linq',
+        messageId: 'provider-message-1',
+        threadId,
+      },
+      source: 'linq',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'linq',
+        partCount: 1,
+        reactionEligible: false,
+        replyToMessageId: null,
+        service: 'iMessage',
+      },
+      sourceRef,
+      text: 'input',
+      transcriptText: 'input',
+      userMessageContent: [{ text: 'input', type: 'text' }],
+    },
+    projection: {
+      captureId: null,
+      reasonCode: null,
+      status: input.projectionStatus ?? 'not_attempted',
+    },
+  }
 }
 
 describe('shouldGroupAdjacentConversationInput', () => {
@@ -202,6 +299,29 @@ describe('shouldGroupAdjacentConversationInput', () => {
     })
 
     expect(shouldGroupAdjacentConversationInput(first, second)).toBe(false)
+  })
+
+  it('folds a trusted image completion into the next authenticated group input', () => {
+    const completion = createAuthenticatedGroupCandidate({
+      completion: true,
+      inputId: 'ain_image_completion',
+      projectionStatus: 'not_attempted',
+    })
+    const fresh = createAuthenticatedGroupCandidate({
+      inputId: 'ain_fresh_group_input',
+      projectionStatus: 'pending',
+    })
+    const differentRoute = createAuthenticatedGroupCandidate({
+      inputId: 'ain_other_group_input',
+      projectionStatus: 'pending',
+      threadId: 'room_2',
+    })
+
+    expect(shouldGroupAdjacentAssistantInputCandidates(completion, fresh)).toBe(true)
+    expect(
+      shouldGroupAdjacentAssistantInputCandidates(completion, differentRoute),
+    ).toBe(false)
+    expect(shouldGroupAdjacentAssistantInputCandidates(fresh, completion)).toBe(false)
   })
 
   it('caps one initial compound turn at 50 and leaves overflow for the next turn', async () => {

@@ -8,6 +8,8 @@ import {
 } from "@murphai/assistant-engine/assistant-skill-env";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
+  isMurphAndroidAppEnabled,
+  MURPH_ANDROID_APP_ENABLED_ENV,
 } from "@murphai/hosted-execution/env";
 
 import {
@@ -380,9 +382,17 @@ export function sanitizeHostedAssistantRuntimePlatformEnv(
   platformEnv: Readonly<Record<string, string>>,
 ): Record<string, string> {
   const allowedKeys = new Set<string>(HOSTED_SHARED_TRUSTED_PLATFORM_ENV_NAMES);
-  return Object.fromEntries(
+  const sanitized = Object.fromEntries(
     Object.entries(platformEnv).filter(([key]) => allowedKeys.has(key)),
   );
+
+  if (isMurphAndroidAppEnabled(platformEnv)) {
+    sanitized[MURPH_ANDROID_APP_ENABLED_ENV] = "1";
+  } else {
+    delete sanitized[MURPH_ANDROID_APP_ENABLED_ENV];
+  }
+
+  return sanitized;
 }
 
 function sanitizeHostedAssistantRuntimeChannelPlatformEnv(

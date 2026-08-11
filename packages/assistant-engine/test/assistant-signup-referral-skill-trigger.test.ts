@@ -48,7 +48,7 @@ describe('assistant signup link guidance', () => {
     expect(lowUsage?.triggerHint).not.toContain('invite link')
   })
 
-  it('keeps group introductions as the default and separates attribution from rewards', async () => {
+  it('keeps group introductions as the default and explains reusable automatic qualification', async () => {
     const skill = await readFile(
       path.join(resolveAssistantSkillsRoot(), 'signup-link', 'SKILL.md'),
       'utf8',
@@ -68,13 +68,25 @@ describe('assistant signup link guidance', () => {
       'pass the exact accepted `message_ref` from the requester',
     )
     expect(normalizedSkill).toContain(
+      "Treat it as the member's reusable referral link",
+    )
+    expect(normalizedSkill).toContain(
+      'do not imply that one recipient consumes it or that the member needs a fresh link for each later recipient',
+    )
+    expect(normalizedSkill).toContain(
       'Never choose, contact, or message the recipient',
     )
     expect(normalizedSkill).toContain(
-      'do not append billing, low-usage, mission, or sponsorship options unless the user also asked about them',
+      'do not append billing, low-usage, group referral, or sponsorship options unless the user also asked about them',
     )
     expect(normalizedSkill).toContain(
-      'does not earn usage, complete a mission, or guarantee a reward',
+      'does not earn usage, qualify for a group referral reward, or guarantee a reward',
+    )
+    expect(normalizedSkill).toContain(
+      'If a recipient later finishes their own Murph setup through an invite attributed to that link and the referral qualifies under server policy, Murph adds any referral reward automatically',
+    )
+    expect(normalizedSkill).toContain(
+      'Do not promise a fixed reward or amount that the tool did not return',
     )
   })
 })

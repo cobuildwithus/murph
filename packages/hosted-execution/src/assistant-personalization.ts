@@ -38,9 +38,17 @@ export type HostedRuntimeAssistantPersonalizationToolRequest =
       personality: HostedRuntimeAssistantPersonalityUpdate;
     };
 
-const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.object({
-  assistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
-}).strict();
+const hostedRuntimeAssistantPersonalizationToolAuthoritySchema = z.union([
+  z.object({
+    assistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+    toolCallId: z.string().trim().min(1).max(256).optional(),
+  }).strict(),
+  z.object({
+    automationId: z.string().trim().min(1).max(256),
+    occurrenceAt: z.string().datetime({ offset: true }),
+    toolCallId: z.string().trim().min(1).max(256).optional(),
+  }).strict(),
+]);
 
 export type HostedRuntimeAssistantPersonalizationToolAuthority = z.infer<
   typeof hostedRuntimeAssistantPersonalizationToolAuthoritySchema
@@ -232,7 +240,7 @@ export function parseHostedRuntimeAssistantPersonalizationToolAuthority(
 ): HostedRuntimeAssistantPersonalizationToolAuthority {
   const parsed = hostedRuntimeAssistantPersonalizationToolAuthoritySchema.safeParse(value);
   if (!parsed.success) {
-    throw new TypeError("Hosted assistant personalization input authority is invalid.", {
+    throw new TypeError("Hosted assistant personalization action authority is invalid.", {
       cause: parsed.error,
     });
   }

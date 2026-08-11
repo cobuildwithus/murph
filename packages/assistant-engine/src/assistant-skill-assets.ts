@@ -23,7 +23,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'hosted-low-usage',
     name: 'hosted-low-usage',
     triggerHint:
-      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep a direct trial, paid plan, Family-sponsored Murph, or hosted group conversation going.',
+      'Use when trusted hosted turn context says Murph usage is running low; when a user asks about hosted plan, AI usage, billing, group funding, or the available ways to add or earn more usage; or when they ask how to keep Starter, Core, a paid plan, Family-sponsored Murph, or a hosted group conversation going. In a hosted group, a request to start or manage a Murph Family plan, seats, or invites is not room funding or a room usage top-up; use murph-family unless the same request explicitly asks about funding or usage for the current room.',
   },
   {
     slug: 'signup-link',
@@ -36,12 +36,6 @@ export const ASSISTANT_SKILLS = [
     name: 'experiment-onboarding',
     triggerHint:
       'Use for starting, configuring, modifying, supporting, or reviewing bounded health experiments, including Health Commons protocol resolution, vault-first setup, safety screens, typed run creation, first-session prep reminders, planned-session support reminders, and experiment outcomes.',
-  },
-  {
-    slug: 'red-light-therapy',
-    name: 'red-light-therapy',
-    triggerHint:
-      'Use for red light therapy or photobiomodulation questions, including dosing, session duration, treatment distance, wavelengths, device irradiance, Bestqool lamps, safety boundaries, and whether to set up a bounded Health Commons PBM experiment.',
   },
   {
     slug: 'sleep-improvement',
@@ -86,12 +80,6 @@ export const ASSISTANT_SKILLS = [
       'Use for VO2 max, cardio fitness estimates, aerobic capacity, zone interpretation, cardiorespiratory health framing, and wearable cardio marker trends. Use running-cardio or competition-training when the user wants a concrete training plan.',
   },
   {
-    slug: 'recovery-modalities',
-    name: 'recovery-modalities',
-    triggerHint:
-      'Use for sauna, cold plunge, contrast therapy, compression, massage, foam rolling, percussion guns, stretching-as-recovery, breathwork-as-recovery, and recovery modality tradeoffs. Use red-light-therapy for red/NIR photobiomodulation dose, duration, distance, wavelengths, device irradiance, or Bestqool questions.',
-  },
-  {
     slug: 'daily-activity',
     name: 'daily-activity',
     triggerHint:
@@ -119,7 +107,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'body-composition',
     name: 'body-composition',
     triggerHint:
-      'Use for fat loss, muscle gain, recomposition, waist or weight trends, plateaus, calorie/protein tradeoffs, body composition measurement noise, and sustainable change. Route eating-disorder risk, aggressive cuts, or medication decisions to clinician support.',
+      'Use for intentional fat loss or weight loss, muscle or weight gain, cutting, bulking, recomposition, maintenance, waist or weight trends, plateaus, calorie/protein tradeoffs, body-composition measurement noise, and sustainable change. Route unintentional change, eating-disorder risk, aggressive cuts, underweight, pregnancy, or medication decisions through the skill’s safety and qualified-care boundaries.',
   },
   {
     slug: 'cycle-hormonal-health',
@@ -132,12 +120,6 @@ export const ASSISTANT_SKILLS = [
     name: 'gut-digestion',
     triggerHint:
       'Use for bloating, reflux, constipation, diarrhea, IBS-style patterns, fiber changes, meal-timing experiments, elimination or reintroduction plans, and digestive symptom tracking. Route red flags or suspected disease to clinician support.',
-  },
-  {
-    slug: 'general-eye-health',
-    name: 'general-eye-health',
-    triggerHint:
-      'Use for digital eye strain, dry or irritated eyes, contact-lens comfort and safety, myopia or refractive questions, eye-health prevention, eye exams, and triage of eye pain, redness, light sensitivity, discharge, vision changes, flashes, floaters, injury, or chemical exposure.',
   },
   {
     slug: 'behavior-followthrough',
@@ -155,7 +137,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'tracked-table',
     name: 'tracked-table',
     triggerHint:
-      'Use when a private member asks for a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
+      'Use when a private member asks to start or resume a live workout, requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
   },
   {
     slug: 'strength-training',
@@ -185,7 +167,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'nutrition-strategy',
     name: 'nutrition-strategy',
     triggerHint:
-      'Use for forward-looking nutrition decisions about meal structure and protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, and real-life food-system execution. Use food-journal for meal capture, body-composition for fat loss/muscle gain/recomposition, and gut-digestion for digestive symptom strategy.',
+      'Use for forward-looking nutrition decisions about meal structure, named diets and dietary patterns, protein, healthy eating, training fuel and recovery eating, hydration, appetite or under-fueling, daily nutrition-card goal setup, and real-life food-system execution. Use food-journal for meal capture and retrospective patterns, body-composition for intentional body change, gut-digestion for digestive symptom strategy or elimination/reintroduction, and clinical owners for therapeutic diets or medically complex cases.',
   },
   {
     slug: 'sleep-recovery-readiness',
@@ -203,7 +185,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'connected-apps',
     name: 'connected-apps',
     triggerHint:
-      'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; or connected-app context for another action. Owns account selection, narrow discovery and reads, limited calendar writes, privacy, and untrusted provider content.',
+      'Use when Murph needs connected email, calendar, documents, storage, notes, or tasks; an approved accountless service such as weather, places, provider registry, product search, or Instacart; account connection or removal; connected-app context for another action; or a verified manual export or one-time import fallback for a health or fitness source without a proven direct Murph connection. Owns account selection, narrow discovery and reads, limited calendar writes, verified provider export handoffs, privacy, and untrusted provider content.',
   },
   {
     slug: 'computer-use',
@@ -221,7 +203,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'murph-family',
     name: 'murph-family',
     triggerHint:
-      'Use only for Murph Family product questions or account actions involving plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless Murph Family account access is also in scope.',
+      'Use only for Murph Family product questions or account actions involving plans, sponsored seats, owner status, checkout, member invites, member usage handoffs, billing, or access. In a hosted group, requests to set up a plan for the requester\'s family, add family members, or manage Family stay here and are not group sponsorship, room funding, or room usage top-ups. Do not use for ordinary family medical history, genetics, family symptoms, household health context, or caregiving unless Murph Family account access is also in scope.',
   },
   {
     slug: 'pdf',

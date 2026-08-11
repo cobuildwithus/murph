@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 import type {
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionLinqExternalThreadRouteAuthority,
   HostedExecutionStructuredLogDetails,
   HostedRuntimeEvent,
@@ -7,9 +10,12 @@ import {
   compareIsoTimestampsAscending as compareHostedIsoTimestampsAscending,
 } from "@murphai/contracts";
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   emitHostedExecutionStructuredLog,
   HOSTED_EXECUTION_ASSISTANT_ASK_CANNOT_ANSWER_RESPONSE,
+  HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
   sanitizeHostedExecutionStructuredLogDetails,
 } from "@murphai/hosted-execution";
@@ -39,6 +45,7 @@ import {
   findAssistantAutoReplyDeliveryIntentIds,
   hasAssistantAutoReplyChannel,
   isAssistantOutboxReplyBubbleSuccessor,
+  listAssistantCronPendingDeliveryIntentIds,
   listAssistantOutboxIntents,
   markAssistantOutboxIntentMirrorTerminalById,
   normalizeAssistantDeliveryError,
@@ -88,12 +95,18 @@ import type {
 } from "./models.ts";
 import type {
   HostedRuntimeActionApprovalPort,
+  HostedRuntimeAssistantAskPrivateCompletionAuthority,
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqDeliveryOutcomeRequest,
   HostedRuntimeLinqRecentInboundEngagementResult,
   HostedRuntimeLinqSendResponse,
+  HostedRuntimePlatform,
   HostedRuntimeProviderTargetKind,
 } from "./platform.ts";
+import {
+  toHostedRuntimeLogCode,
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 import {
   buildHostedLinqChannelEnv,
   buildHostedTelegramChannelEnv,
@@ -308,13 +321,40 @@ export async function collectHostedAssistantDeliverySideEffects(
       intents,
       vaultRoot: request.vaultRoot,
     });
-  const cappedBackgroundCandidates = filteredBackgroundCandidates.slice(
-    0,
-    Math.max(
-      0,
-      HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
-    ),
+  // The scheduled-delivery cohort is derived from durable owner state at
+  // every call, so it survives foreground preemption: whichever pass drains
+  // next re-selects the whole remainder. Membership is either a cron job's
+  // persisted pendingDeliveryIntentId (direct scheduled deliveries, including
+  // local jobs whose authority is intentionally null) or a durable
+  // automationAuthority on the intent itself (canonical scheduled outputs and
+  // the recipient children that newsletter fanout copies it to after the
+  // parent manifest clears the job reference). Provider entry still
+  // revalidates that authority before any irreversible send. Cohort members
+  // keep their comparator position and background classification; only
+  // unrelated backlog competes for the single background slot.
+  const scheduledCohortIntentIds = new Set(
+    filteredBackgroundCandidates.length > 0
+      ? await listAssistantCronPendingDeliveryIntentIds(request.vaultRoot)
+      : [],
   );
+  let backgroundBacklogBudget = Math.max(
+    0,
+    HOSTED_MAX_BACKGROUND_DELIVERY_EFFECTS - foregroundCandidates.length,
+  );
+  const cappedBackgroundCandidates: AssistantOutboxIntent[] = [];
+  for (const intent of filteredBackgroundCandidates) {
+    if (
+      scheduledCohortIntentIds.has(intent.intentId)
+      || intent.automationAuthority != null
+    ) {
+      cappedBackgroundCandidates.push(intent);
+      continue;
+    }
+    if (backgroundBacklogBudget > 0) {
+      cappedBackgroundCandidates.push(intent);
+      backgroundBacklogBudget -= 1;
+    }
+  }
   const effects = [
     ...foregroundCandidates.map((intent) =>
       buildHostedAssistantDeliveryEffectFromIntent(intent, "foreground_current_turn")
@@ -659,6 +699,33 @@ async function preflightHostedAssistantDispatch(input: {
     return vaultFile;
   }
 
+  if (isHostedPrivateAssistantAskCompletionIntent(input.intent)) {
+    try {
+      const proof = requireHostedPrivateAssistantAskCompletionProof(input.intent);
+      assertHostedPrivateAssistantAskCompletionPayloadMatchesIntent({
+        intent: input.intent,
+        payload: input.payload,
+      });
+      assertHostedPrivateAssistantAskCompletionLive({
+        expiresAt: proof.assistantAskCompletionExpiresAt,
+        now: input.now,
+      });
+      return { action: "continue" };
+    } catch (error) {
+      const failed = await markAssistantOutboxIntentMirrorTerminalById({
+        error,
+        intentId: input.intent.intentId,
+        onlyCurrentStatuses: ["pending", "retryable"],
+        status: "failed",
+        vault: input.vaultRoot,
+      });
+      return {
+        action: "stop",
+        intent: failed ?? input.intent,
+      };
+    }
+  }
+
   if (!isHostedReviewedAssistantAskCompletionIntent(input.intent)) {
     return { action: "continue" };
   }
@@ -741,6 +808,14 @@ async function preflightHostedAssistantDispatch(input: {
   return { action: "continue" };
 }
 
+function isHostedPrivateAssistantAskCompletionIntent(
+  intent: AssistantOutboxIntent,
+): boolean {
+  return intent.deliveryIdempotencyKey?.startsWith(
+    HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+  ) === true;
+}
+
 function isHostedReviewedAssistantAskCompletionIntent(
   intent: AssistantOutboxIntent,
 ): boolean {
@@ -749,6 +824,150 @@ function isHostedReviewedAssistantAskCompletionIntent(
     && intent.deliveryIdempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
     ) === true;
+}
+
+function requireHostedPrivateAssistantAskCompletionProof(
+  intent: AssistantOutboxIntent,
+): HostedRuntimeAssistantAskPrivateCompletionAuthority {
+  const completionId = intent.answeredMailboxItemIds[0] ?? null;
+  const expiresAt = intent.reviewedAssistantAskCompletionExpiresAt ?? null;
+  const idempotencyKey = intent.deliveryIdempotencyKey;
+  const route = readHostedPrivateAssistantAskCompletionRoute(intent);
+  if (
+    !completionId
+    || intent.answeredMailboxItemIds.length !== 1
+    || !idempotencyKey
+    || createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+      completionId,
+    ) !== idempotencyKey
+    || !expiresAt
+    || !Number.isFinite(Date.parse(expiresAt))
+    || !route
+    || intent.threadIsDirect !== true
+    || intent.media.length !== 0
+    || intent.card !== null
+    || intent.emailHtml != null
+    || intent.subject !== null
+    || intent.operation !== null
+    || intent.externalThreadRouteAuthority != null
+    || intent.automationAuthority != null
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_OUTBOX_PROOF_INVALID",
+      "Private Assistant Ask completion outbox proof is invalid.",
+      { retryable: false },
+    );
+  }
+  return {
+    answeredMailboxItemIds: [completionId],
+    assistantAskCompletionExpiresAt: expiresAt,
+    idempotencyKey,
+    responseTextDigest: createHostedPrivateAssistantAskResponseTextDigest(
+      intent.message,
+    ),
+    route,
+  };
+}
+
+function readHostedPrivateAssistantAskCompletionRoute(
+  intent: AssistantOutboxIntent,
+): HostedExecutionAssistantNotificationRoute | null {
+  if (
+    (intent.channel !== "linq" && intent.channel !== "telegram")
+    || !intent.bindingDelivery
+    || intent.explicitTarget !== null
+  ) {
+    return null;
+  }
+  const delivery = intent.bindingDelivery;
+  if (
+    intent.channel === "telegram"
+    && (delivery.kind !== "thread" || intent.deliverySource !== null)
+  ) {
+    return null;
+  }
+  if (
+    intent.channel === "linq"
+    && (
+      (delivery.kind !== "thread" && delivery.kind !== "participant")
+      || (
+        delivery.kind === "participant"
+        && intent.deliverySource?.kind !== "linq"
+      )
+      || (delivery.kind === "thread" && intent.deliverySource !== null)
+    )
+  ) {
+    return null;
+  }
+  return {
+    actorId: intent.actorId,
+    channel: intent.channel,
+    delivery: {
+      kind: delivery.kind,
+      ...(intent.deliverySource?.kind === "linq"
+        ? {
+            source: {
+              fromPhoneNumber: intent.deliverySource.fromPhoneNumber,
+              kind: "linq" as const,
+            },
+          }
+        : {}),
+      target: delivery.target,
+    },
+    identityId: intent.identityId,
+    threadId: intent.threadId,
+    threadIsDirect: intent.threadIsDirect,
+  };
+}
+
+function assertHostedPrivateAssistantAskCompletionPayloadMatchesIntent(input: {
+  intent: AssistantOutboxIntent;
+  payload: HostedAssistantDeliveryPayload;
+}): void {
+  const route = readHostedPrivateAssistantAskCompletionRoute(input.intent);
+  if (
+    !route
+    || input.payload.channel !== input.intent.channel
+    || input.payload.idempotencyKey !== input.intent.deliveryIdempotencyKey
+    || input.payload.message !== input.intent.message
+    || input.payload.media.length !== 0
+    || input.payload.card != null
+    || input.payload.answeredMailboxItemIds.length !== 1
+    || input.payload.answeredMailboxItemIds[0]
+      !== input.intent.answeredMailboxItemIds[0]
+    || input.payload.actorId !== route.actorId
+    || input.payload.bindingDeliveryKind !== route.delivery.kind
+    || input.payload.bindingDeliveryTarget !== route.delivery.target
+    || input.payload.explicitTarget !== null
+    || input.payload.identityId !== route.identityId
+    || input.payload.threadId !== route.threadId
+    || input.payload.threadIsDirect !== true
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_TRANSPORT_INVALID",
+      "Private Assistant Ask completion must use its exact direct text-only route.",
+      { retryable: false },
+    );
+  }
+}
+
+function assertHostedPrivateAssistantAskCompletionLive(input: {
+  expiresAt: string;
+  now: Date;
+}): void {
+  if (Date.parse(input.expiresAt) <= input.now.getTime()) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_EXPIRED",
+      "Private Assistant Ask completion expired before provider delivery.",
+      { retryable: false },
+    );
+  }
+}
+
+function createHostedPrivateAssistantAskResponseTextDigest(
+  message: string,
+): string {
+  return createHash("sha256").update(message).digest("hex");
 }
 
 function requireHostedReviewedAssistantAskCompletionExpiresAt(
@@ -805,7 +1024,7 @@ async function persistHostedAssistantAskFallbackSupersession(input: {
     return current;
   }
   const updatedAt = input.now.toISOString();
-  const persisted = await saveAssistantOutboxIntentIfUnchanged({
+  const { intent: persisted } = await saveAssistantOutboxIntentIfUnchanged({
     expectedDedupeKey: current.dedupeKey,
     expectedStatus: current.status,
     expectedUpdatedAt: current.updatedAt,
@@ -851,13 +1070,13 @@ async function persistHostedAssistantVaultFileApprovalState(input: {
     return input.current;
   }
 
-  return await saveAssistantOutboxIntentIfUnchanged({
+  return (await saveAssistantOutboxIntentIfUnchanged({
     expectedDedupeKey: input.current.dedupeKey,
     expectedStatus: input.current.status,
     expectedUpdatedAt: input.current.updatedAt,
     intent: input.next,
     vault: input.vaultRoot,
-  });
+  })).intent;
 }
 
 async function abandonStaleSignupWelcomeCandidatesAfterReplyEvidence(input: {
@@ -1679,6 +1898,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
   latencyTrace?: Omit<HostedAssistantMilestoneTraceContext, "assistantInputIds"> | null;
   linqDeliveryContext?: HostedAssistantLinqDeliveryContext | null;
   linqDeliveryContexts?: readonly HostedAssistantLinqDeliveryContext[] | null;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   providerFetch?: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
@@ -1716,6 +1936,7 @@ export function createHostedAssistantProgressDeliveryDependencies(input: {
       effectsPort: input.effectsPort ?? null,
       linqEnv,
       linqDeliveryContexts,
+      platform: input.platform ?? null,
       onProviderAccepted: ({
         acceptedAssistantInputIds,
         acceptedAt,
@@ -1834,6 +2055,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
   onBackgroundDeliveryYield?: (input: {
     yieldedEffectCount: number;
   }) => void;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   platformEnv?: Readonly<Record<string, string>>;
   preparedDispatches?: readonly HostedAssistantDeliveryPreparedDispatch[] | null;
   providerFetch?: typeof fetch | null;
@@ -1939,6 +2161,7 @@ export async function drainHostedPreparedAssistantDeliveries(input: {
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery ?? null,
           linqEnv,
           linqDeliveryContexts,
+          platform: input.platform ?? null,
           preparedDispatch: ownsPreparedDispatch ? preparedDispatch : null,
           telegramEnv,
           telegramVoiceMemoEnv,
@@ -2398,6 +2621,22 @@ async function assertHostedTelegramThreadRouteAuthorityAtProviderEntry(input: {
     return null;
   }
 
+  const privateCompletion = input.intent
+    && isHostedPrivateAssistantAskCompletionIntent(input.intent)
+    ? input.intent
+    : null;
+  if (privateCompletion) {
+    const target = input.target?.trim() ?? "";
+    if (!input.delivery || input.delivery.media.length !== 0 || !target) {
+      throw new VaultCliError(
+        "ASSISTANT_ASK_PRIVATE_COMPLETION_TRANSPORT_INVALID",
+        "Private Assistant Ask completion must use the text-only Telegram transport.",
+        { retryable: false },
+      );
+    }
+    return target;
+  }
+
   const reviewedCompletion = input.intent
     && isHostedReviewedAssistantAskCompletionIntent(input.intent)
     ? input.intent
@@ -2778,6 +3017,7 @@ async function deliverHostedPreparedAssistantDelivery(input: {
   shouldYieldBackgroundDelivery: (() => boolean) | null;
   linqEnv: NodeJS.ProcessEnv;
   linqDeliveryContexts: readonly HostedAssistantLinqDeliveryContext[];
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
   preparedDispatch: HostedAssistantDeliveryPreparedDispatch | null;
   telegramEnv: NodeJS.ProcessEnv;
   telegramVoiceMemoEnv: NodeJS.ProcessEnv;
@@ -2937,6 +3177,10 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         },
         sendTelegram: async (request) => {
           await assertHostedDeliveryCanEnterProvider(input);
+          const privateCompletion = mirrorState.intent
+            && isHostedPrivateAssistantAskCompletionIntent(mirrorState.intent)
+            ? mirrorState.intent
+            : null;
           const authorityBoundTarget =
             await assertHostedTelegramThreadRouteAuthorityAtProviderEntry({
               assistantDeliveryEffect: input.assistantDeliveryEffect,
@@ -2951,13 +3195,53 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               userId: input.userId,
               vaultRoot: input.vaultRoot,
             });
+          const providerFetch = privateCompletion
+              ? createHostedProviderFetchBoundary({
+                assertProviderEntryLive: async () => {
+                  try {
+                    await assertHostedDeliveryCanEnterProvider(input);
+                    await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+                      actualRoute: {
+                        actorId: input.assistantDeliveryEffect.payload.actorId,
+                        channel: "telegram",
+                        delivery: {
+                          kind: "thread",
+                          target: request.target,
+                        },
+                        identityId:
+                          input.assistantDeliveryEffect.payload.identityId,
+                        threadId: input.assistantDeliveryEffect.payload.threadId,
+                        threadIsDirect:
+                          input.assistantDeliveryEffect.payload.threadIsDirect,
+                      },
+                      effectsPort: input.effectsPort,
+                      intentId: privateCompletion.intentId,
+                      media: [],
+                      message: request.message,
+                      now: new Date(),
+                      signal: input.signal,
+                      vaultRoot: input.vaultRoot,
+                    });
+                  } catch (error) {
+                    throw markHostedDeliveryPreProvider(error);
+                  }
+                },
+                onProviderDispatchEntered: () => {
+                  providerDispatchEntered = true;
+                },
+                operation: "Hosted private Assistant Ask Telegram delivery",
+                providerFetch: input.providerFetch,
+              })
+            : input.providerFetch;
           const dependencies = requireHostedProviderFetchDependencies({
             ...(authorityBoundTarget ? { authorityBoundTarget } : {}),
             env: input.telegramEnv,
-            fetchImplementation: input.providerFetch,
+            fetchImplementation: providerFetch,
             ...(input.signal ? { signal: input.signal } : {}),
           }, "Hosted assistant Telegram delivery");
-          providerDispatchEntered = true;
+          if (!privateCompletion) {
+            providerDispatchEntered = true;
+          }
           const result = await sendTelegramMessage(request, dependencies);
           await assertHostedDeliveryLiveNow(input);
           return result;
@@ -3075,11 +3359,19 @@ async function deliverHostedPreparedAssistantDelivery(input: {
         sendLinq: createHostedAssistantLinqSendDependency({
           actionApprovalPort: input.actionApprovalPort,
           assertLiveness: input.assertLiveness,
+          deliveryRouteContext: {
+            actorId: input.assistantDeliveryEffect.payload.actorId,
+            identityId: input.assistantDeliveryEffect.payload.identityId,
+            threadId: input.assistantDeliveryEffect.payload.threadId,
+            threadIsDirect:
+              input.assistantDeliveryEffect.payload.threadIsDirect,
+          },
           effectsPort: input.effectsPort,
           expectedDedupeKey: input.assistantDeliveryEffect.fingerprint,
           intentId: input.assistantDeliveryEffect.effectId,
           linqEnv: input.linqEnv,
           linqDeliveryContexts,
+          platform: input.platform,
           threadIsDirect: input.assistantDeliveryEffect.payload.threadIsDirect ?? null,
           shouldYieldBackgroundDelivery: input.shouldYieldBackgroundDelivery,
           onProviderDispatchEntered: () => {
@@ -3556,12 +3848,62 @@ function resolveHostedAssistantLinqDeliveryContexts(input: {
   return wakeContext ? [wakeContext] : [];
 }
 
+// The app-card error-to-text transition happens inside the hosted container,
+// whose stdout/stderr never reaches a queryable sink, so the durable runtime
+// log is the only operator-visible destination for this warning. The entry is
+// projected from an allowlist and never copies error messages: parse-failure
+// messages can embed raw provider response text.
+function createHostedLinqAppCardFallbackErrorObserver(input: {
+  intentId: string | null;
+  platform: Pick<HostedRuntimePlatform, "logPort"> | null;
+}): (fallbackError: {
+  error: unknown;
+  reason: "app_card_rejected" | "capability_check_failed";
+}) => void {
+  return (fallbackError) => {
+    if (!input.platform?.logPort) {
+      return;
+    }
+    const diagnostics = buildHostedExecutionSafeErrorDiagnostics(fallbackError.error);
+    const errorName = diagnostics?.errorName;
+    const errorStatus = diagnostics?.errorStatus;
+    const errorCode = diagnostics?.errorCodeDetail ?? diagnostics?.errorCode;
+    void writeHostedRuntimeLogBestEffort({
+      entry: {
+        component: "outbox",
+        ...(typeof errorCode === "string"
+          ? { errorCode: toHostedRuntimeLogCode(errorCode) }
+          : {}),
+        eventCode: "outbox.linq_app_card_fallback_error",
+        level: "warn",
+        ...(input.intentId ? { outboxIntentRef: input.intentId } : {}),
+        phase: "outbox",
+        redactedJson: {
+          fallbackKind: "text",
+          reason: fallbackError.reason,
+          ...(typeof errorName === "string"
+            ? { errorName: toHostedRuntimeLogCode(errorName) }
+            : {}),
+          ...(typeof errorStatus === "number" ? { errorStatus } : {}),
+        },
+      },
+      platform: input.platform,
+    });
+  };
+}
+
 function createHostedAssistantLinqSendDependency(input: {
   actionApprovalPort?: HostedRuntimeActionApprovalPort | null;
   assertLiveness?: () => Promise<void>;
+  deliveryRouteContext?: Pick<
+    HostedAssistantDeliveryPayload,
+    "actorId" | "identityId" | "threadId" | "threadIsDirect"
+  > | null;
   effectsPort?: Pick<
     HostedRuntimeEffectsPort,
-    "assertLinqRecentInboundEngagement" | "recordLinqDeliveryOutcome"
+    | "assertAssistantAskPrivateCompletionAuthority"
+    | "assertLinqRecentInboundEngagement"
+    | "recordLinqDeliveryOutcome"
   > | null;
   expectedDedupeKey?: string | null;
   intentId?: string | null;
@@ -3573,6 +3915,7 @@ function createHostedAssistantLinqSendDependency(input: {
   }) => void;
   onProviderDispatchEntered?: () => void;
   onProviderDispatchSettledWithoutEffect?: () => void;
+  platform?: Pick<HostedRuntimePlatform, "logPort"> | null;
   providerFetch: typeof fetch | null;
   publicInternetFetch?: typeof fetch | null;
   shouldYieldBackgroundDelivery?: (() => boolean) | null;
@@ -3580,14 +3923,23 @@ function createHostedAssistantLinqSendDependency(input: {
   threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
+  const onAppCardFallbackError = createHostedLinqAppCardFallbackErrorObserver({
+    intentId: input.intentId ?? null,
+    platform: input.platform ?? null,
+  });
   return async (request) => {
     await assertHostedDeliveryLiveNow(input);
-    const currentHomeRouteOnly = shouldBypassHostedLinqDeliveryContextForHomeFallback({
-      answeredMailboxItemIds: request.answeredMailboxItemIds,
-      homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
-      nativeReplyRequested: request.nativeReplyRequested,
-      replyToMessageId: request.replyToMessageId ?? null,
-    });
+    const idempotencyKey = request.idempotencyKey?.trim() || null;
+    const privateAssistantAskCompletion = idempotencyKey?.startsWith(
+      HOSTED_EXECUTION_PRIVATE_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
+    ) === true;
+    const currentHomeRouteOnly = !privateAssistantAskCompletion
+      && shouldBypassHostedLinqDeliveryContextForHomeFallback({
+        answeredMailboxItemIds: request.answeredMailboxItemIds,
+        homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+        nativeReplyRequested: request.nativeReplyRequested,
+        replyToMessageId: request.replyToMessageId ?? null,
+      });
     const deliveryContext = currentHomeRouteOnly
       ? null
       : resolveHostedAssistantLinqDeliveryContextFromCandidatesForRequest({
@@ -3608,7 +3960,6 @@ function createHostedAssistantLinqSendDependency(input: {
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
     const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
-    const idempotencyKey = request.idempotencyKey?.trim() || null;
     const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
@@ -3676,12 +4027,54 @@ function createHostedAssistantLinqSendDependency(input: {
     const hasVerifiedVaultAttachment =
       verifiedVaultFiles.size > 0 || verifiedVaultImages.size > 0;
     const readProviderAttempt = () => providerAttempt;
+    const assertPrivateAssistantAskCompletionAtProviderEntry = async () => {
+      if (!privateAssistantAskCompletion) {
+        return;
+      }
+      const routeContext = input.deliveryRouteContext;
+      if (!routeContext) {
+        throw new VaultCliError(
+          "ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_UNAVAILABLE",
+          "Private Assistant Ask completion route is unavailable.",
+          { retryable: false },
+        );
+      }
+      await assertHostedPrivateAssistantAskCompletionAtProviderEntry({
+        actualRoute: {
+          actorId: routeContext.actorId,
+          channel: "linq",
+          delivery: {
+            kind: providerTargetKind ?? "explicit",
+            ...(providerTargetKind === "participant" && fromPhoneNumber
+              ? {
+                  source: {
+                    fromPhoneNumber,
+                    kind: "linq" as const,
+                  },
+                }
+              : {}),
+            target: providerTarget,
+          },
+          identityId: routeContext.identityId,
+          threadId: routeContext.threadId,
+          threadIsDirect: routeContext.threadIsDirect,
+        },
+        effectsPort: input.effectsPort ?? null,
+        intentId: input.intentId ?? null,
+        media: request.media ?? [],
+        message: request.message,
+        now: new Date(),
+        signal: signal ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      });
+    };
     const createMessageFetchBoundary = (
       deliveryIdempotencyKey: string | null,
     ): typeof fetch => createHostedProviderFetchBoundary({
       assertProviderEntryLive: async () => {
         try {
           await assertHostedDeliveryCanEnterProvider(input);
+          await assertPrivateAssistantAskCompletionAtProviderEntry();
         } catch (error) {
           if (providerAttempt && hasVerifiedVaultAttachment) {
             throw markHostedLinqAttachmentReservationMayHaveSucceeded(error);
@@ -3765,6 +4158,7 @@ function createHostedAssistantLinqSendDependency(input: {
       assertProviderEntryLive: async () => {
         try {
           await assertHostedDeliveryCanEnterProvider(input);
+          await assertPrivateAssistantAskCompletionAtProviderEntry();
           await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
             answeredMailboxItemIds: request.answeredMailboxItemIds,
             assistantAskFallback:
@@ -3813,7 +4207,9 @@ function createHostedAssistantLinqSendDependency(input: {
       result = await sendHostedProviderLinqMessage({
         directRecipientPhoneNumber,
         fromPhoneNumber,
-        homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
+        homeRouteFallbackAllowed:
+          !privateAssistantAskCompletion
+          && request.homeRouteFallbackAllowed === true,
         idempotencyKey,
         media: request.media ?? null,
         message: request.message,
@@ -3833,6 +4229,7 @@ function createHostedAssistantLinqSendDependency(input: {
             }),
       }, {
         ...dependencies,
+        onAppCardFallbackError,
         ...(input.publicInternetFetch
           ? { publicFetchImplementation: input.publicInternetFetch }
           : {}),
@@ -4076,6 +4473,87 @@ async function prepareHostedReviewedAssistantAskProviderEntry(input: {
     );
   }
   return expiresAt;
+}
+
+async function assertHostedPrivateAssistantAskCompletionAtProviderEntry(input: {
+  actualRoute: HostedExecutionAssistantNotificationRoute;
+  effectsPort: Pick<
+    HostedRuntimeEffectsPort,
+    "assertAssistantAskPrivateCompletionAuthority"
+  > | null;
+  intentId: string | null;
+  media: readonly AssistantResponseMedia[];
+  message: string;
+  now: Date;
+  signal: AbortSignal | null;
+  vaultRoot: string | null;
+}): Promise<void> {
+  if (!input.intentId || !input.vaultRoot) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_OUTBOX_MISSING",
+      "Private Assistant Ask completion outbox state is unavailable.",
+      { retryable: true },
+    );
+  }
+  const current = await readAssistantOutboxIntent(
+    input.vaultRoot,
+    input.intentId,
+  );
+  if (!current || !isHostedPrivateAssistantAskCompletionIntent(current)) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_OUTBOX_MISSING",
+      "Private Assistant Ask completion outbox state is unavailable.",
+      { retryable: true },
+    );
+  }
+  const proof = requireHostedPrivateAssistantAskCompletionProof(current);
+  assertHostedPrivateAssistantAskCompletionLive({
+    expiresAt: proof.assistantAskCompletionExpiresAt,
+    now: input.now,
+  });
+  if (
+    input.media.length !== 0
+    || current.message !== input.message
+    || proof.responseTextDigest
+      !== createHostedPrivateAssistantAskResponseTextDigest(input.message)
+    || !hostedPrivateAssistantAskCompletionRoutesEqual(
+      proof.route,
+      input.actualRoute,
+    )
+  ) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_OUTBOX_CHANGED",
+      "Private Assistant Ask completion changed before provider delivery.",
+      { retryable: false },
+    );
+  }
+  const assertAuthority =
+    input.effectsPort?.assertAssistantAskPrivateCompletionAuthority;
+  if (!assertAuthority) {
+    throw new VaultCliError(
+      "ASSISTANT_ASK_PRIVATE_COMPLETION_AUTHORITY_UNAVAILABLE",
+      "Private Assistant Ask completion requires live delivery authority before provider work.",
+      { retryable: true },
+    );
+  }
+  await assertAuthority(proof, { signal: input.signal });
+}
+
+function hostedPrivateAssistantAskCompletionRoutesEqual(
+  left: HostedExecutionAssistantNotificationRoute,
+  right: HostedExecutionAssistantNotificationRoute,
+): boolean {
+  return left.actorId === right.actorId
+    && left.channel === right.channel
+    && left.delivery.kind === right.delivery.kind
+    && left.delivery.target === right.delivery.target
+    && (left.delivery.source?.kind ?? null)
+      === (right.delivery.source?.kind ?? null)
+    && (left.delivery.source?.fromPhoneNumber ?? null)
+      === (right.delivery.source?.fromPhoneNumber ?? null)
+    && left.identityId === right.identityId
+    && left.threadId === right.threadId
+    && left.threadIsDirect === right.threadIsDirect;
 }
 
 async function preloadHostedAssistantVaultImages(input: {
@@ -5510,6 +5988,18 @@ function normalizeHostedAssistantDeliveryMedia(
   media: AssistantOutboxIntent["media"],
 ): HostedAssistantDeliveryMedia[] {
   return (media ?? []).map((item) => {
+    if (item.kind === "vault_file") {
+      return {
+        approvalGeneration: item.approvalGeneration,
+        approvalId: item.approvalId,
+        contentType: item.contentType,
+        filename: item.filename,
+        kind: item.kind,
+        ref: item.ref,
+        sha256: item.sha256,
+        sizeBytes: item.sizeBytes,
+      };
+    }
     if (item.kind !== "voice_memo") {
       return item;
     }

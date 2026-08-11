@@ -49,6 +49,10 @@ export interface HostedProviderEffectDependencies {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch | null;
   publicFetchImplementation?: typeof fetch | null;
+  onAppCardFallbackError?: (input: {
+    error: unknown;
+    reason: "app_card_rejected" | "capability_check_failed";
+  }) => void;
   onProviderDispatchEntered?: (() => void) | null;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
@@ -65,6 +69,10 @@ interface HostedProviderEffectContext {
   env: NodeJS.ProcessEnv;
   fetchImplementation: typeof fetch;
   publicFetchImplementation?: typeof fetch;
+  onAppCardFallbackError?: (input: {
+    error: unknown;
+    reason: "app_card_rejected" | "capability_check_failed";
+  }) => void;
   persistAppCardTextFallback?: (input: {
     idempotencyKey: string;
   }) => Promise<void>;
@@ -358,6 +366,9 @@ async function sendHostedProviderLinqMessageDirect(
       : {}),
     ...(context.loadVaultFile ? { loadVaultFile: context.loadVaultFile } : {}),
     ...(context.loadVaultImage ? { loadVaultImage: context.loadVaultImage } : {}),
+    ...(context.onAppCardFallbackError
+      ? { onAppCardFallbackError: context.onAppCardFallbackError }
+      : {}),
     ...(context.persistAppCardTextFallback
       ? { persistAppCardTextFallback: context.persistAppCardTextFallback }
       : {}),
@@ -391,6 +402,9 @@ function createHostedProviderEffectContext(
       : {}),
     ...(dependencies.loadVaultImage
       ? { loadVaultImage: dependencies.loadVaultImage }
+      : {}),
+    ...(dependencies.onAppCardFallbackError
+      ? { onAppCardFallbackError: dependencies.onAppCardFallbackError }
       : {}),
     ...(dependencies.persistAppCardTextFallback
       ? { persistAppCardTextFallback: dependencies.persistAppCardTextFallback }

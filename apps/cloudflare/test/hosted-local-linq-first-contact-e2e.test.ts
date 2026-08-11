@@ -270,6 +270,16 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
     const finalStatus = await completionPromise;
     expect(finalStatus.mailboxLag.every((lane) => lane.lag === "0")).toBe(true);
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
+      computerToolsAvailable: true,
+      connectedAppsAvailable: true,
+      messageTargetingAvailable: true,
+      pendingVaultFilesAvailable: true,
+      phoneCallsAvailable: true,
+      progressUpdatesAvailable: true,
+      responseCardAvailable: true,
+      vaultFileSendAvailable: true,
+    });
     await requireLinqStub().waitForMatchingRequestCount({
       expectedCount: 1,
       expectedMethod: "DELETE",
@@ -1094,14 +1104,6 @@ productionDescribe("hosted local Linq first-contact e2e", () => {
       HOSTED_ASSISTANT_MODEL: productionLikeAssistantModel,
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "stub-local-openai-key",
-    });
-    expectAdvertisedMurphDynamicTools(requireScenario().assistantProviderRequests, {
-      computerToolsAvailable: true,
-      connectedAppsAvailable: true,
-      messageTargetingAvailable: true,
-      phoneCallsAvailable: true,
-      progressUpdatesAvailable: true,
-      vaultFileSendAvailable: true,
     });
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_API_KEY_ENV).toBeUndefined();
     expect(requireScenario().runtimeEnv.HOSTED_ASSISTANT_BASE_URL).toBeUndefined();

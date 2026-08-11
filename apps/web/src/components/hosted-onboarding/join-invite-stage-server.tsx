@@ -16,13 +16,16 @@ import { PlanVisual } from "@/src/components/ui/plan-visual";
 import { ConsentSkeleton } from "@/src/components/legal/hosted-legal-consent-card";
 import { MurphAddToContactsButton } from "@/src/components/murph/murph-contact-card-picker";
 import { HostedFamilyStartButton } from "@/src/components/settings/hosted-family-start-button";
+import { BillingPortalButton } from "@/src/components/settings/billing-portal-button";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
-  HOSTED_PULSE_TRIAL_DAYS,
-  isHostedAutoPulseTrialEnabled,
-  isHostedPulseTrialCheckoutEnabled,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  JOIN_EDGE_FEATURES,
+  JOIN_FAMILY_FEATURES,
+  JOIN_PULSE_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import type { HostedFamilyBillingRecoveryState } from "@/src/lib/hosted-onboarding/family-plan";
 import type { HostedInviteStatusPayload } from "@/src/lib/hosted-onboarding/types";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
@@ -30,7 +33,7 @@ import { isHostedOnboardingAccessibleStage } from "@/src/lib/hosted-onboarding/s
 import type { HostedAccessibleOnboardingStage } from "@/src/lib/hosted-onboarding/stage";
 
 import { JOIN_INVITE_ACTIVE_FEATURE_CARDS } from "./join-invite-active-feature-cards";
-import { JoinInviteAutoTrialIsland } from "./join-invite-auto-trial-island";
+import { JoinInviteStarterUsageIsland } from "./join-invite-starter-usage-island";
 import { JOIN_INVITE_ACTIVATION_PENDING_COPY } from "./join-invite-copy";
 import type {
   JoinInvitePageModel,
@@ -47,41 +50,9 @@ import {
 
 const MURPH_GITHUB_URL = "https://github.com/cobuildwithus/murph";
 
-const PULSE_TRIAL_FEATURES = [
-  `Full Pulse access for ${HOSTED_PULSE_TRIAL_DAYS} days`,
-  "Card required. Then $8/month unless canceled.",
-  "Cancel anytime",
-];
-
-const PULSE_FEATURES = [
-  "Private personal health assistant",
-  "Questions, decisions, plans, and follow-through",
-  "Sync your health data",
-  "Chat with Murph via iMessage, Telegram, or email",
-  "Experiments when you need a clear answer",
-  "Access to the most capable AI models",
-];
-
-const EDGE_FEATURES = [
-  "Everything in Pulse and:",
-  "More usage on the most capable AI models",
-  "Murph remembers more of your history",
-  "Deeper analysis across your context",
-  "Detailed biomarker changes",
-  "Richer plans and protocol recommendations",
-  "Early access to new features",
-];
-
-const FAMILY_FEATURES = [
-  "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
-  "Each person keeps a private Murph",
-  "Family members' chats and health data stay private",
-];
-
 export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel }) {
   const { status } = model;
-  const autoPulseTrialReady = isJoinInviteAutoPulseTrialReady(
+  const starterUsageReady = isJoinInviteStarterUsageReady(
     status,
     model.familyBillingRecovery,
   );
@@ -138,15 +109,22 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
         <JoinInviteFamilyBillingSyncPanel />
       ) : null}
 
-      {!model.launchConsent.gateActive && status.stage === "checkout" && autoPulseTrialReady ? (
-        <JoinInviteAutoTrialIsland inviteCode={model.inviteCode} />
+      {!model.launchConsent.gateActive
+      && status.stage === "checkout"
+      && model.familyBillingRecovery === "manage" ? (
+        <JoinInviteFamilyBillingManagementPanel />
+      ) : null}
+
+      {!model.launchConsent.gateActive && status.stage === "checkout" && starterUsageReady ? (
+        <JoinInviteStarterUsageIsland inviteCode={model.inviteCode} />
       ) : null}
 
       {!model.launchConsent.gateActive
       && status.stage === "checkout"
       && model.familyBillingRecovery !== "checkout"
+      && model.familyBillingRecovery !== "manage"
       && model.familyBillingRecovery !== "syncing"
-      && !autoPulseTrialReady
+      && !starterUsageReady
       && status.messagingSetupRequired ? (
         <JoinInviteMessagingSetupPanel
           authenticated={status.session.authenticated}
@@ -159,8 +137,9 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
       {!model.launchConsent.gateActive
       && status.stage === "checkout"
       && model.familyBillingRecovery !== "checkout"
+      && model.familyBillingRecovery !== "manage"
       && model.familyBillingRecovery !== "syncing"
-      && !autoPulseTrialReady
+      && !starterUsageReady
       && !status.messagingSetupRequired ? (
         <JoinInviteCheckoutPanel
           billingReady={status.capabilities.billingReady}
@@ -184,15 +163,14 @@ export function JoinInviteStageServer({ model }: { model: JoinInvitePageModel })
   );
 }
 
-export function isJoinInviteAutoPulseTrialReady(
+export function isJoinInviteStarterUsageReady(
   status: HostedInviteStatusPayload,
   familyBillingRecovery: HostedFamilyBillingRecoveryState | null = null,
 ): boolean {
-  return isHostedAutoPulseTrialEnabled() &&
-    familyBillingRecovery === null &&
-    status.capabilities.billingReady &&
-    !status.messagingSetupRequired &&
-    status.billing.plans.some((plan) => plan.code === "launch_monthly");
+  return familyBillingRecovery === null
+    && status.session.authenticated
+    && status.session.matchesInvite
+    && !status.messagingSetupRequired;
 }
 
 function JoinInviteSignedInMismatchAlert() {
@@ -323,7 +301,6 @@ export function JoinInviteCheckoutPanel({
 }) {
   const pulsePlan = billingPlans.find((p) => p.code === "launch_monthly") ?? null;
   const edgePlan = billingPlans.find((p) => p.code === "launch_edge_monthly") ?? null;
-  const pulseTrialCheckoutEnabled = isHostedPulseTrialCheckoutEnabled();
   const buttonClassName =
     "h-12 w-full rounded-full bg-foreground text-sm font-semibold text-background hover:bg-foreground/90";
 
@@ -337,32 +314,12 @@ export function JoinInviteCheckoutPanel({
         }
       >
         <PricingTierCard
-          tier="free"
-          name="Pulse Trial"
-          description={`Try Murph for ${HOSTED_PULSE_TRIAL_DAYS} days, no charge.`}
-          price="$0"
-          priceUnit={`for ${HOSTED_PULSE_TRIAL_DAYS} days`}
-          features={PULSE_TRIAL_FEATURES}
-          cta={
-            <JoinInviteCheckoutPlanButtonIsland
-              billingReady={billingReady && pulseTrialCheckoutEnabled}
-              checkoutOffer="pulse_trial_7d"
-              className={buttonClassName}
-              disabledLabel="Trial unavailable"
-              idleLabel={`Start ${HOSTED_PULSE_TRIAL_DAYS}-day trial`}
-              inviteCode={inviteCode}
-              planCode={pulsePlan?.code ?? null}
-            />
-          }
-        />
-
-        <PricingTierCard
           tier="go"
           name="Pulse"
           description="Your private personal health assistant."
           price={pulsePlan ? `$${Math.round(pulsePlan.recurringAmountUsdCents / 100)}` : "$8"}
           priceUnit="/ month"
-          features={PULSE_FEATURES}
+          features={JOIN_PULSE_FEATURES}
           cta={
             <JoinInviteCheckoutPlanButtonIsland
               billingReady={billingReady}
@@ -380,7 +337,7 @@ export function JoinInviteCheckoutPanel({
           description="More guidance and deeper research."
           price={edgePlan ? `$${Math.round(edgePlan.recurringAmountUsdCents / 100)}` : "$20"}
           priceUnit="/ month"
-          features={EDGE_FEATURES}
+          features={JOIN_EDGE_FEATURES}
           cta={
             <JoinInviteCheckoutPlanButtonIsland
               billingReady={billingReady}
@@ -402,7 +359,7 @@ export function JoinInviteCheckoutPanel({
               HOSTED_FAMILY_PLAN_DISPLAY.recurringAmountUsdCentsPerSeat / 100,
             )}`}
             priceUnit="/ person / month"
-            features={FAMILY_FEATURES}
+            features={JOIN_FAMILY_FEATURES}
             cta={
               <HostedFamilyStartButton
                 block
@@ -476,6 +433,36 @@ export function JoinInviteFamilyBillingSyncPanel() {
             Stripe is confirming the plan. This page checks automatically and
             will continue when Family access is ready.
           </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function JoinInviteFamilyBillingManagementPanel() {
+  return (
+    <div className="rounded-xl border border-border bg-card px-6 py-7 sm:px-8">
+      <div className="flex items-start gap-4">
+        <PlanVisual tier="pulse" />
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Family billing
+          </p>
+          <h3 className="mt-2 font-serif text-2xl font-semibold tracking-tight text-foreground">
+            Open Family billing
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            Stripe has an issue with this subscription. Open Family billing to
+            update payment details, review invoices, or cancel the plan.
+          </p>
+          <div className="mt-5">
+            <BillingPortalButton
+              billingScope="family"
+              block
+              label="Open Family billing"
+              variant="secondary"
+            />
+          </div>
         </div>
       </div>
     </div>

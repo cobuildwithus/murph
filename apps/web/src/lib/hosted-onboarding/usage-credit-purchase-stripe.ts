@@ -10,6 +10,7 @@ import {
 import { hostedOnboardingError } from "./errors";
 import type { HostedOnboardingReadClient } from "./shared";
 import {
+  buildHostedStripeAlertCorrelationCause,
   describeHostedStripeError,
   logHostedStripeFailure,
 } from "./stripe-error-log";
@@ -450,6 +451,7 @@ export function buildHostedUsageCreditStripeUnavailableError(
 ) {
   logHostedStripeFailure({ error, operationName });
   return hostedOnboardingError({
+    cause: buildHostedStripeAlertCorrelationCause(error),
     code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
     details: describeSafeHostedUsageCreditStripeError(error),
     httpStatus: 502,

@@ -1,7 +1,6 @@
 import * as z from '@murphai/contracts/zod-runtime'
 
 import {
-  automationAssistantTargetOverrideSchema,
   automationActiveUntilSchema,
   automationContinuityPolicyValues,
   automationScheduleCronSchema,
@@ -9,6 +8,10 @@ import {
   automationStatusValues,
   automationSupportKindValues,
 } from '@murphai/contracts'
+import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  HOSTED_ASSISTANT_REASONING_EFFORTS,
+} from '@murphai/hosted-execution/assistant-model'
 import type {
   AssistantHostedAutomationTool,
   AssistantHostedAutomationToolRequest,
@@ -61,10 +64,41 @@ const automationTagsSchema = z
     }
   })
 
+const hostedAutomationAssistantTargetOverrideSchema = z
+  .object({
+    model: z
+      .enum(HOSTED_ASSISTANT_PRODUCT_MODELS)
+      .optional()
+      .describe(
+        'Optional model for this automation turn only. Use Luna for self-contained cues and reminders with no reads or tools, Terra for bounded contextual judgment or a few targeted reads, and inherit the conversation model for broad context, research, complex or sensitive reasoning, or whenever that selected model materially matters.',
+      ),
+    reasoningEffort: z
+      .enum(HOSTED_ASSISTANT_REASONING_EFFORTS)
+      .optional()
+      .describe(
+        'Optional reasoning effort for this automation turn only. When omitted with an explicit model, Murph uses high for Luna and low for Terra or Sol at execution. A reasoning-only override keeps the conversation model.',
+      ),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.model === undefined && value.reasoningEffort === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Target override must select a model, reasoning effort, or both.',
+        path: [],
+      })
+    }
+  })
+  .describe(
+    'Turn-scoped automation model and reasoning selection. It never changes the conversation default; later replies return to the saved conversation model with this automation message retained in shared history.',
+  )
+
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
   activeUntil: automationActiveUntilSchema.nullable().optional(),
-  assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
+  assistantTargetOverride: hostedAutomationAssistantTargetOverrideSchema
+    .nullable()
+    .optional(),
   automationId: automationIdentifierSchema.optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
   instructions: automationInstructionsSchema,
@@ -85,7 +119,9 @@ const saveOnboardingFirstPersonalReadArgumentsSchema = z.object({
 const patchAutomationArgumentsSchema = z.object({
   action: z.literal('patch'),
   activeUntil: automationActiveUntilSchema.nullable().optional(),
-  assistantTargetOverride: automationAssistantTargetOverrideSchema.nullable().optional(),
+  assistantTargetOverride: hostedAutomationAssistantTargetOverrideSchema
+    .nullable()
+    .optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
   instructions: automationInstructionsSchema.optional(),
   lookup: automationIdentifierSchema,
@@ -199,7 +235,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone; do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule and status. For an active deviceActivity schedule, confirm the persisted event trigger directly: a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, verify any user-facing timing confirmation against timingVerified, schedule, effectiveTimeZone, and nextOccurrenceAt from the tool result; a verified null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save_newsletter creates or replaces this group\'s one health newsletter from structured name, cron schedule, delivery, tone, and health scopes; use it for both current-chat and group-email delivery instead of authoring newsletter instructions. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -350,9 +386,13 @@ function serializeAutomationToolResponse(
         action: response.action,
         automationId: response.automationId,
         created: response.created,
+        effectiveTimeZone: response.effectiveTimeZone,
         lookupId: response.lookupId,
+        nextOccurrenceAt: response.nextOccurrenceAt,
         routeBinding: response.routeBinding,
+        schedule: response.schedule,
         status: response.status,
+        timingVerified: response.timingVerified,
       }
       break
   }

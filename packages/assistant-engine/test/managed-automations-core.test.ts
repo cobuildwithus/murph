@@ -378,6 +378,11 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('knowledge show weekly-health-insights')
     expect(insightRecord?.instructions).toContain('Use `weekly-health-insights` as the dedupe ledger')
     expect(insightRecord?.instructions).toContain('Do not scan every wiki page')
+    expect(insightRecord?.instructions).toContain('vault-cli wearables patterns --date YYYY-MM-DD --format json')
+    expect(insightRecord?.instructions).toContain('continue with the existing bounded manual candidate search')
+    expect(insightRecord?.instructions).toContain('Do not treat command failure as evidence')
+    expect(insightRecord?.instructions).toContain('stages of repeated association, not proof')
+    expect(insightRecord?.instructions).toContain('pattern report narrows the search')
     expect(insightRecord?.instructions).toContain('find zero or one useful')
     expect(insightRecord?.instructions).toContain('better to send nothing')
     expect(insightRecord?.instructions).toContain('knowledge append-section weekly-health-insights YYYY-MM-DD')
@@ -543,12 +548,16 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(researchScoutRecord?.instructions).toContain('Use `vault-cli research scout-batch` once')
     expect(researchScoutRecord?.instructions).not.toContain('Use `vault-cli research scout` once')
     expect(researchScoutRecord?.instructions).toContain('Do not send raw lab values')
-    expect(researchScoutRecord?.instructions).toContain('lowercase non-identifying category tags')
-    expect(researchScoutRecord?.instructions).toContain('vault-cli research scout-batch-payload-schema --format json')
+    expect(researchScoutRecord?.instructions).not.toContain('lowercase non-identifying category tags')
+    expect(researchScoutRecord?.instructions).toContain('run `vault-cli research scout-batch-payload-schema --format json`')
+    expect(researchScoutRecord?.instructions).toContain('sole provider-value catalog')
+    expect(researchScoutRecord?.instructions).toContain('every provider value is an exact concept allowed for that field')
     expect(researchScoutRecord?.instructions).toContain('If none exists, suppress the scheduled message without calling `vault-cli research scout-batch`')
-    expect(researchScoutRecord?.instructions).toContain('do not use a generic `tags` field')
-    expect(researchScoutRecord?.instructions).toContain('late meals and glucose')
-    expect(researchScoutRecord?.instructions).toContain('zone 2 training and resting heart rate')
+    expect(researchScoutRecord?.instructions).toContain('If no current question can be represented exactly, suppress the scheduled message without calling `vault-cli research scout-batch`')
+    expect(researchScoutRecord?.instructions).toContain('or a generic `tags` field')
+    expect(researchScoutRecord?.instructions).not.toContain('Example body:')
+    expect(researchScoutRecord?.instructions).not.toContain('blue light glasses')
+    expect(researchScoutRecord?.instructions).not.toContain('late meals')
     expect(researchScoutRecord?.instructions).toContain('device and measurement meta-commentary')
     expect(researchScoutRecord?.instructions).toContain('a trend in their own wearable data')
     expect(researchScoutRecord?.instructions).toContain('ignore a metric their own data shows is noisy for them')
@@ -1376,7 +1385,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     ])
   })
 
-  it('preserves the signup schedule minute and pending first occurrence during same-pass reconciliation', async () => {
+  it('preserves the signup schedule minute and pending first occurrence without a redundant reconciliation write', async () => {
     const vaultRoot = await createVaultRoot()
     const vault = await loadVault({ vaultRoot })
     const vaultStableKey = vault.metadata.vaultId ?? 'vault-fallback'
@@ -1421,7 +1430,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toEqual({
       created: 5,
       skipped: 0,
-      updated: 1,
+      updated: 0,
     })
 
     await expect(showAutomation({

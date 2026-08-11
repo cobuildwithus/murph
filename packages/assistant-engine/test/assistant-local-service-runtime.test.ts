@@ -41,6 +41,9 @@ import { resolveAssistantConversationKey } from '../src/assistant/bindings.ts'
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
 } from '../src/assistant/response-media.ts'
+import type {
+  AssistantProviderStartCriticalPathContext,
+} from '../src/assistant/provider-start-critical-path.ts'
 import { readAssistantTranscriptEntries } from '../src/assistant/store/persistence.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
@@ -234,7 +237,9 @@ test('sendAssistantMessageLocal hands off product feedback only after durable re
   })
 
   expect(acceptProductFeedbackCandidate).toHaveBeenCalledOnce()
-  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(productFeedbackCandidate)
+  expect(acceptProductFeedbackCandidate).toHaveBeenCalledWith(
+    productFeedbackCandidate,
+  )
   expect(
     acceptProductFeedbackCandidate.mock.invocationCallOrder[0],
   ).toBeGreaterThan(
@@ -2372,12 +2377,7 @@ test('sendAssistantMessageLocal reports thrown preceding delivery when no final 
 test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProviderRequestStarted', async () => {
   const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule()
   let providerStartCriticalPath:
-    | {
-        assistantServiceStartedAtMonotonicMs?: number
-        assistantTurnLockAcquiredAtMonotonicMs?: number
-        assistantTurnLockWaitStartedAtMonotonicMs?: number
-        preProviderSetupDoneAtMonotonicMs?: number
-      }
+    | AssistantProviderStartCriticalPathContext
     | null
     | undefined
 
@@ -2411,7 +2411,16 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
     onProviderRequestStarted: providerRequestStarted,
     providerStartCriticalPath: {
       assistantPhaseStartedAtMonotonicMs: 0,
+      automationCandidateScanDoneAtMonotonicMs: 0,
+      automationCrossSessionContextDoneAtMonotonicMs: 0,
+      automationGroupAndOperationScopeDoneAtMonotonicMs: 0,
+      automationInputSelectionDoneAtMonotonicMs: 0,
       automationLaneStartedAtMonotonicMs: 0,
+      automationPassSetupDoneAtMonotonicMs: 0,
+      automationPromptPreparationDoneAtMonotonicMs: 0,
+      automationReadinessDoneAtMonotonicMs: 0,
+      automationSessionPreflightDoneAtMonotonicMs: 0,
+      automationTerminalEvidenceDoneAtMonotonicMs: 0,
       mailboxImportDoneAtMonotonicMs: 0,
     },
     prompt: 'Measure setup split',
@@ -2423,6 +2432,16 @@ test('sendAssistantMessageLocal surfaces the provider setup sub-split on onProvi
     assistantServiceStartedAtMonotonicMs: expect.any(Number),
     assistantTurnLockAcquiredAtMonotonicMs: expect.any(Number),
     assistantTurnLockWaitStartedAtMonotonicMs: expect.any(Number),
+    automationCandidateScanDoneAtMonotonicMs: 0,
+    automationCrossSessionContextDoneAtMonotonicMs: 0,
+    automationGroupAndOperationScopeDoneAtMonotonicMs: 0,
+    automationInputSelectionDoneAtMonotonicMs: 0,
+    automationLaneStartedAtMonotonicMs: 0,
+    automationPassSetupDoneAtMonotonicMs: 0,
+    automationPromptPreparationDoneAtMonotonicMs: 0,
+    automationReadinessDoneAtMonotonicMs: 0,
+    automationSessionPreflightDoneAtMonotonicMs: 0,
+    automationTerminalEvidenceDoneAtMonotonicMs: 0,
     preProviderSetupDoneAtMonotonicMs: expect.any(Number),
   }))
   expect(
@@ -5805,6 +5824,8 @@ test('sendAssistantMessageLocal routes hosted Linq model progress through progre
   assert.ok(progressDelivery)
   assert.ok(hostedToolContext)
   assert.equal(hostedToolContext.computerToolsAvailable, false)
+  assert.equal(hostedToolContext.pendingVaultFilesAvailable, true)
+  assert.equal(hostedToolContext.vaultFileSendAvailable, false)
   await progressDelivery.send('Checking the iMessage thread.')
 
   assert.equal(mocks.deliverAssistantProgressUpdate.mock.calls.length, 1)

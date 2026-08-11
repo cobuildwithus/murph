@@ -40,6 +40,7 @@ const hostedLocalRunUntilIdleTimeoutMs = 30_000;
 
 export interface HostedLocalDevHarness {
   assertNoInterventions(): void;
+  assertStripeListenerAlive(): void;
   config: ReturnType<typeof resolveHostedLocalDevConfig>;
   /** The app-session HMAC key the web process runs with. */
   hostedAppSessionHmacKey: string;
@@ -50,6 +51,17 @@ export interface HostedLocalDevHarness {
   requestJson<T>(pathname: string, init?: RequestInit): Promise<T>;
   readUserStatus(userId: string): Promise<HostedRunnerStatusResponse>;
   armCanonicalCheckpointLostAckForTest(userId: string): Promise<{ ok: true }>;
+  armTemporalMailboxSignalFaultForTest(
+    userId: string,
+    mailboxItemId: string,
+  ): Promise<{
+    armed: true;
+    deliveredToPendingConsumer: boolean;
+  }>;
+  clearTemporalMailboxSignalFaultForTest(userId: string): Promise<{
+    cleared: boolean;
+    ok: true;
+  }>;
   armForegroundPriorityOrderingObservationForTest(
     userId: string,
     barrierTarget:
@@ -229,6 +241,14 @@ export async function startHostedLocalDevHarness(input: {
           `Expected a passive hosted-local scenario, but the harness issued ${interventionCount} mutating intervention request(s). Deliberate recovery controls require faultInjection: true.`,
         );
       },
+      assertStripeListenerAlive: (): void => {
+        const stripeListener = stack?.processes.stripe;
+        if (!stripeListener || stripeListener.child.exitCode !== null) {
+          throw new Error(
+            "The hosted-local scenario requires its owned stripe listen process to remain alive.",
+          );
+        }
+      },
       config: {
         ...config,
         workerPersistDir: persistDir,
@@ -249,8 +269,10 @@ export async function startHostedLocalDevHarness(input: {
       },
       armGeneratedImageProviderBarrierForTest,
       armCanonicalCheckpointLostAckForTest,
+      armTemporalMailboxSignalFaultForTest,
       armForegroundPriorityOrderingObservationForTest,
       clearForegroundPriorityOrderingObservationForTest,
+      clearTemporalMailboxSignalFaultForTest,
       armSnapshotPublicationCorruptionForTest,
       armIdleSnapshotStartBarrierForTest,
       armShutdownCheckpointPublicationBarrierForTest,
@@ -586,6 +608,61 @@ export async function startHostedLocalDevHarness(input: {
     assertHostedLocalTestControlsAvailable("armCanonicalCheckpointLostAckForTest");
     return await requestJsonForRuntime<{ ok: true }>(
       `/__test/users/${encodeURIComponent(userId)}/canonical-checkpoint-lost-ack`,
+      {
+        headers: {
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function armTemporalMailboxSignalFaultForTest(
+    userId: string,
+    mailboxItemId: string,
+  ): Promise<{
+    armed: true;
+    deliveredToPendingConsumer: boolean;
+  }> {
+    assertHostedLocalTestControlsAvailable(
+      "armTemporalMailboxSignalFaultForTest",
+    );
+    return await requestJsonForRuntime<{
+      armed: true;
+      deliveredToPendingConsumer: boolean;
+    }>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + "/temporal-mailbox-signal-fault/arm",
+      {
+        body: JSON.stringify({ mailboxItemId }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          [HOSTED_EXECUTION_USER_ID_HEADER]: userId,
+          ...statusHeaders(userId),
+        },
+        method: "POST",
+        signal: AbortSignal.timeout(hostedLocalActivityExpiryTimeoutMs),
+      },
+    );
+  }
+
+  async function clearTemporalMailboxSignalFaultForTest(
+    userId: string,
+  ): Promise<{
+    cleared: boolean;
+    ok: true;
+  }> {
+    assertHostedLocalTestControlsAvailable(
+      "clearTemporalMailboxSignalFaultForTest",
+    );
+    return await requestJsonForRuntime<{
+      cleared: boolean;
+      ok: true;
+    }>(
+      `/__test/users/${encodeURIComponent(userId)}`
+        + "/temporal-mailbox-signal-fault/clear",
       {
         headers: {
           [HOSTED_EXECUTION_USER_ID_HEADER]: userId,

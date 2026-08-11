@@ -10,7 +10,11 @@ import { redirect } from "next/navigation";
 
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
 import { ActionApprovalCard } from "@/src/components/sensitive-actions/action-approval-card";
-import { ActionApprovalScreen } from "@/src/components/sensitive-actions/action-approval-screen";
+import {
+  ACTION_APPROVAL_DENIED_DESCRIPTION,
+  ACTION_APPROVAL_RECORDED_DESCRIPTION,
+  ActionApprovalScreen,
+} from "@/src/components/sensitive-actions/action-approval-screen";
 import { HostedPrivyBoundary } from "@/src/components/hosted-onboarding/hosted-privy-boundary";
 import { resolveHostedMurphContactOptions } from "@/src/components/murph/hosted-murph-contact-action";
 import { MurphContactLink } from "@/src/components/murph/murph-contact-link";
@@ -94,7 +98,8 @@ async function ActionApprovalTerminalState({
       }).catch(() => []);
 
   // Approved revisits return to the originating conversation. The durable
-  // system wake resumes the action without requiring a foreground message.
+  // system wake asks the runtime to resume only if it still owns the action;
+  // no foreground confirmation message is required.
   // Denied/expired stay on-screen so the member can read what happened first.
   if (approval.status === "approved" && contactOptions[0]?.href) {
     redirect(contactOptions[0].href);
@@ -178,14 +183,14 @@ function terminalContent(
     case "approved":
       return {
         actionLabel: "Return to Murph",
-        description: "You approved this action. Head back to Murph to continue.",
+        description: ACTION_APPROVAL_RECORDED_DESCRIPTION,
         icon: CheckCircle2,
         title: "Approved",
       };
     case "denied":
       return {
         actionLabel: "Return to Murph",
-        description: "Murph will not continue with this action.",
+        description: ACTION_APPROVAL_DENIED_DESCRIPTION,
         icon: XCircle,
         title: "Denied",
       };

@@ -1,6 +1,9 @@
 import type {
   HostedWorkspaceInvocationResult,
 } from "@murphai/hosted-execution/runtime-control";
+import type {
+  CloudflareHostedControlRuntimeShellPrewarmSource,
+} from "@murphai/cloudflare-hosted-control/client";
 import type { R2BucketLike } from "./bundle-store.ts";
 import type { HostedBrowserVaultReplicaOrphanCandidate } from "./browser-vault-store.ts";
 import type {
@@ -21,6 +24,14 @@ export interface WorkerSendEmailBindingLike {
 
 export interface WorkerAiBindingLike {
   run(model: string, input: Record<string, unknown>): Promise<unknown>;
+}
+
+export interface WorkerAnalyticsEngineDatasetLike {
+  writeDataPoint(dataPoint: {
+    blobs?: string[];
+    doubles?: number[];
+    indexes?: string[];
+  }): void;
 }
 
 export type WorkerProviderEgressTokenValidationRejectReason =
@@ -119,6 +130,10 @@ export interface WorkerRunnerContainerNamespaceLike<
 export interface WorkerUserRunnerStubLike {
   bindUser?(userId: string): Promise<{ userId: string }>;
   deleteHostedUserData?(userId: string): Promise<unknown>;
+  prewarmRuntimeShellForUser?(
+    userId: string,
+    source?: CloudflareHostedControlRuntimeShellPrewarmSource,
+  ): Promise<void>;
   reconcileRuntimeHealthDataConsentForUser?(userId: string): Promise<unknown>;
   publishHostedPrivateMedia?(
     input: HostedPrivateMediaPublishInput,
@@ -126,6 +141,18 @@ export interface WorkerUserRunnerStubLike {
   createHostedWorkspaceSnapshotUploadSession?(
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  heartbeatHostedWorkspaceSnapshotUploadSession?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
+  completeHostedWorkspaceSnapshotUploadSession?(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
   rememberHostedWorkspaceSnapshotReplacedRef?(input: {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
@@ -215,6 +242,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN?: string;
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID?: string;
   HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET?: string;
+  HOSTED_RUNTIME_RETRY_ANALYTICS?: WorkerAnalyticsEngineDatasetLike;
   HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS?: string;
   HOSTED_AI_USAGE_REPORTING_SECRET?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;

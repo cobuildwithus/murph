@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 import type {
   HostedReturnContactKind,
 } from '@murphai/hosted-execution/return-contact'
@@ -13,9 +15,6 @@ import {
 import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
-import type {
-  HostedPhoneCallBrief,
-} from '@murphai/hosted-execution/phone-calls'
 import type {
   AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -57,10 +56,6 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
-import {
-  type AssistantGroupPhoneCallPreviewAuthority,
-  resolveDeliveredAssistantGroupPhoneCallPreviewAuthority,
-} from './group-phone-call-preview-authority.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -86,10 +81,30 @@ export interface AssistantHostedScheduledPhoneCallScope
   originSessionId: string
 }
 
-export interface AssistantHostedInvocationScope {
+interface AssistantHostedInvocationScopeBase {
   conversationScope: AssistantConversationScope | null
-  origin: HostedExecutionAssistantAskOrigin
+  originSessionId?: string
 }
+
+export interface AssistantHostedAcceptedInputInvocationScope
+  extends AssistantHostedInvocationScopeBase {
+  origin: Extract<
+    HostedExecutionAssistantAskOrigin,
+    { kind: 'accepted_input' }
+  >
+}
+
+export interface AssistantHostedScheduledInvocationScope
+  extends AssistantHostedInvocationScopeBase {
+  origin: Extract<
+    HostedExecutionAssistantAskOrigin,
+    { kind: 'automation_occurrence' }
+  >
+}
+
+export type AssistantHostedInvocationScope =
+  | AssistantHostedAcceptedInputInvocationScope
+  | AssistantHostedScheduledInvocationScope
 
 export type AssistantHostedVaultFileSendResult =
   | {
@@ -141,10 +156,6 @@ export interface AssistantHostedToolContext {
   claimIMessageContactAssistantInputId?(): string | null
   currentScheduledAutomationAuthority?(): HostedRuntimeNewsletterScheduledAuthority | null
   currentInvocationScope?(): AssistantHostedInvocationScope | null
-  currentGroupPhoneCallPreviewAuthority?(input?: {
-    brief?: HostedPhoneCallBrief
-    confirmationInputId?: string
-  }): Promise<AssistantGroupPhoneCallPreviewAuthority | null>
   closeNewsletterCapability?(): void
   recordNewsletterSendResult?(
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -159,10 +170,12 @@ export interface AssistantHostedToolContext {
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
+  readonly pendingVaultFilesAvailable?: boolean
   readonly vaultFileSendAvailable: boolean
   sendVaultFile(
     ref: string,
     toolCallId?: string | null,
+    retireExportPackIds?: readonly string[],
   ): Promise<AssistantHostedVaultFileSendResult>
 }
 
@@ -184,6 +197,7 @@ export function createAssistantHostedToolContext(input: {
     turnId: string
     vault: string
   } | null
+  pendingVaultFilesAvailable?: boolean
   route?: CodexThreadIdentity | null
   recordNewsletterSendResult?: (
     result: Extract<HostedRuntimeNewsletterToolResponse, { action: 'send' }>,
@@ -192,6 +206,7 @@ export function createAssistantHostedToolContext(input: {
   sendVaultFile?: (
     ref: string,
     toolCallId?: string | null,
+    retireExportPackIds?: readonly string[],
   ) => Promise<AssistantHostedVaultFileSendResult>
   session: AssistantSession
 }): AssistantHostedToolContext {
@@ -256,6 +271,33 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     }
   }
+  const readCurrentInvocationScope = (): AssistantHostedInvocationScope | null => {
+    const userActionScope = readCurrentUserActionScope()
+    const assistantInputId = userActionScope?.acceptedInputIds.at(-1) ?? null
+    if (
+      userActionScope &&
+      assistantInputId &&
+      userActionScope.conversationScope !== 'unverified-external'
+    ) {
+      const acceptedInputScope: AssistantHostedAcceptedInputInvocationScope = {
+        conversationScope: userActionScope.conversationScope,
+        origin: {
+          assistantInputId,
+          kind: 'accepted_input',
+          sessionId: userActionScope.originSessionId,
+        },
+        originSessionId: userActionScope.originSessionId,
+      }
+      return acceptedInputScope
+    }
+    const deliveryContext = readDeliveryContext()
+    return resolveAssistantHostedScheduledInvocationScope({
+      conversationScope:
+        input.getConversationScope?.() ?? 'unverified-external',
+      messageInput: deliveryContext.messageInput,
+      originSessionId: deliveryContext.session.sessionId,
+    })
+  }
   const readCurrentScheduledPhoneCallScope = () => {
     const deliveryContext = readDeliveryContext()
     return resolveAssistantHostedScheduledPhoneCallScope({
@@ -281,9 +323,17 @@ export function createAssistantHostedToolContext(input: {
     clinicalRecordsConnectLinkTool: clinicalRecordsConnectLinkTool
       ? {
           createConnectLink: (options) => {
-            clinicalRecordsConnectLinkRequest ??=
-              clinicalRecordsConnectLinkTool.createConnectLink(options)
-            return clinicalRecordsConnectLinkRequest
+            if (clinicalRecordsConnectLinkRequest) {
+              return clinicalRecordsConnectLinkRequest
+            }
+            const request = clinicalRecordsConnectLinkTool.createConnectLink(options)
+            clinicalRecordsConnectLinkRequest = request
+            void request.catch(() => {
+              if (clinicalRecordsConnectLinkRequest === request) {
+                clinicalRecordsConnectLinkRequest = null
+              }
+            })
+            return request
           },
         }
       : null,
@@ -408,63 +458,67 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
-    currentGroupPhoneCallPreviewAuthority: async (authorityInput) => {
-      const deliveryContext = readDeliveryContext()
-      return await resolveDeliveredAssistantGroupPhoneCallPreviewAuthority({
-        acceptedInputIds:
-          input.getUserActionAcceptedInputIds?.() ?? [],
-        ...(authorityInput?.brief === undefined
-          ? {}
-          : { brief: authorityInput.brief }),
-        channel: deliveryContext.messageInput.channel,
-        ...(authorityInput?.confirmationInputId === undefined
-          ? {}
-          : { confirmationInputId: authorityInput.confirmationInputId }),
-        sessionId: deliveryContext.session.sessionId,
-        vault: deliveryContext.messageInput.vault,
-      })
-    },
     currentScheduledAutomationAuthority: () => {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.scheduledAutomationAuthority ?? null
     },
-    currentInvocationScope: () => {
-      const userActionScope = readCurrentUserActionScope()
-      const assistantInputId = userActionScope?.acceptedInputIds.at(-1) ?? null
-      if (userActionScope && assistantInputId) {
-        return {
-          conversationScope: userActionScope.conversationScope,
-          origin: {
-            assistantInputId,
-            kind: 'accepted_input',
-            sessionId: userActionScope.originSessionId,
-          },
-        }
-      }
-      const authority =
-        readDeliveryContext().messageInput.scheduledInvocationAuthority ?? null
-      return authority
-        ? {
-            conversationScope: null,
-            origin: {
-              automationId: authority.automationId,
-              kind: 'automation_occurrence',
-              occurrenceAt: authority.occurrenceAt,
-            },
-          }
-        : null
-    },
+    currentInvocationScope: readCurrentInvocationScope,
     closeNewsletterCapability: newsletterOutboxTool?.closeCapability,
     recordNewsletterSendResult: input.recordNewsletterSendResult,
     currentScheduledPhoneCallScope: readCurrentScheduledPhoneCallScope,
     currentUserActionScope: readCurrentUserActionScope,
     currentProductFeedbackAcceptedInputIds: () =>
       input.getProductFeedbackAcceptedInputIds?.() ?? [],
+    pendingVaultFilesAvailable: input.pendingVaultFilesAvailable === true,
     sendVaultFile: input.sendVaultFile ?? (async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
     vaultFileSendAvailable: typeof input.sendVaultFile === 'function',
   }
+}
+
+export function resolveAssistantHostedScheduledInvocationScope(input: {
+  conversationScope: AssistantConversationScope
+  messageInput: Pick<
+    AssistantMessageInput,
+    'scheduledInvocationAuthority' | 'scheduledOccurrenceAt' | 'turnTrigger'
+  >
+  originSessionId: string
+}): AssistantHostedScheduledInvocationScope | null {
+  const authority = input.messageInput.scheduledInvocationAuthority ?? null
+  if (
+    input.conversationScope === 'unverified-external'
+    || input.messageInput.turnTrigger !== 'automation-cron'
+    || authority === null
+    || authority.occurrenceAt !== input.messageInput.scheduledOccurrenceAt
+  ) {
+    return null
+  }
+
+  return {
+    conversationScope: input.conversationScope,
+    origin: {
+      automationId: authority.automationId,
+      kind: 'automation_occurrence',
+      occurrenceAt: authority.occurrenceAt,
+    },
+    originSessionId: input.originSessionId,
+  }
+}
+
+export function createAssistantHostedScheduledRequestKey(input: {
+  operation: 'clinical-records-connect-link'
+  origin: AssistantHostedScheduledInvocationScope['origin']
+}): `scheduled_${string}` {
+  const digest = createHash('sha256')
+    .update(JSON.stringify({
+      automationId: input.origin.automationId,
+      occurrenceAt: input.origin.occurrenceAt,
+      operation: input.operation,
+      schema: 'murph.assistant-scheduled-request-key.v1',
+    }))
+    .digest('hex')
+  return `scheduled_${digest}`
 }
 
 // The host, not the model or tool arguments, owns which durable session an
@@ -494,21 +548,18 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   >
   originSessionId: string
 }): AssistantHostedScheduledPhoneCallScope | null {
-  const authority = input.messageInput.scheduledInvocationAuthority ?? null
+  const scope = resolveAssistantHostedScheduledInvocationScope(input)
   if (
     input.channel?.trim().toLowerCase() !== 'linq'
-    || input.conversationScope !== 'direct'
-    || input.messageInput.turnTrigger !== 'automation-cron'
-    || authority === null
-    || authority.occurrenceAt !== input.messageInput.scheduledOccurrenceAt
+    || scope?.conversationScope !== 'direct'
   ) {
     return null
   }
 
   return {
-    automationId: authority.automationId,
-    occurrenceAt: authority.occurrenceAt,
-    originSessionId: input.originSessionId,
+    automationId: scope.origin.automationId,
+    occurrenceAt: scope.origin.occurrenceAt,
+    originSessionId: scope.originSessionId ?? input.originSessionId,
   }
 }
 

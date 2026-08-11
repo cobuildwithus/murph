@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { stringifyFrontmatterDocument } from '@murphai/core'
 import {
@@ -19,7 +20,6 @@ import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 
 export const GROUP_ROOM_MODEL_KNOWLEDGE_SLUG = 'group-room-model'
 export const GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_TYPE = 'group-room-model'
-export const GROUP_ROOM_MODEL_KNOWLEDGE_PAGE_MAX_BYTES = 8 * 1024
 
 export function deriveKnowledgeTitle(input: {
   body?: string | null
@@ -125,7 +125,12 @@ export function toKnowledgePage(page: DerivedKnowledgeNode, markdown: string): K
       sourcePaths: page.sourcePaths,
     }).trim(),
     markdown,
+    pageRevisionDigest: digestKnowledgePageRevision(markdown),
   }
+}
+
+export function digestKnowledgePageRevision(markdown: string): string {
+  return createHash('sha256').update(markdown).digest('hex')
 }
 
 export function normalizeSourcePathInputs(value: readonly string[] | null | undefined): string[] {

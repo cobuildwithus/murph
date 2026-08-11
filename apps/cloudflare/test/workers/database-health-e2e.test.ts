@@ -17,24 +17,20 @@ import worker, {
 import {
   readDatabaseHealthMessageRequests,
   resetDatabaseHealthMessageRequests,
+  setDatabaseHealthClientWaitSeconds,
+  setDatabaseHealthNowMs,
 } from "./database-health-fetch.ts";
 
+const FIVE_MINUTES_MS = 5 * 60 * 1_000;
+const ONE_HOUR_MS = 60 * 60 * 1_000;
+
 describe("database health scheduled Worker path", () => {
-  it("dispatches through the real SQLite Durable Object and persists the sample", async () => {
+  it("retains a truthful page through recovery and the hourly fence", async () => {
     resetDatabaseHealthMessageRequests();
     const scheduledAtMs = Date.now();
-    const context = createExecutionContext();
-    worker.scheduled(createScheduledController({
-      cron: "*/5 * * * *",
-      scheduledTime: new Date(scheduledAtMs),
-    }), env as WorkerEnvironmentSource, context);
-    await waitOnExecutionContext(context);
-    const namespace = (
-      env as typeof env & {
-        DATABASE_HEALTH_MONITOR:
-          DurableObjectNamespace<VitestDatabaseHealthDurableObject>;
-      }
-    ).DATABASE_HEALTH_MONITOR;
+    setDatabaseHealthNowMs(scheduledAtMs);
+    await runDatabaseHealthCron(scheduledAtMs);
+    const namespace = readDatabaseHealthNamespace();
     const samples = await namespace
       .getByName("production")
       .readRecentSamples({ limit: 10 });
@@ -70,5 +66,63 @@ describe("database health scheduled Worker path", () => {
       idempotencyKey: "murph-db-1-1-recipient-2",
     });
     expect(secondary?.messageParts).toEqual(primary?.messageParts);
+
+    setDatabaseHealthClientWaitSeconds(0);
+    setDatabaseHealthNowMs(scheduledAtMs + FIVE_MINUTES_MS);
+    await runDatabaseHealthCron(scheduledAtMs + FIVE_MINUTES_MS);
+
+    setDatabaseHealthClientWaitSeconds(9);
+    setDatabaseHealthNowMs(scheduledAtMs + FIVE_MINUTES_MS * 2);
+    await runDatabaseHealthCron(scheduledAtMs + FIVE_MINUTES_MS * 2);
+    const pendingState = await namespace
+      .getByName("production")
+      .readAlertState();
+    expect(readDatabaseHealthMessageRequests()).toHaveLength(2);
+    expect(pendingState.pendingAlertMessage).toContain("PgBouncer wait 9s");
+    expect(pendingState.pendingAlertMessage)
+      .not.toMatch(
+        /\b(?:active|availability|capacity|connection|current|degraded|headroom|live|now|pressure|remains?|still|threshold|unresolved|utilization)\b/iu,
+      );
+
+    setDatabaseHealthClientWaitSeconds(0);
+    setDatabaseHealthNowMs(scheduledAtMs + FIVE_MINUTES_MS * 3);
+    await runDatabaseHealthCron(scheduledAtMs + FIVE_MINUTES_MS * 3);
+    expect(readDatabaseHealthMessageRequests()).toHaveLength(2);
+
+    setDatabaseHealthNowMs(scheduledAtMs + ONE_HOUR_MS);
+    await runDatabaseHealthCron(scheduledAtMs + ONE_HOUR_MS);
+    const retriedMessageRequests = readDatabaseHealthMessageRequests();
+    expect(retriedMessageRequests).toHaveLength(4);
+    expect(retriedMessageRequests[2]?.messageParts[0]?.value)
+      .toBe(pendingState.pendingAlertMessage);
+    expect(retriedMessageRequests[3]?.messageParts)
+      .toEqual(retriedMessageRequests[2]?.messageParts);
+    expect(
+      await namespace.getByName("production").readAlertState(),
+    ).toMatchObject({
+      incidentOpen: false,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
   });
 });
+
+function readDatabaseHealthNamespace(): DurableObjectNamespace<
+  VitestDatabaseHealthDurableObject
+> {
+  return (
+    env as typeof env & {
+      DATABASE_HEALTH_MONITOR:
+        DurableObjectNamespace<VitestDatabaseHealthDurableObject>;
+    }
+  ).DATABASE_HEALTH_MONITOR;
+}
+
+async function runDatabaseHealthCron(scheduledAtMs: number): Promise<void> {
+  const context = createExecutionContext();
+  worker.scheduled(createScheduledController({
+    cron: "*/5 * * * *",
+    scheduledTime: new Date(scheduledAtMs),
+  }), env as WorkerEnvironmentSource, context);
+  await waitOnExecutionContext(context);
+}

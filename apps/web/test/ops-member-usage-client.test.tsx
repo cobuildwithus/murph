@@ -95,6 +95,7 @@ describe("MemberUsageClient", () => {
     cleanupRender = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain("Members and containers");
+    expect(rendered.container.textContent).not.toContain("Legacy Pulse trials");
     expect(rendered.container.textContent).toContain("30-day mailbox window");
     expect(rendered.container.textContent).toContain("hbm_container");
     expect(rendered.container.textContent).toContain("2 participants");

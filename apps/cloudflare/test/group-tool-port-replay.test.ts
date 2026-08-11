@@ -57,6 +57,21 @@ const replaySafeRequests = [
       result: { status: "accepted" },
     },
   },
+  {
+    action: "message_current_sender",
+    request: {
+      action: "message_current_sender",
+      origin: {
+        assistantInputId: `ain_${"d".repeat(32)}`,
+        kind: "accepted_input",
+        sessionId: "session_group",
+      },
+    },
+    response: {
+      action: "message_current_sender",
+      result: { status: "accepted" },
+    },
+  },
 ] as const satisfies readonly {
   action: string;
   request: HostedRuntimeGroupToolRequest;
@@ -160,7 +175,9 @@ describe("hosted group tool exact replay", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.request(replaySafeRequests[0].request)).rejects.toThrow();
+    await expect(port.request(replaySafeRequests[0].request)).rejects.toMatchObject({
+      name: "TimeoutError",
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(canceled).toBe(true);
   });
@@ -211,9 +228,9 @@ describe("hosted group tool exact replay", () => {
       transport: { mode: "proxy" },
     });
 
-    await expect(port.request({ action: "read_current" })).rejects.toBeInstanceOf(
-      TypeError,
-    );
+    await expect(port.request({ action: "read_current" })).rejects.toMatchObject({
+      cause: expect.any(TypeError),
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 });

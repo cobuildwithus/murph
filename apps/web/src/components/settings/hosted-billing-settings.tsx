@@ -5,63 +5,39 @@ import {
   type HostedPlanUsageStatus,
 } from "@murphai/hosted-execution/plan-usage";
 
+import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import { Button } from "@/src/components/ui/button";
 import { Progress } from "@/src/components/ui/progress";
-import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
   formatHostedBillingPrice,
   getHostedBillingPlanDefinition,
-  isHostedPulseTrialBillingState,
   parseHostedBillingPhase,
   parseHostedBillingPlanCode,
 } from "@/src/lib/hosted-onboarding/billing-plans";
+import {
+  SETTINGS_CORE_FEATURES,
+  SETTINGS_EDGE_FEATURES,
+  SETTINGS_FAMILY_FEATURES,
+  SETTINGS_MAX_FEATURES,
+  SETTINGS_PULSE_FEATURES,
+} from "@/src/lib/hosted-onboarding/plan-features";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import { cn } from "@/src/lib/utils";
 
 import { BillingPortalButton } from "./billing-portal-button";
 import { HostedFamilyStartButton } from "./hosted-family-start-button";
-import { HostedSettingsSessionState } from "./hosted-settings-session-state";
-import { StartPaidPulseButton } from "./hosted-start-paid-pulse-button";
 import { HostedPlanChangeButton } from "./hosted-plan-change-button";
+import { HostedPlanCheckoutButton } from "./hosted-plan-checkout-button";
 import { SwitchToPulseButton } from "./hosted-plan-switch-to-pulse-button";
 import { UpgradeToEdgeButton } from "./hosted-plan-upgrade-button";
+import { HostedSettingsSessionState } from "./hosted-settings-session-state";
 import {
   HostedUsageTopUpDialog,
   type HostedUsageTopUpActivePurchase,
   type HostedUsageTopUpOffer,
   type HostedUsageTopUpReturn,
 } from "./hosted-usage-top-up-dialog";
-
-const GROUP_FEATURES = [
-  "Stay connected to Murph groups",
-  "Sync your health and activity data",
-  "Keep group scores current",
-  "Private Murph chat",
-  "Lighter included AI usage",
-];
-
-const PULSE_FEATURES = [
-  "Run experiments, see what changed",
-  "Sync your health data",
-  "Private before/after outcomes",
-  "Chat with Murph via iMessage, Telegram, or email",
-  "Access to the most capable AI models",
-];
-
-const EDGE_FEATURES = [
-  "Everything in Pulse",
-  "More usage on the latest AI models",
-  "Murph remembers more of your history",
-  "Deeper research and analysis",
-];
-
-const FAMILY_FEATURES = [
-  "2 to 6 people, one bill",
-  "Choose Pulse or Edge for each person",
-  "Each person keeps a private Murph",
-  "You can't see members' chats or health data",
-];
 
 interface PlanCardModel {
   action: ReactNode;
@@ -77,16 +53,19 @@ interface PlanCardModel {
 export function HostedBillingSettings(props: {
   authenticated: boolean;
   billingStatus?: unknown;
+  canManageBilling?: boolean;
+  canStartDirectPlan?: boolean;
   canStartFamily?: boolean;
-  canStartPaidPulse?: boolean;
+  canSwitchToEdge?: boolean;
   canSwitchToGroup?: boolean;
   canSwitchToPulse?: boolean;
-  canUpgradeToPulse?: boolean;
   canUpgradeToEdge?: boolean;
+  canUpgradeToMax?: boolean;
+  canUpgradeToPulse?: boolean;
   currentBillingPhase?: unknown;
   currentBillingPlanCode?: unknown;
-  currentCheckoutOffer?: unknown;
   currentPeriodEnd?: Date | null;
+  familyBillingOwner?: boolean;
   familyState?: "none" | "owner" | "sponsored";
   groupPaymentMethodSaved?: boolean;
   payerMemberId?: string | null;
@@ -94,7 +73,7 @@ export function HostedBillingSettings(props: {
   scheduledBillingEffectiveAt?: Date | null;
   scheduledBillingPlanCode?: unknown;
   showGroupPlan?: boolean;
-  pulseTrialBillingContinuationPending?: boolean;
+  showMaxPlan?: boolean;
   usageActivityDetail?: ReactNode;
   usageStatus?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
@@ -119,89 +98,244 @@ export function HostedBillingSettings(props: {
   const currentPhase = parseHostedBillingPhase(props.currentBillingPhase);
   const scheduledPlanCode = parseHostedBillingPlanCode(props.scheduledBillingPlanCode);
   const scheduledBillingEffectiveAt =
-    props.scheduledBillingEffectiveAt instanceof Date ? props.scheduledBillingEffectiveAt : null;
+    props.scheduledBillingEffectiveAt instanceof Date
+      ? props.scheduledBillingEffectiveAt
+      : null;
   const currentPeriodEndIso = props.currentPeriodEnd?.toISOString() ?? null;
 
   const familyState = props.familyState ?? "none";
   const familyCurrent = familyState === "owner" || familyState === "sponsored";
-  const familyOwner = familyState === "owner";
+  const activeFamilyOwner = familyState === "owner";
+  const familyBillingOwner = props.familyBillingOwner === true || activeFamilyOwner;
   const sponsoredMember = familyState === "sponsored";
-  const ownBillingActive = props.billingStatus === "active" && !familyCurrent;
-  const ownPaidBillingActive = ownBillingActive && currentPhase === "paid";
-  const pulseTrialActive =
-    ownBillingActive &&
-    currentPlanCode === "launch_monthly" &&
-    isHostedPulseTrialBillingState({
-      currentBillingPhase: props.currentBillingPhase,
-      currentCheckoutOffer: props.currentCheckoutOffer,
-    });
+  const ownAccessActive =
+    props.billingStatus === "active"
+    && !familyCurrent
+    && !familyBillingOwner;
+  const ownPaidBillingActive = ownAccessActive && currentPhase === "paid";
+  const starterAccessActive = ownAccessActive && !ownPaidBillingActive;
   const groupCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_group_monthly";
   const pulseCurrent =
-    (ownPaidBillingActive && currentPlanCode === "launch_monthly") ||
-    pulseTrialActive;
+    ownPaidBillingActive && currentPlanCode === "launch_monthly";
   const edgeCurrent =
     ownPaidBillingActive && currentPlanCode === "launch_edge_monthly";
+  const maxCurrent =
+    ownPaidBillingActive && currentPlanCode === "launch_max_monthly";
   const usageTopUpOffers = props.usageTopUpOffers ?? [];
+  const canStartDirectPlan =
+    props.canStartDirectPlan === true && !familyCurrent && !ownPaidBillingActive;
 
-  const isPulseTrial = pulseTrialActive;
-  const pulseTrialBillingContinuationPending =
-    props.pulseTrialBillingContinuationPending === true;
   const hasPendingGroupSwitch =
     scheduledPlanCode === "launch_group_monthly" &&
     scheduledBillingEffectiveAt !== null;
   const hasPendingPulseSwitch =
-    scheduledPlanCode === "launch_monthly" && scheduledBillingEffectiveAt !== null;
+    scheduledPlanCode === "launch_monthly" &&
+    scheduledBillingEffectiveAt !== null;
+  const hasPendingEdgeSwitch =
+    scheduledPlanCode === "launch_edge_monthly" &&
+    scheduledBillingEffectiveAt !== null;
+  const hasPendingMaxSwitch =
+    scheduledPlanCode === "launch_max_monthly" &&
+    scheduledBillingEffectiveAt !== null;
   const pendingGroupSwitchDate = hasPendingGroupSwitch
     ? formatHostedBillingDate(scheduledBillingEffectiveAt)
     : null;
   const pendingPulseSwitchDate = hasPendingPulseSwitch
     ? formatHostedBillingDate(scheduledBillingEffectiveAt)
     : null;
+  const pendingEdgeSwitchDate = hasPendingEdgeSwitch
+    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
+    : null;
+  const pendingMaxSwitchDate = hasPendingMaxSwitch
+    ? formatHostedBillingDate(scheduledBillingEffectiveAt)
+    : null;
+
+  const pulseAction: ReactNode = (() => {
+    if (activeFamilyOwner) {
+      return <FamilyBillingChangeButton block targetPlanName="Pulse" />;
+    }
+    if (familyBillingOwner) {
+      return null;
+    }
+    if (sponsoredMember) {
+      return null;
+    }
+    if (groupCurrent && props.canUpgradeToPulse === true) {
+      return (
+        <HostedPlanChangeButton
+          block
+          expectedCurrentPlanCode="launch_group_monthly"
+          mode="upgrade"
+          targetPlanCode="launch_monthly"
+        >
+          Choose Pulse
+        </HostedPlanChangeButton>
+      );
+    }
+    if (pulseCurrent) {
+      return <CurrentPlanButton />;
+    }
+    if (scheduledPlanCode !== null) {
+      return null;
+    }
+    if (maxCurrent) {
+      return props.canSwitchToPulse === true ? (
+        <HostedPlanChangeButton
+          block
+          currentPeriodEnd={currentPeriodEndIso}
+          mode="schedule"
+          targetPlanCode="launch_monthly"
+        >
+          Choose Pulse
+        </HostedPlanChangeButton>
+      ) : null;
+    }
+    if (props.canSwitchToPulse === true) {
+      return (
+        <SwitchToPulseButton block currentPeriodEnd={currentPeriodEndIso}>
+          Choose Pulse
+        </SwitchToPulseButton>
+      );
+    }
+    if (canStartDirectPlan) {
+      return (
+        <HostedPlanCheckoutButton block targetPlanCode="launch_monthly">
+          Choose Pulse
+        </HostedPlanCheckoutButton>
+      );
+    }
+    return props.canManageBilling === true ? (
+      <BillingPortalButton block label="Choose Pulse" variant="secondary" />
+    ) : null;
+  })();
+
+  const edgeAction: ReactNode = (() => {
+    if (activeFamilyOwner) {
+      return <FamilyBillingChangeButton block targetPlanName="Edge" />;
+    }
+    if (familyBillingOwner) {
+      return null;
+    }
+    if (sponsoredMember) {
+      return null;
+    }
+    if (edgeCurrent) {
+      return <CurrentPlanButton />;
+    }
+    if (scheduledPlanCode !== null) {
+      return null;
+    }
+    if (maxCurrent) {
+      return props.canSwitchToEdge === true ? (
+        <HostedPlanChangeButton
+          block
+          currentPeriodEnd={currentPeriodEndIso}
+          mode="schedule"
+          targetPlanCode="launch_edge_monthly"
+        >
+          Choose Edge
+        </HostedPlanChangeButton>
+      ) : null;
+    }
+    if (
+      props.canUpgradeToEdge === true &&
+      (
+        currentPlanCode === "launch_group_monthly" ||
+        currentPlanCode === "launch_monthly"
+      )
+    ) {
+      return (
+        <UpgradeToEdgeButton block expectedCurrentPlanCode={currentPlanCode}>
+          Choose Edge
+        </UpgradeToEdgeButton>
+      );
+    }
+    if (canStartDirectPlan) {
+      return (
+        <HostedPlanCheckoutButton block targetPlanCode="launch_edge_monthly">
+          Choose Edge
+        </HostedPlanCheckoutButton>
+      );
+    }
+    return props.canManageBilling === true ? (
+      <BillingPortalButton block label="Choose Edge" variant="secondary" />
+    ) : null;
+  })();
+
+  const maxAction: ReactNode = (() => {
+    if (familyBillingOwner) {
+      return null;
+    }
+    if (maxCurrent) {
+      return <CurrentPlanButton />;
+    }
+    if (scheduledPlanCode !== null) {
+      return null;
+    }
+    if (
+      props.canUpgradeToMax === true &&
+      (
+        currentPlanCode === "launch_group_monthly" ||
+        currentPlanCode === "launch_monthly" ||
+        currentPlanCode === "launch_edge_monthly"
+      )
+    ) {
+      return (
+        <HostedPlanChangeButton
+          block
+          expectedCurrentPlanCode={currentPlanCode}
+          mode="upgrade"
+          targetPlanCode="launch_max_monthly"
+        >
+          Choose Max
+        </HostedPlanChangeButton>
+      );
+    }
+    if (canStartDirectPlan) {
+      return (
+        <HostedPlanCheckoutButton block targetPlanCode="launch_max_monthly">
+          Choose Max
+        </HostedPlanCheckoutButton>
+      );
+    }
+    return null;
+  })();
 
   const cards: PlanCardModel[] = [
     ...(props.showGroupPlan === true && !familyCurrent
       ? [
           {
-            action: groupCurrent
+            action: familyBillingOwner
+              ? null
+              : groupCurrent
               ? <CurrentPlanButton />
               : hasPendingGroupSwitch
                 ? null
                 : props.canSwitchToGroup === true
-                  ? isPulseTrial
+                  ? (
+                      <HostedPlanChangeButton
+                        block
+                        currentPeriodEnd={currentPeriodEndIso}
+                        mode="schedule"
+                        targetPlanCode="launch_group_monthly"
+                      >
+                        Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
+                      </HostedPlanChangeButton>
+                    )
+                  : canStartDirectPlan
                     ? (
-                        <StartPaidPulseButton
+                        <HostedPlanCheckoutButton
                           block
                           targetPlanCode="launch_group_monthly"
-                          timing="at_trial_end"
                         >
                           Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
-                        </StartPaidPulseButton>
+                        </HostedPlanCheckoutButton>
                       )
-                    : (
-                        <HostedPlanChangeButton
-                          block
-                          currentPeriodEnd={currentPeriodEndIso}
-                          mode="schedule"
-                          targetPlanCode="launch_group_monthly"
-                        >
-                          Choose {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
-                        </HostedPlanChangeButton>
-                      )
-                  : isPulseTrial && props.canStartPaidPulse === true
-                    ? (
-                        <StartPaidPulseButton
-                          block
-                          targetPlanCode="launch_group_monthly"
-                          timing="now"
-                        >
-                          Start {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
-                        </StartPaidPulseButton>
-                      )
-                  : null,
+                    : null,
             current: groupCurrent,
             currentLabel: "Current plan",
-            features: GROUP_FEATURES,
+            features: SETTINGS_CORE_FEATURES,
             key: "launch_group_monthly",
             name: HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
             note: pendingGroupSwitchDate
@@ -215,42 +349,13 @@ export function HostedBillingSettings(props: {
         ]
       : []),
     {
-      action: familyOwner
-        ? <FamilyBillingChangeButton block targetPlanName="Pulse" />
-        : sponsoredMember
-          ? null
-        : groupCurrent && props.canUpgradeToPulse === true
-          ? (
-              <HostedPlanChangeButton
-                block
-                expectedCurrentPlanCode="launch_group_monthly"
-                mode="upgrade"
-                targetPlanCode="launch_monthly"
-              >
-                Choose Pulse
-              </HostedPlanChangeButton>
-            )
-        : pulseCurrent
-        ? isPulseTrial
-          && props.canStartPaidPulse === true
-          && !pulseTrialBillingContinuationPending
-          ? <StartPaidPulseButton block>Start Pulse plan</StartPaidPulseButton>
-          : <CurrentPlanButton />
-        : hasPendingPulseSwitch
-          ? null
-          : props.canSwitchToPulse === true
-            ? (
-                <SwitchToPulseButton block currentPeriodEnd={currentPeriodEndIso}>
-                  Choose Pulse
-                </SwitchToPulseButton>
-              )
-            : <BillingPortalButton block variant="secondary" label="Choose Pulse" />,
+      action: pulseAction,
       current: pulseCurrent,
-      currentLabel: isPulseTrial ? "Free trial" : "Current plan",
-      features: PULSE_FEATURES,
+      currentLabel: "Current plan",
+      features: SETTINGS_PULSE_FEATURES,
       key: "launch_monthly",
       name: "Pulse",
-      note: familyOwner
+      note: activeFamilyOwner
         ? "If you switch away from Family, your family members lose their included access when the Family plan ends."
         : pulseCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
           ? (
@@ -260,72 +365,124 @@ export function HostedBillingSettings(props: {
                 targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
               />
             )
-        : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
-        ? `Scheduled to start ${pendingPulseSwitchDate}`
-        : null,
+          : pulseCurrent && hasPendingMaxSwitch && pendingMaxSwitchDate
+            ? (
+                <PendingPlanChangeNote
+                  currentPlanName="Pulse"
+                  effectiveAt={pendingMaxSwitchDate}
+                  targetPlanName="Max"
+                />
+              )
+            : !pulseCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
+              ? `Scheduled to start ${pendingPulseSwitchDate}`
+              : starterAccessActive
+              ? "Starter usage does not expire. Choose Pulse for monthly included usage."
+              : null,
       price: formatHostedBillingPrice(
         getHostedBillingPlanDefinition("launch_monthly").recurringAmountUsdCents,
       ),
     },
     {
-      action: familyOwner
-        ? <FamilyBillingChangeButton block targetPlanName="Edge" />
-        : sponsoredMember
-          ? null
-        : edgeCurrent
-        ? <CurrentPlanButton />
-        : props.canUpgradeToEdge === true
-          ? currentPlanCode === "launch_group_monthly"
-            || currentPlanCode === "launch_monthly"
-            ? (
-                <UpgradeToEdgeButton
-                  block
-                  expectedCurrentPlanCode={currentPlanCode}
-                >
-                  Choose Edge
-                </UpgradeToEdgeButton>
-              )
-            : null
-          : <BillingPortalButton block variant="secondary" label="Choose Edge" />,
+      action: edgeAction,
       current: edgeCurrent,
       currentLabel: "Current plan",
-      features: EDGE_FEATURES,
+      features: SETTINGS_EDGE_FEATURES,
       key: "launch_edge_monthly",
       name: "Edge",
-      note: familyOwner
+      note: activeFamilyOwner
         ? "End or change the Family plan first, then switch to an individual plan."
-        : edgeCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
-        ? (
-            <PendingPlanChangeNote
-              currentPlanName="Edge"
-              effectiveAt={pendingPulseSwitchDate}
-              targetPlanName="Pulse"
-            />
-          )
-        : edgeCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
-        ? (
-            <PendingPlanChangeNote
-              currentPlanName="Edge"
-              effectiveAt={pendingGroupSwitchDate}
-              targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
-            />
-          )
-        : null,
+        : !edgeCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
+          ? `Scheduled to start ${pendingEdgeSwitchDate}`
+          : edgeCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
+          ? (
+              <PendingPlanChangeNote
+                currentPlanName="Edge"
+                effectiveAt={pendingPulseSwitchDate}
+                targetPlanName="Pulse"
+              />
+            )
+          : edgeCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
+            ? (
+                <PendingPlanChangeNote
+                  currentPlanName="Edge"
+                  effectiveAt={pendingGroupSwitchDate}
+                  targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
+                />
+              )
+            : edgeCurrent && hasPendingMaxSwitch && pendingMaxSwitchDate
+              ? (
+                  <PendingPlanChangeNote
+                    currentPlanName="Edge"
+                    effectiveAt={pendingMaxSwitchDate}
+                    targetPlanName="Max"
+                  />
+                )
+              : null,
       price: formatHostedBillingPrice(
-        getHostedBillingPlanDefinition("launch_edge_monthly").recurringAmountUsdCents,
+        getHostedBillingPlanDefinition("launch_edge_monthly")
+          .recurringAmountUsdCents,
       ),
     },
+    ...(props.showMaxPlan === true && !familyCurrent
+      ? [
+          {
+            action: maxAction,
+            current: maxCurrent,
+            currentLabel: "Current plan",
+            features: SETTINGS_MAX_FEATURES,
+            key: "launch_max_monthly",
+            name: "Max",
+            note: maxCurrent && hasPendingEdgeSwitch && pendingEdgeSwitchDate
+              ? (
+                  <PendingPlanChangeNote
+                    currentPlanName="Max"
+                    effectiveAt={pendingEdgeSwitchDate}
+                    targetPlanName="Edge"
+                  />
+                )
+              : maxCurrent && hasPendingPulseSwitch && pendingPulseSwitchDate
+                ? (
+                    <PendingPlanChangeNote
+                      currentPlanName="Max"
+                      effectiveAt={pendingPulseSwitchDate}
+                      targetPlanName="Pulse"
+                    />
+                  )
+                : maxCurrent && hasPendingGroupSwitch && pendingGroupSwitchDate
+                  ? (
+                      <PendingPlanChangeNote
+                        currentPlanName="Max"
+                        effectiveAt={pendingGroupSwitchDate}
+                        targetPlanName={HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME}
+                      />
+                    )
+                  : !maxCurrent && hasPendingMaxSwitch && pendingMaxSwitchDate
+                    ? `Scheduled to start ${pendingMaxSwitchDate}`
+                    : starterAccessActive
+                      ? "Starter usage does not expire. Choose Max for the highest monthly included usage."
+                      : null,
+            price: formatHostedBillingPrice(
+              getHostedBillingPlanDefinition("launch_max_monthly")
+                .recurringAmountUsdCents,
+            ),
+          } satisfies PlanCardModel,
+        ]
+      : []),
     {
       action: sponsoredMember
         ? null
-        : familyOwner
+        : activeFamilyOwner
           ? <CurrentPlanButton />
+          : familyBillingOwner
+            ? null
           : props.canStartFamily === true
-            ? <HostedFamilyStartButton block label="Choose Family" />
+            ? (
+                <HostedFamilyStartButton block label="Choose Family" />
+              )
             : null,
       current: familyCurrent,
       currentLabel: familyState === "sponsored" ? "Sponsored" : "Current plan",
-      features: FAMILY_FEATURES,
+      features: SETTINGS_FAMILY_FEATURES,
       key: "family",
       name: "Family",
       note: familyState === "sponsored" ? "Paid by your family plan owner." : null,
@@ -335,15 +492,25 @@ export function HostedBillingSettings(props: {
     },
   ];
 
-  const planResolved = groupCurrent || pulseCurrent || edgeCurrent || familyCurrent;
+  const paidPlanResolved =
+    groupCurrent || pulseCurrent || edgeCurrent || maxCurrent || familyCurrent;
+  const planGridColumns = cards.length >= 5
+    ? "sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5"
+    : cards.length === 4
+      ? "sm:grid-cols-2 lg:grid-cols-4"
+      : "sm:grid-cols-2 lg:grid-cols-3";
   const retainedPlan = currentPlanCode
     ? getHostedBillingPlanDefinition(currentPlanCode)
     : null;
-  const noPlanText = retainedPlan
-    ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
+  const noPlanText = familyBillingOwner && !activeFamilyOwner
+    ? "Your Family plan needs billing attention. Use Manage Family billing to repair or cancel it."
+    : starterAccessActive
+      ? null
+    : retainedPlan
+      ? `${retainedPlan.displayName} is not active. Choose a plan below or use Manage billing.`
     : props.billingStatus === "active"
-      ? "Your billing status is still syncing. Use Manage billing if it does not resolve."
-      : "You're not on a paid plan yet. Choose one below.";
+        ? "Your billing status is still syncing. Use Manage billing if it does not resolve."
+        : "Choose a plan below when you want recurring included usage.";
 
   return (
     <div className="flex flex-col gap-4">
@@ -357,19 +524,19 @@ export function HostedBillingSettings(props: {
               {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started
             </p>
             <p className="mt-1 max-w-2xl text-sm text-pretty text-muted-foreground">
-              {HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME} has not started. Review
-              the plan options below and make a fresh choice when you are
-              ready.
+              Review the plan options below and make a fresh choice when you are ready.
             </p>
           </div>
         </div>
       ) : null}
-      {!planResolved && !props.planChangePending && !props.groupPaymentMethodSaved ? (
+      {!paidPlanResolved
+        && !props.planChangePending
+        && !props.groupPaymentMethodSaved
+        && noPlanText ? (
         <p className="text-sm text-pretty text-muted-foreground">{noPlanText}</p>
       ) : null}
       <PlanUsageBand
         planChangePending={props.planChangePending === true}
-        pulseTrialBillingContinuationPending={pulseTrialBillingContinuationPending}
         status={props.usageStatus}
         usageTopUpActivePurchase={props.usageTopUpActivePurchase}
         usageTopUpCheckoutUrl={props.usageTopUpCheckoutUrl}
@@ -385,9 +552,7 @@ export function HostedBillingSettings(props: {
       <div
         className={cn(
           "grid items-stretch gap-3",
-          props.showGroupPlan === true && !familyCurrent
-            ? "sm:grid-cols-2 lg:grid-cols-4"
-            : "sm:grid-cols-3",
+          planGridColumns,
         )}
       >
         {cards.map((card) => (
@@ -404,13 +569,15 @@ export function HostedBillingSettings(props: {
           <p className="text-sm text-muted-foreground">
             Billing is managed by your Family plan owner.
           </p>
-        ) : (
+        ) : familyBillingOwner ? (
           <BillingPortalButton
-            billingScope={familyOwner ? "family" : "member"}
+            billingScope="family"
+            label="Manage Family billing"
             variant="ghost"
-            label={familyOwner ? "Manage Family billing" : "Manage billing"}
           />
-        )}
+        ) : props.canManageBilling === true ? (
+          <BillingPortalButton label="Manage billing" variant="ghost" />
+        ) : null}
       </div>
     </div>
   );
@@ -418,7 +585,6 @@ export function HostedBillingSettings(props: {
 
 function PlanUsageBand(props: {
   planChangePending: boolean;
-  pulseTrialBillingContinuationPending: boolean;
   status?: HostedPlanUsageStatus | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
   usageTopUpCheckoutUrl?: string;
@@ -432,11 +598,10 @@ function PlanUsageBand(props: {
 }) {
   const payerMemberId = props.payerMemberId?.trim() || null;
   const inactiveTopUpDialog =
-    payerMemberId && (
-      props.usageTopUpActivePurchase ||
+    payerMemberId &&
+    (props.usageTopUpActivePurchase ||
       props.usageTopUpInitialOpen ||
-      props.usageTopUpPurchaseReturn
-    ) ? (
+      props.usageTopUpPurchaseReturn) ? (
       <HostedUsageTopUpDialog
         activePurchase={props.usageTopUpActivePurchase}
         checkoutUrl={props.usageTopUpCheckoutUrl}
@@ -450,71 +615,30 @@ function PlanUsageBand(props: {
       />
     ) : null;
 
-  if (!props.status) {
+  if (!props.status || props.status.status === "unavailable") {
     return inactiveTopUpDialog;
   }
 
   const { status } = props;
-  if (status.status === "unavailable") {
-    if (status.reason !== "trial_conversion_pending") {
-      return inactiveTopUpDialog;
-    }
-
-    const action = status.recommendedAction;
-    const hasStartAction = action?.kind === "start_pulse";
-    const canShowStartAction =
-      hasStartAction
-      && !props.planChangePending
-      && !props.pulseTrialBillingContinuationPending;
-    return (
-      <>
-        <div
-          aria-label="Pulse Trial AI usage"
-          className="flex flex-col gap-3 border-y border-border/80 py-4 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <div>
-            <p className="text-sm font-semibold text-foreground">AI usage</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Pulse Trial · Trial ended
-            </p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {hasStartAction
-                ? props.pulseTrialBillingContinuationPending
-                  ? "Finishing your Pulse update."
-                  : "Start Pulse to keep Murph replying."
-                : "Your trial usage is no longer active."}
-            </p>
-          </div>
-          {canShowStartAction ? (
-            <StartPaidPulseButton>
-              {action?.label ?? "Start Pulse"}
-            </StartPaidPulseButton>
-          ) : null}
-        </div>
-        {inactiveTopUpDialog}
-      </>
-    );
-  }
-
-  const periodEndLabel = formatHostedBillingDate(new Date(status.periodEnd));
   const displayPlanName =
     status.planCode === "launch_group_monthly"
       ? HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME
       : status.planName;
-  const periodLabel = status.periodKind === "trial"
-    ? `Trial ends ${periodEndLabel}`
-    : `Resets ${periodEndLabel}`;
+  const periodLabel = status.periodKind === "lifetime"
+    ? null
+    : `Resets ${formatHostedBillingDate(new Date(status.periodEnd))}`;
   const action = status.recommendedAction;
-  const forecast = status.forecast
-    ? `At your recent pace, usage may run out in about ${status.forecast.estimatedDaysRemaining} ${status.forecast.estimatedDaysRemaining === 1 ? "day" : "days"}.`
-    : null;
+  const eligibleUsageTopUpOffers =
+    status.accessKind === "paid" || status.accessKind === "family_sponsored"
+    ? props.usageTopUpOffers
+    : [];
   const usageTopUpDialog = payerMemberId ? (
     <HostedUsageTopUpDialog
       activePurchase={props.usageTopUpActivePurchase}
       checkoutUrl={props.usageTopUpCheckoutUrl}
       contactOptions={props.usageTopUpContactOptions}
       initialOpen={props.usageTopUpInitialOpen}
-      offers={props.usageTopUpOffers}
+      offers={eligibleUsageTopUpOffers}
       payerMemberId={payerMemberId}
       purchaseReturn={props.usageTopUpPurchaseReturn}
       scope={props.usageTopUpScope}
@@ -533,26 +657,31 @@ function PlanUsageBand(props: {
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground">AI usage</p>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
-            {displayPlanName} · {periodLabel}
+            {displayPlanName}
+            {periodLabel ? ` · ${periodLabel}` : null}
           </p>
         </div>
-        {props.usageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
+        {eligibleUsageTopUpOffers.length > 0 || props.usageTopUpActivePurchase
           ? usageTopUpDialog
-          : action?.kind === "start_pulse"
-            && !props.planChangePending
-            && !props.pulseTrialBillingContinuationPending ? (
-          <StartPaidPulseButton>{action.label}</StartPaidPulseButton>
-        ) : action?.kind === "upgrade_edge" && !props.planChangePending ? (
-          <UpgradeToEdgeButton
-            expectedCurrentPlanCode={
-              status.planCode === "launch_group_monthly"
-                ? "launch_group_monthly"
-                : "launch_monthly"
-            }
-          >
-            {action.label}
-          </UpgradeToEdgeButton>
-        ) : null}
+          : !props.planChangePending && action?.kind === "start_pulse"
+            ? (
+                <HostedPlanCheckoutButton targetPlanCode="launch_monthly">
+                  {action.label}
+                </HostedPlanCheckoutButton>
+              )
+            : !props.planChangePending && action?.kind === "upgrade_edge"
+              ? (
+                  <UpgradeToEdgeButton
+                    expectedCurrentPlanCode={
+                      status.planCode === "launch_group_monthly"
+                        ? "launch_group_monthly"
+                        : "launch_monthly"
+                    }
+                  >
+                    {action.label}
+                  </UpgradeToEdgeButton>
+                )
+              : null}
       </div>
 
       <div className="mt-4 flex items-center gap-3">
@@ -567,16 +696,16 @@ function PlanUsageBand(props: {
       </div>
       {status.status === "exhausted" ? (
         <p className="mt-3 text-sm text-pretty text-muted-foreground">
-          {status.planCode === "launch_group_monthly"
-            ? "You've used this period's included AI usage. Your wearable keeps syncing and your group activity stays current."
-            : props.usageTopUpOffers.length > 0
-              ? "You've used all available usage. Add usage to continue."
-              : "You've used all available usage. Murph pauses new usage until more capacity is available."}
+          {status.accessKind === "starter"
+            ? "You've used your starter usage. Choose a monthly plan to continue."
+            : status.planCode === "launch_group_monthly"
+              ? "You've used this period's included AI usage. Your wearable keeps syncing and your group activity stays current."
+              : eligibleUsageTopUpOffers.length > 0
+                ? "You've used all available usage. Add usage to continue."
+                : "You've used all available usage. Murph pauses new usage until more capacity is available."}
         </p>
-      ) : forecast ? (
-        <p className="mt-3 text-sm text-pretty text-muted-foreground">{forecast}</p>
       ) : null}
-      {props.usageTopUpOffers.length === 0 &&
+      {eligibleUsageTopUpOffers.length === 0 &&
       !props.usageTopUpActivePurchase &&
       (props.usageTopUpInitialOpen || props.usageTopUpPurchaseReturn)
         ? usageTopUpDialog
@@ -594,7 +723,7 @@ function FamilyBillingChangeButton(props: {
       billingScope="family"
       block={props.block}
       variant="secondary"
-      label={`Manage Family billing`}
+      label="Manage Family billing"
       confirmation={{
         confirmLabel: "Open Family billing",
         title: `Switch from Family to ${props.targetPlanName}`,
@@ -675,7 +804,13 @@ function PlanCard({ card }: { card: PlanCardModel }) {
 
 function CurrentPlanButton() {
   return (
-    <Button type="button" variant="outline" size="default" disabled className="w-full">
+    <Button
+      className="w-full"
+      disabled
+      size="default"
+      type="button"
+      variant="outline"
+    >
       Current plan
     </Button>
   );

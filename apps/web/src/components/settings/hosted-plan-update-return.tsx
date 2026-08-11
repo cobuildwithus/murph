@@ -22,7 +22,7 @@ export function HostedPlanUpdateReturn(props: {
   pollingEnabled?: boolean;
   targetPlanCode: Extract<
     HostedBillingPlanCode,
-    "launch_edge_monthly" | "launch_monthly"
+    "launch_edge_monthly" | "launch_max_monthly" | "launch_monthly"
   >;
 }) {
   const router = useRouter();

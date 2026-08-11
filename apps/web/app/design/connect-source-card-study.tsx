@@ -6,6 +6,11 @@ import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
 import { DeviceSyncSetupGuideDialog } from "@/app/(dashboard)/home/device-sync-completion-dialog";
 import { markLocallyDisconnectedSources } from "@/app/(dashboard)/connect/connect-page-helpers";
+import {
+  APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI,
+  listAppleHealthRelayConnectSources,
+} from "@/app/(dashboard)/connect/apple-health-relay-connect-sources";
+import { MOBVOI_HEALTH_CONNECT_SOURCE } from "@/app/(dashboard)/connect/health-connect-relay-connect-sources";
 import type { ConnectSource } from "@/app/(dashboard)/connect/connect-page-types";
 import { buildAppleHealthRelaySetupGuide } from "@/src/lib/device-sync/apple-health-relay-setup-guide";
 import { buildZeppAppleHealthSetupGuide } from "@/src/lib/device-sync/zepp-apple-health-setup-guide";
@@ -17,17 +22,8 @@ type ConnectSourceCardStudyCase = {
 };
 
 const ZEPP_CONNECT_SOURCE: ConnectSource = {
-  description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
   id: "zepp",
-  logo: {
-    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-    height: 40,
-    src: "/brand-logos/connect/wearable-relay.svg",
-    width: 64,
-  },
-  name: "Zepp / Amazfit",
-  setupGuideActionLabel: "Set up sync",
-  setupGuideId: "zepp-apple-health",
+  ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI.zepp,
 };
 
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
@@ -35,6 +31,11 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
     authenticated: true,
     errorMessage: null,
     source: ZEPP_CONNECT_SOURCE,
+  },
+  {
+    authenticated: true,
+    errorMessage: null,
+    source: MOBVOI_HEALTH_CONNECT_SOURCE,
   },
   {
     authenticated: true,
@@ -205,12 +206,21 @@ const DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES = markLocallyDisconnectedSources(
   new Set(["garmin-disconnect-journey"]),
 );
 
-export function ConnectSourceCardStudy() {
+export function ConnectSourceCardStudy({
+  androidAppAvailable,
+}: {
+  androidAppAvailable: boolean;
+}) {
   const searchParams = useSearchParams();
   const studyState = searchParams?.get("connectDisconnectStudy") ?? null;
   const disconnectDialogSource = studyState === "source"
     ? DESIGN_CONNECT_SOURCE_CASES[0]?.source ?? null
     : null;
+  const defaultStudyCases = androidAppAvailable
+    ? DESIGN_CONNECT_SOURCE_CASES
+    : DESIGN_CONNECT_SOURCE_CASES.filter(
+        ({ source }) => source.id !== MOBVOI_HEALTH_CONNECT_SOURCE.id,
+      );
   const studyCases = studyState === "source-reconnect"
     ? DESIGN_SOURCE_DISCONNECT_JOURNEY_CASES
     : studyState === "source-success"
@@ -218,7 +228,7 @@ export function ConnectSourceCardStudy() {
           ...studyCase,
           source: DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES[index] ?? studyCase.source,
         }))
-      : DESIGN_CONNECT_SOURCE_CASES;
+      : defaultStudyCases;
 
   return (
     <>
@@ -296,54 +306,7 @@ export function ZeppAppleHealthSetupStudy() {
   );
 }
 
-function appleHealthRelayStudySource(
-  source: Pick<ConnectSource, "description" | "id" | "name" | "setupGuideId">,
-): ConnectSource {
-  return {
-    ...source,
-    logo: {
-      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-      height: 40,
-      src: "/brand-logos/connect/wearable-relay.svg",
-      width: 64,
-    },
-    setupGuideActionLabel: "Set up sync",
-  };
-}
-
-const APPLE_HEALTH_RELAY_STUDY_SOURCES: readonly ConnectSource[] = [
-  appleHealthRelayStudySource({
-    description:
-      "Mi Band, Xiaomi Smart Band, and Redmi Watch activity, sleep, heart rate, and workouts through Apple Health.",
-    id: "xiaomi-mi-fitness",
-    name: "Xiaomi / Mi Fitness",
-    setupGuideId: "xiaomi-mi-fitness-apple-health",
-  }),
-  appleHealthRelayStudySource({
-    description: "Smart-ring sleep, activity, heart rate, and supported data through Apple Health.",
-    id: "ringconn",
-    name: "RingConn",
-    setupGuideId: "ringconn-apple-health",
-  }),
-  appleHealthRelayStudySource({
-    description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-    id: "coros",
-    name: "COROS",
-    setupGuideId: "coros-apple-health",
-  }),
-  appleHealthRelayStudySource({
-    description: "Activity, sleep, heart rate, and supported workouts through Apple Health.",
-    id: "suunto",
-    name: "Suunto",
-    setupGuideId: "suunto-apple-health",
-  }),
-  appleHealthRelayStudySource({
-    description: "Selected watch and band data through Apple Health, where supported.",
-    id: "huawei-health",
-    name: "Huawei Health",
-    setupGuideId: "huawei-health-apple-health",
-  }),
-];
+const APPLE_HEALTH_RELAY_STUDY_SOURCES = listAppleHealthRelayConnectSources();
 
 export function AppleHealthRelaySetupStudy() {
   const searchParams = useSearchParams();
@@ -388,4 +351,3 @@ export function AppleHealthRelaySetupStudy() {
     </>
   );
 }
-

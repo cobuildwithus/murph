@@ -56,6 +56,12 @@ type WorkspaceSnapshotSessionStateStore = Pick<
 export interface WorkspaceSnapshotSessionService {
   cleanupOrphanCandidates(userId: string): Promise<void>;
   cleanupOrphanCandidatesBestEffort(userId: string): Promise<void>;
+  completeCurrentOwner(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
   create(
     input: HostedWorkspaceSnapshotUploadSession,
   ): Promise<HostedWorkspaceSnapshotUploadSession | null>;
@@ -67,6 +73,20 @@ export interface WorkspaceSnapshotSessionService {
     snapshotId: string;
     userId: string;
   }): Promise<HostedWorkspaceSnapshotUploadSession | null>;
+  heartbeatCurrentOwner(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  }): Promise<boolean>;
+  readCurrentOwnerHandoff(input: {
+    attemptId: string;
+    leaseGeneration: string;
+    userId: string;
+  }): Promise<{
+    completedAt: string | null;
+    heartbeatAt: string;
+  } | null>;
   rememberReplacedSnapshotRef(input: {
     expectedSession: HostedWorkspaceSnapshotUploadSession;
     replacedSnapshotRef: NonNullable<HostedWorkspaceSnapshotUploadSession["replacedSnapshotRef"]>;
@@ -99,11 +119,6 @@ export function createWorkspaceSnapshotSessionService(input: {
         rememberInput.expectedSession,
         "Expected hosted workspace snapshot upload session",
       );
-      const updatedSession = parseHostedWorkspaceSnapshotUploadSession({
-        ...expectedSession,
-        r2PutDrainUntil: rememberInput.drainUntil,
-        r2PutExpiresAt: rememberInput.expiresAt,
-      });
       await input.stateStore.bindUser(expectedSession.userId);
       const currentValue = await input.state.storage.get<unknown>(
         workspaceSnapshotUploadSessionCurrentStorageKey(),
@@ -118,6 +133,11 @@ export function createWorkspaceSnapshotSessionService(input: {
       if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, expectedSession)) {
         return null;
       }
+      const updatedSession = parseHostedWorkspaceSnapshotUploadSession({
+        ...currentSession,
+        r2PutDrainUntil: rememberInput.drainUntil,
+        r2PutExpiresAt: rememberInput.expiresAt,
+      });
 
       const previousDrainState = await input.state.storage.get<unknown>(
         workspaceSnapshotR2PutDrainStorageKey(),
@@ -158,10 +178,6 @@ export function createWorkspaceSnapshotSessionService(input: {
         rememberInput.expectedSession,
         "Expected hosted workspace snapshot upload session",
       );
-      const updatedSession = parseHostedWorkspaceSnapshotUploadSession({
-        ...expectedSession,
-        replacedSnapshotRef: rememberInput.replacedSnapshotRef,
-      });
       await input.stateStore.bindUser(expectedSession.userId);
       const currentValue = await input.state.storage.get<unknown>(
         workspaceSnapshotUploadSessionCurrentStorageKey(),
@@ -176,6 +192,10 @@ export function createWorkspaceSnapshotSessionService(input: {
       if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, expectedSession)) {
         return false;
       }
+      const updatedSession = parseHostedWorkspaceSnapshotUploadSession({
+        ...currentSession,
+        replacedSnapshotRef: rememberInput.replacedSnapshotRef,
+      });
       await input.state.storage.put(
         workspaceSnapshotUploadSessionCurrentStorageKey(),
         updatedSession,
@@ -189,7 +209,11 @@ export function createWorkspaceSnapshotSessionService(input: {
 
     async create(sessionInput) {
       await input.stateStore.bindUser(sessionInput.userId);
-      const session = parseHostedWorkspaceSnapshotUploadSession(sessionInput);
+      const session = parseHostedWorkspaceSnapshotUploadSession({
+        ...sessionInput,
+        checkpointHandoffCompletedAt: undefined,
+        checkpointHandoffHeartbeatAt: new Date().toISOString(),
+      });
       if (session.userId !== sessionInput.userId) {
         throw new Error("Hosted workspace snapshot upload session user mismatch.");
       }
@@ -232,6 +256,61 @@ export function createWorkspaceSnapshotSessionService(input: {
         service.cleanupOrphanCandidatesBestEffort(sessionInput.userId),
       );
       return session;
+    },
+
+    async heartbeatCurrentOwner(heartbeatInput) {
+      await input.stateStore.bindUser(heartbeatInput.userId);
+      const value = await input.state.storage.get<unknown>(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+      );
+      if (value === undefined) {
+        return false;
+      }
+      const session = parseHostedWorkspaceSnapshotUploadSession(value);
+      if (!workspaceSnapshotSessionMatchesOwner(session, heartbeatInput)) {
+        return false;
+      }
+      if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)) {
+        return false;
+      }
+      if (session.checkpointHandoffCompletedAt) {
+        return true;
+      }
+      await input.state.storage.put(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+        parseHostedWorkspaceSnapshotUploadSession({
+          ...session,
+          checkpointHandoffHeartbeatAt: new Date().toISOString(),
+        }),
+      );
+      return true;
+    },
+
+    async completeCurrentOwner(completeInput) {
+      await input.stateStore.bindUser(completeInput.userId);
+      const value = await input.state.storage.get<unknown>(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+      );
+      if (value === undefined) {
+        return false;
+      }
+      const session = parseHostedWorkspaceSnapshotUploadSession(value);
+      if (!workspaceSnapshotSessionMatchesOwner(session, completeInput)) {
+        return false;
+      }
+      if (!await ownsWorkspaceSnapshotSessionOwner(input.stateStore, session)) {
+        return false;
+      }
+      const completedAt = new Date().toISOString();
+      await input.state.storage.put(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+        parseHostedWorkspaceSnapshotUploadSession({
+          ...session,
+          checkpointHandoffCompletedAt: completedAt,
+          checkpointHandoffHeartbeatAt: completedAt,
+        }),
+      );
+      return true;
     },
 
     async recordOrphanCandidate(candidateInput) {
@@ -447,6 +526,35 @@ export function createWorkspaceSnapshotSessionService(input: {
       return session;
     },
 
+    async readCurrentOwnerHandoff(readInput) {
+      await input.stateStore.bindUser(readInput.userId);
+      const value = await input.state.storage.get<unknown>(
+        workspaceSnapshotUploadSessionCurrentStorageKey(),
+      );
+      if (value === undefined) {
+        return null;
+      }
+      const session = parseHostedWorkspaceSnapshotUploadSession(value);
+      if (session.userId !== readInput.userId) {
+        throw new Error(
+          "Hosted workspace snapshot upload session is outside the bound user namespace.",
+        );
+      }
+      if (
+        session.attemptId !== readInput.attemptId
+        || session.leaseGeneration !== readInput.leaseGeneration
+      ) {
+        return null;
+      }
+      if (!session.checkpointHandoffHeartbeatAt) {
+        return null;
+      }
+      return {
+        completedAt: session.checkpointHandoffCompletedAt ?? null,
+        heartbeatAt: session.checkpointHandoffHeartbeatAt,
+      };
+    },
+
     async delete(deleteInput) {
       await input.stateStore.bindUser(deleteInput.userId);
       const current = await input.state.storage.get<unknown>(
@@ -496,8 +604,35 @@ function workspaceSnapshotUploadSessionsMatchExactly(
   left: HostedWorkspaceSnapshotUploadSession,
   right: HostedWorkspaceSnapshotUploadSession,
 ): boolean {
-  // Both values have been parsed into the same canonical JSON-only shape.
-  return JSON.stringify(left) === JSON.stringify(right);
+  // Heartbeat/completion timestamps are server-owned liveness metadata and may
+  // advance between the runner reading a session and its next exact-session
+  // update. Every client-owned field must still match canonically.
+  const {
+    checkpointHandoffCompletedAt: _leftCompletedAt,
+    checkpointHandoffHeartbeatAt: _leftHeartbeatAt,
+    ...leftClientFields
+  } = left;
+  const {
+    checkpointHandoffCompletedAt: _rightCompletedAt,
+    checkpointHandoffHeartbeatAt: _rightHeartbeatAt,
+    ...rightClientFields
+  } = right;
+  return JSON.stringify(leftClientFields) === JSON.stringify(rightClientFields);
+}
+
+function workspaceSnapshotSessionMatchesOwner(
+  session: HostedWorkspaceSnapshotUploadSession,
+  owner: {
+    attemptId: string;
+    leaseGeneration: string;
+    snapshotId: string;
+    userId: string;
+  },
+): boolean {
+  return session.attemptId === owner.attemptId
+    && session.leaseGeneration === owner.leaseGeneration
+    && session.snapshotId === owner.snapshotId
+    && session.userId === owner.userId;
 }
 
 export async function readHostedWorkspaceSnapshotR2PutDrainUntil(input: {
