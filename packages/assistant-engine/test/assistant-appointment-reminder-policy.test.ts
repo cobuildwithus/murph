@@ -124,10 +124,10 @@ describe('assistant appointment reminder policy', () => {
       'verify the returned automation id, unchanged lookup id for a patch, status, stored schedule, and timing result',
     )
     expect(normalizedSkill).toContain(
-      'state the verified local reminder time and say that the member can move or cancel it by replying',
+      'After a new save or reschedule returns active status with verified timing, state the verified local reminder time and say that the member can move or cancel it by replying',
     )
     expect(normalizedSkill).toContain(
-      'the reminder was saved but no delivery time was verified',
+      'report only the create, update, or recovery state proved by the result, say that no delivery time was verified',
     )
     expect(normalizedSkill).toContain(
       'An initial result with `created: false` and `replayed: true` means the exact existing reminder was recovered, never that creation failed',

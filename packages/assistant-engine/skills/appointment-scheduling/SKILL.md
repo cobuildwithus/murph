@@ -389,10 +389,11 @@ unmistakable and include the appointment time when known.
 
 After every save or patch, verify the returned automation id, unchanged lookup
 id for a patch, status, stored schedule, and timing result before reporting
-completion. After a verified save or reschedule, state the verified local
-reminder time and say that the member can move or cancel it by replying. When
-`timingVerified` is false, say the reminder was saved but no delivery time was
-verified, state no invented clock time, and offer the existing bounded
+completion. After a new save or reschedule returns active status with verified
+timing, state the verified local reminder time and say that the member can move
+or cancel it by replying. When `timingVerified` is false, report only the
+create, update, or recovery state proved by the result, say that no delivery
+time was verified, state no invented clock time, and offer the existing bounded
 inspect-or-update recovery. An initial result with `created: false` and
 `replayed: true` means the exact existing reminder was recovered, never that
 creation failed. Report its actual returned status; when it is active and its
