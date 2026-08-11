@@ -163,6 +163,42 @@ describe('post-onboarding support-gap automation', () => {
     })).toEqual(last)
   })
 
+  it('does not preserve a second-day occurrence that only clears the elapsed-time floor', async () => {
+    const vaultRoot = await createVaultRoot()
+    const completedAt = '2026-06-01T00:00:00.000Z'
+    const existing = await upsertAutomation({
+      activeUntil: '2026-06-08T13:30:00.000Z',
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      continuityPolicy: 'preserve',
+      instructions: 'Current support-gap instructions.',
+      now: new Date('2026-06-01T12:00:00.000Z'),
+      route: defaultRoute,
+      schedule: {
+        at: '2026-06-03T13:30:00.000Z',
+        kind: 'at',
+      },
+      slug: 'onboarding-goal-checkin',
+      status: 'active',
+      tags: ['murph-managed:onboarding-goal-checkin'],
+      title: 'Initial goal support check-in',
+      vaultRoot,
+    })
+
+    expect(buildOnboardingGoalCheckinSeed({
+      existingAutomation: existing.record,
+      now: new Date('2026-06-02T12:00:00.000Z'),
+      onboardingState: completedOnboardingState({ completedAt }),
+      stableKey: 'vault-3',
+      timeZone: 'UTC',
+    })).toMatchObject({
+      activeUntil: '2026-06-08T13:30:00.000Z',
+      schedule: {
+        at: '2026-06-04T13:30:00.000Z',
+        kind: 'at',
+      },
+    })
+  })
+
   it('seeds answered onboarding only and rejects invalid schedule inputs', () => {
     expect(buildOnboardingGoalCheckinSeed({
       onboardingState: openOnboardingState(),
@@ -285,6 +321,67 @@ describe('post-onboarding support-gap automation', () => {
       skipped: 6,
       updated: 0,
     })
+  })
+
+  it('requires a managed occurrence to match the current completion window', async () => {
+    const vaultRoot = await createVaultRoot()
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-01T00:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    await applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-02T12:00:00.000Z'),
+      vaultRoot,
+    })
+
+    const first = await showAutomation({
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      vaultRoot,
+    })
+    if (first?.schedule.kind !== 'at') {
+      throw new TypeError('Expected the first support check to be a one-shot.')
+    }
+    await expect(runOnboardingGoalCheckinAuthorityPrecondition({
+      automationId: first.automationId,
+      occurrenceAt: first.schedule.at,
+      vault: vaultRoot,
+    })).resolves.toEqual({ kind: 'continue' })
+
+    await completeAssistantOnboarding({
+      completedAt: '2026-06-02T00:00:00.000Z',
+      reason: 'user_answered',
+      vault: vaultRoot,
+    })
+    await expect(runOnboardingGoalCheckinAuthorityPrecondition({
+      automationId: first.automationId,
+      occurrenceAt: first.schedule.at,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({ kind: 'skip' })
+
+    await expect(applyMurphManagedAutomations({
+      defaultRoute,
+      now: new Date('2026-06-02T12:05:00.000Z'),
+      vaultRoot,
+    })).resolves.toEqual({
+      created: 0,
+      skipped: 5,
+      updated: 1,
+    })
+    const reconciled = await showAutomation({
+      automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+      vaultRoot,
+    })
+    if (reconciled?.schedule.kind !== 'at') {
+      throw new TypeError('Expected the reconciled support check to be a one-shot.')
+    }
+    expect(reconciled.schedule.at).not.toBe(first.schedule.at)
+    await expect(runOnboardingGoalCheckinAuthorityPrecondition({
+      automationId: reconciled.automationId,
+      occurrenceAt: reconciled.schedule.at,
+      vault: vaultRoot,
+    })).resolves.toEqual({ kind: 'continue' })
   })
 
   it('keeps an installed catch-up and its original private route stable', async () => {
