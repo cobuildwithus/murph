@@ -3193,7 +3193,7 @@ describe('assistant Codex turn planning', () => {
       'Scheduled automation changes for this group room are available through `murph.automation`.',
     )
     expect(plan.developerInstructions).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: list` to recover persisted owners for this conversation, and `action: patch` to change one.',
     )
     expect(plan.developerInstructions).toContain(
       'Patch `status` to pause, reactivate, or archive an existing automation.',
@@ -4472,6 +4472,20 @@ describe('assistant Codex turn planning', () => {
       threadScope: 'session-thread',
       toolProfile: 'provider-turn',
     }
+    const automationTool = { request: vi.fn() }
+    const executionContext = {
+      hosted: {
+        automationTool,
+        memberId: 'member-private-runtime',
+        progressDeliveryDependencies: {},
+        providerFetch: null,
+        userEnvKeys: [],
+      },
+    }
+    const hostedToolContext = {
+      ...createHostedToolContext(),
+      automationTool,
+    }
 
     try {
       await replaceTranscriptEntries(
@@ -4491,7 +4505,8 @@ describe('assistant Codex turn planning', () => {
         supportsNativeResume: false,
       })
       const freshPlan = await resolveAssistantRouteTurnPlan({
-        executionContext: null,
+        executionContext,
+        hostedToolContext,
         input: {
           ...createMessageInput(),
           vault,
@@ -4515,7 +4530,8 @@ describe('assistant Codex turn planning', () => {
         supportsNativeResume: true,
       })
       const staleResumePlan = await resolveAssistantRouteTurnPlan({
-        executionContext: null,
+        executionContext,
+        hostedToolContext,
         input: {
           ...createMessageInput(),
           vault,
@@ -4539,6 +4555,16 @@ describe('assistant Codex turn planning', () => {
 
       expect(staleResumePlan.resume).toBeNull()
       expect(staleResumePlan.conversationHistoryMessages).toEqual(expectedHistory)
+      expect(staleResumePlan.developerInstructions).toContain(
+        '`action: list` to recover persisted owners for this conversation',
+      )
+      const automationDynamicTool = staleResumePlan.dynamicTools.find(
+        (tool) => tool.name === 'automation',
+      )
+      expect(automationDynamicTool).toBeDefined()
+      expect(JSON.stringify(automationDynamicTool?.inputSchema)).toContain(
+        '"exactTag"',
+      )
     } finally {
       await rm(vault, { force: true, recursive: true })
     }

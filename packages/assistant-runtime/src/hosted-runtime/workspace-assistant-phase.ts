@@ -75,6 +75,7 @@ import {
 } from "@murphai/contracts";
 import {
   AutomationAvailabilityConflictBlockError,
+  listAutomations,
   patchAutomation,
   reconcileAutomationSupportSeries,
   resolveAutomationUpsertSlug,
@@ -94,6 +95,7 @@ import {
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
 import {
+  assistantDeliveryRoutesBelongToSameConversation,
   type AssistantCurrentDeliveryRoute,
   getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
@@ -1381,6 +1383,9 @@ type HostedAssistantAutomationTool = NonNullable<
   NonNullable<AssistantExecutionContext["hosted"]>["automationTool"]
 >;
 
+const HOSTED_ASSISTANT_AUTOMATION_LIST_MAX_ITEMS = 4;
+const HOSTED_ASSISTANT_AUTOMATION_SUMMARY_EXCERPT_MAX_CHARS = 512;
+
 function scopeHostedAutomationToolToAssistantOperation(input: {
   executionContext: AssistantExecutionContext;
   route: AssistantCurrentDeliveryRoute | null;
@@ -1424,6 +1429,41 @@ function createHostedAssistantAutomationTool(input: {
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
+      if (request.action === "list") {
+        const result = await listAutomations({
+          ...(request.exactTag === undefined
+            ? {}
+            : { exactTag: request.exactTag }),
+          ...(request.status === undefined ? {} : { status: [...request.status] }),
+          vaultRoot: input.vaultRoot,
+        });
+        context?.signal?.throwIfAborted();
+        const scopedRecords = result.items.filter((record) =>
+          assistantDeliveryRoutesBelongToSameConversation(
+            record.route,
+            currentRoute,
+          )
+        );
+        const items = scopedRecords
+          .slice(0, HOSTED_ASSISTANT_AUTOMATION_LIST_MAX_ITEMS)
+          .map((record) => ({
+            automationId: record.automationId,
+            lookupId: record.slug,
+            schedule: record.schedule,
+            status: record.status,
+            summaryExcerpt: record.summary?.slice(
+              0,
+              HOSTED_ASSISTANT_AUTOMATION_SUMMARY_EXCERPT_MAX_CHARS,
+            ) ?? null,
+            title: record.title,
+          }));
+        return {
+          action: "list",
+          count: scopedRecords.length,
+          items,
+          truncated: scopedRecords.length > items.length,
+        };
+      }
       if (request.action === "reconcile") {
         const result = await reconcileAutomationSupportSeries({
           desiredAutomationIds: request.desiredAutomationIds,
@@ -1526,6 +1566,7 @@ function createHostedAssistantAutomationTool(input: {
             : { assistantTargetOverride: request.assistantTargetOverride }),
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
+          ...(request.createOnly === true ? { createOnly: true } : {}),
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
@@ -1654,6 +1695,15 @@ function assertHostedAutomationSaveRequest(input: {
   route: AutomationRoute;
 }): void {
   const tags = input.request.tags ?? [];
+  if (
+    input.request.createOnly === true
+    && (input.request.automationId !== undefined || input.request.slug !== undefined)
+  ) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Create-only saves use a generated opaque owner; omit automationId and slug.",
+    );
+  }
   const newsletterTagCount = tags.filter((tag) =>
     tag === GROUP_NEWSLETTER_EMAIL_DELIVERY_TAG
     || tag === GROUP_NEWSLETTER_CURRENT_CHAT_DELIVERY_TAG

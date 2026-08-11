@@ -69,16 +69,28 @@ describe('assistant appointment reminder policy', () => {
       'For noon or later, schedule 8:00 AM local that day',
     )
     expect(normalizedSkill).toContain(
-      'always supply one explicit, privacy-safe stable `slug`',
+      'set `createOnly: true`, omit both `automationId` and `slug`',
     )
     expect(normalizedSkill).toContain(
-      'patch that exact owner with the replacement one-shot schedule and `status: "active"`',
+      'include the ordinary tag `appointment-reminder`',
+    )
+    expect(normalizedSkill).toContain(
+      'only when the result says `created: true`',
+    )
+    expect(normalizedSkill).toContain(
+      '`action: "list"` and `exactTag: "appointment-reminder"`',
+    )
+    expect(normalizedSkill).toContain(
+      'patch that exact owner with the replacement one-shot schedule, current privacy-safe title or summary, and `status: "active"`',
     )
     expect(normalizedSkill).toContain(
       'patch the same exact owner to `status: "archived"`',
     )
     expect(normalizedSkill).toContain(
-      'verify the returned automation id, status, stored schedule, and timing result',
+      'Omit `slug` from every appointment-reminder patch',
+    )
+    expect(normalizedSkill).toContain(
+      'verify the returned automation id, unchanged lookup id for a patch, status, stored schedule, and timing result',
     )
     expect(normalizedSkill).toContain(
       'state the verified local reminder time and say that the member can move or cancel it by replying',
@@ -91,6 +103,9 @@ describe('assistant appointment reminder policy', () => {
     )
     expect(normalizedSkill).toContain(
       'if zero or multiple plausible owners remain, make no mutation',
+    )
+    expect(normalizedSkill).toContain(
+      'If the result is truncated',
     )
   })
 

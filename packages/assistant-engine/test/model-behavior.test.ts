@@ -3101,7 +3101,10 @@ describe('assistant conversation scope', () => {
       'Scheduled automation changes for this conversation are available through `murph.automation`.',
     )
     expect(prompt).toContain(
-      'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
+      'Use `murph.automation` with `action: save` to create an ordinary automation, `action: list` to recover persisted owners for this conversation, and `action: patch` to change one.',
+    )
+    expect(prompt).toContain(
+      'Use `createOnly: true` without an automation id or slug when a new opaque owner must not replace any existing record.',
     )
     expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',

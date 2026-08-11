@@ -46,6 +46,12 @@ describe('hosted domain dynamic tools', () => {
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'On patch, a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
     )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'list returns only records whose persisted route belongs to this conversation and never returns route fields',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Use createOnly=true with no automationId or slug',
+    )
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -193,6 +199,44 @@ describe('hosted domain dynamic tools', () => {
         supportKind: 'reminder',
         supportSeriesId: 'habit:sleep-wind-down',
         title: 'Evening wind-down',
+      },
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      instructions: 'Send one private appointment reminder.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      tags: ['appointment-reminder'],
+      title: 'Midtown appointment on August 12 at 9:30 AM',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'save',
+        createOnly: true,
+        instructions: 'Send one private appointment reminder.',
+        schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+        tags: ['appointment-reminder'],
+        title: 'Midtown appointment on August 12 at 9:30 AM',
+      },
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      instructions: 'Try to choose a create-only owner.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      slug: 'model-selected-owner',
+      title: 'Invalid create-only reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'list',
+      exactTag: 'appointment-reminder',
+      status: ['active', 'archived'],
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'list',
+        exactTag: 'appointment-reminder',
+        status: ['active', 'archived'],
       },
     })
 
@@ -380,6 +424,61 @@ describe('hosted domain dynamic tools', () => {
       request,
     })
     expect(unavailable.rpcResult).toMatchObject({ success: false })
+  })
+
+  it('returns bounded automation owners without route fields', async () => {
+    const automationTool = {
+      request: vi.fn(async () => ({
+        action: 'list' as const,
+        count: 1,
+        items: [{
+          automationId: 'automation-appointment-1',
+          lookupId: 'automation-opaque-owner-1',
+          schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' as const },
+          status: 'active' as const,
+          summaryExcerpt: 'Midtown appointment on August 12 at 9:30 AM',
+          title: 'Midtown appointment on August 12 at 9:30 AM',
+        }],
+        truncated: false,
+      })),
+    }
+    const request = readToolRequest('automation', {
+      action: 'list',
+      exactTag: 'appointment-reminder',
+    })
+    if (!request) {
+      throw new Error('Expected an automation list request.')
+    }
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(automationTool.request).toHaveBeenCalledWith({
+      action: 'list',
+      exactTag: 'appointment-reminder',
+    }, { signal: null })
+    expect(readResultPayload(result)).toEqual({
+      action: 'list',
+      count: 1,
+      items: [{
+        automationId: 'automation-appointment-1',
+        lookupId: 'automation-opaque-owner-1',
+        schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+        status: 'active',
+        summaryExcerpt: 'Midtown appointment on August 12 at 9:30 AM',
+        title: 'Midtown appointment on August 12 at 9:30 AM',
+      }],
+      truncated: false,
+    })
+    expect(JSON.stringify(readResultPayload(result))).not.toMatch(
+      /deliveryTarget|identityId|participantId|threadId/u,
+    )
   })
 
   it('executes support-series reconciliation through the injected port', async () => {

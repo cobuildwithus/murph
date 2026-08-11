@@ -143,6 +143,7 @@ export type AutomationScaffoldPayload = ContractAutomationScaffoldPayload;
 export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
+  createOnly?: boolean;
   now?: Date;
   vaultRoot: string;
 }
@@ -1580,16 +1581,27 @@ async function upsertAutomationWithLatestRegistry(
   input: UpsertAutomationInput,
   records?: AutomationRecord[],
 ): Promise<UpsertAutomationResult> {
-  const normalizedId = normalizeId(input.automationId, "automationId", "automation");
+  const suppliedId = normalizeId(input.automationId, "automationId", "automation");
+  const normalizedId = input.createOnly === true && suppliedId === undefined
+    ? generateRecordId("automation")
+    : suppliedId;
   const title = normalizeAutomationTitle(input.title);
-  const requestedSlug = resolveAutomationUpsertSlug({
-    slug: input.slug,
-    title,
-  });
+  const requestedSlug = input.createOnly === true && input.slug === undefined
+    ? normalizeSlug(undefined, "slug", normalizedId)
+    : resolveAutomationUpsertSlug({
+        slug: input.slug,
+        title,
+      });
   const existingRecord = selectAutomationRecord(
     records ?? await loadAutomationRecords(input.vaultRoot),
     { automationId: normalizedId, slug: requestedSlug },
   );
+  if (input.createOnly === true && existingRecord !== null) {
+    throw new VaultError(
+      "VAULT_AUTOMATION_CONFLICT",
+      "Create-only automation ownership already exists.",
+    );
+  }
   const now = (input.now ?? new Date()).toISOString();
   const recordId = existingRecord?.automationId ?? normalizedId ?? generateRecordId("automation");
   const createdAt = existingRecord?.createdAt ?? now;

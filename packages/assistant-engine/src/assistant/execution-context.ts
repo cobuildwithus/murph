@@ -169,6 +169,7 @@ export type AssistantHostedAutomationToolRequest =
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
+      createOnly?: true
       instructions: string
       schedule: AutomationSchedule
       slug?: string
@@ -178,6 +179,11 @@ export type AssistantHostedAutomationToolRequest =
       supportSeriesId?: string
       tags?: readonly string[]
       title: string
+    }
+  | {
+      action: 'list'
+      exactTag?: string
+      status?: readonly AutomationStatus[]
     }
   | {
       action: 'patch'
@@ -203,6 +209,19 @@ export type AssistantHostedAutomationToolRequest =
     }
 
 export type AssistantHostedAutomationToolResponse =
+  | {
+      action: 'list'
+      count: number
+      items: readonly {
+        automationId: string
+        lookupId: string
+        schedule: AutomationSchedule
+        status: AutomationStatus
+        summaryExcerpt: string | null
+        title: string
+      }[]
+      truncated: boolean
+    }
   | {
       action: 'patch' | 'save'
       automationId: string

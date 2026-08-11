@@ -5027,6 +5027,34 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!saved || saved.action !== "save") {
             throw new Error("Expected saved automation.");
           }
+          const appointmentReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              createOnly: true,
+              instructions: "Send the Midtown appointment reminder.",
+              schedule: { at: "2099-08-12T00:00:00.000Z", kind: "at" },
+              summary: "Midtown appointment on August 12 at 9:30 AM",
+              tags: ["appointment-reminder"],
+              title: "Midtown appointment on August 12 at 9:30 AM",
+            });
+          if (!appointmentReminder || appointmentReminder.action !== "save") {
+            throw new Error("Expected an opaque appointment reminder owner.");
+          }
+          expect(appointmentReminder).toEqual(expect.objectContaining({
+            created: true,
+            effectiveTimeZone: null,
+            lookupId: expect.stringMatching(/^automation-[a-z0-9]+$/u),
+          }));
+          await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            createOnly: true,
+            instructions: "Try to select an opaque owner from the model.",
+            schedule: { at: "2099-08-12T01:00:00.000Z", kind: "at" },
+            slug: "model-selected-opaque-owner",
+            title: "Invalid create-only appointment reminder",
+          })).rejects.toThrow(
+            "Create-only saves use a generated opaque owner",
+          );
           const newsletter = await executionContext.hosted?.automationTool?.request(
             buildGroupNewsletterAutomationSaveRequest({
               configuration: {
@@ -5158,7 +5186,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "read_shared",
             projectionScopes: [{ projectionKind: "steps-days.v0" }],
           });
-          return await executionContext.hosted?.automationTool?.request(
+          const newsletter = await executionContext.hosted?.automationTool?.request(
             buildGroupNewsletterAutomationSaveRequest({
               configuration: {
                 delivery: "current_chat",
@@ -5172,6 +5200,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
               },
             }),
           );
+          const appointmentReminder =
+            await executionContext.hosted?.automationTool?.request({
+              action: "save",
+              createOnly: true,
+              instructions: "Send the Downtown appointment reminder.",
+              schedule: { at: "2099-08-12T13:00:00.000Z", kind: "at" },
+              summary: "Downtown appointment on August 12 at 2 PM",
+              tags: ["appointment-reminder"],
+              title: "Downtown appointment on August 12 at 2 PM",
+            });
+          if (!appointmentReminder || appointmentReminder.action !== "save") {
+            throw new Error("Expected a Telegram appointment reminder owner.");
+          }
+          return newsletter;
         },
         turnEnvironment: null,
       });
@@ -5187,6 +5229,32 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         routeBinding: "current_conversation",
         status: "paused",
       }));
+      const linqAppointmentOwners = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [linqInputId],
+        operation: async (executionContext) =>
+          await executionContext.hosted?.automationTool?.request({
+            action: "list",
+            exactTag: "appointment-reminder",
+          }),
+        turnEnvironment: null,
+      });
+      expect(linqAppointmentOwners).toEqual({
+        action: "list",
+        count: 1,
+        items: [{
+          automationId: expect.stringMatching(/^automation_/u),
+          lookupId: expect.stringMatching(/^automation-[a-z0-9]+$/u),
+          schedule: { at: "2099-08-12T00:00:00.000Z", kind: "at" },
+          status: "active",
+          summaryExcerpt: "Midtown appointment on August 12 at 9:30 AM",
+          title: "Midtown appointment on August 12 at 9:30 AM",
+        }],
+        truncated: false,
+      });
+      expect(JSON.stringify(linqAppointmentOwners)).not.toMatch(
+        /deliveryTarget|identityId|participantId|threadId/u,
+      );
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
         linqSenderHandles: ["+15555550123"],

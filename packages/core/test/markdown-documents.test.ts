@@ -273,6 +273,59 @@ describe("markdown document primitives", () => {
     expect(updated.record.tags).toEqual(["sleep", "recovery"]);
   });
 
+  it("creates opaque owners without overwriting semantic slug collisions", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const existing = await upsertAutomation({
+      vaultRoot,
+      ...createAutomationPayload({
+        instructions: "Send the first appointment reminder.",
+        schedule: { at: "2026-08-12T00:00:00.000Z", kind: "at" },
+        slug: "midtown-appointment-on-august-12",
+        title: "Midtown appointment on August 12",
+      }),
+    });
+    const existingMarkdown = existing.record.markdown;
+
+    const created = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      ...createAutomationPayload({
+        instructions: "Send the second appointment reminder.",
+        schedule: { at: "2026-08-12T13:00:00.000Z", kind: "at" },
+        slug: undefined,
+        title: "Midtown appointment on August 12",
+      }),
+    });
+
+    expect(created.created).toBe(true);
+    expect(created.record.automationId).not.toBe(existing.record.automationId);
+    expect(created.record.slug).not.toBe(existing.record.slug);
+    expect(created.record.slug).toMatch(/^automation-[a-z0-9]+$/u);
+    await expect(readAutomation({
+      automationId: existing.record.automationId,
+      vaultRoot,
+    })).resolves.toEqual(expect.objectContaining({
+      markdown: existingMarkdown,
+    }));
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      ...createAutomationPayload({
+        automationId: existing.record.automationId,
+        instructions: "This collision must not replace the first reminder.",
+        slug: existing.record.slug,
+        title: "Conflicting appointment reminder",
+      }),
+    })).rejects.toThrow("Create-only automation ownership already exists.");
+    await expect(readAutomation({
+      automationId: existing.record.automationId,
+      vaultRoot,
+    })).resolves.toEqual(expect.objectContaining({
+      markdown: existingMarkdown,
+    }));
+  });
+
   it("advances the schedule anchor only for timing transitions", async () => {
     const vaultRoot = await makeVaultRoot();
     const createdAt = "2026-07-29T12:00:00.000Z";
