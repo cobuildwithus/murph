@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import path from 'node:path'
 import { stringifyFrontmatterDocument } from '@murphai/core'
 import {
@@ -124,7 +125,12 @@ export function toKnowledgePage(page: DerivedKnowledgeNode, markdown: string): K
       sourcePaths: page.sourcePaths,
     }).trim(),
     markdown,
+    pageRevisionDigest: digestKnowledgePageRevision(markdown),
   }
+}
+
+export function digestKnowledgePageRevision(markdown: string): string {
+  return createHash('sha256').update(markdown).digest('hex')
 }
 
 export function normalizeSourcePathInputs(value: readonly string[] | null | undefined): string[] {

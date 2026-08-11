@@ -332,8 +332,10 @@ failure semantics remain independent. Each bounded pass:
 3. reconciles up to 50 ordinary qualified missions, ordinary rewarded referrals
    awaiting their source celebration, or signup-link rewards awaiting their
    personal completion notice;
-4. re-signals up to 50 oldest unconsumed referral-notification mailbox items in
-   their actual `system` or `conversation` lane.
+4. selects up to 50 lanes containing a live pending referral notification and
+   re-signals only each lane's first live item above its canonical consumed
+   cursor. Live-row filtering skips retention-old or expired prefixes. That head
+   may be an earlier non-referral item; ordinary lane order remains authoritative.
 
 Referral notification producers carry the destination owner's validated
 external-route authority. A direct Linq source conversation remains an explicit
