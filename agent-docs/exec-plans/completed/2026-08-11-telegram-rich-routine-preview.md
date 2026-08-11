@@ -1,6 +1,6 @@
 # Telegram rich routine preview
 
-Status: active, final live presentation approved; completion gates in progress
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -46,7 +46,9 @@ Updated: 2026-08-11
    remove the local rich retry loop.
 7. [x] Make fallback cardinality and catalog image provenance exact after the
    preliminary specialist review.
-8. [ ] Complete the final ReviewGPT, CI, commit, and PR gates.
+8. [x] Complete the final ReviewGPT, CI, commit, and PR gates. The exact-head
+   assistant coverage job has three failures also present on current `main`;
+   the Telegram-focused branch checks pass.
 9. [x] Keep routine meaning channel-neutral, move timing consistency to agent
    guidance, and document channel-native presentation across Telegram and
    iMessage without adding a shared renderer or delivery layer.
@@ -126,3 +128,11 @@ Updated: 2026-08-11
   shared text, photo, and voice impact was not disclosed or directly tested.
   Focused proof now covers all four Telegram send operations and the old-Worker
   policy-response rollout seam.
+- Final ReviewGPT round 6 verified the complete current patch and returned
+  `PASS` with no findings. It confirmed the one-effect delivery rule, ambiguity
+  handling, bounded fallback, catalog provenance, and channel isolation.
+- Exact-head CI passes build, typecheck, platform coverage, CLI coverage,
+  frontend design proof, hosted billing proof, and the runner sandbox gate.
+  Assistant coverage reports three unrelated failures also present on current
+  `main`: two onboarding checks and one follow-through skill-content check.
+Completed: 2026-08-11
