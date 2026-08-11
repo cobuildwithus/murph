@@ -83,8 +83,15 @@ test("HeroClocksIn renders the solo exchange without animation for reduced motio
   const topic = view.container.querySelector<HTMLButtonElement>(
     'button[aria-label="Ask Murph about Steps"]',
   );
+  const member = view.container.querySelector<HTMLButtonElement>(
+    'button[aria-label="Start a group chat with Theo"]',
+  );
   assert.ok(composer);
   assert.ok(topic);
+  assert.ok(member);
+  assert.ok(topic.classList.contains("text-[#756c5a]"));
+  assert.ok(topic.classList.contains("focus-visible:ring-2"));
+  assert.ok(member.classList.contains("text-[#736a58]"));
   const controls = [...view.container.querySelectorAll("input, button")];
   assert.ok(controls.indexOf(composer) < controls.indexOf(topic));
   assert.ok(
