@@ -52,6 +52,9 @@ Success means:
    against old Web responses.
 6. Cover scheduled cards, direct and group messages, current-home rerouting,
    private continuation, voice memos, protocol absence, and route drift.
+7. Attribute every accepted or failed delivery outcome to the resolved sender;
+   replay-scoped line keys are neither emitted by the canonical runtime nor
+   allowed to override a canonical sender number at the Web outcome boundary.
 
 ## Invariants
 
@@ -62,6 +65,8 @@ Success means:
 - Every provider side effect is preceded by an exact live authority assertion.
 - A route mismatch is provider-skipped and cannot expose private response text
   through recovery delivery.
+- Provider outcome, receipt, counter, and line-health attribution use the same
+  sender Web authorized for provider dispatch, never stale wake authority.
 - Current inbound replies, group routing, signup welcome, private Assistant Ask
   continuation, and existing line-health enforcement remain available.
 - No new service, queue, database row, migration, dependency, or route manager
@@ -93,9 +98,19 @@ Success means:
   The production-faithful scheduled-card scenario remains blocked because no
   Docker-compatible engine is installed; the PR does not claim unchanged
   foreground latency without the requested same-environment benchmark.
-- Pending: push the corrected candidate, rerun required CI, complete the
-  preliminary completion-specialists pass and the required next final ReviewGPT
-  round, and resolve every accepted finding before completion.
+- Final ReviewGPT Round 1 found that the outcome builder still emitted a stale
+  replay-context line key after a current-home reroute. The builder no longer
+  emits that obsolete hint, Web prefers the canonical sender number if an old
+  caller supplies both fields, and focused accepted, failed, voice, and Web
+  route tests prove the stale key cannot replace current line attribution
+  (244 runtime callback tests and 151 Web outcome/observability tests pass).
+- The same review independently found the already-remediated `explicit` versus
+  `thread` vault-file representation mismatch. Its PR-body discrepancies are
+  corrected by disclosing scheduled pre-model route/tool scoping, secure
+  approval identity, terminal line-health attribution, and all four serial Web
+  control calls on the scheduled native-card journey.
+- Pending: commit and push the Round 1 remediation, rerun required CI, and
+  complete the required next final ReviewGPT round against that corrected head.
 
 ## Deployment
 

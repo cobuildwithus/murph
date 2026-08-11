@@ -12590,12 +12590,114 @@ describe("hosted runtime callbacks", () => {
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
+        fromPhoneNumber: "+15550100002",
         providerTarget: "linq_chat_current",
         providerThreadId: "linq_chat_recovered",
         target: "linq_chat_current",
         targetKind: "thread",
       }),
       expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
+    );
+  });
+
+  it("records current-home provider failures without replay-scoped line authority", async () => {
+    const staleWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "evt_linq_stale_failure_replay",
+      linqMessage: {
+        chatId: "linq_chat_stale_failure",
+        from: "+15550001",
+        isFromMe: false,
+        messageId: "linq_message_stale_failure",
+        parts: [{ type: "text", value: "already consumed" }],
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      phoneLookupKey: "phone_lookup_stale_failure",
+      routeAuthority: {
+        accountLookupKey: "hbidx:phone:v1:stale-failure",
+        channel: "linq",
+        containerMemberId: "member_123",
+        threadId: "linq_chat_stale_failure",
+      },
+      userId: "member_123",
+    });
+    const effect = createEffect({
+      bindingDeliveryTarget: "linq_chat_stale_failure",
+      channel: "linq",
+      idempotencyKey: "assistant-outbox:intent_current_home_failure",
+      message: "Current home route reminder.",
+      transportIdempotent: false,
+    });
+    const assertRecentInbound = vi.fn(async (request) => ({
+      ...buildClaimedLinqEngagementResult(request),
+      resolvedRoute: buildHostedRuntimeResolvedLinqRoute(request, {
+        conversationThreadId: "conversation-current-failure",
+        directRecipientPhoneNumber: "+15550100001",
+        fromPhoneNumber: "+15550100002",
+        target: "linq_chat_current_failure",
+        targetKind: "thread" as const,
+        threadIsDirect: true,
+      }),
+    }));
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    mocks.sendLinqMessage.mockRejectedValueOnce(Object.assign(
+      new Error("provider rejected current route"),
+      { code: "LINQ_PROVIDER_FAILED" },
+    ));
+    mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
+      try {
+        await dependencies.sendLinq({
+          homeRouteFallbackAllowed: true,
+          idempotencyKey: "assistant-outbox:intent_current_home_failure",
+          message: "Current home route reminder.",
+          replyToMessageId: null,
+          target: "linq_chat_stale_failure",
+          targetKind: "thread",
+        });
+      } catch {
+        return createDispatchResult({ delivery: null, status: "failed" }, {
+          code: "LINQ_PROVIDER_FAILED",
+          message: "Provider send failed.",
+        });
+      }
+
+      throw new Error("Expected Linq send to fail.");
+    });
+
+    await drainHostedPreparedAssistantDeliveries({
+      assistantDeliveryEffects: [effect],
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      providerFetch: vi.fn<typeof fetch>(),
+      vaultRoot: HOSTED_WAKE.vaultRoot,
+      wake: staleWake,
+    });
+    await drainHostedAssistantLinqDeliveryOutcomeWritesBestEffort();
+
+    expect(mocks.sendLinqMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromPhoneNumber: "+15550100002",
+        target: "linq_chat_current_failure",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failedAt: expect.stringMatching(/Z$/u),
+        failureCode: "LINQ_PROVIDER_FAILED",
+        fromPhoneNumber: "+15550100002",
+        providerTarget: "linq_chat_current_failure",
+        target: "linq_chat_current_failure",
+      }),
+      expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
     );
   });
 
@@ -14338,10 +14440,13 @@ describe("hosted runtime callbacks", () => {
     );
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({
+        fromPhoneNumber: "+15559990000",
         idempotencyKey: "assistant-outbox:intent_123",
-        lineLookupKey: "hbidx:phone:v1:account_a",
       }),
       expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
     );
     expect(outcomes).toEqual([
       expect.objectContaining({
@@ -15484,6 +15589,7 @@ describe("hosted runtime callbacks", () => {
         threadIsDirect: true,
       }),
     }));
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
     mocks.dispatchAssistantOutboxIntent.mockImplementationOnce(async ({ dependencies }) => {
       const delivery = await dependencies.sendLinqVoiceMemo({
         attachmentId: "attachment_voice_1",
@@ -15509,6 +15615,7 @@ describe("hosted runtime callbacks", () => {
       assistantDeliveryEffects: [effect],
       effectsPort: createHostedRuntimeEffectsPortStub({
         assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
       }),
       providerFetch: vi.fn<typeof fetch>(),
       vaultRoot: HOSTED_WAKE.vaultRoot,
@@ -15536,6 +15643,18 @@ describe("hosted runtime callbacks", () => {
       attachmentId: "attachment_voice_1",
       target: "linq_chat_current",
     }, expect.any(Object));
+    expect(recordDeliveryOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fromPhoneNumber: "+15550100002",
+        providerTarget: "linq_chat_current",
+        target: "linq_chat_current",
+        targetKind: "thread",
+      }),
+      expect.any(Object),
+    );
+    expect(JSON.stringify(recordDeliveryOutcome.mock.calls)).not.toContain(
+      '"lineLookupKey"',
+    );
     expect(outcomes).toEqual([
       expect.objectContaining({
         deliveryChannel: "linq",

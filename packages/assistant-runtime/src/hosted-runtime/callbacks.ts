@@ -3487,7 +3487,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
               effectsPort: input.effectsPort,
               outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
                 attemptedAt,
-                deliveryContext,
                 failedAt: new Date(),
                 failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
                 failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
@@ -3509,7 +3508,6 @@ async function deliverHostedPreparedAssistantDelivery(input: {
             outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
               acceptedAt: new Date(),
               attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
-              deliveryContext,
               fromPhoneNumber: resolvedRoute.fromPhoneNumber,
               idempotencyKey,
               intentId: input.assistantDeliveryEffect.effectId,
@@ -4301,7 +4299,6 @@ function createHostedAssistantLinqSendDependency(input: {
                     outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
                       attemptedAt: providerAttempt.attemptedAt,
                       answeredMailboxItemIds: [],
-                      deliveryContext,
                       directRecipientPhoneNumber:
                         originalParticipantRecipientPhoneNumber,
                       failedAt: new Date(),
@@ -4340,7 +4337,6 @@ function createHostedAssistantLinqSendDependency(input: {
           outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
             attemptedAt: failedProviderAttempt.attemptedAt,
             answeredMailboxItemIds: [],
-            deliveryContext,
             directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
             failedAt: new Date(),
             failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -4370,7 +4366,6 @@ function createHostedAssistantLinqSendDependency(input: {
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt: failedProviderAttempt.attemptedAt,
           answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
-          deliveryContext,
           directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
@@ -4406,7 +4401,6 @@ function createHostedAssistantLinqSendDependency(input: {
           acceptedProviderAttempt?.attemptedAt ?? null,
         ),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
-        deliveryContext,
         directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
         fromPhoneNumber,
         idempotencyKey: acceptedIdempotencyKey,
@@ -4844,7 +4838,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         outcome: buildHostedAssistantLinqDeliveryOutcomeRequest({
           attemptedAt,
           answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
-          deliveryContext,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: null,
@@ -4867,7 +4860,6 @@ function createHostedAssistantLinqVoiceMemoSendDependency(input: {
         acceptedAt: new Date(),
         attemptedAt: requireHostedLinqProviderAttemptedAt(attemptedAt),
         answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
-        deliveryContext,
         fromPhoneNumber: resolvedRoute.fromPhoneNumber,
         idempotencyKey,
         intentId: input.intentId ?? null,
@@ -4888,7 +4880,6 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
   acceptedAt?: Date | null;
   answeredMailboxItemIds?: readonly string[] | null;
   attemptedAt: Date;
-  deliveryContext: HostedAssistantLinqDeliveryContext | null;
   directRecipientPhoneNumber?: string | null;
   failedAt?: Date | null;
   failureCode?: string | null;
@@ -4918,7 +4909,6 @@ function buildHostedAssistantLinqDeliveryOutcomeRequest(input: {
     fromPhoneNumber: input.fromPhoneNumber,
     idempotencyKey: input.idempotencyKey,
     intentId: input.intentId,
-    lineLookupKey: input.deliveryContext?.routeAuthority?.accountLookupKey ?? null,
     providerMessageId: input.result?.providerMessageId ?? null,
     ...(input.result?.providerMessageIds?.length
       ? { providerMessageIds: [...input.result.providerMessageIds] }
