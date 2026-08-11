@@ -93,11 +93,11 @@ export function MurphCardHandoffPanel({
         </p>
       </DialogHeader>
 
-      <DialogFooter className="flex-col sm:flex-row-reverse">
+      <DialogFooter className="flex-col sm:flex-col">
         <a
           aria-label="Open App Store (opens in a new tab)"
           autoFocus
-          className={buttonVariants()}
+          className={buttonVariants({ className: "w-full", size: "xl" })}
           href={MURPH_IOS_APP_STORE_URL}
           rel="noopener noreferrer"
           target="_blank"
@@ -105,7 +105,13 @@ export function MurphCardHandoffPanel({
           Open App Store
           <ArrowUpRight aria-hidden="true" />
         </a>
-        <Button onClick={onDismiss} type="button" variant="outline">
+        <Button
+          className="w-full"
+          onClick={onDismiss}
+          size="xl"
+          type="button"
+          variant="outline"
+        >
           Cancel
         </Button>
       </DialogFooter>

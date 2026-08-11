@@ -64,19 +64,39 @@ test("shared-card fragments open a private, accessible App Store handoff", async
     );
     await expect(dialog).not.toContainText("Shared from Messages");
     await expect(dialog).not.toContainText(envelope);
-    await expect(
-      dialog.getByRole("link", {
-        name: "Open App Store (opens in a new tab)",
-      }),
-    ).toHaveAttribute(
+    const appStoreLink = dialog.getByRole("link", {
+      name: "Open App Store (opens in a new tab)",
+    });
+    const cancelButton = dialog.getByRole("button", { name: "Cancel" });
+    await expect(appStoreLink).toHaveAttribute(
       "href",
       "https://apps.apple.com/us/app/murph-ai/id6786145859",
     );
-    await expect(dialog.getByRole("button", { name: "Cancel" })).toHaveCount(
-      1,
-    );
+    await expect(cancelButton).toHaveCount(1);
     await expect(dialog.getByRole("button", { name: "Close" })).toHaveCount(1);
     await expect(dialog.locator("a[href], button")).toHaveCount(3);
+
+    const appStoreBox = await appStoreLink.boundingBox();
+    const cancelBox = await cancelButton.boundingBox();
+    expect(
+      appStoreBox,
+      `${label} App Store action should have layout`,
+    ).not.toBeNull();
+    expect(cancelBox, `${label} Cancel action should have layout`).not.toBeNull();
+    if (appStoreBox && cancelBox) {
+      expect(
+        Math.abs(appStoreBox.width - cancelBox.width),
+        `${label} actions should share one full-width column`,
+      ).toBeLessThanOrEqual(OVERFLOW_TOLERANCE_PX);
+      expect(
+        appStoreBox.height,
+        `${label} App Store action should use the large settings size`,
+      ).toBeGreaterThanOrEqual(56);
+      expect(
+        appStoreBox.y + appStoreBox.height,
+        `${label} App Store action should stack above Cancel`,
+      ).toBeLessThan(cancelBox.y);
+    }
 
     const focusIsContained = await dialog.evaluate((element) =>
       element.contains(document.activeElement),
@@ -120,7 +140,7 @@ test("shared-card fragments open a private, accessible App Store handoff", async
       await expect(dialog).toBeVisible();
     }
 
-    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await cancelButton.click();
     await expect(dialog).toBeHidden();
     await expect(page).toHaveURL(new RegExp(`#murph-card=${envelope}$`, "u"));
 
