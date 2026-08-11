@@ -37,6 +37,7 @@ import {
   CHANGELOG_EDITIONS_PER_PAGE,
   CHANGELOG_PREVIEW_CARD_ITEMS,
   listChangelogEditions,
+  listPublishedChangelogItems,
   resolveChangelogEditionPage,
   resolveChangelogPage,
 } from "../src/lib/changelog";
@@ -70,7 +71,7 @@ describe("ChangelogPage", () => {
     expect(firstPage.editions).toHaveLength(CHANGELOG_EDITIONS_PER_PAGE);
     for (const edition of firstPage.editions) {
       expect(markup).toContain(`id="edition-${edition.id}"`);
-      expect(markup).toContain(edition.title);
+      expect(markup).toContain(renderToStaticMarkup(<>{edition.title}</>));
       for (const item of edition.items) {
         expect(markup).toContain(`id="${item.id}"`);
         expect(markup).toContain(`href="${buildChangelogItemPath(item.id)}"`);
@@ -87,9 +88,55 @@ describe("ChangelogPage", () => {
   });
 
   it("renders the new try-it controls with their exact prompts", async () => {
-    const markup = renderToStaticMarkup(
-      await ChangelogPage({ searchParams: Promise.resolve({}) }),
+    const itemIds = [
+      "reminders-keep-requested-timezone",
+      "public-referral-home",
+      "murph-max-plan",
+      "clearer-health-source-handoffs",
+      "x-post-media-understanding",
+      "official-local-alert-health-context",
+      "health-data-consent-controls",
+      "daily-nutrition-cards",
+      "single-source-wearable-disconnect",
+    ];
+    const publishedItemsById = new Map(
+      listPublishedChangelogItems().map((item) => [item.id, item]),
     );
+    const owningEditionIds = [
+      ...new Set(
+        itemIds.map((itemId) => {
+          const item = publishedItemsById.get(itemId);
+          if (!item) {
+            throw new TypeError(`Missing changelog test item: ${itemId}`);
+          }
+          return item.editionId;
+        }),
+      ),
+    ];
+    const pageMarkupByEditionId = new Map(
+      await Promise.all(
+        owningEditionIds.map(async (editionId) => [
+          editionId,
+          renderToStaticMarkup(
+            await ChangelogPage({
+              searchParams: Promise.resolve({ edition: editionId }),
+            }),
+          ),
+        ] as const),
+      ),
+    );
+    const markup = itemIds
+      .map((itemId) => {
+        const editionId = publishedItemsById.get(itemId)?.editionId;
+        const pageMarkup = editionId
+          ? pageMarkupByEditionId.get(editionId)
+          : undefined;
+        if (!pageMarkup) {
+          throw new TypeError(`Missing changelog test page for: ${itemId}`);
+        }
+        return extractChangelogItemMarkup(pageMarkup, itemId);
+      })
+      .join("\n");
 
     expect(markup).not.toContain("Open model settings");
     expect(markup).toContain("Ask about today&#x27;s conditions");
@@ -332,3 +379,12 @@ describe("ChangelogPage", () => {
     expect(mocks.notFound).toHaveBeenCalledTimes(2);
   });
 });
+
+function extractChangelogItemMarkup(markup: string, itemId: string): string {
+  const start = markup.indexOf(`<article id="${itemId}"`);
+  const end = markup.indexOf("</article>", start);
+  if (start === -1 || end === -1) {
+    throw new TypeError(`Missing rendered changelog item: ${itemId}`);
+  }
+  return markup.slice(start, end + "</article>".length);
+}
