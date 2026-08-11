@@ -563,14 +563,11 @@ field applies only if no legacy conversational or sequenced mutation has
 already established that field's watermark, which is the bounded compatibility
 policy for history whose original cross-lane order cannot be reconstructed.
 
-Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default, and prompt assembly adds one persistent user-facing writing contract (casual lowercases all Murph-authored prose except casing-sensitive literals; formal keeps standard capitalization and no slang, staying warm and direct). Voice memo defaults resolve in this order:
+Tone is read from the canonical vault during turn planning. An absent saved tone resolves to the shared `formal` default, and prompt assembly adds one persistent user-facing writing contract (casual lowercases all Murph-authored prose except casing-sensitive literals; formal keeps standard capitalization and no slang, staying warm and direct). Voice memo resolution is:
 
-1. Explicit tool argument `voiceId`.
-2. Vault assistant voice preference mapped through the shared roster to an ElevenLabs voice id.
-3. No stored preference resolves to the shared default (`upbeat`).
-4. `MURPH_ELEVENLABS_VOICE_ID`.
-
-Explicit `classic` and unknown stale vault voice ids fall through to the environment default.
+1. For a current user request to test an exact named roster voice or hear this memo in that exact named voice, `userRequestedVoice` maps that roster id to its ElevenLabs voice id. This includes a same-turn save-and-hear/test request that names the just-selected voice. Murph never supplies this field because another voice seems to fit the content.
+2. Every normal memo uses the voice configured for the running turn: the vault assistant voice mapped through the shared roster, or the shared default (`upbeat`) when no preference is stored.
+3. An explicit `classic` selection or unknown stale vault voice id falls through to `MURPH_ELEVENLABS_VOICE_ID`.
 
 ## Deploy And Rollback
 
