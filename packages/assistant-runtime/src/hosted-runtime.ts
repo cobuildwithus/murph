@@ -2284,6 +2284,50 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         );
       }
 
+      if (consumeForegroundWake()) {
+        return await returnSystemMailboxModeResult();
+      }
+      if (devicePass.prepared) {
+        emitPhaseLog({
+          details: {
+            workspacePresent: activeWorkspace !== null,
+            workspaceVersion: activeWorkspace?.version ?? null,
+          },
+          input,
+          requestId,
+          stage: "browser_vault.refresh",
+          status: "start",
+        });
+        try {
+          const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+            force: false,
+            generatedAt: new Date().toISOString(),
+            platform: foregroundRuntime.platform,
+            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            signal: runtimeAbortController.signal,
+            timeoutMs: null,
+            vaultRoot: restored.vaultRoot,
+            workspace: activeWorkspace,
+          });
+          emitPhaseLog({
+            details: buildHostedBrowserVaultRefreshLogDetails(refresh),
+            input,
+            requestId,
+            stage: "browser_vault.refresh",
+            status: "done",
+          });
+        } catch (error) {
+          emitPhaseLog({
+            error,
+            input,
+            requestId,
+            stage: "browser_vault.refresh",
+            status: "fail",
+          });
+          throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
+        }
+      }
+
       consumeForegroundWake();
       return await returnSystemMailboxModeResult();
     };

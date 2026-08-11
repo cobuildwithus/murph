@@ -9420,6 +9420,7 @@ describe("hosted workspace runtime entrypoint", () => {
       mocks.prepareHostedCodexAssistantProcess.mockClear();
       mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
       mocks.cancelPendingWarmCodexPreinitialization.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
       await enqueueDeviceSyncSystemMailboxItemForTest({
         item: deviceItem,
@@ -9505,7 +9506,15 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(result.nextWakeAt, null);
       assert.equal(result.nextWakeReason ?? null, null);
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledWith(
+        expect.objectContaining({
+          force: false,
+          vaultRoot,
+        }),
+      );
     } finally {
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);
     }
