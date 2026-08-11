@@ -360,8 +360,112 @@ test("Training keeps canonical date-only labels stable across browser time zones
   }
 });
 
+test("Training checks one first admission and adopts a same-source replacement", async () => {
+  const initialClient = await createActiveTrainingClient();
+  const replacementClient = createBrowserVaultQueryClient(initialClient.replica);
+  const refresh = vi.fn<BrowserVaultContextValue["refresh"]>(async () => {});
+  let currentClient = initialClient;
+  let runtimeRefreshPending = false;
+  mocks.useBrowserVault.mockImplementation(() => ({
+    client: currentClient,
+    error: null,
+    ref: {
+      sourceBundleHash: "a".repeat(64),
+    },
+    refresh,
+    refreshPending: runtimeRefreshPending,
+    runtimeRefreshPending,
+    status: "ready",
+  }));
+  const createTrainingElement = () => createElement(
+    TrainingPageClient,
+    {
+      authenticated: true,
+      continueContactOptions,
+      startContactOptions,
+    },
+  );
+  const rendered = await renderClientComponent(createTrainingElement(), {
+    requireButton: false,
+  });
+
+  try {
+    assert.equal(refresh.mock.calls.length, 1);
+    const refreshOptions = refresh.mock.calls[0]?.[0];
+    assert.equal(refreshOptions?.background, true);
+    assert.equal(typeof refreshOptions?.requestRuntimeRefreshUntil, "function");
+    assert.equal(
+      refreshOptions?.requestRuntimeRefreshUntil?.(initialClient),
+      false,
+    );
+    assert.equal(
+      refreshOptions?.requestRuntimeRefreshUntil?.(replacementClient),
+      true,
+    );
+
+    runtimeRefreshPending = true;
+    await rendered.rerender(createTrainingElement());
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Checking for recent updates/,
+    );
+    assert.match(rendered.container.textContent ?? "", /Recent workouts/);
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Start workout|Continue workout/,
+    );
+    await act(async () => {
+      rendered.window.dispatchEvent(new rendered.window.Event("focus"));
+      await Promise.resolve();
+    });
+    assert.equal(refresh.mock.calls.length, 1);
+
+    runtimeRefreshPending = false;
+    await rendered.rerender(createTrainingElement());
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Recent updates not visible yet/,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Start workout|Continue workout/,
+    );
+    assert.match(rendered.container.textContent ?? "", /Use current view/);
+    const checkAgain = [...rendered.container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Check again"));
+    assert.ok(checkAgain);
+    await act(async () => {
+      checkAgain.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+    assert.equal(refresh.mock.calls.length, 2);
+
+    currentClient = replacementClient;
+    await rendered.rerender(createTrainingElement());
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Checking for recent updates|Recent updates not visible yet/,
+    );
+    assert.match(rendered.container.textContent ?? "", /Continue workout/);
+
+    currentClient = initialClient;
+    await rendered.rerender(createTrainingElement());
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Checking for recent updates|Recent updates not visible yet/,
+    );
+    assert.equal(refresh.mock.calls.length, 2);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
 test("Training requests one runtime-owned refresh and latches a later ordinary adoption", async () => {
   const unchangedClient = await createActiveTrainingClient();
+  const initialReplacementClient = createBrowserVaultQueryClient(
+    unchangedClient.replica,
+  );
   const changedClient = createBrowserVaultQueryClient(
     await createBrowserVaultReplica({
       generatedAt: "2026-08-09T18:05:00.000Z",
@@ -427,11 +531,20 @@ test("Training requests one runtime-owned refresh and latches a later ordinary a
   );
 
   try {
+    assert.equal(refresh.mock.calls.length, 1);
+    currentClient = initialReplacementClient;
+    await rendered.rerender(
+      createElement(TrainingPageClient, {
+        authenticated: true,
+        continueContactOptions,
+        startContactOptions,
+      }),
+    );
     await act(async () => {
       rendered.window.dispatchEvent(new rendered.window.Event("focus"));
       await Promise.resolve();
     });
-    assert.equal(refresh.mock.calls.length, 0);
+    assert.equal(refresh.mock.calls.length, 1);
 
     const continueLink = [...rendered.container.querySelectorAll("a")]
       .find((link) => link.textContent?.includes("Continue workout"));
@@ -443,19 +556,19 @@ test("Training requests one runtime-owned refresh and latches a later ordinary a
       rendered.window.dispatchEvent(new rendered.window.Event("focus"));
       await Promise.resolve();
     });
-    assert.equal(refresh.mock.calls.length, 1);
-    const refreshOptions = refresh.mock.calls[0]?.[0];
+    assert.equal(refresh.mock.calls.length, 2);
+    const refreshOptions = refresh.mock.calls[1]?.[0];
     assert.equal(refreshOptions?.background, true);
     assert.equal(typeof refreshOptions?.requestRuntimeRefreshUntil, "function");
     assert.equal(
-      refreshOptions?.requestRuntimeRefreshUntil?.(unchangedClient),
+      refreshOptions?.requestRuntimeRefreshUntil?.(initialReplacementClient),
       false,
     );
     await act(async () => {
       rendered.window.dispatchEvent(new rendered.window.Event("focus"));
       await Promise.resolve();
     });
-    assert.equal(refresh.mock.calls.length, 1);
+    assert.equal(refresh.mock.calls.length, 2);
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
       /Start workout|Continue workout/,
@@ -493,12 +606,16 @@ test("Training requests one runtime-owned refresh and latches a later ordinary a
 
 test("Training shows bounded recovery when the runtime owner expires a stalled request", async () => {
   let runtimeRefreshPending = false;
-  const client = await createActiveTrainingClient();
+  const initialClient = await createActiveTrainingClient();
+  const initialReplacementClient = createBrowserVaultQueryClient(
+    initialClient.replica,
+  );
+  let currentClient = initialClient;
   const refresh = vi.fn<BrowserVaultContextValue["refresh"]>(
     () => new Promise<void>(() => {}),
   );
   mocks.useBrowserVault.mockImplementation(() => ({
-    client,
+    client: currentClient,
     error: null,
     ref: {
       sourceBundleHash: "a".repeat(64),
@@ -521,6 +638,9 @@ test("Training shows bounded recovery when the runtime owner expires a stalled r
   });
 
   try {
+    assert.equal(refresh.mock.calls.length, 1);
+    currentClient = initialReplacementClient;
+    await rendered.rerender(createTrainingElement());
     const continueLink = [...rendered.container.querySelectorAll("a")]
       .find((link) => link.textContent?.includes("Continue workout"));
     assert.ok(continueLink);
@@ -541,11 +661,14 @@ test("Training shows bounded recovery when the runtime owner expires a stalled r
       rendered.container.textContent ?? "",
       /Start workout|Continue workout/,
     );
-    assert.equal(refresh.mock.calls.length, 1);
+    assert.equal(refresh.mock.calls.length, 2);
 
     runtimeRefreshPending = false;
     await rendered.rerender(createTrainingElement());
-    assert.match(rendered.container.textContent ?? "", /Update not visible yet/);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Update not visible yet/,
+    );
     assert.match(rendered.container.textContent ?? "", /Recent workouts/);
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
@@ -563,14 +686,14 @@ test("Training shows bounded recovery when the runtime owner expires a stalled r
         new rendered.window.Event("click", { bubbles: true }),
       );
     });
-    assert.equal(refresh.mock.calls.length, 2);
+    assert.equal(refresh.mock.calls.length, 3);
 
     await act(async () => {
       cancelUpdate.dispatchEvent(
         new rendered.window.Event("click", { bubbles: true }),
       );
     });
-    assert.equal(refresh.mock.calls.length, 2);
+    assert.equal(refresh.mock.calls.length, 3);
     assert.doesNotMatch(
       rendered.container.textContent ?? "",
       /Checking for your saved update|Update not visible yet/,
@@ -725,15 +848,15 @@ test("Training keeps a delayed generation refresh actionable after background po
   }
 });
 
-test("Training keeps retained data visible while a Messages update is checked and recoverable", () => {
+test("Training keeps retained data visible while recent updates are checked and recoverable", () => {
   const checkingMarkup = renderToStaticMarkup(
     createElement(TrainingPageView, {
       authenticated: true,
       continueContactOptions,
       error: null,
-      handoffRefreshState: "checking",
-      onCheckUpdate: () => {},
+      onCheckRefresh: () => {},
       onRefresh: () => {},
+      refreshState: "checking",
       refreshPending: true,
       startContactOptions,
       status: "ready",
@@ -746,17 +869,17 @@ test("Training keeps retained data visible while a Messages update is checked an
   assert.doesNotMatch(checkingMarkup, /Update not visible yet/);
   assert.doesNotMatch(checkingMarkup, /Start workout|Continue workout/);
 
-  const onCheckUpdate = vi.fn();
-  const onCancelUpdate = vi.fn();
+  const onCheckRefresh = vi.fn();
+  const onCancelRefresh = vi.fn();
   const recoveryMarkup = renderToStaticMarkup(
     createElement(TrainingPageView, {
       authenticated: true,
       continueContactOptions,
       error: null,
-      handoffRefreshState: "not_visible",
-      onCancelUpdate,
-      onCheckUpdate,
+      onCancelRefresh,
+      onCheckRefresh,
       onRefresh: () => {},
+      refreshState: "not_visible",
       refreshPending: false,
       startContactOptions,
       status: "ready",
@@ -775,10 +898,10 @@ test("Training keeps retained data visible while a Messages update is checked an
       authenticated: true,
       continueContactOptions,
       error: null,
-      handoffRefreshState: "not_visible",
-      onCancelUpdate,
-      onCheckUpdate,
+      onCancelRefresh,
+      onCheckRefresh,
       onRefresh: () => {},
+      refreshState: "not_visible",
       refreshPending: false,
       startContactOptions,
       status: "ready",
@@ -1010,9 +1133,19 @@ test("Training design study renders the production dashboard with synthetic data
   assert.match(markup, /Loading your training log/);
   assert.match(markup, /data-training-study-state="refresh-pending"/);
   assert.match(markup, /Preparing your training view/);
-  assert.match(markup, /data-training-study-state="handoff-checking"/);
+  assert.match(markup, /data-training-study-state="initial-refresh-checking"/);
+  assert.match(markup, /Checking for recent updates/);
+  assert.match(
+    markup,
+    /data-training-study-state="initial-refresh-not-visible"/,
+  );
+  assert.match(markup, /Recent updates not visible yet/);
+  assert.match(markup, /data-training-study-state="handoff-refresh-checking"/);
   assert.match(markup, /Checking for your saved update/);
-  assert.match(markup, /data-training-study-state="handoff-not-visible"/);
+  assert.match(
+    markup,
+    /data-training-study-state="handoff-refresh-not-visible"/,
+  );
   assert.match(markup, /Update not visible yet/);
   assert.match(markup, /Check again/);
   assert.match(markup, /Could not refresh your training log/);

@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 
 import {
   TrainingPageView,
-  type TrainingHandoffRefreshState,
+  type TrainingRefreshKind,
+  type TrainingRefreshState,
 } from "@/app/(dashboard)/training/training-page-client";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 import type {
@@ -308,16 +309,35 @@ export function TrainingDashboardStudy() {
         training={null}
       />
       <TrainingStudyPage
-        handoffRefreshState="checking"
-        id="handoff-checking"
+        id="initial-refresh-checking"
+        refreshKind="initial"
         refreshPending
+        refreshState="checking"
+        status="ready"
+        title="First admission · checking with retained data"
+        training={COMPLETED_TRAINING_STUDY_VIEW}
+      />
+      <TrainingStudyPage
+        id="initial-refresh-not-visible"
+        refreshKind="initial"
+        refreshState="not_visible"
+        status="ready"
+        title="First admission · recent updates not visible yet"
+        training={COMPLETED_TRAINING_STUDY_VIEW}
+      />
+      <TrainingStudyPage
+        id="handoff-refresh-checking"
+        refreshKind="handoff"
+        refreshPending
+        refreshState="checking"
         status="ready"
         title="Messages handoff · checking with retained data"
         training={COMPLETED_TRAINING_STUDY_VIEW}
       />
       <TrainingStudyPage
-        handoffRefreshState="not_visible"
-        id="handoff-not-visible"
+        id="handoff-refresh-not-visible"
+        refreshKind="handoff"
+        refreshState="not_visible"
         status="ready"
         title="Messages handoff · update not visible yet"
         training={COMPLETED_TRAINING_STUDY_VIEW}
@@ -357,20 +377,22 @@ export function TrainingDashboardStudy() {
 function TrainingStudyPage({
   authenticated = true,
   error = null,
-  handoffRefreshState = "idle",
   id,
   messagingConfigured = true,
   refreshPending = false,
+  refreshKind = "handoff",
+  refreshState = "idle",
   status,
   title,
   training,
 }: {
   authenticated?: boolean;
   error?: string | null;
-  handoffRefreshState?: TrainingHandoffRefreshState;
   id: string;
   messagingConfigured?: boolean;
   refreshPending?: boolean;
+  refreshKind?: TrainingRefreshKind;
+  refreshState?: TrainingRefreshState;
   status: "empty" | "error" | "loading" | "ready";
   title: string;
   training: BrowserTrainingView | null;
@@ -383,10 +405,12 @@ function TrainingStudyPage({
         authenticated={authenticated}
         continueContactOptions={contactOptions}
         error={error}
-        handoffRefreshState={handoffRefreshState}
-        onCheckUpdate={() => undefined}
+        onCancelRefresh={() => undefined}
+        onCheckRefresh={() => undefined}
         onRefresh={() => undefined}
+        refreshKind={refreshKind}
         refreshPending={refreshPending}
+        refreshState={refreshState}
         startContactOptions={contactOptions}
         status={status}
         training={training}

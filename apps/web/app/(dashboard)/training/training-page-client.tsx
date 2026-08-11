@@ -8,6 +8,7 @@ import {
   MessageCircle,
   RefreshCw,
 } from "lucide-react";
+import type { BrowserVaultQueryClient } from "@murphai/query/browser-replica-client";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { AuthButton } from "@/src/components/ui/auth-button";
@@ -39,10 +40,31 @@ const MESSAGE_EXAMPLES = [
   "Actually set two was 9",
 ] as const;
 
-export type TrainingHandoffRefreshState =
+export type TrainingRefreshState =
   | "idle"
   | "checking"
   | "not_visible";
+
+export type TrainingRefreshKind = "initial" | "handoff";
+
+type TrainingRefreshBaseline =
+  | {
+      client: BrowserVaultQueryClient;
+      kind: "initial";
+    }
+  | {
+      handoff: TrainingHandoffBaseline;
+      kind: "handoff";
+    };
+
+function isTrainingRefreshComplete(
+  baseline: TrainingRefreshBaseline,
+  client: BrowserVaultQueryClient,
+): boolean {
+  return baseline.kind === "initial"
+    ? client !== baseline.client
+    : isTrainingHandoffComplete(baseline.handoff, client);
+}
 
 function useTrainingNow(): Date {
   const [now, setNow] = useState(() => new Date());
@@ -113,30 +135,42 @@ export default function TrainingPageClient({
   );
   const training = useBrowserVaultSelector(selectTraining);
   const refreshAfterContactRef = useRef<TrainingHandoffBaseline | null>(null);
-  const [handoffRefreshBaseline, setHandoffRefreshBaseline]
-    = useState<TrainingHandoffBaseline | undefined>(undefined);
-  const requestHandoffRefresh = useCallback(
-    (baseline: TrainingHandoffBaseline) => {
-      setHandoffRefreshBaseline(baseline);
+  // null waits for the first admitted client; undefined is terminal. Both the
+  // admission check and a later Messages handoff reuse this one page-local
+  // baseline and the Browser Vault provider's existing bounded refresh owner.
+  const [refreshBaseline, setRefreshBaseline]
+    = useState<TrainingRefreshBaseline | null | undefined>(null);
+  if (refreshBaseline === null && status === "ready" && client) {
+    setRefreshBaseline({ client, kind: "initial" });
+  }
+  const requestBaselineRefresh = useCallback(
+    (baseline: TrainingRefreshBaseline) => {
       void refresh({
         background: true,
         requestRuntimeRefreshUntil: (client) =>
-          isTrainingHandoffComplete(baseline, client),
+          isTrainingRefreshComplete(baseline, client),
       });
     },
     [refresh],
   );
-  const replacementVisible = handoffRefreshBaseline !== undefined
+  useEffect(() => {
+    if (refreshBaseline?.kind === "initial") {
+      requestBaselineRefresh(refreshBaseline);
+    }
+  }, [refreshBaseline, requestBaselineRefresh]);
+  const replacementVisible = refreshBaseline !== null
+    && refreshBaseline !== undefined
     && client !== null
-    && isTrainingHandoffComplete(handoffRefreshBaseline, client);
+    && isTrainingRefreshComplete(refreshBaseline, client);
   if (replacementVisible) {
-    const completedBaseline = handoffRefreshBaseline;
-    setHandoffRefreshBaseline((current) =>
+    const completedBaseline = refreshBaseline;
+    setRefreshBaseline((current) =>
       current === completedBaseline ? undefined : current
     );
   }
-  const handoffRefreshState: TrainingHandoffRefreshState =
-    handoffRefreshBaseline === undefined
+  const refreshState: TrainingRefreshState =
+    refreshBaseline === null
+      || refreshBaseline === undefined
       || replacementVisible
       || status === "error"
       ? "idle"
@@ -156,7 +190,12 @@ export default function TrainingPageClient({
         return;
       }
       refreshAfterContactRef.current = null;
-      requestHandoffRefresh(refreshRequest);
+      const baseline: TrainingRefreshBaseline = {
+        handoff: refreshRequest,
+        kind: "handoff",
+      };
+      setRefreshBaseline(baseline);
+      requestBaselineRefresh(baseline);
     };
 
     window.addEventListener("focus", refreshAfterContact);
@@ -165,22 +204,23 @@ export default function TrainingPageClient({
       window.removeEventListener("focus", refreshAfterContact);
       document.removeEventListener("visibilitychange", refreshAfterContact);
     };
-  }, [requestHandoffRefresh]);
+  }, [requestBaselineRefresh]);
 
   return (
     <TrainingPageView
       authenticated={authenticated}
       continueContactOptions={continueContactOptions}
       error={error}
-      handoffRefreshState={handoffRefreshState}
-      onCancelUpdate={() => setHandoffRefreshBaseline(undefined)}
-      onCheckUpdate={() => {
-        if (handoffRefreshBaseline) {
-          requestHandoffRefresh(handoffRefreshBaseline);
+      onCancelRefresh={() => setRefreshBaseline(undefined)}
+      onCheckRefresh={() => {
+        if (refreshBaseline) {
+          requestBaselineRefresh(refreshBaseline);
         }
       }}
       onContactAction={markContactHandoff}
       onRefresh={() => void refresh()}
+      refreshKind={refreshBaseline?.kind}
+      refreshState={refreshState}
       refreshPending={refreshPending}
       startContactOptions={startContactOptions}
       status={status}
@@ -193,11 +233,12 @@ export function TrainingPageView({
   authenticated,
   continueContactOptions,
   error,
-  handoffRefreshState = "idle",
-  onCancelUpdate,
-  onCheckUpdate,
+  onCancelRefresh,
+  onCheckRefresh,
   onContactAction,
   onRefresh,
+  refreshKind = "handoff",
+  refreshState = "idle",
   refreshPending,
   startContactOptions,
   status,
@@ -206,11 +247,12 @@ export function TrainingPageView({
   authenticated: boolean;
   continueContactOptions: readonly MurphContactOption[];
   error: string | null;
-  handoffRefreshState?: TrainingHandoffRefreshState;
-  onCancelUpdate?: () => void;
-  onCheckUpdate?: () => void;
+  onCancelRefresh?: () => void;
+  onCheckRefresh?: () => void;
   onContactAction?: () => void;
   onRefresh: () => void;
+  refreshKind?: TrainingRefreshKind;
+  refreshState?: TrainingRefreshState;
   refreshPending: boolean;
   startContactOptions: readonly MurphContactOption[];
   status: ReturnType<typeof useBrowserVault>["status"];
@@ -236,7 +278,7 @@ export function TrainingPageView({
     && status !== "error"
     && !hasTraining
     && refreshPending
-    && handoffRefreshState === "idle";
+    && refreshState === "idle";
 
   return (
     <div className="flex flex-col gap-8">
@@ -246,7 +288,7 @@ export function TrainingPageView({
           title="Training"
           description="Log sets by messaging Murph. Review recent workouts and see what is improving here."
         />
-        {primaryActionLabel && handoffRefreshState === "idle" ? (
+        {primaryActionLabel && refreshState === "idle" ? (
           <ContactAction
             authenticated={authenticated}
             className="w-full sm:w-auto"
@@ -281,48 +323,13 @@ export function TrainingPageView({
         </Alert>
       ) : null}
 
-      {handoffRefreshState !== "idle" ? (
-        <Alert>
-          <AlertTitle>
-            {handoffRefreshState === "checking"
-              ? "Checking for your saved update"
-              : "Update not visible yet"}
-          </AlertTitle>
-          <AlertDescription>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <span>
-                {handoffRefreshState === "checking"
-                  ? "Your current training stays visible while Murph checks for the update from Messages."
-                  : "The saved update has not reached this view yet. Your current training is still available."}
-              </span>
-              {handoffRefreshState === "not_visible" ? (
-                <div className="flex flex-wrap gap-2">
-                  {onCancelUpdate ? (
-                    <Button
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                      onClick={onCancelUpdate}
-                    >
-                      I didn&apos;t send an update
-                    </Button>
-                  ) : null}
-                  {onCheckUpdate ? (
-                    <Button
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                      onClick={onCheckUpdate}
-                    >
-                      <RefreshCw aria-hidden="true" />
-                      Check again
-                    </Button>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </AlertDescription>
-        </Alert>
+      {refreshState !== "idle" ? (
+        <TrainingRefreshNotice
+          kind={refreshKind}
+          onCancel={onCancelRefresh}
+          onCheck={onCheckRefresh}
+          state={refreshState}
+        />
       ) : null}
 
       {awaitingRefresh ? (
@@ -356,7 +363,7 @@ export function TrainingPageView({
         && !awaitingRefresh
         && status !== "error"
         && !hasTraining
-        && handoffRefreshState === "idle" ? (
+        && refreshState === "idle" ? (
         <EmptyTraining
           authenticated={authenticated}
           contactOption={startContactOptions[0] ?? null}
@@ -366,6 +373,70 @@ export function TrainingPageView({
 
       {status === "error" && !hasTraining ? <MessageGuide /> : null}
     </div>
+  );
+}
+
+function TrainingRefreshNotice({
+  kind,
+  onCancel,
+  onCheck,
+  state,
+}: {
+  kind: TrainingRefreshKind;
+  onCancel?: () => void;
+  onCheck?: () => void;
+  state: Exclude<TrainingRefreshState, "idle">;
+}) {
+  const initial = kind === "initial";
+  const title = state === "checking"
+    ? initial
+      ? "Checking for recent updates"
+      : "Checking for your saved update"
+    : initial
+      ? "Recent updates not visible yet"
+      : "Update not visible yet";
+  const description = state === "checking"
+    ? initial
+      ? "Murph is checking for the latest saved workouts. Anything already available stays visible."
+      : "Your current training stays visible while Murph checks for the update from Messages."
+    : initial
+      ? "The latest saved workouts have not reached this view yet. You can use what is visible or check again."
+      : "The saved update has not reached this view yet. Your current training is still available.";
+
+  return (
+    <Alert>
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span>{description}</span>
+          {state === "not_visible" ? (
+            <div className="flex flex-wrap gap-2">
+              {onCancel ? (
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                  onClick={onCancel}
+                >
+                  {initial ? "Use current view" : "I didn't send an update"}
+                </Button>
+              ) : null}
+              {onCheck ? (
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={onCheck}
+                >
+                  <RefreshCw aria-hidden="true" />
+                  Check again
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 }
 
