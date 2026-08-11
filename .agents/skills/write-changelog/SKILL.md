@@ -191,14 +191,15 @@ case applies.
 At minimum, update focused coverage for:
 
 - claim-critical source PRs, boundaries, and `tryIt` behavior;
-- the latest seven-edition page and older navigation;
 - explanatory visual rendering and the synthetic design study;
-- stable feed, card, API, cursor, and permalink behavior affected by the new
-  latest items.
+- stable feed, card, API, cursor, and permalink behavior only when the item
+  changes those contracts.
 
 The fragment loader automatically checks path/content agreement, allowed
 fields, unique IDs, deterministic ordering, and publication in the combined
-registry. Do not add the item to a hand-maintained full-edition inventory test.
+registry. Generic archive tests automatically cover the current seven-edition
+window and older navigation. Do not add the item to a hand-maintained full-edition
+or latest-page inventory test.
 
 Run the smallest focused Vitest set that covers the changed changelog files,
 then the Web typecheck. Render the design study and latest archive at desktop

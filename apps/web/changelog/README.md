@@ -34,9 +34,11 @@ stable fallback title and item-count summary. Avoid editing shared edition
 metadata in ordinary item PRs when several changes are landing on the same
 date.
 
-Historical editions in `src/lib/changelog.ts` are frozen. New entries must not
-edit that registry or a hand-maintained edition inventory test. Web development,
-tests, typechecking, and builds generate an ignored TypeScript module from the
-fragments, avoiding both a committed merge hotspot and runtime filesystem reads.
-The loader and focused tests validate fragments and publish them through the
-existing archive, feed, permalink, and share-card contracts.
+Historical editions in `src/lib/changelog.ts` are frozen through 2026-08-09.
+Fragment dates after that boundary remain open to independent item files; a
+normal item PR never advances the boundary or edits a hand-maintained edition
+or latest-page inventory test. Web development, tests, typechecking, and builds
+generate an ignored TypeScript module from the fragments, avoiding both a
+committed merge hotspot and runtime filesystem reads. The loader and focused
+tests validate fragments and publish them through the existing archive, feed,
+permalink, and share-card contracts.

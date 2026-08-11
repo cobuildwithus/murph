@@ -32,6 +32,7 @@ import { ChangelogArchiveStudy } from "../app/design/changelog-archive-study";
 import {
   buildAbsoluteChangelogUrl,
   buildChangelogCardPath,
+  buildChangelogItemPath,
   buildChangelogPagePath,
   CHANGELOG_EDITIONS_PER_PAGE,
   CHANGELOG_PREVIEW_CARD_ITEMS,
@@ -54,82 +55,33 @@ describe("ChangelogPage", () => {
     mocks.resolveHostedMurphContactOptions.mockResolvedValue([]);
   });
 
-  it("renders the latest seven days with compact older navigation", async () => {
+  it("renders the current archive window with compact older navigation", async () => {
     const markup = renderToStaticMarkup(
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
+    const firstPage = resolveChangelogPage(1);
+    const secondPage = resolveChangelogPage(2);
+    expect(firstPage).not.toBeNull();
+    expect(secondPage).not.toBeNull();
+    if (!firstPage || !secondPage) {
+      throw new TypeError("The changelog fixture must span at least two pages.");
+    }
 
-    expect(markup).toContain(
-      "Starter access, patterns, reminders, cards, voices, and web search",
-    );
-    expect(markup).toContain("Managed OpenAI web search works again");
-    expect(markup).toContain("Completed workout rows keep their checkmark");
-    expect(markup).not.toContain("Ask Murph to search");
-    expect(markup).toContain("Voice memos keep your chosen voice");
-    expect(markup).toContain("Referrals, Max, and a more capable Murph");
-    expect(markup).toContain(
-      "Exact experiment links and steadier background work",
-    );
-    expect(markup).toContain(
-      "A personal first read, richer automations, clearer trends",
-    );
-    expect(markup).toContain(
-      "Faster starts, richer X answers, better continuity",
-    );
-    expect(markup).toContain("More ways to connect, prepare, and finish");
-    expect(markup).toContain("Ask about images and video on X");
-    expect(markup).toContain("More control over data, models, and connections");
-    expect(markup).not.toContain(
-      "Connected apps recover with a clearer next step",
-    );
-    expect(markup).not.toContain("Recovery that stops at the right moment");
-    expect(markup).not.toContain("More ways to finish what you started");
-    expect(markup).not.toContain("A clearer view of home, stronger follow-through");
-    expect(markup).not.toContain("More ways through, less waiting around");
-    expect(markup).not.toContain("Corrections that carry forward");
-    expect(markup).not.toContain("A first text that goes somewhere");
-    expect(markup).not.toContain(
-      "Updated documents, honest reactions, usage you can see",
-    );
-    expect(markup).not.toContain("Onboarding that sounds like a person");
-    expect(markup).not.toContain("Pick who Murph is");
-    expect(markup).not.toContain(
-      "Standings that explain themselves, payments that finish",
-    );
-    expect(markup).not.toContain(
-      "Medical records, without the integration jargon",
-    );
-    expect(markup).not.toContain("Replies that know what they are answering");
-    expect(markup).toContain("Improvements");
-    expect(markup).not.toContain("Under the hood");
-    expect(markup).not.toContain("Your records and measurements, in one place");
-    expect(markup).not.toContain("More control, less waiting");
-    expect(markup).not.toContain("Better answers, better instincts");
-    expect(markup).not.toContain("Murph referees your group challenge");
+    expect(firstPage.editions).toHaveLength(CHANGELOG_EDITIONS_PER_PAGE);
+    for (const edition of firstPage.editions) {
+      expect(markup).toContain(`id="edition-${edition.id}"`);
+      expect(markup).toContain(edition.title);
+      for (const item of edition.items) {
+        expect(markup).toContain(`id="${item.id}"`);
+        expect(markup).toContain(`href="${buildChangelogItemPath(item.id)}"`);
+      }
+    }
+    for (const edition of secondPage.editions) {
+      expect(markup).not.toContain(`id="edition-${edition.id}"`);
+    }
+
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-08-03"');
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-10#personal-patterns"',
-    );
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-10#voice-memos-use-your-voice"',
-    );
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-09#public-referral-home"',
-    );
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-06#x-post-media-understanding"',
-    );
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
-    );
-    expect(markup).toContain(
-      'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
-    );
-    expect(markup).not.toContain(
-      "The physical-note delivery record does not store the postal address",
-    );
-    expect(markup).not.toContain("plaintext conversation memory");
+    expect(markup).toContain(`href="${buildChangelogPagePath(2)}"`);
     expect(markup).toContain("Older");
     expect(markup).not.toContain(">Newer<");
   });
