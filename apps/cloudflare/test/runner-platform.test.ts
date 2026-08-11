@@ -4472,8 +4472,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         return new Response(JSON.stringify({
           action: "read",
           result: {
+            mainPersona: "classic",
             model: "gpt-5.6-terra",
             solAvailable: false,
+            supportingPersona: null,
             tone: "formal",
             voice: "warm",
           },
@@ -4588,8 +4590,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       .resolves.toEqual({
         action: "read",
         result: {
+          mainPersona: "classic",
           model: "gpt-5.6-terra",
           solAvailable: false,
+          supportingPersona: null,
           tone: "formal",
           voice: "warm",
         },
