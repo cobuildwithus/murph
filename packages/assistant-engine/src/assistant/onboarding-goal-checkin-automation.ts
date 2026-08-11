@@ -255,6 +255,24 @@ export async function runOnboardingGoalCheckinAuthorityPrecondition(input: {
     }
   }
 
+  const automation = await showAutomation({
+    automationId: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
+    vaultRoot: input.vault,
+  })
+  if (automation !== null) {
+    const reconciledAtMs = Date.parse(automation.updatedAt)
+    if (
+      !Number.isFinite(reconciledAtMs) ||
+      completedAtMs > reconciledAtMs
+    ) {
+      return {
+        kind: 'skip',
+        reason:
+          'Onboarding was completed after this support check was last reconciled.',
+      }
+    }
+  }
+
   return { kind: 'continue' }
 }
 
