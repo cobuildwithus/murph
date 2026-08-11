@@ -1615,7 +1615,15 @@ describe('monorepo release flow coverage audit', () => {
       'MURPH_VERIFY_EXECUTOR=crabbox pnpm verify:acceptance',
     )
     expect(verificationAndRuntime).toMatch(/fully\s+staging any new non-ignored source/u)
-    expect(completionWorkflow).toContain('not complete until the PR branch has no merge conflicts')
+    expect(completionWorkflow).toContain(
+      'Green required CI on the PR-authored head plus a clean current-base merge-tree is sufficient preparation',
+    )
+    expect(completionWorkflow).toContain(
+      'strict up-to-date checks block it',
+    )
+    expect(completionWorkflow).toContain(
+      'Do not start repeated base-refresh/CI loops during preparation.',
+    )
     expect(completionWorkflow).toContain('fetch the latest `main`')
     expect(completionWorkflow).toContain(
       'pass replaces the four former local `product-experience-review`,',

@@ -1,16 +1,10 @@
 import { getPrisma } from "../src/lib/prisma";
 import {
   getHostedBillingPlanDefinition,
-  HOSTED_PULSE_TRIAL_OFFER,
 } from "../src/lib/hosted-onboarding/billing-plans";
 import {
-  readHostedMemberStripeBillingRef,
-} from "../src/lib/hosted-onboarding/hosted-member-billing-store";
-import {
-  isHostedLegacyPulseTrialRetirableStatus,
-  retireHostedLegacyPulseTrialToStarter,
-  retrieveHostedPulseTrialCleanupTarget,
-} from "../src/lib/hosted-onboarding/pulse-trial-subscription-cleanup";
+  runHostedLegacyPulseTrialRetirement,
+} from "../src/lib/hosted-onboarding/legacy-pulse-trial-retirement";
 import { requireHostedStripeApi } from "../src/lib/hosted-onboarding/runtime";
 
 interface RetirementOptions {
@@ -36,100 +30,16 @@ async function main(): Promise<void> {
       );
     }
 
-    const queriedRows = await prisma.hostedMemberBillingRef.findMany({
-      orderBy: { memberId: "asc" },
-      select: {
-        currentBillingPhase: true,
-        memberId: true,
-      },
-      where: {
-        OR: [
-          { currentBillingPhase: "trial" },
-          { currentCheckoutOffer: HOSTED_PULSE_TRIAL_OFFER },
-        ],
-        stripeSubscriptionLookupKey: { not: null },
-      },
-    });
-    const rows = queriedRows.filter(
-      (row) => row.currentBillingPhase !== "paid",
-    );
-
-    if (options.apply && options.expectedCandidates !== rows.length) {
-      throw new Error(
-        `Expected ${options.expectedCandidates ?? "an explicit"} legacy trial candidates but found ${rows.length}.`,
-      );
-    }
-
-    const candidates: string[] = [];
-    const statusCounts = new Map<string, number>();
-    let missingProviderCount = 0;
-
-    for (const row of rows) {
-      const billingRef = await readHostedMemberStripeBillingRef({
-        memberId: row.memberId,
-        prisma,
-      });
-      const stripeSubscriptionId = billingRef?.stripeSubscriptionId ?? null;
-      if (!stripeSubscriptionId) {
-        throw new Error(
-          "A legacy trial candidate has an unreadable Stripe subscription identity.",
-        );
-      }
-      const subscription = await retrieveHostedPulseTrialCleanupTarget({
-        expectedCustomerId: billingRef?.stripeCustomerId ?? undefined,
-        memberId: row.memberId,
-        priceId: pulsePriceId,
-        stripe,
-        subscriptionId: stripeSubscriptionId,
-      });
-      if (!subscription) {
-        missingProviderCount += 1;
-      } else {
-        statusCounts.set(
-          subscription.status,
-          (statusCounts.get(subscription.status) ?? 0) + 1,
-        );
-        if (!isHostedLegacyPulseTrialRetirableStatus(subscription.status)) {
-          throw new Error(
-            "At least one legacy trial candidate now represents potentially paid Stripe service. No provider objects were changed.",
-          );
-        }
-      }
-
-      candidates.push(row.memberId);
-    }
-
-    let retiredCount = 0;
-    let alreadyRetiredCount = 0;
-    if (options.apply) {
-      for (const memberId of candidates) {
-        const retired = await retireHostedLegacyPulseTrialToStarter({
-          memberId,
-          priceId: pulsePriceId,
-          prisma,
-          stripe,
-        });
-        if (retired) {
-          retiredCount += 1;
-        } else {
-          alreadyRetiredCount += 1;
-        }
-      }
-    }
-
-    process.stdout.write(`${JSON.stringify({
-      alreadyRetiredCount,
-      candidateCount: candidates.length,
-      missingProviderCount,
-      mode: options.apply ? "apply" : "dry-run",
-      retiredCount,
+    process.stdout.write(`${JSON.stringify(await runHostedLegacyPulseTrialRetirement({
+      apply: options.apply,
+      ...(options.expectedCandidates === undefined
+        ? {}
+        : { expectedCandidates: options.expectedCandidates }),
+      priceId: pulsePriceId,
+      prisma,
+      stripe,
       stripeMode: options.stripeMode,
-      subscriptionStatusCounts: Object.fromEntries(
-        [...statusCounts.entries()].sort(([left], [right]) =>
-          left.localeCompare(right)
-        ),
-      ),
-    }, null, 2)}\n`);
+    }), null, 2)}\n`);
   } finally {
     await prisma.$disconnect();
   }
