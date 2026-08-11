@@ -2969,10 +2969,18 @@ function isHostedImageCompletionToolRequestAllowed(input: {
     return true
   }
   if (input.request.kind === 'attach-response-media') {
-    return matchesExactHostedImageCompletionMedia({
-      actual: input.request.media,
-      expected: input.scope.exactMedia,
-    })
+    const requested = input.request.media.length === 1
+      ? input.request.media[0]
+      : null
+    const expected = input.scope.exactMedia?.[0] ?? null
+    // The model relays a vault descriptor, but the vault remains authoritative
+    // for mutable capture metadata such as hash, size, filename and content
+    // type. Admit only the exact trusted ref here. The attachment path then
+    // rehydrates that ref from the vault and performs the full exact-media
+    // comparison before exposing a response patch.
+    return requested?.kind === 'vault_image' &&
+      expected !== null &&
+      requested.ref === expected.ref
   }
   // Physical-note generation already owns an exact-origin continuation: the
   // model must have launched generation with an authorized message_ref, and

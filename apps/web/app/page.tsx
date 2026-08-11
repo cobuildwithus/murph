@@ -15,6 +15,7 @@ import { LandingBrowserVaultWarm } from "@/src/components/homepage/landing-brows
 import { IntegrationsSection } from "@/src/components/homepage/integrations-section";
 import { LocalRunSection } from "@/src/components/homepage/local-run-section";
 import { MealPhotosSection } from "@/src/components/homepage/meal-photos-section";
+import { MurphCardHandoffGate } from "@/src/components/homepage/murph-card-handoff-dialog";
 import { NutritionSection } from "@/src/components/homepage/nutrition-section";
 import { pickRandomMurphHeadshotSrc } from "@/src/components/homepage/murph-headshot-avatar";
 import { PersonasSection } from "@/src/components/homepage/personas-section";
@@ -131,6 +132,7 @@ export default async function HomePage() {
 
   return (
     <HomepageAuthRuntimeProvider authenticated={authenticated}>
+      <MurphCardHandoffGate />
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
         {authenticated ? <LandingBrowserVaultWarm /> : null}
         <StickyNav
