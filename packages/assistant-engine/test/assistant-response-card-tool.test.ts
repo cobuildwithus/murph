@@ -711,9 +711,8 @@ describe('murph.attach_response_card', () => {
     expect(readCardToolRequest({ card: LEGACY_CARD_V1 })).toMatchObject({
       kind: 'invalid-response-card-arguments',
     })
-    expect(readCardToolRequest({ card: CHALLENGE_CARD })).toEqual({
-      card: CHALLENGE_CARD,
-      kind: 'attach-response-card',
+    expect(readCardToolRequest({ card: CHALLENGE_CARD })).toMatchObject({
+      kind: 'invalid-response-card-arguments',
     })
     expect(readCardToolRequest(CHALLENGE_CARD_AUTHORING_INPUT)).toEqual({
       input: CHALLENGE_CARD_AUTHORING_INPUT,
