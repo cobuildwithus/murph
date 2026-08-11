@@ -209,13 +209,26 @@ export async function supersedeHostedCredentialScopedDirtyStateForConnectionTx(i
     return;
   }
 
-  const unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
+  let unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
     where: {
       connectionId: input.connectionId,
       credentialIndependent: null,
       userId: input.userId,
     },
   });
+  if (unclassifiedPayloadCount > 0) {
+    // Acknowledgement takes this dirty-marker lock before deleting payload
+    // rows. Keep reconnect on the same marker-before-payload order while
+    // mixed-version nullable rows are classified behind the consent fence.
+    await classifyHostedUnclassifiedDirtyPayloadsForConnection(input);
+    unclassifiedPayloadCount = await input.tx.deviceSyncDirtyPayload.count({
+      where: {
+        connectionId: input.connectionId,
+        credentialIndependent: null,
+        userId: input.userId,
+      },
+    });
+  }
   if (unclassifiedPayloadCount > 0) {
     throw createDirtyPayloadClassificationPendingError();
   }

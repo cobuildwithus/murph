@@ -69,7 +69,6 @@ import {
 } from "./connection-secrets";
 import {
   isHostedDirtyPayloadClassificationPendingError,
-  classifyHostedUnclassifiedDirtyPayloadsForConnection,
   supersedeHostedCredentialScopedDirtyStateForConnectionTx,
 } from "./dirty-connections";
 import { toPrismaJsonObject } from "./prisma-json";
@@ -264,17 +263,6 @@ export class PrismaHostedConnectionStore {
         }
 
         assertNoActiveHostedConnectionRefreshLease(existing, connectedAt);
-
-        if (existing.connectedAt.getTime() !== connectedAt.getTime()) {
-          // Nullable rows only exist during mixed-version rollout. Classify
-          // them behind the same member-row consent fence as replacement so a
-          // completed withdrawal always orders before any legacy decryption.
-          await classifyHostedUnclassifiedDirtyPayloadsForConnection({
-            connectionId: existing.id,
-            tx,
-            userId: existing.userId,
-          });
-        }
 
         const metadata = input.provider === "junction" && input.existingAccountGuard
           ? sanitizeHostedDeviceSyncConnectionMetadata(

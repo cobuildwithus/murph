@@ -4,16 +4,17 @@ import { DEVICE_SYNC_DISCONNECT_IN_PROGRESS_ERROR_CODE } from "@murphai/device-s
 const {
   lockHostedMemberRowMock,
   openHostedUserSecureBoxStringMock,
-  prepareDirtyClassificationsMock,
   randomBytesMock,
   readHostedHealthDataConsentStateMock,
   supersedeDirtyStateMock,
 } = vi.hoisted(() => ({
   lockHostedMemberRowMock: vi.fn(async () => undefined),
   openHostedUserSecureBoxStringMock: vi.fn(
-    async (_input: { prisma?: unknown; value?: unknown }) => "acct_456",
+    async (input: { prisma?: unknown; value?: unknown }) => {
+      void input;
+      return "acct_456";
+    },
   ),
-  prepareDirtyClassificationsMock: vi.fn(async () => undefined),
   randomBytesMock: vi.fn((length: number) => Buffer.from(Array.from({ length }, (_, index) => index))),
   readHostedHealthDataConsentStateMock: vi.fn(
     async (): Promise<"granted" | "missing" | "revoked"> => "missing",
@@ -53,8 +54,6 @@ vi.mock("@/src/lib/device-sync/prisma-store/dirty-connections", async () => {
   >("@/src/lib/device-sync/prisma-store/dirty-connections");
   return {
     ...actual,
-    classifyHostedUnclassifiedDirtyPayloadsForConnection:
-      prepareDirtyClassificationsMock,
     supersedeHostedCredentialScopedDirtyStateForConnectionTx:
       supersedeDirtyStateMock,
   };
@@ -119,7 +118,6 @@ const TEST_CODEC = {
 describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    prepareDirtyClassificationsMock.mockResolvedValue(undefined);
     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
     supersedeDirtyStateMock.mockResolvedValue(undefined);
   });
@@ -184,7 +182,6 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
 describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    prepareDirtyClassificationsMock.mockResolvedValue(undefined);
     readHostedHealthDataConsentStateMock.mockResolvedValue("missing");
     supersedeDirtyStateMock.mockResolvedValue(undefined);
   });
@@ -913,7 +910,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     expect(tx.deviceConnection.update).not.toHaveBeenCalled();
   });
 
-  it("retries legacy classification once behind the consent-ordered transaction", async () => {
+  it("retries legacy classification once behind the consent and dirty-marker transaction", async () => {
     let stored = createConnection({
       accessTokenEncrypted: null,
       id: "dsc_classification_retry",
@@ -957,7 +954,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
-    prepareDirtyClassificationsMock
+    supersedeDirtyStateMock
       .mockRejectedValueOnce({
         code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
         retryable: true,
@@ -983,8 +980,8 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       status: "active",
     }));
 
-    expect(prepareDirtyClassificationsMock).toHaveBeenCalledTimes(2);
-    expect(prepareDirtyClassificationsMock).toHaveBeenNthCalledWith(1, {
+    expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(2);
+    expect(supersedeDirtyStateMock).toHaveBeenNthCalledWith(1, {
       connectionId: "dsc_classification_retry",
       tx,
       userId: "user-123",
@@ -993,10 +990,9 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
       readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0] ?? 0,
     );
     expect(readHostedHealthDataConsentStateMock.mock.invocationCallOrder[0]).toBeLessThan(
-      prepareDirtyClassificationsMock.mock.invocationCallOrder[0] ?? 0,
+      supersedeDirtyStateMock.mock.invocationCallOrder[0] ?? 0,
     );
     expect(transaction).toHaveBeenCalledTimes(2);
-    expect(supersedeDirtyStateMock).toHaveBeenCalledTimes(1);
   });
 
   it("bounds repeated connection unique-conflict recovery to one retry", async () => {
@@ -1057,7 +1053,7 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     })).rejects.toBe(uniqueConflict);
 
     expect(transaction).toHaveBeenCalledTimes(2);
-    expect(prepareDirtyClassificationsMock).not.toHaveBeenCalled();
+    expect(supersedeDirtyStateMock).not.toHaveBeenCalled();
   });
 
   it("reactivates a disconnected hosted connection on successful OAuth reconnect", async () => {

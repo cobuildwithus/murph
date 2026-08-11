@@ -89,35 +89,100 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it("keeps replacement route-free when deploy skew leaves an unclassified payload", async () => {
+  it("classifies deploy-skew payloads only after taking the dirty-marker lock", async () => {
+    installHostedSecureBoxStringTestCodec();
     const connectionId = "dsc_epoch_skew";
-    const updateMany = vi.fn();
-    const deleteMany = vi.fn();
-    const tx = {
-      $queryRaw: vi.fn(async () => [{
-        dirtyRevision: 3n,
-        latestDirtyAt: new Date("2026-07-27T04:00:00.000Z"),
-        processedRevision: 2n,
-      }]),
-      deviceSyncDirtyConnection: {
-        updateMany,
-      },
-      deviceSyncDirtyPayload: {
-        count: vi.fn(async () => 1),
-        deleteMany,
-      },
-    };
+    const userId = "member_epoch_skew";
+    const payloadId = "dsp_epoch_skew";
+    const dirtyRevision = 3n;
+    const operationOrder: string[] = [];
 
-    await expect(supersedeHostedCredentialScopedDirtyStateForConnectionTx({
-      connectionId,
-      tx: tx as never,
-      userId: "member_epoch_skew",
-    })).rejects.toMatchObject({
-      code: "HOSTED_DEVICE_SYNC_DIRTY_PAYLOAD_CLASSIFICATION_PENDING",
-      retryable: true,
-    });
-    expect(updateMany).not.toHaveBeenCalled();
-    expect(deleteMany).not.toHaveBeenCalled();
+    try {
+      const resourceEncrypted = await sealHostedDeviceSyncDirtyPayloadJson({
+        connectionId,
+        dirtyRevision,
+        payloadId,
+        provider: "junction",
+        userId,
+        value: {
+          count: 1,
+          jobKind: "deauthorization",
+          payload: { webhookDataJson: JSON.stringify({ event: "deauthorize" }) },
+          resource: "deauthorization",
+        },
+      });
+      const tx = {
+        $queryRaw: vi.fn(async () => {
+          operationOrder.push("lock-dirty-marker");
+          return [{
+            dirtyRevision,
+            latestDirtyAt: new Date("2026-07-27T04:00:00.000Z"),
+            processedRevision: 2n,
+          }];
+        }),
+        deviceSyncDirtyConnection: {
+          updateMany: vi.fn(async () => {
+            operationOrder.push("reset-dirty-marker");
+            return { count: 1 };
+          }),
+        },
+        deviceSyncDirtyPayload: {
+          count: vi.fn()
+            .mockImplementationOnce(async () => {
+              operationOrder.push("count-nullable");
+              return 1;
+            })
+            .mockImplementationOnce(async () => {
+              operationOrder.push("count-nullable");
+              return 0;
+            }),
+          deleteMany: vi.fn(async () => {
+            operationOrder.push("delete-credential-scoped");
+            return { count: 1 };
+          }),
+          findMany: vi.fn(async () => {
+            operationOrder.push("read-nullable-payloads");
+            return [{
+              connectionId,
+              dirtyRevision,
+              id: payloadId,
+              provider: "junction",
+              resourceEncrypted,
+            }];
+          }),
+          updateMany: vi.fn(async () => {
+            operationOrder.push("classify-payload");
+            return { count: 1 };
+          }),
+        },
+      };
+
+      await expect(supersedeHostedCredentialScopedDirtyStateForConnectionTx({
+        connectionId,
+        tx: tx as never,
+        userId,
+      })).resolves.toBeUndefined();
+      expect(operationOrder).toEqual([
+        "lock-dirty-marker",
+        "count-nullable",
+        "read-nullable-payloads",
+        "classify-payload",
+        "count-nullable",
+        "reset-dirty-marker",
+        "delete-credential-scoped",
+      ]);
+      expect(tx.deviceSyncDirtyPayload.updateMany).toHaveBeenCalledWith({
+        data: { credentialIndependent: false },
+        where: {
+          connectionId,
+          credentialIndependent: null,
+          id: { in: [payloadId] },
+          userId,
+        },
+      });
+    } finally {
+      setHostedSecureBoxStringTestCodecForTests(null);
+    }
   });
 
   it("classifies nullable legacy payloads before replacement and preserves decrypt failures", async () => {

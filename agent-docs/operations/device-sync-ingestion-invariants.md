@@ -237,9 +237,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    compare-and-set plus set-based deletion of rows classified as
    credential-scoped. Nullable rows left by mixed-version writers are the one
    transitional exception: Web classifies at most 800 of them inside the
-   existing member-row transaction, after the health-data consent re-read, so
-   completed withdrawal orders before any legacy decryption. More than 800
-   null rows fail retryably until runtime acknowledgement reduces that backlog.
+   existing member-row transaction, after the health-data consent re-read and
+   after locking the dirty marker, so completed withdrawal orders before any
+   legacy decryption and both reconnect and acknowledgement take the marker
+   before touching payload rows. More than 800 null rows fail retryably until
+   runtime acknowledgement reduces that backlog.
    Hosted runtime
    hydration still loads the classifier per turn and passes it into the existing
    SQLite credential-replacement transaction. Both paths keep provider/importer
