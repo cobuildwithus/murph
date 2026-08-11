@@ -113,6 +113,9 @@ test("opens the App Store handoff without exposing the opaque card value", async
     expect(rendered.container.textContent).toContain(
       "Install or open Murph from the App Store. Then return to Messages and tap the card again.",
     );
+    const title = rendered.container.querySelector(`#murph-card-handoff-title`);
+    expect(title?.className).toContain("text-3xl/9");
+    expect(title?.className).toContain("font-semibold");
     expect(rendered.container.textContent).not.toContain("Shared from Messages");
     expect(rendered.container.innerHTML).not.toContain("opaque-test-envelope");
     expect(fetchMock).not.toHaveBeenCalled();

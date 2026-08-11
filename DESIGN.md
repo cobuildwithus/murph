@@ -247,8 +247,11 @@ to install or open Murph and then return to Messages and tap the card again.
 Use Open App Store as the primary action, Cancel as a ghost secondary action,
 and the standard close control. Stack both actions at full width using the
 large settings-dialog button convention so the App Store destination remains
-the clear primary path. The dialog must not display or decode the fragment,
-add device-specific branching, or turn the fallback into a signup flow.
+the clear primary path. Give the short serif heading display-scale presence,
+use readable body copy, and let the compact surface breathe with the wider,
+roomier settings-dialog spacing. The dialog must not display or decode the
+fragment, add device-specific branching, or turn the fallback into a signup
+flow.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep

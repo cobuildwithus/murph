@@ -9,7 +9,7 @@ export function MurphCardHandoffStudy() {
       data-design-component="murph-card-handoff-dialog"
       inert
     >
-      <div className="relative mx-auto grid max-w-sm gap-4 rounded-3xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10">
+      <div className="relative mx-auto grid max-w-md gap-6 rounded-3xl bg-popover p-6 text-sm text-popover-foreground ring-1 ring-foreground/10 md:p-7">
         <MurphCardHandoffPanel onDismiss={() => undefined} />
       </div>
     </div>
