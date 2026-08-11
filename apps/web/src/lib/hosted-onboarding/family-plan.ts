@@ -2349,6 +2349,7 @@ export async function createHostedFamilyBillingCheckout(input: {
   now?: Date;
   ownerMemberId: string;
   prisma?: PrismaClient;
+  requireExistingCheckoutAttempt?: boolean;
   seatCount?: unknown;
 }): Promise<{ alreadyActive: boolean; url: string | null }> {
   let restartAllowed = true;
@@ -2377,6 +2378,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
     now?: Date;
     ownerMemberId: string;
     prisma?: PrismaClient;
+    requireExistingCheckoutAttempt?: boolean;
     seatCount?: unknown;
   },
 ): Promise<
@@ -2385,7 +2387,9 @@ async function createOrResumeHostedFamilyBillingCheckout(
 > {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
-  const seatCount = normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
+  const requestedSeatCount = input.requireExistingCheckoutAttempt
+    ? null
+    : normalizeHostedFamilySeatCount(input.seatCount ?? HOSTED_FAMILY_MIN_SEATS);
   const checkoutInput: HostedFamilyBillingCheckoutInput = await prisma.$transaction(async (tx) => {
     const group = await tx.hostedAccountGroup.findUnique({
       select: hostedAccountGroupAccessSelect,
@@ -2408,7 +2412,8 @@ async function createOrResumeHostedFamilyBillingCheckout(
       };
     }
     await assertHostedFamilyOwnerCanStartBillingTx({
-      allowDirectPaidOwner: input.allowDirectPaidUpgrade !== false,
+      allowDirectPaidOwner: !input.requireExistingCheckoutAttempt
+        && input.allowDirectPaidUpgrade !== false,
       groupId: group.id,
       ownerMemberId: group.ownerMemberId,
       tx,
@@ -2425,7 +2430,24 @@ async function createOrResumeHostedFamilyBillingCheckout(
         message: "Family billing is still syncing. Try again after payment is confirmed.",
       });
     }
-    const directPaidUpgrade = input.allowDirectPaidUpgrade === false
+    const currentAttemptId = currentBillingRef?.checkoutAttemptId ?? null;
+    if (input.requireExistingCheckoutAttempt && !currentAttemptId) {
+      throw buildHostedFamilyDraftChangedError();
+    }
+    if (
+      input.requireExistingCheckoutAttempt
+      && currentBillingRef?.checkoutSeatCount == null
+    ) {
+      throw buildHostedFamilyDraftRecoveryRequiredError();
+    }
+    const seatCount = input.requireExistingCheckoutAttempt
+      ? normalizeHostedFamilySeatCount(currentBillingRef?.checkoutSeatCount)
+      : requestedSeatCount;
+    if (seatCount === null) {
+      throw new TypeError("Family checkout seat count was not resolved.");
+    }
+    const directPaidUpgrade = input.requireExistingCheckoutAttempt
+      || input.allowDirectPaidUpgrade === false
       ? null
       : await readHostedFamilyDirectPaidUpgradeInputTx({
           group,
@@ -2447,7 +2469,6 @@ async function createOrResumeHostedFamilyBillingCheckout(
       return directPaidUpgrade;
     }
 
-    const currentAttemptId = currentBillingRef?.checkoutAttemptId ?? null;
     if (currentBillingRef?.stripeCheckoutSessionId && !currentAttemptId) {
       throw buildHostedFamilyCheckoutRecoveryRequiredError();
     }

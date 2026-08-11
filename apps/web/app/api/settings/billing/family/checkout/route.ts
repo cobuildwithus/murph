@@ -56,19 +56,35 @@ export const POST = withJsonError(async (request: Request) => {
     }
   }
 
-  const group = await prisma.$transaction((tx) =>
-    ensureHostedAccountGroupForOwnerTx({
-      ownerMemberId: auth.member.id,
-      tx,
-    }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  const group = abandonForInvite
+    ? await prisma.hostedAccountGroup.findUnique({
+        select: { id: true },
+        where: { ownerMemberId: auth.member.id },
+      })
+    : await prisma.$transaction((tx) =>
+        ensureHostedAccountGroupForOwnerTx({
+          ownerMemberId: auth.member.id,
+          tx,
+        }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  if (!group) {
+    throw hostedOnboardingError({
+      code: "HOSTED_FAMILY_DRAFT_CHANGED",
+      httpStatus: 409,
+      message: "Family setup changed before invite recovery started. Refresh and try again.",
+      retryable: true,
+    });
+  }
 
   const checkout = await createHostedFamilyBillingCheckout({
     allowDirectPaidUpgrade: !abandonForInvite,
-    confirmedTrialConversion: body.confirmedTrialConversion,
+    confirmedTrialConversion: abandonForInvite
+      ? undefined
+      : body.confirmedTrialConversion,
     groupId: group.id,
     ownerMemberId: auth.member.id,
     prisma,
-    seatCount: body.seatCount,
+    requireExistingCheckoutAttempt: abandonForInvite,
+    seatCount: abandonForInvite ? undefined : body.seatCount,
   });
   if (abandonForInvite) {
     if (checkout.alreadyActive || !checkout.url) {

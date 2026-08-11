@@ -6841,7 +6841,7 @@ describe("hosted Family plan", () => {
         billedSeatCount: null,
         checkoutAttemptId: "hbfca_existing",
         checkoutCreatedAt: new Date("2026-07-28T11:00:00.000Z"),
-        checkoutSeatCount: 2,
+        checkoutSeatCount: 3,
         group,
         stripeCheckoutSessionIdEncrypted: null,
         stripeSubscriptionIdEncrypted: null,
@@ -6866,7 +6866,7 @@ describe("hosted Family plan", () => {
       cancel_url: "https://local.withmurph.ai:3443/settings",
       client_reference_id: group.id,
       customer: "cus_family",
-      line_items: [{ price: "price_family", quantity: 2 }],
+      line_items: [{ price: "price_family", quantity: 3 }],
       metadata,
       mode: "subscription",
       payment_method_types: ["card"],
@@ -6904,7 +6904,7 @@ describe("hosted Family plan", () => {
       now: new Date("2026-07-28T12:00:00.000Z"),
       ownerMemberId: group.ownerMemberId,
       prisma: prisma as never,
-      seatCount: 2,
+      requireExistingCheckoutAttempt: true,
     })).resolves.toEqual({
       alreadyActive: false,
       url: `https://local.withmurph.ai:3443/checkout/family/${sessionId}`,
@@ -6921,6 +6921,35 @@ describe("hosted Family plan", () => {
       "invite_return_target",
     );
     expect(JSON.stringify(replayedSession)).not.toContain("invite_return_target");
+  });
+
+  it("does not create a new Family attempt when invite recovery loses its existing claim", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(createHostedFamilyBillingCheckout({
+      allowDirectPaidUpgrade: false,
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      requireExistingCheckoutAttempt: true,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DRAFT_CHANGED",
+      httpStatus: 409,
+    });
+
+    expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+    expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
   });
 
   it("retains a freshly bound Family Session past the attempt cutoff", async () => {
