@@ -14,7 +14,9 @@
       "privacy",
       "wearables"
     ],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [
+      1675
+    ],
     "tryIt": {
       "href": "/connect#connectSource=strava",
       "label": "Open Strava setup"
