@@ -1010,8 +1010,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   assistant/room sponsorship projection exposes only sponsored versus
   unsponsored. For a signed-in active group participant, the funding page owns
   one separate bounded recognition projection for the current activation and
-  at most 20 recent fulfilled one-time moments. It exposes only each retained opted-in
-  public alias or `Anonymous` plus monthly versus one-time kind, never payer
+  at most 20 recent fulfilled one-time moments. It exposes only a versioned,
+  funding-page-consented public alias whose existing verified-settlement
+  authority check stamped the moment publishable, or `Anonymous`, plus monthly
+  versus one-time kind. Historical aliases and moments settled after creator
+  authority was lost remain anonymous. Recognition streams below the primary
+  funding controls with a bounded abortable crypto budget, so optional alias
+  work cannot delay funding, management, cancellation, or recovery. It never exposes payer
   identity, amount, cap, balance, payment state, charge timing, or refill
   events. A separate room-public usage read may expose one bounded
   `includedUsageUsedPercent`: Web derives it only from current-period included

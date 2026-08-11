@@ -15,6 +15,9 @@ import {
 import {
   setHostedSecureBoxStringTestCodecForTests,
 } from "@/src/lib/hosted-crypto/secure-box";
+import {
+  HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+} from "@/src/lib/hosted-groups/group-sponsorship-contract";
 
 const PAID_AT = new Date("2026-07-27T12:00:00.000Z");
 
@@ -67,6 +70,19 @@ describe("hosted group sponsorship store", () => {
       runningBitRequest: null,
       sponsorMessage: null,
     });
+    expect(parseHostedGroupSponsorshipDraft({
+      publicAlias: "Funding-page alias",
+      publicAliasRecognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+    })).toEqual({
+      publicAlias: "Funding-page alias",
+      publicAliasRecognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+      runningBitRequest: null,
+      sponsorMessage: null,
+    });
+    expect(() => parseHostedGroupSponsorshipDraft({
+      publicAlias: null,
+      publicAliasRecognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+    })).toThrow(/short plain text/u);
     expect(() => parseHostedGroupSponsorshipDraft({
       publicAlias: "Sponsor",
       unexpected: true,
@@ -109,12 +125,12 @@ describe("hosted group sponsorship store", () => {
     const momentFindMany = vi.fn(async () => [
       {
         creatorMemberId: "member_monthly",
-        publicAliasEncrypted: sealTestValue("The Group Historian"),
+        publicAliasEncrypted: sealRecognizedAlias("The Group Historian"),
         purchaseId: "hucp_monthlysponsor1",
       },
       {
         creatorMemberId: "member_one_time",
-        publicAliasEncrypted: sealTestValue("Night Shift"),
+        publicAliasEncrypted: sealRecognizedAlias("Night Shift"),
         purchaseId: "hucp_onetimecontrib1",
       },
     ]);
@@ -150,29 +166,45 @@ describe("hosted group sponsorship store", () => {
         },
       ],
     });
-    expect(authorizationFindFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
+    expect(authorizationFindFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
         beneficiaryMemberId: "member_group_runtime",
-      }),
-    }));
-    expect(purchaseFindMany).toHaveBeenCalledWith(expect.objectContaining({
+        status: {
+          in: ["active", "paused", "recovery_required"],
+        },
+      },
+    });
+    expect(purchaseFindMany).toHaveBeenCalledWith({
+      orderBy: [{ paidAt: "desc" }, { id: "desc" }],
+      select: { id: true },
       take: 20,
-      where: expect.objectContaining({
+      where: {
         beneficiaryMemberId: "member_group_runtime",
         groupSponsorshipAuthorizationId: null,
+        paidAt: { not: null },
         status: "fulfilled",
-      }),
-    }));
-    expect(purchaseFindFirst).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
+      },
+    });
+    expect(purchaseFindFirst).toHaveBeenCalledWith({
+      orderBy: [{ paidAt: "desc" }, { id: "desc" }],
+      select: { id: true },
+      where: {
         groupSponsorshipAuthorizationId: "hgsa_abcdefghijklmnop",
         groupSponsorshipChargeOrdinal: 0,
         status: "fulfilled",
-      }),
-    }));
-    expect(momentFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({
+      },
+    });
+    expect(momentFindMany).toHaveBeenCalledWith({
+      select: {
+        creatorMemberId: true,
+        publicAliasEncrypted: true,
+        purchaseId: true,
+      },
+      where: {
         beneficiaryMemberId: "member_group_runtime",
+        fundingPageAliasPublishedAt: { not: null },
+        publicAliasEncrypted: { not: null },
         purchaseId: {
           in: [
             "hucp_monthlysponsor1",
@@ -180,8 +212,57 @@ describe("hosted group sponsorship store", () => {
             "hucp_onetimecontrib2",
           ],
         },
-      }),
-    }));
+      },
+    });
+  });
+
+  it("keeps legacy aliases anonymous without recognition consent", async () => {
+    const prisma = {
+      hostedGroupSponsorshipAuthorization: {
+        findFirst: vi.fn(async () => null),
+      },
+      hostedGroupSponsorshipMoment: {
+        findMany: vi.fn(async () => [{
+          creatorMemberId: "member_one_time",
+          publicAliasEncrypted: sealTestValue("Legacy creative alias"),
+          purchaseId: "hucp_onetimecontrib1",
+        }]),
+      },
+      hostedUsageCreditPurchase: {
+        findFirst: vi.fn(),
+        findMany: vi.fn(async () => [{ id: "hucp_onetimecontrib1" }]),
+      },
+    };
+
+    await expect(readHostedGroupFundingSupporters({
+      beneficiaryMemberId: "member_group_runtime",
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      monthlySponsor: null,
+      oneTimeContributions: [{
+        id: "hucp_onetimecontrib1",
+        name: "Anonymous",
+      }],
+    });
+  });
+
+  it("stops supporter reads when their latency budget is already exhausted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const prisma = {
+      hostedGroupSponsorshipAuthorization: { findFirst: vi.fn() },
+      hostedGroupSponsorshipMoment: { findMany: vi.fn() },
+      hostedUsageCreditPurchase: { findFirst: vi.fn(), findMany: vi.fn() },
+    };
+
+    await expect(readHostedGroupFundingSupporters({
+      beneficiaryMemberId: "member_group_runtime",
+      prisma: prisma as never,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(prisma.hostedGroupSponsorshipAuthorization.findFirst)
+      .not.toHaveBeenCalled();
+    expect(prisma.hostedUsageCreditPurchase.findMany).not.toHaveBeenCalled();
   });
 
   it("keeps funding history available as Anonymous when aliases cannot be opened", async () => {
@@ -232,6 +313,7 @@ describe("hosted group sponsorship store", () => {
         styleRequest: "Warm ensemble-sitcom theme with a bright acoustic intro.",
       },
       publicAlias: "The Group Historian",
+      publicAliasRecognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
       runningBitRequest: "Treat me like the exhausted CFO.",
       sponsorMessage: null,
     };
@@ -285,6 +367,7 @@ describe("hosted group sponsorship store", () => {
     expect(harness.row).toMatchObject({
       activatedAt: PAID_AT,
       expiresAt: new Date("2026-07-28T12:00:00.000Z"),
+      fundingPageAliasPublishedAt: PAID_AT,
     });
 
     await expect(readHostedGroupSponsorshipMomentForNotification({
@@ -294,7 +377,10 @@ describe("hosted group sponsorship store", () => {
       purchaseId: "purchase_123",
     })).resolves.toMatchObject({
       celebrationScale: "medium",
-      ...draft,
+      creativeRequest: draft.creativeRequest,
+      publicAlias: draft.publicAlias,
+      runningBitRequest: draft.runningBitRequest,
+      sponsorMessage: draft.sponsorMessage,
     });
     await expect(readHostedGroupSponsorshipDraftForCreator({
       creatorMemberId: "member_sponsor",
@@ -527,17 +613,60 @@ describe("hosted group sponsorship store", () => {
       code: "HOSTED_GROUP_SPONSORSHIP_BIT_NOT_AVAILABLE",
     });
   });
+
+  it("keeps a recognized alias unpublished when settlement authority is lost", async () => {
+    const harness = createHarness();
+    await createHostedGroupSponsorshipMomentTx({
+      authorizedDraft: {
+        publicAlias: "Former participant",
+        publicAliasRecognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+        runningBitRequest: null,
+        sponsorMessage: null,
+      },
+      beneficiaryMemberId: "member_group_runtime",
+      creatorMemberId: "member_sponsor",
+      offerCode: "usage_5_usd",
+      purchaseId: "purchase_removed_before_settlement",
+      tx: harness.prisma as never,
+    });
+
+    await activateHostedGroupSponsorshipMomentTx({
+      activatedAt: PAID_AT,
+      customContentAuthorized: false,
+      offerCode: "usage_5_usd",
+      purchaseId: "purchase_removed_before_settlement",
+      tx: harness.prisma as never,
+    });
+
+    expect(harness.row).toMatchObject({
+      activatedAt: PAID_AT,
+      fundingPageAliasPublishedAt: null,
+    });
+  });
 });
 
 function sealTestValue(value: string): string {
   return `sealed:${Buffer.from(value, "utf8").toString("base64url")}`;
 }
 
+function sealRecognizedAlias(value: string): string {
+  return sealTestValue(JSON.stringify({
+    publicAlias: value,
+    recognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+    schema: "murph.group-sponsorship-public-alias.v1",
+  }));
+}
+
 function createHarness(input: { participantAuthorized?: boolean } = {}) {
   const state: { row: Record<string, unknown> } = { row: {} };
   const hostedGroupSponsorshipMoment = {
     create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-      state.row = { ...data, activatedAt: null, expiresAt: null };
+      state.row = {
+        ...data,
+        activatedAt: null,
+        expiresAt: null,
+        fundingPageAliasPublishedAt: null,
+      };
       return state.row;
     }),
     findFirst: vi.fn(async () =>

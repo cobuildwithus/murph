@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 
 import {
   GroupFundingSignInButton,
@@ -66,6 +67,7 @@ export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
+const HOSTED_GROUP_FUNDING_SUPPORTERS_TIMEOUT_MS = 2_000;
 
 type GroupFundingSearchParams = {
   usageCheckout?: string | string[] | undefined;
@@ -128,7 +130,6 @@ export default async function GroupFundingPage({
     purchaseReturnMatchesTarget,
     customizationAllowed,
     sponsorshipManagement,
-    supporters,
   ] =
     await Promise.all([
       managementOnly
@@ -164,20 +165,6 @@ export default async function GroupFundingPage({
             prisma,
           })
         : Promise.resolve(null),
-      customizationAllowedPromise.then((allowed) =>
-        allowed
-          ? readHostedGroupFundingSupporters({
-              beneficiaryMemberId: target.runtimeMemberId,
-              prisma,
-            }).catch(() => ({
-              monthlySponsor: null,
-              oneTimeContributions: [],
-            }))
-          : {
-              monthlySponsor: null,
-              oneTimeContributions: [],
-            },
-      ),
     ]);
   if (!usageStatus || (managementOnly && !sponsorshipManagement)) {
     return <GroupFundingUnavailable />;
@@ -311,13 +298,37 @@ export default async function GroupFundingPage({
             ) : (
               <GroupFundingSignInButton />
             )}
-            <GroupFundingSupporters supporters={supporters} />
+            {customizationAllowed ? (
+              <Suspense fallback={null}>
+                <GroupFundingSupportersStream
+                  beneficiaryMemberId={target.runtimeMemberId}
+                  prisma={prisma}
+                />
+              </Suspense>
+            ) : null}
           </div>
         }
         groupName={groupName}
       />
     </main>
   );
+}
+
+async function GroupFundingSupportersStream({
+  beneficiaryMemberId,
+  prisma,
+}: {
+  beneficiaryMemberId: string;
+  prisma: ReturnType<typeof getPrisma>;
+}) {
+  const supporters = await readHostedGroupFundingSupporters({
+    beneficiaryMemberId,
+    prisma,
+    signal: AbortSignal.timeout(HOSTED_GROUP_FUNDING_SUPPORTERS_TIMEOUT_MS),
+  }).catch(() => null);
+  return supporters
+    ? <GroupFundingSupporters supporters={supporters} />
+    : null;
 }
 
 function projectHostedMonthlyCapOptions(): GroupSponsorshipMonthlyCapOption[] {

@@ -202,7 +202,9 @@ another moment, creative response, group notice, or running bit. The moment is
 not a financial status or balance. It freezes an HMAC-bound request
 configuration and, only for a current owner or active participant, may encrypt
 an optional public alias, optional creative request, and temporary running-bit
-request using the hosted member secure-box owner.
+request using the hosted member secure-box owner. A new public alias is stored
+in a versioned encrypted envelope with the exact funding-page recognition
+consent; legacy plaintext-shaped encrypted aliases carry no such consent.
 
 A creative request is absent by default, so funding alone is quiet in the room.
 The bounded formats are `message`, `poem`, and `song`. Every request may include
@@ -221,22 +223,30 @@ A valid funding locator remains sufficient to contribute anonymously. It is
 not sufficient to publish content into the room. Web checks current
 participant authority when the purchase is created and again after verified
 payment. Losing that authority suppresses the new authored creative request
-without changing the grant. A public alias is retained only when an opted-in
-response or active running-bit request can actually use it; both the client
-builder and server canonicalizer discard an alias-only quiet request, so quiet
-funding does not store an unused public identity. No expired private copy is
-read or exposed.
+without changing the grant and leaves the funding-page publication marker null.
+The alias field itself is optional recognition consent: the collection copy
+names signed-in group members as the audience and bounds visibility to an active
+monthly sponsorship or the 20 most recent contributions; blank means
+`Anonymous`. The server retains an alias-only draft only with that exact
+versioned consent. Legacy aliases can still support their originally disclosed
+creative or running-bit use but never gain funding-page consent. No expired
+private copy is read or exposed.
 
 For a signed-in active group participant, the funding page may recognize the
 current live monthly sponsorship activation and at most the 20 most recent
 fulfilled one-time contribution moments. It displays only `Monthly sponsor` or
-`One-time contribution` with the moment's retained public alias, falling back
-to `Anonymous`; the alias is a presentation label, not authenticated payer
-identity. The projection never exposes payer records, contribution amounts,
+`One-time contribution` with the moment's consented public alias only when the
+existing verified-settlement transaction also marked it publishable after its
+creator-authority recheck, falling back to `Anonymous`; the alias is a
+presentation label, not authenticated payer identity. Pre-feature aliases,
+pending or incompletely materialized moments, and moments settled after the
+creator lost authority remain Anonymous. The projection never exposes payer records, contribution amounts,
 monthly maximums, charge timing, balances, automatic refills, or payment
 status. Signed-out visitors and non-participants receive no supporter
 projection. Alias decryption is best effort and degrades to `Anonymous` without
-blocking funding.
+blocking funding. The complete funding, management, cancellation, and recovery
+controls stream first; supporter recognition renders in a separate Suspense
+boundary with a null fallback and a two-second abortable database/crypto budget.
 
 The funding-page read reuses the page's participant-authority result, then adds
 at most four set-based database calls: sponsorship authorization and 20-row
@@ -244,7 +254,9 @@ one-time history in parallel, an optional activation purchase, and one moment
 batch for at most 21 purchase IDs. Peak added database concurrency is two. The
 secure-box owner reads envelope metadata in one batch and performs at most 21
 root unwraps with its existing concurrency cap of four; there are no per-row
-database reads, provider calls, or transactions.
+database reads, provider calls, or transactions. The optional read is outside
+the page's blocking data fanout and aborts with an empty recognition state when
+its budget expires.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:

@@ -677,7 +677,7 @@ test("keeps a customizable sponsorship quiet by default", async () => {
   }
 });
 
-test("drops hidden sponsor details when their owning features are disabled", async () => {
+test("keeps recognition consent independent when creative extras are disabled", async () => {
   const checkout = deferred<unknown>();
   mocks.requestHostedOnboardingJson.mockReturnValueOnce(checkout.promise);
   const { GroupSponsorshipDialog } = await import(
@@ -737,7 +737,7 @@ test("drops hidden sponsor details when their owning features are disabled", asy
     );
     await clickRadio(rendered.container, rendered.window, "usage_5_usd");
 
-    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    assert.ok(controlByLabel(rendered.container, "Credit it as"));
     assert.equal(
       controlByLabel(rendered.container, "Temporary running bit"),
       null,
@@ -750,7 +750,8 @@ test("drops hidden sponsor details when their owning features are disabled", asy
         clientRequestKey: "00000000-0000-4000-8000-000000000001",
         offerCode: "usage_5_usd",
         sponsorship: {
-          publicAlias: null,
+          publicAlias: "The Group Historian",
+          publicAliasRecognition: "funding_participants_v1",
           runningBitRequest: null,
           sponsorMessage: null,
         },
@@ -800,7 +801,19 @@ test("freezes an opted-in sponsorship creative request with the selected offer",
       rendered.container.querySelector('[data-default-open="false"]') !== null,
       true,
     );
-    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    const sponsorAlias = requireTextControlByLabel(
+      rendered.container,
+      rendered.window,
+      "Credit it as",
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Signed-in group members see this alias while your monthly sponsorship is active or while this is one of the 20 most recent contributions\./u,
+    );
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Leave blank to show Anonymous\./u,
+    );
     assert.equal(
       controlByLabel(rendered.container, "Temporary running bit"),
       null,
@@ -819,7 +832,7 @@ test("freezes an opted-in sponsorship creative request with the selected offer",
       rendered.window,
       "Temporary running bit",
     );
-    assert.equal(controlByLabel(rendered.container, "Credit it as"), null);
+    assert.ok(controlByLabel(rendered.container, "Credit it as"));
     assert.match(rendered.container.textContent ?? "", /Lasts for 3 days\./u);
 
     await clickCheckboxByLabel(
@@ -829,11 +842,6 @@ test("freezes an opted-in sponsorship creative request with the selected offer",
     );
     await clickRadio(rendered.container, rendered.window, "song");
 
-    const sponsorAlias = requireTextControlByLabel(
-      rendered.container,
-      rendered.window,
-      "Credit it as",
-    );
     const creativePrompt = requireTextControlByLabel(
       rendered.container,
       rendered.window,
@@ -893,6 +901,7 @@ test("freezes an opted-in sponsorship creative request with the selected offer",
               "Warm ensemble-sitcom theme with a bright acoustic intro",
           },
           publicAlias: "The Group Historian",
+          publicAliasRecognition: "funding_participants_v1",
           runningBitRequest: "Treat me like Murph’s exhausted CFO.",
           sponsorMessage: null,
         },
@@ -1032,6 +1041,7 @@ test("keeps the private monthly maximum out of the public sponsorship moment", a
             styleRequest: null,
           },
           publicAlias: "Chat sponsor",
+          publicAliasRecognition: "funding_participants_v1",
           runningBitRequest: null,
           sponsorMessage: null,
         },
@@ -1382,6 +1392,7 @@ test("clears a lost group request after terminal recovery with a remounted spons
             styleRequest: null,
           },
           publicAlias: "Original sponsor",
+          publicAliasRecognition: "funding_participants_v1",
           runningBitRequest: null,
           sponsorMessage: null,
         },

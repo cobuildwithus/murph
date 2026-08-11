@@ -494,12 +494,16 @@ with the group. Do not reload into an unrelated unavailable state.
 
 For a signed-in active group participant, append one quiet **Supporters** list
 beneath the funding action when a current monthly sponsorship or recent
-one-time contribution exists. Use the retained opted-in public alias or
-`Anonymous`, and label each row only as
+one-time contribution exists. Use only a public alias entered after the dialog
+discloses its signed-in-group audience and active-monthly-or-recent-20 duration,
+and only after verified settlement preserved the sponsor's group authority;
+otherwise use `Anonymous`. Label each row only as
 `Monthly sponsor` or `One-time contribution`. Do not show amounts, monthly
 maximums, dates, payer identity, payment status, or automatic-refill history.
 Signed-out visitors and non-participants never see the supporter list. Keep the
-list absent when there is nothing to recognize and render its real
+list absent when there is nothing to recognize. Stream it beneath the complete
+primary action with a null fallback and bounded abortable read so recognition
+cannot delay funding, management, cancellation, or recovery. Render its real
 component with synthetic states in both the components catalog and this
 section study.
 

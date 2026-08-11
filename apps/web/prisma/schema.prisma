@@ -1565,6 +1565,7 @@ model HostedGroupSponsorshipMoment {
   sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
   runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
   activatedAt                DateTime? @map("activated_at")
+  fundingPageAliasPublishedAt DateTime? @map("funding_page_alias_published_at")
   expiresAt                  DateTime? @map("expires_at")
   createdAt                  DateTime  @default(now()) @map("created_at")
   updatedAt                  DateTime  @updatedAt @map("updated_at")
