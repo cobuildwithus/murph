@@ -14,7 +14,10 @@ import {
   PrismaHostedDirtyConnectionStore,
   supersedeHostedCredentialScopedDirtyStateForConnectionTx,
 } from "@/src/lib/device-sync/prisma-store/dirty-connections";
-import { sealHostedDeviceSyncDirtyPayloadJson } from "@/src/lib/device-sync/prisma-store/dirty-payloads";
+import {
+  openHostedDeviceSyncDirtyPayloadJson,
+  sealHostedDeviceSyncDirtyPayloadJson,
+} from "@/src/lib/device-sync/prisma-store/dirty-payloads";
 import { setHostedSecureBoxStringTestCodecForTests } from "@/src/lib/hosted-crypto/secure-box";
 
 describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
@@ -1296,6 +1299,9 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
       resources: [
         {
           count: 1,
+          eventToProviderSendBucket: "under_5_minutes",
+          firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
+          providerSendToWebhookMs: 60_000,
           jobKind: "resource",
           payload: {
             ordinary: "y".repeat(1_000),
@@ -1326,6 +1332,22 @@ describe("PrismaHostedDirtyConnectionStore dirty pending state", () => {
     expect(payloadRowJson).not.toContain(webhookDataJson);
     expect(typeof resourceEncrypted).toBe("string");
     expect(resourceEncrypted).toMatch(/^hsb-test:/u);
+    const payloadId = createdPayloadData?.[0]?.id;
+    if (typeof payloadId !== "string" || typeof resourceEncrypted !== "string") {
+      throw new TypeError("Expected the dirty payload row to be persisted.");
+    }
+    await expect(openHostedDeviceSyncDirtyPayloadJson({
+      connectionId: "dsc_junction_123",
+      dirtyRevision: 1n,
+      payloadId,
+      provider: "junction",
+      userId: "member_123",
+      value: resourceEncrypted,
+    })).resolves.toMatchObject({
+      eventToProviderSendBucket: "under_5_minutes",
+      firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
+      providerSendToWebhookMs: 60_000,
+    });
     expect(prisma.deviceSyncDirtyConnection.createMany).toHaveBeenCalledTimes(1);
     expect(prisma.deviceSyncDirtyPayload.createMany).toHaveBeenCalledTimes(1);
   });

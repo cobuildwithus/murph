@@ -122,6 +122,10 @@ import {
   type AssistantTrustedHostedImageCompletion,
 } from './prompt-builder.js'
 import {
+  resolveAssistantPromptTimeContext,
+  type ResolvedAssistantPromptTimeContext,
+} from '../prompt-time.js'
+import {
   assistantAutomationInputSummaryFromCandidate,
   compareAssistantInputSummaryOrder,
   type AssistantAutomationInputSummary,
@@ -199,6 +203,7 @@ interface AssistantAutoReplyReplyDecision {
   operatorAuthority: AssistantOperatorAuthority
   primaryInput: AssistantAutoReplyPrimaryInput
   prompt: string
+  promptTimeContext: ResolvedAssistantPromptTimeContext
   providerStartCriticalPath: AssistantProviderStartCriticalPathContext | null
   turnContext: string | null
   userMessageContent: AssistantUserMessageContentPart[] | null
@@ -685,6 +690,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
           input.onAcceptedContext?.(nextContext)
         },
         onEvent: input.onEvent,
+        promptTimeContext: decision.promptTimeContext,
         inputSource: input.inputSource,
         requestId: input.requestId,
         vault: input.vault,
@@ -793,6 +799,7 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     conversationRef: decision.primaryInput.conversation,
     crossSessionContext: decision.crossSessionContext,
     prompt: decision.prompt,
+    promptTimeContext: decision.promptTimeContext,
     replyInputId: primaryAutoReplyInputId(context),
     activeTurnInput: activeTurnHooks?.admit,
     activeTurnCheckpoint: activeTurnHooks?.checkpoint,
@@ -1526,10 +1533,12 @@ async function evaluateAssistantAutoReplyGroup(input: {
     )
   }
 
+  const promptTimeContext = await resolveAssistantPromptTimeContext(input.vault)
   const preparedInput = await prepareAssistantAutoReplyInputWithContext({
     executionContext: input.executionContext,
     inputs: promptInputs,
     onEvent: input.onEvent,
+    promptTimeContext,
     vault: input.vault,
   })
   if (preparedInput.kind === 'defer') {
@@ -1562,6 +1571,7 @@ async function evaluateAssistantAutoReplyGroup(input: {
     operatorAuthority: 'direct-operator',
     primaryInput: primaryReplyInput,
     prompt: preparedInput.prompt,
+    promptTimeContext,
     providerStartCriticalPath,
     turnContext: buildAssistantAutoReplyTurnContext({
       baseContext: affirmativeReaction
@@ -2005,6 +2015,7 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
   executionContext?: AssistantExecutionContext | null
   inputs: readonly AssistantAutoReplyPromptInput[]
   onEvent?: ((event: AssistantRunEvent) => void) | null
+  promptTimeContext: ResolvedAssistantPromptTimeContext
   vault: string
 }): Promise<Awaited<ReturnType<typeof prepareAssistantAutoReplyInput>>> {
   const promptInputs = await enrichAssistantAutoReplyLinqSpeakerNames({
@@ -2016,6 +2027,7 @@ async function prepareAssistantAutoReplyInputWithContext(input: {
   const options = {
     ...(materializeWorkspaceArtifacts ? { materializeWorkspaceArtifacts } : {}),
     ...(input.onEvent ? { onEvent: input.onEvent } : {}),
+    promptTimeContext: input.promptTimeContext,
   }
   return Object.keys(options).length > 0
     ? await prepareAssistantAutoReplyInput(promptInputs, input.vault, options)
@@ -2146,6 +2158,7 @@ async function executeAssistantAutoReply(input: {
   conversationRef: AssistantInputConversationRef
   crossSessionContext: AssistantAutoReplySelectedCrossSessionContext | null
   prompt: string
+  promptTimeContext: ResolvedAssistantPromptTimeContext
   replyInputId: string
   source: string
   turnEnvironment?: AssistantTurnEnvironment | null
@@ -2197,6 +2210,7 @@ async function executeAssistantAutoReply(input: {
       operatorAuthority: input.operatorAuthority,
       persistUserPromptOnFailure: false,
       prompt: input.prompt,
+      promptTimeContext: input.promptTimeContext,
       ...(input.turnContext === null
         ? {}
         : { turnContext: input.turnContext }),
@@ -2329,6 +2343,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
   historyReader: AssistantAutoReplyHistoryReader
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
   onEvent?: (event: AssistantRunEvent) => void
+  promptTimeContext: ResolvedAssistantPromptTimeContext
   inputSource: AssistantActiveTurnInputSource
   requestId: string | null
   vault: string
@@ -2495,6 +2510,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
         },
         onEvent: input.onEvent,
         pendingAcceptances,
+        promptTimeContext: input.promptTimeContext,
         replyContexts: lateReplyContexts,
         vault: input.vault,
       })
@@ -2530,6 +2546,7 @@ function createAssistantAutoReplyActiveTurnInputHooks(input: {
       executionContext: input.executionContext,
       inputs: contextualizedLatePromptInputs,
       onEvent: input.onEvent,
+      promptTimeContext: input.promptTimeContext,
       vault: input.vault,
     })
     if (preparedInput.kind !== 'ready') {
@@ -2969,6 +2986,7 @@ async function admitCapturelessAssistantInputs(input: {
   onAcceptedContext(context: AssistantAutoReplyGroupContext): void
   onEvent?: (event: AssistantRunEvent) => void
   pendingAcceptances: AssistantAutoReplyActiveTurnPendingAcceptance[]
+  promptTimeContext: ResolvedAssistantPromptTimeContext
   replyContexts: ReadonlyMap<string, string | null>
   vault: string
 }): Promise<AssistantActiveTurnInputAdmissionResult> {
@@ -2982,6 +3000,7 @@ async function admitCapturelessAssistantInputs(input: {
       replyContext: input.replyContexts.get(candidate.event.inputId) ?? null,
     })),
     onEvent: input.onEvent,
+    promptTimeContext: input.promptTimeContext,
     vault: input.vault,
   })
   if (preparedInput.kind !== 'ready') {

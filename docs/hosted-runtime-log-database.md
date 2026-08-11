@@ -108,6 +108,58 @@ No isolated tombstone remains after account deletion. A warm runner or late
 network drain cannot recreate diagnostics because append checks primary member
 authority only after acquiring the same isolated advisory lock used by cleanup.
 
+## Wearable import timing
+
+Eligible hosted webhook imports write the buffered info event
+`device-sync.import_completed`. Its privacy-limited `redacted_json` separates
+the operational stages instead of treating all missing-data time as one delay:
+
+- `eventToProviderSendBucket`: a coarse, non-reversible upstream delay bucket
+  computed before persistence (`under_5_minutes`, `5_to_30_minutes`,
+  `30_minutes_to_2_hours`, `2_to_24_hours`, or `over_24_hours`)
+- `providerSendToWebhookMs`: verified signed webhook-envelope send to Murph
+  receipt, when the provider exposes the signed time
+- `webhookToImportMs`: Murph receipt to successful canonical import
+- `runtimeQueueMs` and `importExecutionMs`: local queue and execution durations
+- `provider` and `jobKind`: bounded operational routing context
+
+Clock skew does not become a negative latency; only the affected measurement is
+omitted. The log deliberately excludes raw stage timestamps, event or resource
+types, source-device/provider semantics, counts, health values, webhook bodies,
+and exact event-to-import intervals. The new timing fields on the dirty-resource
+carrier hold only the coarse upstream bucket, exact signed-send-to-receipt
+duration, and earliest Murph receipt needed for the remaining duration.
+Pre-existing ingestion fields still use provider occurrence for dirty-window
+and clean-transition wake ownership; those fields are not copied into this
+runtime event. Compact timing and job fields
+can remain in the existing dirty row; oversized job payloads use the existing
+encrypted dirty-payload row. Coalesced hints keep the slowest upstream bucket,
+longest signed delivery, and earliest receipt, so timestamps from different
+events are never paired into a synthetic duration.
+
+The timing association is pass-local and deliberately best-effort. A compact
+job that remains queued or retrying beyond its admitting runtime pass can later
+succeed without a `device-sync.import_completed` event. Canonical import and
+retry behavior remain authoritative; this event is not an exhaustive import
+ledger. Like other debug/info logs, it uses the nonblocking runtime-log buffer
+and seven-day retention.
+
+Example bounded diagnostic read:
+
+```sql
+SELECT
+  at,
+  redacted_json->>'provider' AS provider,
+  redacted_json->>'eventToProviderSendBucket' AS upstream_delay_bucket,
+  (redacted_json->>'providerSendToWebhookMs')::bigint AS upstream_delivery_ms,
+  (redacted_json->>'webhookToImportMs')::bigint AS murph_import_ms
+FROM hosted_runtime_log
+WHERE at >= now() - interval '24 hours'
+  AND event_code = 'device-sync.import_completed'
+ORDER BY at DESC
+LIMIT 100;
+```
+
 ## Reads and retention
 
 Status and latency dashboards read only the isolated store. If a dedicated

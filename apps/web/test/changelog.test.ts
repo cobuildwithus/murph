@@ -420,6 +420,14 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("local-and-utc-activity-timing")).toMatchObject({
+      sourcePullRequests: [1626],
+      summary: expect.stringContaining("local clock beside the exact UTC instant"),
+      details: expect.stringContaining(
+        "without putting health values in operational logs",
+      ),
+    });
+    expect(items.get("local-and-utc-activity-timing")?.tryIt).toBeUndefined();
     expect(items.get("environment-report-loading-preview")).toMatchObject({
       sourcePullRequests: [1617],
       summary: expect.stringContaining("report-shaped preview"),
