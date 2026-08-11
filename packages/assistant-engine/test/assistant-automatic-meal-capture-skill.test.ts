@@ -13,6 +13,10 @@ import {
 } from '../src/assistant-skill-assets.js'
 import { buildAssistantSystemPrompt } from '../src/assistant/system-prompt.js'
 
+function compact(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
 function buildPrompt(input: {
   currentLocalDate?: string
   scheduledOccurrenceAt?: string
@@ -60,14 +64,22 @@ describe('assistant automatic meal capture skill', () => {
   })
 
   it('teaches setup, background limits, import proof, and calorie-aware enrichment', async () => {
-    const skill = await readFile(
-      path.join(
-        resolveAssistantSkillsRoot(),
-        'automatic-meal-capture',
-        'SKILL.md',
+    const skillsRoot = resolveAssistantSkillsRoot()
+    const [skill, cardSafety] = await Promise.all([
+      readFile(
+        path.join(skillsRoot, 'automatic-meal-capture', 'SKILL.md'),
+        'utf8',
       ),
-      'utf8',
-    )
+      readFile(
+        path.join(
+          skillsRoot,
+          'nutrition-strategy',
+          'references',
+          'daily-nutrition-card-safety.md',
+        ),
+        'utf8',
+      ),
+    ])
 
     expect(skill).toMatch(/^---\nname: automatic-meal-capture\n/)
     expect(skill).toContain('iOS 26.1 or later')
@@ -110,68 +122,256 @@ describe('assistant automatic meal capture skill', () => {
     expect(skill).toContain('vault-cli meal closeout-work')
     expect(skill).toContain('oldest bounded batch')
     expect(skill).not.toContain('preceding 31 local days')
-    expect(skill).toContain('partial totals as partial')
+    expect(compact(skill)).toContain('partial totals as partial')
     expect(skill).toContain('each retained photo as pending closeout work')
     expect(skill).toContain('late import gets one dated catch-up')
     expect(skill).toContain('latest `recordedAt` is at or after')
     expect(skill).toContain('partial-cleanup failure loses no meal')
     expect(skill).toMatch(
-      /canonical\s+`vault-cli meal totals --from <date> --to <date>` read/,
+      /canonical\s+`vault-cli meal totals --from <date> --to\s+<date>` read/,
+    )
+    expect(compact(skill)).toContain(
+      'immediately before any response-card attachment',
+    )
+    const compactSkill = compact(skill)
+    expect(compactSkill).toContain(
+      'Run `vault-cli goal list --status active --limit 200 --format json`.',
+    )
+    expect(compactSkill).toContain(
+      'If it returns 200 records, fail closed with the ordinary compact closeout: run no Goal detail reads, perform no Goal or measurement mutation, ask no question, and attach no card.',
+    )
+    expect(compactSkill).toContain(
+      'run `vault-cli goal show <goal-id> --format json` for every returned active Goal whose list item reports a nonzero `data.metricTargetsCount`.',
+    )
+    expect(compactSkill).toContain(
+      'Do not select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix.',
+    )
+    expect(compactSkill).toContain(
+      'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
+    )
+    expect(compactSkill).toContain(
+      'requires both `vault-cli condition list --status active --limit 200 --format json` and `vault-cli regimen list --status active --limit 200 --format json`.',
+    )
+    expect(compactSkill).toContain(
+      'If either returns exactly 200 records or fails, run no condition or regimen detail reads, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+    )
+    expect(compactSkill).toContain(
+      'run `vault-cli condition show <condition-id> --format json` for every returned condition and `vault-cli regimen show <regimen-id> --format json` for every returned regimen before applying the safety gate.',
+    )
+    expect(compactSkill).toContain(
+      'Never use the five-record context projection, a title, substance, severity, or the default list prefix to select the safety set.',
+    )
+    expect(compactSkill).toContain(
+      'If any required detail read fails or is unreadable, use the same ordinary-text, no-write, no-question, no-card failure behavior.',
+    )
+    expect(compactSkill).toContain(
+      'Also run `vault-cli event list --kind procedure --limit 200 --format json` and follow the shared gate\'s procedure-item inspection and conditional detail reads.',
+    )
+    expect(compactSkill).toContain(
+      'A completed bariatric procedure uses the same non-numeric, no-write, no-question, no-card path; failed, unreadable, or saturated procedure discovery uses the failure path.',
+    )
+    expect(compactSkill).toContain(
+      'Also run `vault-cli event list --kind encounter --limit 200 --format json`, detail-read every returned item with nonzero `data.diagnosesCount`, and apply the shared gate\'s current active diagnosis rules.',
+    )
+    expect(compactSkill).toContain(
+      'A relevant active documented or suspected diagnosis uses the same non-numeric path; failed, unreadable, saturated, required-detail, or unresolved safety-relevant diagnosis discovery uses the failure path.',
+    )
+    expect(compactSkill).toContain(
+      'Then run the shared gate\'s bounded body-measurement read, separate `pregnancy-test` measurement read, and bounded canonical test-event list plus every required test detail read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-evidence read uses the same failure behavior.',
+    )
+    expect(compactSkill).toContain(
+      'Only when all five qualifying exact point targets resolve from active canonical Goals',
+    )
+    expect(compactSkill).toContain(
+      'A card-qualifying target must use the exact canonical metric/unit pair: `dietary-calories` with `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
+    )
+    expect(compactSkill).toContain(
+      'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
+    )
+    expect(compactSkill).toContain(
+      'A card-qualifying target must also be an exact point: its selected-value comparator is `between` with identical numeric `value` and `highValue`.',
+    )
+    expect(compactSkill).toContain(
+      'A one-sided `<`, `<=`, `>`, or `>=` threshold, non-identical range, or other shape remains authoritative but is incompatible with this point-target card.',
+    )
+    expect(compactSkill).toContain(
+      'Never expose, compare, copy, or derive from its bound, and never create, replace, or remove a managed target around it.',
+    )
+    expect(compactSkill).toContain(
+      'On a scheduled occurrence, ask no question, perform no Goal or measurement mutation, and use ordinary closeout text without a card.',
+    )
+    expect(compactSkill).toContain(
+      'on a scheduled occurrence, ask no question and use ordinary closeout text.',
+    )
+    expect(compactSkill).toContain(
+      'Keep the occurrence local date from step 1 only as the work and retry boundary.',
+    )
+    expect(compactSkill).toContain(
+      'Resolve target applicability against the single selected card `localDate`: the capture date whose totals and card are being closed out, including a historical catch-up date.',
+    )
+    expect(compactSkill).toContain(
+      "A target qualifies only when that card date is on or after the containing Goal's `window.startAt`, on or before its optional `window.targetAt`, and inside the target's optional inclusive `startAt`/`targetAt` interval.",
+    )
+    expect(compactSkill).toContain(
+      'Ignore an out-of-window target for current authority and conflict resolution; never copy, expose, derive from, or mutate a Goal because of it.',
+    )
+    expect(compactSkill).toContain(
+      'If fewer than five applicable targets remain, ask no question and use ordinary closeout text.',
     )
     expect(skill).toContain(
-      'Run it immediately before any response-card attachment',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
+    )
+    expect(compactSkill).toContain(
+      'before resolving a card, even when five accepted goals already exist.',
+    )
+    expect(compactSkill).toContain(
+      'first requires `vault-cli memory show --format json`; if that complete canonical memory read fails or is unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+    )
+    expect(compactSkill).toContain(
+      'A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same non-numeric, no-write, no-question, no-card path.',
+    )
+    expect(compactSkill).toContain(
+      'Missing or ambiguous age alone does not block a scheduled closeout and never authorizes a question.',
+    )
+    expect(compactSkill).toContain(
+      'the first eligible managed closeout has one proposal-only exception',
     )
     expect(skill).toContain(
-      'vault-cli goal list\n   --status active --limit 200 --format json',
+      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
-    expect(skill).toContain(
-      'vault-cli goal show\n   <goal-id> --format json',
+    expect(compactSkill).toContain(
+      'run `vault-cli goal list --limit 200 --format json` and detail-read only candidate managed records.',
     )
-    expect(skill).toContain(
-      'If the list\n   returns 200 records, its bounded result may be incomplete',
+    expect(compactSkill).toContain(
+      'The absence of that managed Goal is the first-run authority; add no flag or second state owner.',
     )
-    expect(skill).toContain(
-      'exactly one qualifying\n   active record unambiguously names that daily nutrition metric',
+    expect(compactSkill).toContain(
+      'create that single canonical Goal as `paused`, with `window.startAt` equal to the selected capture/card local date.',
     )
-    expect(skill).toContain(
-      'multiple matches (even if their values agree)',
+    expect(compactSkill).toContain(
+      'Ask no question, attach no card, and never activate it on the scheduled turn.',
     )
-    expect(skill).toContain("Never infer a target\n   from the day's total")
-    expect(skill).toContain(
-      'When the run covers exactly one local date',
+    expect(compactSkill).toContain(
+      'If responsible inputs are missing or the bundle is infeasible, write nothing and keep the ordinary closeout.',
     )
-    expect(skill).toContain('the canonical read includes a\n   calorie total')
-    expect(skill).toContain('numerical output is permitted for the member')
+    expect(compactSkill).toContain(
+      'If numeric presentation is suppressed, or the active target bundle is ambiguous, unit-incompatible, or comparator-incompatible, retain the ordinary compact closeout and do not attach a card.',
+    )
+    expect(compactSkill).not.toContain(
+      'follow it exactly. Resolve all five targets from active canonical Goals.',
+    )
+    expect(compactSkill).toContain(
+      "Never infer a target from this day's meal total or one wearable day.",
+    )
+    expect(compactSkill).toContain(
+      'When the run covers exactly one local date, the canonical read includes a calorie total',
+    )
+    const compactSafety = compact(cardSafety)
+    expect(compactSafety).toContain(
+      'before every `daily_nutrition` attachment',
+    )
+    expect(compactSafety).toContain('under-fueling or RED-S concern')
+    expect(compactSafety).toContain('known underweight')
+    expect(compactSafety).toContain('frailty, or malnutrition risk')
+    expect(compactSafety).toContain(
+      'its first eligible managed closeout may use already-known responsible inputs to create and explain one paused proposal',
+    )
+    expect(compactSafety).toContain(
+      'Every later scheduled occurrence remains card-time-only and may not create, change, or automatically repeat a numeric proposal.',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json`',
+    )
+    expect(compactSafety).toContain(
+      'Otherwise run `vault-cli event show <event-id> --format json` for every returned test',
+    )
+    expect(compactSafety).toContain(
+      'Treat a test event as explicit positive pregnancy evidence only when all of these are true: its result status is not `pending`;',
+    )
+    expect(compactSkill).toContain(
+      'An explicit positive pregnancy-test result from either canonical owner uses the same non-numeric, no-write, no-question, no-card path.',
+    )
+    expect(compactSafety).toContain(
+      'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
+    )
+    expect(compactSafety).toContain(
+      'Canonical `resultStatus` classifies the result rather than the source report\'s lifecycle, so `unknown` does not prove that a test is unfinished and may qualify only when the same strict test identity and explicit textual result rules pass.',
+    )
+    expect(compactSafety).toContain(
+      '`pending` is unfinished and never qualifies, even if preliminary text says positive.',
+    )
+    expect(compactSafety).toContain(
+      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` or `unknown` status/flag alone, test title, or non-result note alone.',
+    )
+    expect(compactSafety).toContain(
+      '`vault-cli memory show --format json`',
+    )
+    expect(compactSafety).toContain(
+      'A usable adult BMI below 18.5 suppresses numeric goals, every Goal write or activation, and the card.',
+    )
+    expect(compactSafety).toContain(
+      'Do not combine height and weight from different events or dates',
+    )
+    expect(compactSafety).toContain(
+      'Never ask a scheduled occurrence for these measurements and never mutate measurement records during this check.',
+    )
+    expect(compactSafety).toContain('below 1,200 kcal/day')
+    expect(compactSafety).toContain('active canonical target at card time')
+    expect(compactSafety).toContain(
+      'Evaluate the boundary only for an exact point `dietary-calories` target in canonical `kcal`: its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
+    )
+    expect(compactSafety).toContain(
+      'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
+    )
+    expect(compactSafety).toContain(
+      'a calorie threshold whose satisfying range includes intake below 1,200 cannot authorize numeric self-directed card feedback.',
+    )
+    expect(compactSafety).toContain('pregnancy or breastfeeding')
+    expect(compactSafety).toContain('glucose-lowering medication')
+    expect(compactSafety).toContain('kidney disease')
     expect(skill).toContain('`murph.attach_response_card`')
     expect(skill).toContain(
       '`card: { kind: "daily_nutrition", version: 2, localDate: <the single',
     )
     expect(skill).toContain('mealCount: <top-level mealCount>')
-    expect(skill).toContain(
+    expect(compactSkill).toContain(
       'proteinGrams, carbsGrams, fatGrams, fiberGrams }, goals: { calories,',
     )
-    expect(skill).toContain(
-      "Copy every metric's\n   complete `{ total, mealCount }` pair unchanged",
+    expect(compactSkill).toContain(
+      "Copy every metric's complete `{ total, mealCount }` pair unchanged",
     )
     expect(skill).toContain('including `fiberGrams`')
-    expect(skill).toContain('There is no universal\n   percentage threshold')
-    expect(skill).toContain(
-      'A metric whose total is missing or whose\n   `mealCount` is below the top-level `mealCount` must use `unavailable`',
-    )
-    expect(skill).toContain(
-      'Use `null` when no trustworthy\n   target exists; never fabricate one',
+    expect(compactSkill).toContain('There is no universal percentage threshold')
+    expect(compactSkill).toContain(
+      'A metric whose total is missing or whose `mealCount` is below the top-level `mealCount` must use `unavailable`',
     )
     expect(skill).toContain('Do not author a second nutrition summary')
     expect(skill).toMatch(/For\s+multi-date catch-up, missing calories/u)
     expect(skill).toMatch(
-      /retain the current\s+compact text or suppression behavior/u,
+      /retain the current compact text,\s+one-question, or non-numeric behavior/u,
     )
     expect(skill.indexOf('vault-cli meal remove-photo <meal-id>')).toBeLessThan(
-      skill.indexOf('vault-cli meal totals --from <date> --to <date>'),
+      skill.indexOf('vault-cli meal totals --from <date> --to'),
+    )
+    const attachCardIndex = compactSkill.indexOf(
+      'call `murph.attach_response_card` with this exact mapping',
     )
     expect(
-      skill.indexOf('vault-cli meal totals --from <date> --to <date>'),
-    ).toBeLessThan(skill.indexOf('murph.attach_response_card'))
+      compactSkill.indexOf('vault-cli meal totals --from <date> --to'),
+    ).toBeLessThan(attachCardIndex)
+    expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
+      .toBeLessThan(attachCardIndex)
+    expect(
+      compactSkill.indexOf(
+        'vault-cli goal list --status active --limit 200 --format json',
+      ),
+    ).toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')
@@ -187,7 +387,7 @@ describe('assistant automatic meal capture skill', () => {
     )
   })
 
-  it('maps canonical totals and trusted goal context into the closed V2 card', () => {
+  it('maps applicable canonical point targets and rejects incompatible units or comparators', () => {
     const canonicalTotals = {
       mealCount: 4,
       totals: {
@@ -197,6 +397,46 @@ describe('assistant automatic meal capture skill', () => {
         fatGrams: { total: 71, mealCount: 3 },
         fiberGrams: { total: 26, mealCount: 2 },
       },
+    }
+    type CandidateTarget = {
+      metricKey: string
+      unit: string
+      value: number
+      comparator: '<' | '<=' | '>' | '>=' | 'between'
+      highValue?: number
+    }
+    const pointTarget = (
+      metricKey: string,
+      unit: string,
+      value: number,
+    ): CandidateTarget => ({
+      metricKey,
+      unit,
+      value,
+      comparator: 'between',
+      highValue: value,
+    })
+    const canonicalTargets: readonly CandidateTarget[] = [
+      pointTarget('dietary-calories', 'kcal', 2_400),
+      pointTarget('protein-grams', 'g', 150),
+      pointTarget('carbs-grams', 'g', 270),
+      pointTarget('fat-grams', 'g', 80),
+      pointTarget('fiber-grams', 'g', 35),
+    ]
+    const resolveTarget = (
+      metricKey: string,
+      unit: string,
+      targets: readonly CandidateTarget[] = canonicalTargets,
+    ): number => {
+      const matches = targets.filter(
+        (target) =>
+          target.metricKey === metricKey &&
+          target.unit === unit &&
+          target.comparator === 'between' &&
+          target.highValue === target.value,
+      )
+      expect(matches).toHaveLength(1)
+      return matches[0]!.value
     }
     const expectedArgument = {
       card: {
@@ -212,11 +452,26 @@ describe('assistant automatic meal capture skill', () => {
           fiberGrams: canonicalTotals.totals.fiberGrams,
         },
         goals: {
-          calories: null,
-          proteinGrams: { target: 150, status: 'unavailable' },
-          carbsGrams: null,
-          fatGrams: null,
-          fiberGrams: { target: 30, status: 'unavailable' },
+          calories: {
+            target: resolveTarget('dietary-calories', 'kcal'),
+            status: 'on_target',
+          },
+          proteinGrams: {
+            target: resolveTarget('protein-grams', 'g'),
+            status: 'unavailable',
+          },
+          carbsGrams: {
+            target: resolveTarget('carbs-grams', 'g'),
+            status: 'unavailable',
+          },
+          fatGrams: {
+            target: resolveTarget('fat-grams', 'g'),
+            status: 'unavailable',
+          },
+          fiberGrams: {
+            target: resolveTarget('fiber-grams', 'g'),
+            status: 'unavailable',
+          },
         },
       },
     } as const
@@ -224,9 +479,181 @@ describe('assistant automatic meal capture skill', () => {
     expect(assistantResponseCardSchema.parse(expectedArgument.card)).toEqual(
       expectedArgument.card,
     )
+    expect(Object.values(expectedArgument.card.goals)).not.toContain(null)
     expect(expectedArgument.card.totals.fiberGrams).toBe(
       canonicalTotals.totals.fiberGrams,
     )
+
+    const kilojouleCalories = canonicalTargets.map((target) =>
+      target.metricKey === 'dietary-calories'
+        ? { ...target, unit: 'kJ', value: 4_000 }
+        : target
+    )
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      kilojouleCalories,
+    )).toThrow()
+
+    const lowCalorieCeiling = canonicalTargets.map((target) =>
+      target.metricKey === 'dietary-calories'
+        ? {
+            ...target,
+            comparator: '<=' as const,
+            highValue: undefined,
+            value: 1_200,
+          }
+        : target
+    )
+    expect(900).toBeLessThanOrEqual(1_200)
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      lowCalorieCeiling,
+    )).toThrow()
+
+    const residualCalorieCeiling = canonicalTargets.map((target) =>
+      target.metricKey === 'dietary-calories'
+        ? {
+            ...target,
+            comparator: '<' as const,
+            highValue: undefined,
+            value: 2_000,
+          }
+        : target
+    )
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      residualCalorieCeiling,
+    )).toThrow()
+
+    for (const metricKey of [
+      'protein-grams',
+      'carbs-grams',
+      'fat-grams',
+      'fiber-grams',
+    ]) {
+      const ounceTarget = canonicalTargets.map((target) =>
+        target.metricKey === metricKey
+          ? { ...target, unit: 'oz' }
+          : target
+      )
+      expect(() => resolveTarget(metricKey, 'g', ounceTarget)).toThrow()
+
+      const thresholdTarget = canonicalTargets.map((target) =>
+        target.metricKey === metricKey
+          ? {
+              ...target,
+              comparator: '>=' as const,
+              highValue: undefined,
+            }
+          : target
+      )
+      expect(() => resolveTarget(metricKey, 'g', thresholdTarget)).toThrow()
+    }
+
+    const appliesToCardDate = (input: {
+      cardDate: string
+      goalStartAt: string
+      goalTargetAt?: string
+      targetStartAt?: string
+      targetTargetAt?: string
+    }): boolean =>
+      input.goalStartAt <= input.cardDate &&
+      (input.goalTargetAt === undefined || input.cardDate <= input.goalTargetAt) &&
+      (input.targetStartAt === undefined || input.targetStartAt <= input.cardDate) &&
+      (input.targetTargetAt === undefined || input.cardDate <= input.targetTargetAt)
+
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-09-01',
+    })).toBe(false)
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-01-01',
+      targetStartAt: '2026-09-01',
+    })).toBe(false)
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-01-01',
+      goalTargetAt: '2026-08-09',
+    })).toBe(false)
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: '2026-08-10',
+      goalTargetAt: '2026-08-10',
+      targetStartAt: '2026-08-10',
+      targetTargetAt: '2026-08-10',
+    })).toBe(true)
+
+    const datedGoals = [
+      {
+        name: 'catch-up-date goal',
+        calories: 1_100,
+        goalStartAt: '2026-01-01',
+        goalTargetAt: '2026-08-09',
+      },
+      {
+        name: 'occurrence-date goal',
+        calories: 1_800,
+        goalStartAt: '2026-08-10',
+      },
+    ] as const
+    const applicableGoals = (cardDate: string) => datedGoals.filter((goal) =>
+      appliesToCardDate({
+        cardDate,
+        goalStartAt: goal.goalStartAt,
+        goalTargetAt: 'goalTargetAt' in goal
+          ? goal.goalTargetAt
+          : undefined,
+      })
+    )
+
+    const catchUpGoals = applicableGoals('2026-08-09')
+    expect(catchUpGoals.map(({ name }) => name)).toEqual(['catch-up-date goal'])
+    expect(catchUpGoals[0]?.calories).toBeLessThan(1_200)
+    expect(applicableGoals('2026-08-10').map(({ name }) => name)).toEqual([
+      'occurrence-date goal',
+    ])
+
+    const proposalEffectiveDate = (input: {
+      currentVaultDate: string
+      explicitEffectiveDate?: string
+      selectedCardDate?: string
+    }): string =>
+      input.explicitEffectiveDate ??
+      input.selectedCardDate ??
+      input.currentVaultDate
+
+    const historicalProposalStart = proposalEffectiveDate({
+      currentVaultDate: '2026-08-10',
+      selectedCardDate: '2026-08-09',
+    })
+    expect(historicalProposalStart).toBe('2026-08-09')
+    expect(appliesToCardDate({
+      cardDate: '2026-08-09',
+      goalStartAt: historicalProposalStart,
+    })).toBe(true)
+
+    const currentProposalStart = proposalEffectiveDate({
+      currentVaultDate: '2026-08-10',
+    })
+    expect(currentProposalStart).toBe('2026-08-10')
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: currentProposalStart,
+    })).toBe(true)
+
+    const futureProposalStart = proposalEffectiveDate({
+      currentVaultDate: '2026-08-10',
+      explicitEffectiveDate: '2026-08-11',
+    })
+    expect(futureProposalStart).toBe('2026-08-11')
+    expect(appliesToCardDate({
+      cardDate: '2026-08-10',
+      goalStartAt: futureProposalStart,
+    })).toBe(false)
   })
 
   it('keeps a post-midnight retry anchored to its scheduled occurrence date', () => {

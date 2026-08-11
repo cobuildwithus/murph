@@ -54,6 +54,20 @@ describe("changelog registry", () => {
     );
   });
 
+  it("keeps the voice-memo default and named exception explicit", () => {
+    const item = listPublishedChangelogItems().find(
+      (candidate) => candidate.id === "voice-memos-use-your-voice",
+    );
+
+    expect(item).toMatchObject({
+      editionId: "2026-08-10",
+      sourcePullRequests: [1587],
+      summary: expect.stringContaining("voice already selected"),
+      details: expect.stringContaining("only when you explicitly ask"),
+    });
+    expect(item?.details).toContain("one-time preview");
+  });
+
   it("keeps support escalation private and contact disclosure opt-in", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "direct-product-support-escalation",
@@ -527,6 +541,7 @@ describe("changelog registry", () => {
           "personal-patterns",
           "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
+          "voice-memos-use-your-voice",
           "web-search-restored",
           "appointment-reminders-by-default",
           "workout-card-status-rendering",

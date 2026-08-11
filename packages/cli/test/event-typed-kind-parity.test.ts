@@ -33,6 +33,20 @@ interface EventShowEnvelope {
   }
 }
 
+interface EventListEnvelope {
+  count: number
+  filters: {
+    kind: string | null
+    limit: number
+  }
+  items: Array<{
+    id: string
+    kind: string
+    occurredAt: string | null
+    data: Record<string, unknown>
+  }>
+}
+
 function createSliceCli() {
   const cli = Cli.create('vault-cli', {
     description: 'typed event kind parity test cli',
@@ -213,11 +227,11 @@ test.sequential('additional typed event commands persist canonical event records
       'procedure',
       'add',
       '--procedure',
-      'venipuncture',
+      'Roux-en-Y gastric bypass',
       '--status',
       'completed',
       '--title',
-      'Blood draw',
+      'Completed bariatric procedure',
       '--occurred-at',
       '2026-03-14T10:00:00.000Z',
       '--vault',
@@ -297,6 +311,16 @@ test.sequential('additional typed event commands persist canonical event records
       '--vault',
       vaultRoot,
     ])
+    const procedureList = await runSliceCli<EventListEnvelope>([
+      'event',
+      'list',
+      '--kind',
+      'procedure',
+      '--limit',
+      '200',
+      '--vault',
+      vaultRoot,
+    ])
     const adverseEffectShow = await runSliceCli<EventShowEnvelope>([
       'event',
       'show',
@@ -327,8 +351,30 @@ test.sequential('additional typed event commands persist canonical event records
 
     assert.equal(procedureShow.ok, true)
     assert.equal(requireData(procedureShow).entity.kind, 'procedure')
-    assert.equal(requireData(procedureShow).entity.data.procedure, 'venipuncture')
+    assert.equal(
+      requireData(procedureShow).entity.data.procedure,
+      'Roux-en-Y gastric bypass',
+    )
     assert.equal(requireData(procedureShow).entity.data.status, 'completed')
+
+    assert.equal(procedureList.ok, true)
+    assert.equal(requireData(procedureList).filters.kind, 'procedure')
+    assert.equal(requireData(procedureList).filters.limit, 200)
+    assert.equal(requireData(procedureList).count, 1)
+    assert.equal(
+      requireData(procedureList).items[0]?.id,
+      requireData(procedureResult).eventId,
+    )
+    assert.equal(requireData(procedureList).items[0]?.kind, 'procedure')
+    assert.equal(
+      requireData(procedureList).items[0]?.occurredAt,
+      '2026-03-14T10:00:00.000Z',
+    )
+    assert.equal(
+      requireData(procedureList).items[0]?.data.procedure,
+      'Roux-en-Y gastric bypass',
+    )
+    assert.equal(requireData(procedureList).items[0]?.data.status, 'completed')
 
     assert.equal(adverseEffectShow.ok, true)
     assert.equal(requireData(adverseEffectShow).entity.kind, 'adverse_effect')
