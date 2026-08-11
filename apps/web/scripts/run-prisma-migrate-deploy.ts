@@ -105,6 +105,14 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20260810010000_member_owned_device_provider_applications",
+    // Both application-binding columns are introduced nullable in this same
+    // migration, so every existing row has the accepted all-null shape. The
+    // NOT VALID checks avoid a table scan while still enforcing the paired,
+    // positive revision shape for every subsequent insert or update.
+    new Set(["ADD CONSTRAINT CHECK"]),
+  ],
+  [
     "20260727040000_relax_hosted_usage_credit_detached_direct_proof",
     new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
   ],
