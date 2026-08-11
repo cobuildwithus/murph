@@ -576,7 +576,10 @@ async function executeAssistantCodexAttempt(input: {
           ? composeAssistantProviderFlexDeadlineSignal(executionPlan.input.abortSignal)
           : executionPlan.input.abortSignal,
         activeTurnId: executionPlan.turnId,
-        activeTurnSteering: executionPlan.activeTurnSteering,
+        activeTurnSteering:
+          hostedImageCompletionNativeCapabilitiesRestrictedTurn
+          ? null
+          : executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
         authorizeAcceptedMessageTarget:

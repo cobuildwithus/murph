@@ -171,6 +171,9 @@ import {
 } from '../src/assistant/onboarding-goal-checkin-automation.ts'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import type {
+  AssistantActiveTurnLiveProviderSteering,
+} from '../src/assistant/turn-input.ts'
+import type {
   AssistantProviderTurnAttemptResult,
   AssistantProviderTurnExecutionResult,
 } from '../src/assistant/providers/types.ts'
@@ -875,6 +878,10 @@ describe('Codex model catalog', () => {
       sendVaultFile: vi.fn(),
       vaultFileSendAvailable: true,
     }
+    const activeTurnSteering = {
+      closeInputAdmission: vi.fn(),
+      registerLiveProviderTurn: vi.fn(() => vi.fn()),
+    } satisfies AssistantActiveTurnLiveProviderSteering
     const input = {
       codexConfigOverrides: [
         'features.shell_tool=true',
@@ -901,7 +908,7 @@ describe('Codex model catalog', () => {
       createProviderAttemptResult(),
     )
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
-      activeTurnSteering: null,
+      activeTurnSteering,
       executionContext: {
         hosted: {
           materializeWorkspaceArtifacts,
@@ -981,6 +988,7 @@ describe('Codex model catalog', () => {
     expect(completionProviderInput?.codexConfigOverrides).toEqual(
       EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
     )
+    expect(completionProviderInput?.activeTurnSteering).toBeNull()
     expect(completionProviderInput).toMatchObject({
       dynamicTools,
       environments: [],
@@ -1016,6 +1024,7 @@ describe('Codex model catalog', () => {
       sandbox: 'danger-full-access',
     })
     expect(foregroundProviderInput?.codexThreadConfig).toBeNull()
+    expect(foregroundProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
     expect(foregroundProviderInput?.codexConfigOverrides).toEqual(
       input.codexConfigOverrides,
     )
