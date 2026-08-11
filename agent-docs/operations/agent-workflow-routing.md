@@ -85,9 +85,10 @@ Then load only the task-relevant docs listed below.
   scoped task commit. A task is not complete while its Frog entry is untracked,
   unstaged, or otherwise omitted from that commit. If the commit is blocked,
   preserve the entry and report the exact blocker instead of dropping it.
-- Frog logging must not delay or replace the requested outcome. Review-only,
-  planning, and other no-edit tasks report friction in the handoff instead of
-  mutating the repository.
+- Frog logging must not delay or replace the requested outcome. Creating or
+  updating a tracked plan file is edit-authorized repository work and follows
+  the normal Frog flow. Review-only, planning-only, and other no-edit tasks
+  report friction in the handoff instead of mutating the repository.
 
 - Same-turn task completion counts as acceptance unless the user explicitly says `review first` or `do not commit`.
 - Choose verification ownership by delivery path. PR-bound work runs focused

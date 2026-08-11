@@ -1,6 +1,6 @@
 # Require Frog logging in agent workflows
 
-Status: active
+Status: completed
 Created: 2026-08-10
 Updated: 2026-08-10
 
@@ -56,6 +56,9 @@ Updated: 2026-08-10
 - Keep enforcement instructional and covered by the existing Frog policy test;
   do not add a second commit hook or state scanner before evidence shows agents
   bypass the documented scoped-commit path.
+- Treat tracked plan-file creation or updates as edit-authorized work. Reserve
+  the handoff-only exemption for review-only, planning-only, and other requests
+  that do not authorize repository edits.
 
 ## Verification
 
@@ -64,3 +67,4 @@ Updated: 2026-08-10
 - Expected outcomes: Frog lists the repository store, policy assertions pass,
   durable-doc drift is clean, and every required entry point states a coherent
   public-safe same-task commit contract.
+Completed: 2026-08-10

@@ -10,8 +10,10 @@ Murph's product-feedback or runtime-issue systems.
 
 ## Authority
 
-Use this skill only when the current request authorizes repository edits. During
-review-only, planning, or other no-edit work, do not create an entry; mention the
+Use this skill only when the current request authorizes repository edits.
+Creating or updating a tracked plan file is edit-authorized repository work and
+follows the normal Frog flow. During review-only, planning-only, or other work
+that does not authorize repository edits, do not create an entry; mention the
 friction in the handoff instead. Logging must not delay or replace the requested
 outcome.
 
