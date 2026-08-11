@@ -321,13 +321,18 @@ establish that no plausible owner exists.
 
 On the initial `murph.automation` save, set `createOnly: true`, omit both
 `automationId` and `slug`, include the ordinary tag `appointment-reminder`, and
-set `createOnlyEffectKey` to `appointment-reminder:<ordinal>`. The ordinal is
-one-based from the appointment's order in the accepted input, not tool-call
-order. Reuse it when regenerating the same effect even if reminder copy, tag
-order, or timestamp spelling changes. Distinct appointments in one input use
-distinct ordinals, including when their reminders share a delivery instant.
-The trusted host scopes that discriminator to the accepted input, so no mutable
-write field is identity. Use a privacy-safe but unmistakable title and summary
+set `createOnlySourceRef` to the exact opaque `Appointment source ref` beside
+that accepted input, and set `createOnlyEffectKey` to
+`appointment-reminder:<ordinal>`. The ordinal is one-based from the
+appointment's order within that source input, not tool-call order. Reuse the
+same source ref and ordinal when regenerating the same effect, including after
+later inputs join and when reminder copy, tag order, or timestamp spelling
+changes. Distinct appointments in one input use distinct ordinals, including
+when their reminders share a delivery instant. First appointments from
+separate inputs use their separate source refs with ordinal one. The trusted
+host resolves that opaque reference against accepted inputs and scopes the
+discriminator to the exact source input, so no mutable batch position or write
+field is identity. Use a privacy-safe but unmistakable title and summary
 that identify the destination or service plus the original local date and
 appointment time when known; never include a diagnosis, reason for care,
 confirmation code, or other sensitive identifier.

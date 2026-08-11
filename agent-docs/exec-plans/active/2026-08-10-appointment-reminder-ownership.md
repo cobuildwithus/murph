@@ -120,6 +120,39 @@ require the strict source-ordinal discriminator, core derives both opaque owner
 keys only from that discriminator plus trusted replay scope, and the local CLI
 create-only option and appointment promise are deleted.
 
+## Review retrospective — round 4
+
+ReviewGPT found that the round-3 hosted scope was read from the mutable set of
+accepted inputs at each tool call. If input A's appointment write committed but
+its result was lost, then input B joined the same live turn before regeneration,
+the host could replace A with B as the effect authority and create a duplicate.
+The same last-input rule could not distinguish separate appointment ordinals
+when a provider request grouped multiple accepted messages.
+
+The requirement-level decisions are:
+
+- The immutable authority unit is one exact accepted input, not the mutable
+  provider-request batch. Each input receives a deterministic, host-generated
+  opaque appointment source reference in the prompt.
+- A create-only save supplies that opaque source reference plus the existing
+  `appointment-reminder:<ordinal>` discriminator. The ordinal is one-based only
+  within that source input's visible appointment order.
+- The host resolves the opaque reference against its accepted-input journal and
+  derives the replay scope from the matched accepted-input id and trusted
+  conversation route. It never treats a raw model-supplied input id as
+  authority, and mutable batch order or mailbox tails do not participate.
+- A later accepted input is a separate authority scope. Regenerating input A's
+  save after input B joins continues to resolve A, while B's first appointment
+  has its own source reference and can independently use ordinal one.
+- Required proof covers a committed result lost before a later input joins,
+  separate first appointments from two accepted messages, replay under a
+  differently composed batch, and independent lifecycle operations that touch
+  only the two original owners.
+
+This correction continues to use the existing automation record,
+accepted-input journal, and registry lock. It adds no durable owner, index,
+queue, reconciliation loop, or state machine.
+
 ## Tasks
 
 1. [x] Add canonical create-only ownership and hosted current-conversation list.

@@ -610,6 +610,7 @@ describe('assistant product small seams', () => {
       extractAssistantAutoReplyFailedPromptText(
         [
           'Input 1:',
+          'Appointment source ref: ais_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           'Message ref: ain_11111111111111111111111111111111',
           'Reply context:',
           'quoted',
@@ -618,6 +619,7 @@ describe('assistant product small seams', () => {
           'first message',
           '',
           'Input 2:',
+          'Appointment source ref: ais_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           'Message ref: ain_22222222222222222222222222222222',
           'Message text:',
           'second message',
@@ -629,6 +631,7 @@ describe('assistant product small seams', () => {
         [
           'Source: telegram',
           '',
+          'Appointment source ref: ais_cccccccccccccccccccccccccccccccc',
           'Message ref: ain_33333333333333333333333333333333',
           '',
           'Attachment context:',

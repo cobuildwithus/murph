@@ -78,7 +78,10 @@ describe('assistant appointment reminder policy', () => {
       'set `createOnlyEffectKey` to `appointment-reminder:<ordinal>`',
     )
     expect(normalizedSkill).toContain(
-      "one-based from the appointment's order in the accepted input",
+      'set `createOnlySourceRef` to the exact opaque `Appointment source ref` beside that accepted input',
+    )
+    expect(normalizedSkill).toContain(
+      "one-based from the appointment's order within that source input",
     )
     expect(normalizedSkill).toContain(
       'either `created: true`, or `created: false` with `replayed: true`',
@@ -94,6 +97,9 @@ describe('assistant appointment reminder policy', () => {
     )
     expect(normalizedSkill).toContain(
       'Distinct appointments in one input use distinct ordinals',
+    )
+    expect(normalizedSkill).toContain(
+      'First appointments from separate inputs use their separate source refs with ordinal one',
     )
     expect(normalizedSkill).not.toContain('`--create-only`')
     expect(normalizedSkill).toContain(

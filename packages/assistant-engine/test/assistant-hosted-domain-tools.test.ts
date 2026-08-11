@@ -18,6 +18,14 @@ import {
 import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.js'
+import { createAssistantAppointmentReminderSourceRef } from '../src/assistant/appointment-reminder-source-ref.js'
+
+const APPOINTMENT_INPUT_A = `ain_${'a'.repeat(32)}`
+const APPOINTMENT_INPUT_B = `ain_${'b'.repeat(32)}`
+const APPOINTMENT_SOURCE_REF_A =
+  createAssistantAppointmentReminderSourceRef(APPOINTMENT_INPUT_A)
+const APPOINTMENT_SOURCE_REF_B =
+  createAssistantAppointmentReminderSourceRef(APPOINTMENT_INPUT_B)
 
 describe('hosted domain dynamic tools', () => {
   it('keeps device and automation default-off', () => {
@@ -50,7 +58,10 @@ describe('hosted domain dynamic tools', () => {
       'list returns only records whose persisted route belongs to this conversation and never returns route fields',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'use createOnly=true and createOnlyEffectKey=appointment-reminder:<one-based ordinal',
+      'createOnlyEffectKey=appointment-reminder:<one-based ordinal',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'createOnlySourceRef=<the exact opaque Appointment source ref beside the accepted input>',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'query narrows only those scoped records',
@@ -137,7 +148,17 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       createOnly: true,
       createOnlyEffectKey: 'appointment:1',
+      createOnlySourceRef: APPOINTMENT_SOURCE_REF_A,
       instructions: 'Uses a noncanonical effect discriminator.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      title: 'Invalid create-only reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      createOnlyEffectKey: 'appointment-reminder:1',
+      createOnlySourceRef: APPOINTMENT_INPUT_A,
+      instructions: 'Uses a raw accepted input id as authority.',
       schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       title: 'Invalid create-only reminder',
     })).toMatchObject({ kind: 'invalid-automation-arguments' })
@@ -230,11 +251,13 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       createOnly: true,
       createOnlyEffectKey: 'appointment-reminder:1',
+      createOnlySourceRef: APPOINTMENT_SOURCE_REF_A,
       instructions: 'Send one private appointment reminder.',
       schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       tags: ['appointment-reminder'],
       title: 'Midtown appointment on August 12 at 9:30 AM',
     })).toEqual({
+      createOnlySourceRef: APPOINTMENT_SOURCE_REF_A,
       kind: 'automation',
       request: {
         action: 'save',
@@ -250,6 +273,7 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       createOnly: true,
       createOnlyEffectKey: 'appointment-reminder:1',
+      createOnlySourceRef: APPOINTMENT_SOURCE_REF_A,
       instructions: 'Try to choose a create-only owner.',
       schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       slug: 'model-selected-owner',
@@ -513,7 +537,7 @@ describe('hosted domain dynamic tools', () => {
     )
   })
 
-  it('binds create-only saves to the trusted accepted input instead of the tool call', async () => {
+  it('keeps each create-only owner bound to its source when later input joins and results replay', async () => {
     const automationRequest = vi.fn<
       NonNullable<AssistantHostedToolContext['automationTool']>['request']
     >(async () => ({
@@ -531,48 +555,61 @@ describe('hosted domain dynamic tools', () => {
     const automationTool = {
       request: automationRequest,
     }
-    const request = readToolRequest('automation', {
+    const createRequest = (input: {
+      instructions: string
+      sourceRef: string
+      title: string
+    }) => readToolRequest('automation', {
       action: 'save',
       createOnly: true,
       createOnlyEffectKey: 'appointment-reminder:1',
-      instructions: 'Send the Midtown appointment reminder.',
+      createOnlySourceRef: input.sourceRef,
+      instructions: input.instructions,
       schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       tags: ['appointment-reminder'],
-      title: 'Midtown appointment on August 12 at 9:30 AM',
+      title: input.title,
     })
-    if (!request) {
-      throw new Error('Expected a create-only automation request.')
-    }
+    let acceptedInputIds = [APPOINTMENT_INPUT_A]
+    let inboundMailboxItemIds = ['mailbox-appointment-a']
     const hostedToolContext = createHostedToolContext({
       automationTool,
       currentUserActionScope: () => ({
-        acceptedInputIds: ['assistant_input_appointment'],
+        acceptedInputIds,
         conversationId: 'conversation-appointment',
         conversationScope: 'direct',
-        inboundMailboxItemIds: ['mailbox-appointment'],
+        inboundMailboxItemIds,
         originSessionId: 'session-appointment',
         recipientKey: 'recipient-appointment',
       }),
     })
 
+    const requestA = createRequest({
+      instructions: 'Send the Midtown appointment reminder.',
+      sourceRef: APPOINTMENT_SOURCE_REF_A,
+      title: 'Midtown appointment on August 12 at 9:30 AM',
+    })
+    if (!requestA) {
+      throw new Error('Expected the first create-only automation request.')
+    }
+    // The write result is intentionally discarded to model commit success with
+    // a lost provider result before another accepted input joins this turn.
     await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext,
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
-      request,
+      request: requestA,
     })
-    const regeneratedRequest = readToolRequest('automation', {
-      action: 'save',
-      createOnly: true,
-      createOnlyEffectKey: 'appointment-reminder:1',
+
+    acceptedInputIds = [APPOINTMENT_INPUT_A, APPOINTMENT_INPUT_B]
+    inboundMailboxItemIds = ['mailbox-appointment-a', 'mailbox-appointment-b']
+    const regeneratedRequestA = createRequest({
       instructions: 'Regenerated copy for the Midtown reminder.',
-      schedule: { at: '2026-08-11T20:00:00-04:00', kind: 'at' },
-      tags: ['care-reminder', 'appointment-reminder'],
+      sourceRef: APPOINTMENT_SOURCE_REF_A,
       title: 'Regenerated Midtown appointment title',
     })
-    if (!regeneratedRequest) {
+    if (!regeneratedRequestA) {
       throw new Error('Expected a regenerated create-only automation request.')
     }
     await executeMurphDynamicToolRequest({
@@ -581,18 +618,14 @@ describe('hosted domain dynamic tools', () => {
       hostedToolContext,
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
-      request: regeneratedRequest,
+      request: regeneratedRequestA,
     })
-    const distinctRequest = readToolRequest('automation', {
-      action: 'save',
-      createOnly: true,
-      createOnlyEffectKey: 'appointment-reminder:2',
+    const requestB = createRequest({
       instructions: 'Send the Lakeside appointment reminder.',
-      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
-      tags: ['appointment-reminder'],
+      sourceRef: APPOINTMENT_SOURCE_REF_B,
       title: 'Lakeside appointment on August 12 at 3 PM',
     })
-    if (!distinctRequest) {
+    if (!requestB) {
       throw new Error('Expected a second create-only automation request.')
     }
     await executeMurphDynamicToolRequest({
@@ -601,28 +634,55 @@ describe('hosted domain dynamic tools', () => {
       hostedToolContext,
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
-      request: distinctRequest,
+      request: requestB,
     })
 
-    const firstContext = automationRequest.mock.calls[0]?.[1]
-    const secondContext = automationRequest.mock.calls[1]?.[1]
-    const distinctContext = automationRequest.mock.calls[2]?.[1]
-    expect(firstContext?.createOnlyReplayKey).toMatch(/^automation_create_[a-f0-9]{64}$/u)
-    expect(secondContext?.createOnlyReplayKey).toBe(
-      firstContext?.createOnlyReplayKey,
-    )
-    expect(distinctContext?.createOnlyReplayKey).toBe(
-      firstContext?.createOnlyReplayKey,
-    )
-    expect(automationRequest.mock.calls[0]?.[0]).toMatchObject({
-      createOnlyEffectKey: 'appointment-reminder:1',
+    acceptedInputIds = [APPOINTMENT_INPUT_B, APPOINTMENT_INPUT_A]
+    inboundMailboxItemIds = ['mailbox-appointment-b', 'mailbox-appointment-a']
+    for (const request of [requestA, requestB]) {
+      await executeMurphDynamicToolRequest({
+        env: {},
+        fetchImpl: fetch,
+        hostedToolContext,
+        nextUsageOrdinal: () => 0,
+        progressDelivery: null,
+        request,
+      })
+    }
+
+    const keyA = automationRequest.mock.calls[0]?.[1]?.createOnlyReplayKey
+    const replayKeyA = automationRequest.mock.calls[1]?.[1]?.createOnlyReplayKey
+    const keyB = automationRequest.mock.calls[2]?.[1]?.createOnlyReplayKey
+    const recomposedKeyA = automationRequest.mock.calls[3]?.[1]?.createOnlyReplayKey
+    const recomposedKeyB = automationRequest.mock.calls[4]?.[1]?.createOnlyReplayKey
+    expect(keyA).toMatch(/^automation_create_[a-f0-9]{64}$/u)
+    expect(replayKeyA).toBe(keyA)
+    expect(recomposedKeyA).toBe(keyA)
+    expect(keyB).toMatch(/^automation_create_[a-f0-9]{64}$/u)
+    expect(recomposedKeyB).toBe(keyB)
+    expect(keyB).not.toBe(keyA)
+    for (const [request] of automationRequest.mock.calls) {
+      expect(request).not.toHaveProperty('createOnlySourceRef')
+    }
+
+    const unknownSourceRequest = createRequest({
+      instructions: 'Do not accept an unjournaled source reference.',
+      sourceRef: createAssistantAppointmentReminderSourceRef(`ain_${'c'.repeat(32)}`),
+      title: 'Unjournaled appointment',
     })
-    expect(automationRequest.mock.calls[1]?.[0]).toMatchObject({
-      createOnlyEffectKey: 'appointment-reminder:1',
+    if (!unknownSourceRequest) {
+      throw new Error('Expected the unjournaled source request to parse.')
+    }
+    const unknownSourceResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext,
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: unknownSourceRequest,
     })
-    expect(automationRequest.mock.calls[2]?.[0]).toMatchObject({
-      createOnlyEffectKey: 'appointment-reminder:2',
-    })
+    expect(unknownSourceResult.rpcResult.success).toBe(false)
+    expect(automationRequest).toHaveBeenCalledTimes(5)
   })
 
   it('executes support-series reconciliation through the injected port', async () => {

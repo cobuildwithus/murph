@@ -29,6 +29,7 @@ import {
   readAssistantGroupRoomModelState,
   replaceAssistantGroupRoomModel,
 } from '../src/assistant/group-room-model.ts'
+import { createAssistantAppointmentReminderSourceRef } from '../src/assistant/appointment-reminder-source-ref.ts'
 
 const promptBuilderMocks = vi.hoisted(() => ({
   buildAssistantInputAttachmentPromptBundles: vi.fn(),
@@ -467,8 +468,18 @@ describe('buildAssistantAutoReplyPrompt', () => {
     if (result.kind !== 'ready') {
       throw new Error('Expected a ready prompt result.')
     }
-    expect(result.prompt).toContain(`Input 1:\nMessage ref: ${firstInputId}`)
-    expect(result.prompt).toContain(`Input 2:\nMessage ref: ${secondInputId}`)
+    const firstSourceRef =
+      createAssistantAppointmentReminderSourceRef(firstInputId)
+    const secondSourceRef =
+      createAssistantAppointmentReminderSourceRef(secondInputId)
+    expect(result.prompt).toContain(
+      `Input 1:\nAppointment source ref: ${firstSourceRef}\n\nMessage ref: ${firstInputId}`,
+    )
+    expect(result.prompt).toContain(
+      `Input 2:\nAppointment source ref: ${secondSourceRef}\n\nMessage ref: ${secondInputId}`,
+    )
+    expect(firstSourceRef).not.toContain(firstInputId)
+    expect(secondSourceRef).not.toContain(secondInputId)
     expect(result.prompt.match(new RegExp(firstInputId, 'gu'))).toHaveLength(1)
     expect(result.prompt.match(new RegExp(secondInputId, 'gu'))).toHaveLength(1)
     expect(result.prompt).not.toContain(firstProviderMessageId)
@@ -1409,10 +1420,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
       throw new Error('Expected a ready prompt result.')
     }
     expect(result.prompt).toContain(
-      `Input 1:\nMessage ref: ${firstInputId}\n\nSender: +15551110000`,
+      `Input 1:\nAppointment source ref: ${createAssistantAppointmentReminderSourceRef(firstInputId)}\n\nMessage ref: ${firstInputId}\n\nSender: +15551110000`,
     )
     expect(result.prompt).toContain(
-      `Input 2:\nMessage ref: ${secondInputId}\n\nSender: +15552220000`,
+      `Input 2:\nAppointment source ref: ${createAssistantAppointmentReminderSourceRef(secondInputId)}\n\nMessage ref: ${secondInputId}\n\nSender: +15552220000`,
     )
     expect(result.prompt).toContain(
       'Reply context:\nThe sender explicitly replied to assistant message A.',
@@ -1646,7 +1657,10 @@ describe('buildAssistantAutoReplyPrompt', () => {
     )
     expect(result.prompt).toContain('[truncated 1405 characters]')
     expect(result.prompt).toContain('Extracted text:\nShort extracted text')
-    expect(result.prompt).toContain('Input 2:\nMessage text:\nSecond message')
+    expect(result.prompt).toContain(
+      'Input 2:\nAppointment source ref: ais_',
+    )
+    expect(result.prompt).toContain('Message text:\nSecond message')
   })
 
   it('omits telegram media-group context when grouped captures span different albums', () => {

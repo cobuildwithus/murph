@@ -3107,10 +3107,10 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation, `action: list` to recover persisted owners for this conversation, and `action: patch` to change one.',
     )
     expect(prompt).toContain(
-      'For appointment ownership, use `createOnly: true` plus `createOnlyEffectKey: appointment-reminder:<ordinal>` without an automation id or slug.',
+      'For appointment ownership, use `createOnly: true`, `createOnlySourceRef: <Appointment source ref>`, and `createOnlyEffectKey: appointment-reminder:<ordinal>` without an automation id or slug.',
     )
     expect(prompt).toContain(
-      'reuse it across regenerated copy, tag order, or timestamp spelling, and use distinct ordinals for distinct appointments even when reminder times match',
+      'reuse the same source ref and ordinal across regeneration even when later inputs join or copy, tag order, or timestamp spelling changes',
     )
     expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',

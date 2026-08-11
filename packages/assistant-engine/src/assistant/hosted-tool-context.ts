@@ -56,6 +56,7 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantNewsletterOutboxTool } from './newsletter-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
+import { resolveAssistantAppointmentReminderSourceInputId } from './appointment-reminder-source-ref.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -522,22 +523,23 @@ export function createAssistantHostedScheduledRequestKey(input: {
 }
 
 export function createAssistantHostedAutomationCreateReplayKey(input: {
-  scope: AssistantHostedToolRequestKeyScope
-}): `automation_create_${string}` {
-  const acceptedInputId = input.scope.acceptedInputIds.at(-1) ?? null
+  scope: AssistantHostedUserActionScope
+  sourceRef: string
+}): `automation_create_${string}` | null {
+  const acceptedInputId = resolveAssistantAppointmentReminderSourceInputId({
+    acceptedInputIds: input.scope.acceptedInputIds,
+    sourceRef: input.sourceRef,
+  })
   if (!acceptedInputId) {
-    throw new TypeError(
-      'Automation create replay keys require accepted user input.',
-    )
+    return null
   }
   const digest = createHash('sha256')
     .update(JSON.stringify({
       acceptedInputId,
       conversationId: input.scope.conversationId,
-      inboundMailboxItemId:
-        input.scope.inboundMailboxItemIds.at(-1) ?? null,
+      conversationScope: input.scope.conversationScope,
       recipientKey: input.scope.recipientKey,
-      schema: 'murph.automation-create-replay-key.v1',
+      schema: 'murph.automation-create-replay-key.v2',
     }))
     .digest('hex')
   return `automation_create_${digest}`

@@ -5073,7 +5073,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           const secondAppointmentReminderRequest = {
             action: "save" as const,
             createOnly: true as const,
-            createOnlyEffectKey: "appointment-reminder:2",
+            createOnlyEffectKey: "appointment-reminder:1",
             instructions: "Send the Alpha appointment reminder.",
             schedule: appointmentReminderRequest.schedule,
             summary: "Alpha appointment on August 12 at 11 AM",
@@ -5083,7 +5083,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           const secondAppointmentReminder =
             await executionContext.hosted?.automationTool?.request(
               secondAppointmentReminderRequest,
-              { createOnlyReplayKey: "linq-accepted-input-appointment" },
+              { createOnlyReplayKey: "linq-later-accepted-input-appointment" },
             );
           if (
             !secondAppointmentReminder
@@ -5100,7 +5100,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           );
           await expect(executionContext.hosted?.automationTool?.request(
             secondAppointmentReminderRequest,
-            { createOnlyReplayKey: "linq-accepted-input-appointment" },
+            { createOnlyReplayKey: "linq-later-accepted-input-appointment" },
           )).resolves.toEqual(expect.objectContaining({
             automationId: secondAppointmentReminder.automationId,
             created: false,

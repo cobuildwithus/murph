@@ -26,6 +26,7 @@ import {
   type AssistantDerivedEvidenceReadBudget,
 } from '../attachment-evidence-model.js'
 import { normalizeAssistantRawAttachmentArtifactPath } from '../attachment-artifact-paths.js'
+import { createAssistantAppointmentReminderSourceRef } from '../appointment-reminder-source-ref.js'
 import { readAssistantInputMessageRef } from '../message-target-selection.js'
 import { normalizeNullableString } from '../shared.js'
 
@@ -155,6 +156,8 @@ export function buildAssistantAutoReplyPrompt(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
+        appointmentReminderSourceRef:
+          createAssistantAppointmentReminderSourceRef(entry.inputId),
         messageRef: readAssistantInputMessageRef(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
@@ -233,6 +236,8 @@ export async function prepareAssistantAutoReplyInput(
         inputText: normalizeNullableString(entry.text),
         index,
         groupContext: renderAssistantInputGroupContextPrompt(entry),
+        appointmentReminderSourceRef:
+          createAssistantAppointmentReminderSourceRef(entry.inputId),
         messageRef: readAssistantInputMessageRef(entry),
         promptUnavailableNote: renderAssistantInputPromptUnavailableNote(entry),
         projectionReasonCode: entry.projection?.reasonCode ?? null,
@@ -499,6 +504,7 @@ export function renderAssistantInputLinqCorrectionContext(
 }
 
 function renderAssistantAutoReplyInputSection(input: {
+  appointmentReminderSourceRef: string
   attachmentSections: readonly string[]
   correctionContext: string | null
   evidenceReasonCode: string | null
@@ -574,6 +580,9 @@ function renderAssistantAutoReplyInputSection(input: {
   if (input.messageRef) {
     sections.unshift(`Message ref: ${input.messageRef}`)
   }
+  sections.unshift(
+    `Appointment source ref: ${input.appointmentReminderSourceRef}`,
+  )
 
   if (input.totalInputs === 1) {
     return sections.join('\n\n')

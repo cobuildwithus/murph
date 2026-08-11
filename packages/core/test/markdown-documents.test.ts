@@ -330,7 +330,7 @@ describe("markdown document primitives", () => {
     }));
   });
 
-  it("creates distinct trusted effects and replays each without another write", async () => {
+  it("creates and independently updates ordinal-one effects from separate accepted inputs", async () => {
     const vaultRoot = await makeVaultRoot();
     const basePayload = createAutomationPayload({
       instructions: "Send the Midtown appointment reminder.",
@@ -396,7 +396,7 @@ describe("markdown document primitives", () => {
 
     const secondRequest = {
       ...request,
-      createOnlyEffectKey: "appointment-reminder:2",
+      createOnlyReplayKey: "accepted-input-appointment-2",
       instructions: "Send the Lakeside appointment reminder.",
       schedule: request.schedule,
       summary: "Lakeside appointment on August 12 at 11 AM",
