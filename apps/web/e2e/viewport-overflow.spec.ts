@@ -284,6 +284,9 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
         const frameRect = frame.getBoundingClientRect();
         const manageLinkRect = manageLink?.getBoundingClientRect();
         const titleRect = title.getBoundingClientRect();
+        const inertAncestor = frame.closest<HTMLElement>("[inert]");
+        const inertValue = inertAncestor?.getAttribute("inert") ?? "";
+        inertAncestor?.removeAttribute("inert");
         const linkOwnsPoint = (x: number, y: number) => {
           const hit = document.elementFromPoint(x, y);
           return Boolean(
@@ -292,6 +295,19 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
               (hit === manageLink || manageLink.contains(hit)),
           );
         };
+        const manageHitBottom = manageLinkRect
+          ? linkOwnsPoint(
+              manageLinkRect.left + manageLinkRect.width / 2,
+              manageLinkRect.bottom - 1,
+            )
+          : null;
+        const manageHitTop = manageLinkRect
+          ? linkOwnsPoint(
+              manageLinkRect.left + manageLinkRect.width / 2,
+              manageLinkRect.top + 1,
+            )
+          : null;
+        inertAncestor?.setAttribute("inert", inertValue);
         return {
           buttonHeight: buttonRect.height,
           buttonLeft: buttonRect.left,
@@ -304,18 +320,8 @@ test("health-data consent actions stay aligned and contained", async ({ page }) 
           frameLeft: frameRect.left,
           frameRight: frameRect.right,
           frameScrollWidth: frame.scrollWidth,
-          manageHitBottom: manageLinkRect
-            ? linkOwnsPoint(
-                manageLinkRect.left + manageLinkRect.width / 2,
-                manageLinkRect.bottom - 1,
-              )
-            : null,
-          manageHitTop: manageLinkRect
-            ? linkOwnsPoint(
-                manageLinkRect.left + manageLinkRect.width / 2,
-                manageLinkRect.top + 1,
-              )
-            : null,
+          manageHitBottom,
+          manageHitTop,
           manageLinkHeight: manageLinkRect?.height ?? null,
           manageLinkTop: manageLinkRect?.top ?? null,
           manageTargetHeight: manageLinkRect?.height ?? null,
