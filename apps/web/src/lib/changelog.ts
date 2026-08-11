@@ -63,6 +63,27 @@ export interface ChangelogPage {
 
 const RAW_CHANGELOG_EDITIONS = [
   {
+    id: "2026-08-11",
+    publishedOn: "2026-08-11",
+    title: "A clearer way back to shared cards",
+    summary:
+      "Shared workout and nutrition cards now explain how to get Murph for iPhone and return to the interactive card in Messages.",
+    items: [
+      {
+        id: "shared-card-app-handoff",
+        kind: "improvement",
+        priority: 4,
+        title: "Shared cards point back to Murph",
+        summary:
+          "Opening a shared workout or nutrition card on the web now shows a focused path to Murph for iPhone and explains how to return to the card in Messages.",
+        details:
+          "The page keeps the card details opaque and leaves the shared link unchanged. Ordinary homepage links stay unaffected, while Messages continues to own the interactive card.",
+        relevanceTags: ["imessage", "cards", "iphone", "recovery"],
+        sourcePullRequests: [],
+      },
+    ],
+  },
+  {
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title: "Starter access, patterns, reminders, cards, and web search",

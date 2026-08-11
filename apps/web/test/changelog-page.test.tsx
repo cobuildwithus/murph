@@ -59,6 +59,8 @@ describe("ChangelogPage", () => {
       await ChangelogPage({ searchParams: Promise.resolve({}) }),
     );
 
+    expect(markup).toContain("A clearer way back to shared cards");
+    expect(markup).toContain("Shared cards point back to Murph");
     expect(markup).toContain(
       "Starter access, patterns, reminders, cards, and web search",
     );
@@ -77,7 +79,7 @@ describe("ChangelogPage", () => {
     );
     expect(markup).toContain("More ways to connect, prepare, and finish");
     expect(markup).toContain("Ask about images and video on X");
-    expect(markup).toContain("More control over data, models, and connections");
+    expect(markup).not.toContain("More control over data, models, and connections");
     expect(markup).not.toContain(
       "Connected apps recover with a clearer next step",
     );
@@ -106,7 +108,10 @@ describe("ChangelogPage", () => {
     expect(markup).not.toContain("Better answers, better instincts");
     expect(markup).not.toContain("Murph referees your group challenge");
     expect(markup).toContain('aria-label="Changelog pages"');
-    expect(markup).toContain('href="/changelog?edition=2026-08-03"');
+    expect(markup).toContain('href="/changelog?edition=2026-08-04"');
+    expect(markup).toContain(
+      'href="/changelog?edition=2026-08-11#shared-card-app-handoff"',
+    );
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-10#personal-patterns"',
     );
@@ -119,7 +124,7 @@ describe("ChangelogPage", () => {
     expect(markup).toContain(
       'href="/changelog?edition=2026-08-05#official-local-alert-health-context"',
     );
-    expect(markup).toContain(
+    expect(markup).not.toContain(
       'href="/changelog?edition=2026-08-04#custom-inference-endpoint"',
     );
     expect(markup).not.toContain(
@@ -137,10 +142,9 @@ describe("ChangelogPage", () => {
 
     expect(markup).not.toContain("Open model settings");
     expect(markup).toContain("Ask about today&#x27;s conditions");
-    expect(markup).toContain("Open privacy settings");
-    expect(markup).toContain('href="/settings/data-privacy"');
-    expect(markup).toContain("Ask for today&#x27;s nutrition card");
-    expect(markup).toContain("Manage connections");
+    expect(markup).not.toContain("Open privacy settings");
+    expect(markup).not.toContain("Ask for today&#x27;s nutrition card");
+    expect(markup).not.toContain("Manage connections");
     expect(markup).not.toContain("Open Environment");
     expect(markup).not.toContain('href="/environment"');
     expect(markup).toContain("Explore referrals");
@@ -169,12 +173,6 @@ describe("ChangelogPage", () => {
           message: {
             body: "I feel more tired than usual and planned an outdoor workout today. Check whether an official local alert should change my plan.",
             subject: "Try it: Murph can account for official local alerts",
-          },
-        },
-        {
-          message: {
-            body: "Show me today's nutrition card.",
-            subject: "Try it: Ask for today's nutrition card",
           },
         },
       ]),

@@ -173,6 +173,7 @@ import type { EnvironmentVoiceScript } from "../(dashboard)/environment/environm
 import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
+import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -1444,6 +1445,15 @@ export function ComponentsContent() {
           title="iMessage compact table card states"
         >
           <ImessageCompactTableCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="murph-card-handoff-dialog"
+          title="Shared card handoff dialog"
+        >
+          <MurphCardHandoffStudy />
         </Section>
 
         <Separator />

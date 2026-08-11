@@ -221,6 +221,16 @@ tap-to-reveal target state. The provider caption retains only the date and meal
 count; visible totals and goals are not repeated beneath the image. V1 renders
 an unavailable fiber dash in the image without adding a fiber caption claim.
 
+### Shared iMessage Card Handoff
+When a shared response-card URL reaches the public homepage instead of the
+Messages extension, open one compact handoff dialog after hydration. Use the
+same flat cream paper, warm hairline, sage primary action, Fraunces heading,
+and DM Mono filing labels as the rest of the product. Explain the two-step
+recovery plainly: get Murph for iPhone, then return to Messages and tap the
+card again. Keep the App Store link as the only forward action and provide one
+quiet dismiss action. The dialog must not display or decode the fragment, add
+device-specific branching, or turn the fallback into a signup flow.
+
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
 current MRR, tracked fulfilled usage top-ups, paying-customer growth, active

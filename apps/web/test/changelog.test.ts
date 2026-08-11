@@ -292,7 +292,7 @@ describe("changelog registry", () => {
     );
   });
 
-  it("keeps the August 7 through August 10 feature claims bounded", () => {
+  it("keeps the August 7 through August 11 feature claims bounded", () => {
     const items = new Map(
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
@@ -312,6 +312,11 @@ describe("changelog registry", () => {
       details: expect.stringContaining("part of the card image itself"),
     });
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
+    expect(items.get("shared-card-app-handoff")).toMatchObject({
+      details: expect.stringContaining("keeps the card details opaque"),
+      summary: expect.stringContaining("return to the card in Messages"),
+    });
+    expect(items.get("shared-card-app-handoff")?.tryIt).toBeUndefined();
     expect(items.get("public-referral-home")).toMatchObject({
       sourcePullRequests: [
         1450, 1459, 1483, 1485, 1487, 1492, 1497, 1498, 1499, 1515,
@@ -503,13 +508,17 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 10 shipment set", () => {
+  it("publishes the complete July 20 through August 11 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 22).map((edition) => ({
+      listChangelogEditions().slice(0, 23).map((edition) => ({
         id: edition.id,
         itemIds: edition.items.map((item) => item.id),
       })),
     ).toEqual([
+      {
+        id: "2026-08-11",
+        itemIds: ["shared-card-app-handoff"],
+      },
       {
         id: "2026-08-10",
         itemIds: [
@@ -1002,8 +1011,8 @@ describe("changelog registry", () => {
   it("keeps the default archive window to seven calendar days", () => {
     const firstPage = resolveChangelogPage(1);
     expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
+    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-11");
+    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-05");
   });
 
   it("resolves only known canonical edition cursors", () => {
