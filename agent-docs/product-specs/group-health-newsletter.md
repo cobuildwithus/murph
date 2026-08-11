@@ -261,10 +261,14 @@ Deploy Web before Cloudflare/runner in that coordinated window. The recipient
 callback is additive during the rollback window: current Cloudflare sends the
 same authorization proof under both the generic field and the legacy alias, so
 an already-accepted parent still fails closed if it reaches the old Web parser.
+Durable outbox JSON and the runner-to-Worker request likewise retain the legacy
+proof field on their rollback-facing representations while current code
+normalizes it to the generic internal name.
 Until the generic Web receiver is established and recorded as the hard rollback
 floor, roll Cloudflare/runner back before rolling Web back. Remove the legacy
-callback alias only after production deployment evidence proves that no
-addressable Web rollback artifact depends on it.
+proof representations only after production deployment evidence proves that no
+old runner, Worker, or Web artifact is addressable and every outbox intent
+written during the compatibility window has drained.
 
 After rollout, prove one current-chat occurrence and one group-email
 prepare/send occurrence. Confirm the model receives no addresses or grant

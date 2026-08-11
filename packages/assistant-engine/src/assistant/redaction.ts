@@ -319,11 +319,23 @@ export function sanitizeAssistantOutboxIntentForPersistence(
   card?: NonNullable<AssistantOutboxIntent['card']>
   operation?: NonNullable<AssistantOutboxIntent['operation']>
 } {
-  const { card, operation, ...baseIntent } = intent
+  const {
+    card,
+    groupEmailAuthorizationProof,
+    newsletterAuthorizationProof,
+    operation,
+    ...baseIntent
+  } = intent
+  const persistedGroupEmailAuthorizationProof =
+    groupEmailAuthorizationProof ?? newsletterAuthorizationProof ?? null
   return {
     ...baseIntent,
     schema: 'murph.assistant-outbox-intent.v1',
     lastError: sanitizeAssistantDeliveryErrorForPersistence(intent.lastError),
+    // The pre-generic runner schema is strict. Keep the durable representation
+    // rollback-readable until current runner/Worker artifacts are the enforced
+    // rollback floor and every intent written in this window has drained.
+    newsletterAuthorizationProof: persistedGroupEmailAuthorizationProof,
     ...(card ? { card } : {}),
     ...(operation ? { operation } : {}),
   }

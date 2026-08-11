@@ -111,7 +111,7 @@ describe('group email durable outbox capability', () => {
       deliveryIdempotencyKey: DELIVERY_KEY,
       emailHtml: '<p>Weekly</p>',
       message: 'Weekly',
-      groupEmailAuthorizationProof: AUTHORIZATION_PROOF,
+      newsletterAuthorizationProof: AUTHORIZATION_PROOF,
       status: 'pending',
     })
     expect(recordPendingDeliveryIntentId).toHaveBeenCalledWith(

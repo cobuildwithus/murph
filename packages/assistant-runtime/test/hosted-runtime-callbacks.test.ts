@@ -4329,7 +4329,7 @@ describe("hosted runtime callbacks", () => {
         intentId: "intent_newsletter",
         lastError: null,
         message: "Weekly",
-        groupEmailAuthorizationProof: "a".repeat(64),
+        newsletterAuthorizationProof: "a".repeat(64),
         nextAttemptAt: "2026-07-12T13:00:00.000Z",
         replyToMessageId: null,
         sessionId: "session_newsletter",

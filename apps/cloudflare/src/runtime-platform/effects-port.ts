@@ -332,8 +332,22 @@ export function createCloudflareEffectsPort(input: {
         }
       : {}),
     async sendEmail(request) {
+      const {
+        groupEmailAuthorizationProof,
+        ...rollbackReadableRequest
+      } = request;
       const payload = await fetchHostedProviderEffectJson({
-        body: request,
+        body: {
+          ...rollbackReadableRequest,
+          ...(groupEmailAuthorizationProof == null
+            ? {}
+            : {
+                // The pre-generic Worker reads only this field. Keep the wire
+                // representation legacy-facing until old Workers are no longer
+                // addressable and compatibility-window outbox work has drained.
+                newsletterAuthorizationProof: groupEmailAuthorizationProof,
+              }),
+        },
         boundedResponseBody: true,
         description: "Hosted email send",
         fetchImpl: input.fetchImpl,

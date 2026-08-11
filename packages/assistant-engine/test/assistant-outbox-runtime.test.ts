@@ -650,6 +650,59 @@ describe('assistant outbox runtime', () => {
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
   })
 
+  it('persists group email proof under the rollback-readable outbox field', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-email-proof-rollback-',
+    )
+    const groupEmailAuthorizationProof = 'a'.repeat(64)
+    const parentTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group_123',
+      subject: 'Group subject',
+      targetKind: 'group',
+    })
+    const targets = [
+      parentTarget,
+      serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        recipientMemberId: 'member_123',
+        subject: 'Group subject',
+        targetKind: 'group',
+      }),
+    ]
+
+    for (const [index, explicitTarget] of targets.entries()) {
+      const intent = await createAssistantOutboxIntent({
+        channel: 'email',
+        deliveryIdempotencyKey: `group-email-effect:proof:${index}`,
+        explicitTarget,
+        groupEmailAuthorizationProof,
+        message: 'Group email body',
+        sessionId: `session_group_email_${index}`,
+        threadIsDirect: false,
+        turnId: `turn_group_email_${index}`,
+        vault: vaultRoot,
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const persisted = JSON.parse(await readFile(
+        resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
+        'utf8',
+      )) as Record<string, unknown>
+
+      // A frozen pre-generic strict schema recognizes only the legacy proof
+      // property. Absence of the generic property is what prevents quarantine.
+      expect(Object.keys(persisted).filter((key) =>
+        key.endsWith('AuthorizationProof')
+      )).toEqual(['newsletterAuthorizationProof'])
+      expect(persisted.newsletterAuthorizationProof).toBe(
+        groupEmailAuthorizationProof,
+      )
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId))
+        .resolves.toMatchObject({
+          newsletterAuthorizationProof: groupEmailAuthorizationProof,
+        })
+    }
+  })
+
   it('monotonically widens answered mailbox ids when a grouped reply is rebatched', async () => {
     const { vaultRoot } = await createAssistantVault(
       'assistant-outbox-grouped-answered-upgrade-',

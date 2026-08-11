@@ -972,8 +972,8 @@ export const assistantOutboxIntentSchema = z
       .regex(/^[0-9a-f]{64}$/u)
       .nullable()
       .optional(),
-    // Bounded read-only compatibility for durable intents accepted before the
-    // generic group-email field shipped. New writes use the field above.
+    // Bounded compatibility for the rollback-readable durable representation.
+    // Current code normalizes this to the generic internal field at dispatch.
     newsletterAuthorizationProof: z
       .string()
       .regex(/^[0-9a-f]{64}$/u)
