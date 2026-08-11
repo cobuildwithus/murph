@@ -8,8 +8,12 @@ import {
   type HostedMemberIdentity,
 } from "@prisma/client";
 import {
+  buildHostedSecureBoxAad,
   findHostedDomainRootWrap,
+  HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   parseHostedDomainRootKeyEnvelope,
+  sealHostedSecureBox,
+  serializeHostedSecureBoxEnvelope,
   verifyHostedDomainRootEnvelopeSignatureWithPublicKey,
   type HostedDomainRootKeyEnvelopeV1,
 } from "@murphai/runtime-state";
@@ -30,6 +34,7 @@ import {
   buildHostedMemberRoutingPrivateColumns,
 } from "../src/lib/hosted-onboarding/member-private-codecs";
 import {
+  openHostedUserSecureBoxStringFromPreparedRoot,
   openHostedUserSecureBoxStrings,
   sealHostedUserSecureBoxStrings,
   setHostedSecureBoxStringTestCodecForTests,
@@ -2066,6 +2071,79 @@ test("webhook-style multi-field crypto reuses one unwrap per domain inside the s
     // reuse the same unwrap without weakening per-call key copies.
     assert.equal(counting.readCount(), readsAfterSeals);
   });
+});
+
+test("prepared secure-box opening uses only the exact request-scoped root", async () => {
+  setHostedSecureBoxStringTestCodecForTests(null);
+  const {
+    getHostedDomainRootUnwrapCache,
+    runWithHostedDomainRootUnwrapCache,
+  } = await import("../src/lib/hosted-crypto/domain-root-unwrap-cache");
+  const userId = "member-test-prepared-open";
+  const rootKeyId = "udrk:control:prepared-open";
+  const rootKey = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+  const cachedRootKey = Uint8Array.from(rootKey);
+  const scope = "hosted-pending-group-setup:payload:v1";
+  const aad = {
+    field: "payload_encrypted",
+    purpose: "pending-group-setup",
+    rowId: "hpgs_prepared_open",
+    table: "hosted_pending_group_setup",
+  } as const;
+  const cachedEnvelope: HostedDomainRootKeyEnvelopeV1 = {
+    authoritySignature: {
+      alg: "GCP-KMS-EC-P256-SHA256",
+      keyVersionName: "test-key-version",
+      signedAt: "2026-08-10T18:00:00.000Z",
+      signature: "test-signature",
+    },
+    createdAt: "2026-08-10T18:00:00.000Z",
+    domain: "control",
+    generation: 1,
+    rootKeyId,
+    schema: HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
+    updatedAt: "2026-08-10T18:00:00.000Z",
+    userId,
+    wraps: [],
+  };
+  const ciphertext = serializeHostedSecureBoxEnvelope(
+    await sealHostedSecureBox({
+      aad: buildHostedSecureBoxAad({
+        ...aad,
+        domain: "control",
+        lane: "hosted-member-private-field",
+        scope,
+        userId,
+      }),
+      domain: "control",
+      lane: "hosted-member-private-field",
+      plaintext: new TextEncoder().encode("authenticated plaintext"),
+      rootKey,
+      rootKeyId,
+      scope,
+    }),
+  );
+
+  await runWithHostedDomainRootUnwrapCache(async () => {
+    const cache = getHostedDomainRootUnwrapCache();
+    assert.ok(cache);
+    cache.set(`${userId}|control|${rootKeyId}`, Promise.resolve({
+      envelope: cachedEnvelope,
+      rootKey: cachedRootKey,
+    }));
+
+    await expect(openHostedUserSecureBoxStringFromPreparedRoot({
+      aad,
+      lane: "hosted-member-private-field",
+      preparedRootKeyId: rootKeyId,
+      scope,
+      userId,
+      value: ciphertext,
+    })).resolves.toBe("authenticated plaintext");
+    expect([...cachedRootKey]).toEqual([...rootKey]);
+  });
+
+  expect([...cachedRootKey]).toEqual(Array.from({ length: 32 }, () => 0));
 });
 
 test("batch private-field sealing unwraps once and preserves member-bound AAD", async () => {

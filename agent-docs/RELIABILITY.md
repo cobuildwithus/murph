@@ -551,18 +551,27 @@ Last verified: 2026-08-11
   A changed required fact may spend only the existing single typed fresh-
   preparation retry. Replacement-line ownership is pinned in request memory
   across that retry; a different fresh selection returns route-free. A
-  permanently invalid selected root is consumed only after exact lock and
-  revalidation, while transient KMS or network failure leaves the row available
-  for retry. The setup must cover the provider event time and remain
+  selected-root, envelope, KMS/provider, signature, and authentication failures
+  preserve the row for retry. Only successfully authenticated plaintext with
+  malformed JSON or an invalid application schema is consumed after exact lock
+  and revalidation. That exact terminal `invalid_payload` result may continue
+  same-event fallback or ordinary handoff; claim races, authority changes, and
+  transient failures remain route-free. The setup must cover the provider event
+  time and remain
   unexpired at processing and lock time, so a delayed pre-arm event cannot spend
   a newer intent. Final ownership remains with the canonical route owner. The
   selected setup row stays locked until route admission finishes and is deleted
   only when that transaction creates the route; rollback and convergence leave
   it unchanged without a compensation lifecycle. A concurrent loser re-reads
   the canonical route and appends its distinct message there. The optional
-  setup payload is encrypted and versioned; unreadable or future bytes are
-  consumed as unavailable optional setup and fall back to ordinary sender
-  admission instead of wedging the room. Hard-blocked-line recovery keeps the
+  setup payload is encrypted and versioned. Exact candidate ciphertext and its
+  referenced root are prepared before `BEGIN`; the transaction repeats
+  authority checks, locks the winner, and accepts only an exact prepared match.
+  Only successfully authenticated plaintext with malformed JSON or an invalid
+  application schema is consumed as unavailable optional setup. Secure-box,
+  envelope/root, KMS/provider, authentication, and stale-preparation failures
+  roll back and preserve the row for the existing bounded retry owner instead
+  of being misclassified as invalid payload. Hard-blocked-line recovery keeps the
   existing delivery attempt as its retry owner, awaits provider-accepted
   correlation before reporting send success, and treats an exact
   still-uncorrelated attempt as retryable rather than definitive absence. An

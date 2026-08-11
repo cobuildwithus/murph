@@ -20,7 +20,6 @@ import {
 } from '@murphai/operator-config/assistant/provider-config'
 import {
   assistantCodexModelProviderRequiresModelThreadCompatibility,
-  resolveAssistantRuntimeTarget,
 } from '@murphai/operator-config/assistant/target-runtime'
 
 import { normalizeNullableString } from '../shared.js'
@@ -115,10 +114,10 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     return override
   }
 
-  const runtimeTarget = resolveAssistantRuntimeTarget({
-    modelProvider: effectiveModelProvider,
-    provider: 'codex-cli',
-  })
+  const supportsReasoningEffort =
+    !assistantCodexModelProviderRequiresModelThreadCompatibility(
+      effectiveModelProvider,
+    )
   const inheritedModelSpecificProvider =
     explicitModelProvider === null &&
     assistantCodexModelProviderRequiresModelThreadCompatibility(
@@ -126,7 +125,7 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     )
   if (
     !inheritedModelSpecificProvider &&
-    runtimeTarget.supportsReasoningEffort
+    supportsReasoningEffort
   ) {
     return override
   }
@@ -136,7 +135,7 @@ export function resolveAutomationAssistantTargetOverrideForTarget(
     Boolean(override.model) &&
     isHostedAssistantProductModel(override.model)
   const model = suppressProductModel ? null : override.model ?? null
-  const reasoningEffort = runtimeTarget.supportsReasoningEffort
+  const reasoningEffort = supportsReasoningEffort
     ? override.reasoningEffort ?? null
     : null
 

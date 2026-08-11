@@ -1,22 +1,28 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  compactAssistantProviderConfigInput,
+  mergeAssistantProviderConfigs,
   normalizeAssistantProviderConfig,
-  resolveAssistantProviderRuntimeTarget,
   serializeAssistantProviderOperatorDefaults,
   serializeAssistantProviderSessionOptions,
+  type AssistantProviderConfigInput,
 } from '../src/assistant/provider-config.ts'
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_CONFIG,
   OPENAI_CODEX_MODEL_PROVIDER_CONFIG,
   VENICE_CODEX_MODEL_PROVIDER_CONFIG,
-  resolveAssistantCodexModelProviderConfig,
   resolveAssistantCodexLocalOnboardingProviderConfig,
+  resolveAssistantCodexModelProviderConfig,
 } from '../src/assistant/target-runtime.ts'
 
-describe('assistant provider config runtime resolution', () => {
-  it('keeps continuity stable across model and reasoning changes', () => {
-    const first = resolveAssistantProviderRuntimeTarget({
+function continuityFingerprint(input: AssistantProviderConfigInput): string {
+  return serializeAssistantProviderSessionOptions(input).continuityFingerprint
+}
+
+describe('assistant provider config', () => {
+  it('keeps Codex continuity stable across ordinary model and reasoning changes', () => {
+    const first = continuityFingerprint({
       approvalPolicy: 'never',
       model: 'gpt-5.6-terra',
       modelProvider: 'vercel-ai-gateway',
@@ -24,7 +30,7 @@ describe('assistant provider config runtime resolution', () => {
       reasoningEffort: 'low',
       sandbox: 'workspace-write',
     })
-    const switched = resolveAssistantProviderRuntimeTarget({
+    const switched = continuityFingerprint({
       approvalPolicy: 'never',
       model: 'gpt-5.6-sol',
       modelProvider: 'vercel-ai-gateway',
@@ -32,7 +38,7 @@ describe('assistant provider config runtime resolution', () => {
       reasoningEffort: 'high',
       sandbox: 'workspace-write',
     })
-    const incompatible = resolveAssistantProviderRuntimeTarget({
+    const incompatible = continuityFingerprint({
       approvalPolicy: 'never',
       model: 'gpt-5.6-sol',
       modelProvider: 'openai',
@@ -41,38 +47,36 @@ describe('assistant provider config runtime resolution', () => {
       sandbox: 'workspace-write',
     })
 
-    expect(switched.continuityFingerprint).toBe(first.continuityFingerprint)
-    expect(incompatible.continuityFingerprint).not.toBe(
-      first.continuityFingerprint,
+    expect(first).toBe(
+      'sha256:9c5e29337e7b8d33232ad969c74c9271f0e0ee53769838a4197dd516f6ee8367',
     )
+    expect(switched).toBe(first)
+    expect(incompatible).not.toBe(first)
   })
 
-  it('makes custom inference continuity revision-sensitive through its model alias', () => {
-    const revisionSeven = resolveAssistantProviderRuntimeTarget({
+  it('makes hosted custom inference continuity revision-sensitive through its model alias', () => {
+    const revisionSeven = continuityFingerprint({
       model: 'murph-custom-r7',
       modelProvider: 'hosted-custom-inference',
       provider: 'codex-cli',
     })
-    const sameRevision = resolveAssistantProviderRuntimeTarget({
+    const sameRevision = continuityFingerprint({
       model: 'murph-custom-r7',
       modelProvider: 'hosted-custom-inference',
       provider: 'codex-cli',
       reasoningEffort: 'high',
     })
-    const revisionEight = resolveAssistantProviderRuntimeTarget({
+    const revisionEight = continuityFingerprint({
       model: 'murph-custom-r8',
       modelProvider: 'hosted-custom-inference',
       provider: 'codex-cli',
     })
 
-    expect(sameRevision.continuityFingerprint)
-      .toBe(revisionSeven.continuityFingerprint)
-    expect(revisionEight.continuityFingerprint)
-      .not.toBe(revisionSeven.continuityFingerprint)
-    expect(revisionSeven.supportsReasoningEffort).toBe(false)
+    expect(sameRevision).toBe(revisionSeven)
+    expect(revisionEight).not.toBe(revisionSeven)
   })
 
-  it('normalizes Vercel AI Gateway as a Codex model provider', () => {
+  it('normalizes Vercel AI Gateway as Codex model-provider configuration', () => {
     const input = {
       provider: 'codex-cli',
       approvalPolicy: 'never',
@@ -85,16 +89,13 @@ describe('assistant provider config runtime resolution', () => {
       sandbox: 'danger-full-access',
     } as const
 
-    const normalized = normalizeAssistantProviderConfig(input)
-
-    expect(normalized).toEqual({
+    expect(normalizeAssistantProviderConfig(input)).toEqual({
       policy: {
         approvalPolicy: 'never',
         reasoningEffort: 'medium',
         sandbox: 'danger-full-access',
       },
       target: {
-        kind: 'codex-cli',
         codexCommand: null,
         codexHome: '/tmp/codex-home',
         model: 'gpt-5.6-terra',
@@ -102,15 +103,6 @@ describe('assistant provider config runtime resolution', () => {
         oss: false,
         profile: 'hosted',
       },
-    })
-
-    const resolved = resolveAssistantProviderRuntimeTarget(normalized)
-    expect(resolved).toMatchObject({
-      executionDriver: 'codex-app-server',
-      modelProvider: 'vercel-ai-gateway',
-      resumeKind: 'codex-thread',
-      supportsNativeResume: true,
-      target: { kind: 'codex-cli' },
     })
 
     expect(serializeAssistantProviderSessionOptions(input)).toMatchObject({
@@ -169,7 +161,6 @@ describe('assistant provider config runtime resolution', () => {
 
     expect(normalized).toMatchObject({
       target: {
-        kind: 'codex-cli',
         model: 'venice-model',
         modelProvider: 'venice',
       },
@@ -193,20 +184,18 @@ describe('assistant provider config runtime resolution', () => {
     })
   })
 
-  it('fails closed for unsupported provider config inputs', () => {
+  it('fails closed for unsupported assistant-runtime identifiers at raw config boundaries', () => {
     const legacyInput = {
       provider: 'unsupported-provider',
       model: 'gpt-5.1',
     } as const
+    const message = /Assistant runtime targets must use Codex App Server/u
 
-    expect(() => normalizeAssistantProviderConfig(legacyInput)).toThrow(
-      /Assistant runtime targets must use Codex App Server/u,
-    )
-    expect(() => resolveAssistantProviderRuntimeTarget(legacyInput)).toThrow(
-      /Assistant runtime targets must use Codex App Server/u,
-    )
+    expect(() => normalizeAssistantProviderConfig(legacyInput)).toThrow(message)
+    expect(() => compactAssistantProviderConfigInput(legacyInput)).toThrow(message)
+    expect(() => mergeAssistantProviderConfigs(legacyInput)).toThrow(message)
     expect(() => serializeAssistantProviderSessionOptions(legacyInput)).toThrow(
-      /Assistant runtime targets must use Codex App Server/u,
+      message,
     )
   })
 })

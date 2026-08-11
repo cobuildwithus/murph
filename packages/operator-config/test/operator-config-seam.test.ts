@@ -65,7 +65,6 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
 
   const providerPatch = buildAssistantProviderDefaultsPatch({
     defaults: null,
-    provider: 'codex-cli',
     providerConfig: {
       approvalPolicy: 'never',
       codexHome: ' /tmp/codex-home ',
@@ -93,7 +92,7 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
 
   assert.equal(savedDefaultsConfig.assistant?.identityId, ' user-123 ')
   assert.deepEqual(
-    resolveAssistantProviderDefaults(savedDefaultsConfig.assistant, 'codex-cli'),
+    resolveAssistantProviderDefaults(savedDefaultsConfig.assistant),
     {
       approvalPolicy: 'never',
       codexCommand: null,

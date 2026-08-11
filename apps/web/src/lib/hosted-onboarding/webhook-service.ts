@@ -1930,6 +1930,7 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
 }
 
 interface HostedThreadRoutingCryptoPreparation {
+  pendingGroupSetupPreparationFailure?: unknown;
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
@@ -2025,15 +2026,24 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
       pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
       prisma: input.prisma,
     });
-    if (!admission.shouldPrepareThreadContainer || !accountLookupKey) {
-      return admission.preparedPendingGroupSetup
-        ? { preparedPendingGroupSetup: admission.preparedPendingGroupSetup }
+    const pendingGroupPreparation: HostedThreadRoutingCryptoPreparation =
+      admission.preparedPendingGroupSetup
+        ? {
+            ...(admission.preparedPendingGroupSetup.selectedPayload?.kind
+                === "failed"
+              ? {
+                  pendingGroupSetupPreparationFailure:
+                    admission.preparedPendingGroupSetup.selectedPayload.error,
+                }
+              : {}),
+            preparedPendingGroupSetup: admission.preparedPendingGroupSetup,
+          }
         : {};
+    if (!admission.shouldPrepareThreadContainer || !accountLookupKey) {
+      return pendingGroupPreparation;
     }
     return {
-      ...(admission.preparedPendingGroupSetup
-        ? { preparedPendingGroupSetup: admission.preparedPendingGroupSetup }
-        : {}),
+      ...pendingGroupPreparation,
       preparedThreadContainerCreation:
         await prepareHostedThreadContainerCreation({
           accountLookupKey,
@@ -2137,7 +2147,6 @@ async function prepareHostedTelegramThreadRoutingCrypto(input: {
 }
 
 const HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES = new Set([
-  "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
   "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
   "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED",
 ]);
@@ -2160,6 +2169,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let preparation: HostedThreadRoutingCryptoPreparation = {};
     const preparationFailures: unknown[] = [];
+    let pendingGroupSetupPreparationFailure: unknown;
     try {
       return await runHostedOnboardingWebhookTransaction(
         input.prisma,
@@ -2167,6 +2177,10 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
         async () => {
           try {
             preparation = await input.prepare({ attempt });
+            if (preparation.pendingGroupSetupPreparationFailure !== undefined) {
+              pendingGroupSetupPreparationFailure =
+                preparation.pendingGroupSetupPreparationFailure;
+            }
           } catch (error) {
             preparationFailures.push(error);
             throw error;
@@ -2175,9 +2189,28 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
       );
     } catch (error) {
       if (
+        pendingGroupSetupPreparationFailure !== undefined
+        && isHostedOnboardingError(error)
+        && error.code === "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED"
+        && error.details?.preparationTarget === "pending_group_setup_payload"
+        && error.details?.preparationFailureMatched === true
+      ) {
+        throw hostedOnboardingError({
+          cause: pendingGroupSetupPreparationFailure,
+          code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_FAILED",
+          details: {
+            preparationTarget: "pending_group_setup_payload",
+          },
+          httpStatus: 503,
+          message: "Hosted pending group setup payload preparation failed.",
+          retryable: true,
+        });
+      }
+      if (
         preparationFailures.length > 0
         && isHostedOnboardingError(error)
         && HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES.has(error.code)
+        && error.details?.preparationTarget !== "pending_group_setup_payload"
       ) {
         // The transaction helper deliberately suppresses an irrelevant warm
         // failure so ignored branches can still complete. If the planner then

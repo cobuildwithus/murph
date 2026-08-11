@@ -159,7 +159,7 @@ vi.mock("../src/lib/hosted-groups/pending-group-setup", async (importOriginal) =
         recoveredRecipientPhoneLookupKey:
           input.recoveredRecipientPhoneLookupKey,
         selected,
-        selectedPayloadRoot: null,
+        selectedPayload: null,
         senderMemberId: input.senderMemberId ?? null,
         threadId: input.threadId,
       };
@@ -6989,10 +6989,17 @@ describe("Linq group chat auto-provision", () => {
             reason: "only_candidate" as const,
           }
         : null,
-      selectedPayloadRoot: recoveryAuthority === "accepted"
+      selectedPayload: recoveryAuthority === "accepted"
         ? {
             candidateId: "hpgs_recovered_group",
             kind: "ready" as const,
+            preparedClaim: {
+              id: "hpgs_recovered_group",
+              ownerMemberId: senderCore.id,
+              payloadEncrypted: "sealed:test-pending-group-payload",
+              payloadRootKeyId: null,
+              recipientPhoneLookupKey: originalRecipientPhoneLookupKey,
+            },
           }
         : null,
       senderMemberId: firstSpeakerCore.id,
@@ -7604,7 +7611,7 @@ describe("Linq group chat auto-provision", () => {
           candidateRows: [],
           candidates: [],
           selected: null,
-          selectedPayloadRoot: null,
+          selectedPayload: null,
         };
       }
       const row = {
@@ -7636,9 +7643,16 @@ describe("Linq group chat auto-provision", () => {
           candidateId: setupId,
           reason: "only_candidate" as const,
         },
-        selectedPayloadRoot: {
+        selectedPayload: {
           candidateId: setupId,
           kind: "ready" as const,
+          preparedClaim: {
+            id: setupId,
+            ownerMemberId: recoveredOwnerMemberId,
+            payloadEncrypted: "sealed:test-recovery-pin",
+            payloadRootKeyId: null,
+            recipientPhoneLookupKey: setupLineLookupKey,
+          },
         },
       };
     };
@@ -7647,7 +7661,10 @@ describe("Linq group chat auto-provision", () => {
       .mockImplementationOnce(prepareForRetry);
     preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
       .mockRejectedValueOnce(hostedOnboardingError({
-        code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+        code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+        details: {
+          preparationTarget: "pending_group_setup_payload",
+        },
         httpStatus: 409,
         message: "fresh pending-group preparation required",
         retryable: true,

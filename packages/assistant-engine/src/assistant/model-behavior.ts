@@ -17,7 +17,7 @@ export function resolveAssistantModelBehaviorProfile(
 ): AssistantModelBehaviorProfile {
   const normalized = normalizeAssistantProviderConfig(input)
 
-  if (normalized.target.kind === 'codex-cli' && normalized.target.oss) {
+  if (normalized.target.oss) {
     return 'default'
   }
 
@@ -25,11 +25,7 @@ export function resolveAssistantModelBehaviorProfile(
     return 'gpt5-agentic'
   }
 
-  if (
-    normalized.target.kind === 'codex-cli' &&
-    !normalized.target.oss &&
-    !normalized.target.model
-  ) {
+  if (!normalized.target.oss && !normalized.target.model) {
     return 'gpt5-agentic'
   }
 

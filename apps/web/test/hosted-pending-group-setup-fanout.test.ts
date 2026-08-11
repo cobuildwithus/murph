@@ -18,7 +18,10 @@ type UnwrapHostedDomainRootsForWebByRootKeyIds =
     .unwrapHostedDomainRootsForWebByRootKeyIds;
 
 const mocks = vi.hoisted(() => ({
+  domainRootCache: new Map<string, unknown>(),
+  openHostedUserSecureBoxStringFromPreparedRoot: vi.fn(),
   openHostedUserSecureBoxStrings: vi.fn(),
+  readHostedUserSecureBoxStringRootReference: vi.fn(),
   openHostedMemberRoutingHomeLinqRecipientPhoneRecords: vi.fn(),
   readActiveHostedLinqManagedLineLookupKeys: vi.fn(),
   readHostedLinqGroupLineRecoveryAuthoritiesTx: vi.fn(),
@@ -62,11 +65,15 @@ vi.mock("@/src/lib/hosted-crypto/gcp-kms", async (importOriginal) => {
 });
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
-  getHostedDomainRootUnwrapCache: () => new Map(),
+  getHostedDomainRootUnwrapCache: () => mocks.domainRootCache,
 }));
 
 vi.mock("@/src/lib/hosted-crypto/secure-box", () => ({
+  openHostedUserSecureBoxStringFromPreparedRoot:
+    mocks.openHostedUserSecureBoxStringFromPreparedRoot,
   openHostedUserSecureBoxStrings: mocks.openHostedUserSecureBoxStrings,
+  readHostedUserSecureBoxStringRootReference:
+    mocks.readHostedUserSecureBoxStringRootReference,
   sealHostedUserSecureBoxString: vi.fn(),
 }));
 
@@ -446,6 +453,18 @@ function createPrismaFixture() {
 }
 
 function installOwnerMocks(): void {
+  mocks.readHostedUserSecureBoxStringRootReference.mockImplementation(
+    (input: { value: string }) => {
+      const envelope = JSON.parse(input.value) as {
+        domain: string;
+        rootKeyId: string;
+      };
+      return {
+        domain: envelope.domain,
+        rootKeyId: envelope.rootKeyId,
+      };
+    },
+  );
   mocks.readHostedRuntimeAiAllowedMemberIds.mockImplementation(async () =>
     new Set(fixture.allowedMemberIds)
   );
@@ -469,11 +488,33 @@ function installOwnerMocks(): void {
       if (fixture.transactionActive) {
         throw new Error("KMS started while the transaction was active.");
       }
-      return input.references.map((reference) => ({
-        ...reference,
-        envelope: {},
-        rootKey: new Uint8Array([1, 2, 3, 4]),
-      }));
+      return input.references.map((reference) => {
+        const userId = "userId" in reference
+          ? String(reference.userId)
+          : "";
+        const domain = "domain" in reference
+          ? String(reference.domain)
+          : "control";
+        mocks.domainRootCache.set(
+          `${userId}|${domain}|${reference.rootKeyId}`,
+          true,
+        );
+        return {
+          ...reference,
+          envelope: {},
+          rootKey: new Uint8Array([1, 2, 3, 4]),
+        };
+      });
+    },
+  );
+  mocks.openHostedUserSecureBoxStringFromPreparedRoot.mockImplementation(
+    async () => {
+      if (!fixture.transactionActive) {
+        throw new Error(
+          "Secure-box open started before the transaction was active.",
+        );
+      }
+      return JSON.stringify({ schemaVersion: 1, setup: {} });
     },
   );
   mocks.openHostedUserSecureBoxStrings.mockImplementation(async (input: {
@@ -540,6 +581,7 @@ async function claim(input: {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.domainRootCache.clear();
   fixture = buildFixture({ count: 1, selectedIndex: 0 });
   installOwnerMocks();
 });
@@ -597,7 +639,9 @@ describe("pending-group preparation fanout", () => {
         .mock.calls[0]?.[0]?.candidates,
     ).toHaveLength(32);
     expect(mocks.unwrapHostedDomainRootsForWebByRootKeyIds).not.toHaveBeenCalled();
-    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
+    expect(
+      mocks.openHostedUserSecureBoxStringFromPreparedRoot,
+    ).not.toHaveBeenCalled();
   });
 
   it("keeps the K=32 selected-race shape constant, with KMS before BEGIN and local AES after the winner lock", async () => {
@@ -669,7 +713,9 @@ describe("pending-group preparation fanout", () => {
       rootKeyId: "setup-root-32",
       userId: thirtyTwo.selected.ownerMemberId,
     }]);
-    expect(mocks.openHostedUserSecureBoxStrings).toHaveBeenCalledOnce();
+    expect(
+      mocks.openHostedUserSecureBoxStringFromPreparedRoot,
+    ).toHaveBeenCalledOnce();
   });
 
   it("opens private routing phones only for the eligible subset of a mixed K=32 roster", async () => {
@@ -724,7 +770,7 @@ describe("pending-group preparation fanout", () => {
     );
   });
 
-  it("consumes a permanently unreadable selected root only after exact lock", async () => {
+  it("keeps a permanently unreadable selected root retryable after exact lock", async () => {
     fixture = buildFixture({ count: 1, selectedIndex: 0 });
     installOwnerMocks();
     const permanent = new HostedDomainRootPermanentUnwrapError(
@@ -745,15 +791,24 @@ describe("pending-group preparation fanout", () => {
       prisma,
       requiredCandidateId: selected.id,
       senderMemberId: selected.ownerMemberId,
-    })).resolves.toEqual({ kind: "none", reason: "invalid_payload" });
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+      details: {
+        preparationFailureMatched: true,
+        preparationTarget: "pending_group_setup_payload",
+      },
+      retryable: true,
+    });
     expect(queryRaw.mock.calls.some(([query]) =>
       queryText(query).includes("FOR UPDATE")
     )).toBe(true);
-    expect(executeRaw).toHaveBeenCalledOnce();
-    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
+    expect(executeRaw).not.toHaveBeenCalled();
+    expect(
+      mocks.openHostedUserSecureBoxStringFromPreparedRoot,
+    ).not.toHaveBeenCalled();
   });
 
-  it("rethrows transient KMS failure without locking or consuming the setup", async () => {
+  it("keeps transient KMS failure retryable without consuming the setup", async () => {
     fixture = buildFixture({ count: 1, selectedIndex: 0 });
     installOwnerMocks();
     const transient = new Error("temporary KMS outage");
@@ -772,11 +827,22 @@ describe("pending-group preparation fanout", () => {
       prisma,
       requiredCandidateId: selected.id,
       senderMemberId: selected.ownerMemberId,
-    })).rejects.toBe(transient);
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+      details: {
+        preparationFailureMatched: true,
+        preparationTarget: "pending_group_setup_payload",
+      },
+      retryable: true,
+    });
     expect(queryRaw.mock.calls.some(([query]) =>
       queryText(query).includes("FOR UPDATE")
-    )).toBe(false);
+    )).toBe(true);
     expect(executeRaw).not.toHaveBeenCalled();
+    expect(prepared.selectedPayload).toMatchObject({
+      error: transient,
+      kind: "failed",
+    });
   });
 
   it("keeps a replacement setup retryable until its historical verify key is restored", async () => {
@@ -811,15 +877,27 @@ describe("pending-group preparation fanout", () => {
       requiredCandidateId: selected.id,
     }).then(() => null, (error: unknown) => error);
     expect(unavailableKeyError).toBeInstanceOf(Error);
-    expect((unavailableKeyError as Error).message).toMatch(
-      /not trusted for verification/u,
-    );
+    expect(unavailableKeyError).toMatchObject({
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+      details: {
+        preparationFailureMatched: true,
+        preparationTarget: "pending_group_setup_payload",
+      },
+      retryable: true,
+    });
+    expect(unavailableKeyPrepared.selectedPayload).toMatchObject({
+      kind: "failed",
+    });
+    const selectedPayload = unavailableKeyPrepared.selectedPayload;
+    expect(selectedPayload?.kind === "failed"
+      ? (selectedPayload.error as Error).message
+      : "").toMatch(/not trusted for verification/u);
     expect(unavailableKeyError).not.toBeInstanceOf(
       HostedDomainRootPermanentUnwrapError,
     );
     expect(queryRaw.mock.calls.some(([query]) =>
       queryText(query).includes("FOR UPDATE")
-    )).toBe(false);
+    )).toBe(true);
     expect(executeRaw).not.toHaveBeenCalled();
     expect(decrypt).not.toHaveBeenCalled();
 
@@ -828,7 +906,11 @@ describe("pending-group preparation fanout", () => {
       cloudflarePublicJwk,
       historicalPublicKeyPem: historicalSigner.publicKeyPem,
     });
+    mocks.domainRootCache.clear();
     const restoredKeyPrepared = await prepare({ prisma });
+    expect(restoredKeyPrepared.selectedPayload).toMatchObject({
+      kind: "ready",
+    });
     await expect(claim({
       prepared: restoredKeyPrepared,
       prisma,
@@ -844,7 +926,7 @@ describe("pending-group preparation fanout", () => {
     expect(decrypt).toHaveBeenCalledOnce();
   });
 
-  it("consumes a malformed historical signature only after exact replacement lock", async () => {
+  it("keeps a malformed historical signature retryable after exact replacement lock", async () => {
     fixture = buildFixture({
       count: 1,
       selectedIndex: 0,
@@ -888,13 +970,22 @@ describe("pending-group preparation fanout", () => {
       prepared,
       prisma,
       requiredCandidateId: selected.id,
-    })).resolves.toEqual({ kind: "none", reason: "invalid_payload" });
+    })).rejects.toMatchObject({
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+      details: {
+        preparationFailureMatched: true,
+        preparationTarget: "pending_group_setup_payload",
+      },
+      retryable: true,
+    });
     expect(queryRaw.mock.calls.some(([query]) =>
       queryText(query).includes("FOR UPDATE")
     )).toBe(true);
-    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(executeRaw).not.toHaveBeenCalled();
     expect(decrypt).not.toHaveBeenCalled();
-    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
+    expect(
+      mocks.openHostedUserSecureBoxStringFromPreparedRoot,
+    ).not.toHaveBeenCalled();
   });
 
   it("returns route-free when fresh preparation selects a different recovery owner than the immutable pin", async () => {
@@ -922,7 +1013,9 @@ describe("pending-group preparation fanout", () => {
       queryText(query).includes("FOR UPDATE")
     )).toBe(false);
     expect(executeRaw).not.toHaveBeenCalled();
-    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
+    expect(
+      mocks.openHostedUserSecureBoxStringFromPreparedRoot,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not open BEGIN while an uncached selected payload root is blocked", async () => {
@@ -963,10 +1056,16 @@ describe("pending-group preparation fanout", () => {
         .toHaveBeenCalledOnce();
     });
     expect(transactionBegan).toBe(false);
-    expect(mocks.openHostedUserSecureBoxStrings).not.toHaveBeenCalled();
+    expect(
+      mocks.openHostedUserSecureBoxStringFromPreparedRoot,
+    ).not.toHaveBeenCalled();
     if (!rootGate.release) {
       throw new Error("Expected the pending setup root gate to be waiting.");
     }
+    mocks.domainRootCache.set(
+      `${fixture.candidateRows[31]!.ownerMemberId}|control|setup-root-32`,
+      true,
+    );
     rootGate.release([{
       domain: "control",
       envelope: {},
@@ -999,7 +1098,7 @@ describe("pending-group live mutation fences", () => {
     mutate();
     const cryptoCallsBeforeClaim =
       mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mock.calls.length
-      + mocks.openHostedUserSecureBoxStrings.mock.calls.length;
+      + mocks.openHostedUserSecureBoxStringFromPreparedRoot.mock.calls.length;
 
     await expect(claim({
       prepared,
@@ -1007,12 +1106,12 @@ describe("pending-group live mutation fences", () => {
       requiredCandidateId: selected.id,
       senderMemberId: selected.ownerMemberId,
     })).rejects.toMatchObject({
-      code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
       retryable: true,
     });
     expect(
       mocks.unwrapHostedDomainRootsForWebByRootKeyIds.mock.calls.length
-      + mocks.openHostedUserSecureBoxStrings.mock.calls.length,
+      + mocks.openHostedUserSecureBoxStringFromPreparedRoot.mock.calls.length,
     ).toBe(cryptoCallsBeforeClaim);
   }
 
@@ -1088,7 +1187,7 @@ describe("pending-group live mutation fences", () => {
       requiredCandidateId: selected.id,
       senderMemberId: selected.ownerMemberId,
     })).rejects.toMatchObject({
-      code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
     });
   });
 
@@ -1133,7 +1232,7 @@ describe("pending-group live mutation fences", () => {
       requiredCandidateId: selected.id,
       senderMemberId: selected.ownerMemberId,
     })).rejects.toMatchObject({
-      code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
       retryable: true,
     });
   });
@@ -1153,7 +1252,7 @@ describe("pending-group live mutation fences", () => {
       requiredCandidateId: fixture.candidateRows[0]!.id,
       senderMemberId: fixture.candidateRows[1]!.ownerMemberId,
     })).rejects.toMatchObject({
-      code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
     });
   });
 
@@ -1194,7 +1293,7 @@ describe("pending-group live mutation fences", () => {
       prisma,
       requiredCandidateId: fixture.candidateRows[0]!.id,
     })).rejects.toMatchObject({
-      code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
       retryable: true,
     });
   });
@@ -1240,7 +1339,7 @@ describe("pending-group live mutation fences", () => {
       requiredCandidateId: selected.id,
       senderMemberId: selected.ownerMemberId,
     })).rejects.toMatchObject({
-      code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+      code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
     });
   });
 });

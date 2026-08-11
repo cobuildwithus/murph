@@ -57,9 +57,11 @@ Updated: 2026-08-11
 3. Risk: batching changes recovery ambiguity or in-flight behavior.
    Mitigation: preserve every existing attempt-time, line, template, target,
    status, source-ref, and provider-correlation predicate in one set projection.
-4. Risk: corrupt optional setup blocks an otherwise valid group message.
-   Mitigation: retain selected-corrupt consume-and-fallback semantics and do
-   not let an unselected corrupt envelope invalidate unrelated candidates.
+4. Risk: an unavailable crypto dependency is mistaken for corrupt optional
+   setup and destroys retry authority.
+   Mitigation: preserve the row for envelope/root, KMS/provider, signature,
+   and authentication failures. Consume only authenticated plaintext whose
+   JSON or application schema is malformed after exact lock and revalidation.
 
 ## Tasks
 
@@ -95,10 +97,11 @@ Updated: 2026-08-11
   across the existing single fresh-preparation retry. A different or absent
   fresh selection now returns route-free instead of transferring ownership to a
   different setup or the active-sender fallback.
-- Classify deterministic selected-root metadata/ciphertext failure separately
-  from transient provider failure. Permanent invalid state is consumed only
-  after exact lock and live revalidation; network, availability, missing-key,
-  and other retryable provider failures leave the setup untouched.
+- This historical pass classified deterministic selected-root failures as
+  consumable only after lock. The later payload-crypto-boundary integration
+  supersedes that classification: all envelope/root, KMS/provider, signature,
+  and authentication failures now preserve the row; only authenticated
+  malformed setup plaintext is terminal.
 - Read the bounded routing projection once, but open private home-line
   ciphertext only for candidates already admitted by runtime access,
   active-managed-line, and exact routing-lookup facts.
@@ -238,3 +241,25 @@ Updated: 2026-08-11
   passed the affected `apps/web verify` lane, including TypeScript, 720
   hosted-web test files/9,566 tests, lint, dev smoke, and Next build. Lint and
   Turbopack emitted existing warnings unrelated to this diff.
+
+### Current-main payload-crypto integration
+
+- Merged current `main` through PR #1623's pending-group payload-crypto
+  boundary. Kept this change's single request-local candidate package and
+  set-based access, line, routing, and recovery preparation as the only public
+  admission API; removed the superseded compatibility preparation helper and
+  duplicate failure registry.
+- Nested PR #1623's exact prepared ciphertext/root identity in the selected
+  package. The locked claim repeats the live candidate and recovery selection,
+  requires an exact prepared row and cached root, and performs only the local
+  authenticated open. Envelope/root, KMS/provider, signature, and
+  authentication failures preserve the row and surface as retryable; only
+  authenticated malformed JSON or schema is deleted under the exact lock.
+- Retained the round-three two-guard correction: only terminal
+  `invalid_payload` can release a required replacement candidate for same-event
+  fallback or ordinary handoff. Claim races, selection or authority changes,
+  unmanaged lines, and transient preparation failures remain route-free.
+- Post-composition verification passed the broader focused matrix (10 files,
+  415 tests), app-local typecheck, scoped ESLint, and the real PostgreSQL
+  one-connection incident replay (1 file, 4 tests, including the bounded
+  32-candidate 8/13-statement shapes).

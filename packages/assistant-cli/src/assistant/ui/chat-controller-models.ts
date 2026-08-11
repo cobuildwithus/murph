@@ -56,7 +56,6 @@ export async function persistAssistantModelSelection(input: {
   await saveAssistantOperatorDefaultsPatch(
     buildAssistantProviderDefaultsPatch({
       defaults: input.defaults,
-      provider: updatedSession.provider,
       providerConfig: {
         ...updatedSession.providerOptions,
         model: input.nextModel,

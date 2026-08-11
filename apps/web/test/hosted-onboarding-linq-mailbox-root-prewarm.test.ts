@@ -668,7 +668,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
         description: "a late route winner",
       },
       {
-        code: "HOSTED_PENDING_GROUP_SETUP_PREPARATION_REQUIRED",
+        code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
         description: "changed pending-setup authority",
       },
     ] as const)(

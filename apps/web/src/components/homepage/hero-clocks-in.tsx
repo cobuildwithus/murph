@@ -1297,7 +1297,7 @@ export function HeroClocksIn({
         </div>
 
         <div className="pointer-events-auto relative z-10 lg:col-span-5">
-          <div className="relative mx-auto w-full max-w-[320px] lg:aspect-[3/4] lg:max-w-[520px]">
+          <div className="relative mx-auto w-full max-w-[280px] sm:max-w-[320px] lg:aspect-[3/4] lg:max-w-[520px]">
             <div className="lg:absolute lg:left-1/2 lg:top-1/2 lg:w-[340px] lg:-translate-x-1/2 lg:-translate-y-1/2">
               <PhoneShell>
                 <StatusBar />

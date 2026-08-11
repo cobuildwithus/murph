@@ -65,30 +65,26 @@ export function normalizeAssistantModelTarget(
 export function assistantModelTargetToProviderConfigInput(
   target: AssistantModelTarget,
 ): AssistantProviderConfigInput {
-  switch (target.adapter) {
-    case 'codex-cli':
-    default:
-      return {
-        provider: 'codex-cli',
-        approvalPolicy:
-          normalizeNullableEnumValue(
-            target.approvalPolicy,
-            assistantApprovalPolicyValues,
-          ) ?? null,
-        codexCommand: normalizeNullableString(target.codexCommand),
-        codexHome: normalizeNullableString(target.codexHome),
-        model: normalizeNullableString(target.model),
-        modelProvider: normalizeNullableString(target.modelProvider),
-        oss: target.oss === true,
-        profile: normalizeNullableString(target.profile),
-        reasoningEffort:
-          normalizeNullableEnumValue(
-            target.reasoningEffort,
-            assistantReasoningEffortValues,
-          ) ?? null,
-        sandbox:
-          normalizeNullableEnumValue(target.sandbox, assistantSandboxValues) ?? null,
-      }
+  return {
+    provider: 'codex-cli',
+    approvalPolicy:
+      normalizeNullableEnumValue(
+        target.approvalPolicy,
+        assistantApprovalPolicyValues,
+      ) ?? null,
+    codexCommand: normalizeNullableString(target.codexCommand),
+    codexHome: normalizeNullableString(target.codexHome),
+    model: normalizeNullableString(target.model),
+    modelProvider: normalizeNullableString(target.modelProvider),
+    oss: target.oss === true,
+    profile: normalizeNullableString(target.profile),
+    reasoningEffort:
+      normalizeNullableEnumValue(
+        target.reasoningEffort,
+        assistantReasoningEffortValues,
+      ) ?? null,
+    sandbox:
+      normalizeNullableEnumValue(target.sandbox, assistantSandboxValues) ?? null,
   }
 }
 
@@ -119,24 +115,20 @@ export const sanitizeAssistantBackendTargetForPersistence =
 function convertAssistantProviderConfigToModelTarget(
   config: AssistantProviderConfig,
 ): AssistantModelTarget {
-  switch (config.target.kind) {
-    case 'codex-cli':
-    default:
-      return {
-        adapter: 'codex-cli',
-        approvalPolicy: config.policy.approvalPolicy,
-        codexCommand: config.target.codexCommand,
-        ...(config.target.codexHome ? { codexHome: config.target.codexHome } : {}),
-        model: config.target.model,
-        modelProvider: config.target.modelProvider,
-        oss: config.target.oss,
-        profile: config.target.profile,
-        reasoningEffort: normalizeNullableEnumValue(
-          config.policy.reasoningEffort,
-          assistantReasoningEffortValues,
-        ),
-        sandbox: config.policy.sandbox,
-      }
+  return {
+    adapter: 'codex-cli',
+    approvalPolicy: config.policy.approvalPolicy,
+    codexCommand: config.target.codexCommand,
+    ...(config.target.codexHome ? { codexHome: config.target.codexHome } : {}),
+    model: config.target.model,
+    modelProvider: config.target.modelProvider,
+    oss: config.target.oss,
+    profile: config.target.profile,
+    reasoningEffort: normalizeNullableEnumValue(
+      config.policy.reasoningEffort,
+      assistantReasoningEffortValues,
+    ),
+    sandbox: config.policy.sandbox,
   }
 }
 
@@ -159,21 +151,17 @@ function coerceAssistantModelTargetToProviderConfigInput(
 }
 
 function hasAssistantModelTargetValues(target: AssistantModelTarget): boolean {
-  switch (target.adapter) {
-    case 'codex-cli':
-    default:
-      return Boolean(
-          target.model ??
-          target.modelProvider ??
-          target.reasoningEffort ??
-          target.profile ??
-          target.codexHome ??
-          target.codexCommand ??
-          target.sandbox ??
-          target.approvalPolicy ??
-          (target.oss ? 'oss' : null),
-      )
-  }
+  return Boolean(
+    target.model ??
+      target.modelProvider ??
+      target.reasoningEffort ??
+      target.profile ??
+      target.codexHome ??
+      target.codexCommand ??
+      target.sandbox ??
+      target.approvalPolicy ??
+      (target.oss ? 'oss' : null),
+  )
 }
 
 function normalizeNullableEnumValue<T extends string>(

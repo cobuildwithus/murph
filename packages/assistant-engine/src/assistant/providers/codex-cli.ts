@@ -16,10 +16,6 @@ import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
 import {
-  isAssistantCodexTargetConfig,
-  resolveAssistantChatProviderFromConfig,
-} from '@murphai/operator-config/assistant/provider-config'
-import {
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -434,7 +430,7 @@ export async function executeCodexAssistantTurnAttempt(
     },
     ok: true,
     result: {
-      provider: resolveAssistantChatProviderFromConfig(providerConfig),
+      provider: 'codex-cli',
       additionalUsages: result.additionalUsages,
       ...(result.acceptedNoReplyDeliveryContextOrdinals === undefined
         ? {}
@@ -566,12 +562,6 @@ function resolveCodexAssistantProcessLaunchInput(
   input: CodexAssistantProcessPreparationInput,
 ): CodexAssistantProcessLaunchInput {
   const providerConfig = input.providerConfig
-  if (!isAssistantCodexTargetConfig(providerConfig)) {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      'Codex app-server execution requires a Codex provider config.',
-    )
-  }
   const configOverrides = [
     ...(mergeCodexConfigOverrides({
       modelProvider: providerConfig.target.modelProvider,
@@ -1349,9 +1339,7 @@ function asDiagnosticRecord(value: unknown): Record<string, unknown> | null {
 export function resolveCodexAssistantLabel(
   config: AssistantProviderTurnExecutionInput['providerConfig'],
 ): string {
-  return config.target.kind === 'codex-cli' && config.target.oss
-    ? 'Codex OSS app-server'
-    : 'Codex app-server'
+  return config.target.oss ? 'Codex OSS app-server' : 'Codex app-server'
 }
 
 export function resolveCodexStaticModels(): typeof DEFAULT_CODEX_MODELS {
