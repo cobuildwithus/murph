@@ -412,6 +412,294 @@ const DM_SANS_400_ADVANCE_WIDTH_BY_CODE_POINT = new Map<number, number>([
   [0xFB02, 563],
 ]);
 
+// Only positive GPOS kerning can make a renderer-shaped line wider than the
+// hmtx sum. Keeping those exact pairs makes this measurement a conservative
+// upper bound for the bundled Satori/OpenType renderer without shipping a
+// runtime font parser. Negative kerning deliberately remains extra room.
+const DM_SANS_400_GLYPH_ID_BY_CODE_POINT = new Map<number, number>([
+  [0x0022, 320],
+  [0x0023, 297],
+  [0x0026, 326],
+  [0x0027, 321],
+  [0x002C, 286],
+  [0x002F, 298],
+  [0x0031, 257],
+  [0x0032, 258],
+  [0x0033, 259],
+  [0x0034, 260],
+  [0x0035, 261],
+  [0x0036, 262],
+  [0x0037, 263],
+  [0x0038, 264],
+  [0x0039, 265],
+  [0x003A, 287],
+  [0x003F, 292],
+  [0x0042, 13],
+  [0x0044, 19],
+  [0x0045, 23],
+  [0x0046, 35],
+  [0x0048, 40],
+  [0x0049, 42],
+  [0x004B, 54],
+  [0x004C, 56],
+  [0x004D, 62],
+  [0x004E, 63],
+  [0x0050, 80],
+  [0x0052, 83],
+  [0x0054, 93],
+  [0x0056, 108],
+  [0x0057, 109],
+  [0x0059, 115],
+  [0x005C, 299],
+  [0x005F, 303],
+  [0x0066, 159],
+  [0x0067, 160],
+  [0x0069, 166],
+  [0x006A, 178],
+  [0x006C, 182],
+  [0x0071, 208],
+  [0x0072, 209],
+  [0x0074, 219],
+  [0x0076, 234],
+  [0x0078, 240],
+  [0x0079, 241],
+  [0x007A, 247],
+  [0x007C, 333],
+  [0x00A5, 348],
+  [0x00A6, 334],
+  [0x00BF, 293],
+  [0x00C8, 30],
+  [0x00C9, 24],
+  [0x00CA, 27],
+  [0x00CB, 28],
+  [0x00CC, 49],
+  [0x00CD, 44],
+  [0x00CE, 46],
+  [0x00CF, 47],
+  [0x00D1, 67],
+  [0x00DD, 116],
+  [0x00DE, 81],
+  [0x00FD, 242],
+  [0x00FF, 244],
+  [0x010E, 20],
+  [0x0112, 31],
+  [0x0114, 25],
+  [0x0116, 29],
+  [0x0118, 32],
+  [0x011A, 26],
+  [0x011F, 161],
+  [0x0121, 163],
+  [0x0123, 162],
+  [0x0128, 52],
+  [0x012A, 50],
+  [0x012C, 45],
+  [0x0130, 48],
+  [0x0136, 55],
+  [0x0139, 57],
+  [0x013B, 59],
+  [0x013D, 58],
+  [0x013F, 60],
+  [0x0141, 61],
+  [0x0143, 64],
+  [0x0147, 65],
+  [0x0154, 84],
+  [0x0155, 210],
+  [0x0157, 212],
+  [0x0158, 85],
+  [0x0159, 211],
+  [0x0162, 95],
+  [0x0163, 221],
+  [0x0164, 94],
+  [0x0165, 220],
+  [0x0174, 111],
+  [0x0176, 117],
+  [0x0177, 243],
+  [0x0178, 118],
+  [0x017A, 248],
+  [0x017C, 250],
+  [0x017E, 249],
+  [0x0192, 324],
+  [0x021A, 96],
+  [0x021B, 222],
+  [0x1E80, 113],
+  [0x1E82, 110],
+  [0x1E84, 112],
+  [0x1EBC, 33],
+  [0x1EF2, 119],
+  [0x1EF3, 245],
+  [0x1EF8, 120],
+  [0x1EF9, 246],
+  [0x201A, 310],
+  [0x201E, 311],
+  [0x221A, 371],
+  [0xFB01, 251],
+  [0xFB02, 252],
+]);
+
+const DM_SANS_400_POSITIVE_KERNING_BY_GLYPH_PAIR = new Map<number, number>([
+  [93 * 512 + 292, 20],
+  [93 * 512 + 299, 4],
+  [94 * 512 + 292, 20],
+  [94 * 512 + 299, 4],
+  [95 * 512 + 292, 20],
+  [95 * 512 + 299, 4],
+  [96 * 512 + 292, 20],
+  [96 * 512 + 299, 4],
+  [108 * 512 + 263, 20],
+  [108 * 512 + 299, 6],
+  [115 * 512 + 320, 39],
+  [115 * 512 + 321, 39],
+  [116 * 512 + 320, 39],
+  [116 * 512 + 321, 39],
+  [117 * 512 + 320, 39],
+  [117 * 512 + 321, 39],
+  [118 * 512 + 320, 39],
+  [118 * 512 + 321, 39],
+  [119 * 512 + 320, 39],
+  [119 * 512 + 321, 39],
+  [120 * 512 + 320, 39],
+  [120 * 512 + 321, 39],
+  [160 * 512 + 178, 20],
+  [160 * 512 + 234, 3],
+  [161 * 512 + 178, 20],
+  [161 * 512 + 234, 3],
+  [162 * 512 + 178, 20],
+  [162 * 512 + 234, 3],
+  [163 * 512 + 178, 20],
+  [163 * 512 + 234, 3],
+  [208 * 512 + 178, 26],
+  [209 * 512 + 258, 7],
+  [209 * 512 + 259, 3],
+  [209 * 512 + 287, 17],
+  [210 * 512 + 258, 7],
+  [210 * 512 + 259, 3],
+  [210 * 512 + 287, 17],
+  [211 * 512 + 258, 7],
+  [211 * 512 + 259, 3],
+  [211 * 512 + 287, 17],
+  [212 * 512 + 258, 7],
+  [212 * 512 + 259, 3],
+  [212 * 512 + 287, 17],
+  [219 * 512 + 258, 30],
+  [219 * 512 + 286, 52],
+  [220 * 512 + 258, 30],
+  [220 * 512 + 286, 52],
+  [221 * 512 + 258, 30],
+  [221 * 512 + 286, 52],
+  [222 * 512 + 258, 30],
+  [222 * 512 + 286, 52],
+  [234 * 512 + 159, 20],
+  [234 * 512 + 219, 3],
+  [234 * 512 + 220, 3],
+  [234 * 512 + 221, 3],
+  [234 * 512 + 222, 3],
+  [234 * 512 + 258, 3],
+  [241 * 512 + 263, 4],
+  [242 * 512 + 263, 4],
+  [243 * 512 + 263, 4],
+  [244 * 512 + 263, 4],
+  [245 * 512 + 263, 4],
+  [246 * 512 + 263, 4],
+  [258 * 512 + 159, 3],
+  [258 * 512 + 234, 3],
+  [258 * 512 + 240, 3],
+  [258 * 512 + 297, 4],
+  [258 * 512 + 324, 23],
+  [260 * 512 + 326, 39],
+  [260 * 512 + 371, 30],
+  [261 * 512 + 297, 4],
+  [263 * 512 + 108, 20],
+  [263 * 512 + 109, 3],
+  [263 * 512 + 110, 3],
+  [263 * 512 + 111, 3],
+  [263 * 512 + 112, 3],
+  [263 * 512 + 113, 3],
+  [263 * 512 + 159, 3],
+  [263 * 512 + 257, 4],
+  [263 * 512 + 320, 30],
+  [263 * 512 + 321, 30],
+  [265 * 512 + 61, 23],
+  [293 * 512 + 247, 20],
+  [293 * 512 + 248, 20],
+  [293 * 512 + 249, 20],
+  [293 * 512 + 250, 20],
+  [293 * 512 + 310, 39],
+  [293 * 512 + 311, 39],
+  [298 * 512 + 13, 57],
+  [298 * 512 + 19, 57],
+  [298 * 512 + 20, 57],
+  [298 * 512 + 23, 57],
+  [298 * 512 + 24, 57],
+  [298 * 512 + 25, 57],
+  [298 * 512 + 26, 57],
+  [298 * 512 + 27, 57],
+  [298 * 512 + 28, 57],
+  [298 * 512 + 29, 57],
+  [298 * 512 + 30, 57],
+  [298 * 512 + 31, 57],
+  [298 * 512 + 32, 57],
+  [298 * 512 + 33, 57],
+  [298 * 512 + 35, 57],
+  [298 * 512 + 40, 57],
+  [298 * 512 + 42, 57],
+  [298 * 512 + 44, 57],
+  [298 * 512 + 45, 57],
+  [298 * 512 + 46, 60],
+  [298 * 512 + 47, 43],
+  [298 * 512 + 48, 57],
+  [298 * 512 + 49, 57],
+  [298 * 512 + 50, 63],
+  [298 * 512 + 52, 57],
+  [298 * 512 + 54, 57],
+  [298 * 512 + 55, 57],
+  [298 * 512 + 56, 57],
+  [298 * 512 + 57, 57],
+  [298 * 512 + 58, 57],
+  [298 * 512 + 59, 57],
+  [298 * 512 + 60, 57],
+  [298 * 512 + 62, 57],
+  [298 * 512 + 63, 57],
+  [298 * 512 + 64, 57],
+  [298 * 512 + 65, 57],
+  [298 * 512 + 67, 57],
+  [298 * 512 + 80, 57],
+  [298 * 512 + 81, 57],
+  [298 * 512 + 83, 57],
+  [298 * 512 + 84, 57],
+  [298 * 512 + 85, 57],
+  [298 * 512 + 93, 20],
+  [298 * 512 + 94, 20],
+  [298 * 512 + 95, 20],
+  [298 * 512 + 96, 20],
+  [298 * 512 + 108, 30],
+  [298 * 512 + 109, 3],
+  [298 * 512 + 110, 3],
+  [298 * 512 + 111, 3],
+  [298 * 512 + 112, 3],
+  [298 * 512 + 113, 3],
+  [298 * 512 + 115, 21],
+  [298 * 512 + 116, 21],
+  [298 * 512 + 117, 21],
+  [298 * 512 + 118, 21],
+  [298 * 512 + 119, 21],
+  [298 * 512 + 120, 21],
+  [298 * 512 + 333, 57],
+  [298 * 512 + 334, 57],
+  [299 * 512 + 286, 57],
+  [299 * 512 + 303, 41],
+  [299 * 512 + 310, 47],
+  [299 * 512 + 311, 47],
+  [303 * 512 + 178, 8],
+  [320 * 512 + 263, 30],
+  [321 * 512 + 263, 30],
+  [324 * 512 + 258, 4],
+  [324 * 512 + 259, 4],
+  [324 * 512 + 262, 3],
+  [324 * 512 + 263, 41],
+  [324 * 512 + 264, 4],
+  [348 * 512 + 263, 21],
+]);
+
 const DM_SANS_400_GRAPHEME_SEGMENTER = new Intl.Segmenter("en", {
   granularity: "grapheme",
 });
@@ -428,36 +716,54 @@ export function measureDmSans400Text(
   fontSize: number,
   letterSpacingEm = 0,
 ): number {
-  const graphemes = segmentDmSans400Text(value);
-  const advance = graphemes.reduce(
-    (total, grapheme) => total + getDmSans400GraphemeAdvance(grapheme),
+  const glyphs = getDmSans400TextGlyphs(value);
+  const advance = glyphs.reduce(
+    (total, glyph, index) => {
+      const nextGlyph = glyphs[index + 1];
+      const positiveKerning = glyph.id === null || nextGlyph?.id === undefined
+        || nextGlyph.id === null
+        ? 0
+        : DM_SANS_400_POSITIVE_KERNING_BY_GLYPH_PAIR.get(
+          glyph.id * 512 + nextGlyph.id,
+        ) ?? 0;
+      return total + glyph.advance + positiveKerning;
+    },
     0,
   );
-  const letterSpacing = Math.max(0, graphemes.length - 1)
-    * fontSize
-    * letterSpacingEm;
+  // Satori's bundled OpenType renderer applies tracking after every glyph,
+  // including the final glyph in a line.
+  const letterSpacing = glyphs.length * fontSize * letterSpacingEm;
   return advance / DM_SANS_400_UNITS_PER_EM * fontSize + letterSpacing;
 }
 
-function getDmSans400GraphemeAdvance(grapheme: string): number {
-  if (/\p{Extended_Pictographic}/u.test(grapheme)) {
-    return DM_SANS_400_MAX_GLYPH_ADVANCE;
-  }
+function getDmSans400TextGlyphs(
+  value: string,
+): Array<{ advance: number; id: number | null }> {
+  return segmentDmSans400Text(value).flatMap((grapheme) => {
+    if (/\p{Extended_Pictographic}/u.test(grapheme)) {
+      return [{ advance: DM_SANS_400_MAX_GLYPH_ADVANCE, id: null }];
+    }
 
-  let advance = 0;
-  for (const character of grapheme) {
-    const codePoint = character.codePointAt(0);
-    if (codePoint === undefined) continue;
-    const exactAdvance = DM_SANS_400_ADVANCE_WIDTH_BY_CODE_POINT.get(codePoint);
-    if (exactAdvance !== undefined) {
-      advance += exactAdvance;
-      continue;
+    const glyphs: Array<{ advance: number; id: number | null }> = [];
+    for (const character of grapheme) {
+      const codePoint = character.codePointAt(0);
+      if (codePoint === undefined) continue;
+      const exactAdvance = DM_SANS_400_ADVANCE_WIDTH_BY_CODE_POINT.get(
+        codePoint,
+      );
+      if (exactAdvance !== undefined) {
+        glyphs.push({
+          advance: exactAdvance,
+          id: DM_SANS_400_GLYPH_ID_BY_CODE_POINT.get(codePoint) ?? null,
+        });
+        continue;
+      }
+      if (/\p{Mark}/u.test(character) || codePoint === 0x200D) {
+        continue;
+      }
+      // Never underestimate a glyph that the bundled font cannot measure.
+      glyphs.push({ advance: DM_SANS_400_MAX_GLYPH_ADVANCE, id: null });
     }
-    if (/\p{Mark}/u.test(character) || codePoint === 0x200D) {
-      continue;
-    }
-    // Never underestimate a glyph that the bundled font cannot measure.
-    advance += DM_SANS_400_MAX_GLYPH_ADVANCE;
-  }
-  return advance;
+    return glyphs;
+  });
 }

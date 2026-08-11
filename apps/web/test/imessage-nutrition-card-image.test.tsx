@@ -158,6 +158,20 @@ const FONT_METRIC_TABLE_CARD: CompactTablePresentationCardV1 = {
   footer: null,
 };
 
+const POSITIVE_KERNING_TABLE_CARD: CompactTablePresentationCardV1 = {
+  kind: "compact_table",
+  version: 1,
+  title: "Recovery signals",
+  subtitle: null,
+  rowHeader: "Metric",
+  columns: ["Today", "Week", "Trend", "Note"],
+  rows: [{
+    label: "Recovery",
+    values: ["slow gait, ankle impact, or load", "Stable", "Up", "Review"],
+  }],
+  footer: null,
+};
+
 const WORKOUT_CARD: Extract<
   CompactTablePresentationCardV1,
   { workout: unknown }
@@ -457,6 +471,26 @@ test("four-column rows use exact DM Sans advances for word breaks and height", a
   assert.match(serialized, /deep sleep\nand mood\nguidance/u);
   assert.match(serialized, /height:100px/u);
   assert.match(serialized, /data-card-text-lines="3"[^>]*>deep sleep/u);
+});
+
+test("positive DM Sans kerning cannot reflow text beyond its measured row", async () => {
+  const { GET } = await import("../app/imessage/card/v1/[payload]/route");
+  const payload = encodePayload({
+    schemaVersion: 3,
+    card: POSITIVE_KERNING_TABLE_CARD,
+  });
+  const response = await GET(
+    new Request(`https://www.withmurph.ai/imessage/card/v1/${payload}`),
+    { params: Promise.resolve({ payload }) },
+  );
+
+  assert.equal(response.status, 200);
+  const [imageTree] = getImageResponseCall();
+  const serialized = renderToStaticMarkup(imageTree);
+  assert.match(serialized, /slow gait,\nankle impact,\nor load/u);
+  assert.match(serialized, /height:100px/u);
+  assert.match(serialized, /data-card-text-lines="3"[^>]*>slow gait,/u);
+  assert.doesNotMatch(serialized, /slow gait, ankle\nimpact, or load/u);
 });
 
 test("response-card image route rejects malformed, incomplete, and query-bearing URLs before asset reads", async () => {

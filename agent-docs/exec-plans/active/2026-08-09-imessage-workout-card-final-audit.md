@@ -48,6 +48,9 @@ Success criteria:
 10. Match the corrected nutrition fallback's provider-chrome ownership: keep
     compact-table and workout bitmaps rectangular and badge-free, remove the
     generated icon gutter, and leave the app icon and outer mask to Messages.
+11. Keep the private line-layout owner ahead of the real raster renderer by
+    accounting for the bundled font's positive kerning adjustments and proving
+    the boundary with actual ImageResponse pixels.
 
 ## Review disposition
 
@@ -123,9 +126,16 @@ Success criteria:
 - Accepted from final ReviewGPT round 4: the first word-aware correction used
   handwritten width buckets that underestimated the actual checked-in DM Sans
   font and could still allocate a two-line row for text the renderer wrapped to
-  four lines. The sole private layout owner now uses exact cmap/hmtx advances
-  derived from that same font, with its hash pinned by focused proof and a
-  conservative fallback only for unsupported glyphs.
+  four lines. The sole private layout owner now uses cmap/hmtx advances derived
+  from that same font, with its hash pinned by focused proof and a conservative
+  fallback only for unsupported glyphs.
+- Accepted from PR #1576 final ReviewGPT round 5: raw hmtx sums still omitted
+  positive GPOS kerning applied by ImageResponse and could leave an ordinary
+  four-column note in a row shorter than its rendered lines. The pinned metric
+  owner now adds every positive pair from the bundled font while deliberately
+  treating negative kerning as spare width. A real-font route regression finds
+  the rendered dividers from PNG pixels and proves the text does not enter the
+  next row, without adding a runtime parser or dependency.
 - Rejected: exposing a native correlation token or canonical event id. The extension remains an immutable reader and visible composer-command source; transcript context and exact reconciliation fail closed when an old card is ambiguous.
 - Deferred release proof: transcript badge, bubble sizing, forwarding, composer insertion, and offline reopening require a physical Messages device and remain a release gate. PR #1502 merged externally before that gate closed; the follow-up must stay draft until the missing evidence is captured.
 
@@ -198,6 +208,12 @@ Success criteria:
   the 160.05px four-column width, and the resulting three-line row owns 100px.
   A fresh native-resolution 1200×1120 direct-route raster shows those three
   lines contained between their dividers without overlap.
+- The positive-kerning remediation passed 18 focused Web tests and Web
+  typecheck. Its real ImageResponse regression decodes the bundled-font PNG,
+  finds the owning row from actual divider pixels, and proves the reported
+  gait/ankle/load phrase has a 100px row with no text pixels in the adjacent
+  row. Fresh direct-route rasters remain rectangular and badge-free at
+  1200×1120 for the dense table and 1200×580 for the active workout.
 
 ## Parent product-experience revalidation
 
