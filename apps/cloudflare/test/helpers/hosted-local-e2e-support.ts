@@ -197,7 +197,10 @@ function buildAssistantProviderMurphCodeModeInput(
   tool: string,
   toolArguments: Record<string, unknown>,
 ): string {
+  // Scripted provider responses cannot inspect a yielded cell and call `wait`.
+  // Keep the nested tool in the initial exec window on loaded CI runners.
   return [
+    '// @exec: {"yield_time_ms": 30000}',
     `const result = await tools.murph__${tool}(${JSON.stringify(toolArguments)});`,
     "text(result);",
   ].join("\n");
@@ -573,6 +576,14 @@ function readHostedLocalAssistantProviderResponsePayload(
     : scriptedResponse;
 }
 
+function isHostedLocalAssistantProviderHeldTextResponse(
+  scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
+): scriptedResponse is HostedLocalAssistantProviderHeldTextResponse {
+  return typeof scriptedResponse === "object"
+    && scriptedResponse !== null
+    && "text" in scriptedResponse;
+}
+
 function normalizeHostedLocalAssistantProviderResponsePayload(
   scriptedResponse: HostedLocalAssistantProviderScriptedResponsePayload,
 ): HostedLocalAssistantProviderScriptedResponsePayload {
@@ -725,13 +736,15 @@ async function prepareAssistantProviderScriptedResponse(
   return scriptedResponse.text;
 }
 
-function writeAssistantProviderResponsesApiStubStream(input: {
+async function writeAssistantProviderResponsesApiStubStream(input: {
+  beforeContent?: (() => Promise<void> | void) | null;
   modelId: string;
+  onStarted?: (() => void) | null;
   response: ServerResponse;
   responseId: string;
   responseText: string;
   usage: HostedLocalAssistantProviderUsage;
-}): void {
+}): Promise<void> {
   const messageId = `msg_${input.responseId}`;
   const content = {
     annotations: [],
@@ -767,6 +780,8 @@ function writeAssistantProviderResponsesApiStubStream(input: {
     },
     type: "response.created",
   });
+  input.onStarted?.();
+  await input.beforeContent?.();
   writeAssistantProviderSseEvent(input.response, "response.output_item.added", {
     item: {
       ...outputItem,
@@ -1082,6 +1097,28 @@ export async function startAssistantProviderStubServer(input: {
         return;
       }
 
+      if (
+        bodyJson.stream === true
+        && isHostedLocalAssistantProviderHeldTextResponse(scriptedResponse)
+      ) {
+        const responseText = scriptedResponse.text;
+        const usage = buildAssistantProviderStubUsage({
+          body,
+          responseText,
+          usageMode: input.usageMode ?? "fixed",
+        });
+        await writeAssistantProviderResponsesApiStubStream({
+          beforeContent: scriptedResponse.beforeResponse,
+          modelId,
+          onStarted: scriptedResponse.onResponseStarted,
+          response,
+          responseId,
+          responseText,
+          usage,
+        });
+        return;
+      }
+
       const preparedScriptedResponse =
         await prepareAssistantProviderScriptedResponse(scriptedResponse, {
           requestBody: body,
@@ -1132,7 +1169,7 @@ export async function startAssistantProviderStubServer(input: {
       });
 
       if (bodyJson.stream === true) {
-        writeAssistantProviderResponsesApiStubStream({
+        await writeAssistantProviderResponsesApiStubStream({
           modelId,
           response,
           responseId,

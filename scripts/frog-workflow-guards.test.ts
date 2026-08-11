@@ -16,6 +16,11 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  normalizeFrogPullRequestBody,
+  selectFrogPullRequest,
+} from "./frog-pr-context.ts";
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const frogScriptPath = path.join(repoRoot, "scripts", "frog");
 const readRepoFile = (...parts: string[]) =>
@@ -183,7 +188,19 @@ fi
     const skill = readRepoFile(".agents", "skills", "frog", "SKILL.md");
     expect(skill).toContain("current request authorizes repository edits");
     expect(skill).toContain("review-only");
+    expect(skill).toContain(
+      "Creating or updating a tracked plan file is edit-authorized repository work",
+    );
+    expect(skill).toContain("planning-only");
     expect(skill).toContain("scripts/frog list");
+    expect(skill).toContain(
+      'Do not create an empty or synthetic "no friction" entry',
+    );
+    expect(skill).toContain("include it in the same scoped task commit");
+    expect(skill).toContain("untracked, unstaged, or omitted from the commit");
+    expect(skill).toMatch(
+      /If a safe scoped\s+commit is blocked, preserve the entry and report the exact blocker/u,
+    );
     expect(skill).toContain("repository root");
     expect(skill).toContain("`--cwd` and `--mcp`");
     expect(skill).toContain("cat <<'FROG' | scripts/frog log");
@@ -199,6 +216,40 @@ fi
     ]) {
       expect(skill).toContain(heading);
     }
+
+    const agents = readRepoFile("AGENTS.md");
+    expect(agents).toContain("§ Developer Friction Logging");
+    expect(agents).toContain("commit each created entry with the task");
+
+    const workflowRouting = readRepoFile(
+      "agent-docs",
+      "operations",
+      "agent-workflow-routing.md",
+    );
+    expect(workflowRouting).toContain("### Developer Friction Logging");
+    expect(workflowRouting).toContain(
+      "For every edit-authorized repository task",
+    );
+    expect(workflowRouting).toMatch(
+      /Creating or\s+updating a tracked plan file is edit-authorized repository work/u,
+    );
+    expect(workflowRouting).toContain("planning-only");
+    expect(workflowRouting).toContain("run `scripts/frog list`");
+    expect(workflowRouting).toMatch(
+      /record it\s+through `scripts\/frog log`/u,
+    );
+    expect(workflowRouting).toContain(
+      "A task is not complete while its Frog entry is untracked",
+    );
+
+    const completionWorkflow = readRepoFile(
+      "agent-docs",
+      "operations",
+      "completion-workflow.md",
+    );
+    expect(completionWorkflow).toContain(
+      "Include every public-safe Frog entry created or modified during the task in that same scoped commit",
+    );
   });
 
   it("keeps the Action on trusted default-branch events with narrow authority", () => {
@@ -225,23 +276,21 @@ fi
       "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)",
     );
     expect(workflow).toContain(
-      "github.event.issue.user.login == 'github-actions[bot]'",
+      "github.event.issue.user.login == vars.FROG_APP_BOT_LOGIN",
     );
+    expect(workflow).not.toContain("github-actions[bot]");
     expect(workflow).not.toMatch(/^\s+pull_request(?:_target)?:/mu);
+    expect(workflow).toContain(`environment:
+      name: frog-reconciliation
+      deployment: false`);
 
     const topLevelPermissions = workflow.indexOf("permissions: {}");
     const jobs = workflow.indexOf("jobs:");
     expect(topLevelPermissions).toBeGreaterThanOrEqual(0);
     expect(jobs).toBeGreaterThan(topLevelPermissions);
-    expect(
-      (workflow.match(/^\s+[a-z-]+: write$/gmu) ?? []).map((line) =>
-        line.trim()
-      ),
-    ).toEqual([
-      "contents: write",
-      "issues: write",
-      "pull-requests: write",
-    ]);
+    const jobPermissions = /^    permissions:\n(?<permissions>(?:      .+\n)+)/mu
+      .exec(workflow)?.groups?.permissions;
+    expect(jobPermissions).toBe("      contents: read\n");
     expect(workflow).not.toContain("id-token: write");
     expect(workflow).toContain("timeout-minutes: 10");
     expect(workflow).toContain("persist-credentials: false");
@@ -256,16 +305,170 @@ fi
       "de0fac2e4500dabe0009e67214ff5f5447ce83dd",
       "fc06bc1257f339d1d5d8b3a19a8cae5388b55320",
       "48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
+      "bcd2ba49218906704ab6c1aa796996da409d3eb1",
       "7b71c098683d49a573c279a2031a24205ea76841",
+    ]);
+    const appTokenInputs =
+      /^        uses: actions\/create-github-app-token@[^\n]+\n        with:\n(?<inputs>(?:          [^\n]+\n)+)/mu
+        .exec(workflow)?.groups?.inputs;
+    expect(
+      appTokenInputs?.trim().split("\n").map((line) => line.trim()),
+    ).toEqual([
+      "client-id: ${{ vars.FROG_APP_CLIENT_ID }}",
+      "private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}",
+      "permission-contents: write",
+      "permission-issues: write",
+      "permission-pull-requests: write",
     ]);
     for (const input of [
       "branch: frog/sync",
       "command: node_modules/.bin/frog",
-      "issue-author: github-actions[bot]",
+      "issue-author: ${{ vars.FROG_APP_BOT_LOGIN }}",
       "push: pull-request",
+      "token: ${{ steps.frog-app-token.outputs.token }}",
     ]) {
       expect(workflow).toContain(input);
     }
+    expect(workflow).not.toMatch(/^\s+token:\s*\$\{\{\s*github\.token\s*\}\}/mu);
+    expect(workflow).not.toContain("secrets.GITHUB_TOKEN");
     expect(workflow).not.toMatch(/^\s+version:/mu);
+    expect(workflow).toContain(
+      "GH_TOKEN: ${{ steps.frog-app-token.outputs.token }}",
+    );
+    expect(workflow).toContain(
+      '-f head="${GITHUB_REPOSITORY_OWNER}:$FROG_PR_BRANCH"',
+    );
+    expect(workflow).toContain("-F per_page=2");
+    expect(workflow).toContain("frog-pr-context.ts select");
+    expect(workflow).toContain("frog-pr-context.ts normalize");
+    expect(workflow).toContain(
+      'cmp -s "$frog_current_body_file" "$frog_body_file"',
+    );
+    expect(workflow).toContain("gh pr edit \"$frog_pr_number\"");
+
+    const footerMarker = "          FROG_PR_BODY_FOOTER: |-\n";
+    const footerStart = workflow.indexOf(footerMarker);
+    const footerEnd = workflow.indexOf(
+      "          FROG_PR_BRANCH: frog/sync",
+      footerStart,
+    );
+    expect(footerStart).toBeGreaterThanOrEqual(0);
+    expect(footerEnd).toBeGreaterThan(footerStart);
+    const footer = workflow
+      .slice(footerStart + footerMarker.length, footerEnd)
+      .split("\n")
+      .map((line) => line.replace(/^ {12}/u, ""))
+      .join("\n")
+      .trim();
+    const expectedPullRequest = {
+      appBotLogin: "murph-frog[bot]",
+      baseBranch: "main",
+      branch: "frog/sync",
+      repository: "cobuildwithus/murph",
+    };
+    const internalPullRequest = {
+      base: { ref: "main" },
+      head: {
+        ref: "frog/sync",
+        repo: { full_name: "cobuildwithus/murph" },
+      },
+      number: 17,
+      user: { login: "murph-frog[bot]" },
+    };
+    const forkPullRequest = {
+      base: { ref: "main" },
+      head: {
+        ref: "frog/sync",
+        repo: { full_name: "example/fork" },
+      },
+      number: 18,
+      user: { login: "contributor" },
+    };
+    expect(
+      selectFrogPullRequest(
+        [forkPullRequest, internalPullRequest],
+        expectedPullRequest,
+      ),
+    ).toBe(17);
+    expect(selectFrogPullRequest([], expectedPullRequest)).toBeUndefined();
+    expect(
+      selectFrogPullRequest([forkPullRequest], expectedPullRequest),
+    ).toBeUndefined();
+    expect(() =>
+      selectFrogPullRequest(
+        [internalPullRequest, { ...internalPullRequest, number: 19 }],
+        expectedPullRequest,
+      )
+    ).toThrow("exactly one repository-owned");
+    expect(() =>
+      selectFrogPullRequest(
+        [
+          {
+            ...internalPullRequest,
+            user: { login: "untrusted-bot[bot]" },
+          },
+        ],
+        expectedPullRequest,
+      )
+    ).toThrow("configured App bot");
+
+    const generatedBody = `Opened by the Frog action.
+
+## Linked
+
+- [cobuildwithus/murph#123](https://example.invalid/issues/123) Synthetic friction`;
+    const normalizedBody = normalizeFrogPullRequestBody(
+      generatedBody,
+      footer,
+    );
+    expect(normalizeFrogPullRequestBody(normalizedBody, footer)).toBe(
+      normalizedBody,
+    );
+    expect(normalizedBody.match(/^## Architecture and reuse$/gmu)).toHaveLength(
+      1,
+    );
+    expect(normalizedBody.match(/^## Changelog$/gmu)).toHaveLength(1);
+    expect(
+      normalizedBody.match(/<!-- murph:frog-pr-context:start -->/gu),
+    ).toHaveLength(1);
+    expect(
+      normalizedBody.match(/<!-- murph:frog-pr-context:end -->/gu),
+    ).toHaveLength(1);
+    const architectureValidation = spawnSync(
+      process.execPath,
+      [path.join(repoRoot, "scripts", "check-pr-architecture-summary.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, MURPH_PR_BODY: normalizedBody },
+      },
+    );
+    expect(
+      architectureValidation.status,
+      architectureValidation.stderr,
+    ).toBe(0);
+    const changelogValidation = spawnSync(
+      process.execPath,
+      [path.join(repoRoot, "scripts", "check-pr-changelog.mjs")],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          MURPH_PR_BASE_SHA: "HEAD",
+          MURPH_PR_BODY: normalizedBody,
+          MURPH_PR_HEAD_SHA: "HEAD",
+        },
+      },
+    );
+    expect(changelogValidation.status, changelogValidation.stderr).toBe(0);
+
+    const readme = readRepoFile(".agents", "friction-log", "README.md");
+    expect(readme).toContain("FROG_APP_CLIENT_ID");
+    expect(readme).toContain("FROG_APP_BOT_LOGIN");
+    expect(readme).toContain("FROG_APP_PRIVATE_KEY");
+    expect(readme).toContain("installed only on this repository");
+    expect(readme).toContain("environment is limited");
+    expect(readme).toMatch(/Missing credentials\s+fail the workflow closed/u);
   });
 });

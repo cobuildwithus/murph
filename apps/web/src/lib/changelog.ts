@@ -1,5 +1,7 @@
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
 
+import CHANGELOG_FRAGMENT_EDITIONS from "./changelog-fragments.generated";
+
 export const CHANGELOG_FEED_SCHEMA = "murph.changelog-feed.v1";
 export const CHANGELOG_CARD_VERSION = "v1";
 export const CHANGELOG_CARD_MAX_ITEMS = 7;
@@ -61,129 +63,13 @@ export interface ChangelogPage {
   totalPages: number;
 }
 
-const RAW_CHANGELOG_EDITIONS = [
-  {
-    id: "2026-08-10",
-    publishedOn: "2026-08-10",
-    title: "Starter access, patterns, reminders, cards, voices, and web search",
-    summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
-    items: [
-      {
-        id: "non-expiring-starter-access",
-        kind: "feature",
-        priority: 5,
-        title: "Start with usage that does not expire",
-        summary:
-          "Eligible new members receive a Starter usage balance that remains available until it is used, with remaining usage and paid plan choices visible in Settings.",
-        details:
-          "Eligible legacy trial value carries into Starter. When the balance is exhausted, Murph pauses AI work without deleting account state and Settings offers eligible paid plans; usage top-ups remain available only to active paid-plan owners.",
-        relevanceTags: ["starter", "usage", "billing", "settings"],
-        sourcePullRequests: [1464],
-        tryIt: {
-          href: "/settings#subscription",
-          label: "View Starter usage",
-        },
-      },
-      {
-        id: "personal-patterns",
-        kind: "feature",
-        priority: 5,
-        title: "See what tends to change after repeated actions",
-        summary:
-          "Patterns compares days with and without a repeated activity or logged experiment action, then shows how next-day sleep and recovery differed.",
-        details:
-          "It uses your existing history when enough comparable days are available, requires the direction to repeat across the observation window, and shows association rather than cause. Murph's weekly health insight checks the same evidence and stays quiet when nothing clears the bar.",
-        relevanceTags: [
-          "patterns",
-          "wearables",
-          "sleep",
-          "recovery",
-          "experiments",
-        ],
-        sourcePullRequests: [1563],
-        tryIt: {
-          href: "/patterns",
-          label: "View your patterns",
-        },
-      },
-      {
-        id: "reminders-keep-requested-timezone",
-        kind: "improvement",
-        priority: 4,
-        title: "Reminders keep the time you asked for",
-        summary:
-          "When you schedule a recurring reminder in a named timezone, Murph now preserves that local time through saving and later edits.",
-        details:
-          "The confirmation comes from the saved schedule and scheduler's next deliverable occurrence. If timing cannot be verified, or an old one-time reminder can no longer fire, Murph says so and offers a bounded recovery instead of inventing a time.",
-        relevanceTags: ["reminders", "automations", "timezones", "reliability"],
-        sourcePullRequests: [1546],
-        tryIt: {
-          label: "Schedule a local-time reminder",
-          prompt: "Remind me every day at 9 PM Central to wind down.",
-        },
-      },
-      {
-        id: "voice-memos-use-your-voice",
-        kind: "improvement",
-        priority: 4,
-        title: "Voice memos keep your chosen voice",
-        summary:
-          "Ordinary voice memos now use the voice already selected for your Murph instead of switching voices on their own.",
-        details:
-          "A different named voice is used only when you explicitly ask to test it or request that voice for one memo. Saving a named voice and asking to hear it immediately still works as a one-time preview.",
-        relevanceTags: ["voice", "messaging", "personalization", "reliability"],
-        sourcePullRequests: [1587],
-      },
-      {
-        id: "web-search-restored",
-        kind: "improvement",
-        priority: 5,
-        title: "Managed OpenAI web search works again",
-        summary:
-          "When Murph uses managed OpenAI, its built-in web search can reach current information again instead of stopping with a forbidden-request error.",
-        details:
-          "Search still runs through Murph's existing protected managed OpenAI provider connection and returns in the same conversation. Other provider choices keep their current search behavior.",
-        relevanceTags: ["assistant", "search", "research", "reliability"],
-        sourcePullRequests: [1583],
-      },
-      {
-        id: "appointment-reminders-by-default",
-        kind: "improvement",
-        priority: 4,
-        title: "Confirmed appointments come with a reminder",
-        summary:
-          "When a future care appointment is confirmed in a private conversation, Murph now creates one useful reminder by default unless you opt out.",
-        details:
-          "Morning appointments use the prior evening, later appointments use the same morning, and Murph keeps the same reminder up to date when an appointment is rescheduled or canceled.",
-        relevanceTags: ["appointments", "reminders", "automations", "care"],
-        sourcePullRequests: [1586],
-        tryIt: {
-          label: "Tell Murph about an appointment",
-          prompt:
-            "I have a confirmed dentist appointment next Thursday at 2 PM.",
-        },
-      },
-      {
-        id: "workout-card-status-rendering",
-        kind: "improvement",
-        priority: 3,
-        title: "Completed workout rows keep their checkmark",
-        summary:
-          "Completed exercises now keep a clear checkmark in Messages workout cards, including their static previews.",
-        details:
-          "The status mark is part of the card image itself, so it stays visible anywhere the static preview is shown.",
-        relevanceTags: ["workouts", "imessage", "cards", "reliability"],
-        sourcePullRequests: [1599],
-      },
-    ],
-  },
+const LEGACY_CHANGELOG_EDITIONS = [
   {
     id: "2026-08-09",
     publishedOn: "2026-08-09",
     title: "Referrals, Max, and a more capable Murph",
     summary:
-      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
+      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, private group follow-ups, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
       {
         id: "group-sleep-challenges-use-fresh-data",
@@ -191,11 +77,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Group sleep checks use fresh shared data",
         summary:
-          "Murph now checks the current shared sleep record before answering and counts reported Deep and REM sleep as soon as those values are shared.",
+          "Murph now checks the current shared sleep record before answering, counts reported Deep and REM sleep as soon as those values are shared, and includes explicit manual corrections.",
         details:
-          "Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
+          "The latest manual correction for a sleep date wins and is labeled Manual instead of a connected source. Reconnected sources no longer combine an old disconnected status with a newer sync time. Future-dated entries stay excluded, and missing data remains unverified.",
         relevanceTags: ["groups", "sleep", "health-data", "connections"],
-        sourcePullRequests: [1565],
+        sourcePullRequests: [1565, 1593],
       },
       {
         id: "public-referral-home",
@@ -277,6 +163,18 @@ const RAW_CHANGELOG_EDITIONS = [
         },
       },
       {
+        id: "private-group-follow-up",
+        kind: "feature",
+        priority: 4,
+        title: "Continue a group question privately",
+        summary:
+          "Ask Murph in a group to continue with you privately, and your personal Murph can send the answer only to your verified direct chat on the same channel.",
+        details:
+          "Murph uses the exact group message author and checks the direct chat before personal work begins. If no eligible direct chat is available, Murph asks you to open one on that channel and retry.",
+        relevanceTags: ["groups", "messaging", "privacy", "assistant"],
+        sourcePullRequests: [1481],
+      },
+      {
         id: "clearer-health-source-handoffs",
         kind: "improvement",
         priority: 5,
@@ -351,11 +249,11 @@ const RAW_CHANGELOG_EDITIONS = [
         priority: 4,
         title: "Nutrition cards fit Messages cleanly",
         summary:
-          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card.",
+          "Static nutrition cards now use Messages' own app icon and rounded frame, with only the date and meal count beneath the card unless totals are partial.",
         details:
-          "Calories and nutrient totals stay visible in the card without a second Murph badge or a long repeat below it. Partial totals and assessed goals keep only their short status labels.",
+          "Calories, nutrient totals, and goal status stay inside the card without a second Murph badge or a long repeat below it. Provider chrome keeps only a short partial-data warning when needed.",
         relevanceTags: ["imessage", "cards", "nutrition", "design"],
-        sourcePullRequests: [1567],
+        sourcePullRequests: [1567, 1588],
       },
       {
         id: "typing-prewarms-private-chat",
@@ -3153,7 +3051,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "A real zero still counts. Missing sharing permission, a stale sync, a disconnected source, and a source that needs attention stay distinct. When an exact required share has not been granted, Murph may offer one separate Like-or-heart permission card; the standings message itself never becomes a consent surface.",
         relevanceTags: ["groups", "challenges", "sharing", "wearables"],
-        sourcePullRequests: [769],
+        sourcePullRequests: [769, 1463],
         tryIt: {
           label: "Review missing standings data",
           prompt:
@@ -7051,7 +6949,10 @@ const RAW_CHANGELOG_EDITIONS = [
 ] satisfies readonly ChangelogEdition[];
 
 export const CHANGELOG_EDITIONS: readonly ChangelogEdition[] =
-  validateChangelogEditions(RAW_CHANGELOG_EDITIONS);
+  validateChangelogEditions([
+    ...CHANGELOG_FRAGMENT_EDITIONS,
+    ...LEGACY_CHANGELOG_EDITIONS,
+  ]);
 
 export function listChangelogEditions(): readonly ChangelogEdition[] {
   return CHANGELOG_EDITIONS;

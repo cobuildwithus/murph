@@ -39,6 +39,7 @@ import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client";
 import { metadata as patternsMetadata } from "../app/(dashboard)/patterns/layout";
+import { EnvironmentPrintStudy } from "../app/design/environment-print-study";
 import { PersonalPatternsComponentStudy } from "../app/design/personal-patterns-study";
 import { renderClientComponent } from "./render-client-component";
 
@@ -349,6 +350,51 @@ test("Environment print report renders the signed-in member's Browser Vault fact
   assert.match(markup, /blackout/);
   assert.match(markup, /href="\/environment"/);
   assert.doesNotMatch(markup, /fixture data|mock/i);
+});
+
+test("Environment print report uses a report-shaped accessible loading state", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "loading",
+  });
+
+  const markup = renderToStaticMarkup(
+    createElement(EnvironmentPrintPageClient, {
+      generatedOn: "July 31, 2026",
+    }),
+  );
+
+  assert.match(markup, /data-environment-print-state="loading"/);
+  assert.match(markup, /aria-busy="true"/);
+  assert.match(markup, /aria-live="polite"/);
+  assert.match(markup, /role="status"/);
+  assert.match(markup, /Putting your report together/);
+  assert.match(
+    markup,
+    /Opening your private records and arranging the printable view\./,
+  );
+  assert.match(markup, /Preparing/);
+  assert.doesNotMatch(markup, /Unlocking your private Environment report/);
+
+  const animatedCount = markup.match(/animate-pulse/g)?.length ?? 0;
+  const motionSafeAnimatedCount =
+    markup.match(/motion-safe:animate-pulse/g)?.length ?? 0;
+  assert.ok(animatedCount > 0);
+  assert.equal(motionSafeAnimatedCount, animatedCount);
+});
+
+test("Environment print design study renders the real loading and ready states", () => {
+  const markup = renderToStaticMarkup(createElement(EnvironmentPrintStudy));
+
+  assert.match(markup, /data-design-state="loading"/);
+  assert.match(markup, /data-environment-print-state="loading"/);
+  assert.match(markup, /data-design-state="ready"/);
+  assert.match(markup, /data-environment-print-page="true"/);
 });
 
 test("EnvironmentPage gives zero-data members one clear start and previews the report", async () => {

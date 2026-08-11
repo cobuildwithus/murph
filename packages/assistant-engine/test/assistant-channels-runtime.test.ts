@@ -49,6 +49,24 @@ const NUTRITION_CARD: AssistantResponseCard = {
 
 const NUTRITION_CARD_TEXT = renderAssistantResponseCardText(NUTRITION_CARD)
 
+const CHALLENGE_CARD: AssistantResponseCard = {
+  kind: 'challenge_standings',
+  version: 1,
+  format: 'individual',
+  title: 'Weird Health Week',
+  subtitle: 'Day 4 of 7',
+  objective: { kind: 'ranking' },
+  entries: [{
+    label: 'Maya',
+    points: 120,
+    coverage: 'complete',
+    detail: null,
+  }],
+  footer: null,
+}
+
+const CHALLENGE_CARD_TEXT = renderAssistantResponseCardText(CHALLENGE_CARD)
+
 vi.mock('@murphai/operator-config/agentmail-runtime', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@murphai/operator-config/agentmail-runtime')>()
@@ -147,6 +165,65 @@ describe('assistant channels runtime seam', () => {
     expect(isAssistantUserFacingChannel('LOCAL')).toBe(false)
     expect(isAssistantUserFacingChannel('null')).toBe(false)
     expect(isAssistantUserFacingChannel(null)).toBe(false)
+  })
+
+  it('never recovers a missing Linq group-card fallback into a private chat', async () => {
+    vi.stubEnv('LINQ_API_TOKEN', 'linq-token')
+    const missingChatError = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq request POST /chats/[chat]/messages failed with HTTP 404.',
+      {
+        failureStage: 'http',
+        linqFailureKind: 'chat_not_found',
+        method: 'POST',
+        operation: 'send_message',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 404,
+      },
+    )
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValueOnce(
+      new VaultCliError(
+        'LINQ_API_REQUEST_FAILED',
+        'Linq rejected the iMessage app card.',
+        {
+          failureStage: 'http',
+          method: 'POST',
+          operation: 'send_imessage_app_card',
+          path: '/chats/[chat]/messages',
+          provider: 'linq',
+          retryable: false,
+          status: 400,
+        },
+      ),
+    )
+    runtimeMocks.sendLinqChatMessage.mockRejectedValueOnce(missingChatError)
+    const persistLinqAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+
+    await expect(ASSISTANT_CHANNEL_ADAPTERS.linq.send({
+      actorId: '+15550001',
+      bindingDelivery: createAssistantBindingDelivery('thread', 'group-card-chat'),
+      card: CHALLENGE_CARD,
+      deliverySource: {
+        kind: 'linq',
+        fromPhoneNumber: '+15550000',
+      },
+      explicitTarget: null,
+      idempotencyKey: 'group-card-fallback',
+      identityId: null,
+      message: CHALLENGE_CARD_TEXT,
+      replyToMessageId: null,
+      threadIsDirect: false,
+    }, {
+      persistLinqAppCardTextFallback,
+    })).rejects.toBe(missingChatError)
+
+    expect(persistLinqAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'group-card-fallback:fallback',
+    })
+    expect(runtimeMocks.probeLinqApi).not.toHaveBeenCalled()
+    expect(runtimeMocks.createLinqChat).not.toHaveBeenCalled()
   })
 
   it('reports channel readiness and auto-reply support from descriptors', () => {
@@ -613,6 +690,38 @@ describe('assistant channels runtime seam', () => {
     })
 
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves a Telegram failure proven to occur before provider entry', async () => {
+    const preProviderFailure = Object.assign(
+      new VaultCliError(
+        'ASSISTANT_ASK_PRIVATE_COMPLETION_ROUTE_STALE',
+        'Private Assistant Ask route changed before provider entry.',
+        { retryable: false },
+      ),
+      { deliveryMayHaveSucceeded: false as const },
+    )
+    const fetchImplementation = vi.fn(async () => {
+      throw preProviderFailure
+    })
+
+    await expect(
+      sendTelegramMessage(
+        {
+          message: 'Reviewed private answer.',
+          target: '123',
+        },
+        {
+          env: {
+            TELEGRAM_API_BASE_URL: 'https://telegram.test/',
+            TELEGRAM_BOT_TOKEN: 'bot-token',
+          },
+          fetchImplementation,
+        },
+      ),
+    ).rejects.toBe(preProviderFailure)
+
+    expect(fetchImplementation).toHaveBeenCalledOnce()
   })
 
   it('keeps the Telegram provider deadline active through response body consumption', async () => {
@@ -1793,6 +1902,89 @@ describe('assistant channels runtime seam', () => {
     })
   })
 
+  it('falls back once after a definitive scheduled group-card rejection', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq rejected the iMessage app card.',
+      {
+        failureStage: 'http',
+        method: 'POST',
+        operation: 'send_imessage_app_card',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: false,
+        status: 400,
+      },
+    ))
+    runtimeMocks.sendLinqChatMessage.mockResolvedValue({
+      message: { id: 'scheduled-group-card-fallback-1' },
+    })
+
+    await expect(sendLinqMessage({
+      card: CHALLENGE_CARD,
+      idempotencyKey: 'scheduled-group-card',
+      message: CHALLENGE_CARD_TEXT,
+      target: 'scheduled-group-thread',
+      targetKind: 'explicit',
+      threadIsDirect: false,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).resolves.toMatchObject({
+      idempotencyKey: 'scheduled-group-card:fallback',
+      providerMessageId: 'scheduled-group-card-fallback-1',
+    })
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledWith({
+      card: CHALLENGE_CARD,
+      chatId: 'scheduled-group-thread',
+      idempotencyKey: 'scheduled-group-card',
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      fetchImplementation: undefined,
+    })
+    expect(persistAppCardTextFallback).toHaveBeenCalledWith({
+      idempotencyKey: 'scheduled-group-card:fallback',
+    })
+    expect(runtimeMocks.sendLinqChatMessage).toHaveBeenCalledOnce()
+  })
+
+  it('preserves a scheduled group card after an ambiguous native result', async () => {
+    const persistAppCardTextFallback = vi.fn().mockResolvedValue(undefined)
+    const error = new VaultCliError(
+      'LINQ_API_REQUEST_FAILED',
+      'Linq app-card delivery was not confirmed.',
+      {
+        failureStage: 'transport',
+        method: 'POST',
+        operation: 'send_imessage_app_card',
+        path: '/chats/[chat]/messages',
+        provider: 'linq',
+        retryable: true,
+      },
+    )
+    runtimeMocks.sendLinqIMessageAppCard.mockRejectedValue(error)
+
+    await expect(sendLinqMessage({
+      card: CHALLENGE_CARD,
+      idempotencyKey: 'scheduled-group-card-ambiguous',
+      message: CHALLENGE_CARD_TEXT,
+      target: 'scheduled-group-thread',
+      targetKind: 'explicit',
+      threadIsDirect: false,
+    }, {
+      env: { LINQ_API_TOKEN: 'linq-token' },
+      persistAppCardTextFallback,
+    })).rejects.toBe(error)
+
+    expect(runtimeMocks.checkLinqIMessageCapability).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqIMessageAppCard).toHaveBeenCalledOnce()
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled()
+    expect(runtimeMocks.sendLinqChatMessage).not.toHaveBeenCalled()
+  })
+
   it.each([
     ['rate limit', { failureStage: 'http', retryable: true, status: 429 }],
     ['server failure', { failureStage: 'http', retryable: true, status: 500 }],
@@ -2656,6 +2848,7 @@ describe('assistant channels runtime seam', () => {
           identityId: null,
           message: 'hello again',
           replyToMessageId: ' reply-9 ',
+          threadIsDirect: true,
         },
         {},
       ),
@@ -2795,6 +2988,7 @@ describe('assistant channels runtime seam', () => {
           identityId: null,
           message: 'hello again',
           replyToMessageId: null,
+          threadIsDirect: true,
         },
         {},
       ),
@@ -2869,6 +3063,7 @@ describe('assistant channels runtime seam', () => {
           identityId: null,
           message: 'hello again',
           replyToMessageId: null,
+          threadIsDirect: true,
         },
         {},
       ),
@@ -3034,6 +3229,7 @@ describe('assistant channels runtime seam', () => {
         identityId: null,
         message: 'hello again',
         replyToMessageId: ' reply-9 ',
+        threadIsDirect: true,
       },
       {},
     ).then(
@@ -3093,6 +3289,7 @@ describe('assistant channels runtime seam', () => {
           identityId: null,
           message: 'hello again',
           replyToMessageId: ' reply-9 ',
+          threadIsDirect: true,
         },
         {},
       ),

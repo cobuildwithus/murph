@@ -80,14 +80,14 @@ describe("hosted usage-referral recovery", () => {
     ]);
     const findMailboxItems = vi.fn().mockResolvedValue([
       {
-        id: "mailbox_referral_existing",
+        id: "mailbox_generic_predecessor",
         lane: "conversation",
         laneSeq: 11n,
         userId: "member_existing_source",
       },
     ]);
     const prisma = {
-      hostedMailboxItem: { findMany: findMailboxItems },
+      $queryRaw: findMailboxItems,
       hostedUsageReferral: { findMany: findReferrals },
     };
     mocks.recoverPendingHostedSignupReferralRewards.mockResolvedValue({
@@ -181,24 +181,7 @@ describe("hosted usage-referral recovery", () => {
       prisma,
       referralId: "referral_failed",
     });
-    expect(findMailboxItems).toHaveBeenCalledExactlyOnceWith({
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-      select: {
-        id: true,
-        lane: true,
-        laneSeq: true,
-        userId: true,
-      },
-      take: HOSTED_USAGE_REFERRAL_RECOVERY_BATCH_SIZE,
-      where: {
-        consumedAt: null,
-        dedupeKey: {
-          startsWith:
-            "assistant.notification.requested:usage-referral-reward:",
-        },
-        kind: "assistant.notification.requested",
-      },
-    });
+    expect(findMailboxItems).toHaveBeenCalledOnce();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenNthCalledWith(
       1,
       {
@@ -234,10 +217,43 @@ describe("hosted usage-referral recovery", () => {
           laneSeq: "11",
           userId: "member_existing_source",
         },
-        mailboxItemId: "mailbox_referral_existing",
+        mailboxItemId: "mailbox_generic_predecessor",
         prisma,
       },
     );
+  });
+
+  it("re-signals a legacy mailbox pointer without reading or rewriting its payload", async () => {
+    const prisma = {
+      $queryRaw: vi.fn().mockResolvedValue([{
+        id: "mailbox_legacy_direct",
+        lane: "system",
+        laneSeq: 11n,
+        userId: "member_legacy_direct",
+      }]),
+      hostedUsageReferral: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+
+    await expect(recoverPendingHostedUsageReferrals({
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      failed: 0,
+      pending: 0,
+      queued: 0,
+      resignaled: 1,
+      scanned: 1,
+    });
+
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledExactlyOnceWith({
+      expectedUserId: "member_legacy_direct",
+      knownCheckpoint: {
+        lane: "system",
+        laneSeq: "11",
+        userId: "member_legacy_direct",
+      },
+      mailboxItemId: "mailbox_legacy_direct",
+      prisma,
+    });
   });
 
   it("continues ordinary recovery when the gated signup scan throws", async () => {
@@ -245,7 +261,7 @@ describe("hosted usage-referral recovery", () => {
     const findReferrals = vi.fn().mockResolvedValue([]);
     const findMailboxItems = vi.fn().mockResolvedValue([]);
     const prisma = {
-      hostedMailboxItem: { findMany: findMailboxItems },
+      $queryRaw: findMailboxItems,
       hostedUsageReferral: { findMany: findReferrals },
     };
     mocks.recoverPendingHostedSignupReferralRewards.mockRejectedValue(
@@ -273,9 +289,7 @@ describe("hosted usage-referral recovery", () => {
 
   it("authenticates the cron before running an empty recovery pass", async () => {
     const prisma = {
-      hostedMailboxItem: {
-        findMany: vi.fn().mockResolvedValue([]),
-      },
+      $queryRaw: vi.fn().mockResolvedValue([]),
       hostedUsageReferral: {
         findMany: vi.fn().mockResolvedValue([]),
       },

@@ -240,6 +240,11 @@ export interface HostedExecutionAssistantNotificationFirstContactPolicy {
   markSeenOnDeliveryAccepted: boolean;
 }
 
+export interface HostedExecutionPrivateAssistantAskCompletionNotification {
+  expiresAt: string;
+  requestId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
@@ -248,7 +253,16 @@ export interface HostedExecutionAssistantNotificationRequestedPayload {
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
+  privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
   responsePolicy?: HostedExecutionAssistantNotificationResponsePolicy | null;
+  route: HostedExecutionAssistantNotificationRoute;
+}
+
+export interface HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority {
+  answeredMailboxItemIds: readonly string[];
+  assistantAskCompletionExpiresAt: string;
+  idempotencyKey: string;
+  responseTextDigest: string;
   route: HostedExecutionAssistantNotificationRoute;
 }
 
@@ -283,10 +297,17 @@ export interface HostedExecutionAssistantAskGroupSenderTarget {
   permissionDigest: string;
 }
 
+export interface HostedExecutionAssistantAskPrivateGroupSenderTarget {
+  groupRuntimeMemberId: string;
+  kind: "group_sender_private";
+  permissionDigest: string;
+}
+
 export type HostedExecutionAssistantAskTarget =
   | HostedExecutionAssistantAskJoinedGroupTarget
   | HostedExecutionAssistantAskConsentedMemberTarget
-  | HostedExecutionAssistantAskGroupSenderTarget;
+  | HostedExecutionAssistantAskGroupSenderTarget
+  | HostedExecutionAssistantAskPrivateGroupSenderTarget;
 
 export interface HostedExecutionAssistantAskAcceptedInputOrigin {
   assistantInputId: string;
@@ -336,10 +357,18 @@ export interface HostedExecutionAssistantAskGroupSenderRequestedPayload {
   target: HostedExecutionAssistantAskGroupSenderTarget;
 }
 
+export interface HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload {
+  expiresAt: string;
+  origin: HostedExecutionAssistantAskAcceptedInputOrigin;
+  question: string;
+  target: HostedExecutionAssistantAskPrivateGroupSenderTarget;
+}
+
 export type HostedExecutionAssistantAskRequestedPayload =
   | HostedExecutionAssistantAskJoinedGroupRequestedPayload
   | HostedExecutionAssistantAskConsentedMemberRequestedPayload
-  | HostedExecutionAssistantAskGroupSenderRequestedPayload;
+  | HostedExecutionAssistantAskGroupSenderRequestedPayload
+  | HostedExecutionAssistantAskPrivateGroupSenderRequestedPayload;
 
 export interface HostedExecutionAssistantAskJoinedGroupCompletedPayload {
   expiresAt: string;

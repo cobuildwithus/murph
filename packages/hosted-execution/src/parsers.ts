@@ -41,6 +41,8 @@ import type {
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
   HostedExecutionAssistantNotificationPromptProfile,
+  HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
+  HostedExecutionPrivateAssistantAskCompletionNotification,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationResponsePolicy,
@@ -70,7 +72,11 @@ import type {
 import {
   parseHostedExecutionAssistantAskCompletedPayload,
   parseHostedExecutionAssistantAskRequestedPayload,
+  parseHostedExecutionAssistantAskTimestamp,
 } from "./assistant-ask-payload.ts";
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from "./assistant-identifiers.ts";
 import type {
   HostedExecutionLogLevel,
 } from "./observability.ts";
@@ -1523,6 +1529,15 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
                 `${label}.notificationPromptProfile`,
               ),
         }),
+    ...(record.privateAssistantAskCompletion === undefined
+      ? {}
+      : {
+          privateAssistantAskCompletion:
+            parseHostedExecutionPrivateAssistantAskCompletionNotification(
+              record.privateAssistantAskCompletion,
+              `${label}.privateAssistantAskCompletion`,
+            ),
+        }),
     ...(record.responsePolicy === undefined
       ? {}
       : {
@@ -1534,6 +1549,25 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionPrivateAssistantAskCompletionNotification(
+  value: unknown,
+  label: string,
+): HostedExecutionPrivateAssistantAskCompletionNotification {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, ["expiresAt", "requestId"], label);
+  const requestId = requireString(record.requestId, `${label}.requestId`);
+  if (!/^aask_req_[0-9a-f]{64}$/u.test(requestId)) {
+    throw new TypeError(`${label}.requestId is invalid.`);
+  }
+  return {
+    expiresAt: parseHostedExecutionAssistantAskTimestamp(
+      record.expiresAt,
+      `${label}.expiresAt`,
+    ),
+    requestId,
   };
 }
 
@@ -1614,7 +1648,7 @@ function parseHostedExecutionAssistantNotificationFirstContactPolicy(
   };
 }
 
-function parseHostedExecutionAssistantNotificationRoute(
+export function parseHostedExecutionAssistantNotificationRoute(
   value: unknown,
   label: string,
 ): HostedExecutionAssistantNotificationRequestedPayload["route"] {
@@ -1633,6 +1667,70 @@ function parseHostedExecutionAssistantNotificationRoute(
     threadIsDirect: record.threadIsDirect === null
       ? null
       : requireBoolean(record.threadIsDirect, `${label}.threadIsDirect`),
+  };
+}
+
+export function parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority(
+  value: unknown,
+  label = "Hosted execution private Assistant Ask completion delivery authority",
+): HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(record, [
+    "answeredMailboxItemIds",
+    "assistantAskCompletionExpiresAt",
+    "idempotencyKey",
+    "responseTextDigest",
+    "route",
+  ], label);
+  const answeredMailboxItemIds = requireArray(
+    record.answeredMailboxItemIds,
+    `${label}.answeredMailboxItemIds`,
+  ).map((entry, index) => requireString(
+    entry,
+    `${label}.answeredMailboxItemIds[${index}]`,
+  ));
+  const completionId = answeredMailboxItemIds[0] ?? "";
+  if (
+    answeredMailboxItemIds.length !== 1
+    || !completionId.trim()
+    || completionId.trim() !== completionId
+    || [...completionId].length > 256
+  ) {
+    throw new TypeError(`${label}.answeredMailboxItemIds is invalid.`);
+  }
+  const idempotencyKey = requireString(
+    record.idempotencyKey,
+    `${label}.idempotencyKey`,
+  );
+  if (
+    idempotencyKey.trim() !== idempotencyKey
+    || idempotencyKey
+      !== createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+        completionId,
+      )
+  ) {
+    throw new TypeError(`${label}.idempotencyKey is invalid.`);
+  }
+  const responseTextDigest = requireString(
+    record.responseTextDigest,
+    `${label}.responseTextDigest`,
+  );
+  if (!/^[0-9a-f]{64}$/u.test(responseTextDigest)) {
+    throw new TypeError(`${label}.responseTextDigest is invalid.`);
+  }
+  return {
+    answeredMailboxItemIds,
+    assistantAskCompletionExpiresAt:
+      parseHostedExecutionAssistantAskTimestamp(
+        record.assistantAskCompletionExpiresAt,
+        `${label}.assistantAskCompletionExpiresAt`,
+      ),
+    idempotencyKey,
+    responseTextDigest,
+    route: parseHostedExecutionAssistantNotificationRoute(
+      record.route,
+      `${label}.route`,
+    ),
   };
 }
 

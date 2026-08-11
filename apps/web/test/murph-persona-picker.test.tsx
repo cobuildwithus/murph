@@ -10,6 +10,8 @@ import {
 } from "react";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
+import type { MurphPersonaPreferences } from "@/src/components/murph/murph-persona-picker";
+
 import { renderClientComponent } from "./render-client-component";
 
 const componentMocks = vi.hoisted(() => ({
@@ -178,6 +180,112 @@ test("MurphPersonaPicker saves the selected persona, voice, and tone atomically"
       voice: "husky",
     }]);
     assert.deepEqual(onOpenChange.mock.calls[0], [false]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test("MurphPersonaPicker reuses the main and supporting steps without changing tone or voice", async () => {
+  const savePreference = vi.fn(async (preferences: MurphPersonaPreferences) =>
+    preferences
+  );
+  const onOpenChange = vi.fn();
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      initialPersona: "classic-with-navy-seal",
+      initialTone: "formal",
+      initialVoice: "grandpa",
+      mode: "personality",
+      onOpenChange,
+      open: true,
+      savePreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    assert.match(rendered.container.textContent ?? "", /Step 1 of 2/u);
+    assert.match(rendered.container.textContent ?? "", /Cancel/u);
+    await clickControlContaining(rendered, "Scientist");
+    await clickControlContaining(rendered, "Continue");
+    assert.match(rendered.container.textContent ?? "", /Step 2 of 2/u);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Choose a voice/u);
+    await clickControlContaining(rendered, "Classic");
+    await clickControlContaining(rendered, "Save personality");
+
+    assert.deepEqual(savePreference.mock.calls[0], [{
+      persona: "scientist-with-classic",
+      tone: "formal",
+      voice: "grandpa",
+    }]);
+    assert.deepEqual(onOpenChange.mock.calls[0], [false]);
+  } finally {
+    await rendered.cleanup();
+  }
+});
+
+test.each([
+  { mobile: false, surface: "desktop" },
+  { mobile: true, surface: "mobile" },
+])("MurphPersonaPicker blocks pointer selection while saving on $surface", async ({
+  mobile,
+}) => {
+  componentMocks.useIsMobile.mockReturnValue(mobile);
+  let resolveSave: ((preferences: MurphPersonaPreferences) => void) | undefined;
+  const savePreference = vi.fn(
+    () => new Promise<MurphPersonaPreferences>((resolve) => {
+      resolveSave = resolve;
+    }),
+  );
+  const { MurphPersonaPicker } = await import(
+    "@/src/components/murph/murph-persona-picker"
+  );
+  const rendered = await renderClientComponent(
+    createElement(MurphPersonaPicker, {
+      initialPersona: "classic",
+      initialTone: "formal",
+      initialVoice: "upbeat",
+      mode: "personality",
+      onOpenChange: vi.fn(),
+      open: true,
+      savePreference,
+    }),
+    { requireButton: false },
+  );
+
+  try {
+    await clickControlContaining(rendered, "Continue");
+    await clickControlContaining(rendered, "Scientist");
+    await clickControlContaining(rendered, "Save personality");
+
+    const selected = rendered.container.querySelector<HTMLInputElement>(
+      "input[type='radio'][value='scientist']",
+    );
+    const other = rendered.container.querySelector<HTMLInputElement>(
+      "input[type='radio'][value='navy-seal']",
+    );
+    assert.ok(selected);
+    assert.ok(other);
+    assert.equal(selected.checked, true);
+    assert.equal(selected.disabled, true);
+
+    const otherLabel = rendered.container.querySelector<HTMLLabelElement>(
+      `label[for='${other.id}']`,
+    );
+    assert.ok(otherLabel);
+    await act(async () => otherLabel.click());
+    assert.equal(selected.checked, true);
+    assert.equal(other.checked, false);
+
+    assert.ok(resolveSave);
+    await act(async () => resolveSave?.({
+      persona: "classic-with-scientist",
+      tone: "formal",
+      voice: "upbeat",
+    }));
   } finally {
     await rendered.cleanup();
   }

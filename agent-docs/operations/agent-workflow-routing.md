@@ -1,6 +1,6 @@
 # Agent Workflow Routing
 
-Last verified: 2026-08-10
+Last verified: 2026-08-11
 
 This doc is the durable workflow map behind `AGENTS.md`.
 Use it to classify the task, load only the relevant docs, and choose the right verification, audit, and commit path.
@@ -70,13 +70,36 @@ Then load only the task-relevant docs listed below.
 
 ## Workflow Defaults
 
+### Developer Friction Logging
+
+- For every edit-authorized repository task, read
+  `.agents/skills/frog/SKILL.md` and run `scripts/frog list` before inventing or
+  accepting a workaround. Reuse an existing entry when it covers the problem.
+- When new, reproducible, repository-actionable friction occurs, record it
+  through `scripts/frog log` before handoff. Do not manufacture a report when
+  no qualifying friction occurred, and do not use Frog for any excluded
+  product, support, runtime, private-data, machine-local, or internal-model
+  signal named by the skill.
+- Treat every created or modified Frog entry as part of the current task output:
+  read it back, verify the public-data boundary, and include it in the same
+  scoped task commit. A task is not complete while its Frog entry is untracked,
+  unstaged, or otherwise omitted from that commit. If the commit is blocked,
+  preserve the entry and report the exact blocker instead of dropping it.
+- Frog logging must not delay or replace the requested outcome. Creating or
+  updating a tracked plan file is edit-authorized repository work and follows
+  the normal Frog flow. Review-only, planning-only, and other no-edit tasks
+  report friction in the handoff instead of mutating the repository.
+
 - Same-turn task completion counts as acceptance unless the user explicitly says `review first` or `do not commit`.
 - Choose verification ownership by delivery path. PR-bound work runs focused
   local proof while required GitHub Actions own the broad suite on the exact
   head. A CI failure is diagnosed from the narrowest local reproducer outward.
   Before a direct push to `main` or another shared default branch, reconcile the
-  candidate and run `pnpm verify:acceptance` locally or through an explicitly
-  allowed canonical executor.
+  candidate and run `pnpm verify:acceptance` once locally or through an
+  explicitly allowed canonical executor. If the remote advances during that
+  run, use the bounded post-acceptance rebase rule in
+  `verification-and-runtime.md`; do not turn one direct-push attempt into an
+  acceptance loop.
 - Preserve unrelated working-tree edits in the current checkout and never revert work you did not make.
 - Use one independent mutating task per worktree. Multiple agents may collaborate
   on one parent-owned task in the same worktree only with explicit non-overlapping
@@ -94,7 +117,7 @@ Then load only the task-relevant docs listed below.
 - Run the preliminary specialist ReviewGPT pass on an exact pushed candidate head before the parent's final review. When the final ReviewGPT gate also applies, its full-patch round 1 may start concurrently against that same head after focused local proof and the parent's candidate review. The stages stay independent: the preliminary pass does not establish or advance the final baseline, and accepted findings from either stage must be resolved before completion. Inspect, path-scope, and verify any returned `reviewgpt-coverage.patch` before applying it.
 - Frontend-only PRs keep every applicable preliminary product-experience, frontend, and coverage lens plus rendered proof, but skip the final cross-cutting ReviewGPT gate unless backend, authority, persisted-state, provider, deploy, high-risk-refactor, or another independent cross-cutting scope triggers it.
 - For final-ReviewGPT-eligible PR-lane work, `agent-docs/operations/pr-reviewgpt-loop.md` owns the cross-cutting gate. Preserve the immutable round-one baseline even when a parallel specialist finding causes remediation, and use correction-delta rounds for all later behavior-bearing fixes. Require `SPECIALIST_OUTCOME: PASS` or fully resolved specialist findings when that pass applies, `ROUND_OUTCOME: PASS` with zero accepted final-gate findings, and green CI. Never also run local `deep-review` for the same completed change. That doc owns exact-head packaging, browser lanes, anomaly retrospectives, reruns, invalid-run retry counting, and base-only updates.
-- After a zero-finding final round, do not merge or rebase merely to chase a moving base before handoff. Green required CI on the PR-authored head plus a clean current-base `git merge-tree --write-tree` proof is sufficient preparation. If an authorized merge later requires a strict-current head, use the merge queue when available or perform one normal base update at the merge boundary; inspect any bounded conflicts, run affected-surface proof, and let required CI gate that head without rerunning ReviewGPT. Use the ordinary next round when the base-only classification is uncertain or false.
+- After a zero-finding final round, green required CI on the PR-authored head plus a clean current-base `git merge-tree --write-tree` proof is sufficient preparation. At an authorized merge boundary, wait only for routed review gates and required GitHub checks. If strict-current enforcement blocks the merge, prefer the merge queue; otherwise the unchanged reviewed patch gets at most one normal base update, affected-surface proof, and required CI without another ReviewGPT round. A later base advance never resets that budget or restarts CI: rerun the merge-tree, use an already-authorized non-refresh merge path when it is clean, or report `moving-base race` and stop with the PR and worktree active. Use the ordinary next round when the base-only classification is uncertain or false; `agent-docs/operations/pr-reviewgpt-loop.md` owns the exact terminal path.
 - Prompt-primary PRs run the preliminary specialist ReviewGPT pass with the prompt lens. They still skip the separate final ReviewGPT gate unless non-prompt scope independently triggers it or the current user explicitly requests it.
 - Codex-native agents satisfy a required local `deep-review` pass with a spawned local subagent, not `codex exec`. Claude and other non-Codex parents use the local Codex CLI model, reasoning, and home-resolution route defined in `agent-docs/operations/completion-workflow.md` § Audit Worker Rules. If required subagent tooling or CLI auth is unavailable, report the limitation and follow that workflow's fallback instead of skipping the pass.
 - When Claude or another non-Codex parent delegates any other repo implementation or review work to local Codex, pin `gpt-5.6-sol` explicitly with `codex exec -m gpt-5.6-sol` and select `high` or `xhigh` reasoning from the task's risk and complexity. A personal profile or launcher default is not repo model authority: never omit `-m` after an explicit model selection fails, and never substitute an unverified model slug. If the exact model or CLI auth is unavailable, stop and report the routing limitation instead of silently falling back to an older model.

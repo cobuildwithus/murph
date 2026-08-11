@@ -13,6 +13,7 @@ import {
   parseHostedExecutionDirectRoute,
   parseHostedExecutionExternalThreadRouteAuthority,
   parseHostedExecutionEvent,
+  parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   parseHostedExecutionWake,
   parseHostedRuntimeFamilyPlanToolRequest,
   parseHostedRuntimeFamilyPlanToolResponse,
@@ -36,6 +37,54 @@ describe("parseHostedExecutionDirectRoute", () => {
       threadId: "chat_123",
       threadIsDirect: true,
     })).toThrow(/unsupported field "threadIsDirect"/u);
+  });
+});
+
+describe("parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority", () => {
+  it("accepts one exact completion proof and rejects extra fields", () => {
+    const authority = {
+      answeredMailboxItemIds: [`aask_done_${"b".repeat(64)}`],
+      assistantAskCompletionExpiresAt: "2026-04-08T00:10:00.000Z",
+      idempotencyKey: `assistant-ask-private:aask_done_${"b".repeat(64)}`,
+      responseTextDigest: "c".repeat(64),
+      route: {
+        actorId: null,
+        channel: "telegram",
+        delivery: { kind: "thread", target: "private-thread" },
+        identityId: null,
+        threadId: "private-thread",
+        threadIsDirect: true,
+      },
+    };
+    expect(
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority(
+        authority,
+      ),
+    ).toEqual(authority);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        assistantAskFallback: false,
+      })
+    ).toThrow(/unsupported field "assistantAskFallback"/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        answeredMailboxItemIds: [""],
+      })
+    ).toThrow(/answeredMailboxItemIds\[0\] must be a non-empty string/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        idempotencyKey: "",
+      })
+    ).toThrow(/idempotencyKey must be a non-empty string/u);
+    expect(() =>
+      parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority({
+        ...authority,
+        idempotencyKey: "assistant-ask-private:wrong-completion",
+      })
+    ).toThrow(/idempotencyKey is invalid/u);
   });
 });
 
@@ -472,6 +521,10 @@ describe("parseHostedExecutionEvent", () => {
             markSeenOnDeliveryAccepted: true,
           },
           instructions: "Send exactly the signup welcome.",
+          privateAssistantAskCompletion: {
+            expiresAt: "2026-04-08T00:10:00.000Z",
+            requestId: `aask_req_${"a".repeat(64)}`,
+          },
           responsePolicy: {
             kind: "require_send_exact_text",
             text: "Welcome to Murph, your personal health assistant.",
@@ -504,6 +557,10 @@ describe("parseHostedExecutionEvent", () => {
           markSeenOnDeliveryAccepted: true,
         },
         instructions: "Send exactly the signup welcome.",
+        privateAssistantAskCompletion: {
+          expiresAt: "2026-04-08T00:10:00.000Z",
+          requestId: `aask_req_${"a".repeat(64)}`,
+        },
         responsePolicy: {
           kind: "require_send_exact_text",
           text: "Welcome to Murph, your personal health assistant.",
@@ -526,6 +583,32 @@ describe("parseHostedExecutionEvent", () => {
       },
       userId: "user-1",
     });
+  });
+
+  it("strictly parses private Assistant Ask completion notification proof", () => {
+    const event = {
+      kind: "assistant.notification.requested",
+      notification: {
+        instructions: "Send the exact private answer.",
+        privateAssistantAskCompletion: {
+          expiresAt: "2026-04-08T00:10:00.000Z",
+          requestId: `aask_req_${"a".repeat(64)}`,
+          unsupported: true,
+        },
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: { kind: "thread", target: "private-thread" },
+          identityId: null,
+          threadId: "private-thread",
+          threadIsDirect: true,
+        },
+      },
+      userId: "user-1",
+    };
+    expect(() => parseHostedExecutionEvent(event)).toThrow(
+      "privateAssistantAskCompletion contains unsupported field",
+    );
   });
 
   it("round-trips external thread route authority for group notifications", () => {

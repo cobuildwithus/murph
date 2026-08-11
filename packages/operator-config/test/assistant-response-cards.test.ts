@@ -599,14 +599,10 @@ describe('assistant response cards', () => {
     expect(goalLayout).toEqual({
       caption: 'Jul 28 · 3 meals',
       image_url: buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2),
-      subcaption:
-        'Goals: Calories under · Protein on target · Carbs on target · Fat on target · Fiber under',
     })
-    expect(proteinGoalLayout.subcaption).toBe('Goals: Protein on target')
+    expect(proteinGoalLayout).not.toHaveProperty('subcaption')
     expect(completeNoGoalsLayout).not.toHaveProperty('subcaption')
-    expect(directionalGoalsLayout.subcaption).toBe(
-      'Goals: Calories far under · Protein over',
-    )
+    expect(directionalGoalsLayout).not.toHaveProperty('subcaption')
     expect(decodeAppCardImageUrl(proteinGoalLayout.image_url ?? '')).toEqual({
       schemaVersion: 2,
       card: {

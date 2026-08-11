@@ -53,6 +53,7 @@ function normalizeMetricValueForScope(
     case "albumin":
       return normalizeAlbumin(input.value, unit);
     case "body-weight":
+    case "lean-body-mass":
       return normalizeWeight(input.value, unit);
     case "waist-circumference":
       return normalizeLengthCentimeters(input.value, unit, definition.displayName);

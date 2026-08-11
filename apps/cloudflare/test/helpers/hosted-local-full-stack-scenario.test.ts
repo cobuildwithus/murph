@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
     phase: "completed",
     redactedJson: null,
   }]),
+  reserveLocalTcpPort: vi.fn(async () => 4300),
+  reserveLocalTemporalTcpPort: vi.fn(async () => 7233),
   startHostedLocalDevHarness: vi.fn(),
   startHostedLocalOidcFixture: vi.fn(async () => ({
     jwksUrl: "http://127.0.0.1:4100/.well-known/jwks.json",
@@ -49,8 +51,8 @@ vi.mock("./hosted-local-e2e-support.js", () => ({
   buildHostLoopbackStubBaseUrl: vi.fn(() => "http://127.0.0.1:4200"),
   buildHostedLocalDeviceSyncProviderEnvClearances: vi.fn(() => ({})),
   mergeRequiredEnvProfile: vi.fn((_current, required) => required),
-  reserveLocalTemporalTcpPort: vi.fn(async () => 7233),
-  reserveLocalTcpPort: vi.fn(async () => 4300),
+  reserveLocalTemporalTcpPort: mocks.reserveLocalTemporalTcpPort,
+  reserveLocalTcpPort: mocks.reserveLocalTcpPort,
   resolveHostedAssistantLocalDevEnv: vi.fn(() => ({})),
   resolveHostedAssistantProviderMode: vi.fn(() => "live"),
   resolveHostedLocalSmokeWebEnv: vi.fn(() => ({})),
@@ -292,6 +294,32 @@ it("keeps Wrangler inspector traffic out of streamed hosted E2E logs", async () 
   } finally {
     await scenario.stop();
   }
+});
+
+it("retries startup with fresh port reservations after an address-in-use race", async () => {
+  const harness = createScenarioHarness();
+  mocks.startHostedLocalDevHarness
+    .mockRejectedValueOnce(new Error("Address already in use (0.0.0.0:4300)."))
+    .mockResolvedValueOnce(harness);
+
+  const scenario = await startScenario();
+  try {
+    expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledTimes(2);
+    expect(mocks.reserveLocalTcpPort).toHaveBeenCalledTimes(4);
+    expect(mocks.reserveLocalTemporalTcpPort).toHaveBeenCalledTimes(2);
+    expect(mocks.startHostedLocalOidcFixture).toHaveBeenCalledTimes(2);
+  } finally {
+    await scenario.stop();
+  }
+});
+
+it("does not retry non-port startup failures", async () => {
+  mocks.startHostedLocalDevHarness.mockRejectedValueOnce(
+    new Error("Hosted local database migration failed."),
+  );
+
+  await expect(startScenario()).rejects.toThrow("Hosted local database migration failed.");
+  expect(mocks.startHostedLocalDevHarness).toHaveBeenCalledOnce();
 });
 
 it("forwards explicitly supplied provider credentials to the worker harness", async () => {

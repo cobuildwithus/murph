@@ -7,8 +7,20 @@ import {
   formatHostedExecutionGroupReactionEventText,
   HOSTED_EXECUTION_GROUP_REACTION_SENDER_ATTESTATION,
 } from "@murphai/hosted-execution";
+import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 
 import {
+  lockAndReadActiveHostedDomainRootKeyIdTx,
+  unwrapHostedDomainRootForWeb,
+} from "../hosted-crypto/domain-root-store";
+import {
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
+import {
+  lockHostedThreadRouteByThreadIdentityTx,
   readHostedThreadRouteByThreadIdentity,
   type HostedThreadRouteSnapshot,
 } from "../hosted-routing/thread-route-store";
@@ -16,6 +28,10 @@ import {
   signalHostedMailboxAppendRuntime,
 } from "../hosted-orchestration/signal-runtime";
 import { createHostedPhoneLookupKey } from "./contact-privacy";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "./errors";
 import { getHostedLinqChatSummary } from "./linq-client";
 import { createHostedLinqParticipantContact } from "./linq-participant-contact";
 import {
@@ -30,11 +46,29 @@ import {
 } from "./group-reaction-mailbox";
 
 const HOSTED_LINQ_GROUP_REACTION_VALUE_MAX_CHARS = 256;
+const HOSTED_LINQ_GROUP_REACTION_PREPARATION_REQUIRED_CODE =
+  "HOSTED_LINQ_GROUP_REACTION_PREPARATION_REQUIRED";
+const HOSTED_LINQ_GROUP_REACTION_MAILBOX_DOMAIN =
+  getHostedCryptoDomainForLane("mailbox-payload");
 
 type HostedLinqGroupReactionRoute = Pick<
   HostedThreadRouteSnapshot,
   "accountLookupKey" | "containerMemberId"
 >;
+
+interface HostedLinqGroupReactionRouteCandidate {
+  accountLookupKey: string | null;
+  containerMemberId: string;
+  deliveryRouteEncrypted: string | null;
+  deliveryRouteEncryptedPresent: boolean;
+  threadIdentityLookupKey: string;
+  threadLookupKey: string;
+}
+
+interface PreparedHostedLinqGroupReactionContext {
+  ingressRootKeyId: string;
+  route: HostedLinqGroupReactionRouteCandidate;
+}
 
 export type HostedLinqGroupReactionMailboxAppend = {
   containerMemberId: string;
@@ -250,10 +284,67 @@ export async function stageHostedLinqGroupReactionContext(input: {
     return false;
   }
 
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const append = await runWithHostedDomainRootUnwrapCache(async () => {
+        const prepared = await prepareHostedLinqGroupReactionContext({
+          chatId: eventContext.chatId,
+          prisma: input.prisma,
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+        if (!prepared) {
+          return null;
+        }
+
+        input.signal?.throwIfAborted();
+        return input.prisma.$transaction(
+          (tx) => appendPreparedHostedLinqGroupReactionMailboxTx({
+            actor: eventContext.actor.value,
+            chatId: eventContext.chatId,
+            event: input.event,
+            prepared,
+            tx,
+          }),
+          HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+        );
+      });
+
+      if (!append) {
+        return false;
+      }
+      input.signal?.throwIfAborted();
+      await signalHostedLinqGroupReactionMailbox({
+        ...(input.signal ? { abortSignal: input.signal } : {}),
+        append,
+        prisma: input.prisma,
+      });
+      return true;
+    } catch (error) {
+      if (
+        attempt === 0
+        && isHostedOnboardingError(error)
+        && error.code === HOSTED_LINQ_GROUP_REACTION_PREPARATION_REQUIRED_CODE
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new Error(
+    "Hosted Linq group reaction preparation retry exhausted unexpectedly.",
+  );
+}
+
+async function prepareHostedLinqGroupReactionContext(input: {
+  chatId: string;
+  prisma: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<PreparedHostedLinqGroupReactionContext | null> {
   const route = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
-    threadId: eventContext.chatId,
+    threadId: input.chatId,
   });
   if (
     !route
@@ -262,26 +353,139 @@ export async function stageHostedLinqGroupReactionContext(input: {
       prisma: input.prisma,
     }))
   ) {
-    return false;
+    return null;
   }
 
-  const append = await input.prisma.$transaction(
-    (tx) => appendHostedLinqGroupReactionMailboxTx({
-      actor: eventContext.actor.value,
-      event: input.event,
-      route,
-      tx,
-    }),
-    HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-  );
-
-  input.signal?.throwIfAborted();
-  await signalHostedLinqGroupReactionMailbox({
-    ...(input.signal ? { abortSignal: input.signal } : {}),
-    append,
+  const routeCandidate = requireHostedLinqGroupReactionRouteCandidate(route);
+  const root = await unwrapHostedDomainRootForWeb({
+    domain: HOSTED_LINQ_GROUP_REACTION_MAILBOX_DOMAIN,
     prisma: input.prisma,
+    retainFailureInScopedCache: true,
+    ...(input.signal ? { signal: input.signal } : {}),
+    userId: routeCandidate.containerMemberId,
   });
-  return true;
+  try {
+    return {
+      ingressRootKeyId: root.envelope.rootKeyId,
+      route: routeCandidate,
+    };
+  } finally {
+    root.rootKey.fill(0);
+  }
+}
+
+async function appendPreparedHostedLinqGroupReactionMailboxTx(input: {
+  actor: string;
+  chatId: string;
+  event: ParsedHostedLinqProviderEvent;
+  prepared: PreparedHostedLinqGroupReactionContext;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedLinqGroupReactionMailboxAppend | null> {
+  await acquireHostedLinqChatOwnershipLockTx({
+    chatId: input.chatId,
+    tx: input.tx,
+  });
+  await lockHostedThreadRouteByThreadIdentityTx({
+    authority: {
+      channel: "linq",
+      containerMemberId: input.prepared.route.containerMemberId,
+      threadId: input.chatId,
+    },
+    prisma: input.tx,
+  });
+
+  const route = await readHostedThreadRouteByThreadIdentity({
+    channel: "linq",
+    prisma: input.tx,
+    threadId: input.chatId,
+  });
+  if (!matchesHostedLinqGroupReactionRouteCandidate({
+    candidate: input.prepared.route,
+    route,
+  })) {
+    throw hostedLinqGroupReactionPreparationRequired("route");
+  }
+
+  if (!(await readActiveHostedMemberAccess({
+    memberId: input.prepared.route.containerMemberId,
+    prisma: input.tx,
+  }))) {
+    return null;
+  }
+
+  const activeRootKeyId = await lockAndReadActiveHostedDomainRootKeyIdTx({
+    domain: HOSTED_LINQ_GROUP_REACTION_MAILBOX_DOMAIN,
+    tx: input.tx,
+    userId: input.prepared.route.containerMemberId,
+  });
+  if (activeRootKeyId !== input.prepared.ingressRootKeyId) {
+    throw hostedLinqGroupReactionPreparationRequired("ingress-root");
+  }
+
+  return appendHostedLinqGroupReactionMailboxTx({
+    actor: input.actor,
+    event: input.event,
+    route: {
+      ...(input.prepared.route.accountLookupKey
+        ? { accountLookupKey: input.prepared.route.accountLookupKey }
+        : {}),
+      containerMemberId: input.prepared.route.containerMemberId,
+    },
+    tx: input.tx,
+  });
+}
+
+function requireHostedLinqGroupReactionRouteCandidate(
+  route: HostedThreadRouteSnapshot,
+): HostedLinqGroupReactionRouteCandidate {
+  const state = route.deliveryRouteState;
+  if (route.channel !== "linq" || !state) {
+    throw new TypeError(
+      "Hosted Linq group reaction preparation requires a canonical route snapshot.",
+    );
+  }
+  return {
+    accountLookupKey: route.accountLookupKey ?? null,
+    containerMemberId: route.containerMemberId,
+    deliveryRouteEncrypted: state.deliveryRouteEncrypted,
+    deliveryRouteEncryptedPresent: state.deliveryRouteEncryptedPresent,
+    threadIdentityLookupKey: state.threadIdentityLookupKey,
+    threadLookupKey: state.threadLookupKey,
+  };
+}
+
+function matchesHostedLinqGroupReactionRouteCandidate(input: {
+  candidate: HostedLinqGroupReactionRouteCandidate;
+  route: HostedThreadRouteSnapshot | null;
+}): boolean {
+  if (!input.route || input.route.channel !== "linq") {
+    return false;
+  }
+  const state = input.route.deliveryRouteState;
+  return Boolean(
+    state
+    && (input.route.accountLookupKey ?? null) === input.candidate.accountLookupKey
+    && input.route.containerMemberId === input.candidate.containerMemberId
+    && state.deliveryRouteEncrypted === input.candidate.deliveryRouteEncrypted
+    && (
+      state.deliveryRouteEncryptedPresent
+        === input.candidate.deliveryRouteEncryptedPresent
+    )
+    && state.threadIdentityLookupKey === input.candidate.threadIdentityLookupKey
+    && state.threadLookupKey === input.candidate.threadLookupKey
+  );
+}
+
+function hostedLinqGroupReactionPreparationRequired(
+  reason: "ingress-root" | "route",
+) {
+  return hostedOnboardingError({
+    code: HOSTED_LINQ_GROUP_REACTION_PREPARATION_REQUIRED_CODE,
+    details: { reason },
+    httpStatus: 503,
+    message: "Hosted Linq group reaction preparation is stale.",
+    retryable: true,
+  });
 }
 
 async function readHostedLinqReactionCanonicalChat(input: {

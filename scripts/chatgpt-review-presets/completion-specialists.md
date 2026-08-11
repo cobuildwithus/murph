@@ -141,6 +141,15 @@ the highest stable boundary available. Name the production behavior and the
 specific test boundary that would prove it. Do not request duplicate tests,
 snapshot churn, broad fixture rewrites, or speculative helper abstractions.
 
+When the diff adds or changes a database-touching collection path, apply
+`docs/contracts/00-invariants.md` § Database Load And Collection Fanout to its
+proof. For a hot, locked, or transactional path, require deterministic
+maximum-cardinality assertions for composed database and external call counts
+and peak connection, transaction, and external-call concurrency, including N+1
+reads, repeated owner-row loads, nested helper fanout, and concurrent per-item
+transactions. Small fixtures, passing umbrella checks, and pool limits do not
+establish the bound; the proof must also cover required boundary revalidation.
+
 ## Optional coverage patch artifact
 
 When at least one accepted coverage finding can be corrected entirely within
