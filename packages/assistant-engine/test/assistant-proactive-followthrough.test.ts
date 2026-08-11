@@ -8,7 +8,7 @@ import {
 } from '../src/assistant/onboarding-goal-checkin-automation.js'
 
 describe('assistant proactive follow-through', () => {
-  it('makes repeated-plan decisions plan-and-support turns only in private conversations', () => {
+  it('proactively offers and activates goal support only in private conversations', () => {
     const direct = buildAssistantExecutionBehaviorText({
       profile: 'gpt5-agentic',
       progressUpdateMode: 'direct',
@@ -23,17 +23,23 @@ describe('assistant proactive follow-through', () => {
       'adopt, continue, restart, extend, or modify a repeated health behavior',
     )
     expect(direct).toContain(
-      'one specific finite reminder/check-in/review package',
+      'current user-chosen goal, accepted plan, or repeatedly described friction',
     )
+    expect(direct).toContain(
+      'proactively offer one best-fit finite reminder, check-in, or review package',
+    )
+    expect(direct).toContain('weekly managed goal-support check')
+    expect(direct).toContain('Execute those writes now')
     expect(direct).toContain(
       'Do not call the plan set, started, or locked in',
     )
     expect(direct).toContain('stop asking about a topic')
     expect(direct).toContain('preserve unrelated support')
+    expect(direct).toContain('pause the weekly managed goal-support check too')
     expect(group).not.toContain('Direct proactive follow-through:')
   })
 
-  it('makes the managed post-onboarding check-in concrete, evidence-aware, and easy to stop', () => {
+  it('makes the managed goal-support audit recurring, concrete, and easy to stop', () => {
     const completedAt = '2026-06-01T18:15:00.000Z'
     const seed = buildOnboardingGoalCheckinSeed({
       now: new Date('2026-06-02T12:00:00.000Z'),
@@ -48,12 +54,19 @@ describe('assistant proactive follow-through', () => {
       timeZone: 'UTC',
     })
 
-    expect(seed?.instructions).toContain(
-      'one concrete, reply-oriented day-to-day health support bid',
-    )
-    expect(seed?.instructions).toContain('one exact finite support package')
-    expect(seed?.instructions).toContain('meal note or photo')
-    expect(seed?.instructions).toContain('stop asking about that topic')
+    expect(seed).toMatchObject({
+      activeUntil: null,
+      schedule: {
+        expression: '30 13 * * 2',
+        kind: 'cron',
+      },
+      title: 'Weekly goal support check-in',
+    })
+    expect(seed?.instructions).toContain('weekly support-gap check')
+    expect(seed?.instructions).toContain('one exact finite package')
+    expect(seed?.instructions).toContain('meal notes or photos')
+    expect(seed?.instructions).toContain('later clear yes')
+    expect(seed?.instructions).toContain('stop that topic')
     expect(seed?.instructions).toContain(
       'Missing, sparse, stale, misclassified, messy, or contradictory data is unknown',
     )
