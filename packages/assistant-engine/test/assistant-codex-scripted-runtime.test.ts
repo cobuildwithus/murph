@@ -141,6 +141,18 @@ const SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES = [
   '',
 ] as const
 
+function enableNetworkForScriptedPermissionShellProof(
+  profileLines: readonly string[],
+): readonly string[] {
+  // GitHub's restricted Linux runner cannot configure loopback inside Codex's
+  // network-disabled bubblewrap sandbox. These app-server cases exercise the
+  // profile's filesystem rules plus shell/environment preservation; the exact
+  // production network-deny TOML remains covered by assistant-permissions tests.
+  return profileLines.map((line) =>
+    line === 'enabled = false' ? 'enabled = true' : line,
+  )
+}
+
 const GROUP_CHALLENGE_DEFINITION = {
   format: {
     kind: 'individual',
@@ -399,7 +411,9 @@ describe('real codex app-server with scripted provider', () => {
     const scenario = await prepareScriptedTurnScenario({
       additionalTomlLines: [
         ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
-        ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
+        ...enableNetworkForScriptedPermissionShellProof(
+          buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
+        ),
       ],
     })
     const vaultRoot = scenario.turnInput.workingDirectory
@@ -495,7 +509,9 @@ text(result.output);
     const scenario = await prepareScriptedTurnScenario({
       additionalTomlLines: [
         ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
-        ...buildMurphMemberReadPermissionProfileTomlLines(),
+        ...enableNetworkForScriptedPermissionShellProof(
+          buildMurphMemberReadPermissionProfileTomlLines(),
+        ),
       ],
     })
     const vaultRoot = scenario.turnInput.workingDirectory
