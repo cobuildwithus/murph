@@ -480,6 +480,63 @@ describe("production-watch snapshot contract", () => {
     }
   });
 
+  it("settles resistant same-group descendants after ordinary child success", async () => {
+    const runtimeRoot = makeTempRoot();
+    const descendantPath = path.join(runtimeRoot, "ordinary-resistant-descendant.cjs");
+    const wrapperPath = path.join(runtimeRoot, "ordinary-wrapper.cjs");
+    writeFileSync(descendantPath, [
+      "const { appendFileSync, writeFileSync } = require('node:fs');",
+      "writeFileSync(process.env.TEST_DESCENDANT_PID, String(process.pid));",
+      "appendFileSync(process.env.TEST_DESCENDANT_EVENTS, 'started\\n');",
+      "process.on('SIGTERM', () => appendFileSync(process.env.TEST_DESCENDANT_EVENTS, 'terminated\\n'));",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    writeFileSync(wrapperPath, [
+      "const { spawn } = require('node:child_process');",
+      "spawn(process.execPath, [process.env.TEST_DESCENDANT_PATH], { stdio: 'ignore' });",
+      "setTimeout(() => process.exit(0), 150);",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const capturedPidPath = path.join(runtimeRoot, "ordinary-captured.pid");
+    const capturedEventsPath = path.join(runtimeRoot, "ordinary-captured.events");
+    const codexPidPath = path.join(runtimeRoot, "ordinary-codex.pid");
+    const codexEventsPath = path.join(runtimeRoot, "ordinary-codex.events");
+    const childEnv = (pidPath: string, eventsPath: string): NodeJS.ProcessEnv => ({
+      ...process.env,
+      TEST_DESCENDANT_PATH: descendantPath,
+      TEST_DESCENDANT_PID: pidPath,
+      TEST_DESCENDANT_EVENTS: eventsPath,
+    });
+    const startedAt = Date.now();
+
+    const [captured, codex] = await Promise.all([
+      spawnCaptured(process.execPath, [wrapperPath], {
+        timeoutMs: 5_000,
+        outputLimitBytes: 1_024,
+        env: childEnv(capturedPidPath, capturedEventsPath),
+      }),
+      spawnCodexJsonChild(process.execPath, [wrapperPath], {
+        stdin: "",
+        timeoutMs: 5_000,
+        outputLimitBytes: 1_024,
+        env: childEnv(codexPidPath, codexEventsPath),
+      }),
+    ]);
+
+    expect(captured).toMatchObject({ status: 0, timedOut: false });
+    expect(codex).toMatchObject({ status: 0, timedOut: false });
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(900);
+    for (const [pidPath, eventsPath] of [
+      [capturedPidPath, capturedEventsPath],
+      [codexPidPath, codexEventsPath],
+    ]) {
+      expect(readFileSync(eventsPath, "utf8")).toBe("started\nterminated\n");
+      const descendantPid = Number(readFileSync(pidPath, "utf8"));
+      expect(() => process.kill(descendantPid, 0)).toThrow(/ESRCH/u);
+    }
+  });
+
   it("aborts and settles the sibling Stripe process after an output-limit failure", async () => {
     const runtimeRoot = makeTempRoot();
     const binRoot = path.join(runtimeRoot, "bin");

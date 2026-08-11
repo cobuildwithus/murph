@@ -3752,6 +3752,7 @@ export async function spawnCaptured(
     });
     child.on("close", (status, signal) => {
       void (async () => {
+        terminationPromise ??= terminateOwnedProcessGroup(child.pid);
         await terminationPromise;
         if (pendingError !== undefined) {
           fail(pendingError);
@@ -3882,6 +3883,7 @@ export async function spawnCodexJsonChild(
     });
     child.on("close", (status, signal) => {
       void (async () => {
+        terminationPromise ??= terminateOwnedProcessGroup(child.pid);
         await terminationPromise;
         if (lineRemainder.length > 0) {
           updateCodexJsonSummary(summary, lineRemainder);
