@@ -68,7 +68,7 @@ describe("changelog registry", () => {
     expect(item?.details).toContain("one-time preview");
   });
 
-  it("keeps Terra's lone first-photo detail separate from other bounded image paths", () => {
+  it("keeps Terra on OpenAI's available first-photo detail separate from bounded image paths", () => {
     const item = listPublishedChangelogItems().find(
       (candidate) => candidate.id === "sharper-single-photo-review",
     );
@@ -76,11 +76,18 @@ describe("changelog registry", () => {
     expect(item).toMatchObject({
       editionId: "2026-08-10",
       sourcePullRequests: [1616],
-      summary: expect.stringContaining("Murph uses Terra"),
+      summary: expect.stringContaining("Terra on OpenAI"),
       details: expect.stringContaining("follow-up photos"),
     });
-    expect(item?.details).toContain("use another model");
+    expect(item?.summary).toContain("one available initial photo");
+    expect(item?.summary).toContain("stored detail");
+    expect(item?.details).toContain("Multiple available initial photos");
+    expect(item?.details).toContain("Venice");
+    expect(item?.details).toContain("other models");
     expect(item?.details).toContain("custom inference");
+    expect(`${item?.title} ${item?.summary} ${item?.details}`).not.toContain(
+      "original detail",
+    );
   });
 
   it("keeps the health-data Settings note bound to layout only", () => {
