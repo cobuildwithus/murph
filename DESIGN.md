@@ -225,8 +225,9 @@ an unavailable fiber dash in the image without adding a fiber caption claim.
 Render the app-absent standings fallback as the static counterpart to the
 shipping SwiftUI balloon. Keep the cream field, title, rank or collective
 progress, and score hierarchy aligned with the native card. The bitmap remains
-badge-free because Messages owns the outer chrome; align the title to the
-card's content padding instead of reserving an icon gutter. Preserve
+rectangular and badge-free because Messages owns the outer chrome. Reserve the
+upper-left title gutter for its provider-owned logo without drawing that logo
+into the bitmap. Preserve
 scorer-owned order, scores, progress, and coverage while using the identity-free
 public presentation defined by the challenge standings delivery contract.
 

@@ -40,7 +40,10 @@ export function getChallengeStandingsCardImageSize(
   };
 }
 
-/** Static counterpart to the shipping SwiftUI challenge standings balloon. */
+/**
+ * Static counterpart to the shipping SwiftUI challenge standings balloon.
+ * Messages owns the outer corner mask, so the bitmap remains rectangular.
+ */
 export function ChallengeStandingsCardImage({
   card,
 }: {
@@ -54,9 +57,7 @@ export function ChallengeStandingsCardImage({
         display: "flex",
         width: "100%",
         height: "100%",
-        overflow: "hidden",
         flexDirection: "column",
-        borderRadius: 105,
         padding: "38px 45px 42px",
         backgroundColor: IMESSAGE_CARD_COLOR.balloon,
         color: IMESSAGE_CARD_COLOR.primary,
@@ -69,6 +70,7 @@ export function ChallengeStandingsCardImage({
           minHeight: 105,
           flexDirection: "column",
           justifyContent: "center",
+          marginLeft: 155,
           gap: 8,
         }}
       >

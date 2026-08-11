@@ -407,6 +407,13 @@ test("response-card image route renders the exact V5 standings snapshot", async 
   assert.match(serialized, /OF 250 PTS/u);
   assert.match(serialized, /data-entry-progress="0\.8400"/u);
   assert.match(serialized, /Ranks appear when every score is complete\./u);
+  const rootTag = serialized.match(
+    /<div data-design-contract="imessage-native-challenge-standings-card"[^>]*>/u,
+  );
+  assert.ok(rootTag);
+  assert.doesNotMatch(rootTag[0], /border-radius|overflow:hidden/u);
+  assert.match(serialized, /margin-left:155px/u);
+  assert.doesNotMatch(serialized, /box-shadow:/u);
   assert.doesNotMatch(
     serialized,
     /VERIFIED STANDINGS|TEAM STANDINGS|GROUP GOAL|LEADERBOARD|verified minimum|waiting for data/u,
