@@ -371,6 +371,24 @@ cross-runtime, scheduled, or replay-conflicting requests fail closed. This path
 creates no group, membership, permission, grant, queue, workflow, or table and
 grants no future disclosure authority.
 
+The sibling `group_sender_private` adapter powers `message_current_sender` only
+for the exact accepted group input whose author explicitly requested a private
+continuation. Web derives the canonical sender and targets only that sender's
+active personal runtime; thread-container, direct, unknown-audience, scheduled,
+stale-route, and unresolved-sender contexts fail closed. A reviewed completion
+never returns to the group. Web appends one deterministic, queue-only
+`assistant.notification.requested` for the same member's current same-channel
+`direct-member` route, with `threadIsDirect: true`, no external group-thread
+authority, and the exact reviewed text. The personal runtime consumes that
+notification through the existing delivery primitive while retaining the
+original completion expiry and proof anchor. Immediately before provider entry,
+Web reopens that proof and revalidates the unexpired private Assistant Ask, the
+exact reviewed-text digest, the same personal member, and the current
+same-channel `direct-member` route. Expired, revoked, text-mismatched, or
+route-drifted proof fails terminally with no group fallback. Replay cannot
+redirect the completion after member or route drift. This adds no second model
+turn, group wake, group outbox intent, route selector, queue, or table.
+
 The target runtime keeps its resident foreground Murph as the sole
 model-authored canonical-content writer and outbound sender. Beside it, at most
 one `executeReadOnlyAssistantAsk` call may start a separate one-shot Codex App
@@ -391,23 +409,23 @@ owned child before releasing the workspace. Further asks remain pending in the
 same mailbox; there is no second queue, projection, table, workflow, container,
 or general agent registry.
 
-For a consented member or one-time current-sender target, the private read-only
-child receives the exact permission context and produces a candidate from the
-member workspace. One separate fresh-context outgoing reviewer receives only that immutable
+For a consented member, one-time current-sender disclosure, or private
+current-sender continuation, the private read-only child receives the exact
+permission context and produces a candidate from the member workspace. One
+separate fresh-context outgoing reviewer receives only that immutable
 permission, the question, and the candidate; it has no member workspace,
-history, application tools, network, or delivery authority and returns only `allow` or
-`deny`. There is no incoming reviewer and no rewrite loop. An allowed answer is
-placed on the bound group completion as untrusted data. For accepted-input
-requests, the caller group Murph runs one isolated output-only continuation with
-the existing room history, resolves references such as “that”, and writes the
-actual user-facing reply using only private facts present in the reviewed
-answer. The final outbox intent retains the completion id, expiry, and route
-proof for provider-entry revalidation. Denial or a candidate-declared
-cannot-answer yields fixed non-disclosing copy without another model turn.
-Invalid review output, provider failure, or stale
-authority discloses nothing and follows the existing retry, expiry, or terminal
-lifecycle. A denied candidate never becomes durable operation state. This adds no
-fan-out, scheduler, policy engine, result table, or second service.
+history, application tools, network, or delivery authority and returns only
+`allow` or `deny`. There is no incoming reviewer or rewrite loop. An allowed
+answer enters only its target-bound completion adapter. `consented_member` and
+`group_sender` retain the caller group's isolated output-only continuation and
+provider-entry authority recheck. `group_sender_private` instead seals the exact
+reviewed text into the personal queue-only notification above; no group
+continuation or second generation runs. Denial or a candidate-declared
+cannot-answer uses fixed non-disclosing copy. Invalid review output, provider
+failure, or stale authority discloses nothing and follows the existing retry,
+expiry, or terminal lifecycle. A denied candidate never becomes durable
+operation state. This adds no fan-out, scheduler, policy engine, result table,
+or second service.
 
 ## Hosted Connected Apps
 
@@ -465,8 +483,20 @@ make that latency shortcut replay-safe; generic notifications still wait for
 the idle checkpoint. A referral celebration recomputes its current-model
 capacity label and receives only a server-resolved tone, Humor, and Unhinged
 band, never transcript history. The existing minute recovery pass
-re-signals the exact oldest unconsumed celebration mailbox items after a failed
-Temporal signal, so mailbox state remains the only durable wake owner.
+re-signals the exact oldest unconsumed celebration mailbox pointers after a
+failed Temporal signal, so mailbox state remains the only durable wake owner;
+Web does not decrypt or replace their payloads. An authority-less legacy direct
+Linq referral wake may already be persisted behind the runtime's advanced
+import watermark. The local system-mailbox boundary therefore owns the only
+compatibility action: for the exact referral event/dedupe/queue-only/required-
+send/direct-explicit shape, it asks the existing signed external-route owner to
+assert the frozen member, Linq channel, directness, and target before model
+work. Success carries authority in memory through the unchanged audience guard
+and provider-entry recheck, with no home-route fallback. A definitive stale
+route becomes a typed terminal no-send for the same pending item so lane order
+advances; authority-owner unavailability keeps the ordinary same-item retry.
+There is no payload rewrite, replacement append, cursor rewind, migration, or
+second reconciliation owner.
 
 Scheduled non-direct Telegram execution follows the same hint-only rule without Linq fallback: the signed Web route owner must assert the exact channel, synthetic container member, and thread before group tools or model work. That exact authority is persisted on the ordinary conversation outbox and reasserted against the same Web owner immediately before each Telegram provider effect. Missing ownership is retryable; changed or mismatched ownership fails closed without a repair queue or second route store.
 
@@ -1177,8 +1207,13 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   credential, query, member identifier, phone number, or raw response. This is
   operational monitoring history, never health truth, routing authority, or a
   product control plane.
-  The Web-owned reply-latency monitor remains a separate Resend-email incident
-  owner and never falls back to this Linq path.
+  The Web-owned reply-latency and durable mailbox-progress monitors remain
+  separate Resend-email incident owners and never fall back to this Linq path.
+  They share one generic compare-and-set email lifecycle and the existing
+  `HostedLinqAlert` storage owner, but retain independent singleton rows so one
+  active latency incident cannot suppress a later error-code-independent
+  progress stall. The progress read is observability only: it neither advances
+  mailbox state nor signals Temporal or Cloudflare.
 - Hosted deployment topology has one generated Cloudflare config/deploy owner
   and two manual protected-main targets: `production` and `preview`. The
   `preview` target is a separate trust boundary, not a mode inside production:

@@ -326,6 +326,11 @@ describe("hosted usage referral policy", () => {
       kind: "explicit",
       target: "provider-linq-source-thread",
     });
+    expect(linqWake.notification.externalThreadRouteAuthority).toEqual({
+      channel: "linq",
+      containerMemberId: "member_personal",
+      threadId: "provider-linq-source-thread",
+    });
   });
 
   it("requires the complete portable active-group threshold", () => {
