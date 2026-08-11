@@ -340,16 +340,17 @@ describe('assistant response cards', () => {
       'Doorway stretch <easy> — 8 repetitions (45s)',
     )
     const richMessage = buildTelegramRichMessage(ROUTINE_CARD)
-    expect(richMessage.html).toContain('<table bordered striped>')
     expect(richMessage.html).toContain('<details>')
-    expect(richMessage.html).toContain('<tg-slideshow>')
+    expect(richMessage.html).toContain(
+      '<details><summary>Doorway stretch &lt;easy&gt;</summary><p><b>Dose:</b> 8 repetitions · <b>Time:</b> 45s</p>',
+    )
+    expect(richMessage.html).toContain(
+      '</ol><tg-slideshow><img src="https://cdn.example.test/doorway-stretch.png?x=1&amp;y=2"/></tg-slideshow></details>',
+    )
+    expect(richMessage.html).not.toContain('<th>Exercise</th>')
     expect(richMessage.html).toContain('Doorway stretch &lt;easy&gt;')
-    expect(richMessage.html).toContain(
-      'https://cdn.example.test/doorway-stretch.png?x=1&amp;y=2',
-    )
-    expect(richMessage.html).toContain(
-      'Person standing tall with the forearm on a door frame.',
-    )
+    expect(richMessage.html).not.toContain('<figcaption>')
+    expect(richMessage.html).not.toContain('Person standing tall')
   })
 
   it('preserves nutrition goals in the Telegram rich projection', () => {
@@ -357,8 +358,16 @@ describe('assistant response cards', () => {
     expect(richMessage.html).toContain(
       `<figure><img src="${buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2)}"/></figure>`,
     )
-    expect(richMessage.html).toContain('<details><summary>Goals</summary>')
-    expect(richMessage.html).toContain('calories goal 2,100 cal, under target')
+    expect(richMessage.html).toContain(
+      '<details><summary>Daily goals</summary><table bordered>',
+    )
+    expect(richMessage.html).toContain(
+      '<tr><td>Calories</td><td align="right">2,100 cal</td><td>🟠 Below target</td></tr>',
+    )
+    expect(richMessage.html).toContain(
+      '<tr><td>Protein</td><td align="right">100g</td><td>🟢 On target</td></tr>',
+    )
+    expect(richMessage.html).not.toContain('<summary>Goals</summary><ul>')
     expect(richMessage.html).toContain('<table bordered striped>')
   })
 

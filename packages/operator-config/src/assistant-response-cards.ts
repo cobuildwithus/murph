@@ -822,18 +822,12 @@ function renderTelegramExerciseRoutineCardHtml(
   const subtitle = card.subtitle === null
     ? ''
     : `<p>${escapeTelegramRichHtml(card.subtitle)}</p>`
-  const rows = card.exercises.map((exercise) =>
-    `<tr><td><b>${escapeTelegramRichHtml(exercise.name)}</b></td><td>${escapeTelegramRichHtml(exercise.dose)}</td><td align="right">${escapeTelegramRichHtml(formatRoutineDuration(exercise.estimatedSeconds))}</td></tr>`
-  ).join('')
-  const details = card.exercises.map((exercise) =>
-    `<details><summary>${escapeTelegramRichHtml(exercise.name)} · ${escapeTelegramRichHtml(exercise.dose)}</summary><ol>${exercise.instructions.map((instruction) => `<li>${escapeTelegramRichHtml(instruction)}</li>`).join('')}</ol></details>`
-  ).join('')
-  const images = card.exercises.flatMap((exercise) =>
-    exercise.images.map((image) => ({ exercise, image }))
-  )
-  const slideshow = images.length === 0
-    ? ''
-    : `<tg-slideshow>${images.map(({ image }) => renderTelegramRoutineImage(image)).join('')}<figcaption>${escapeTelegramRichHtml(card.labels.visualGuide)}<br>${images.map(({ exercise, image }, index) => renderTelegramRoutineImageCaption(index, exercise, image)).join('<br>')}</figcaption></tg-slideshow>`
+  const details = card.exercises.map((exercise) => {
+    const slideshow = exercise.images.length === 0
+      ? ''
+      : `<tg-slideshow>${exercise.images.map(renderTelegramRoutineImage).join('')}</tg-slideshow>`
+    return `<details><summary>${escapeTelegramRichHtml(exercise.name)}</summary><p><b>${escapeTelegramRichHtml(card.labels.dose)}:</b> ${escapeTelegramRichHtml(exercise.dose)} · <b>${escapeTelegramRichHtml(card.labels.time)}:</b> ${escapeTelegramRichHtml(formatRoutineDuration(exercise.estimatedSeconds))}</p><ol>${exercise.instructions.map((instruction) => `<li>${escapeTelegramRichHtml(instruction)}</li>`).join('')}</ol>${slideshow}</details>`
+  }).join('')
   const footer = card.footer === null
     ? ''
     : `<footer>${escapeTelegramRichHtml(card.footer)}</footer>`
@@ -842,9 +836,7 @@ function renderTelegramExerciseRoutineCardHtml(
     `<h2>${escapeTelegramRichHtml(card.title)}</h2>`,
     subtitle,
     `<p><b>${escapeTelegramRichHtml(card.intensity)}</b> · ${escapeTelegramRichHtml(formatRoutineDuration(card.totalSeconds))}</p>`,
-    `<table bordered striped><tr><th>${escapeTelegramRichHtml(card.labels.exercise)}</th><th>${escapeTelegramRichHtml(card.labels.dose)}</th><th>${escapeTelegramRichHtml(card.labels.time)}</th></tr>${rows}</table>`,
     details,
-    slideshow,
     `<blockquote>⚠️ ${escapeTelegramRichHtml(card.safety)}</blockquote>`,
     footer,
   ].join('')
@@ -854,14 +846,6 @@ function renderTelegramRoutineImage(
   image: ExerciseRoutineCardImageV1,
 ): string {
   return `<img src="${escapeTelegramRichHtmlAttribute(image.url)}"/>`
-}
-
-function renderTelegramRoutineImageCaption(
-  index: number,
-  exercise: ExerciseRoutineCardExerciseV1,
-  image: ExerciseRoutineCardImageV1,
-): string {
-  return `${index + 1}. <b>${escapeTelegramRichHtml(exercise.name)}</b> · ${escapeTelegramRichHtml(image.step)} — ${escapeTelegramRichHtml(image.alt)}`
 }
 
 function renderTelegramCompactTableCardHtml(
@@ -907,13 +891,13 @@ function renderTelegramNutritionCardHtml(
     : `<blockquote>${escapeTelegramRichHtml(partial)}</blockquote>`
   const goalsHtml = !isDailyNutritionResponseCardV2(card)
     ? ''
-    : `<details><summary>Goals</summary><ul>${[
-        renderTelegramNutritionGoal('calories', card.goals.calories, ' cal'),
-        renderTelegramNutritionGoal('protein', card.goals.proteinGrams, 'g'),
-        renderTelegramNutritionGoal('carbs', card.goals.carbsGrams, 'g'),
-        renderTelegramNutritionGoal('fat', card.goals.fatGrams, 'g'),
-        renderTelegramNutritionGoal('fiber', card.goals.fiberGrams, 'g'),
-      ].map((goal) => `<li>${escapeTelegramRichHtml(goal)}</li>`).join('')}</ul></details>`
+    : `<details><summary>Daily goals</summary><table bordered><tr><th>Nutrient</th><th>Target</th><th>Status</th></tr>${[
+        renderTelegramNutritionGoalRow('Calories', card.goals.calories, ' cal'),
+        renderTelegramNutritionGoalRow('Protein', card.goals.proteinGrams, 'g'),
+        renderTelegramNutritionGoalRow('Carbs', card.goals.carbsGrams, 'g'),
+        renderTelegramNutritionGoalRow('Fat', card.goals.fatGrams, 'g'),
+        renderTelegramNutritionGoalRow('Fiber', card.goals.fiberGrams, 'g'),
+      ].join('')}</table></details>`
   return [
     `<h2>${escapeTelegramRichHtml(formatNutritionCardDate(card.localDate))}</h2>`,
     `<p>${card.mealCount} ${card.mealCount === 1 ? 'meal' : 'meals'}</p>`,
@@ -991,17 +975,34 @@ function renderDailyNutritionGoals(
   )
 }
 
-function renderTelegramNutritionGoal(
+function renderTelegramNutritionGoalRow(
   label: string,
   goal: NutritionCardGoalSnapshot | null,
   unit: string,
 ): string {
   if (goal === null) {
-    return `${label} goal unavailable`
+    return `<tr><td>${escapeTelegramRichHtml(label)}</td><td align="right">—</td><td>⚪ Not available</td></tr>`
   }
-  return `${label} goal ${formatNutritionCardNumber(goal.target)}${unit}, ${
-    nutritionCardGoalStatusLabels[goal.status]
-  }`
+  return `<tr><td>${escapeTelegramRichHtml(label)}</td><td align="right">${escapeTelegramRichHtml(`${formatNutritionCardNumber(goal.target)}${unit}`)}</td><td>${escapeTelegramRichHtml(renderTelegramNutritionGoalStatus(goal.status))}</td></tr>`
+}
+
+function renderTelegramNutritionGoalStatus(
+  status: keyof typeof nutritionCardGoalStatusLabels,
+): string {
+  switch (status) {
+    case 'far_under_target':
+      return '🟠 Well below target'
+    case 'under_target':
+      return '🟠 Below target'
+    case 'on_target':
+      return '🟢 On target'
+    case 'over_target':
+      return '🟠 Above target'
+    case 'far_over_target':
+      return '🟠 Well above target'
+    case 'unavailable':
+      return '⚪ Not available'
+  }
 }
 
 function renderAvailableNutritionTotals(

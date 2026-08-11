@@ -1,6 +1,6 @@
 # Telegram rich routine preview
 
-Status: active, visual direction approved; implementation in progress
+Status: active, final live presentation approved; completion gates in progress
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -73,6 +73,13 @@ Updated: 2026-08-11
   stated duration with the visible routine instead of adding runtime arithmetic.
 - Review useful structured UI across both Telegram and iMessage. Reuse meaning,
   not provider UI; each channel keeps its own cards, media, and delivery owner.
+- Keep routine cards compact when collapsed. Put each exercise's instructions
+  and images inside its own details block instead of repeating the routine in a
+  summary table and one global caption.
+- Present nutrition goals as one compact table with short semantic statuses.
+  Keep the image and goals useful without repeating sentence-shaped labels.
+- Keep the local manual-preview recipient in ignored environment state. Commit
+  only the variable name and the safe opt-in preview procedure.
 
 ## Verification
 
@@ -89,9 +96,11 @@ Updated: 2026-08-11
   percentage and added accessible names to fallback images.
 - Focused typechecks pass for contracts, operator-config, assistant-engine, and
   the Cloudflare runner.
-- Operator card tests pass: 12 tests, including the maximum rich-message size.
+- Operator card tests pass: 13 tests, including the maximum rich-message size.
 - Assistant channel, card-tool, skill, and turn-planning tests pass: 174 tests,
   with 6 existing skips.
 - Cloudflare provider-egress conformance and intercept tests pass: 247 tests.
 - Agent docs drift check passes.
 - `git diff --check` passes.
+- The user approved the final live Telegram routine, nutrition, and compact
+  table presentation after two focused iteration rounds.
