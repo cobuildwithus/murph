@@ -1,7 +1,7 @@
 # Canonical Linq send route
 
-Status: active
-Updated: 2026-08-10
+Status: completed
+Updated: 2026-08-11
 
 ## Goal
 
@@ -114,9 +114,23 @@ Success means:
   before approval consumption, file access, or provider work on direct/group or
   participant/thread audience drift; three negative cases pass with all 247
   callback tests and the Assistant Runtime typecheck.
-- Pending: triage final ReviewGPT Round 2, commit the combined next remediation,
-  reconcile the bounded changelog-only current-base conflict, rerun required
-  CI, and complete the required next final ReviewGPT round.
+- A later ReviewGPT attempt against the pre-merge exact pushed source timed out
+  without a response and did not count as a review outcome. A fresh guarded
+  full-snapshot review of that same source returned `REVIEW_COMPLETE` and
+  `PASS` from the requested Pro model after the local collector resumed the
+  exact conversation and requested its final answer.
+- One bounded current-base merge preserved the already-reviewed routing patch.
+  Its manual resolutions kept current `main` nutrition-card presentation,
+  retained the canonical-route reliability contract, and moved this PR's
+  release note into the new independent changelog-fragment owner. An automatic
+  test-harness merge had dropped four bindings used only by this PR's scheduled
+  native-card scenario; restoring those existing bindings made the Cloudflare
+  typecheck pass without changing production behavior.
+- Post-merge proof passes: 2,172 Assistant Runtime tests with 4 skipped, 230 Web
+  routing tests, 151 Cloudflare parser/platform tests, 40 changelog tests, and
+  hosted-execution, Web, Assistant Runtime, and Cloudflare typechecks. Required
+  GitHub checks are running on the pushed merge head; the final plan-only
+  closeout commit does not change reviewed production behavior.
 
 ## Deployment
 
@@ -129,3 +143,4 @@ outside the rollback window.
 Post-deploy proof must include one authorized private scheduled native card,
 one ordinary direct reply, one group reply, and one private continuation, with
 no canonical-route protocol or mismatch errors.
+Completed: 2026-08-11
