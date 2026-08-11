@@ -6,6 +6,10 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  hostedPhysicalNoteSendResponseSchema,
+} from '@murphai/hosted-execution/physical-notes'
+
+import {
   MURPH_SEND_PHYSICAL_NOTE_TOOL,
   createPhysicalNoteRequestKey,
   readPhysicalNoteDynamicToolRequest,
@@ -36,6 +40,10 @@ const RECIPIENT = {
   postalCode: '30308',
   state: 'GA',
 }
+const PREVIOUS_HOSTED_PHYSICAL_NOTE_SEND_RESPONSE_SCHEMA =
+  hostedPhysicalNoteSendResponseSchema
+    .omit({ failureReason: true })
+    .strict()
 const tempRoots: string[] = []
 const authorizeApprovalInput: AssistantAcceptedMessageTargetAuthorizer =
   async (input) => input.messageRef === APPROVAL_INPUT_ID
@@ -322,6 +330,63 @@ describe('assistant physical notes', () => {
     )
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       'action is not available to the current participant right now',
+    )
+  })
+
+  it('keeps a categorized Web rejection pending through the previous strict runner', async () => {
+    const vaultRoot = await createPhysicalNoteVault()
+    const currentWebResponse = hostedPhysicalNoteSendResponseSchema.parse({
+      complimentary: true,
+      costUsdMicros: '0',
+      failureReason: 'recipient_address',
+      physicalNoteId: 'hpn_failed',
+      status: 'failed',
+    })
+    const send = vi.fn(async () =>
+      PREVIOUS_HOSTED_PHYSICAL_NOTE_SEND_RESPONSE_SCHEMA.parse(
+        currentWebResponse,
+      )
+    )
+
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { send },
+        privateImageUrlPublisher: {
+          publishPrivateImageUrl: async () => ({
+            expiresAt: '2027-08-01T00:00:00.000Z',
+            url: 'https://private-media.example.test/note',
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        imageRef: IMAGE_REF,
+        imageSha256: IMAGE_SHA256,
+        kind: 'send-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        recipient: RECIPIENT,
+      },
+      vaultRoot,
+    })
+
+    expect(send).toHaveBeenCalledOnce()
+    expect(result.rpcResult).toMatchObject({ success: false })
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"status":"pending"',
+    )
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'could not confirm whether this physical note was accepted',
+    )
+    expect(result.rpcResult.contentItems[0]?.text).toMatch(
+      /do not .*retry it automatically/iu,
+    )
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+      'new explicit send request',
     )
   })
 

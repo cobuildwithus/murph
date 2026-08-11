@@ -15,10 +15,11 @@ import {
   vi,
 } from "vitest";
 
-import type {
-  LobPhysicalNoteCreateResult,
-  LobPhysicalNoteLookupResult,
-  LobPhysicalNoteRuntime,
+import {
+  createLobPhysicalNoteRuntime,
+  type LobPhysicalNoteCreateResult,
+  type LobPhysicalNoteLookupResult,
+  type LobPhysicalNoteRuntime,
 } from "@/src/lib/physical-notes/lob-runtime";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -628,6 +629,44 @@ describe("createHostedPhysicalNote", () => {
         status: "starting",
       }),
     ]);
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
+  });
+
+  it("keeps an HTTP 408 reservation and offer after one provider request", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      error: {
+        code: "request_timeout",
+        message: "provider detail",
+        status_code: 408,
+      },
+    }, { status: 408 }));
+    const runtime = createLobPhysicalNoteRuntime({
+      apiKey: "test_key",
+      fetchImpl,
+      fromAddressId: "adr_from",
+    });
+
+    const response = await createHostedPhysicalNote({
+      ...buildRequest(70),
+      prisma: store.prisma,
+      runtime,
+    });
+
+    expect(response).toMatchObject({
+      complimentary: true,
+      status: "pending",
+    });
+    expect(store.allRows()).toEqual([
+      expect.objectContaining({
+        complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+        failureReason: null,
+        providerLetterId: null,
+        status: "starting",
+      }),
+    ]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
     expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 

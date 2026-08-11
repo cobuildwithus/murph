@@ -43,13 +43,12 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Add one nullable column to `hosted_physical_note` so a definite rejection has
   the same answer on the original call and every replay. Existing failed rows
   remain compatible with a null reason and use the unknown recovery path.
-- Deploy the Cloudflare Worker and runner bundle with
-  `container_rollout=immediate`, then require managed-container smoke proof of
-  the exact new runner-bundle fingerprint before deploying the additive Web
-  migration and response producer. The new consumer accepts older Web
-  responses because the reason is optional; an old strict runner rejects the
-  new field and fails closed to pending, so it must not coexist with the new
-  producer. Roll back Web before Cloudflare.
+- Deploy the additive migration and current Web producer first so the HTTP 408
+  ambiguity fix precedes the new recovery behavior. An old strict runner rejects
+  a categorized response and fails closed to pending without retry. Then deploy
+  the Cloudflare Worker and runner bundle with `container_rollout=immediate` and
+  require managed-container smoke proof of the exact new runner-bundle
+  fingerprint. Roll back Cloudflare before Web.
 
 ## Implementation
 
@@ -72,7 +71,7 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Assistant tool tests prove each member-facing recovery path and preserve the
   pending no-retry instruction.
 - Focused Hosted Execution, Web, Assistant Engine, and Cloudflare tests pass:
-  6, 84, 13, and 5 tests respectively. Prisma validation and generation pass,
+  6, 85, 15, and 5 tests respectively. Prisma validation and generation pass,
   as do all four affected package/app typechecks. The opt-in real-model journey
   compiles and selected the exact test locally, but its paid execution is
   blocked when the provider credential is absent; deterministic owner tests
@@ -98,10 +97,10 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   column, allowlisted mapper, and existing-owner recovery path. Review-driven
   growth is focused tests and corrected guidance, not a new state owner, queue,
   retry path, compatibility shim, or reconciliation mechanism.
-- Continue with the existing implementation after converging every operative
-  rollout instruction on immediate consumer convergence, exact runner
-  fingerprint proof, Web-last deployment, and Web-first rollback. Adding a
-  second protocol or compatibility path is not justified.
+- Round 2 initially converged the rollout on immediate consumer convergence,
+  exact runner fingerprint proof, Web-last deployment, and Web-first rollback.
+  Round 5 supersedes that deployment decision below; adding a second protocol
+  or compatibility path remains unjustified.
 - Round 3 found that three new Murph-owned recovery instructions also opened the
   unrelated product-feedback path, including for transient printer failures.
   Delete that coupling, leave feedback eligibility with its existing central
@@ -114,3 +113,11 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   candidate for independently expressed eligible repeated frustration. Cover
   both outcomes in the existing opt-in real-model journey; do not add runtime
   flags, recorder filters, or another feedback policy owner.
+- Round 5 found that the rollout reasoning over-weighted response-schema
+  compatibility and missed the old Web producer's different HTTP 408 behavior.
+  Runner-first convergence could terminalize an ambiguous request before the
+  current runner invited a later explicit request under a new idempotency key.
+  Reverse the rollout to migration/current-Web first, where the old strict
+  runner fails categorized responses closed to pending, then converge the new
+  runner. Add mixed-version and integrated 408 proof without a compatibility
+  schema, queue, reconciliation owner, or rollout state.

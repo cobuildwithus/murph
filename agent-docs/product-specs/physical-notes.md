@@ -198,13 +198,16 @@ active, then enable live sending. The older runtime simply lacks the tool during
 a Web-first compatibility window; a new runtime against an old Web deployment
 would expose a route that does not exist and is therefore the unsafe order.
 
-The additive actionable-rejection rollout uses the opposite consumer-first
-order within the already-live physical-note route: deploy Cloudflare and the
-runner bundle with `container_rollout=immediate`, then require the managed
-container smoke to prove the exact new runner-bundle fingerprint before
-deploying Web's additive Prisma migration and response producer. The new strict
-consumer accepts an older Web response without the optional field. An older
-warm runner rejects the added Web response field, so Web must not ship before
-runner convergence. Verify one synthetic rejection category and one accepted
-test-mode note after both sides converge. Roll back Web before Cloudflare so the
-old strict consumer never returns while Web still produces the new field.
+The additive actionable-rejection rollout is producer-first within the
+already-live physical-note route: deploy Web's additive Prisma migration and
+response producer before Cloudflare and the runner bundle. That installs Web's
+HTTP 408 ambiguity correction before any recovery can authorize a later
+explicit request. During the mixed-version interval an older strict runner
+rejects a categorized failure response and the assistant fails closed to
+`pending` without retry; responses without a definite printer rejection remain
+unchanged.
+Then deploy Cloudflare and the runner bundle with `container_rollout=immediate`
+and require the managed-container smoke to prove the exact new runner-bundle
+fingerprint. Verify one synthetic rejection category, one HTTP 408 ambiguity,
+and one accepted test-mode note after both sides converge. Roll back Cloudflare
+before Web so the old 408 classifier never meets the new recovery behavior.
