@@ -17,7 +17,8 @@ Updated: 2026-08-11
   schedule with an explicit calendar date or preserved relative day, wall-clock
   time, and IANA timezone.
 - Relative words such as today, tonight, and tomorrow are resolved by the host
-  against the named timezone instead of being converted to a date by the model.
+  against the named timezone and the accepted input timestamp instead of being
+  converted to a date by the model or resolved when a delayed tool call arrives.
 - Exact ISO `at` schedules keep their existing behavior for programmatic callers.
 - Generic model-authored one-shots cannot bypass local-time resolution with raw
   exact-ISO input, while code-owned programmatic callers retain exact instants.
@@ -84,8 +85,10 @@ Updated: 2026-08-11
 - Return bounded model-facing recovery for daylight-saving gaps, folds, invalid
   timezones, and optimistic-concurrency conflicts without exposing raw errors.
 - Preserve today/tonight/tomorrow as a bounded semantic field until the trusted
-  resolver computes the named-zone calendar date; use an explicit date only
-  when the request or established context already supplies one.
+  resolver computes the named-zone calendar date from one accepted-input
+  reference instant; use an explicit date only when the request or established
+  context already supplies one. Validation and canonicalization share that one
+  resolution rather than reading the clock twice.
 - Make the typed root hosted automation port the exclusive hosted mutation owner.
   The hosted-runner image contains a root-owned, read-only role sentinel, and the
   automation CLI rejects every mutation when that immutable image role is present.
@@ -132,6 +135,10 @@ projection and is covered by a byte-for-byte no-mutation test.
   passed.
 - `pnpm --dir packages/assistant-engine test test/assistant-hosted-domain-tools.test.ts test/model-behavior.test.ts test/onboarding-first-personal-read.test.ts test/assistant-codex-scripted-runtime.test.ts`
   passed with 136 tests.
+- Focused accepted-input reference coverage passed: the host resolves a request
+  accepted immediately before named-zone midnight even when tool parsing occurs
+  after midnight; initial provider input and live-steered delivery contexts both
+  carry their own immutable reference instant.
 - `pnpm --dir packages/assistant-runtime test test/hosted-runtime-workspace-assistant-phase.test.ts`
   passed with 282 tests, including byte-for-byte read-only inspect coverage.
 - `pnpm --dir packages/cli test test/automation.test.ts test/automation-hosted-image.test.ts`

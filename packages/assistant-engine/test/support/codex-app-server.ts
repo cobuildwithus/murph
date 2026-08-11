@@ -18,18 +18,24 @@ const TEST_REQUEST_ID = 'request-test'
  */
 export function readTestMurphDynamicToolRequest(
   message: CodexRpcMessage,
+  input?: {
+    automationRelativeDateReferenceAt?: string | null
+  },
 ): MurphDynamicToolRequest | null {
   const params = isRecord(message.params) ? message.params : {}
-  return readMurphDynamicToolRequest({
-    ...message,
-    id: Object.hasOwn(message, 'id') ? message.id : TEST_REQUEST_ID,
-    params: {
-      callId: TEST_CALL_ID,
-      threadId: TEST_THREAD_ID,
-      turnId: TEST_TURN_ID,
-      ...params,
+  return readMurphDynamicToolRequest(
+    {
+      ...message,
+      id: Object.hasOwn(message, 'id') ? message.id : TEST_REQUEST_ID,
+      params: {
+        callId: TEST_CALL_ID,
+        threadId: TEST_THREAD_ID,
+        turnId: TEST_TURN_ID,
+        ...params,
+      },
     },
-  })
+    input,
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

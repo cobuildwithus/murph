@@ -1,7 +1,10 @@
 import type { AssistantAskResult } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantMessageInput } from './service-contracts.js'
-import type { AssistantAcceptedTurnInputItemInput } from './active-turn-input-journal.js'
+import {
+  resolveAssistantAcceptedTurnInputReferenceAt,
+  type AssistantAcceptedTurnInputItemInput,
+} from './active-turn-input-journal.js'
 import type {
   AssistantActiveTurnInputAdmissionHook,
   AssistantActiveTurnInputAdmissionInput,
@@ -52,6 +55,7 @@ interface QueuedAssistantActiveTurnInputAdmission {
   providerInputAck?: Promise<boolean> | null
   providerInputAckTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
   providerInputAcknowledgedTurnKey?: AssistantActiveTurnLiveProviderTurnKey | null
+  relativeDateReferenceAt: string
 }
 
 interface AssistantActiveTurnManualInputCompletion {
@@ -129,6 +133,7 @@ class AssistantActiveTurnInputController {
       }),
       manualCompletion,
       providerInputAcknowledgedTurnKey: null,
+      relativeDateReferenceAt: new Date().toISOString(),
     }
     this.pending.push(queued)
     this.manualCompletions.push(manualCompletion)
@@ -426,6 +431,9 @@ class AssistantActiveTurnInputController {
     const queued = {
       admission: normalizeAcceptedActiveTurnInputAdmission(result),
       providerInputAcknowledgedTurnKey: null,
+      relativeDateReferenceAt:
+        resolveAssistantAcceptedTurnInputReferenceAt(result.acceptedInputs)
+        ?? new Date().toISOString(),
     }
     this.pending.push(queued)
     this.tryStartLiveSteers()
@@ -531,6 +539,7 @@ class AssistantActiveTurnInputController {
           })
           await liveProviderTurn.steer({
             prompt: normalizeNullableString(item.admission.prompt) ?? '',
+            relativeDateReferenceAt: item.relativeDateReferenceAt,
             userMessageContent: item.admission.userMessageContent ?? null,
           })
         })

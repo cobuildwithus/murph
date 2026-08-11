@@ -457,6 +457,7 @@ async function waitForCodexProgressDrain(
 
 export interface CodexAppServerTurnInput {
   allowFinishWithoutReply?: boolean | null
+  automationRelativeDateReferenceAt?: string | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   approvalPolicy?: string
@@ -634,6 +635,7 @@ export type CodexAppServerSteerInput = {
   threadId: string
   turnId: string
   prompt: string
+  relativeDateReferenceAt?: string | null
   images?: readonly CodexAppServerImageInput[] | null
 }
 
@@ -3110,6 +3112,9 @@ async function runCodexAppServerTurnOnProcess(
     readProjectionScopeKeyBatches: [],
     roster: null,
   }
+  const automationRelativeDateReferenceAts: Array<string | null> = [
+    input.automationRelativeDateReferenceAt ?? null,
+  ]
   const generateSongTurnState = input.generateSongPolicy
     ? {
         attemptCount: 0,
@@ -4080,7 +4085,12 @@ async function runCodexAppServerTurnOnProcess(
       readMurphDynamicToolRequest,
     } = dynamicToolRuntime
 
-    const dynamicToolRequest = readMurphDynamicToolRequest(message)
+    const dynamicToolRequest = readMurphDynamicToolRequest(message, {
+      automationRelativeDateReferenceAt:
+        automationRelativeDateReferenceAts[
+          dynamicToolRequestDeliveryContextOrdinal
+        ] ?? null,
+    })
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({
         message,
@@ -5124,18 +5134,29 @@ async function runCodexAppServerTurnOnProcess(
       images: steerInput.images,
       tempRoot: input.tempRoot,
     })
-    await withCodexRpcTimeout(
-      sendRequest(
-        'turn/steer',
-        buildCodexTurnSteerParams({
-          ...liveTurn,
-          imagePaths: steerImagePaths,
-          prompt: steerInput.prompt,
-        }),
-      ),
-      CODEX_RPC_STEER_TIMEOUT_MS,
-      'turn/steer',
+    const deliveryContextOrdinal = automationRelativeDateReferenceAts.length
+    automationRelativeDateReferenceAts.push(
+      normalizeNullableString(steerInput.relativeDateReferenceAt),
     )
+    try {
+      await withCodexRpcTimeout(
+        sendRequest(
+          'turn/steer',
+          buildCodexTurnSteerParams({
+            ...liveTurn,
+            imagePaths: steerImagePaths,
+            prompt: steerInput.prompt,
+          }),
+        ),
+        CODEX_RPC_STEER_TIMEOUT_MS,
+        'turn/steer',
+      )
+    } catch (error) {
+      if (automationRelativeDateReferenceAts.length === deliveryContextOrdinal + 1) {
+        automationRelativeDateReferenceAts.pop()
+      }
+      throw error
+    }
   }
 
   const interruptLiveTurn = async (): Promise<void> => {

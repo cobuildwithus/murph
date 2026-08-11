@@ -135,6 +135,7 @@ export interface AssistantProviderTurn {
   activeTurnId?: string | null
   activeTurnSessionId?: string | null
   allowFinishWithoutReply?: boolean | null
+  automationRelativeDateReferenceAt?: string | null
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   abortSignal?: AbortSignal
   codexConfigOverrides?: readonly string[] | null

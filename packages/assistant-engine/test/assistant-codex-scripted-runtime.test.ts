@@ -1823,7 +1823,7 @@ const result = await tools.murph__automation({
   schedule: {
     kind: "at",
     localAt: {
-      date: "2031-02-14",
+      relativeDay: "today",
       time: "23:20",
       timeZone: "Pacific/Honolulu",
     },
@@ -1840,6 +1840,7 @@ text(JSON.stringify(result));
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
+      automationRelativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
       baseInstructions: buildScriptedHostedSystemPrompt('group', true),
       dynamicTools: [MURPH_AUTOMATION_TOOL],
       hostedToolContext: {
@@ -1853,7 +1854,7 @@ text(JSON.stringify(result));
               action: 'save',
               automationId: 'automation-group-one-shot',
               created: true,
-              effectiveTimeZone: 'Pacific/Honolulu',
+              effectiveTimeZone: null,
               lookupId: 'group-one-shot-reminder',
               nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
               routeBinding: 'current_conversation',
@@ -1892,10 +1893,107 @@ text(JSON.stringify(result));
       .join('\n')
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"effectiveTimeZone":null')
     expect(toolOutputs).toContain('"nextOccurrenceAt":"2031-02-15T09:20:00.000Z"')
     expect(result.finalMessage).toBe(
       'The group reminder is saved for the verified local time.',
     )
+  })
+
+  it('keeps a live-steered relative reminder on its accepted delivery-context date', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    let steered: Promise<void> | null = null
+    scenario.stub.queue(
+      {
+        delayMs: 2_000,
+        text: 'STEER_REMINDER_FIRST_REPLY',
+      },
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the reminder tonight.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      relativeDay: "today",
+      time: "23:20",
+      timeZone: "Pacific/Honolulu",
+    },
+  },
+  title: "Steered one-shot reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'STEER_REMINDER_OK' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-steered-one-shot',
+              created: true,
+              effectiveTimeZone: null,
+              lookupId: 'steered-one-shot-reminder',
+              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              routeBinding: 'current_conversation',
+              schedule: {
+                at: '2031-02-15T09:20:00.000Z',
+                kind: 'at',
+              },
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2031-02-15T09:59:59.950Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      onLiveTurn: (turn: CodexAppServerLiveTurn) => {
+        steered = delay(500).then(() =>
+          turn.steer({
+            prompt: 'Remind me tonight at 11:20 PM Honolulu time.',
+            relativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
+          }))
+      },
+      prompt: 'Reply before I send another message.',
+    })
+
+    expect(steered).not.toBeNull()
+    await steered
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the reminder tonight.',
+      schedule: {
+        at: '2031-02-15T09:20:00.000Z',
+        kind: 'at',
+      },
+      title: 'Steered one-shot reminder',
+    }])
+    expect(result.finalMessage).toBe('STEER_REMINDER_OK')
+    expect(result.responseDeliveryContextOrdinal).toBe(1)
   })
 
   it('reports a reactivated stale one-shot as needing a new time', {

@@ -676,6 +676,7 @@ test('active-turn controller can notify every active turn in one vault', async (
     admissionHook: async () => ({
       acceptedInputs: [
         {
+          acceptedAt: '2031-02-15T09:59:59.900Z',
           id: 'hook-1',
           promptFallbackReason: 'missing-content-ref',
           promptFallbackText: 'Vault-level hook input',
@@ -728,6 +729,7 @@ test('active-turn controller can notify every active turn in one vault', async (
     ])
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Vault-level hook input',
+      relativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
       userMessageContent: [
         {
           text: 'Vault-level hook input',
@@ -1038,6 +1040,7 @@ test('active-turn controller only probes input after explicit notification or pr
     assert.equal(admissionCount, 1)
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Notification hook input',
+      relativeDateReferenceAt: expect.any(String),
       userMessageContent: [
         {
           text: 'Notification hook input',
@@ -1331,6 +1334,7 @@ test('active-turn controller reruns input-available admission for in-flight noti
     expect(steer).toHaveBeenCalledTimes(1)
     expect(steer).toHaveBeenCalledWith({
       prompt: 'Rerun hook input',
+      relativeDateReferenceAt: expect.any(String),
       userMessageContent: [
         {
           text: 'Rerun hook input',

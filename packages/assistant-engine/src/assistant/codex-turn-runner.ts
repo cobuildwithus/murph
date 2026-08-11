@@ -85,9 +85,10 @@ import {
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
-import type {
-  AssistantAcceptedTurnInputItemInput,
-  AssistantCodexContinuation,
+import {
+  resolveAssistantAcceptedTurnInputReferenceAt,
+  type AssistantAcceptedTurnInputItemInput,
+  type AssistantCodexContinuation,
 } from './active-turn-input-journal.js'
 import type { AssistantUserMessageContentPart } from './content-types.js'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
@@ -582,6 +583,10 @@ async function executeAssistantCodexAttempt(input: {
           : executionPlan.activeTurnSteering,
         activeTurnSessionId: attemptPlan.session.sessionId,
         allowFinishWithoutReply: executionPlan.allowFinishWithoutReply,
+        automationRelativeDateReferenceAt:
+          resolveAssistantAcceptedTurnInputReferenceAt(
+            executionPlan.acceptedInputItems ?? [],
+          ),
         authorizeAcceptedMessageTarget:
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({

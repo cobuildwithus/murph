@@ -634,6 +634,18 @@ describe('Codex model catalog', () => {
       },
     })
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue({
+      acceptedInputItems: [
+        {
+          acceptedAt: '2031-02-15T09:59:58.000Z',
+          id: 'accepted-input-earlier',
+          source: 'manual',
+        },
+        {
+          acceptedAt: '2031-02-15T09:59:59.900Z',
+          id: 'accepted-input-latest',
+          source: 'manual',
+        },
+      ],
       activeTurnSteering: null,
       executionContext: { hosted: null },
       input,
@@ -694,6 +706,10 @@ describe('Codex model catalog', () => {
     }
     expect(outcome.providerTurn.responseCard).toEqual(card)
     expect(outcome.providerTurn.responseMedia).toEqual([])
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.automationRelativeDateReferenceAt,
+    ).toBe('2031-02-15T09:59:59.900Z')
   })
 
   it('enforces the output-only boundary at provider execution', async () => {

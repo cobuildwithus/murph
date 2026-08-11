@@ -28,8 +28,9 @@ import {
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_ID,
   MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
 } from '../../assistant/onboarding-first-personal-read-automation.js'
-import type {
-  SafeToolCallValidationDigest,
+import {
+  buildSafeToolCallValidationDigest,
+  type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
@@ -100,6 +101,7 @@ type AutomationLocalAtFailureCode =
   | 'local_at_fold'
   | 'local_at_gap'
   | 'local_at_invalid_timezone'
+  | 'local_at_reference_unavailable'
 
 class AutomationLocalAtResolutionError extends Error {
   readonly code: AutomationLocalAtFailureCode
@@ -151,20 +153,6 @@ const automationLocalAtScheduleSchema = z
     ),
   })
   .strict()
-  .superRefine((value, context) => {
-    try {
-      resolveOneShotLocalAt(value.localAt)
-    } catch (error) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          error instanceof Error
-            ? error.message
-            : 'schedule.localAt could not be resolved.',
-        path: ['localAt'],
-      })
-    }
-  })
 
 const automationDynamicToolScheduleSchema = z.union([
   automationScheduleEverySchema,
@@ -288,6 +276,26 @@ const automationArgumentsSchema = z.discriminatedUnion('action', [
   reconcileAutomationArgumentsSchema,
 ])
 
+const AUTOMATION_ARGUMENT_ROOT_KEYS = [
+  'action',
+  'activeUntil',
+  'assistantTargetOverride',
+  'continuityPolicy',
+  'expectedUpdatedAt',
+  'instructions',
+  'lookup',
+  'retargetToCurrentConversation',
+  'schedule',
+  'slug',
+  'status',
+  'summary',
+  'supportKind',
+  'supportSeriesId',
+  'tags',
+  'title',
+  'desiredAutomationIds',
+] as const
+
 export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
@@ -311,6 +319,7 @@ export type AutomationDynamicToolRequest =
 
 export function readAutomationDynamicToolRequest(input: {
   arguments: unknown
+  relativeDateReferenceAt?: string | null
   tool: string | null
 }): AutomationDynamicToolRequest | null {
   if (input.tool !== MURPH_AUTOMATION_TOOL.name) {
@@ -319,73 +328,51 @@ export function readAutomationDynamicToolRequest(input: {
 
   const parsed = parseDynamicToolArguments({
     schema: automationArgumentsSchema,
-    schemaRootKeys: [
-      'action',
-      'activeUntil',
-      'assistantTargetOverride',
-      'continuityPolicy',
-      'expectedUpdatedAt',
-      'instructions',
-      'lookup',
-      'retargetToCurrentConversation',
-      'schedule',
-      'slug',
-      'status',
-      'summary',
-      'supportKind',
-      'supportSeriesId',
-      'tags',
-      'title',
-      'desiredAutomationIds',
-    ],
+    schemaRootKeys: AUTOMATION_ARGUMENT_ROOT_KEYS,
     toolName: 'murph.automation',
     value: input.arguments,
   })
 
-  const safeFailureCode = parsed.ok
-    ? null
-    : readAutomationLocalAtFailureCode(input.arguments)
+  if (!parsed.ok) {
+    return {
+      kind: 'invalid-automation-arguments',
+      validationDigest: parsed.validationDigest,
+    }
+  }
 
-  return parsed.ok
-    ? {
-        kind: 'automation',
-        ...(parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
-          ? { onboardingFirstReadCompletionRequested: true as const }
-          : {}),
-        request: resolveAutomationDynamicToolRequest(parsed.args),
-      }
-    : {
-        kind: 'invalid-automation-arguments',
-        ...(safeFailureCode === null
-          ? {}
-          : { safeFailureCode }),
-        validationDigest: parsed.validationDigest,
-      }
-}
-
-function readAutomationLocalAtFailureCode(
-  value: unknown,
-): AutomationLocalAtFailureCode | null {
-  if (!isUnknownRecord(value)) {
-    return null
-  }
-  if (value.action !== 'save' && value.action !== 'patch') {
-    return null
-  }
-  if (!isUnknownRecord(value.schedule) || value.schedule.kind !== 'at') {
-    return null
-  }
-  const parsed = automationOneShotLocalAtSchema.safeParse(value.schedule.localAt)
-  if (!parsed.success) {
-    return null
-  }
   try {
-    resolveOneShotLocalAt(parsed.data)
-    return null
+    return {
+      kind: 'automation',
+      ...(parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
+        ? { onboardingFirstReadCompletionRequested: true as const }
+        : {}),
+      request: resolveAutomationDynamicToolRequest(
+        parsed.args,
+        input.relativeDateReferenceAt ?? null,
+      ),
+    }
   } catch (error) {
-    return error instanceof AutomationLocalAtResolutionError
-      ? error.code
-      : null
+    return {
+      kind: 'invalid-automation-arguments',
+      ...(error instanceof AutomationLocalAtResolutionError
+        ? { safeFailureCode: error.code }
+        : {}),
+      validationDigest: buildSafeToolCallValidationDigest({
+        error: new z.ZodError([{
+          code: z.ZodIssueCode.custom,
+          message:
+            error instanceof Error
+              ? error.message
+              : 'schedule.localAt could not be resolved.',
+          path: ['schedule', 'localAt'],
+        }]),
+        rawInput: input.arguments,
+        requestedToolName: 'murph.automation',
+        schemaName: 'murph.automation.input',
+        schemaRootKeys: AUTOMATION_ARGUMENT_ROOT_KEYS,
+        toolName: 'murph.automation',
+      }),
+    }
   }
 }
 
@@ -395,6 +382,7 @@ function isUnknownRecord(value: unknown): value is Record<string, unknown> {
 
 function resolveAutomationDynamicToolRequest(
   args: z.infer<typeof automationArgumentsSchema>,
+  relativeDateReferenceAt: string | null,
 ): AssistantHostedAutomationToolRequest {
   if (args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION) {
     return buildOnboardingFirstPersonalReadAutomationSaveRequest()
@@ -402,7 +390,10 @@ function resolveAutomationDynamicToolRequest(
   if (args.action === 'save') {
     return {
       ...args,
-      schedule: resolveDynamicAutomationSchedule(args.schedule),
+      schedule: resolveDynamicAutomationSchedule(
+        args.schedule,
+        relativeDateReferenceAt,
+      ),
     }
   }
   if (args.action === 'patch') {
@@ -411,7 +402,12 @@ function resolveAutomationDynamicToolRequest(
       ...rest,
       ...(schedule === undefined
         ? {}
-        : { schedule: resolveDynamicAutomationSchedule(schedule) }),
+        : {
+            schedule: resolveDynamicAutomationSchedule(
+              schedule,
+              relativeDateReferenceAt,
+            ),
+          }),
     }
   }
   return args
@@ -419,10 +415,14 @@ function resolveAutomationDynamicToolRequest(
 
 function resolveDynamicAutomationSchedule(
   schedule: z.infer<typeof automationDynamicToolScheduleSchema>,
+  relativeDateReferenceAt: string | null,
 ): AutomationSchedule {
   if ('localAt' in schedule) {
     return {
-      at: resolveOneShotLocalAt(schedule.localAt),
+      at: resolveOneShotLocalAt(
+        schedule.localAt,
+        relativeDateReferenceAt,
+      ),
       kind: 'at',
     }
   }
@@ -431,6 +431,7 @@ function resolveDynamicAutomationSchedule(
 
 function resolveOneShotLocalAt(
   localAt: z.infer<typeof automationOneShotLocalAtSchema>,
+  relativeDateReferenceAt: string | null,
 ): string {
   const timeZone = normalizeIanaTimeZone(localAt.timeZone)
   if (!timeZone) {
@@ -441,7 +442,11 @@ function resolveOneShotLocalAt(
   }
 
   const date = localAt.date === undefined
-    ? resolveLocalAtRelativeDate(localAt.relativeDay, timeZone)
+    ? resolveLocalAtRelativeDate(
+        localAt.relativeDay,
+        timeZone,
+        relativeDateReferenceAt,
+      )
     : parseLocalAtDate(localAt.date)
   const time = parseLocalAtTime(localAt.time)
   const localAsUtcMs = Date.UTC(
@@ -489,11 +494,19 @@ function resolveOneShotLocalAt(
 function resolveLocalAtRelativeDate(
   relativeDay: typeof automationLocalAtRelativeDayValues[number] | undefined,
   timeZone: string,
+  referenceAt: string | null,
 ): { day: number; month: number; year: number } {
   if (relativeDay === undefined) {
     throw new Error('schedule.localAt requires an explicit date or relativeDay.')
   }
-  const current = formatTimeZoneDateTimeParts(Date.now(), timeZone)
+  const referenceAtMs = referenceAt === null ? Number.NaN : Date.parse(referenceAt)
+  if (!Number.isFinite(referenceAtMs)) {
+    throw new AutomationLocalAtResolutionError(
+      'local_at_reference_unavailable',
+      'schedule.localAt.relativeDay requires the accepted input reference time.',
+    )
+  }
+  const current = formatTimeZoneDateTimeParts(referenceAtMs, timeZone)
   const dayOffset = relativeDay === 'tomorrow' ? 1 : 0
   const resolved = new Date(Date.UTC(
     current.year,

@@ -1272,6 +1272,9 @@ function isMurphDynamicToolNamespace(namespace: string | null): boolean {
 
 export function readMurphDynamicToolRequest(
   message: CodexRpcMessage,
+  input?: {
+    automationRelativeDateReferenceAt?: string | null
+  },
 ): MurphDynamicToolRequest | null {
   const request = parseDynamicToolCallRequest(message)
   if (!request) {
@@ -1288,6 +1291,8 @@ export function readMurphDynamicToolRequest(
 
   const automationRequest = readAutomationDynamicToolRequest({
     arguments: request.arguments,
+    relativeDateReferenceAt:
+      input?.automationRelativeDateReferenceAt ?? null,
     tool: request.tool,
   })
   if (automationRequest) {
@@ -1855,6 +1860,11 @@ export async function executeMurphDynamicToolRequest(input: {
           return toolTextResult(
             false,
             'the reminder timezone is invalid; ask for or infer a valid IANA timezone before retrying',
+          )
+        case 'local_at_reference_unavailable':
+          return toolTextResult(
+            false,
+            'the relative reminder date could not be safely anchored to the accepted message; ask the user for an explicit calendar date before retrying',
           )
         default:
           return toolTextResult(false, 'invalid automation arguments')

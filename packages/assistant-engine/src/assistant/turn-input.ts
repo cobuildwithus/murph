@@ -77,6 +77,7 @@ export type AssistantActiveTurnInputCheckpointHook = (
 
 export interface AssistantActiveTurnLiveProviderSteerInput {
   prompt: string
+  relativeDateReferenceAt: string
   userMessageContent?: readonly AssistantUserMessageContentPart[] | null
 }
 

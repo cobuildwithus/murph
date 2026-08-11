@@ -288,6 +288,22 @@ export interface AssistantAcceptedTurnInputTranscriptRefUpdateInput {
   transcriptRef: z.input<typeof assistantAcceptedTurnInputTranscriptRefSchema>
 }
 
+export function resolveAssistantAcceptedTurnInputReferenceAt(
+  inputs: readonly AssistantAcceptedTurnInputItemInput[],
+): string | null {
+  let latestAtMs: number | null = null
+  for (const input of inputs) {
+    const acceptedAtMs = Date.parse(input.acceptedAt ?? '')
+    if (
+      Number.isFinite(acceptedAtMs)
+      && (latestAtMs === null || acceptedAtMs > latestAtMs)
+    ) {
+      latestAtMs = acceptedAtMs
+    }
+  }
+  return latestAtMs === null ? null : new Date(latestAtMs).toISOString()
+}
+
 export async function readAssistantAcceptedTurnInputJournal(
   vault: string,
   turnId: string,

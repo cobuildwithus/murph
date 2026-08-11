@@ -3211,6 +3211,7 @@ describe('Codex assistant registry helpers', () => {
         closeInputAdmission,
         registerLiveProviderTurn: vi.fn(() => () => {}),
       },
+      automationRelativeDateReferenceAt: '2031-02-15T09:59:59.900Z',
       providerConfig: normalizeAssistantProviderConfig({
         provider: 'codex-cli',
       }),
@@ -3223,6 +3224,9 @@ describe('Codex assistant registry helpers', () => {
       codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
     expect(appServerInput?.onFirstAssistantResponseCompleted).toEqual(
       expect.any(Function),
+    )
+    expect(appServerInput?.automationRelativeDateReferenceAt).toBe(
+      '2031-02-15T09:59:59.900Z',
     )
     appServerInput?.onFirstAssistantResponseCompleted?.()
     expect(closeInputAdmission).toHaveBeenCalledTimes(1)

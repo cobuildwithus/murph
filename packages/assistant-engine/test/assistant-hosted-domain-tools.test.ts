@@ -58,10 +58,10 @@ describe('hosted domain dynamic tools', () => {
     )
   })
 
-  it('resolves relative one-shot days from the named timezone instead of the system date', () => {
+  it('anchors relative one-shot days to accepted input across a named-zone midnight', () => {
     vi.useFakeTimers()
     try {
-      vi.setSystemTime(new Date('2031-02-15T00:05:00.000Z'))
+      vi.setSystemTime(new Date('2031-02-15T10:00:00.100Z'))
       expect(readToolRequest('automation', {
         action: 'save',
         instructions: 'Send the reminder tonight.',
@@ -74,7 +74,7 @@ describe('hosted domain dynamic tools', () => {
           },
         },
         title: 'Tonight reminder',
-      })).toEqual({
+      }, '2031-02-15T09:59:59.900Z')).toEqual({
         kind: 'automation',
         request: {
           action: 'save',
@@ -98,7 +98,7 @@ describe('hosted domain dynamic tools', () => {
           },
         },
         title: 'Tomorrow reminder',
-      })).toMatchObject({
+      }, '2031-02-15T09:59:59.900Z')).toMatchObject({
         kind: 'automation',
         request: {
           schedule: {
@@ -106,6 +106,22 @@ describe('hosted domain dynamic tools', () => {
             kind: 'at',
           },
         },
+      })
+      expect(readToolRequest('automation', {
+        action: 'save',
+        instructions: 'Do not guess the relative date.',
+        schedule: {
+          kind: 'at',
+          localAt: {
+            relativeDay: 'today',
+            time: '23:20',
+            timeZone: 'Pacific/Honolulu',
+          },
+        },
+        title: 'Unanchored reminder',
+      }, null)).toMatchObject({
+        kind: 'invalid-automation-arguments',
+        safeFailureCode: 'local_at_reference_unavailable',
       })
     } finally {
       vi.useRealTimers()
@@ -746,16 +762,23 @@ describe('hosted domain dynamic tools', () => {
   })
 })
 
-function readToolRequest(tool: 'automation' | 'device', argumentsValue: unknown) {
-  return readTestMurphDynamicToolRequest({
-    method: 'item/tool/call',
-    params: {
-      arguments: argumentsValue,
-      namespace: 'murph',
-      tool,
-      turnId: 'turn-active-root-1',
+function readToolRequest(
+  tool: 'automation' | 'device',
+  argumentsValue: unknown,
+  automationRelativeDateReferenceAt: string | null = new Date().toISOString(),
+) {
+  return readTestMurphDynamicToolRequest(
+    {
+      method: 'item/tool/call',
+      params: {
+        arguments: argumentsValue,
+        namespace: 'murph',
+        tool,
+        turnId: 'turn-active-root-1',
+      },
     },
-  })
+    { automationRelativeDateReferenceAt },
+  )
 }
 
 function createHostedToolContext(input: {
