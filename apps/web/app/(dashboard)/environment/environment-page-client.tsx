@@ -12,6 +12,9 @@ import {
   HABITAT_DECLINED_VALUE,
   normalizeHabitatCityOrRegion,
 } from "@murphai/contracts";
+import type {
+  HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/browser-vault";
 import Image from "next/image";
 import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
 
@@ -20,6 +23,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { Button } from "@/src/components/ui/button";
 import { PageHeader } from "@/src/components/ui/page-header";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
+import { browserVaultReplicaRefsMatch } from "@/src/lib/browser-vault/ref";
 import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { deriveCategoryNote, overallGrade } from "./category-notes";
@@ -54,18 +58,29 @@ const VOICE_REFRESH_WINDOW_MS = 2 * 60 * 1_000;
 
 export type VoiceRefreshState =
   | { status: "idle" }
-  | {
-      baselineValues: string;
-      status: "processing";
-    }
-  | { baselineValues: string; status: "completed" }
+  | { status: "processing" }
+  | { status: "refreshing" }
   | { status: "updated"; factsChanged: boolean }
   | { status: "delayed" };
 
-type DisplayedVoiceRefreshState = Exclude<
-  VoiceRefreshState,
-  { status: "completed" }
->;
+interface EnvironmentVoiceRefreshBaseline {
+  baselineReplicaRef: HostedBrowserVaultReplicaRef | null;
+  baselineValues: string;
+}
+
+type EnvironmentVoiceRefreshProgress =
+  | { status: "idle" }
+  | (EnvironmentVoiceRefreshBaseline & {
+      status: "processing";
+    })
+  | (EnvironmentVoiceRefreshBaseline & {
+      status: "refreshing";
+    })
+  | (EnvironmentVoiceRefreshBaseline & {
+      phase: "processing" | "refreshing";
+      status: "delayed";
+    })
+  | { status: "updated"; factsChanged: boolean };
 
 const EMPTY_CATEGORY_SUMMARIES: Readonly<Record<string, string>> = {
   sleep: "Temperature, darkness, noise and bedroom air.",
@@ -83,15 +98,17 @@ export default function EnvironmentPageClient({
   const {
     client,
     error,
+    ref,
     refresh,
+    runtimeRefreshPending,
     status,
   } = useBrowserVault();
   const [voiceRefreshState, setVoiceRefreshState] =
-    useState<VoiceRefreshState>({ status: "idle" });
+    useState<EnvironmentVoiceRefreshProgress>({ status: "idle" });
   const checkedInitialVoiceProcessingRef = useRef(false);
   const initialVoiceProcessingCheckRef = useRef(0);
-  const voiceRefreshBaselineRef = useRef<string | null>(null);
   const voiceRefreshStartedAtRef = useRef<number | null>(null);
+  const runtimeRefreshPendingObservedRef = useRef(false);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -112,21 +129,21 @@ export default function EnvironmentPageClient({
   const conditions = useEnvironmentConditions(location);
   const hasEnvironmentData = hasKnownHabitatValue(values);
   const valuesSignature = JSON.stringify(values);
-  const displayedVoiceRefreshState = resolveDisplayedVoiceRefreshState({
-    currentValues: valuesSignature,
-    state: voiceRefreshState,
-  });
+  const displayedVoiceRefreshState = resolveDisplayedVoiceRefreshState(
+    voiceRefreshState,
+  );
   const voiceCaptureDisabled =
-    displayedVoiceRefreshState.status === "processing" ||
-    displayedVoiceRefreshState.status === "delayed";
+    voiceRefreshState.status === "processing"
+    || voiceRefreshState.status === "refreshing"
+    || voiceRefreshState.status === "delayed";
   const onVoiceAccepted = useCallback(() => {
-    voiceRefreshBaselineRef.current = valuesSignature;
     voiceRefreshStartedAtRef.current = Date.now();
     setVoiceRefreshState({
+      baselineReplicaRef: ref,
       baselineValues: valuesSignature,
       status: "processing",
     });
-  }, [valuesSignature]);
+  }, [ref, valuesSignature]);
 
   useEffect(() => {
     if (
@@ -143,11 +160,11 @@ export default function EnvironmentPageClient({
       }
       checkedInitialVoiceProcessingRef.current = true;
       if (processing === true) {
-        voiceRefreshBaselineRef.current = valuesSignature;
         voiceRefreshStartedAtRef.current = Date.now();
         setVoiceRefreshState((current) =>
           current.status === "idle"
             ? {
+                baselineReplicaRef: ref,
                 baselineValues: valuesSignature,
                 status: "processing",
               }
@@ -160,12 +177,18 @@ export default function EnvironmentPageClient({
         initialVoiceProcessingCheckRef.current += 1;
       }
     };
-  }, [status, valuesSignature]);
+  }, [ref, status, valuesSignature]);
 
   useEffect(() => {
     if (
-      voiceRefreshState.status !== "processing"
-      && voiceRefreshState.status !== "delayed"
+      (
+        voiceRefreshState.status !== "processing"
+        && voiceRefreshState.status !== "delayed"
+      )
+      || (
+        voiceRefreshState.status === "delayed"
+        && voiceRefreshState.phase !== "processing"
+      )
     ) {
       return;
     }
@@ -176,23 +199,23 @@ export default function EnvironmentPageClient({
         return;
       }
       const processing = await readEnvironmentVoiceProcessingStatus();
-      await refresh({ background: true }).catch(() => undefined);
       if (cancelled) {
         return;
       }
       if (processing === false) {
         setVoiceRefreshState((current) =>
-          current.status === "processing"
+          (
+            current.status === "processing"
+            || (
+              current.status === "delayed"
+              && current.phase === "processing"
+            )
+          )
             ? {
+                baselineReplicaRef: current.baselineReplicaRef,
                 baselineValues: current.baselineValues,
-                status: "completed",
+                status: "refreshing",
               }
-            : current.status === "delayed"
-              ? {
-                  baselineValues:
-                    voiceRefreshBaselineRef.current ?? valuesSignature,
-                  status: "completed",
-                }
             : current,
         );
         return;
@@ -203,8 +226,16 @@ export default function EnvironmentPageClient({
           voiceRefreshStartedAtRef.current ?? Date.now()
         ) >= VOICE_REFRESH_WINDOW_MS
       ) {
-        voiceRefreshBaselineRef.current = voiceRefreshState.baselineValues;
-        setVoiceRefreshState({ status: "delayed" });
+        setVoiceRefreshState((current) =>
+          current.status === "processing"
+            ? {
+                baselineReplicaRef: current.baselineReplicaRef,
+                baselineValues: current.baselineValues,
+                phase: "processing",
+                status: "delayed",
+              }
+            : current,
+        );
         return;
       }
       timeoutId = setTimeout(
@@ -221,7 +252,106 @@ export default function EnvironmentPageClient({
         clearTimeout(timeoutId);
       }
     };
-  }, [refresh, valuesSignature, voiceRefreshState]);
+  }, [voiceRefreshState]);
+
+  useEffect(() => {
+    if (voiceRefreshState.status !== "refreshing") {
+      return;
+    }
+    runtimeRefreshPendingObservedRef.current = false;
+    void refresh({
+      background: true,
+      requestRuntimeRefreshUntil: (_client, nextRef) =>
+        browserVaultReplicaRefAdvanced(
+          voiceRefreshState.baselineReplicaRef,
+          nextRef,
+        ),
+    }).catch(() => undefined);
+  }, [refresh, voiceRefreshState]);
+
+  useEffect(() => {
+    if (
+      (
+        voiceRefreshState.status !== "refreshing"
+        && voiceRefreshState.status !== "delayed"
+      )
+      || (
+        voiceRefreshState.status === "delayed"
+        && voiceRefreshState.phase !== "refreshing"
+      )
+    ) {
+      runtimeRefreshPendingObservedRef.current = false;
+      return;
+    }
+    if (browserVaultReplicaRefAdvanced(
+      voiceRefreshState.baselineReplicaRef,
+      ref,
+    )) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setVoiceRefreshState({
+            factsChanged: valuesSignature !== voiceRefreshState.baselineValues,
+            status: "updated",
+          });
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (voiceRefreshState.status === "delayed") {
+      return;
+    }
+    if (runtimeRefreshPending) {
+      runtimeRefreshPendingObservedRef.current = true;
+      return;
+    }
+    if (runtimeRefreshPendingObservedRef.current) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setVoiceRefreshState({
+            baselineReplicaRef: voiceRefreshState.baselineReplicaRef,
+            baselineValues: voiceRefreshState.baselineValues,
+            phase: "refreshing",
+            status: "delayed",
+          });
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [ref, runtimeRefreshPending, valuesSignature, voiceRefreshState]);
+
+  useEffect(() => {
+    if (
+      voiceRefreshState.status !== "delayed"
+      || voiceRefreshState.phase !== "refreshing"
+    ) {
+      return;
+    }
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const poll = () => {
+      if (cancelled) {
+        return;
+      }
+      void refresh({ background: true }).finally(() => {
+        if (!cancelled) {
+          timeoutId = setTimeout(poll, VOICE_REFRESH_DELAYED_INTERVAL_MS);
+        }
+      });
+    };
+    timeoutId = setTimeout(poll, VOICE_REFRESH_DELAYED_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [refresh, voiceRefreshState]);
 
   if (status === "loading") {
     return (
@@ -277,15 +407,25 @@ export default function EnvironmentPageClient({
       <EnvironmentVoiceRefreshNotice
         state={displayedVoiceRefreshState}
         onCheckAgain={() => {
-          voiceRefreshBaselineRef.current = valuesSignature;
-          voiceRefreshStartedAtRef.current = Date.now();
+          if (voiceRefreshState.status !== "delayed") {
+            return;
+          }
+          if (voiceRefreshState.phase === "processing") {
+            voiceRefreshStartedAtRef.current = Date.now();
+            setVoiceRefreshState({
+              baselineReplicaRef: voiceRefreshState.baselineReplicaRef,
+              baselineValues: voiceRefreshState.baselineValues,
+              status: "processing",
+            });
+            void requestEnvironmentVoiceProcessingRecheck().catch(() => undefined);
+            return;
+          }
+          runtimeRefreshPendingObservedRef.current = false;
           setVoiceRefreshState({
-            baselineValues: valuesSignature,
-            status: "processing",
+            baselineReplicaRef: voiceRefreshState.baselineReplicaRef,
+            baselineValues: voiceRefreshState.baselineValues,
+            status: "refreshing",
           });
-          void requestEnvironmentVoiceProcessingRecheck().finally(() =>
-            refresh({ background: true }).catch(() => undefined)
-          );
         }}
       />
       {hasEnvironmentData ? (
@@ -312,20 +452,23 @@ export default function EnvironmentPageClient({
   );
 }
 
-function resolveDisplayedVoiceRefreshState({
-  currentValues,
-  state,
-}: {
-  currentValues: string;
-  state: VoiceRefreshState;
-}): DisplayedVoiceRefreshState {
-  if (state.status !== "completed") {
-    return state;
+function resolveDisplayedVoiceRefreshState(
+  state: EnvironmentVoiceRefreshProgress,
+): VoiceRefreshState {
+  if (state.status === "processing" || state.status === "refreshing") {
+    return { status: state.status };
   }
-  return {
-    factsChanged: currentValues !== state.baselineValues,
-    status: "updated",
-  };
+  return state.status === "delayed"
+    ? { status: "delayed" }
+    : state;
+}
+
+function browserVaultReplicaRefAdvanced(
+  baseline: HostedBrowserVaultReplicaRef | null,
+  current: HostedBrowserVaultReplicaRef | null,
+): boolean {
+  return current !== null
+    && (baseline === null || !browserVaultReplicaRefsMatch(baseline, current));
 }
 
 async function readEnvironmentVoiceProcessingStatus(): Promise<boolean | null> {
@@ -704,7 +847,7 @@ export function EnvironmentVoiceRefreshNotice({
   state,
 }: {
   onCheckAgain: () => void;
-  state: DisplayedVoiceRefreshState;
+  state: VoiceRefreshState;
 }) {
   if (state.status === "idle") {
     return null;
@@ -721,6 +864,23 @@ export function EnvironmentVoiceRefreshNotice({
         </AlertTitle>
         <AlertDescription>
           This report will refresh automatically when the clear facts are ready.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (state.status === "refreshing") {
+    return (
+      <Alert aria-live="polite">
+        <AlertTitle className="flex items-center gap-2">
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-4 animate-spin text-primary motion-reduce:animate-none"
+          />
+          Updating your environment report
+        </AlertTitle>
+        <AlertDescription>
+          Your recording is saved. This page is waiting for the newer private
+          report.
         </AlertDescription>
       </Alert>
     );

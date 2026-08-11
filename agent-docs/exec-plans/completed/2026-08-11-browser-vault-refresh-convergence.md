@@ -1,6 +1,6 @@
 # Browser Vault Refresh Convergence
 
-Status: active
+Status: completed
 Updated: 2026-08-11
 
 ## Outcome
@@ -49,6 +49,19 @@ newer Browser Vault replica before reporting that the report is updated.
 4. Run focused typechecks/tests, inspect the final diff, commit and push the
    candidate, then complete the routed ReviewGPT and CI gates.
 
+## Local Result
+
+- Applied the returned patch and kept it on the existing Browser Vault refresh
+  and hosted system-mailbox owners.
+- Runtime mailbox preparation now collapses only pristine,
+  sequence-contiguous legacy Browser Vault refresh controls to their final row
+  as one invocation-local refresh intent.
+- Environment voice completion now waits for voice processing to finish, then
+  requests a runtime-owned Browser Vault refresh and waits for a replica ref
+  that differs from the captured baseline before resolving the report.
+- The design catalog covers the separate processing, private-report refresh,
+  updated, no-clear-facts, and delayed recovery states.
+
 ## Verification
 
 - Focused assistant-runtime tests for equivalent refresh-control collapse,
@@ -58,8 +71,23 @@ newer Browser Vault replica before reporting that the report is updated.
 - Relevant package typechecks.
 - Exact-head required CI and the routed preliminary and final ReviewGPT gates.
 
+Local proof run:
+
+- `git diff --check`
+- `pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/environment-voice-refresh.test.tsx apps/web/test/browser-vault-context.test.tsx apps/web/test/training-page.test.tsx`
+- `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-browser-vault-refresh-mailbox.test.ts`
+- `pnpm test:frontend-design-proof`
+- `pnpm --dir apps/web exec eslint 'app/(dashboard)/environment/environment-page-client.tsx'`
+- `pnpm test:diff ARCHITECTURE.md 'apps/web/app/(dashboard)/environment/environment-page-client.tsx' apps/web/app/design/components-content.tsx apps/web/app/design/environment-progress-study.tsx apps/web/src/lib/browser-vault/context.tsx apps/web/test/browser-vault-context.test.tsx apps/web/test/environment-voice-refresh.test.tsx apps/web/test/training-page.test.tsx packages/assistant-runtime/src/hosted-runtime/system-mailbox.ts packages/assistant-runtime/test/hosted-runtime-browser-vault-refresh-mailbox.test.ts`
+
+Current remaining gate:
+
+- Close this active plan through `scripts/finish-task` with the final scoped
+  commit after final review.
+
 ## Deployment
 
 Classify the final Web/runtime compatibility window from the implemented patch.
 If both surfaces change, preserve old-Web/new-runtime and new-Web/old-runtime
 safety and document the safe deployment order plus live convergence checks.
+Completed: 2026-08-11

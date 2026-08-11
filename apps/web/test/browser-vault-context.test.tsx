@@ -1178,7 +1178,7 @@ test("browser-vault provider keeps admitted content visible during focus revalid
   await rendered.cleanup();
 });
 
-test("a runtime refresh request survives an in-flight focus read and waits through a nonmatching replica", async () => {
+test("a runtime refresh request passes replica refs to its predicate and waits through a nonmatching replica", async () => {
   vi.useFakeTimers();
   const currentRef = createReplicaRef();
   const unrelatedRef = createReplicaRef({
@@ -2897,8 +2897,8 @@ function BrowserVaultRuntimeRefreshProbe() {
     {
       onClick: () => void vault.refresh({
         background: true,
-        requestRuntimeRefreshUntil: (client) =>
-          client.replica.source.dataVersion === "f".repeat(64),
+        requestRuntimeRefreshUntil: (_client, replicaRef) =>
+          replicaRef.dataVersion === "f".repeat(64),
       }),
     },
     `${vault.ref?.sourceBundleHash ?? "none"}:${vault.dataVersion ?? "none"}:${vault.runtimeRefreshPending ? "pending" : "ready"}`,

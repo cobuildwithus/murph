@@ -42,6 +42,16 @@ const EMPTY_BROWSER_VAULT_SESSION_METADATA: BrowserVaultSessionMetadata = {
   workspaceVersion: null,
 };
 
+type BrowserVaultRuntimeRefreshCompletion = (
+  client: BrowserVaultQueryClient,
+  ref: HostedBrowserVaultReplicaRef,
+) => boolean;
+
+interface BrowserVaultRefreshOptions {
+  background?: boolean;
+  requestRuntimeRefreshUntil?: BrowserVaultRuntimeRefreshCompletion;
+}
+
 export interface BrowserVaultContextValue {
   /**
    * Prefer useBrowserVaultSelector for page/component reads so consumers only receive
@@ -55,10 +65,7 @@ export interface BrowserVaultContextValue {
   freshness: BrowserVaultFreshness;
   ref: HostedBrowserVaultReplicaRef | null;
   refreshPending: boolean;
-  refresh(options?: {
-    background?: boolean;
-    requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
-  }): Promise<void>;
+  refresh(options?: BrowserVaultRefreshOptions): Promise<void>;
   runtimeRefreshPending: boolean;
   status: BrowserVaultStatus;
   workspaceVersion: string | null;
@@ -139,9 +146,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const authorityGenerationRef = useRef(0);
   const mountedRef = useRef(false);
   const providerStartedLoadRef = useRef(false);
-  const runtimeRefreshCompletionRef = useRef<
-    ((client: BrowserVaultQueryClient) => boolean) | null
-  >(null);
+  const runtimeRefreshCompletionRef =
+    useRef<BrowserVaultRuntimeRefreshCompletion | null>(null);
   const runtimeRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -156,7 +162,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   }, []);
 
   const beginRuntimeRefreshWait = useCallback(
-    (isComplete: (client: BrowserVaultQueryClient) => boolean) => {
+    (isComplete: BrowserVaultRuntimeRefreshCompletion) => {
       runtimeRefreshCompletionRef.current = isComplete;
       if (runtimeRefreshTimeoutRef.current) {
         clearTimeout(runtimeRefreshTimeoutRef.current);
@@ -179,7 +185,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   const commitReady = useCallback((snapshot: BrowserVaultReadySnapshot) => {
     const isRuntimeRefreshComplete = runtimeRefreshCompletionRef.current;
     const awaitingRequestedReplacement = isRuntimeRefreshComplete !== null
-      && !isRuntimeRefreshComplete(snapshot.client);
+      && !isRuntimeRefreshComplete(snapshot.client, snapshot.ref);
     if (isRuntimeRefreshComplete && !awaitingRequestedReplacement) {
       // A stronger refresh may be queued behind the load that delivered this
       // matching snapshot. Fence that now-redundant continuation before it can
@@ -286,10 +292,8 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const runProviderLoad = useCallback(
-    async (options: {
+    async (options: BrowserVaultRefreshOptions & {
       authorityPathname?: string;
-      background?: boolean;
-      requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
     } = {}) => {
       const background = options.background ?? false;
       const { authorityPathname } = options;
@@ -367,10 +371,7 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
   );
 
   const refresh = useCallback(
-    async (options: {
-      background?: boolean;
-      requestRuntimeRefreshUntil?: (client: BrowserVaultQueryClient) => boolean;
-    } = {}) => {
+    async (options: BrowserVaultRefreshOptions = {}) => {
       await runProviderLoad(
         options.background
           ? {

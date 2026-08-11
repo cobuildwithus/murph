@@ -1,18 +1,32 @@
 import assert from "node:assert/strict";
 
+import {
+  BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+} from "@murphai/query/browser";
+import type {
+  HostedBrowserVaultReplicaRef,
+} from "@murphai/hosted-execution/browser-vault";
+import type {
+  BrowserVaultContextValue,
+} from "@/src/lib/browser-vault/context";
 import { act, createElement, StrictMode, type ReactNode } from "react";
-import { test, vi } from "vitest";
+import { beforeEach, test, vi } from "vitest";
+
+type BrowserVaultRefreshOptions = Parameters<
+  BrowserVaultContextValue["refresh"]
+>[0];
 
 const mocks = vi.hoisted(() => ({
-  refresh: vi.fn(async () => undefined),
+  refresh: vi.fn(async (_options?: BrowserVaultRefreshOptions) => undefined),
   vault: {
     client: null,
     dataVersion: "data-v1",
     deviceSyncImportPending: false,
     error: null,
     freshness: "fresh",
-    ref: null,
+    ref: null as HostedBrowserVaultReplicaRef | null,
     refreshPending: false,
+    runtimeRefreshPending: false,
     status: "empty",
     workspaceVersion: "workspace-v1",
   },
@@ -48,10 +62,29 @@ vi.mock(
 import EnvironmentPageClient from "../app/(dashboard)/environment/environment-page-client";
 import { renderClientComponent } from "./render-client-component";
 
-test("keeps processing through intermediate checkpoints until the voice job finishes", async () => {
+beforeEach(() => {
+  mocks.refresh.mockReset();
+  mocks.refresh.mockResolvedValue(undefined);
+  Object.assign(mocks.vault, {
+    client: null,
+    dataVersion: "data-v1",
+    deviceSyncImportPending: false,
+    error: null,
+    freshness: "fresh",
+    ref: createReplicaRef("a"),
+    refreshPending: false,
+    runtimeRefreshPending: false,
+    status: "empty",
+    workspaceVersion: "workspace-v1",
+  });
+});
+
+test("requests a runtime refresh after voice processing and waits for a different replica ref", async () => {
   vi.useFakeTimers();
-  mocks.refresh.mockClear();
   const originalFetch = globalThis.fetch;
+  const baselineRef = createReplicaRef("a");
+  const replacementRef = createReplicaRef("b");
+  mocks.vault.ref = baselineRef;
   const processingResponses = [false, true, false];
   const fetchMock = vi.fn(async () =>
     Response.json({ processing: processingResponses.shift() ?? false })
@@ -71,6 +104,9 @@ test("keeps processing through intermediate checkpoints until the voice job fini
   );
 
   try {
+    await act(async () => {
+      await Promise.resolve();
+    });
     const trigger = Array.from(
       rendered.window.document.querySelectorAll("button"),
     ).find((button) => button.textContent?.includes("Start the 2-minute"));
@@ -82,17 +118,11 @@ test("keeps processing through intermediate checkpoints until the voice job fini
       rendered.window.document.body.textContent ?? "",
       /Murph is processing your recording/,
     );
-    const processingTrigger = Array.from(
-      rendered.window.document.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Processing recording"));
-    assert.ok(processingTrigger instanceof rendered.window.HTMLButtonElement);
-    assert.equal(processingTrigger.disabled, true);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
-    assert.equal(mocks.refresh.mock.calls.length, 1);
-    assert.deepEqual(mocks.refresh.mock.calls[0], [{ background: true }]);
+    assert.equal(mocks.refresh.mock.calls.length, 0);
 
     mocks.vault.workspaceVersion = "workspace-v2";
     await rendered.rerender(
@@ -102,13 +132,68 @@ test("keeps processing through intermediate checkpoints until the voice job fini
       rendered.window.document.body.textContent ?? "",
       /Murph is processing your recording/,
     );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Updating your environment report/,
+    );
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /The report was not updated/,
+    );
+    const refreshingTrigger = Array.from(
+      rendered.window.document.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Processing recording"));
+    assert.ok(refreshingTrigger instanceof rendered.window.HTMLButtonElement);
+    assert.equal(refreshingTrigger.disabled, true);
+    const refreshingNotice = Array.from(
+      rendered.window.document.querySelectorAll('[aria-live="polite"]'),
+    ).find((element) =>
+      element.textContent?.includes("Updating your environment report")
+    );
+    assert.ok(refreshingNotice);
+
+    const refreshOptions = mocks.refresh.mock.calls[0]?.[0];
+    assert.equal(refreshOptions?.background, true);
+    const completion = refreshOptions?.requestRuntimeRefreshUntil;
+    assert.ok(completion);
+    assert.equal(
+      Reflect.apply(completion, undefined, [null, baselineRef]),
+      false,
+    );
+    assert.equal(
+      Reflect.apply(completion, undefined, [null, replacementRef]),
+      true,
+    );
+
+    mocks.vault.runtimeRefreshPending = true;
+    await rendered.rerender(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
+    mocks.vault.workspaceVersion = "workspace-v3";
+    await rendered.rerender(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Updating your environment report/,
+    );
     assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",
       /The report was not updated/,
     );
 
+    mocks.vault.ref = replacementRef;
+    mocks.vault.runtimeRefreshPending = false;
+    await rendered.rerender(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
+      await Promise.resolve();
     });
     assert.match(
       rendered.window.document.body.textContent ?? "",
@@ -126,20 +211,23 @@ test("keeps processing through intermediate checkpoints until the voice job fini
   }
 });
 
-test("restores server-side processing state after the page is reopened", async () => {
+test("restores server-side processing after reload and still waits for the replacement replica", async () => {
   vi.useFakeTimers();
-  mocks.refresh.mockClear();
   const originalFetch = globalThis.fetch;
+  const baselineRef = createReplicaRef("a");
+  const replacementRef = createReplicaRef("b");
+  mocks.vault.ref = baselineRef;
   const processingResponses = [true, true, false];
   globalThis.fetch = vi.fn(async () =>
     Response.json({ processing: processingResponses.shift() ?? false })
   );
+  const renderEnvironment = () => createElement(
+    StrictMode,
+    null,
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
+  );
   const rendered = await renderClientComponent(
-    createElement(
-      StrictMode,
-      null,
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    ),
+    renderEnvironment(),
     {
       location: {
         hash: "",
@@ -168,6 +256,20 @@ test("restores server-side processing state after the page is reopened", async (
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Updating your environment report/,
+    );
+
+    mocks.vault.runtimeRefreshPending = true;
+    await rendered.rerender(renderEnvironment());
+    mocks.vault.ref = replacementRef;
+    mocks.vault.runtimeRefreshPending = false;
+    await rendered.rerender(renderEnvironment());
+    await act(async () => {
+      await Promise.resolve();
+    });
     assert.match(
       rendered.window.document.body.textContent ?? "",
       /The report was not updated/,
@@ -179,10 +281,12 @@ test("restores server-side processing state after the page is reopened", async (
   }
 });
 
-test("keeps checking after processing takes longer than two minutes", async () => {
+test("preserves delayed recovery for voice processing and replica refresh timeouts", async () => {
   vi.useFakeTimers();
-  mocks.refresh.mockClear();
   const originalFetch = globalThis.fetch;
+  const baselineRef = createReplicaRef("a");
+  const replacementRef = createReplicaRef("b");
+  mocks.vault.ref = baselineRef;
   let processing = true;
   const fetchMock = vi.fn(async (
     _input: string | URL | Request,
@@ -211,14 +315,20 @@ test("keeps checking after processing takes longer than two minutes", async () =
       rendered.window.document.body.textContent ?? "",
       /Murph is taking longer than usual/,
     );
-    const callsAtDelay = fetchMock.mock.calls.length;
-    const checkAgain = Array.from(
+    const delayedRecordingTrigger = Array.from(
+      rendered.window.document.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Processing recording"));
+    assert.ok(
+      delayedRecordingTrigger instanceof rendered.window.HTMLButtonElement,
+    );
+    assert.equal(delayedRecordingTrigger.disabled, true);
+
+    const firstCheckAgain = Array.from(
       rendered.window.document.querySelectorAll("button"),
     ).find((button) => button.textContent?.includes("Check again"));
-    assert.ok(checkAgain instanceof rendered.window.HTMLButtonElement);
-
+    assert.ok(firstCheckAgain instanceof rendered.window.HTMLButtonElement);
     await act(async () => {
-      checkAgain.click();
+      firstCheckAgain.click();
       await Promise.resolve();
     });
     assert.ok(fetchMock.mock.calls.some(([input, init]) =>
@@ -229,8 +339,58 @@ test("keeps checking after processing takes longer than two minutes", async () =
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Updating your environment report/,
+    );
 
-    assert.ok(fetchMock.mock.calls.length > callsAtDelay);
+    mocks.vault.runtimeRefreshPending = true;
+    await rendered.rerender(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
+    mocks.vault.runtimeRefreshPending = false;
+    await rendered.rerender(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Murph is taking longer than usual/,
+    );
+
+    const patchCallsBeforeReplicaRetry = fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        input === "/api/environment/voice" && init?.method === "PATCH",
+    ).length;
+    const secondCheckAgain = Array.from(
+      rendered.window.document.querySelectorAll("button"),
+    ).find((button) => button.textContent?.includes("Check again"));
+    assert.ok(secondCheckAgain instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      secondCheckAgain.click();
+      await Promise.resolve();
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 2);
+    assert.equal(fetchMock.mock.calls.filter(
+      ([input, init]) =>
+        input === "/api/environment/voice" && init?.method === "PATCH",
+    ).length, patchCallsBeforeReplicaRetry);
+
+    mocks.vault.runtimeRefreshPending = true;
+    await rendered.rerender(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
+    mocks.vault.ref = replacementRef;
+    mocks.vault.runtimeRefreshPending = false;
+    await rendered.rerender(
+      createElement(EnvironmentPageClient, { contactOptions: [] }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
     assert.match(
       rendered.window.document.body.textContent ?? "",
       /The report was not updated/,
@@ -241,3 +401,18 @@ test("keeps checking after processing takes longer than two minutes", async () =
     await rendered.cleanup();
   }
 });
+
+function createReplicaRef(version: string): HostedBrowserVaultReplicaRef {
+  return {
+    byteLength: 128,
+    dataVersion: version.repeat(64),
+    generatedAt: "2026-08-11T12:00:00.000Z",
+    generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
+    keyId: `browser-vault-replica:${version}`,
+    objectKey: `users/browser-vault-replicas/test/${version}.json`,
+    replicaSchema: "murph.browser-vault-replica",
+    runtimeRootKeyId: "udrk:runtime:test-root",
+    schema: "murph.hosted-browser-vault-replica-ref.v1",
+    sourceBundleHash: version.repeat(64),
+  };
+}

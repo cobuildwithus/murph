@@ -165,10 +165,13 @@ export function EnvironmentProgressStudy() {
       </StudyState>
       <StudyState label="After upload · Processing on the open report">
         <EnvironmentVoiceRefreshNotice
-          state={{
-            baselineValues: "{}",
-            status: "processing",
-          }}
+          state={{ status: "processing" }}
+          onCheckAgain={() => {}}
+        />
+      </StudyState>
+      <StudyState label="After processing · Waiting for the private report">
+        <EnvironmentVoiceRefreshNotice
+          state={{ status: "refreshing" }}
           onCheckAgain={() => {}}
         />
       </StudyState>

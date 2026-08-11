@@ -310,20 +310,27 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         };
       }
 
+      const collapsed = collapseConsecutiveHostedBrowserVaultRefreshItems({
+        pending: state.pending,
+        selected: pending,
+      });
+
       const nextItem: HostedSystemMailboxPendingItem = {
-        ...pending,
-        attemptCount: pending.attemptCount + 1,
+        ...collapsed.selected,
+        attemptCount: collapsed.selected.attemptCount + 1,
         lastAttemptAt: startedAt,
         lastErrorCode: null,
         lastErrorMessage: null,
         nextAttemptAt: null,
-        status: pending.status === "recording" ? "recording" : "sending",
+        status: collapsed.selected.status === "recording"
+          ? "recording"
+          : "sending",
       };
       return {
         result: nextItem,
         state: {
-          pending: state.pending.map((item) =>
-            item.itemId === pending.itemId ? nextItem : item
+          pending: collapsed.pending.map((item) =>
+            item.itemId === collapsed.selected.itemId ? nextItem : item
           ),
         },
       };
@@ -441,6 +448,88 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       wakeKind: prepared.wake.kind,
     };
   }
+}
+
+function collapseConsecutiveHostedBrowserVaultRefreshItems(input: {
+  pending: readonly HostedSystemMailboxPendingItem[];
+  selected: HostedSystemMailboxPendingItem;
+}): {
+  pending: HostedSystemMailboxPendingItem[];
+  selected: HostedSystemMailboxPendingItem;
+} {
+  // Each Browser Vault refresh control row requests the same invocation-local
+  // idempotent intent. Compact only the pristine sequence-adjacent suffix that
+  // ordinary mailbox selection already admitted. The last row remains as the
+  // representative, so handled-through stays at representative - 1 until the
+  // intent is durably consumed; retries and foreground preemption retain it.
+  const selectedIndex = input.pending.findIndex((item) =>
+    item.itemId === input.selected.itemId
+  );
+  const selectedSeq = readCollapsibleHostedBrowserVaultRefreshSeq(
+    input.selected,
+  );
+  if (selectedIndex < 0 || selectedSeq === null) {
+    return {
+      pending: [...input.pending],
+      selected: input.selected,
+    };
+  }
+
+  let lastIndex = selectedIndex;
+  let lastSeq = selectedSeq;
+  while (lastIndex + 1 < input.pending.length) {
+    const candidate = input.pending[lastIndex + 1];
+    if (!candidate) {
+      break;
+    }
+    const candidateSeq = readCollapsibleHostedBrowserVaultRefreshSeq(candidate);
+    if (candidateSeq === null || candidateSeq !== lastSeq + 1n) {
+      break;
+    }
+    lastIndex += 1;
+    lastSeq = candidateSeq;
+  }
+
+  if (lastIndex === selectedIndex) {
+    return {
+      pending: [...input.pending],
+      selected: input.selected,
+    };
+  }
+
+  const representative = input.pending[lastIndex];
+  if (!representative) {
+    throw new Error("Collapsed Browser Vault refresh representative is missing.");
+  }
+  return {
+    pending: [
+      ...input.pending.slice(0, selectedIndex),
+      representative,
+      ...input.pending.slice(lastIndex + 1),
+    ],
+    selected: representative,
+  };
+}
+
+function readCollapsibleHostedBrowserVaultRefreshSeq(
+  item: HostedSystemMailboxPendingItem,
+): bigint | null {
+  if (
+    item.wake.kind !== "runtime.browser-vault-refresh-requested"
+    || item.routeAction !== "apply-runtime-control-request"
+    || item.status !== "pending"
+    || item.attemptCount !== 0
+    || item.lastAttemptAt !== null
+    || item.lastErrorCode !== null
+    || item.lastErrorMessage !== null
+    || item.nextAttemptAt !== null
+    || item.postCheckpointRecord !== null
+    || item.mailboxLaneSeq === null
+    || !/^[1-9]\d*$/u.test(item.mailboxLaneSeq)
+  ) {
+    return null;
+  }
+  return BigInt(item.mailboxLaneSeq);
 }
 
 function hostedSystemMailboxTimestampPrecedes(
