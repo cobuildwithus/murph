@@ -38,9 +38,9 @@ import {
 import {
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
+  resolveHostedLinqThreadContainerCryptoPreparationTarget,
   resolveHostedLinqMailboxPayloadRootPrewarmMemberId,
   resolveHostedLinqTypingPrewarmMemberId,
-  shouldPrepareHostedLinqThreadContainerCrypto,
   type HostedOnboardingLinqWebhookResponse,
 } from "./webhook-provider-linq";
 import {
@@ -124,6 +124,12 @@ import {
   type PreparedHostedThreadContainerDeliveryRoute,
 } from "../hosted-routing/thread-container-service";
 import {
+  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
+  prepareHostedPendingGroupSetupClaimForParticipants,
+  readHostedPendingGroupSetupPreparationFailure,
+  type PreparedHostedPendingGroupSetupClaim,
+} from "../hosted-groups/pending-group-setup";
+import {
   HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
 } from "../hosted-routing/thread-delivery-route";
 import {
@@ -151,9 +157,6 @@ import {
 import {
   lookupHostedGroupParticipantMemberIdByHandle,
 } from "../hosted-groups/participant-member";
-import {
-  HOSTED_PENDING_GROUP_SETUP_MAX_PARTICIPANT_MEMBERS,
-} from "../hosted-groups/pending-group-setup";
 import {
   reconcileHostedUsageReferralRewardAfterCommit,
 } from "../hosted-growth/usage-referral";
@@ -551,6 +554,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 planningResolution.pendingGroupParticipantMemberIds ?? null,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
+              ...(preparation.failedPendingGroupSetupPreparationClaim
+                ? {
+                    failedPendingGroupSetupPreparationClaim:
+                      preparation.failedPendingGroupSetupPreparationClaim,
+                  }
+                : {}),
+              ...(preparation.preparedPendingGroupSetupClaim
+                ? {
+                    preparedPendingGroupSetupClaim:
+                      preparation.preparedPendingGroupSetupClaim,
+                  }
+                : {}),
               ...(preparation.preparedThreadContainerCreation
                 ? {
                     preparedThreadContainerCreation:
@@ -1909,6 +1924,10 @@ async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {
 }
 
 interface HostedThreadRoutingCryptoPreparation {
+  failedPendingGroupSetupPreparationClaim?: PreparedHostedPendingGroupSetupClaim;
+  pendingGroupSetupPreparationFailure?: unknown;
+  threadContainerPreparationFailure?: unknown;
+  preparedPendingGroupSetupClaim?: PreparedHostedPendingGroupSetupClaim;
   preparedSenderMemberId?: string;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
@@ -1997,25 +2016,64 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   }
 
   if (context.messageEvent.data.chat?.is_group === true) {
-    if (!await shouldPrepareHostedLinqThreadContainerCrypto({
-      event: input.event,
-      participantMemberIds: input.participantMemberIds,
-      pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
-      prisma: input.prisma,
-    })) {
+    const preparationTarget =
+      await resolveHostedLinqThreadContainerCryptoPreparationTarget({
+        event: input.event,
+        participantMemberIds: input.participantMemberIds,
+        pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
+        prisma: input.prisma,
+      });
+    if (!preparationTarget) {
       return {};
     }
     if (!accountLookupKey) {
       return {};
     }
+    const [pendingSetupResult, containerResult] = await Promise.allSettled([
+      prepareHostedPendingGroupSetupClaimForParticipants({
+        occurredAt: preparationTarget.occurredAt,
+        participantMemberIds: preparationTarget.participantMemberIds,
+        prisma: input.prisma,
+        recipientPhoneLookupKeys:
+          preparationTarget.recipientPhoneLookupKeys,
+        requiredCandidateId:
+          preparationTarget.requiredPendingSetupCandidateId,
+        senderMemberId: preparationTarget.senderMemberId,
+      }),
+      prepareHostedThreadContainerCreation({
+        accountLookupKey,
+        channel: "linq",
+        prisma: input.prisma,
+        threadId: context.summary.chatId,
+      }),
+    ]);
+    const pendingGroupSetupPreparationFailure =
+      pendingSetupResult.status === "rejected"
+        ? readHostedPendingGroupSetupPreparationFailure(
+            pendingSetupResult.reason,
+          )
+        : null;
     return {
-      preparedThreadContainerCreation:
-        await prepareHostedThreadContainerCreation({
-          accountLookupKey,
-          channel: "linq",
-          prisma: input.prisma,
-          threadId: context.summary.chatId,
-        }),
+      ...(pendingGroupSetupPreparationFailure
+        ? {
+            failedPendingGroupSetupPreparationClaim:
+              pendingGroupSetupPreparationFailure.preparedClaim,
+          }
+        : {}),
+      ...(pendingSetupResult.status === "fulfilled"
+        && pendingSetupResult.value
+        ? { preparedPendingGroupSetupClaim: pendingSetupResult.value }
+        : {}),
+      ...(pendingSetupResult.status === "rejected"
+        ? {
+            pendingGroupSetupPreparationFailure:
+              pendingGroupSetupPreparationFailure?.error
+              ?? pendingSetupResult.reason,
+          }
+        : {}),
+      ...(containerResult.status === "fulfilled"
+        ? { preparedThreadContainerCreation: containerResult.value }
+        : { threadContainerPreparationFailure: containerResult.reason }),
     };
   }
 
@@ -2134,6 +2192,7 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     let preparation: HostedThreadRoutingCryptoPreparation = {};
     const preparationFailures: unknown[] = [];
+    let pendingGroupSetupPreparationFailure: unknown;
     try {
       return await runHostedOnboardingWebhookTransaction(
         input.prisma,
@@ -2141,6 +2200,15 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
         async () => {
           try {
             preparation = await input.prepare({ attempt });
+            if (preparation.pendingGroupSetupPreparationFailure !== undefined) {
+              pendingGroupSetupPreparationFailure =
+                preparation.pendingGroupSetupPreparationFailure;
+            }
+            if (preparation.threadContainerPreparationFailure !== undefined) {
+              preparationFailures.push(
+                preparation.threadContainerPreparationFailure,
+              );
+            }
           } catch (error) {
             preparationFailures.push(error);
             throw error;
@@ -2149,9 +2217,19 @@ async function runHostedThreadRoutingPreparedTransaction<TResult>(input: {
       );
     } catch (error) {
       if (
+        pendingGroupSetupPreparationFailure !== undefined
+        && isHostedOnboardingError(error)
+        && error.code === "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED"
+        && error.details?.preparationTarget === "pending_group_setup_payload"
+        && error.details?.preparationFailureMatched === true
+      ) {
+        throw pendingGroupSetupPreparationFailure;
+      }
+      if (
         preparationFailures.length > 0
         && isHostedOnboardingError(error)
         && HOSTED_THREAD_ROUTING_PREPARATION_REQUIRED_CODES.has(error.code)
+        && error.details?.preparationTarget !== "pending_group_setup_payload"
       ) {
         // The transaction helper deliberately suppresses an irrelevant warm
         // failure so ignored branches can still complete. If the planner then

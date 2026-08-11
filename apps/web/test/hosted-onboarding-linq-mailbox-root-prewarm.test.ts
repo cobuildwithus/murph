@@ -83,6 +83,35 @@ vi.mock("@/src/lib/hosted-routing/thread-container-service", async (importOrigin
   };
 });
 
+vi.mock("@/src/lib/hosted-groups/pending-group-setup", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/src/lib/hosted-groups/pending-group-setup")
+  >();
+  return {
+    ...actual,
+    prepareHostedPendingGroupSetupClaimForParticipants: vi.fn(async () => {
+      calls.push("prepare-pending");
+      return {
+        id: "hpgs_prepared",
+        ownerMemberId: "member_pending_owner",
+        payloadEncrypted: "prepared-pending-ciphertext",
+        payloadRootKeyId: "root_pending",
+        recipientPhoneLookupKey: "hplk_pending_line",
+      };
+    }),
+    readHostedPendingGroupSetupPreparationFailure: vi.fn((error: unknown) => ({
+      error,
+      preparedClaim: {
+        id: "hpgs_failed_preparation",
+        ownerMemberId: "member_pending_owner",
+        payloadEncrypted: "failed-pending-ciphertext",
+        payloadRootKeyId: "root_pending_failed",
+        recipientPhoneLookupKey: "hplk_pending_line",
+      },
+    })),
+  };
+});
+
 // The remaining mocks exist so `handleHostedOnboardingLinqWebhook` itself can be
 // driven end to end. The composition under test — the real planning-event
 // resolver handing its route to the real warm hook, ahead of the real
@@ -150,6 +179,13 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
         threadRoute: { containerMemberId: string } | null;
       }) => threadRoute?.containerMemberId ?? "member_direct_prewarm",
     ),
+    resolveHostedLinqThreadContainerCryptoPreparationTarget: vi.fn(async () => ({
+      occurredAt: new Date("2026-03-26T12:00:00.000Z"),
+      participantMemberIds: ["member_pending_owner"],
+      recipientPhoneLookupKeys: ["hplk_pending_line"],
+      requiredPendingSetupCandidateId: null,
+      senderMemberId: "member_pending_owner",
+    })),
     shouldPrepareHostedLinqThreadContainerCrypto: vi.fn(async () => true),
   };
 });
@@ -640,18 +676,323 @@ describe("hosted Linq mailbox payload root prewarm", () => {
       });
 
       expect(calls).toEqual([
+        "prepare-pending",
         "prepare-container",
         "begin",
         "plan",
         "commit",
       ]);
+      const { prepareHostedPendingGroupSetupClaimForParticipants } = await import(
+        "@/src/lib/hosted-groups/pending-group-setup"
+      );
+      expect(prepareHostedPendingGroupSetupClaimForParticipants)
+        .toHaveBeenCalledExactlyOnceWith({
+          occurredAt: new Date("2026-03-26T12:00:00.000Z"),
+          participantMemberIds: ["member_pending_owner"],
+          prisma,
+          recipientPhoneLookupKeys: ["hplk_pending_line"],
+          requiredCandidateId: null,
+          senderMemberId: "member_pending_owner",
+        });
       expect(planHostedOnboardingLinqWebhook).toHaveBeenCalledWith(
         expect.objectContaining({
           preparedThreadContainerCreation: expect.objectContaining({
             containerMemberId: "member_prepared_container",
           }),
+          preparedPendingGroupSetupClaim: expect.objectContaining({
+            id: "hpgs_prepared",
+          }),
         }),
       );
+    });
+
+    it("suppresses a pending-setup warm failure when the transaction does not need it", async () => {
+      const { prepareHostedPendingGroupSetupClaimForParticipants } = await import(
+        "@/src/lib/hosted-groups/pending-group-setup"
+      );
+      const { readHostedThreadRouteByThreadIdentity } = await import(
+        "@/src/lib/hosted-routing/thread-route-store"
+      );
+      const preparePending = vi.mocked(
+        prepareHostedPendingGroupSetupClaimForParticipants,
+      );
+      const preparationError = new Error("pending root unavailable");
+      vi.mocked(readHostedThreadRouteByThreadIdentity).mockResolvedValueOnce(null);
+      preparePending.mockImplementationOnce(async () => {
+        calls.push("prepare-pending");
+        throw preparationError;
+      });
+      const prisma = buildPrewarmPrisma();
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody({ chatIsGroup: true }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({ ok: true });
+
+      expect(calls).toEqual([
+        "prepare-pending",
+        "prepare-container",
+        "begin",
+        "plan",
+        "commit",
+      ]);
+    });
+
+    it("preserves the original pending-root failure when the transaction proves it is required", async () => {
+      const { prepareHostedPendingGroupSetupClaimForParticipants } = await import(
+        "@/src/lib/hosted-groups/pending-group-setup"
+      );
+      const { hostedOnboardingError } = await import(
+        "@/src/lib/hosted-onboarding/errors"
+      );
+      const { planHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-provider-linq"
+      );
+      const { prepareHostedThreadContainerCreation } = await import(
+        "@/src/lib/hosted-routing/thread-container-service"
+      );
+      const { readHostedThreadRouteByThreadIdentity } = await import(
+        "@/src/lib/hosted-routing/thread-route-store"
+      );
+      const preparationError = new Error("pending kms unavailable");
+      const unrelatedContainerError = new Error("container kms unavailable");
+      vi.mocked(readHostedThreadRouteByThreadIdentity).mockResolvedValueOnce(null);
+      vi.mocked(prepareHostedPendingGroupSetupClaimForParticipants)
+        .mockImplementationOnce(async () => {
+          calls.push("prepare-pending");
+          throw preparationError;
+        });
+      vi.mocked(prepareHostedThreadContainerCreation)
+        .mockImplementationOnce(async () => {
+          calls.push("prepare-container");
+          throw unrelatedContainerError;
+        });
+      vi.mocked(planHostedOnboardingLinqWebhook).mockImplementationOnce(
+        async (input) => {
+          calls.push("plan");
+          if (!input.preparedPendingGroupSetupClaim) {
+            throw hostedOnboardingError({
+              code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+              details: {
+                preparationFailureMatched: true,
+                preparationTarget: "pending_group_setup_payload",
+              },
+              httpStatus: 503,
+              message: "Pending setup preparation required.",
+              retryable: true,
+            });
+          }
+          throw new Error("Unexpected prepared pending claim.");
+        },
+      );
+      const prisma = buildPrewarmPrisma();
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody({ chatIsGroup: true }),
+        signature: null,
+        timestamp: null,
+      })).rejects.toBe(preparationError);
+
+      expect(prepareHostedPendingGroupSetupClaimForParticipants)
+        .toHaveBeenCalledTimes(1);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(calls).toEqual([
+        "prepare-pending",
+        "prepare-container",
+        "begin",
+        "plan",
+      ]);
+    });
+
+    it("re-prepares instead of surfacing a stale pending-root failure for a changed winner", async () => {
+      const { prepareHostedPendingGroupSetupClaimForParticipants } = await import(
+        "@/src/lib/hosted-groups/pending-group-setup"
+      );
+      const { hostedOnboardingError } = await import(
+        "@/src/lib/hosted-onboarding/errors"
+      );
+      const { planHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-provider-linq"
+      );
+      const { prepareHostedThreadContainerCreation } = await import(
+        "@/src/lib/hosted-routing/thread-container-service"
+      );
+      const { readHostedThreadRouteByThreadIdentity } = await import(
+        "@/src/lib/hosted-routing/thread-route-store"
+      );
+      const stalePreparationError = new Error("old winner kms unavailable");
+      const unrelatedContainerError = new Error("container kms unavailable");
+      vi.mocked(readHostedThreadRouteByThreadIdentity)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
+      vi.mocked(prepareHostedPendingGroupSetupClaimForParticipants)
+        .mockImplementationOnce(async () => {
+          calls.push("prepare-pending-stale");
+          throw stalePreparationError;
+        });
+      vi.mocked(prepareHostedThreadContainerCreation)
+        .mockImplementationOnce(async () => {
+          calls.push("prepare-container");
+          throw unrelatedContainerError;
+        });
+      vi.mocked(planHostedOnboardingLinqWebhook)
+        .mockImplementationOnce(async (input) => {
+          calls.push("plan-changed-winner");
+          expect(input.failedPendingGroupSetupPreparationClaim)
+            .toMatchObject({ id: "hpgs_failed_preparation" });
+          throw hostedOnboardingError({
+            code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+            details: { preparationTarget: "pending_group_setup_payload" },
+            httpStatus: 503,
+            message: "Changed winner needs fresh pending preparation.",
+            retryable: true,
+          });
+        })
+        .mockImplementationOnce(async (input) => {
+          calls.push("plan");
+          expect(input.preparedPendingGroupSetupClaim)
+            .toMatchObject({ id: "hpgs_prepared" });
+          return {
+            desiredSideEffects: [],
+            response: { ok: true, reason: "changed-winner-reprepared" },
+          };
+        });
+      const prisma = buildPrewarmPrisma();
+
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never,
+        rawBody: buildLinqMessageWebhookBody({ chatIsGroup: true }),
+        signature: null,
+        timestamp: null,
+      })).resolves.toMatchObject({
+        ok: true,
+        reason: "changed-winner-reprepared",
+      });
+
+      expect(prepareHostedPendingGroupSetupClaimForParticipants)
+        .toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+      expect(calls).toEqual([
+        "prepare-pending-stale",
+        "prepare-container",
+        "begin",
+        "plan-changed-winner",
+        "prepare-pending",
+        "prepare-container",
+        "begin",
+        "plan",
+        "commit",
+      ]);
+    });
+
+    it("re-prepares a changed pending winner before retrying the transaction", async () => {
+      const { prepareHostedPendingGroupSetupClaimForParticipants } = await import(
+        "@/src/lib/hosted-groups/pending-group-setup"
+      );
+      const { hostedOnboardingError } = await import(
+        "@/src/lib/hosted-onboarding/errors"
+      );
+      const { planHostedOnboardingLinqWebhook } = await import(
+        "@/src/lib/hosted-onboarding/webhook-provider-linq"
+      );
+      const { readHostedThreadRouteByThreadIdentity } = await import(
+        "@/src/lib/hosted-routing/thread-route-store"
+      );
+      const readRoute = vi.mocked(readHostedThreadRouteByThreadIdentity);
+      const defaultReadRoute = readRoute.getMockImplementation();
+      const preparePending = vi.mocked(
+        prepareHostedPendingGroupSetupClaimForParticipants,
+      );
+      const defaultPreparePending = preparePending.getMockImplementation();
+      const planner = vi.mocked(planHostedOnboardingLinqWebhook);
+      const defaultPlanner = planner.getMockImplementation();
+      if (!defaultReadRoute || !defaultPreparePending || !defaultPlanner) {
+        throw new Error("Expected default pending preparation mocks.");
+      }
+      const firstClaim = {
+        id: "hpgs_first",
+        ownerMemberId: "member_first",
+        payloadEncrypted: "ciphertext_first",
+        payloadRootKeyId: "root_first",
+        recipientPhoneLookupKey: "hplk_pending_line",
+      };
+      const secondClaim = {
+        ...firstClaim,
+        id: "hpgs_second",
+        ownerMemberId: "member_second",
+        payloadEncrypted: "ciphertext_second",
+        payloadRootKeyId: "root_second",
+      };
+      const prisma = buildPrewarmPrisma();
+
+      try {
+        readRoute.mockImplementation(async () => {
+          calls.push("read-route");
+          return null;
+        });
+        preparePending
+          .mockImplementationOnce(async () => {
+            calls.push("prepare-pending-first");
+            return firstClaim;
+          })
+          .mockImplementationOnce(async () => {
+            calls.push("prepare-pending-second");
+            return secondClaim;
+          });
+        planner
+          .mockImplementationOnce(async (input) => {
+            calls.push("plan-conflict");
+            expect(input.preparedPendingGroupSetupClaim).toEqual(firstClaim);
+            throw hostedOnboardingError({
+              code: "HOSTED_THREAD_CONTAINER_PREPARATION_REQUIRED",
+              details: { preparationTarget: "pending_group_setup_payload" },
+              httpStatus: 503,
+              message: "Fresh pending setup preparation required.",
+              retryable: true,
+            });
+          })
+          .mockImplementationOnce(async (input) => {
+            calls.push("plan");
+            expect(input.preparedPendingGroupSetupClaim).toEqual(secondClaim);
+            return {
+              desiredSideEffects: [],
+              response: { ok: true, reason: "pending-prepared-retry" },
+            };
+          });
+
+        await expect(handleHostedOnboardingLinqWebhook({
+          prisma: prisma as never,
+          rawBody: buildLinqMessageWebhookBody({ chatIsGroup: true }),
+          signature: null,
+          timestamp: null,
+        })).resolves.toMatchObject({
+          ok: true,
+          reason: "pending-prepared-retry",
+        });
+
+        expect(preparePending).toHaveBeenCalledTimes(2);
+        expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+        expect(calls).toEqual([
+          "read-route",
+          "prepare-pending-first",
+          "prepare-container",
+          "begin",
+          "plan-conflict",
+          "read-route",
+          "prepare-pending-second",
+          "prepare-container",
+          "begin",
+          "plan",
+          "commit",
+        ]);
+      } finally {
+        readRoute.mockImplementation(defaultReadRoute);
+        preparePending.mockImplementation(defaultPreparePending);
+        planner.mockImplementation(defaultPlanner);
+      }
     });
 
     it("re-prepares outside a fresh transaction after a late route winner", async () => {
