@@ -1,8 +1,8 @@
 # Bound hosted callback nonce database critical sections
 
-Status: active
+Status: completed
 Created: 2026-08-09
-Updated: 2026-08-09
+Updated: 2026-08-11
 
 ## Goal
 
@@ -49,7 +49,7 @@ handling never holds a pooled connection while sweeping shared nonce state.
 2. [x] Add bounded skip-locked callback nonce cleanup to hosted retention.
 3. [x] Add focused unit, route, retention, and real-PostgreSQL contention proof.
 4. [x] Align architecture, operations, and testing documentation.
-5. [ ] Commit and push the exact candidate, open the draft PR, then complete CI
+5. [x] Commit and push the exact candidate, open the draft PR, then complete CI
    and both required ReviewGPT gates on exact pushed heads.
 
 ## Verification
@@ -69,3 +69,14 @@ handling never holds a pooled connection while sweeping shared nonce state.
   expiry boundary.
 - Reuse the serial hosted retention owner and its bounded batch primitive instead
   of introducing another cron route or cleanup abstraction.
+
+## Final review
+
+- Final ReviewGPT round 2 passed the exact remediated PR-authored head with no
+  qualifying findings after verifying atomic admission, tombstone behavior,
+  strict cleanup boundaries, and the added concurrency coverage.
+- A single normal merge of current `main` changed only the base history; the
+  reviewed PR patch remained unchanged and all required CI passed afterward.
+- The parent review found no remaining correctness, security, privacy,
+  reliability, or architecture issues in the final patch.
+Completed: 2026-08-11
