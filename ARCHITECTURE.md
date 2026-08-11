@@ -1007,8 +1007,25 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Cap increases require explicit payer confirmation; a decrease below already
   committed charges is deferred to the next period. Only the activation
   purchase may own a public sponsorship moment; refills are silent. The
-  sponsorship projection exposes only sponsored versus unsponsored. A separate
-  room-public usage read may expose one bounded
+  assistant/room sponsorship projection exposes only sponsored versus
+  unsponsored. For a signed-in active group participant, the funding page owns
+  one separate bounded recognition projection for the current activation and
+  at most 20 recent fulfilled one-time moments. It exposes only a public alias
+  whose separate exact consent metadata and existing verified-settlement
+  authority check stamped the moment publishable at its first activation, or
+  `Anonymous`, plus monthly versus one-time kind. Publication authority cannot
+  be acquired by a later settlement replay. Historical aliases and moments
+  settled after creator authority was lost remain anonymous. Recognition streams
+  below the primary funding controls. A two-second signal is forwarded through
+  the optional stages and bounds external secure-box work but cannot cancel an
+  in-flight Prisma query; when the moment read overlaps expiry, the following
+  secure-box metadata lookup may begin before external crypto observes the abort.
+  The independent Suspense boundary keeps optional alias work from delaying funding,
+  management, cancellation, or recovery. The alias ciphertext remains legacy-readable plain
+  text while consent and settlement publication stay in additive nullable
+  metadata. It never exposes payer
+  identity, amount, cap, balance, payment state, charge timing, or refill
+  events. A separate room-public usage read may expose one bounded
   `includedUsageUsedPercent`: Web derives it only from current-period included
   spend and the room's included limit. It never reveals payer, cap, charges,
   credit balance or source, remaining capacity, period dates, message counts,
@@ -1815,10 +1832,15 @@ ciphertext keeps the existing owning-ingress repair path without speculative
 KMS. Thread-container creation therefore does not use the legacy all-domain
 provisioning bridge or perform domain-root provisioning, delivery-route sealing,
 or activation-mailbox root unwraps while holding its route transaction.
-Transaction-owned authority reads remain inside that boundary and may reuse
-request-scoped root prewarms when available. In particular, opening a
-pending-group setup transfer payload remains a pre-existing transaction-owned
-authority read; it is not thread-container crypto preparation.
+Transaction-owned authority reads remain inside that boundary. Pending-group
+claim preparation now repeats the bounded candidate selection before `BEGIN`,
+binds the prospective winner's id, owner, blinded line key, ciphertext, and
+referenced root id, and prewarms only that decrypt root. The transaction repeats
+all authority and eligibility checks, locks the winner, requires an exact match
+to the prepared identity, and opens the payload with local authenticated crypto
+from the request-scoped cache. Winner, ciphertext, or root drift rolls back into
+the existing one-retry preparation path; provider, root, envelope, and
+authentication failures never consume the row.
 
 A private accepted text turn may arm one expiring
 `HostedPendingGroupSetup` for a person member's current managed Linq line. The
@@ -1852,9 +1874,11 @@ member's existing preference owner and carries explicit room context on the
 existing activation wake to initialize the fixed group-room-model page exactly
 once before conversation work. Existing-route convergence and transaction
 rollback leave the envelope unchanged without compensation; a concurrent loser
-re-reads the canonical route and appends its distinct message there. Unreadable
-or future encrypted payloads are consumed as unavailable optional setup so they
-cannot block an accepted group message. Expiry is query-time authority, and
+re-reads the canonical route and appends its distinct message there. Only
+successfully authenticated plaintext that is malformed JSON or fails the strict
+supported schema is consumed as unavailable optional setup; secure-box parse,
+envelope/root lookup, KMS/provider, authentication, and missing-preparation
+failures roll back and preserve the row. Expiry is query-time authority, and
 member deletion removes the intent by foreign-key cascade. Provider add-actor
 fields are not ownership authority. For a hard-blocked-line recovery, the
 existing delivery attempt is the retry owner: transport must durably record its

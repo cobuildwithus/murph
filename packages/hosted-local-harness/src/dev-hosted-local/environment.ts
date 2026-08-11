@@ -1071,6 +1071,7 @@ export function buildWranglerLocalDevConfig(
     },
     instance_type: "standard-1",
     max_instances: input.maxInstances,
+    ssh: { enabled: false },
   });
 
   return {
@@ -1080,7 +1081,7 @@ export function buildWranglerLocalDevConfig(
       path.join(cloudflareAppDir, "src", resolveWranglerLocalDevWorkerEntrypoint(source)),
     ),
     compatibility_date: "2026-03-27",
-    compatibility_flags: ["nodejs_compat"],
+    compatibility_flags: ["nodejs_compat", "containers_pid_namespace"],
     containers: [
       buildRunnerContainerConfig({ className: "RunnerContainer", maxInstances: 50 }),
       buildRunnerContainerConfig({ className: "DeploySmokeRunnerContainer", maxInstances: 1 }),

@@ -544,9 +544,14 @@ Last verified: 2026-08-10
   only when that transaction creates the route; rollback and convergence leave
   it unchanged without a compensation lifecycle. A concurrent loser re-reads
   the canonical route and appends its distinct message there. The optional
-  setup payload is encrypted and versioned; unreadable or future bytes are
-  consumed as unavailable optional setup and fall back to ordinary sender
-  admission instead of wedging the room. Hard-blocked-line recovery keeps the
+  setup payload is encrypted and versioned. Exact candidate ciphertext and its
+  referenced root are prepared before `BEGIN`; the transaction repeats
+  authority checks, locks the winner, and accepts only an exact prepared match.
+  Only successfully authenticated plaintext with malformed JSON or an invalid
+  application schema is consumed as unavailable optional setup. Secure-box,
+  envelope/root, KMS/provider, authentication, and stale-preparation failures
+  roll back and preserve the row for the existing bounded retry owner instead
+  of being misclassified as invalid payload. Hard-blocked-line recovery keeps the
   existing delivery attempt as its retry owner, awaits provider-accepted
   correlation before reporting send success, and treats an exact
   still-uncorrelated attempt as retryable rather than definitive absence. An
