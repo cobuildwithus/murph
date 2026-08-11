@@ -69,7 +69,8 @@ export function ImessageChallengeStandingsCardStudy() {
           The identity-free image fallback mirrors the native ranked and
           collective hierarchy. Generic labels preserve scorer order,
           incomplete ranks stay neutral, and a shared target remains group
-          progress rather than an individual result.
+          progress rather than an individual result. The canonical Murph mark
+          occupies the native upper-left badge footprint inside the raster.
         </p>
       </div>
       <div className="hidden flex-col gap-8 sm:flex">

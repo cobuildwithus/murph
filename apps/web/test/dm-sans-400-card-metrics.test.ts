@@ -4,7 +4,10 @@ import { readFile } from "node:fs/promises";
 
 import { test } from "vitest";
 
-import { dmSans400FontPath } from "../app/font-files";
+import {
+  dmSans400FontPath,
+  dmSans600FontPath,
+} from "../app/font-files";
 import {
   DM_SANS_400_FONT_SHA256,
   measureDmSans400Text,
@@ -24,6 +27,14 @@ test("card metrics stay pinned to the exact bundled DM Sans font", async () => {
   assertClose(measureDmSans400Text("Bodyweight ×", 23), 144.693);
   assertClose(measureDmSans400Text("slow gait, ankle", 23), 160.862);
   assertClose(measureDmSans400Text("impact, or load", 23), 160.563);
+});
+
+test("native-parity semibold text stays pinned to its exact bundled font", async () => {
+  const font = await readFile(dmSans600FontPath);
+  assert.equal(
+    createHash("sha256").update(font).digest("hex"),
+    "52897fabe96fa9dfe59b52681b57493f6bdce268ca3add5b82d701460ecc100d",
+  );
 });
 
 test("positive kerning stays inside the measured four-column lines", () => {

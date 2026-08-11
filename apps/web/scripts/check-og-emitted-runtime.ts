@@ -48,6 +48,8 @@ const execFileAsync = promisify(execFile);
 type ProbeRoute = {
   /** Path under the dist directory, as the emitted function is laid out. */
   entry: string;
+  expectedHeight: number;
+  expectedWidth: number;
   params: Record<string, string>;
   url: string;
 };
@@ -56,6 +58,8 @@ type ProbeResult = {
   bytes: number;
   contentType: string | null;
   entry: string;
+  expectedHeight: number;
+  expectedWidth: number;
   height: number;
   status: number;
   width: number;
@@ -73,25 +77,30 @@ type ProbeOutput = {
 const probeRoutes: ProbeRoute[] = [
   {
     entry: "server/app/join/[inviteCode]/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
     params: { inviteCode: "invite-probe" },
     url: "http://localhost/join/invite-probe/opengraph-image",
   },
   // Adds Fraunces-400, which the hero share frame does not use.
   {
     entry: "server/app/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
     params: {},
     url: "http://localhost/opengraph-image",
   },
+  createIMessageCardProbe(),
 ];
 
 const requiredAssetNames = [
   "logo.svg",
+  "murph-mark.svg",
   "Fraunces-400.ttf",
   "Fraunces-600.ttf",
   "DMSans-400.ttf",
+  "DMSans-600.ttf",
 ] as const;
-
-const expectedImageSize = { height: 630, width: 1200 } as const;
 
 // Emitted into the temporary root rather than committed next to this file:
 // the child must run without reading anything out of the build checkout, and
@@ -164,6 +173,8 @@ async function main() {
       bytes: buffer.length,
       contentType: response.headers.get("content-type"),
       entry: route.entry,
+      expectedHeight: route.expectedHeight,
+      expectedWidth: route.expectedWidth,
       status: response.status,
       ...readPngSize(buffer),
     });
@@ -207,6 +218,8 @@ async function main(): Promise<void> {
 
     const relocatedRoutes = probeRoutes.map((route) => ({
       entry: path.join(path.relative(repoRoot, distDir), route.entry),
+      expectedHeight: route.expectedHeight,
+      expectedWidth: route.expectedWidth,
       params: route.params,
       url: route.url,
     }));
@@ -249,11 +262,20 @@ async function main(): Promise<void> {
  */
 function assertDeployedAssetLayout(relocatedRoot: string): void {
   const deployed = path.join(relocatedRoot, "apps/web/public/logo.svg");
+  const deployedMark = path.join(
+    relocatedRoot,
+    "apps/web/public/icons/murph-mark.svg",
+  );
   const workingDirectoryRelative = path.join(relocatedRoot, "public/logo.svg");
 
   if (!existsSync(deployed)) {
     throw new Error(
       `Expected the traced function to contain apps/web/public/logo.svg at ${deployed}.`,
+    );
+  }
+  if (!existsSync(deployedMark)) {
+    throw new Error(
+      `Expected the traced function to contain apps/web/public/icons/murph-mark.svg at ${deployedMark}.`,
     );
   }
   if (existsSync(workingDirectoryRelative)) {
@@ -275,11 +297,11 @@ function assertProbeOutput(output: ProbeOutput, relocatedRoot: string): void {
       failures.push(`${result.entry} returned content-type ${result.contentType}, expected image/png`);
     }
     if (
-      result.width !== expectedImageSize.width
-      || result.height !== expectedImageSize.height
+      result.width !== result.expectedWidth
+      || result.height !== result.expectedHeight
     ) {
       failures.push(
-        `${result.entry} returned a ${result.width}x${result.height} image, expected ${expectedImageSize.width}x${expectedImageSize.height}`,
+        `${result.entry} returned a ${result.width}x${result.height} image, expected ${result.expectedWidth}x${result.expectedHeight}`,
       );
     }
   }
@@ -308,6 +330,40 @@ function assertProbeOutput(output: ProbeOutput, relocatedRoot: string): void {
       ...failures.map((failure) => `- ${failure}`),
     ].join("\n"));
   }
+}
+
+function createIMessageCardProbe(): ProbeRoute {
+  const card = {
+    schemaVersion: 2,
+    card: {
+      kind: "daily_nutrition",
+      version: 2,
+      localDate: "2026-08-11",
+      mealCount: 1,
+      totals: {
+        calories: { total: 700, mealCount: 1 },
+        proteinGrams: { total: 35, mealCount: 1 },
+        carbsGrams: { total: 80, mealCount: 1 },
+        fatGrams: { total: 20, mealCount: 1 },
+        fiberGrams: { total: 8, mealCount: 1 },
+      },
+      goals: {
+        calories: null,
+        proteinGrams: null,
+        carbsGrams: null,
+        fatGrams: null,
+        fiberGrams: null,
+      },
+    },
+  };
+  const payload = `${Buffer.from(JSON.stringify(card)).toString("base64url")}.png`;
+  return {
+    entry: "server/app/imessage/card/v1/[payload]/route.js",
+    expectedHeight: 509,
+    expectedWidth: 1200,
+    params: { payload },
+    url: `http://localhost/imessage/card/v1/${payload}`,
+  };
 }
 
 /**

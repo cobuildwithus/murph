@@ -40,8 +40,9 @@ export function ImessageNutritionCardStudy() {
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The static fallback mirrors the shipping Messages balloon&apos;s default
-          state. Messages supplies the outer chrome and concise date label;
-          only partial totals or assessed goals add a short subcaption.
+          state and embeds the canonical Murph mark in its native badge
+          footprint. Messages supplies the outer mask and concise date label;
+          only partial totals add a short subcaption.
         </p>
       </div>
       <div className="hidden sm:block">

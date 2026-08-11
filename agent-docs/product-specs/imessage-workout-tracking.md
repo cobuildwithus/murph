@@ -48,10 +48,13 @@ remains the workout recovery owner, and the value-free fallback identifies the
 message as the member's workout before telling them how to request that complete
 text without exposing its values outside the card.
 
-The bitmap remains rectangular and badge-free because Messages owns the outer
-mask and app icon, but its header keeps the provider's upper-left icon footprint
-clear. Removing the image-owned logo must not move title text beneath the
-provider overlay.
+The bitmap remains rectangular because Messages owns the outer mask and
+caption. Because the provider request omits an App Store id, the app-absent
+layout supplies no app art of its own; the bitmap therefore embeds the checked-in
+canonical Murph mark in the same 36×27pt upper-left badge footprint as the
+native balloon. The title may sit beside that compact footprint for structured
+workouts or below it for generic tables, but no larger empty icon gutter is
+reserved.
 
 Shared workout footer copy must remain truthful on both projections: it may ask
 the member to reply with an exercise, set, and result, but must not promise a

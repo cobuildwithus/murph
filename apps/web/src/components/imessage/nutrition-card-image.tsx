@@ -1,20 +1,26 @@
 import {
-  nutritionCardGoalStatusLabels,
   type DailyNutritionResponseCard,
   type DailyNutritionResponseCardV2,
   type NutritionCardGoalSnapshot,
   type NutritionCardMetric,
 } from "@murphai/contracts";
 
-import { IMESSAGE_CARD_COLOR } from "./card-image-chrome";
+import {
+  IMessageCardBadge,
+  IMESSAGE_CARD_COLOR,
+} from "./card-image-chrome";
 
 export const IMESSAGE_NUTRITION_CARD_IMAGE_SIZE = {
   width: 1200,
-  height: 568,
+  height: 509,
 } as const;
 
 const NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 3,
+  useGrouping: true,
+});
+const WHOLE_NUMBER_FORMATTER = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 0,
   useGrouping: true,
 });
 
@@ -38,13 +44,15 @@ const EMPTY_METRIC: NutritionCardMetric = {
 
 /**
  * Static counterpart to the shipping SwiftUI nutrition balloon's default
- * state. The provider owns the outer card chrome, so this image deliberately
- * avoids its own badge and corner mask.
+ * state. The provider owns the outer corner mask; the bitmap owns Murph's mark
+ * because extension-absent Linq cards do not receive provider artwork.
  */
 export function NutritionCardImage({
   card,
+  logoSrc = "/icons/murph-mark.svg",
 }: {
   card: DailyNutritionResponseCard;
+  logoSrc?: string;
 }) {
   const v2 = isNutritionCardV2(card) ? card : null;
   const metrics: NutritionMetricPresentation[] = [
@@ -86,16 +94,17 @@ export function NutritionCardImage({
         fontFamily: "DM Sans",
       }}
     >
+      <IMessageCardBadge logoSrc={logoSrc} />
+
       <div
         data-calorie-goal-status={calorieGoal?.status ?? "no-goal"}
         style={{
           position: "absolute",
-          top: 146,
+          top: 105,
           left: 45,
           display: "flex",
           flexDirection: "column",
           alignItems: "flex-start",
-          gap: 10,
           maxWidth: 800,
           whiteSpace: "nowrap",
         }}
@@ -131,7 +140,6 @@ export function NutritionCardImage({
             cal
           </div>
         </div>
-        <GoalStatusLabel fontSize={27} goal={calorieGoal} />
       </div>
 
       <CalorieRing
@@ -144,11 +152,11 @@ export function NutritionCardImage({
         style={{
           position: "absolute",
           right: 45,
-          bottom: 36,
+          bottom: 38,
           left: 45,
           display: "flex",
           alignItems: "flex-start",
-          gap: 30,
+          gap: 15,
         }}
       >
         {metrics.map((presentation) => (
@@ -168,22 +176,20 @@ function CalorieRing({
   metric: NutritionCardMetric;
   goal: NutritionCardGoalSnapshot | null | undefined;
 }) {
-  const size = 203;
+  const size = 188;
   const strokeWidth = 19;
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const progress = getCalorieProgress(metric, cardMealCount, goal);
+  const progress = getCalorieProgress(metric, goal, cardMealCount);
 
   return (
     <div
       aria-hidden="true"
-      data-calorie-progress={
-        progress === null ? "unavailable" : progress.toFixed(4)
-      }
+      data-calorie-progress={progress === null ? "unavailable" : progress.toFixed(4)}
       style={{
         position: "absolute",
-        top: 75,
-        right: 38,
+        top: 60,
+        right: 75,
         display: "flex",
         width: size,
         height: size,
@@ -280,61 +286,23 @@ function Metric({
           whiteSpace: "nowrap",
         }}
       >
-        {metric.total === null ? "—" : `${formatNumber(metric.total)}g`}
+        {metric.total === null ? "—" : `${formatWholeNumber(metric.total)}g`}
       </div>
-      <GoalStatusLabel fontSize={23} goal={goal} />
     </div>
   );
-}
-
-function GoalStatusLabel({
-  fontSize,
-  goal,
-}: {
-  fontSize: number;
-  goal: NutritionCardGoalSnapshot | null | undefined;
-}) {
-  if (goal === null || goal === undefined || goal.status === "unavailable") {
-    return null;
-  }
-
-  return (
-    <div
-      data-goal-status-label={goal.status}
-      style={{
-        display: "flex",
-        color: getStatusColor(goal),
-        fontSize,
-        fontWeight: 700,
-        lineHeight: 1,
-        letterSpacing: "0.04em",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {formatGoalStatusLabel(goal.status)}
-    </div>
-  );
-}
-
-function formatGoalStatusLabel(
-  status: NutritionCardGoalSnapshot["status"],
-): string {
-  const label = nutritionCardGoalStatusLabels[status];
-  return (status === "on_target" ? label : label.replace(" target", ""))
-    .toUpperCase();
 }
 
 function getCalorieProgress(
   metric: NutritionCardMetric,
-  cardMealCount: number,
   goal: NutritionCardGoalSnapshot | null | undefined,
+  cardMealCount: number,
 ): number | null {
   if (
-    metric.total === null ||
-    metric.mealCount !== cardMealCount ||
-    goal === null ||
-    goal === undefined ||
-    goal.status === "unavailable"
+    metric.total === null
+    || metric.mealCount !== cardMealCount
+    || goal === null
+    || goal === undefined
+    || goal.status === "unavailable"
   ) {
     return null;
   }
@@ -369,4 +337,8 @@ function isNutritionCardV2(
 
 function formatNumber(value: number): string {
   return NUMBER_FORMATTER.format(value);
+}
+
+function formatWholeNumber(value: number): string {
+  return WHOLE_NUMBER_FORMATTER.format(value);
 }

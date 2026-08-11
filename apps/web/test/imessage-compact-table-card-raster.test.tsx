@@ -25,7 +25,7 @@ const KERNING_BOUNDARY_CARD: CompactTablePresentationCardV1 = {
   footer: null,
 };
 
-test("real-font route keeps positive-kerning text inside its owning row", async () => {
+test("real-font route keeps positive-kerning text above the stacked-row divider", async () => {
   const { GET } = await import("../app/imessage/card/v1/[payload]/route");
   const payload = encodePayload({
     schemaVersion: 3,
@@ -39,20 +39,18 @@ test("real-font route keeps positive-kerning text inside its owning row", async 
   assert.equal(response.status, 200);
   const png = Buffer.from(await response.arrayBuffer());
   const image = decodePng(png);
-  assert.deepEqual([image.width, image.height], [1_200, 568]);
+  assert.deepEqual([image.width, image.height], [1_200, 1_366]);
 
   const dividerBands = findHorizontalDividerBands(image);
-  assert.ok(dividerBands.length >= 3);
-  const rowTop = dividerBands.at(-2);
-  const nextRowTop = dividerBands.at(-1);
-  assert.ok(rowTop !== undefined && nextRowTop !== undefined);
-  assert.equal(nextRowTop.start - rowTop.start, 100);
+  assert.ok(dividerBands.length >= 1);
+  const divider = dividerBands.at(-1);
+  assert.ok(divider !== undefined);
   assert.equal(
     hasDarkPixel(image, {
-      left: 467,
-      right: 639,
-      top: nextRowTop.end + 2,
-      bottom: nextRowTop.end + 18,
+      left: 45,
+      right: 1_155,
+      top: divider.end + 2,
+      bottom: divider.end + 28,
     }),
     false,
   );

@@ -113,9 +113,10 @@ export function ImessageCompactTableCardStudy() {
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The image fallback keeps a targetless first pending set honest and
           measures every wrapped row in the dense four-column boundary.
-          Messages supplies the app icon and outer corner mask; the rectangular
-          raster keeps that icon footprint clear. Provider chrome stays concise;
-          the complete semantic fallback remains available as text.
+          The rectangular raster embeds the canonical Murph mark in the native
+          badge footprint, while Messages supplies the outer corner mask.
+          Provider chrome stays concise; the complete semantic fallback remains
+          available as text.
         </p>
       </div>
       <div className="hidden flex-col gap-8 sm:flex">
