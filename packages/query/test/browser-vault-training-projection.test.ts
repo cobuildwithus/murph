@@ -115,6 +115,49 @@ test("browser vault replicas expose a bounded sanitized training projection with
           kind: "activity_session",
           occurredAt: "2026-08-08T08:00:00.000Z",
         }),
+        createEntity("event", "manual_cardio", {
+          attributes: {
+            activityType: "running",
+            distanceKm: 4.828032,
+            durationMinutes: 45,
+            note: "45 minute trail run 3 mi",
+            privateProviderPayload: { shouldNotReachBrowser: true },
+            source: "manual",
+            title: "45-minute run",
+            workout: {
+              exercises: [],
+              privateNestedPayload: "hidden",
+              sessionNote: "45 minute trail run 3 mi",
+            },
+          },
+          date: "2026-08-08",
+          kind: "activity_session",
+          occurredAt: "2026-08-08T09:00:00.000Z",
+          title: "45-minute run",
+        }),
+        createEntity("event", "imported_cardio", {
+          attributes: {
+            activityType: "cycling",
+            distanceKm: 24.5,
+            durationMinutes: 60,
+            source: "import",
+            workout: { exercises: [] },
+          },
+          date: "2026-08-07",
+          kind: "activity_session",
+          occurredAt: "2026-08-07T09:00:00.000Z",
+        }),
+        createEntity("event", "manual_activity_without_workout", {
+          attributes: {
+            activityType: "running",
+            distanceKm: 5,
+            durationMinutes: 30,
+            source: "manual",
+          },
+          date: "2026-08-07",
+          kind: "activity_session",
+          occurredAt: "2026-08-07T10:00:00.000Z",
+        }),
         createEntity("event", "strength_old", {
           attributes: {
             activityType: "strength-training",
@@ -208,6 +251,47 @@ test("browser vault replicas expose a bounded sanitized training projection with
   assert.deepEqual(projectedRun.attributes, {
     activityKind: "run",
     source: "device",
+  });
+
+  const projectedManualCardio = replica.entities.find(
+    (entity) => entity.id === "manual_cardio",
+  );
+  assert.ok(projectedManualCardio);
+  assert.deepEqual(projectedManualCardio.attributes.training, {
+    activityType: "running",
+    distanceKm: 4.828032,
+    durationMinutes: 45,
+    exercises: [],
+    note: "45 minute trail run 3 mi",
+    schema: BROWSER_VAULT_TRAINING_SESSION_SCHEMA,
+    sessionNote: "45 minute trail run 3 mi",
+    startedAt: "2026-08-08T09:00:00.000Z",
+    state: "completed",
+    title: "45-minute run",
+  });
+  assert.equal("privateProviderPayload" in projectedManualCardio.attributes, false);
+  assert.equal(
+    "privateNestedPayload"
+      in requireRecord(projectedManualCardio.attributes.training),
+    false,
+  );
+
+  const projectedImportedCardio = replica.entities.find(
+    (entity) => entity.id === "imported_cardio",
+  );
+  assert.ok(projectedImportedCardio?.attributes.training);
+  assert.equal(
+    requireRecord(projectedImportedCardio.attributes.training).distanceKm,
+    24.5,
+  );
+
+  const projectedManualActivity = replica.entities.find(
+    (entity) => entity.id === "manual_activity_without_workout",
+  );
+  assert.ok(projectedManualActivity);
+  assert.deepEqual(projectedManualActivity.attributes, {
+    activityKind: "running",
+    source: "manual",
   });
 
   const projectedOld = replica.entities.find(

@@ -10,7 +10,10 @@ import {
   createVaultReadModel,
 } from "@murphai/query/browser";
 
-import type { BrowserTrainingView } from "../src/lib/training/browser-training";
+import {
+  selectBrowserVaultTraining,
+  type BrowserTrainingView,
+} from "../src/lib/training/browser-training";
 import type { BrowserVaultContextValue } from "../src/lib/browser-vault/context";
 
 const mocks = vi.hoisted(() => ({
@@ -39,6 +42,7 @@ const trainingFixture: BrowserTrainingView = {
     activityType: "strength-training",
     completedSetCount: 1,
     date: "2026-08-09",
+    distanceKm: null,
     durationMinutes: null,
     endedAt: null,
     exerciseCount: 1,
@@ -136,6 +140,7 @@ const trainingFixture: BrowserTrainingView = {
       activityType: "strength-training",
       completedSetCount: 2,
       date: "2026-08-07",
+      distanceKm: null,
       durationMinutes: 48,
       endedAt: "2026-08-07T17:48:00.000Z",
       exerciseCount: 1,
@@ -333,14 +338,14 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
       vault: createVaultReadModel({
         entities: [{
           attributes: {
-            activityType: "strength-training",
+            activityType: "running",
+            distanceKm: 4.828032,
+            durationMinutes: 45,
+            source: "manual",
+            title: "45-minute run",
             workout: {
-              endedAt: "2026-08-09T18:04:00.000Z",
-              exercises: [{
-                name: "Bench press",
-                sets: [{ order: 1, reps: 8, weight: 155, weightUnit: "lb" }],
-              }],
-              startedAt: "2026-08-09T18:00:00.000Z",
+              exercises: [],
+              sessionNote: "45 minute trail run 3 mi",
             },
           },
           body: null,
@@ -412,6 +417,9 @@ test("Training requests one runtime-owned refresh after its messaging handoff re
       refreshOptions?.requestRuntimeRefreshUntil?.(changedClient),
       true,
     );
+    const cardioUpdate = selectBrowserVaultTraining(changedClient);
+    assert.equal(cardioUpdate.recentSessions[0]?.distanceKm, 4.828032);
+    assert.notEqual(cardioUpdate.projectionSignature, "[]");
 
     rendered.window.dispatchEvent(new rendered.window.Event("focus"));
     await Promise.resolve();
@@ -829,6 +837,7 @@ test("Training shows both cardio measurements without calling a slower effort Be
         activityType: "cardio",
         completedSetCount: 2,
         date: "2026-08-09",
+        distanceKm: 4.828032,
         durationMinutes: 11,
         endedAt: "2026-08-09T17:11:00.000Z",
         exerciseCount: 1,
@@ -872,6 +881,7 @@ test("Training shows both cardio measurements without calling a slower effort Be
 
   assert.match(markup, /5 min · 1 km/);
   assert.match(markup, /6 min · 1 km/);
+  assert.match(markup, /11 min · 4.8 km/);
   assert.match(markup, /Best<\/p><p[^>]*>—<\/p>/);
   assert.doesNotMatch(markup, /Best<\/p><p[^>]*>6 min · 1 km<\/p>/);
 });

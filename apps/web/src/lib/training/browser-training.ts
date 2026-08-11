@@ -39,6 +39,7 @@ export interface TrainingSessionView {
   activityType: string;
   completedSetCount: number;
   date: string;
+  distanceKm: number | null;
   durationMinutes: number | null;
   endedAt: string | null;
   exerciseCount: number;
@@ -177,6 +178,7 @@ function parseTrainingSession(entity: BrowserVaultEntity): TrainingSessionView[]
     activityType,
     completedSetCount: sets.filter((set) => set.completed).length,
     date: entity.date ?? startedAt.slice(0, 10),
+    distanceKm: readNumber(training.distanceKm),
     durationMinutes,
     endedAt,
     exerciseCount: normalizedExercises.length,

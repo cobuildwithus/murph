@@ -22,6 +22,10 @@ import {
   initializeVault,
   resolveRawAssetDirectory,
 } from "@murphai/core";
+import {
+  createBrowserVaultReplica,
+  createVaultReadModel,
+} from "@murphai/query/browser";
 
 import {
   MAX_DURATION_MINUTES,
@@ -521,6 +525,7 @@ describe("workout", () => {
         timeZone: "UTC",
       },
       activityType: "running",
+      occurredAt: "2026-08-08T09:00:00.000Z",
       source: "import",
     });
 
@@ -531,6 +536,48 @@ describe("workout", () => {
     assert.equal(draft.title, "45-minute run");
     assert.equal(draft.note, "45 minute trail run 3 mi");
     assert.equal(draft.rawRefs?.[0], "bank/raw/workout.csv");
+    assert.deepEqual(draft.workout?.exercises, []);
+
+    const cardioReplica = await createBrowserVaultReplica({
+      generatedAt: "2026-08-09T12:00:00.000Z",
+      metricPoints: [],
+      sourceBundleHash: "structured-workout-cardio",
+      vault: createVaultReadModel({
+        entities: [{
+          attributes: { ...draft },
+          body: null,
+          date: "2026-08-08",
+          entityId: "structured_cardio",
+          experimentSlug: null,
+          family: "event",
+          frontmatter: null,
+          kind: "activity_session",
+          links: [],
+          lookupIds: ["structured_cardio"],
+          occurredAt: "2026-08-08T09:00:00.000Z",
+          path: "history/events/structured-cardio.jsonl",
+          primaryLookupId: "structured_cardio",
+          recordClass: "ledger",
+          relatedIds: [],
+          status: null,
+          stream: null,
+          tags: [],
+          title: draft.title,
+        }],
+        metadata: null,
+        vaultRoot: "browser://vault",
+      }),
+    });
+    const projectedCardio = cardioReplica.entities.find(
+      (entity) => entity.id === "structured_cardio",
+    );
+    const projectedTraining = projectedCardio?.attributes.training;
+    assert.ok(
+      projectedTraining
+      && typeof projectedTraining === "object"
+      && !Array.isArray(projectedTraining),
+    );
+    assert.equal(Reflect.get(projectedTraining, "distanceKm"), 4.828032);
 
     const compactStrengthDraft = workoutModule.buildStructuredWorkoutActivitySessionDraft({
       payload: {

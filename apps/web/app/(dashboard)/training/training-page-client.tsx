@@ -624,6 +624,11 @@ function WorkoutDetails({
             {session.durationMinutes
               ? ` · ${session.durationMinutes} min`
               : ""}
+            {session.distanceKm !== null
+              ? ` · ${formatNumber(session.distanceKm, {
+                  maximumFractionDigits: 1,
+                })} km`
+              : ""}
             {session.exerciseCount
               ? ` · ${session.exerciseCount} ${pluralize(
                   session.exerciseCount,

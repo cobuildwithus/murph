@@ -13,6 +13,7 @@ const STRENGTH_ACTIVITY_TYPES = new Set([
   "weightlifting",
   "resistance-training",
 ]);
+const STRUCTURED_WORKOUT_SOURCES = new Set(["import", "manual"]);
 
 export function projectBrowserTrainingSession(input: {
   activityKind: string | null;
@@ -39,10 +40,14 @@ export function projectBrowserTrainingSession(input: {
     && workoutEndedAt === null;
   const explicitStrength =
     activityType !== null && STRENGTH_ACTIVITY_TYPES.has(activityType);
+  const structuredMurphWorkout =
+    workout !== null
+    && STRUCTURED_WORKOUT_SOURCES.has(readString(source.source) ?? "");
 
   if (
     !activeLiveWorkout
     && !explicitStrength
+    && !structuredMurphWorkout
     && exercises.length === 0
     && strengthExercises.length === 0
   ) {
@@ -64,6 +69,7 @@ export function projectBrowserTrainingSession(input: {
   assignScalar(training, "title", source.title ?? input.entity.title);
   assignScalar(training, "note", source.note);
   assignScalar(training, "durationMinutes", source.durationMinutes);
+  assignScalar(training, "distanceKm", source.distanceKm);
   assignScalar(
     training,
     "startedAt",
