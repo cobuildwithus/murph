@@ -1,6 +1,6 @@
 # Preserve private Assistant Ask continuity
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -79,3 +79,6 @@ Updated: 2026-08-11
 - Passed locally: the notification audience integration suite (9 tests), the
   notification-turn runtime suite (54 tests), three native-resume/transcript
   planner regressions, and the assistant-engine package typecheck.
+- Passed locally after adding the public entry: the changelog fragment suite
+  (7 tests), Web typecheck, full-PR docs drift, and diff whitespace check.
+Completed: 2026-08-11
