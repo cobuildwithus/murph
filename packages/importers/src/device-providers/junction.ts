@@ -1550,6 +1550,7 @@ const JUNCTION_DAILY_TIMESERIES_DESCRIPTORS: ReadonlyMap<string, JunctionDailyTi
 // Readings are sparse (10s-100s per member-year): each one lands as a paired
 // `measurement` event plus one compact per-reading evidence part.
 const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
+const JUNCTION_NOTE_RESOURCE = "note";
 
 // Derived from the descriptor entries (plus the sparse paired blood-pressure
 // resource) so the raw-snapshot sanitization allowlist cannot drift from the
@@ -1557,6 +1558,7 @@ const JUNCTION_BLOOD_PRESSURE_RESOURCE = "blood_pressure";
 const COMPACT_TIMESERIES_RESOURCE_ALLOWLIST: ReadonlySet<string> = new Set([
   ...JUNCTION_DAILY_TIMESERIES_DESCRIPTOR_ENTRIES.map(([resource]) => resource),
   JUNCTION_BLOOD_PRESSURE_RESOURCE,
+  JUNCTION_NOTE_RESOURCE,
 ]);
 
 function normalizeTimeseries(
@@ -1564,6 +1566,11 @@ function normalizeTimeseries(
   context: NormalizationContext,
 ): void {
   for (const [resource, payload] of allowedResourceEntries(timeseries, TIMESERIES_RESOURCE_ALLOWLIST)) {
+    if (resource === JUNCTION_NOTE_RESOURCE) {
+      pushJunctionNoteTags(payload, resource, slugify(resource, "timeseries"), context);
+      continue;
+    }
+
     if (resource === JUNCTION_BLOOD_PRESSURE_RESOURCE) {
       pushJunctionBloodPressureReadings(payload, resource, slugify(resource, "timeseries"), context);
       continue;
@@ -1574,6 +1581,111 @@ function normalizeTimeseries(
       pushJunctionDailyTimeseriesObservations(payload, resource, slugify(resource, "timeseries"), context, descriptor);
     }
   }
+}
+
+function pushJunctionNoteTags(
+  payload: unknown,
+  resource: string,
+  resourceSlug: string,
+  context: NormalizationContext,
+): void {
+  const baseArtifactRole = `junction-timeseries-reading-${resourceSlug}`;
+  const seenNoteHashes = new Set<string>();
+
+  for (const [index, { entry, originFallback }] of timeseriesResourceEntries(payload).entries()) {
+    const resourceContext = buildResourceContext({
+      entry,
+      originFallback,
+      resource,
+      resourceSlug,
+      identityKind: "timeseries",
+      index,
+      fallbackArtifactRole: baseArtifactRole,
+      context,
+    });
+    if (!resourceContext) continue;
+
+    const tags = normalizeJunctionNoteTags(entry.tags);
+    const start = firstStringFromPaths(entry, ["start", "startAt", "start_at"]);
+    const timestamp = resolveRecordTimestamp(
+      start ? { ...entry, observedAtRaw: start } : entry,
+      context,
+      resourceContext.sourceProviderSlug,
+    );
+    if (!timestamp.occurredAt || !timestamp.dayKey || tags.length === 0) continue;
+
+    const stableId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
+    const noteHash = stableId
+      ? shortHash([resourceContext.externalRefResourceType, stableId])
+      : shortHash([
+          resourceContext.externalRefResourceType,
+          timestamp.observedAtRaw ?? timestamp.occurredAt,
+          ...tags,
+        ]);
+    if (seenNoteHashes.has(noteHash)) continue;
+    seenNoteHashes.add(noteHash);
+
+    const role = `${baseArtifactRole}:${timestamp.dayKey}:${noteHash}`;
+    pushEvidencePart(
+      context.evidenceParts,
+      withJunctionCompactTimeseriesMetadata(
+        resource,
+        createEvidencePart(
+          role,
+          `${role}.json`,
+          stripUndefined({
+            schema: "junction.note_tags.v1",
+            provider: "junction",
+            resource,
+            dayKey: timestamp.dayKey,
+            sourceProviderSlug: resourceContext.sourceProviderSlug,
+            sourceType: resourceContext.origin.sourceType,
+            sourceInstanceId: resourceContext.origin.sourceInstanceId,
+            occurredAt: timestamp.occurredAt,
+            recordedAt: timestamp.recordedAt,
+            tags,
+          }),
+        ),
+        "timeseries_reading",
+      ),
+    );
+
+    for (const tag of tags) {
+      context.events.push(stripUndefined({
+        kind: "intervention_session",
+        occurredAt: timestamp.occurredAt,
+        recordedAt: timestamp.recordedAt,
+        dayKey: timestamp.dayKey,
+        source: "device",
+        title: `Wearable tag: ${tag.replaceAll("-", " ")}`,
+        tags: [tag],
+        evidenceRoles: [role],
+        externalRef: makeProviderExternalRef(
+          "junction",
+          resourceContext.externalRefResourceType,
+          noteHash,
+          undefined,
+          `tag-${tag}`,
+        ),
+        dataOrigin: buildDataOrigin(entry, resourceContext, timestamp),
+        fields: {
+          interventionType: tag,
+          sessionStatus: "completed",
+        },
+      }));
+    }
+  }
+}
+
+function normalizeJunctionNoteTags(value: unknown): string[] {
+  return [...new Set(
+    asArray(value).flatMap((entry) => {
+      const label = stringId(entry);
+      if (!label) return [];
+      const tag = slugify(label, "").slice(0, 80).replace(/-+$/u, "");
+      return tag ? [tag] : [];
+    }),
+  )].sort();
 }
 
 function pushJunctionDailyTimeseriesObservations(
@@ -2101,6 +2213,10 @@ function buildRawResourcePayload(
   payload: unknown,
   connectionsByKey?: ReadonlyMap<string, PlainObject>,
 ): unknown {
+  if (resource === JUNCTION_NOTE_RESOURCE) {
+    return sanitizeJunctionNoteRawValue(sanitizeJunctionRawPayload(payload));
+  }
+
   if (resource !== "profile") {
     return sanitizeJunctionRawPayload(payload);
   }
@@ -2120,6 +2236,21 @@ function buildRawResourcePayload(
   return sanitizeProfilePayload(
     payload,
     profile && connectionsByKey ? resolveEntryConnection(profile, connectionsByKey) : undefined,
+  );
+}
+
+function sanitizeJunctionNoteRawValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeJunctionNoteRawValue);
+  }
+  if (!isPlainRecord(value)) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => normalizeJunctionRawIdentityKey(key) !== "value")
+      .map(([key, entry]) => [key, sanitizeJunctionNoteRawValue(entry)]),
   );
 }
 

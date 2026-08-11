@@ -5060,7 +5060,7 @@ function junctionTimeseriesRecordValueIdentity(
   resource: string,
   entry: Record<string, unknown>,
 ): string[] {
-  if (resource !== "blood_pressure") {
+  if (resource !== "blood_pressure" && resource !== "note") {
     return [];
   }
 
@@ -5071,6 +5071,17 @@ function junctionTimeseriesRecordValueIdentity(
     if (rowId) {
       return [rowId];
     }
+  }
+
+  if (resource === "note") {
+    return [
+      ...(Array.isArray(entry.tags) ? entry.tags : [])
+        .flatMap((tag) => {
+          const normalized = normalizeString(tag);
+          return normalized ? [normalized] : [];
+        })
+        .sort(),
+    ];
   }
 
   // Field names mirror the importer's blood-pressure value paths.
