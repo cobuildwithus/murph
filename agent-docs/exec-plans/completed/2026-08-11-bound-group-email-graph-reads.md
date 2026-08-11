@@ -1,6 +1,6 @@
 # Bound group-email graph reads
 
-Status: active
+Status: completed
 Created: 2026-08-11
 Updated: 2026-08-11
 
@@ -88,3 +88,10 @@ share authorization semantics.
   participant. Focused proof covers 101 raw members with 100 eligible through
   preparation and final recipients, 101 eligible participants, both raw
   201-member overflow stages, and the exact 201-row query sentinels.
+- The mandated round-three anomaly retrospective attributed all review growth,
+  confirmed one unchanged graph/transaction owner and no concept growth, and
+  selected justified continuation. The same-head full-snapshot retry returned
+  PASS on `bde164cf6a9394198dbfb987b87753f1ce684d34`; both accepted findings are
+  resolved, parent corrective review has no finding, and exact-head required CI
+  is green before this archive-only closure.
+Completed: 2026-08-11
