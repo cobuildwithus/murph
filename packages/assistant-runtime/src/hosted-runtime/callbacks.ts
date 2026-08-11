@@ -5786,6 +5786,9 @@ async function maybeFailHostedDisabledAutoReplyDelivery(input: {
   if (!intent) {
     return null;
   }
+  if (readHostedAcceptedLinqReactionDeliveryAwaitingConsume(intent)) {
+    return null;
+  }
   if (!await hostedAssistantDeliveryIntentIsAutoReply({
     intent,
     vaultRoot: input.vaultRoot,

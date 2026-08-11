@@ -10125,7 +10125,7 @@ describe("hosted runtime callbacks", () => {
     );
   });
 
-  it("confirms a retained Linq reaction receipt without replaying provider or route authority", async () => {
+  it("confirms a retained Linq reaction receipt after auto-reply is revoked without replaying provider or route authority", async () => {
     const effect = createEffect({
       answeredMailboxItemIds: ["mailbox_item_retry"],
       channel: "linq",
@@ -10149,6 +10149,7 @@ describe("hosted runtime callbacks", () => {
       bindingDelivery: { kind: "thread", target: "linq_chat_retry" },
       channel: "linq",
       delivery: acceptedDelivery,
+      deliveryConfirmationPending: true,
       deliveryIdempotencyKey: "assistant-outbox:intent_123",
       explicitTarget: null,
       intentId: effect.effectId,
@@ -10157,6 +10158,14 @@ describe("hosted runtime callbacks", () => {
       replyToMessageId: "linq_message_retry",
       status: "retryable",
     }) as AssistantOutboxIntent;
+    mocks.readAssistantOutboxIntentMirrorState.mockResolvedValue(
+      createMirrorState(storedIntent),
+    );
+    mocks.findAssistantAutoReplyDeliveryIntentIds.mockResolvedValue(
+      new Set([effect.effectId]),
+    );
+    mocks.hasAssistantAutoReplyChannel.mockReturnValue(false);
+    mocks.readAssistantAutomationState.mockResolvedValue({ autoReply: [] });
     const assertRecentInbound = vi.fn(async () => {
       throw new Error("route authority must not be re-entered");
     });
@@ -10205,6 +10214,9 @@ describe("hosted runtime callbacks", () => {
     ]);
     expect(assertRecentInbound).not.toHaveBeenCalled();
     expect(mocks.setLinqMessageReaction).not.toHaveBeenCalled();
+    expect(mocks.findAssistantAutoReplyDeliveryIntentIds).not.toHaveBeenCalled();
+    expect(mocks.readAssistantAutomationState).not.toHaveBeenCalled();
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
     expect(recordDeliveryOutcome).toHaveBeenCalledTimes(1);
     expect(recordDeliveryOutcome).toHaveBeenCalledWith(
       expect.objectContaining({

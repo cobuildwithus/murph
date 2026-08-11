@@ -52,9 +52,18 @@ Updated: 2026-08-11
 - Make only a concrete accepted Linq reaction receipt with exact answered IDs schedulable for callback-only retry. Ambiguous non-idempotent sends remain parked and cannot replay.
 - Prove the admitted 100-ID Web boundary as one set-based transaction and an idempotent replay instead of adding batching or another persistence layer.
 
+## Review round 2 retrospective
+
+- Original requirement: once Linq accepts a reaction and the concrete receipt names exact answered mailbox items, the remaining work is irrevocable post-provider bookkeeping until exact Web confirmation reaches a durable terminal state. Current automation and route authority may govern fresh provider work but must not revoke that bookkeeping obligation.
+- Current implementation: the existing receipt classifier correctly admitted callback-only retries, and the outbox dispatcher correctly resolved those receipts before provider or route work. However, the hosted delivery wrapper ran the mutable auto-reply channel gate before entering that resolver, so disabling auto-reply after provider acceptance could terminally fail the intent and clear the confirmation obligation.
+- Review-growth check: the prior review repair changed 12 behavior-source lines in the hosted callback owner (nine additions and three removals). The repeat finding came from gate ordering at the same provider-acceptance phase boundary, not from a new queue, scheduler, lifecycle, or persistence owner.
+- Ownership decision: keep the accepted receipt and exact-consume hook as the existing post-provider owner. Classify the disabled-channel gate as fresh-provider-only, bypass it only for a concrete accepted reaction receipt awaiting exact consumption, and leave the dispatcher responsible for confirmation and terminalization. Fresh sends without a receipt still use the channel gate; ambiguous non-idempotent sends remain parked.
+- Regression decision: prove channel revocation between provider acceptance and callback retry, exact-consume confirmation once, no provider or route-authority replay, and no terminal mirror mutation. Preserve the existing fresh-disabled and ambiguous-no-receipt proofs.
+
 ## Verification
 
 - Passed locally: assistant outbox (101 tests), hosted callbacks plus the real Linq outbox regression (255 tests), focused Web route/store/monitor coverage (158 tests), assistant-engine/runtime/Web typechecks, assistant-engine/runtime builds, runner-bundle assembly, runner-bundle policy tests (50 tests), docs drift, and diff/privacy checks.
 - PostgreSQL proofs: three tests are present but skipped locally because the loopback PostgreSQL server is unavailable; exact-head CI owns their execution.
 - Review GPT round 1 accepted findings: repaired fresh-intent resolver ordering, concrete-receipt wake ownership, and maximum-cardinality transactional proof. The preliminary specialist pass returned the same wake-ownership finding plus the coverage bound; no patch artifact was returned.
+- Review GPT round 2 accepted the three round-1 repairs and required this retrospective for the repeated provider-acceptance phase-boundary defect before tactical remediation.
 - Remaining: push the corrected candidate, obtain a passing final Review GPT round, finish exact-head GitHub Actions, and close this plan.
