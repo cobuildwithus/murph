@@ -523,6 +523,18 @@ supported provider credential.
   Its `MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL` override is accepted only as a
   plain-HTTP loopback origin while hosted-local E2E isolation is explicitly
   active; production deployments must leave both test-only settings unset.
+- `apps/web/test/hosted-runtime-progress-alert-monitor-postgres.test.ts` is an
+  opt-in local-PostgreSQL proof for the companion 15-minute durable mailbox
+  progress detector. It exercises the real paginated SQL together with exact
+  personal and thread-container AI authority, including current-participant
+  access and inactive, stale, removed, suspended, or consent-revoked
+  exclusions. It also proves usage-denial suppression and restart chronology
+  across staging, provider, delivery, and mailbox-consumption evidence, plus
+  the 20,000 eligible-row cap after exclusions. The hosted-local
+  foreground-priority leg drives this monitor through authenticated cron HTTP
+  and the same isolated Resend stub, proving paced lost-ack retry,
+  identifier-free aggregation, active-incident coalescing, recovery/rearm, and
+  independence from the latency monitor.
 - `apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts` is an opt-in
   local-PostgreSQL proof that the usage-denial write marks only the observed
   conversation sequence window with database-owned chronology and leaves a
