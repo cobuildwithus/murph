@@ -432,21 +432,19 @@ export class PrismaHostedConnectionStore {
   }
 
   async markWebhookReceived(accountId: string, now: string): Promise<void> {
-    const record = await this.getConnectionRecordById(accountId);
-
-    if (!record) {
-      return;
-    }
-
-    await this.prisma.deviceConnection.update({
+    const lastWebhookAt = new Date(now);
+    await this.prisma.deviceConnection.updateMany({
       where: {
         id: accountId,
+        OR: [
+          { lastWebhookAt: null },
+          { lastWebhookAt: { lt: lastWebhookAt } },
+        ],
       },
       data: {
-        lastWebhookAt: new Date(now),
+        lastWebhookAt,
       },
     });
-
   }
 
   async markConnectionSetupFailed(
@@ -587,6 +585,20 @@ export class PrismaHostedConnectionStore {
       ...hostedConnectionRecordArgs,
     });
     return record ? await this.buildStoredConnectionAccount(record, prisma) : null;
+  }
+
+  async materializeDurableConnectionRecord(
+    record: HostedConnectionRecord,
+    prisma: HostedSecureBoxPrismaClient = this.prisma,
+  ): Promise<PublicDeviceSyncAccount> {
+    return this.buildDurableConnectionRecord(record, {}, prisma);
+  }
+
+  async materializeStoredConnectionAccount(
+    record: HostedConnectionRecord,
+    prisma: HostedSecureBoxPrismaClient = this.prisma,
+  ): Promise<HostedStoredDeviceSyncAccount | null> {
+    return this.buildStoredConnectionAccount(record, prisma);
   }
 
   async claimConnectionRefreshLease(input: {
