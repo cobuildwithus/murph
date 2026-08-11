@@ -596,9 +596,14 @@ export async function sendAssistantNotificationLocal(
         }
         let decision: AssistantNotificationDecision
         try {
-          decision = parseAssistantNotificationDecision(
-            providerResult.providerAuthoredResponse ?? providerResult.response,
-          )
+          decision = providerResult.finalAction?.kind === 'none' && groupEmailSendResult
+            ? {
+                kind: 'skip',
+                privateSummary: 'Group email effect completed.',
+              }
+            : parseAssistantNotificationDecision(
+                providerResult.providerAuthoredResponse ?? providerResult.response,
+              )
           if (providerResult.responseCard && decision.kind !== 'send_message') {
             throw new VaultCliError(
               'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',

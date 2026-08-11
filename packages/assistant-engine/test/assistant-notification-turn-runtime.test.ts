@@ -2965,6 +2965,73 @@ test.each([
   },
 )
 
+test('sendAssistantNotificationLocal treats terminal group email as a structural skip', async () => {
+  const providerResult = createProviderResult({
+    finalAction: { kind: 'none' },
+    providerAuthoredResponse: '',
+    response: '',
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      onExecuteCodexTurnWithRecovery: async (providerInput) => {
+        const hostedToolContext = providerInput.hostedToolContext
+        expect(hostedToolContext).not.toBeNull()
+        hostedToolContext?.recordGroupEmailSendResult?.({
+          action: 'send_email',
+          result: {
+            participantCount: 1,
+            skippedNoEmailMemberIds: [],
+            status: 'accepted',
+          },
+        })
+        return {
+          kind: 'succeeded',
+          providerTurn: providerResult,
+        }
+      },
+      providerResult,
+      turnId: 'turn-notification-group-email-terminal',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    executionContext: {
+      hosted: {
+        memberId: 'member-notification-group-email-terminal',
+        userEnvKeys: [],
+      },
+    },
+    instructions: 'Send the scheduled group email.',
+    scheduledAutomationAuthority: {
+      automationId: 'automation_group_email_terminal',
+      occurrenceAt: '2026-07-20T13:00:00.000Z',
+    },
+    scheduledOccurrenceAt: '2026-07-20T13:00:00.000Z',
+    vault: '/vaults/notification-group-email-terminal',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'skip',
+      privateSummary: 'Group email effect completed.',
+    },
+    postTurnDeliveryExpectations: {
+      groupEmailSendResult: {
+        participantCount: 1,
+        skippedNoEmailMemberIds: [],
+        status: 'accepted',
+      },
+    },
+    response: null,
+  })
+  expect(deliverMessage).not.toHaveBeenCalled()
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: null,
+      persistUserPromptToTranscript: false,
+    }),
+  )
+})
+
 test('sendAssistantNotificationLocal keeps scheduled group reads and offers model-triggered', async () => {
   const providerResult = createProviderResult({
     response: '```json\n{"kind":"skip","privateSummary":"Challenge update complete."}\n```',
@@ -5360,6 +5427,7 @@ async function loadNotificationTurnHarness(input: {
 function createProviderResult(input?: {
   providerOptions?: AssistantProviderSessionOptions
   codexThreadId?: string | null
+  finalAction?: ExecutedAssistantProviderTurnResult['finalAction']
   providerAuthoredResponse?: string | null
   rawEvents?: readonly unknown[]
   responseCard?: ExecutedAssistantProviderTurnResult['responseCard']
@@ -5397,6 +5465,7 @@ function createProviderResult(input?: {
     },
     providerOptions: input?.providerOptions ?? createProviderOptions(),
     codexThreadId: input?.codexThreadId ?? 'provider-session-1',
+    ...(input?.finalAction === undefined ? {} : { finalAction: input.finalAction }),
     providerAuthoredResponse: input?.providerAuthoredResponse ?? null,
     rawEvents: [...(input?.rawEvents ?? [])],
     response: input?.response ?? 'provider response',
