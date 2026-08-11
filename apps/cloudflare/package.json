@@ -32,6 +32,7 @@
     "test:workers": "pnpm --dir ../.. exec vitest run --config apps/cloudflare/vitest.workers.config.ts --no-coverage --passWithNoTests",
     "verify": "bash scripts/verify-fast.sh",
     "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh",
+    "verify:codex-upstream-source": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/verify-codex-upstream-source.ts",
     "deploy:config:render": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/render-deploy-config.ts",
     "deploy:preflight": "pnpm --dir ../.. exec tsx --tsconfig apps/cloudflare/tsconfig.scripts.json apps/cloudflare/scripts/validate-deploy-env.ts",
     "deploy:artifacts": "pnpm runner:bundle && pnpm deploy:config:render && pnpm deploy:secrets:render && pnpm deploy:artifacts:validate",
