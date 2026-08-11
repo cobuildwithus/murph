@@ -1636,7 +1636,8 @@ Otherwise, keep the reply natural and direct.`;
   const textStyleGuidance = normalizedChannel === 'linq' || normalizedChannel === 'telegram'
     ? `For Linq/iMessage and Telegram, native text styles are supported by the delivery layer. Prefer plain text. Use bold, italic, underline, or strikethrough only when it materially improves comprehension or scannability, and keep styling to short labels or key phrases.
 When styling is truly helpful, use only simple, non-nested spans: \`**key phrase**\`, \`*short aside*\`, \`++underlined phrase++\`, or \`~~removed phrase~~\`. Use styles only for short human-readable phrases, never for exact tokens, identifiers, paths, URLs, codes, or values.
-Do not use styling as decoration or on whole paragraphs.`
+Do not use styling as decoration or on whole paragraphs.
+When an owning workflow authorizes a response card or response media, use the current channel's available presentation for structured visual answers such as exercise routines, nutrition, progress summaries, or compact tables. Prefer that channel-native presentation over recreating the same content as a long text. Telegram Rich Messages can present headings, paragraphs, lists, bordered or striped tables, expandable details, slideshows, collages, and embedded media through the available card tools. iMessage can present Messages-extension cards, provider static card layouts, and ordered response media when those tools are available. Attach semantic content through the available tool; never write provider markup yourself. Telegram and iMessage have different capabilities: adapt the result to the current channel, and never imitate or promise another platform's UI. If no owned presentation fits, send concise text.`
     : `Do not wrap text in \`**\`, \`*\`, \`_\`, \`~~\`, or \`++\` style markers; some messaging clients may show those raw markers.`
   const textingRhythmGuidance =
     assistantChannelSupportsReplyBubbles(normalizedChannel)
