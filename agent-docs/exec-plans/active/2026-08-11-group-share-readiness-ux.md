@@ -92,3 +92,17 @@ Updated: 2026-08-11
   concurrent invocation raced its generated registry preparation; the same test
   passed after the Web typecheck completed generation. Final Web typecheck
   passed with the fragment included.
+- The first preliminary ReviewGPT pass returned `INVALID` because the
+  selector-based seven-day consent wording is a user-facing Web change and the
+  packet had no rendered evidence. The design catalog now renders both changed
+  selector shapes with the real permission-card component. Redacted desktop
+  (1440 CSS px at 2x) and mobile (390 CSS px at 3x) crops passed native local
+  and hosted-image inspection and are attached to the PR packet.
+- The required Claude Code UI double-check was attempted after the rendered
+  surface stabilized, but Fable reported explicit usage-credit exhaustion. Per
+  the completion workflow, no alternate Claude request or local substitute was
+  run; the gap is recorded as non-blocking.
+- The branch was rebased once onto current `origin/main`. The sole textual
+  conflict was the durable-doc index; the resolution preserves both main's
+  hosted Telegram/projection-fairness entries and this change's immediate wake,
+  pending read, and consumer-first rollout entries.
