@@ -74,7 +74,77 @@ test("browser-vault biomarker selection prefers the primary metric when secondar
   assert.equal(client.metricSelections.get("lowest-spo2")?.value, 91.2);
 });
 
-function point(date: string, metricKey: string, biomarkerKey: string | null, value: number, unit: string): MetricPoint {
+test("browser-vault selection uses recorded order for comparable non-sleep facts", () => {
+  const source = {
+    family: "event" as const,
+    kind: "observation" as const,
+    path: "",
+    resultIndex: null,
+  };
+  const older = point(
+    "2026-04-29",
+    "body-weight",
+    "biomarker:body-weight",
+    80,
+    "kg",
+    {
+      id: "metric-point:weight:opaque-sort-last",
+      observedAt: "2026-04-29T12:00:00.000Z",
+      recordedAt: "2026-04-30T08:00:00.000Z",
+      source: { ...source, recordId: "evt_older_weight" },
+    },
+  );
+  const newer = point(
+    "2026-04-29",
+    "body-weight",
+    "biomarker:body-weight",
+    81,
+    "kg",
+    {
+      id: "metric-point:weight:opaque-sort-first",
+      observedAt: "2026-04-29T12:00:00.000Z",
+      recordedAt: "2026-04-30T09:00:00.000Z",
+      source: { ...source, recordId: "evt_newer_weight" },
+    },
+  );
+  const unsupportedNewest = point(
+    "2026-04-29",
+    "body-weight",
+    "biomarker:body-weight",
+    5_400,
+    "seconds",
+    {
+      canonicalUnit: null,
+      canonicalValue: null,
+      id: "metric-point:weight:unsupported-newest",
+      observedAt: "2026-04-29T12:00:00.000Z",
+      recordedAt: "2026-04-30T10:00:00.000Z",
+      source: { ...source, recordId: "evt_unsupported_weight" },
+    },
+  );
+
+  const [selection] = createBrowserVaultMetricSelectionRows({
+    generatedAt: "2026-04-30T12:00:00.000Z",
+    metricPoints: [older, newer, unsupportedNewest],
+    requestedMetrics: [{
+      biomarkerKey: "biomarker:body-weight",
+      metricKey: "body-weight",
+    }],
+  });
+
+  assert.equal(selection?.value, 81);
+  assert.deepEqual(selection?.pointIds, [newer.id]);
+  assert.ok(selection?.warnings.some((warning) => warning.code === "UNIT_NOT_NORMALIZED"));
+});
+
+function point(
+  date: string,
+  metricKey: string,
+  biomarkerKey: string | null,
+  value: number,
+  unit: string,
+  overrides: Partial<MetricPoint> = {},
+): MetricPoint {
   return {
     biomarkerKey,
     canonicalUnit: unit,
@@ -96,6 +166,7 @@ function point(date: string, metricKey: string, biomarkerKey: string | null, val
     textValue: null,
     unit,
     value,
+    ...overrides,
   };
 }
 

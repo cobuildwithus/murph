@@ -226,11 +226,26 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    summary payloads whose inline source provenance is sufficient for direct
    import. Inline-looking Junction jobs that must fall back to a provider fetch
    remain connection-epoch scoped. Junction owns that exact inline predicate
-   beside its importer-backed executor. Web dynamically invokes the same public
-   predicate during reconnect cleanup; hosted runtime hydration loads it per
-   turn and passes it into the existing SQLite credential-replacement
-   transaction. Both paths keep provider/importer modules out of their static
-   boot closures. Recovery does not use an automatic export endpoint, operator
+   beside its importer-backed executor. Web derives the same authority while
+   preparing each encrypted dirty payload and persists only the resulting
+   boolean beside the ciphertext. The dirty store privately completes
+   compression, secure-box sealing, and any lazy Junction classifier load
+   before a store-owned transaction; callers cannot supply prepared bundles.
+   Consent-gated webhook and companion admissions do that work
+   only after the member lock and consent re-read, but before the dirty-marker
+   lock or mutation. On a replacement epoch, the ordinary non-null path uses only a marker
+   compare-and-set plus set-based deletion of rows classified as
+   credential-scoped. Nullable rows left by mixed-version writers are the one
+   transitional exception: Web classifies at most 800 of them inside the
+   existing member-row transaction, after the health-data consent re-read and
+   after locking the dirty marker, so completed withdrawal orders before any
+   legacy decryption and both reconnect and acknowledgement take the marker
+   before touching payload rows. More than 800 null rows fail retryably until
+   runtime acknowledgement reduces that backlog.
+   Hosted runtime
+   hydration still loads the classifier per turn and passes it into the existing
+   SQLite credential-replacement transaction. Both paths keep provider/importer
+   modules out of their static boot closures. Recovery does not use an automatic export endpoint, operator
    action, or vendor support.
    Hosted runtime account hydration keys by the control plane's opaque hosted
    connection id before mutable provider identity. A terminal privacy scrub

@@ -183,7 +183,19 @@ fi
     const skill = readRepoFile(".agents", "skills", "frog", "SKILL.md");
     expect(skill).toContain("current request authorizes repository edits");
     expect(skill).toContain("review-only");
+    expect(skill).toContain(
+      "Creating or updating a tracked plan file is edit-authorized repository work",
+    );
+    expect(skill).toContain("planning-only");
     expect(skill).toContain("scripts/frog list");
+    expect(skill).toContain(
+      'Do not create an empty or synthetic "no friction" entry',
+    );
+    expect(skill).toContain("include it in the same scoped task commit");
+    expect(skill).toContain("untracked, unstaged, or omitted from the commit");
+    expect(skill).toMatch(
+      /If a safe scoped\s+commit is blocked, preserve the entry and report the exact blocker/u,
+    );
     expect(skill).toContain("repository root");
     expect(skill).toContain("`--cwd` and `--mcp`");
     expect(skill).toContain("cat <<'FROG' | scripts/frog log");
@@ -199,6 +211,40 @@ fi
     ]) {
       expect(skill).toContain(heading);
     }
+
+    const agents = readRepoFile("AGENTS.md");
+    expect(agents).toContain("§ Developer Friction Logging");
+    expect(agents).toContain("commit each created entry with the task");
+
+    const workflowRouting = readRepoFile(
+      "agent-docs",
+      "operations",
+      "agent-workflow-routing.md",
+    );
+    expect(workflowRouting).toContain("### Developer Friction Logging");
+    expect(workflowRouting).toContain(
+      "For every edit-authorized repository task",
+    );
+    expect(workflowRouting).toMatch(
+      /Creating or\s+updating a tracked plan file is edit-authorized repository work/u,
+    );
+    expect(workflowRouting).toContain("planning-only");
+    expect(workflowRouting).toContain("run `scripts/frog list`");
+    expect(workflowRouting).toMatch(
+      /record it\s+through `scripts\/frog log`/u,
+    );
+    expect(workflowRouting).toContain(
+      "A task is not complete while its Frog entry is untracked",
+    );
+
+    const completionWorkflow = readRepoFile(
+      "agent-docs",
+      "operations",
+      "completion-workflow.md",
+    );
+    expect(completionWorkflow).toContain(
+      "Include every public-safe Frog entry created or modified during the task in that same scoped commit",
+    );
   });
 
   it("keeps the Action on trusted default-branch events with narrow authority", () => {
