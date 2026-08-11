@@ -294,6 +294,14 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
         ? authorityGenerationRef.current
         : authorityGenerationRef.current + 1;
       if (authorityPathname !== undefined) {
+        // The provider persists across dashboard routes. Retire page-owned
+        // runtime work before the destination authority request starts so an
+        // older handoff deadline can never abort the new route's load.
+        if (runtimeRefreshCompletionRef.current) {
+          clearRuntimeRefreshWait();
+          abortBrowserVaultInFlightLoad();
+          providerStartedLoadRef.current = false;
+        }
         authorityGenerationRef.current = authorityGeneration;
         setAdmittedPathname(null);
         setStatus("loading");
@@ -345,7 +353,12 @@ function ActiveBrowserVaultProvider({ children, initialMemberId }: {
 
       applyOutcome(outcome, { authorityPathname, background });
     },
-    [applyOutcome, beginRuntimeRefreshWait, initialMemberId],
+    [
+      applyOutcome,
+      beginRuntimeRefreshWait,
+      clearRuntimeRefreshWait,
+      initialMemberId,
+    ],
   );
 
   const refresh = useCallback(

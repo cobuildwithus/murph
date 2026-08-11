@@ -77,7 +77,15 @@ export function startBrowserVaultWarmLoad(
 
   if (inFlight) {
     if (options.requestRefresh && !inFlightRequestsRefresh) {
-      return inFlight.then(() => startBrowserVaultWarmLoad(options));
+      // A stronger request may wait for ordinary shared work, but it belongs
+      // to the same authority generation. Abort, clear, or unmount must not
+      // let that deferred continuation restart network work afterward.
+      const queuedGeneration = generation;
+      return inFlight.then(() =>
+        queuedGeneration === generation
+          ? startBrowserVaultWarmLoad(options)
+          : { status: "superseded" }
+      );
     }
     return inFlight;
   }
