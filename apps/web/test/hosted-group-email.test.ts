@@ -220,6 +220,74 @@ describe("hosted group email authorization", () => {
     },
   );
 
+  it.each(["prepare", "recipients"] as const)(
+    "fails a duplicate noncanonical email grant during %s before truncated success",
+    async (operation) => {
+      const memberId = "member_corrupt_email_grant";
+      const prisma = createPrismaMock({ groupEmailMemberIds: [memberId] });
+      prisma.hostedVaultShare.findMany.mockResolvedValue([
+        buildGroupEmailGrant(memberId),
+        {
+          grantorMemberId: memberId,
+          id: "share_email_duplicate",
+          projectionKind: "group-email.v0",
+          projectionScopeKey: "group-email-corrupt.v0",
+        },
+        ...Array.from(
+          {
+            length:
+              HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
+              + 1,
+          },
+          (_, index) => {
+            const suffix = String(index).padStart(3, "0");
+            return {
+              grantorMemberId: memberId,
+              id: `share_corrupt_authorized_${suffix}`,
+              projectionKind: "steps-days.v0",
+              projectionScopeKey: `z-authorized-share-${suffix}`,
+            };
+          },
+        ),
+      ]);
+      mocks.getPrisma.mockReturnValue(prisma);
+
+      const result = operation === "prepare"
+        ? await prepareHostedGroupEmail({
+            runtimeMemberId: "group_runtime_member",
+          })
+        : await readHostedGroupEmailRecipients({
+            expectedGroupEmailAuthorizationProof: "stale-proof",
+            groupId: "hgrp_123",
+            runtimeMemberId: "group_runtime_member",
+          });
+
+      expect(result).toEqual({
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_invalid",
+      });
+    },
+  );
+
+  it("fails a noncanonical singleton email authorization grant", async () => {
+    const memberId = "member_noncanonical_email_grant";
+    const prisma = createPrismaMock({ groupEmailMemberIds: [memberId] });
+    prisma.hostedVaultShare.findMany.mockResolvedValue([{
+      grantorMemberId: memberId,
+      id: "share_email_noncanonical",
+      projectionKind: "group-email.v0",
+      projectionScopeKey: "group-email-legacy.v0",
+    }]);
+    mocks.getPrisma.mockReturnValue(prisma);
+
+    await expect(prepareHostedGroupEmail({
+      runtimeMemberId: "group_runtime_member",
+    })).resolves.toEqual({
+      status: "unavailable",
+      unavailableReason: "authorization_snapshot_invalid",
+    });
+  });
+
   it("excludes inactive granted members from group email preparation and email recipients", async () => {
     const prisma = createPrismaMock();
     mocks.getPrisma.mockReturnValue(prisma);

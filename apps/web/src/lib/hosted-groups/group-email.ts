@@ -68,8 +68,11 @@ type ReadClient = PrismaClient;
 
 const HOSTED_GROUP_EMAIL_MEMBER_QUERY_TAKE =
   HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX + 1;
+const HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY = "group-email.v0";
 // The selected relation also carries the exact group-email.v0 authorization
 // grant, so retain that row plus the first over-limit authorized-share row.
+// The snapshot validation below rejects a second or noncanonical email-kind
+// row, which keeps these two non-data slots sufficient for corrupt graphs too.
 const HOSTED_GROUP_EMAIL_SHARE_QUERY_TAKE =
   HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX + 2;
 
@@ -381,9 +384,23 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
     if (!hasHostedGroupEmailMemberActiveAccess(member)) {
       continue;
     }
+    const emailAuthorizationGrants = member.vaultSharesGranted.filter((grant) =>
+      grant.projectionKind === HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+    );
+    if (
+      emailAuthorizationGrants.length > 1
+      || emailAuthorizationGrants.some((grant) =>
+        grant.projectionScopeKey !== HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+      )
+    ) {
+      return {
+        status: "unavailable",
+        unavailableReason: "authorization_snapshot_invalid",
+      };
+    }
     if (
       member.vaultSharesGranted.filter((grant) =>
-        grant.projectionKind !== "group-email.v0"
+        grant.projectionKind !== HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
       ).length
       > HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
     ) {
@@ -405,7 +422,8 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
       continue;
     }
     if (!member.vaultSharesGranted.some((grant) =>
-      grant.projectionKind === "group-email.v0"
+      grant.projectionKind === HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+      && grant.projectionScopeKey === HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
     )) {
       continue;
     }
@@ -430,7 +448,9 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
     participants.push({
       address: emailUnchanged?.address ?? null,
       authorizedShares: member.vaultSharesGranted
-        .filter((grant) => grant.projectionKind !== "group-email.v0")
+        .filter((grant) =>
+          grant.projectionKind !== HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
+        )
         .map((grant) => ({
           projectionScopeKey: grant.projectionScopeKey,
           shareId: grant.id,
