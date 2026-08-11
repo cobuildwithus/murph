@@ -972,16 +972,25 @@ describe("hosted email helpers", () => {
   it("parses group-recipient callback contracts through normalized email addresses", () => {
     const authorizationProof = "a".repeat(64);
     expect(parseHostedEmailGroupRecipientsCallbackRequest({
-      expectedNewsletterAuthorizationProof: authorizationProof,
+      expectedGroupEmailAuthorizationProof: authorizationProof,
       groupId: " group_123 ",
     })).toEqual({
-      expectedNewsletterAuthorizationProof: authorizationProof,
+      expectedGroupEmailAuthorizationProof: authorizationProof,
       groupId: "group_123",
     });
     expect(() => parseHostedEmailGroupRecipientsCallbackRequest({
-      expectedNewsletterAuthorizationProof: "not-a-proof",
+      expectedGroupEmailAuthorizationProof: "not-a-proof",
       groupId: "group_123",
     })).toThrow(/SHA-256 hex digest/u);
+    expect(() => parseHostedEmailGroupRecipientsCallbackRequest({
+      expectedNewsletterAuthorizationProof: authorizationProof,
+      groupId: "group_legacy",
+    })).toThrow(/retired proof field/u);
+    expect(() => parseHostedEmailGroupRecipientsCallbackRequest({
+      expectedGroupEmailAuthorizationProof: authorizationProof,
+      expectedNewsletterAuthorizationProof: "b".repeat(64),
+      groupId: "group_mismatched",
+    })).toThrow(/retired proof field/u);
     expect(() => parseHostedEmailGroupRecipientsCallbackRequest({})).toThrow(
       /groupId must be present/u,
     );

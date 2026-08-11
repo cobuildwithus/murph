@@ -1594,6 +1594,8 @@ describe("buildWranglerLocalDevConfig", () => {
       image_build_context: string;
       image_vars: Record<string, string>;
       max_instances: number;
+      authorized_keys?: unknown;
+      ssh: { enabled: boolean };
     }[];
     const container = containers[0]!;
     const smokeContainer = containers[1]!;
@@ -1605,6 +1607,14 @@ describe("buildWranglerLocalDevConfig", () => {
       "RunnerContainer",
       "DeploySmokeRunnerContainer",
     ]);
+    expect(config.compatibility_flags).toEqual([
+      "nodejs_compat",
+      "containers_pid_namespace",
+    ]);
+    for (const entry of containers) {
+      expect(entry.ssh).toEqual({ enabled: false });
+      expect(entry).not.toHaveProperty("authorized_keys");
+    }
     expect(config.durable_objects).toMatchObject({
       bindings: expect.arrayContaining([
         {

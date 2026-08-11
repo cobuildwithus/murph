@@ -61,11 +61,15 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { OpsUsageStudy } from "./ops-usage-study";
-import { PersonaOnboardingStudy } from "./persona-onboarding-study";
+import {
+  PersonaOnboardingStudy,
+  PersonaSettingsStudy,
+} from "./persona-onboarding-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
 import { StructuredReviewResultsStudy } from "./structured-review-results-study";
+import { TrainingDashboardStudy } from "./training-dashboard-study";
 import {
   GroupUsageFundingStudy,
   PersonalUsageCreditOwnerStudy,
@@ -108,6 +112,7 @@ export function SectionsContent() {
         <div
           id="homepage-solo-first-hero"
           data-design-section="homepage-solo-first-hero"
+          data-design-state="soft-topic-labels-mobile-narrow-phone"
           className="-mx-5 sm:-mx-8 lg:-mx-12"
           inert
         >
@@ -224,7 +229,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings custom inference routing and endpoint">
+      <StudySection title="Settings inference routing, locked models, and endpoint">
         <SettingsCustomInferenceStudy />
       </StudySection>
 
@@ -244,7 +249,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Settings retained data export">
+      <StudySection title="Settings retained export while newer data is processing">
         <DataExportFlowStudy />
       </StudySection>
 
@@ -258,6 +263,18 @@ export function SectionsContent() {
 
       <StudySection title="Private Environment print report loading and ready states">
         <EnvironmentPrintStudy />
+      </StudySection>
+
+      <Separator />
+
+      <StudySection title="Private training dashboard">
+        <div
+          id="private-training-dashboard"
+          data-design-section="private-training-dashboard"
+          inert
+        >
+          <TrainingDashboardStudy />
+        </div>
       </StudySection>
 
       <Separator />
@@ -536,6 +553,8 @@ export function SectionsContent() {
       <StudySection title="Persona onboarding with stacked tone samples">
         <div data-design-section="persona-onboarding">
           <PersonaOnboardingStudy />
+          <Separator />
+          <PersonaSettingsStudy />
         </div>
       </StudySection>
 

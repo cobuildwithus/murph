@@ -27,8 +27,7 @@ import {
 } from './runtime-state.js'
 import { resolveAssistantConversationKey } from '../bindings.js'
 import {
-  buildGroupNewsletterScheduledExecutionPrompt,
-  resolveGroupNewsletterAutomationDelivery,
+  appendLegacyGroupNewsletterSkillInstructions,
 } from '../group-newsletter-automation.js'
 import { computeAssistantCronNextRunAt } from './schedule.js'
 import {
@@ -628,18 +627,8 @@ function buildCanonicalAssistantCronJobPrompt(
   source: CanonicalAssistantCronJobRecord,
 ): string {
   switch (source.kind) {
-    case 'automation': {
-      const newsletterDelivery = resolveGroupNewsletterAutomationDelivery(source)
-      return newsletterDelivery === null
-        ? source.instructions
-        : [
-            source.instructions,
-            buildGroupNewsletterScheduledExecutionPrompt({
-              delivery: newsletterDelivery,
-              newsletterName: source.title,
-            }),
-          ].join('\n\n')
-    }
+    case 'automation':
+      return appendLegacyGroupNewsletterSkillInstructions(source.instructions)
     case 'scheduledLog':
       return `Auto-log scheduled log "${source.title}" as ${source.actionKind}.`
   }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT,
+  buildLinqIMessageAppFallbackText,
   buildLinqIMessageAppLayout,
   renderAssistantResponseCardText,
   type CompactTableResponseCardV1,
@@ -33,10 +33,18 @@ const TRACKED_TABLE: CompactTableResponseCardV1 = {
 }
 
 describe('response-card static Linq layouts', () => {
-  it('uses generic value-free fallback copy across card kinds', () => {
-    expect(LINQ_IMESSAGE_APP_CARD_FALLBACK_TEXT).toBe(
-      'Ask Murph for this card in text',
+  it('uses value-free fallback copy for generic and workout cards', () => {
+    expect(buildLinqIMessageAppFallbackText(ONE_OFF_TABLE)).toBe(
+      'Your Murph summary. Ask Murph for this card in text',
     )
+    expect(buildLinqIMessageAppFallbackText(TRACKED_TABLE)).toBe(
+      'Your workout. Ask Murph for this card in text',
+    )
+    for (const card of [ONE_OFF_TABLE, TRACKED_TABLE]) {
+      expect(buildLinqIMessageAppFallbackText(card)).not.toMatch(
+        /\d|today|day|time/iu,
+      )
+    }
   })
 
   it('preserves generic provider details without exposing tracking authority', () => {

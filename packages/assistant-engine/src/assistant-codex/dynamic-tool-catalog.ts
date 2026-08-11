@@ -1,5 +1,7 @@
 import * as z from '@murphai/contracts/zod-runtime'
 import {
+  assistantBasePersonaIdValues,
+  assistantBasePersonaOptions,
   assistantPersonaIdValues,
   assistantTonePreferenceValues,
   assistantVoiceOptionIdValues,
@@ -19,9 +21,9 @@ import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-  HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
+  HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
   HOSTED_USAGE_REFERRAL_POLICY_CODES,
 } from '@murphai/hosted-execution/runtime-control'
 import {
@@ -122,9 +124,9 @@ export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 export const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
-  `Optional ordered JPG, PNG, or WebP image refs to use as visual references (up to 16). Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated image. Describe in the prompt how image 1, image 2, etc. should be used.`
+  `Optional ordered JPG/PNG/WebP refs (max 16): raw/inbox/**, raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Explain roles; include the character sheet whenever Murph itself appears.`
 const GROUP_GENERATED_AVATAR_REFERENCE_IMAGE_REFS_DESCRIPTION =
-  `Optional ordered JPG, PNG, or WebP image refs to use as visual references when action="set_chat_avatar" and avatarSource="generate". Refs may be user-sent media under raw/inbox/**, captured media under raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF} whenever Murph itself appears in a generated avatar.`
+  `Optional ordered JPG/PNG/WebP refs for generated avatars: raw/inbox/**, raw/captures/**, or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Explain roles; include the character sheet when Murph appears.`
 
 export const HOSTED_COMPUTER_UNKNOWN_OUTCOME_TEXT =
   'computer API outcome is unknown after a transport or browser execution failure; call computer_open before retrying Playwright code or taking another step'
@@ -257,6 +259,7 @@ export const MURPH_ATTACH_RESPONSE_CARD_TOOL = {
     'The daily-nutrition safety gate includes a lifetime vault-cli event list --kind procedure --limit 200 --format json read before numeric proposals, Goal activation, or cards. Inspect every returned item; use event show for an item whose procedure or status is missing or truncated. A completed gastric bypass, Roux-en-Y, sleeve gastrectomy, gastric sleeve, biliopancreatic diversion, duodenal switch, adjustable gastric band, lap band, or other explicit bariatric surgery suppresses numeric output. Planned, ordered, cancelled, ambiguous, or unrelated procedures do not prove post-bariatric context. A failed, unreadable, or exactly 200-record procedure read, or a failed required detail read, fails closed with no Goal or measurement mutation and no card; scheduled occurrences ask no question. ' +
     'The daily-nutrition safety gate includes a separate vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json read before numeric proposals, Goal activation, or cards. Require exact metric pregnancy-test, unit result, value 1, and a normalized positive qualifiers.result; any such positive wins over negative evidence from either pregnancy-evidence owner in the window and suppresses numeric output without diagnosing pregnancy. Missing, negative, stale, indeterminate, malformed, or conflicting rows are unavailable evidence rather than proof of non-pregnancy. A failed, unreadable, or exactly 200-record pregnancy-test read fails closed with no Goal or measurement mutation and no card; scheduled occurrences ask no question. ' +
     'The same gate includes vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json. A failed, unreadable, or exactly 200-record list fails closed before any numeric effect, with no test detail reads on saturation. Otherwise event show every returned test because list output compacts results and can truncate summaries; any failed or unreadable detail fails closed. Treat a pregnancy/hCG test or matching structured analyte with an explicit positive, detected, or pregnant textValue or unambiguous test-level summary as positive evidence unless resultStatus is pending. Canonical resultStatus unknown classifies the result rather than source lifecycle and may qualify only with that strict identity plus explicit text. Do not infer pregnancy from numeric hCG, reference ranges, abnormal or unknown status/flags alone, titles, notes, or ambiguous or negated text. An explicit positive wins over negative evidence from either canonical owner in the window and suppresses numeric output, Goal mutation or activation, and cards. Missing, negative, pending, numeric-only, stale, unrelated, and ambiguous test evidence is unavailable rather than a universal block. Scheduled occurrences ask no question, perform no mutation, and attach no card. ' +
+    'Workout footers span native and static cards; never promise native-only taps. ' +
     'Attach one private-direct response card only when the current accepted member message or the saved instructions for the exact scheduled automation occurrence explicitly request it, during managed meal closeout, for the verified initial card after starting or resuming one canonical live workout, or for an unambiguous update to its established workout card. Occurrence authority alone is not card intent. The card replaces the entire final response: attach it only when the card alone completely satisfies the current request; answer compound requests with complete ordinary text and no card. Before every goal-aware daily_nutrition card, first run vault-cli goal list --status active --limit 200 --format json. If it returns 200 records, fail closed with ordinary text, no Goal or measurement mutation, and no card. Otherwise run vault-cli goal show <goal-id> --format json for every returned active Goal whose list item reports a nonzero data.metricTargetsCount; never select detail reads by title, slug, domain, context-snapshot visibility, or the default list prefix. Resolve metric identity, unit, comparator, effective date, conflicts, and the 1,200-kcal boundary only after inspecting that complete detail set. Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal; neither read substitutes for the other. For daily_nutrition, immediately beforehand run vault-cli meal totals --from <date> --to <same-date> and copy its exact canonical metric { total, mealCount } values; never calculate or reuse totals. New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only. Before deriving, saving, or surfacing numeric nutrition goals, before activating a paused nutrition proposal, and before every daily_nutrition attachment, even with five active goals or on a scheduled closeout, follow nutrition-strategy/references/daily-nutrition-card-safety.md. First run vault-cli memory show --format json and inspect the complete canonical Identity, Preferences, Instructions, and Context memory document for explicit, unambiguous safety facts; the context snapshot does not inject it. A failed or unreadable memory read fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same suppression path. Missing, stale, ambiguous, or conflicting age alone is unavailable evidence, not a universal block; scheduled occurrences never ask. Run both vault-cli condition list --status active --limit 200 --format json and vault-cli regimen list --status active --limit 200 --format json. If either read fails or returns exactly 200 records, run no condition or regimen detail reads and fail closed with ordinary non-numeric text, no Goal or measurement mutation, and no card. Otherwise run vault-cli condition show <condition-id> --format json for every returned active condition and vault-cli regimen show <regimen-id> --format json for every returned active regimen before applying the safety gate; never select by title, substance, severity, context-snapshot visibility, or the default list prefix. If any required detail read fails or is unreadable, use the same fail-closed behavior; otherwise reuse the complete current-turn reads. Then run vault-cli event list --kind procedure --limit 200 --format json and apply its complete procedure-item and conditional-detail contract before continuing; a completed bariatric procedure suppresses numeric output, and a failed, unreadable, or saturated read fails closed. As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window. A usable adult BMI below 18.5, including height and weight rows sharing one eventId, suppresses numeric proposal derivation or presentation, every Goal write or activation, and the card. A failed read, or a saturated read that cannot resolve usable BMI evidence, fails closed with ordinary non-numeric text, no Goal or measurement mutation, and no card; leave an existing paused proposal unchanged. The gate also blocks known underweight, frailty, malnutrition risk, glucose-lowering medication, safety-relevant disease or clinician-managed nutrition context, and calorie targets below 1,200 kcal/day without flooring them upward. Scheduled authority never permits questions or activation; only the first eligible managed meal closeout may create and explain one paused proposal after the complete safety gate and an all-status Goal read prove the stable managed slug has never existed. For the exact card localDate, require the containing active Goal window and each target\'s optional startAt/targetAt interval to include that date, with inclusive boundaries; use the selected capture date for a scheduled closeout, which may differ from the occurrence date for a historical catch-up, or the explicitly requested date, never wall-clock today. Ignore out-of-window targets for current authority and conflicts, and never expose, compare, copy, derive from, or mutate a Goal because of them. Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals. Each target must use selected-value comparator between with identical numeric value and highValue. A one-sided threshold, non-identical range, or other shape remains authoritative but makes the bundle comparator-incompatible: never expose, compare, copy, or derive from its bound or create, replace, or remove a managed target around it; use ordinary text with no card or managed Goal mutation, and ask no question on a scheduled closeout. A target in another unit likewise remains authoritative but makes the bundle incompatible: never compare, convert, copy, or derive from its raw value. An explicit numeric-card request or the one first eligible managed closeout authorizes only the goal-aware workflow\'s paused canonical proposal, not activation or use. When any target is missing, follow nutrition-strategy/references/daily-nutrition-card-goals.md: hold applicable, compatible exact point targets fixed, derive missing macros from residual calories, and require every AMDR plus a 50 kcal energy tolerance before any Goal write; an infeasible bundle means ordinary text and no mutation. Save one paused canonical proposal, explain its values, reasoning, and effective date in ordinary text with no card, and activate it only after member acceptance. On first creation, set Goal window.startAt explicitly: use a member-requested effective date when present, otherwise the selected card localDate for a dated card request, otherwise the engine-supplied current vault-local date; never rely on the write-day default. Preserve that window on every later edit, activation, or card request and never silently rebase it to another card date. Any derived target addition or change atomically pauses the complete managed bundle until acceptance. A scheduled closeout never asks for inputs or activates provisional targets. On the first eligible managed closeout only, if the complete all-status Goal read proves the stable managed slug has never existed and already-known inputs pass the complete safety and derivation contracts, create and explain one paused proposal in ordinary text with no card; once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it. Without a complete accepted bundle or that one first-run proposal path, use ordinary closeout text and no card. When an explicit card request caused the proposal, its next unambiguous acceptance may complete that pending request only after the complete safety recheck passes, then activation and readback, and a fresh same-date totals read; corrections, declines, ambiguous replies, target-setting-only requests, and compound requests remain text-only. Explicit active targets win metric by metric; conflicts, thresholds, ranges, unsafe numbers, or missing responsible calorie inputs mean ordinary text or one consolidated question, never a goal-less card. Freeze each exact point target and Murph\'s context-aware status without a universal threshold. Use compact_table only for an explicit table or structured-tracker request, that verified initial live-workout card, or an unambiguous update to the same active workout; with multiple plausible workouts, do not infer authority and ask one narrow question. Never invent or silently truncate values. For tracked workouts, first update or resolve the canonical workout, re-read it successfully, and copy only that verified snapshot with its exact evt_<ULID> reference and canonical UTC snapshot instant. Use only when numerical output is permitted. Runtime renders durable text and fallbacks, so do not repeat card values in final send_message. This tool does not send and cannot combine with response media.',
   inputSchema: {
     type: 'object',
@@ -280,7 +283,7 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   namespace: 'murph',
   name: 'generate_image',
   description:
-    `Generate one image with GPT Image 2 only when the user requests an image, a known preference supports visual help, or a loaded skill or product flow explicitly marks images welcome and privacy-safe. Optionally use ordered reference images from vault media or ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}. Attach ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, whenever Murph itself appears in a generated image. When referenceImageRefs is provided, describe in the prompt how image 1, image 2, etc. should be used. When a vault is available, generated images are saved as canonical capture media under raw/captures/** for later reuse. Hosted accepted-message turns start generation in the background and receive private media in a later trusted system input. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response. Local runs remain synchronous and also save the image under CODEX_HOME/generated_images.`,
+    `Generate one GPT Image 2 image when requested, a known preference supports visual help, or a skill/product flow explicitly marks images welcome and privacy-safe. Use ordered vault refs and explain their roles; include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's canonical character sheet, when Murph appears. Vault outputs persist under raw/captures/**. Hosted accepted-message turns start generation in the background and finish through trusted private media. Exact scheduled automation occurrences remain synchronous and attach private media to the same final response. Local runs stay synchronous and save under CODEX_HOME/generated_images.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -334,11 +337,14 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   },
 } as const
 
+export const MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE =
+  'Before classifying a Murph path as missing or filing missing-capability feedback, use the provided deferred-tool discovery surface; absence from eager tools is not proof.'
+
 export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    'Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.',
+    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. ${MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE} When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -529,7 +535,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
   namespace: 'murph',
   name: 'personalization',
   description:
-    'Read the current hosted conversation runtime\'s effective Murph tone, voice, and model context, or atomically update tone and voice from current accepted input or an exact scheduled automation occurrence. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
+    'Read the current hosted conversation runtime\'s effective Murph main personality, optional supporting personality, tone, voice, and model context, or atomically update those fields. Persona changes require current accepted user input plus both mainPersona and supportingPersona; use read first when either current value must be preserved, and pass null to remove support. Exact scheduled automation occurrences may update tone and voice but never personas. Reply casing maps to the existing tone field: capitalize, standard capitalization, or sentence case means formal; lowercase means casual. Treat a request about how Murph should keep writing or show up as an update rather than an unsupported setting; a one-reply formatting request does not persist. In a private chat this is the member\'s Murph; in a group chat this is the synthetic room Murph and never a participant\'s private settings. Use murph.assistant_configuration for model, provider, or reasoning changes only when that separate tool is available.',
   inputSchema: {
     oneOf: [
       {
@@ -551,6 +557,21 @@ export const MURPH_PERSONALIZATION_TOOL = {
             type: 'string',
             enum: ['update'],
           },
+          mainPersona: {
+            type: 'string',
+            enum: assistantBasePersonaIdValues,
+            description: assistantBasePersonaOptions
+              .map((option) => `${option.label}=${option.id}`)
+              .join(', '),
+          },
+          supportingPersona: {
+            anyOf: [
+              { type: 'string', enum: assistantBasePersonaIdValues },
+              { type: 'null' },
+            ],
+            description:
+              'Supporting personality paired with mainPersona; null removes support. It must differ from mainPersona.',
+          },
           tone: {
             type: 'string',
             enum: assistantTonePreferenceValues,
@@ -565,6 +586,7 @@ export const MURPH_PERSONALIZATION_TOOL = {
         },
         required: ['action'],
         anyOf: [
+          { required: ['mainPersona', 'supportingPersona'] },
           { required: ['tone'] },
           { required: ['voice'] },
         ],
@@ -804,13 +826,19 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
   type: 'string',
   pattern: ASSISTANT_ACCEPTED_MESSAGE_REF_PATTERN,
   description:
-    'Opaque Message ref shown beside an accepted inbound message in the current prompt. This is not a provider message id.',
+    'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for ask_current_sender, message_current_sender, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the request; this is not a provider message id.',
 } as const
+
+const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF = [
+  'ask_current_sender',
+  'message_current_sender',
+  'revoke_own_email_share',
+] as const
 
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
   'The native consent message completes the offer portion. If no other requested output remains, call murph.finish_without_reply. Otherwise answer the remaining request without adding a companion consent acknowledgment.'
 
-export const MURPH_GROUP_TOOL = {
+const MURPH_GROUP_TOOL_BASE = {
   namespace: 'murph',
   name: 'group',
   deferLoading: true,
@@ -830,6 +858,7 @@ export const MURPH_GROUP_TOOL = {
           'post_disclosure_request',
           'revoke_disclosure_grant',
           'read_shared',
+          'send_email',
           'read_current',
           'prepare_next_group',
           'read_next_group',
@@ -988,7 +1017,7 @@ export const MURPH_GROUP_TOOL = {
         type: 'string',
         enum: ['generate', 'image_ref'],
         description:
-          'Required for action="set_chat_avatar". Generate a new square avatar or reuse a user-sent private image ref.',
+          'Required for action="set_chat_avatar". Generate a new square avatar or reuse an exact existing private image ref.',
       },
       prompt: {
         type: 'string',
@@ -1002,7 +1031,7 @@ export const MURPH_GROUP_TOOL = {
         minLength: 1,
         maxLength: 1024,
         description:
-          'Required for action="set_chat_avatar" with avatarSource="image_ref". A user-sent JPG, PNG, or WebP ref under raw/inbox/** or raw/captures/**.',
+          'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
       },
       size: {
         type: 'string',
@@ -1043,7 +1072,36 @@ export const MURPH_GROUP_TOOL = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          'For read_shared, one to three exact consent-aware group projections to read, including additive exact-grant activation time when available. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+          'For ordinary read_shared, one to three exact consent-aware group projections, including additive exact-grant activation time when available. For read_shared with audience="group_email", the exact bounded projections allowed into this email composition; the trusted host intersects them with live recipient grants. For offer_access, omit projectionScopes to request every selectable permission by default, or supply the exact narrower set requested. Existing membership and other grants remain unchanged. The trusted host owns the exact consent copy and actual scope snapshot and uses a handled native consent path or a first-party link. Fresh native results include exact responseHandling; follow it.',
+      },
+      audience: {
+        type: 'string',
+        enum: ['group_email'],
+        description:
+          'Optional only for read_shared in a scheduled group automation. group_email prepares the generic email effect, filters members and facts to currently eligible email recipients, and returns recipientCount, missingVerifiedEmailCount, and referenceAt without exposing addresses or authorization metadata.',
+      },
+      subject: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH,
+        description: 'Required only for send_email.',
+      },
+      html: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
+        description: 'Required only for send_email.',
+      },
+      text: {
+        anyOf: [
+          {
+            type: 'string',
+            maxLength: HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH,
+          },
+          { type: 'null' },
+        ],
+        default: null,
+        description: 'Optional plain-text equivalent for send_email.',
       },
       standaloneLink: {
         type: 'boolean',
@@ -1056,41 +1114,43 @@ export const MURPH_GROUP_TOOL = {
   },
 } as const
 
-export const MURPH_NEWSLETTER_TOOL = {
-  namespace: 'murph',
-  name: 'newsletter',
-  description:
-    'Prepare or send the scheduled group health newsletter. `prepare` returns recipient eligibility, the occurrence reference, and shared facts from the seven completed local days before the run, filtered to exact live email and health-share grants; compose only from its members. Each turn allows one prepare attempt and at most one send attempt. `send` durably queues recipient-scoped delivery and may return `accepted` while that outbox work is pending; stop after that result and do not claim provider completion. Start the subject with the exact name in the current scheduled automation instructions, never a generic label. Send the first edition only after the setup notice and opt-out window. This tool sends one shared email thread, never exposes addresses or grant metadata, and does not manage the automation.',
+const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
+  MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum.filter((action) =>
+    action !== 'ask_current_sender'
+    && action !== 'message_current_sender'
+    && action !== 'revoke_own_email_share')
+
+export const MURPH_GROUP_TOOL = {
+  ...MURPH_GROUP_TOOL_BASE,
   inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: ['prepare', 'send'],
-      },
-      subject: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_NEWSLETTER_SUBJECT_MAX_LENGTH,
-      },
-      html: {
-        type: 'string',
-        minLength: 1,
-        maxLength: HOSTED_RUNTIME_NEWSLETTER_HTML_MAX_LENGTH,
-      },
-      text: {
-        anyOf: [
+    allOf: [
+      MURPH_GROUP_TOOL_BASE.inputSchema,
+      {
+        oneOf: [
           {
-            type: 'string',
-            maxLength: HOSTED_RUNTIME_NEWSLETTER_TEXT_MAX_LENGTH,
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_MESSAGE_REF,
+              },
+              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
+            },
+            required: ['action', 'message_ref'],
           },
-          { type: 'null' },
+          {
+            type: 'object',
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF,
+              },
+            },
+            required: ['action'],
+          },
         ],
-        default: null,
       },
-    },
-    required: ['action'],
+    ],
   },
 } as const
 
@@ -1337,7 +1397,6 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_SUBSCRIPTION_TOOL,
   MURPH_GROUP_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
-  MURPH_NEWSLETTER_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
@@ -1396,7 +1455,6 @@ export interface MurphDynamicToolAvailability {
   groupRoomModelAvailable?: boolean | null
   groupPermissionOfferAvailable?: boolean | null
   groupSharedReadAvailable?: boolean | null
-  newsletterAvailable?: boolean | null
   messageTargetingAvailable?: boolean | null
   personalizationAvailable?: boolean | null
   productFeedbackAvailable?: boolean | null
@@ -1446,7 +1504,6 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
     [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
     [MURPH_GROUP_ROOM_MODEL_TOOL, defaultOff((a) => a.groupRoomModelAvailable)],
-    [MURPH_NEWSLETTER_TOOL, defaultOff((a) => a.newsletterAvailable)],
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],

@@ -32,6 +32,15 @@ test("renders the retained-export error study from the production content", () =
   expect(markup).toContain("hosted-data-export-description");
 });
 
+test("renders the retained-export success study while newer data is processing", () => {
+  const markup = renderToStaticMarkup(createElement(DataExportFlowStudy));
+
+  expect(markup).toContain("Your latest retained data downloaded.");
+  expect(markup).toContain(
+    "Recent changes Murph had not finished processing may be absent.",
+  );
+});
+
 test("renders the retained-export pending study from the production content", () => {
   mocks.study = "data-export-pending";
 
@@ -57,6 +66,7 @@ test("renders consent status retry states from the production control", () => {
     createElement(HealthDataConsentControlStudy),
   );
 
+  expect(markup).toContain("lg:col-span-2");
   expect(markup).toContain("Checking status...");
   expect(markup).toContain("Status is still unavailable. Try again.");
   expect(markup).toContain("text-destructive");
@@ -84,5 +94,5 @@ test("renders pending renewed consent from the production prompt", () => {
 
   expect(markup).toContain("Saving...");
   expect(markup).toContain("Use Murph again");
-  expect(markup).toContain("sm:grid-cols-[minmax(0,1fr)_auto]");
+  expect(markup).toContain("sm:grid-cols-[auto_minmax(0,1fr)_auto]");
 });

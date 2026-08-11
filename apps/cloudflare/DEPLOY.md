@@ -28,6 +28,53 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Generic Group-Email Cutover
+
+The newsletter deletion is a hard public-runtime and private-skill cutover.
+Old runners interpret an untagged `group-health-newsletter` record as email, so
+they must never claim an automation created or edited by the new ordinary
+recipe skill.
+
+Suspend hosted automation wake dispatch before either producer changes and let
+in-flight newsletter turns finish. Keep dispatch suspended while deploying the
+matching Web receiver, then the Cloudflare Worker and runner with
+`container_rollout=immediate`. Prove the exact runner-bundle fingerprint and
+record that public artifact as the hard rollback floor before publishing the
+private skill bundle or resuming wakes. The private skill must not deploy
+earlier. After it is published, rollback below that public floor or to the old
+skill is unsupported; use a forward fix.
+
+New outbox and HTTP writes use only generic group-email keys and proof fields.
+The current runner retains bounded readers for old persisted parents and
+instructions, but no old runner, Worker, or Web parser is part of the supported
+window. Remove the readers after legacy recipes are rewritten, legacy parents
+and children drain, and the retired mailbox inventory is empty.
+
+## Provider Media-Effect Rollout
+
+The first runner that writes the true-only physical media-owner fact inside a
+persisted provider-message effect must deploy with
+`container_rollout=immediate`. Require managed-container smoke to report the
+exact new runner-bundle fingerprint before admitting image or voice delivery.
+There is no Web deployment dependency.
+
+`HostedUserRunner` constructs its state store before creating any invocation,
+workspace snapshot, or container service. This release advances that Durable
+Object state to runner schema version 16 at construction. A version-15 Worker
+rejects version 16 before it can wake a runner or read an encrypted workspace,
+so it cannot send a marked record through the legacy strict outbox parser and
+quarantine it during idle snapshot maintenance.
+
+Runner schema version 16 is a hard Cloudflare/runner rollback floor after the
+deploy reaches a member's Durable Object. Do not roll Worker or runner below
+that floor; use a forward fix on version 16 or newer. Production preflight keeps
+the immediate-container requirement fail closed, and the existing bundle
+fingerprint admission prevents a stale warm runner from becoming the first
+writer. After deployment, prove the managed runner fingerprint, send one
+image-plus-link and one text-plus-voice response, checkpoint both workspaces,
+and confirm Workers Observability contains no outbox quarantine or runner schema
+version failures.
+
 ## Health-Data Consent Stop-Target Rollout
 
 Deploy the Cloudflare Worker that retains an exact user-control stop target
@@ -807,15 +854,6 @@ Core execution tuning:
 - `CF_COMPATIBILITY_DATE` defaults to `2026-03-27`
 - `CF_CONTAINER_INSTANCE_TYPE` defaults to `{"vcpu":2,"memory_mib":6144,"disk_mb":6000}`
 - `CF_CONTAINER_MAX_INSTANCES` defaults to `1000`
-- `CF_CONTAINER_SSH_PUBLIC_KEY` optionally adds one `ssh-ed25519` public key to
-  both runner Container `authorized_keys` entries for Wrangler SSH debugging.
-  The deploy renderer keeps only the key type and key body, so local key
-  comments are not copied into the generated Wrangler config. When this is set,
-  deploy automation also adds the `containers_pid_namespace` compatibility flag
-  so SSH debug sessions do not see unrelated VM processes.
-- `CF_CONTAINER_SSH_KEY_NAME` optionally sets the displayed key name for
-  `CF_CONTAINER_SSH_PUBLIC_KEY`; use a neutral lowercase slug. Defaults to
-  `local-debug`.
 - `CF_MAX_EVENT_ATTEMPTS` defaults to `3`
 - `CF_RETRY_DELAY_MS` defaults to `30000`
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
@@ -1231,6 +1269,13 @@ pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:artifacts
 ```
 
+To inspect the runner bundle and generated Wrangler config independently:
+
+```bash
+pnpm --dir apps/cloudflare runner:bundle
+pnpm --dir apps/cloudflare deploy:config:render
+```
+
 Local deploys and Docker smoke checks also prepare the stable native base image:
 
 ```bash
@@ -1474,39 +1519,19 @@ Optional smoke env:
 
 If neither managed-container smoke nor `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, smoke stops after the public banner and health checks.
 
-## Wrangler SSH Debugging
+## Container Operator Access
 
-Wrangler SSH for Cloudflare Containers is an operator debug path only. It does
-not expose a public port, but it does let Cloudflare account writers connect to
-running Container instances when their local private key matches a public key in
-the rendered Container `authorized_keys`.
+Wrangler SSH is intentionally disabled for both runner Container classes. The
+checked-in scaffold and generated deploy config must set `ssh.enabled` to
+`false`, contain no `authorized_keys`, and expose no environment input that can
+re-enable the capability. This explicit setting is required because Cloudflare
+enables Wrangler SSH by default.
 
-Use a local `ssh-ed25519` key. If you create a dedicated key, use a neutral
-comment and keep the private key outside source control:
+Keep `containers_pid_namespace` enabled independently of SSH. Murph's current
+compatibility date predates Cloudflare's default for isolated Container PID
+namespaces, and removing the flag would change process topology and widen
+`/proc` visibility rather than merely remove operator access.
 
-```bash
-ssh-keygen -t ed25519 -C murph-cloudflare-containers -f <SSH_PRIVATE_KEY>
-ssh-add <SSH_PRIVATE_KEY>
-```
-
-Before rendering or deploying, export the public key without the local comment:
-
-```bash
-export CF_CONTAINER_SSH_PUBLIC_KEY="$(awk '{print $1 \" \" $2}' < <SSH_PUBLIC_KEY>)"
-export CF_CONTAINER_SSH_KEY_NAME=local-debug
-pnpm --dir apps/cloudflare runner:bundle
-pnpm --dir apps/cloudflare deploy:config:render
-```
-
-`pnpm --dir apps/cloudflare deploy:worker` also renders the config, so keep
-those env vars present for the deploy that should carry the debug key. After
-deploying, find a running instance and connect:
-
-```bash
-pnpm --dir apps/cloudflare exec wrangler containers instances <APPLICATION>
-pnpm --dir apps/cloudflare exec wrangler containers ssh <INSTANCE_ID>
-```
-
-SSH does not wake stopped Containers and does not keep an otherwise idle
-Container alive. Unset `CF_CONTAINER_SSH_PUBLIC_KEY` and redeploy when the debug
-window is over.
+Use bounded structured runtime logs, Durable Object status, Container
+application and instance inventory, and the managed deploy smoke for production
+diagnosis. Do not add an operator shell or per-deploy SSH key escape hatch.

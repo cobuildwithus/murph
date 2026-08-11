@@ -9,7 +9,7 @@ import {
   deleteEvent,
   initializeVault,
   readJsonlRecords,
-  readLatestBloodTestHistorySummaryInterruptible,
+  readCanonicalEventAvailabilityInterruptible,
   stringifyFrontmatterDocument,
   toMonthlyShardRelativePath,
   VAULT_LAYOUT,
@@ -1127,7 +1127,7 @@ test("blood-test writes infer result status and persist structured analytes cano
   assert.equal((stored[0] as { specimenType?: string }).specimenType, "blood");
 });
 
-test("latest blood-test summary collapses tombstones", async () => {
+test("canonical event availability collapses blood-test tombstones", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary");
   await initializeVault({ vaultRoot });
 
@@ -1148,17 +1148,148 @@ test("latest blood-test summary collapses tombstones", async () => {
     vaultRoot,
   });
 
-  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+  const summary = await readCanonicalEventAvailabilityInterruptible({
     vaultRoot,
   });
   assert.deepEqual(summary, {
     interrupted: false,
-    latestOccurredAt: older.record.occurredAt,
-    present: true,
+    latestBloodPressureMeasurementDayKey: null,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: older.record.occurredAt,
+    latestBodyMeasurementDayKey: null,
+    latestBodyMeasurementOccurredAt: null,
   });
 });
 
-test("latest blood-test summary collapses revisions before filtering by kind", async () => {
+test("canonical event availability reads supported legacy provider body rows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-canonical-availability-legacy-grain");
+  await initializeVault({ vaultRoot });
+  const occurredAt = "2026-07-15T12:00:00.000Z";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath(
+      VAULT_LAYOUT.eventLedgerDirectory,
+      occurredAt,
+      "occurredAt",
+    ),
+    record: {
+      dayKey: "2026-07-15",
+      externalRef: {
+        resourceId: "legacy-body-summary-2026-07-15",
+        resourceType: "daily-summary",
+        system: "junction",
+      },
+      id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F7",
+      kind: "observation",
+      metric: "body-fat-pct",
+      observationGrain: "daily_timeseries_aggregate",
+      occurredAt,
+      recordedAt: "2026-07-15T12:05:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Legacy body composition summary",
+      unit: "%",
+      value: 18.4,
+    },
+  });
+  const partialProvenanceOccurredAt = "2026-07-15T13:00:00.000Z";
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath(
+      VAULT_LAYOUT.eventLedgerDirectory,
+      partialProvenanceOccurredAt,
+      "occurredAt",
+    ),
+    record: {
+      dayKey: "2026-07-15",
+      externalRef: {
+        system: "oura",
+      },
+      id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F4",
+      kind: "observation",
+      metric: "weight",
+      occurredAt: partialProvenanceOccurredAt,
+      recordedAt: "2026-07-15T13:05:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Legacy body weight",
+      unit: "kg",
+      value: 74.2,
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath(
+      VAULT_LAYOUT.eventLedgerDirectory,
+      occurredAt,
+      "occurredAt",
+    ),
+    record: {
+      dayKey: "2026-07-15",
+      id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F5",
+      kind: "observation",
+      lifecycle: {
+        revision: 0,
+      },
+      metric: "daily-steps",
+      occurredAt,
+      recordedAt: "2026-07-15T12:06:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Unrelated malformed activity summary",
+      value: 7000,
+    },
+  });
+
+  const summary = await readCanonicalEventAvailabilityInterruptible({
+    vaultRoot,
+  });
+  assert.equal(summary.interrupted, false);
+  assert.equal(summary.latestBodyMeasurementDayKey, "2026-07-15");
+  assert.equal(
+    summary.latestBodyMeasurementOccurredAt,
+    partialProvenanceOccurredAt,
+  );
+});
+
+test("canonical event availability still fails closed for malformed relevant records", async () => {
+  const vaultRoot = await makeTempDirectory("murph-canonical-availability-malformed-body-alias");
+  await initializeVault({ vaultRoot });
+  const occurredAt = "2026-07-15T12:00:00.000Z";
+
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: toMonthlyShardRelativePath(
+      VAULT_LAYOUT.eventLedgerDirectory,
+      occurredAt,
+      "occurredAt",
+    ),
+    record: {
+      dayKey: "2026-07-15",
+      id: "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F6",
+      kind: "measurement",
+      measurements: [{
+        metric: "bodymassindex",
+        value: 22.1,
+      }],
+      occurredAt,
+      recordedAt: "2026-07-15T12:05:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Malformed body measurement alias",
+    },
+  });
+
+  await assert.rejects(
+    () => readCanonicalEventAvailabilityInterruptible({ vaultRoot }),
+    (error: unknown) =>
+      error instanceof VaultError
+      && error.code === "EVENT_CONTRACT_INVALID",
+  );
+});
+
+test("canonical event availability collapses revisions before filtering by kind", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary-kind-revision");
   await initializeVault({ vaultRoot });
 
@@ -1188,18 +1319,60 @@ test("latest blood-test summary collapses revisions before filtering by kind", a
       },
     },
   });
+  const legacyBodyId = "evt_01JNW7YJ7MNE7M9Q2QWQK4Z3F3";
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: reclassified.relativePath,
+    record: {
+      dayKey: "2026-01-15",
+      externalRef: {
+        system: "oura",
+      },
+      id: legacyBodyId,
+      kind: "observation",
+      metric: "weight",
+      occurredAt: "2026-01-15T09:00:00.000Z",
+      recordedAt: "2026-01-15T09:01:00.000Z",
+      schemaVersion: "murph.event.v1",
+      source: "device",
+      title: "Superseded malformed body observation",
+      value: 74.2,
+    },
+  });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: reclassified.relativePath,
+    record: {
+      schemaVersion: "murph.event.v1",
+      id: legacyBodyId,
+      kind: "procedure",
+      occurredAt: "2026-01-15T09:00:00.000Z",
+      recordedAt: "2026-01-15T09:02:00.000Z",
+      dayKey: "2026-01-15",
+      source: "manual",
+      title: "Reclassified legacy body row",
+      procedure: "Reclassified legacy body row",
+      status: "completed",
+      lifecycle: {
+        revision: 2,
+      },
+    },
+  });
 
-  const summary = await readLatestBloodTestHistorySummaryInterruptible({
+  const summary = await readCanonicalEventAvailabilityInterruptible({
     vaultRoot,
   });
   assert.deepEqual(summary, {
     interrupted: false,
-    latestOccurredAt: null,
-    present: false,
+    latestBloodPressureMeasurementDayKey: null,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: null,
+    latestBodyMeasurementDayKey: null,
+    latestBodyMeasurementOccurredAt: null,
   });
 });
 
-test("latest blood-test summary stops between JSONL records", async () => {
+test("canonical event availability stops between JSONL records", async () => {
   const vaultRoot = await makeTempDirectory("murph-blood-test-summary-interrupt");
   await initializeVault({ vaultRoot });
 
@@ -1231,7 +1404,7 @@ test("latest blood-test summary stops between JSONL records", async () => {
   assert.deepEqual(walked.relativePaths, [appended.relativePath]);
 
   let continuationChecks = 0;
-  const interrupted = await readLatestBloodTestHistorySummaryInterruptible({
+  const interrupted = await readCanonicalEventAvailabilityInterruptible({
     shouldContinue: () => {
       continuationChecks += 1;
       return continuationChecks <= walkContinuationChecks + 2;
@@ -1241,8 +1414,11 @@ test("latest blood-test summary stops between JSONL records", async () => {
 
   assert.deepEqual(interrupted, {
     interrupted: true,
-    latestOccurredAt: null,
-    present: false,
+    latestBloodPressureMeasurementDayKey: null,
+    latestBloodPressureMeasurementOccurredAt: null,
+    latestBloodTestOccurredAt: null,
+    latestBodyMeasurementDayKey: null,
+    latestBodyMeasurementOccurredAt: null,
   });
   assert.equal(continuationChecks, walkContinuationChecks + 3);
 });

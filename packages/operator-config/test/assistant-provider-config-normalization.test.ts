@@ -13,7 +13,6 @@ describe('assistant provider config normalization', () => {
   it('re-sanitizes normalized Codex targets without carrying registry metadata', () => {
     const staleNormalizedConfig: AssistantProviderConfig = {
       target: {
-        kind: 'codex-cli',
         codexCommand: null,
         codexHome: null,
         model: ' gpt-5.6-terra ',
@@ -30,10 +29,6 @@ describe('assistant provider config normalization', () => {
 
     const normalized = normalizeAssistantProviderConfig(staleNormalizedConfig)
 
-    expect(normalized.target.kind).toBe('codex-cli')
-    if (normalized.target.kind !== 'codex-cli') {
-      throw new Error('expected a Codex target after normalization')
-    }
     expect(normalized.target.model).toBe('gpt-5.6-terra')
     expect(normalized.target.modelProvider).toBe('vercel-ai-gateway')
     expect(serializeAssistantProviderSessionOptions(normalized)).toMatchObject({

@@ -1677,7 +1677,6 @@ test.sequential(
     await saveAssistantOperatorDefaultsPatch(
       buildAssistantProviderDefaultsPatch({
         defaults: null,
-        provider: 'codex-cli',
         providerConfig: {
           model: 'gpt-5.4-mini',
           reasoningEffort: 'xhigh',

@@ -4593,7 +4593,7 @@ test("Junction data webhooks name the delivering source and lifecycle events do 
     },
     {
       data: { provider: "garmin" },
-      expectedOccurredAt: "2026-04-03T00:00:00.000Z",
+      expectedOccurredAt: undefined,
       messageId: "msg_lifecycle_update_now_fallback",
     },
   ] as const;
@@ -7124,6 +7124,73 @@ test("Junction reconcile keeps summaries current while compact timeseries stays 
       ["2026-04-01", "2026-04-01"],
       ["2026-04-02", "2026-04-02"],
     ],
+  );
+});
+
+test("Junction reconcile keeps same-time Oura notes with different tags", async () => {
+  const provider = createJunctionProvider(async (input) => {
+    const url = new URL(readUrl(input));
+    if (url.pathname === "/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          id: "provider-oura-1",
+          slug: "oura",
+          name: "Oura",
+          status: "connected",
+          resource_availability: { note: true },
+        }],
+      });
+    }
+    if (url.pathname === "/v2/timeseries/junction-user-1/note/grouped") {
+      const first = {
+        start: "2026-04-02T18:05:00.000Z",
+        end: "2026-04-02T18:10:00.000Z",
+        tags: ["sauna"],
+        value: "SENSITIVE_VALUE_SENTINEL",
+      };
+      return createJsonResponse({
+        groups: {
+          oura: [{
+            data: [first, { ...first }, { ...first, tags: ["late meal"] }],
+            source: { provider: "oura", type: "ring" },
+          }],
+        },
+      });
+    }
+    if (url.pathname === "/v2/summary/activity/junction-user-1") {
+      return createJsonResponse({ data: [] });
+    }
+    throw new Error(`Unexpected request: ${url.toString()}`);
+  }, {
+    providerFilter: ["oura"],
+    summaryResources: ["activity"],
+    timeseriesResources: ["note"],
+  });
+  const importedSnapshots: unknown[] = [];
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      now: "2026-04-03T12:00:00.000Z",
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob("reconcile", {
+      windowStart: "2026-04-02T00:00:00.000Z",
+      windowEnd: "2026-04-03T00:00:00.000Z",
+    }),
+  );
+
+  const noteRecords = importedSnapshots.flatMap((snapshot) => {
+    const timeseries = (snapshot as { timeseries?: Record<string, unknown[]> }).timeseries;
+    return timeseries?.note ?? [];
+  });
+  assert.equal(noteRecords.length, 2);
+  assert.deepEqual(
+    noteRecords.map((record) => (record as { tags?: string[] }).tags).sort(),
+    [["late meal"], ["sauna"]],
   );
 });
 
@@ -12993,6 +13060,7 @@ test("Junction nested compact timeseries webhooks use sample timestamps for stab
   });
 
   assert.equal(firstParse.jobs[0]?.dedupeKey, secondParse.jobs[0]?.dedupeKey);
+  assert.equal(firstParse.providerSentAt, "2026-04-03T00:00:00.000Z");
   assert.equal(firstParse.jobs[0]?.payload?.occurredAt, "2026-04-02T14:30:00.000Z");
   assert.equal(firstParse.jobs[0]?.payload?.windowStart, "2026-04-02T00:00:00.000Z");
   assert.equal(firstParse.jobs[0]?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");

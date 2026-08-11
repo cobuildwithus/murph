@@ -6,9 +6,6 @@ import {
 } from "@murphai/hosted-execution/vault-share";
 
 import {
-  enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort,
-} from "@/src/lib/hosted-groups/group-newsletter";
-import {
   materializePendingHostedGroupJoinConfirmationsBestEffort,
   signalHostedGroupJoinConfirmationRuntimeBestEffort,
 } from "@/src/lib/hosted-groups/group-join-confirmation";
@@ -114,17 +111,6 @@ export const POST = withJsonError(async (
     });
   }
 
-  if (result.grantedVaultShareProjectionKinds.includes("group-email.v0")) {
-    await runHostedGroupJoinPostCommitBestEffort({
-      deadlineMs: postCommitDeadlineMs,
-      operation: () => enqueueHostedGroupNewsletterEmailNeededNudgeIfNeededBestEffort({
-        groupId: result.groupId,
-        memberId: auth.member.id,
-        prisma,
-      }),
-      signal: request.signal,
-    });
-  }
   return jsonOk({ ok: true, ...responseResult });
 });
 

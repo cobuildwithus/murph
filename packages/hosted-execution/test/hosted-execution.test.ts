@@ -289,7 +289,7 @@ describe("hosted execution coverage gaps", () => {
   });
 
   it("centralizes browser-vault replica source hash and refresh decisions", () => {
-    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(5);
+    expect(BROWSER_VAULT_REPLICA_CURRENT_GENERATION).toBe(7);
     const base = {
       hash: "a".repeat(64),
       key: "cloudflare-workspace-snapshots/base.bundle",
@@ -544,7 +544,6 @@ describe("hosted execution coverage gaps", () => {
       "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
-      "group-newsletter.email-needed",
       "runtime.manual-requested",
       "runtime.pending-effects-reconcile-requested",
       "runtime.maintenance-requested",
@@ -740,7 +739,6 @@ describe("hosted execution coverage gaps", () => {
       "HOSTED_RUNTIME_LOG_PATH",
       "HOSTED_RUNTIME_MAILBOX_FETCH_PATH",
       "HOSTED_RUNTIME_MAILBOX_PAYLOAD_FETCH_PATH",
-      "HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASED_PATH",
       "HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY",
       "HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH",
@@ -762,9 +760,6 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(routeModule.HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH).toBe(
       "/api/internal/hosted-runtime/email-egress/recipient",
-    );
-    expect(routeModule.HOSTED_RUNTIME_NEWSLETTER_TOOL_PATH).toBe(
-      "/api/internal/hosted-execution/groups/newsletter-tool",
     );
     expect(routeModule.HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH).toBe(
       "/api/internal/hosted-execution/assistant-configuration/tool",

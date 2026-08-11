@@ -212,7 +212,8 @@ cream field, large calorie value, calorie progress ring, and one-row protein,
 carbohydrates, fat, and fiber readings visually aligned with the Messages
 extension. The bitmap stays rectangular and badge-free because Messages owns
 the outer corner mask. Installed extensions retain their native icon;
-app-absent static cards omit the optional square App Store artwork. Status
+app-absent cards may show the provider-owned App Store install affordance from
+Murph's canonical app identity, while the bitmap never imitates that chrome. Status
 color may tint nutrient values, but
 the ring draws quantitative progress only for a complete calorie total with an
 assessed goal; V1, partial, null-goal, and unavailable-status cards keep only
@@ -220,6 +221,12 @@ the neutral track. The static image does not expose the native card's
 tap-to-reveal target state. The provider caption retains only the date and meal
 count; visible totals and goals are not repeated beneath the image. V1 renders
 an unavailable fiber dash in the image without adding a fiber caption claim.
+
+Compact-table and workout fallback images use the same provider-owned chrome
+contract: keep the bitmap rectangular and badge-free, reserve empty upper-left
+clearance for the icon that Messages overlays, and let Messages supply that icon
+and the outer corner mask. Keep structural rounding only where it communicates
+an inner state, such as a progress track or set-status marker.
 
 ### iMessage Challenge Standings Card Image
 Render the app-absent standings fallback as the static counterpart to the
@@ -230,6 +237,21 @@ upper-left title gutter for its provider-owned logo without drawing that logo
 into the bitmap. Preserve
 scorer-owned order, scores, progress, and coverage while using the identity-free
 public presentation defined by the challenge standings delivery contract.
+
+### Shared iMessage Card Handoff
+When a shared response-card URL reaches the public homepage instead of the
+Messages extension, open one compact handoff dialog after hydration. Reuse the
+standard Dialog and Button conventions without a logo, eyebrow, numbered step
+grid, or promotional accent treatment. In one short description, tell the user
+to install or open Murph and then return to Messages and tap the card again.
+Use Open App Store as the primary action, Cancel as a ghost secondary action,
+and the standard close control. Stack both actions at full width using the
+large settings-dialog button convention so the App Store destination remains
+the clear primary path. Give the short serif heading display-scale presence,
+use readable body copy, and let the compact surface breathe with the wider,
+roomier settings-dialog spacing. The dialog must not display or decode the
+fragment, add device-specific branching, or turn the fallback into a signup
+flow.
 
 ### Ops Weekly Growth Scorecard
 On `/ops/growth`, lead with one large Fraunces weekly MRR growth rate and keep
@@ -485,6 +507,21 @@ longer eligible for new funding; authenticated non-payers see the ordinary
 unavailable state. After cancellation, replace the action with a durable receipt
 that confirms future automatic refills stopped and existing usage credit stays
 with the group. Do not reload into an unrelated unavailable state.
+
+For a signed-in active group participant, append one quiet **Supporters** list
+beneath the funding action when a current monthly sponsorship or recent
+one-time contribution exists. Use only a public alias entered after the dialog
+discloses its signed-in-group audience and active-monthly-or-recent-20 duration,
+and only after verified settlement preserved the sponsor's group authority;
+otherwise use `Anonymous`. Label each row only as
+`Monthly sponsor` or `One-time contribution`. Do not show amounts, monthly
+maximums, dates, payer identity, payment status, or automatic-refill history.
+Signed-out visitors and non-participants never see the supporter list. Keep the
+list absent when there is nothing to recognize. Stream it beneath the complete
+primary action in its own best-effort Suspense boundary with a null fallback so
+recognition cannot delay funding, management, cancellation, or recovery. Render
+its real component with synthetic states in both the components catalog and
+this section study.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared

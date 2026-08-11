@@ -22,6 +22,7 @@ import type {
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   mergeHostedDeviceSyncConnectionMetadata,
+  mergeHostedDeviceSyncEventToProviderSendBuckets,
   normalizeHostedDeviceSyncJobHints,
   resolveHostedDeviceSyncWakeContext,
   sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata,
@@ -32,6 +33,7 @@ import type {
   HostedExecutionDeviceSyncRuntimeCredentialUpdate as HostedDeviceSyncRuntimeCredentialUpdate,
   HostedExecutionDeviceSyncDirtyResource,
   HostedExecutionDeviceSyncDirtyStateResponse,
+  HostedDeviceSyncEventToProviderSendBucket,
   HostedExecutionDeviceSyncJobHint,
   HostedExecutionDeviceSyncRuntimeConnectionSnapshot as HostedDeviceSyncRuntimeConnectionSnapshot,
   HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate as HostedDeviceSyncRuntimeConnectionSourceUpdate,
@@ -78,14 +80,30 @@ export interface HostedDeviceSyncRuntimeDirtyAck {
 
 export interface HostedDeviceSyncRuntimeDirtyPayloadJob {
   connectionId: string;
-  dirtyPayloadId: string;
+  dirtyPayloadId: string | null;
   jobId: string;
   processedRevision: string;
+  timing?: HostedDeviceSyncImportTiming;
+}
+
+export interface HostedDeviceSyncImportTiming {
+  eventToProviderSendBucket: HostedDeviceSyncEventToProviderSendBucket | null;
+  firstWebhookReceivedAt: string | null;
+  providerSendToWebhookMs: number | null;
+}
+
+export interface HostedDeviceSyncCompletedImportTiming extends HostedDeviceSyncImportTiming {
+  importCompletedAt: string;
+  importExecutionStartedAt: string | null;
+  jobCreatedAt: string;
+  jobKind: string;
+  provider: string;
 }
 
 interface HostedDirtyDeviceSyncJob {
   dirtyPayloadId: string | null;
   input: DeviceSyncJobInput;
+  resource: HostedExecutionDeviceSyncDirtyResource;
 }
 
 interface HostedDirtyDeviceSyncApplyResult {
@@ -705,7 +723,9 @@ function applyHostedDirtyDeviceSyncState(input: {
         nextWakeAt: input.nextWakeAt,
         ...withHostedDirtyPayloadAckIds(
           input.dirtyState,
-          pendingDirtyPayloadJobs.map((job) => job.dirtyPayloadId),
+          pendingDirtyPayloadJobs.flatMap((job) =>
+            job.dirtyPayloadId ? [job.dirtyPayloadId] : []
+          ),
         ),
         processedRevision: input.dirtyState.dirtyRevision,
       },
@@ -738,7 +758,9 @@ function applyHostedDirtyDeviceSyncState(input: {
       nextWakeAt: input.nextWakeAt,
       ...withHostedDirtyPayloadAckIds(
         input.dirtyState,
-        pendingDirtyPayloadJobs.map((job) => job.dirtyPayloadId),
+        pendingDirtyPayloadJobs.flatMap((job) =>
+          job.dirtyPayloadId ? [job.dirtyPayloadId] : []
+        ),
       ),
       processedRevision: input.dirtyState.dirtyRevision,
     },
@@ -805,6 +827,7 @@ function buildHostedDirtyDeviceSyncJobs(
       ? resource.dirtyPayloadId
       : null,
     input: hostedDirtyResourceToDeviceSyncJobInput(resource, dirtyState, occurredAt),
+    resource,
   }));
 }
 
@@ -827,15 +850,36 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
       priority: job.input.priority ?? 0,
       provider: input.provider,
     });
-    return job.dirtyPayloadId
+    const timing = buildHostedDeviceSyncImportTiming(job.resource);
+    return job.dirtyPayloadId || "timing" in timing
       ? [{
           connectionId: input.connectionId,
           dirtyPayloadId: job.dirtyPayloadId,
           jobId: enqueued.id,
           processedRevision: input.processedRevision,
+          ...timing,
         }]
       : [];
   });
+}
+
+function buildHostedDeviceSyncImportTiming(
+  resource: HostedExecutionDeviceSyncDirtyResource,
+): { timing: HostedDeviceSyncImportTiming } | Record<string, never> {
+  const eventToProviderSendBucket = resource.eventToProviderSendBucket ?? null;
+  const firstWebhookReceivedAt = resource.firstWebhookReceivedAt ?? null;
+  const providerSendToWebhookMs = resource.providerSendToWebhookMs ?? null;
+  if (!eventToProviderSendBucket && !firstWebhookReceivedAt && providerSendToWebhookMs === null) {
+    return {};
+  }
+
+  return {
+    timing: {
+      eventToProviderSendBucket,
+      firstWebhookReceivedAt,
+      providerSendToWebhookMs,
+    },
+  };
 }
 
 /**
@@ -849,12 +893,16 @@ function enqueueHostedDirtyDeviceSyncJobs(input: {
 export function promoteHostedCompletedDirtyPayloadAcks(input: {
   service: DeviceSyncService;
   state: HostedDeviceSyncRuntimeSyncState;
-}): void {
+}): HostedDeviceSyncCompletedImportTiming[] {
   if (input.state.pendingDirtyPayloadJobs.length === 0) {
-    return;
+    return [];
   }
 
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
+  const completedImportsByJobId = new Map<
+    string,
+    HostedDeviceSyncCompletedImportTiming
+  >();
   const completedByAck = new Map<string, Set<string>>();
   const remaining: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   for (const pending of input.state.pendingDirtyPayloadJobs) {
@@ -871,9 +919,35 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
       remaining.push(pending);
       continue;
     }
+    if (
+      job?.status === "succeeded"
+      && job.finishedAt
+      && pending.timing
+    ) {
+      const completedImport = {
+        ...pending.timing,
+        importCompletedAt: job.finishedAt,
+        importExecutionStartedAt: job.startedAt,
+        jobCreatedAt: job.createdAt,
+        jobKind: job.kind,
+        provider: job.provider,
+      };
+      const previous = completedImportsByJobId.get(job.id);
+      completedImportsByJobId.set(
+        job.id,
+        previous
+          ? {
+              ...completedImport,
+              ...mergeHostedDeviceSyncImportTiming(previous, completedImport),
+            }
+          : completedImport,
+      );
+    }
     const ackKey = buildHostedDirtyAckKey(pending.connectionId, pending.processedRevision);
     const ids = completedByAck.get(ackKey) ?? new Set<string>();
-    ids.add(pending.dirtyPayloadId);
+    if (pending.dirtyPayloadId) {
+      ids.add(pending.dirtyPayloadId);
+    }
     completedByAck.set(ackKey, ids);
   }
 
@@ -892,6 +966,47 @@ export function promoteHostedCompletedDirtyPayloadAcks(input: {
     ];
   }
   input.state.pendingDirtyPayloadJobs = remaining;
+  return [...completedImportsByJobId.values()];
+}
+
+function mergeHostedDeviceSyncImportTiming(
+  left: HostedDeviceSyncImportTiming,
+  right: HostedDeviceSyncImportTiming,
+): HostedDeviceSyncImportTiming {
+  return {
+    eventToProviderSendBucket: mergeHostedDeviceSyncEventToProviderSendBuckets(
+      left.eventToProviderSendBucket,
+      right.eventToProviderSendBucket,
+    ),
+    firstWebhookReceivedAt: minOptionalIso(
+      left.firstWebhookReceivedAt,
+      right.firstWebhookReceivedAt,
+    ),
+    providerSendToWebhookMs: maxOptionalDurationMs(
+      left.providerSendToWebhookMs,
+      right.providerSendToWebhookMs,
+    ),
+  };
+}
+
+function minOptionalIso(left: string | null, right: string | null): string | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return Date.parse(left) <= Date.parse(right) ? left : right;
+}
+
+function maxOptionalDurationMs(left: number | null, right: number | null): number | null {
+  if (left === null) {
+    return right;
+  }
+  if (right === null) {
+    return left;
+  }
+  return Math.max(left, right);
 }
 
 function buildHostedDirtyAckKey(connectionId: string, processedRevision: string): string {

@@ -390,7 +390,7 @@ describe("hosted email worker ingress", () => {
     })));
   });
 
-  it("preserves signed group reply aliases from newsletter send through email reply ingress and follow-up fanout", async () => {
+  it("preserves signed group reply aliases from group email send through email reply ingress and follow-up fanout", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
@@ -441,9 +441,9 @@ describe("hosted email worker ingress", () => {
       config: createHostedEmailConfig(),
       emailBinding,
       request: {
-        idempotencyKey: "group-newsletter:test-edition",
+        idempotencyKey: "group-email-effect:test-edition",
         message: "weekly note",
-        newsletterAuthorizationProof: "a".repeat(64),
+        groupEmailAuthorizationProof: "a".repeat(64),
         subject: "Weekly health note",
         target: groupId,
         targetKind: "group",
@@ -460,13 +460,13 @@ describe("hosted email worker ingress", () => {
     expect(replyAliasAddress).toMatch(/^assistant\+g2-/u);
 
     if (!replyAliasAddress) {
-      throw new Error("Expected hosted group newsletter send to include a Reply-To alias.");
+      throw new Error("Expected hosted group email send to include a Reply-To alias.");
     }
 
     await handleHostedEmailIngressProduction({
       from: "member-one@example.test",
       raw: buildRawEmailWithAttachment({
-        attachmentBase64: Buffer.from("newsletter attachment bytes").toString("base64"),
+        attachmentBase64: Buffer.from("group email attachment bytes").toString("base64"),
         attachmentContentType: "application/pdf",
         attachmentFileName: "member-one@example.test.pdf",
         body: [

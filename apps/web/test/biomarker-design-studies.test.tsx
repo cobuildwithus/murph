@@ -118,7 +118,7 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain('data-design-section="homepage-footer"');
   expect(sectionsMarkup).toContain("Changelog archive with explanatory visuals");
   expect(sectionsMarkup).toContain('data-design-study="changelog-archive"');
-  expect(sectionsMarkup).toContain("A week that closes its own loops");
+  expect(sectionsMarkup).toContain("A week of follow-through");
   expect(sectionsMarkup.match(/Illustrative examples\./g)).toHaveLength(2);
   expect(sectionsMarkup).toContain("Biomarker preparing state");
   expect(sectionsMarkup).toContain("Biomarker index");
@@ -128,6 +128,23 @@ test("design page routes the biomarker studies through the dedicated sections ta
   expect(sectionsMarkup).toContain(
     "Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status",
   );
+  expect(sectionsMarkup).toContain(
+    'data-design-variant="venice-terra-sol-locked"',
+  );
+  expect(sectionsMarkup).toContain(
+    "Settings inference routing, locked models, and endpoint",
+  );
+  expect(sectionsMarkup).toContain("High usage · Edge required");
+  expect(sectionsMarkup).toContain(">Upgrade to Edge</button>");
+  expect(sectionsMarkup).not.toContain("Sol requires an active Edge plan.");
+  expect(sectionsMarkup).toContain(
+    'data-design-state="active-lifetime-starter-usage"',
+  );
+  expect(sectionsMarkup).toContain('aria-label="Starter AI usage"');
+  expect(sectionsMarkup).not.toContain(
+    "Your non-expiring starter usage is active. Choose a monthly plan whenever you want recurring included usage.",
+  );
+  expect(sectionsMarkup).not.toContain("Starter · Does not expire");
   expect(sectionsMarkup).toContain(
     "Overall AI usage, referral-link sharing, purchase reset, Family owner action, credits, and referrals",
   );

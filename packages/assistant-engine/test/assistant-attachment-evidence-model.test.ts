@@ -66,12 +66,61 @@ describe('assistant input attachment evidence model materialization', () => {
       type: 'text',
       text: 'Look at this image.',
     })
-    expect(prepared.userMessageContent?.some((part) => part.type === 'image')).toBe(true)
+    expect(prepared.userMessageContent).toContainEqual({
+      detail: 'original',
+      image: imageBytes,
+      mediaType: 'image/jpeg',
+      mimeType: 'image/jpeg',
+      type: 'image',
+    })
     expect(prepared.userMessageContent).toContainEqual({
       type: 'text',
       text: 'Attachment image 1 (01__meal.jpg).',
     })
     expect(materializeWorkspaceArtifacts).toHaveBeenCalledWith([imagePath])
+  })
+
+  it('keeps image galleries at high detail to bound visual input cost', async () => {
+    const vaultRoot = await createTempVaultRoot()
+    const firstImagePath = 'raw/inbox/capture-1/attachments/01__first.jpg'
+    const secondImagePath = 'raw/inbox/capture-1/attachments/02__second.jpg'
+    await writeVaultFile(
+      vaultRoot,
+      firstImagePath,
+      Buffer.from([0xff, 0xd8, 0xff, 0x01]),
+    )
+    await writeVaultFile(
+      vaultRoot,
+      secondImagePath,
+      Buffer.from([0xff, 0xd8, 0xff, 0x02]),
+    )
+
+    const bundles = await buildAssistantInputAttachmentPromptBundles({
+      attachments: [
+        createAttachmentEvidence({
+          kind: 'image',
+          mime: 'image/jpeg',
+          ordinal: 1,
+          rawPath: firstImagePath,
+        }),
+        createAttachmentEvidence({
+          kind: 'image',
+          mime: 'image/jpeg',
+          ordinal: 2,
+          rawPath: secondImagePath,
+        }),
+      ],
+      vaultRoot,
+    })
+    const prepared = await prepareAssistantInputMultimodalUserMessageContent({
+      attachmentSources: bundles,
+      prompt: 'Compare these images.',
+      vaultRoot,
+    })
+
+    expect((prepared.userMessageContent ?? []).flatMap((part) =>
+      part.type === 'image' ? [part.detail] : [],
+    )).toEqual(['high', 'high'])
   })
 
   it('uses preserved filenames when deciding image routing eligibility', async () => {

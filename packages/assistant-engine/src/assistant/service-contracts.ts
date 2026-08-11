@@ -10,6 +10,7 @@ import type {
   AssistantSandbox,
   AssistantSession,
   AssistantTurnTrigger,
+  AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import type { AssistantProviderTraceEvent } from './provider-traces.js'
 import type { AssistantProviderProgressEvent } from './provider-progress.js'
@@ -20,6 +21,7 @@ import type {
   AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderTurnExecutionResult,
 } from './providers/types.js'
+import type { ResolvedAssistantPromptTimeContext } from './prompt-time.js'
 import type {
   AssistantProviderStartCriticalPathContext,
 } from './provider-start-critical-path.js'
@@ -50,7 +52,7 @@ import type {
   CodexThreadIdentity,
 } from './codex-thread-route.js'
 import type {
-  HostedRuntimeNewsletterScheduledAuthority,
+  HostedRuntimeGroupEmailScheduledAuthority,
   HostedRuntimeScheduledAutomationAuthority,
 } from '@murphai/hosted-execution/runtime-control'
 import type { recordAssistantDiagnosticEvent } from './diagnostics.js'
@@ -87,6 +89,12 @@ export interface AssistantHostedDeliveryIdempotencyContext {
   conversationId?: string | null
   inboundMailboxItemIds?: readonly string[] | null
   recipientKey?: string | null
+}
+
+export interface AssistantHostedImageCompletionEffectRestriction {
+  authorizedOriginAssistantInputId: string | null
+  completionAssistantInputId: string
+  exactMedia: readonly [AssistantVaultImageResponseMedia] | null
 }
 
 export type AssistantProviderRequestStartHook = (event: {
@@ -151,6 +159,10 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   executionContext?: AssistantExecutionContext | null
   expectedActiveTurnId?: string | null
   hostedDeliveryIdempotency?: AssistantHostedDeliveryIdempotencyContext | null
+  // Engine-owned and turn-local. It preserves a trusted completion's provider
+  // contract while preventing the system input from becoming user authority.
+  hostedImageCompletionEffectRestriction?:
+    AssistantHostedImageCompletionEffectRestriction | null
   includeEarlySessionOnboarding?: boolean
   // Engine-owned silent-maintenance policy. It selects trusted prompt/evidence
   // boundaries and is never supplied by a model or persisted automation.
@@ -163,6 +175,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
   outboxExternalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   persistUserPromptOnFailure?: boolean
+  /** Engine-resolved once for this turn so every prompt layer shares one time authority. */
+  promptTimeContext?: ResolvedAssistantPromptTimeContext
   // Existing App Server per-turn thread option. Never enters session identity
   // or persisted provider config.
   providerThreadEphemeral?: boolean | null
@@ -171,9 +185,9 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   turnContext?: string | null
   userMessageContent?: AssistantUserMessageContentPart[] | null
   receiptMetadata?: Record<string, string> | null
-  scheduledAutomationAuthority?: HostedRuntimeNewsletterScheduledAuthority | null
-  // Generic engine-owned invocation identity. Unlike the newsletter authority,
-  // this grants no side effect by itself and is never model supplied.
+  scheduledAutomationAuthority?: HostedRuntimeGroupEmailScheduledAuthority | null
+  // Generic engine-owned invocation identity. This grants no side effect by
+  // itself and is never model supplied.
   scheduledInvocationAuthority?: HostedRuntimeScheduledAutomationAuthority | null
   // Exact engine-owned occurrence for this scheduled turn. This is ephemeral
   // decision context, not persisted automation or session state.

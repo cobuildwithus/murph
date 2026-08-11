@@ -85,11 +85,13 @@ describe("scheduled assistant tool authority", () => {
     const personalizationRequest = vi.fn(async () => ({
       action: "update" as const,
       result: {
+        mainPersona: "classic" as const,
         model: "gpt-5.6-terra" as const,
         modelChangeAppliesNextRun: false as const,
         modelUpdated: false as const,
         solAvailable: true,
         status: "saved" as const,
+        supportingPersona: null,
         tone: "casual" as const,
         voice: "warm" as const,
       },

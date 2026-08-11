@@ -31,6 +31,7 @@ import {
   renderAssistantResponseCardText,
   type AssistantResponseCard,
 } from '@murphai/operator-config/assistant-response-cards'
+import { resolveAssistantGeneratedImageDelivery } from '../src/assistant/response-media.ts'
 import { serializeAssistantProviderSessionOptions } from '@murphai/operator-config/assistant/provider-config'
 import {
   hasAssistantSeenFirstContact,
@@ -664,6 +665,57 @@ describe('assistant outbox runtime', () => {
         turnId: 'turn-too-many-answered-mailbox',
       }),
     ).rejects.toThrow('answered mailbox item ids exceed the 100 item limit')
+  })
+
+  it('persists new group email proof only under the generic outbox field', async () => {
+    const { vaultRoot } = await createAssistantVault(
+      'assistant-outbox-group-email-proof-rollback-',
+    )
+    const groupEmailAuthorizationProof = 'a'.repeat(64)
+    const parentTarget = serializeHostedEmailThreadTarget({
+      groupId: 'group_123',
+      subject: 'Group subject',
+      targetKind: 'group',
+    })
+    const targets = [
+      parentTarget,
+      serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        recipientMemberId: 'member_123',
+        subject: 'Group subject',
+        targetKind: 'group',
+      }),
+    ]
+
+    for (const [index, explicitTarget] of targets.entries()) {
+      const intent = await createAssistantOutboxIntent({
+        channel: 'email',
+        deliveryIdempotencyKey: `group-email-effect:proof:${index}`,
+        explicitTarget,
+        groupEmailAuthorizationProof,
+        message: 'Group email body',
+        sessionId: `session_group_email_${index}`,
+        threadIsDirect: false,
+        turnId: `turn_group_email_${index}`,
+        vault: vaultRoot,
+      })
+      const paths = resolveAssistantStatePaths(vaultRoot)
+      const persisted = JSON.parse(await readFile(
+        resolveAssistantOutboxIntentPath(paths.outboxDirectory, intent.intentId),
+        'utf8',
+      )) as Record<string, unknown>
+
+      expect(Object.keys(persisted).filter((key) =>
+        key.endsWith('AuthorizationProof')
+      )).toEqual(['groupEmailAuthorizationProof'])
+      expect(persisted.groupEmailAuthorizationProof).toBe(
+        groupEmailAuthorizationProof,
+      )
+      await expect(readAssistantOutboxIntent(vaultRoot, intent.intentId))
+        .resolves.toMatchObject({
+          groupEmailAuthorizationProof,
+        })
+    }
   })
 
   it('monotonically widens answered mailbox ids when a grouped reply is rebatched', async () => {
@@ -2366,6 +2418,36 @@ describe('assistant outbox runtime', () => {
       updatedAt: '2026-03-01T00:05:00.000Z',
     })
 
+    const generatedRef = 'raw/captures/2026/04/generated/generated.webp'
+    const generatedDelivery = await createIntent(vaultRoot, {
+      channel: 'linq',
+      createdAt: '2026-04-18T00:00:00.000Z',
+      media: [{
+        alt: 'Visible generated image',
+        contentType: 'image/webp',
+        filename: 'generated.webp',
+        kind: 'vault_image',
+        ref: generatedRef,
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+        source: 'gpt-image-2',
+      }],
+      message: 'visible generated image',
+      sessionId: 'session-generated-delivery',
+      turnId: 'turn-generated-delivery',
+    })
+    await saveAssistantOutboxIntent(vaultRoot, {
+      ...generatedDelivery,
+      delivery: createDelivery({
+        channel: 'linq',
+        providerMessageId: 'generated-delivery-message',
+        sentAt: '2026-04-18T00:05:00.000Z',
+      }),
+      sentAt: '2026-04-18T00:05:00.000Z',
+      status: 'sent',
+      updatedAt: '2026-04-18T00:05:00.000Z',
+    })
+
     const recentTerminalIntents = Array.from({ length: 101 }, (_, index) => {
       const createdAt = new Date(Date.UTC(2026, 3, 19, 0, index, 0)).toISOString()
       const message = `terminal-${index}`
@@ -2432,15 +2514,54 @@ describe('assistant outbox runtime', () => {
     ).resolves.toBe(2)
 
     const retained = await listAssistantOutboxIntentsLocal(vaultRoot)
-    expect(retained).toHaveLength(101)
+    expect(retained).toHaveLength(102)
     expect(retained.filter((intent) => intent.status === 'retryable')).toHaveLength(1)
     expect(
       retained.some((intent) => intent.message === 'old terminal intent'),
     ).toBe(false)
-    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(100)
+    expect(retained.filter((intent) => intent.status !== 'retryable')).toHaveLength(101)
+    expect(retained.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(true)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retained,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(true)
+
+    await expect(
+      pruneAssistantTerminalOutboxIntents({
+        now: new Date('2026-05-02T00:06:00.000Z'),
+        paths,
+        vault: vaultRoot,
+      }),
+    ).resolves.toBe(1)
+    const retainedAfterAgeCutoff = await listAssistantOutboxIntentsLocal(vaultRoot)
+    expect(retainedAfterAgeCutoff.some((intent) =>
+      intent.intentId === generatedDelivery.intentId
+    )).toBe(false)
+    expect(resolveAssistantGeneratedImageDelivery({
+      currentMedia: {
+        contentType: 'image/webp',
+        sha256: 'a'.repeat(64),
+        sizeBytes: 128,
+      },
+      generatedImageOriginKnown: true,
+      imageRef: generatedRef,
+      intents: retainedAfterAgeCutoff,
+      sessionId: generatedDelivery.sessionId,
+      transcriptEntries: [],
+    })).toBe(false)
   })
 
-  it('retains group newsletter terminal occurrence evidence during outbox pruning', async () => {
+  it('retains legacy group newsletter terminal occurrence evidence during outbox pruning', async () => {
     const { paths, vaultRoot } = await createAssistantVault(
       'assistant-outbox-newsletter-retention-',
     )

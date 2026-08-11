@@ -91,6 +91,7 @@ function toIngressWebhook(parsed: {
   eventType: string;
   jobs: DeviceSyncIngressWebhook["jobs"];
   occurredAt?: string;
+  providerSentAt?: string;
   resourceCategory?: string | null;
   sourceProviderSlug?: string | null;
   dataSourceProviderSlug?: string | null;
@@ -104,6 +105,7 @@ function toIngressWebhook(parsed: {
     eventType: parsed.eventType,
     jobs: [...parsed.jobs],
     ...(parsed.occurredAt ? { occurredAt: parsed.occurredAt } : {}),
+    ...(parsed.providerSentAt ? { providerSentAt: parsed.providerSentAt } : {}),
     ...(resourceCategory ? { resourceCategory } : {}),
     ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     ...(dataSourceProviderSlug ? { dataSourceProviderSlug } : {}),

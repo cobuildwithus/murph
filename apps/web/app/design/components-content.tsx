@@ -156,6 +156,7 @@ import {
   DESIGN_GROUP_SPONSORSHIP_OFFERS,
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
+  GroupFundingSupportersStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
@@ -174,6 +175,7 @@ import { ExperimentResultsShareStudy } from "./experiment-results-share-study";
 import { ImessageChallengeStandingsCardStudy } from "./imessage-challenge-standings-card-study";
 import { ImessageNutritionCardStudy } from "./imessage-nutrition-card-study";
 import { ImessageCompactTableCardStudy } from "./imessage-compact-table-card-study";
+import { MurphCardHandoffStudy } from "./murph-card-handoff-study";
 import { DataExportControlStudy } from "./data-export-study";
 import { HealthDataConsentControlStudy } from "./health-data-consent-study";
 import { SignupReferralComponentStudy } from "./signup-referral-study";
@@ -1452,7 +1454,7 @@ export function ComponentsContent() {
 
         <Section
           id="imessage-compact-table-card"
-          title="iMessage workout and compact table card states"
+          title="iMessage workout and compact table fallback states"
         >
           <ImessageCompactTableCardStudy />
         </Section>
@@ -1464,6 +1466,15 @@ export function ComponentsContent() {
           title="iMessage challenge standings card"
         >
           <ImessageChallengeStandingsCardStudy />
+        </Section>
+
+        <Separator />
+
+        <Section
+          id="murph-card-handoff-dialog"
+          title="Shared card handoff dialog"
+        >
+          <MurphCardHandoffStudy />
         </Section>
 
         <Separator />
@@ -2144,6 +2155,17 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <Section title="Group funding supporters">
+          <p className="text-sm text-muted-foreground">
+            The funding page recognizes the current monthly sponsor and recent
+            one-time supporters without exposing contribution amounts or the
+            sponsor&apos;s private monthly maximum.
+          </p>
+          <GroupFundingSupportersStudy />
+        </Section>
+
+        <Separator />
+
         <Section title="Signup referral link actions">
           <p className="text-sm text-muted-foreground">
             The real copy action keeps loading, clipboard, and recovery states
@@ -2284,14 +2306,14 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Personality Settings">
+        <Section title="Style Levels">
           <p className="text-sm text-muted-foreground">
             Private Humor, Push, and Detail controls. The mobile preview uses a
             full-height drawer with a safe-area footer; desktop uses a dialog.
           </p>
           <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card p-5">
             <Button onClick={() => setPersonalitySettingsOpen(true)}>
-              Preview personality settings
+              Preview style levels
             </Button>
           </div>
           <MurphPersonalitySettingsDialog
@@ -2533,7 +2555,7 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Health data consent actions">
+        <Section title="Health data consent settings row">
           <HealthDataConsentControlStudy />
         </Section>
 

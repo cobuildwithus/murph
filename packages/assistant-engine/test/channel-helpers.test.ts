@@ -1269,6 +1269,7 @@ describe('channel helper seams', () => {
           providerMessageId: 'linq-text-message',
         },
         {
+          carriesIntentMedia: true,
           message: null,
           providerMessageId: 'linq-voice-message',
         },

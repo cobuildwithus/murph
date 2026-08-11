@@ -16,6 +16,10 @@ import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
+  CAPTURE_LOOKUP_INDEX_PATH,
+  readStoredCaptureLookupIndex,
+} from '@murphai/core'
+import {
   type ResolvedAssistantSession,
   appendAssistantTranscriptEntries,
   appendAssistantTranscriptEntriesWithRefs,
@@ -30,6 +34,7 @@ import {
 } from './outbox.js'
 import {
   ASSISTANT_IMAGE_RESPONSE_TRANSCRIPT_MARKER,
+  resolveAssistantGeneratedImageDelivery,
 } from './response-media.js'
 import { recordAssistantDiagnosticEvent } from './diagnostics.js'
 import { refreshAssistantStatusSnapshotLocal } from './status.js'
@@ -81,7 +86,7 @@ import {
   finalizeAssistantTurnReceipt,
 } from './turns.js'
 import {
-  mergeAssistantProviderConfigsForProvider,
+  mergeAssistantProviderConfigs,
   serializeAssistantProviderSessionOptions,
 } from '@murphai/operator-config/assistant/provider-config'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -809,6 +814,46 @@ export async function sendAssistantMessageLocal(
                 ),
               messageInput: input,
               pendingVaultFilesAvailable,
+              verifyGeneratedImageDelivery: async (candidate) => {
+                try {
+                  const imageRef = candidate.imageRef
+                  const knownFromCurrentCompletion =
+                    currentInput.hostedImageCompletionEffectRestriction
+                      ?.exactMedia?.some((media) => media.ref === imageRef) === true
+                  const [intents, transcriptEntries, captureLookupIndex] =
+                    await Promise.all([
+                      runtimeState.outbox.listIntents(),
+                      runtimeState.transcripts.list(currentSession.sessionId),
+                      (async () => {
+                        await hostedExecutionContext
+                          ?.materializeWorkspaceArtifacts?.([
+                            CAPTURE_LOOKUP_INDEX_PATH,
+                          ])
+                        return await readStoredCaptureLookupIndex({
+                          vaultRoot: input.vault,
+                        })
+                      })(),
+                    ])
+                  return resolveAssistantGeneratedImageDelivery({
+                    currentMedia: {
+                      contentType: candidate.contentType,
+                      sha256: candidate.sha256,
+                      sizeBytes: candidate.sizeBytes,
+                    },
+                    generatedImageOriginKnown:
+                      knownFromCurrentCompletion ||
+                      Object.values(captureLookupIndex.entries).some(
+                        (entry) => entry.attachmentRef === imageRef,
+                      ),
+                    imageRef,
+                    intents,
+                    sessionId: currentSession.sessionId,
+                    transcriptEntries,
+                  })
+                } catch {
+                  return false
+                }
+              },
               route,
               ...(vaultFileSendAvailable && actionApprovalPort
                 ? {
@@ -2226,8 +2271,7 @@ export async function updateAssistantSessionOptionsLocal(input: {
     createIfMissing: false,
   })
 
-  const providerConfig = mergeAssistantProviderConfigsForProvider(
-    input.providerOptions.provider,
+  const providerConfig = mergeAssistantProviderConfigs(
     // Persisted targets carry the full durable provider config. Session
     // providerOptions are a derived runtime projection and omit target-only
     // fields such as the Codex executable path.
@@ -2236,12 +2280,6 @@ export async function updateAssistantSessionOptionsLocal(input: {
   )
   const nextTarget =
     createAssistantModelTarget(providerConfig) ?? session.session.target
-  if (nextTarget.adapter !== 'codex-cli') {
-    throw new VaultCliError(
-      'ASSISTANT_PROVIDER_UNSUPPORTED',
-      'Assistant sessions only support Codex app-server targets.',
-    )
-  }
   const nextProviderOptions = serializeAssistantProviderSessionOptions(providerConfig)
   const continuityChanged =
     session.session.providerOptions.continuityFingerprint !==
