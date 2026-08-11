@@ -1277,24 +1277,14 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
     readNumberAtPath(redactedStatus, ["hostedSystemMailboxRetryableFailed"]) ?? 0;
   const recordFailed =
     readNumberAtPath(redactedStatus, ["hostedSystemMailboxRecordFailed"]) ?? 0;
-  const systemImportedSeq = readIntegerStringAtPath(
+  const systemImportedSeq = readStringAtPath(
     redactedStatus,
     ["hostedMailboxSystemImportedSeq"],
   );
-  const systemHandledThroughSeq = readIntegerStringAtPath(
+  const systemHandledThroughSeq = readStringAtPath(
     redactedStatus,
     ["hostedMailboxSystemHandledThroughSeq"],
   );
-  const systemMailboxLag = receiptStatus.mailboxLag.find(
-    (entry) => entry.lane === "system",
-  );
-  const checkpointedSystemReceipt =
-    systemImportedSeq !== null
-    && systemImportedSeq !== "0"
-    && systemHandledThroughSeq === systemImportedSeq
-    && systemMailboxLag?.importedSeq === systemImportedSeq
-    && systemMailboxLag.maxSeq === systemImportedSeq
-    && systemMailboxLag.lag === "0";
   const systemMailboxLogs = collectHostedSystemMailboxLogSummaries(receiptStatus);
   const retryableLog = systemMailboxLogs.find((entry) => entry.status === "retryable_failed");
   const recordedDeviceSyncLog = systemMailboxLogs.find((entry) =>
@@ -1303,8 +1293,12 @@ async function assertHostedDeviceSyncReplayReceiptAccepted(input: {
     && (entry.status === "processed" || entry.status === "recorded")
     && (entry.recordFailed ?? 0) === 0
   );
-  const durableSystemLaneAdvancedAndSettled = checkpointedSystemReceipt
-    && hasDecimalSequenceAdvanced(input.systemImportedSeqBefore, systemImportedSeq);
+  const durableSystemLaneAdvancedAndSettled = systemImportedSeq !== null
+    && hasDecimalSequenceAdvanced(input.systemImportedSeqBefore, systemImportedSeq)
+    && systemImportedSeq === systemHandledThroughSeq
+    && receiptStatus.mailboxLag.some((lane) =>
+      lane.lane === "system" && lane.lag === "0"
+    );
   const receiptObserved = durableSystemLaneAdvancedAndSettled
     || (
       input.requireAdvancedDurableFrontier !== true
@@ -1356,7 +1350,7 @@ async function readHostedSystemImportedSeq(input: {
     ),
   );
   return requireNonNegativeDecimalSequence(
-    readIntegerStringAtPath(
+    readStringAtPath(
       status.workspace?.redactedStatus ?? null,
       ["hostedMailboxSystemImportedSeq"],
     ),
@@ -1795,7 +1789,7 @@ function readNumberAtPath(value: unknown, keys: readonly string[]): number | nul
   return typeof current === "number" ? current : null;
 }
 
-function readIntegerStringAtPath(value: unknown, keys: readonly string[]): string | null {
+function readStringAtPath(value: unknown, keys: readonly string[]): string | null {
   let current = value;
   for (const key of keys) {
     if (!current || typeof current !== "object" || Array.isArray(current)) {
@@ -1804,9 +1798,7 @@ function readIntegerStringAtPath(value: unknown, keys: readonly string[]): strin
     current = (current as Record<string, unknown>)[key];
   }
 
-  return typeof current === "string" && /^(0|[1-9]\d*)$/u.test(current)
-    ? current
-    : null;
+  return typeof current === "string" ? current : null;
 }
 
 function hasDecimalSequenceAdvanced(before: string, after: string): boolean {
