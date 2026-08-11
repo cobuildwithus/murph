@@ -137,6 +137,7 @@ import {
   hasHostedPreparedPendingGroupSetupRecoveryInFlight,
   prepareHostedPendingGroupSetupForParticipants,
   readHostedPendingGroupSetupCandidatesForParticipantsTx,
+  type HostedPendingGroupSetupClaimReason,
   type HostedPreparedPendingGroupSetupPackage,
 } from "../hosted-groups/pending-group-setup";
 import type {
@@ -3169,7 +3170,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   let pendingSetupParticipantMemberIds: readonly string[];
   let pendingSetupRecipientPhoneLookupKeys =
     input.threadRouteAccountLookupKeys;
-  let requiredPendingSetupCandidateId = normalizeNullableString(
+  const requiredPendingSetupCandidateId = normalizeNullableString(
     input.requiredPendingGroupSetupCandidateId,
   );
   if (lineState.kind === "at_risk" || lineState.kind === "hard_blocked") {
@@ -3280,12 +3281,12 @@ async function planHostedLinqGroupChatWebhook(input: {
           recoveredPendingSetup.recipientPhoneLookupKey,
         ]),
       ];
-      requiredPendingSetupCandidateId ??= recoveredPendingSetup.id;
     }
   }
 
   let createdContainerMemberId: string | null = null;
   let demotedMailboxConsumedAt: Date | null = null;
+  let pendingSetupResolution: HostedPendingGroupSetupClaimReason | null = null;
   let routeEnsured = false;
   try {
     const preparedResult = await ensureHostedPreparedLinqThreadContainerRouteTx({
@@ -3307,15 +3308,13 @@ async function planHostedLinqGroupChatWebhook(input: {
       threadId: summary.chatId,
       tx: input.prisma,
     });
+    pendingSetupResolution = preparedResult.pendingSetupResolution;
     if (preparedResult.kind !== "ensured") {
       if (
         preparedResult.pendingSetupResolution
           === "recipient_line_unmanaged"
       ) {
         return ignored("recipient-line-unmanaged", senderIdentityMatch);
-      }
-      if (preparedResult.pendingSetupResolution === "invalid_payload") {
-        requiredPendingSetupCandidateId = null;
       }
       // A concurrent setup claimant may have committed this route while the
       // row lock was held. The canonical re-read below decides whether this
@@ -3350,13 +3349,30 @@ async function planHostedLinqGroupChatWebhook(input: {
     // of dropping an authorized inbound; a missing route still fails closed.
   }
 
+  const withNextRequiredPendingSetupCandidateId = (
+    plan: HostedOnboardingLinqDirectPlan,
+  ): HostedOnboardingLinqDirectPlan =>
+    pendingSetupResolution === "invalid_payload"
+      && requiredPendingSetupCandidateId !== null
+      ? {
+          ...plan,
+          nextRequiredPendingGroupSetupCandidateId: null,
+        }
+      : plan;
+
   const route = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma: input.prisma,
     threadId: summary.chatId,
   });
   if (!route) {
-    if (activeSenderMemberId || requiredPendingSetupCandidateId) {
+    if (
+      activeSenderMemberId
+      || (
+        requiredPendingSetupCandidateId
+        && pendingSetupResolution !== "invalid_payload"
+      )
+    ) {
       return ignored("provision-unavailable", senderIdentityMatch);
     }
     if (lineState.kind !== "assignable") {
@@ -3375,45 +3391,49 @@ async function planHostedLinqGroupChatWebhook(input: {
       && input.requireFirstContactAdmission === true
       && input.firstContactAdmissionDecision?.kind !== "allow"
     ) {
-      return logHostedLinqWebhookPlannerDecisionAndReturn(
-        buildFirstContactAdmissionRequiredPlan({
-          participantContact,
-          request: buildHostedLinqFirstContactAdmissionRequest({
-            context: input.context,
-            event: input.event,
+      return withNextRequiredPendingSetupCandidateId(
+        logHostedLinqWebhookPlannerDecisionAndReturn(
+          buildFirstContactAdmissionRequiredPlan({
             participantContact,
+            request: buildHostedLinqFirstContactAdmissionRequest({
+              context: input.context,
+              event: input.event,
+              participantContact,
+            }),
           }),
+          buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
+            existingMemberActive: false,
+            existingMemberMatch: senderIdentityMatch,
+            reason: "first-contact-admission-required",
+            routeStage: "first-contact-admission-required",
+          }),
+        ),
+      );
+    }
+
+    return withNextRequiredPendingSetupCandidateId(
+      logHostedLinqWebhookPlannerDecisionAndReturn(
+        buildGroupSetupRequiredResponse({
+          chatId: summary.chatId,
+          messageId: summary.messageId,
+          occurredAt,
+          ...(sender === null
+            && participantContact.kind === "email"
+            && isHostedLinqIMessageService(messageEvent.data.service)
+              ? { participantEmail: participantContact.value }
+              : {}),
+          recipientPhone: incomingRecipientPhone,
+          sourceEventId: input.event.event_id,
         }),
         buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
           existingMemberActive: false,
           existingMemberMatch: senderIdentityMatch,
-          reason: "first-contact-admission-required",
-          routeStage: "first-contact-admission-required",
+          reason: inactiveSender
+            ? "sender-inactive"
+            : "sender-identity-unresolved",
+          routeStage: "new-group-setup-planned",
         }),
-      );
-    }
-
-    return logHostedLinqWebhookPlannerDecisionAndReturn(
-      buildGroupSetupRequiredResponse({
-        chatId: summary.chatId,
-        messageId: summary.messageId,
-        occurredAt,
-        ...(sender === null
-          && participantContact.kind === "email"
-          && isHostedLinqIMessageService(messageEvent.data.service)
-            ? { participantEmail: participantContact.value }
-            : {}),
-        recipientPhone: incomingRecipientPhone,
-        sourceEventId: input.event.event_id,
-      }),
-      buildHostedLinqWebhookPlannerDetails(input.event, input.context, {
-        existingMemberActive: false,
-        existingMemberMatch: senderIdentityMatch,
-        reason: inactiveSender
-          ? "sender-inactive"
-          : "sender-identity-unresolved",
-        routeStage: "new-group-setup-planned",
-      }),
+      ),
     );
   }
 
@@ -3449,7 +3469,7 @@ async function planHostedLinqGroupChatWebhook(input: {
         route,
       });
   if (createdContainerMemberId && route.containerMemberId === createdContainerMemberId) {
-    return {
+    return withNextRequiredPendingSetupCandidateId({
       ...plan,
       postCommitGroupRosterReconciles: [
         ...(plan.postCommitGroupRosterReconciles ?? []),
@@ -3458,10 +3478,10 @@ async function planHostedLinqGroupChatWebhook(input: {
           containerMemberId: route.containerMemberId,
         },
       ],
-    };
+    });
   }
 
-  return plan;
+  return withNextRequiredPendingSetupCandidateId(plan);
 }
 
 async function planHostedLinqDailyQuotaAdmissionDenied(input: {

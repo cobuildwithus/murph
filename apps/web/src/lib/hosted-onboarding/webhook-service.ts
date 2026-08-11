@@ -541,8 +541,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             })
           : null;
       let requiredPendingGroupSetupCandidateId: string | null = null;
-      const runPlan = (instantStartAllowed = true) =>
-        runHostedThreadRoutingPreparedTransaction({
+      const runPlan = async (instantStartAllowed = true) => {
+        const planned = await runHostedThreadRoutingPreparedTransaction({
           plan: ({ preparation, transaction }) => {
             const preparedSelection =
               preparation.preparedPendingGroupSetup?.selected;
@@ -604,6 +604,14 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             }),
           prisma,
         });
+        if (
+          planned.nextRequiredPendingGroupSetupCandidateId !== undefined
+        ) {
+          requiredPendingGroupSetupCandidateId =
+            planned.nextRequiredPendingGroupSetupCandidateId;
+        }
+        return planned;
+      };
       const planAfterBlockedAdmission = (reason?: string) =>
         requireFirstContactAdmission
           ? Promise.resolve(buildBlockedHostedLinqFirstContactAdmissionPlan(reason))

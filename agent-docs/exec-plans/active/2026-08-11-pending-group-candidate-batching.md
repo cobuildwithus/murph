@@ -62,6 +62,11 @@ Updated: 2026-08-11
    Mitigation: preserve the row for envelope/root, KMS/provider, signature,
    and authentication failures. Consume only authenticated plaintext whose
    JSON or application schema is malformed after exact lock and revalidation.
+5. Risk: a terminally consumed replacement candidate remains pinned across an
+   independent same-event admission replan.
+   Mitigation: keep one request-scoped pin owner in the webhook service. The
+   planner reports the exact terminal transition after commit; all nonterminal
+   claim, selection, authority, and preparation outcomes retain the pin.
 
 ## Tasks
 
@@ -87,6 +92,10 @@ Updated: 2026-08-11
 - Extend current owner boundaries with set-shaped reads rather than copying
   access, line, routing, recovery, or cryptographic policy into the webhook.
 - Bound stale recovery to the existing single prepared-transaction retry.
+- Keep the replacement-candidate pin's only mutable owner in the webhook
+  service across planning retries and independent same-event replans. The
+  planner consumes the pin as input and explicitly returns its next value only
+  after exact locked `invalid_payload` consumption.
 - Classify the change as internal reliability/performance work; no changelog
   item is planned because member-visible behavior intentionally does not change.
 
@@ -269,3 +278,29 @@ Updated: 2026-08-11
   warnings; dev smoke; and the production Next build. A fresh current-main
   merge-tree was clean and its newer paths did not overlap this database path,
   so no behind-only merge was added.
+
+### ReviewGPT round-four pre-merge remediation
+
+- The retained full-snapshot review of head
+  `6e2b58867b376e962392303b3de473141f02d2d8` found one material same-event
+  failure: terminal `invalid_payload` cleared the planner-local candidate copy,
+  but the webhook-service closure retained the deleted candidate across the
+  independent first-contact-admission replan. The second plan therefore
+  returned `claim_raced`/`provision-unavailable` instead of ordinary setup.
+- A service-entry regression reproduced that exact sequence on the merged-main
+  tree: replacement selection, exact terminal invalid result, reuse of a prior
+  model allow, and the independent second plan. Before remediation it expected
+  `sent-group-setup` and observed `group-chat`/`provision-unavailable`.
+- Removed the planner's mutable shadow copy. The webhook service is now the
+  only mutable request-scoped pin owner; the planner returns an explicit next
+  pin value after exact terminal consumption. The existing nonterminal retry
+  regression still proves `claim_raced` retains the original pin and remains
+  route-free.
+- Post-remediation proof on the current-main merge includes the full Linq
+  thread-route file (147 tests), the wider unit matrix (11 files/435 tests),
+  app-local typecheck, scoped ESLint, and the real PostgreSQL one-connection
+  replay (4 tests, including the unchanged 32-candidate 8/13-statement
+  ceilings). Diff-aware hosted-web verification also passed its guards,
+  typecheck, 722 test files/9,602 tests, lint with existing warnings only, dev
+  smoke, and production Next build. A fresh exact-head ReviewGPT audit and
+  exact-head CI remain before completion.

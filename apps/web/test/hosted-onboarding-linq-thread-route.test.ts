@@ -288,6 +288,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-client", async (importOriginal) => {
     ...actual,
     getHostedLinqChatHandles: vi.fn(),
     getHostedLinqChatSummary: vi.fn(),
+    sendHostedLinqChatMessage: vi.fn(),
   };
 });
 
@@ -356,6 +357,11 @@ beforeEach(() => {
   vi.mocked(linqClient.getHostedLinqChatHandles).mockReset();
   vi.mocked(linqClient.getHostedLinqChatHandles).mockResolvedValue([]);
   vi.mocked(linqClient.getHostedLinqChatSummary).mockReset();
+  vi.mocked(linqClient.sendHostedLinqChatMessage).mockReset();
+  vi.mocked(linqClient.sendHostedLinqChatMessage).mockResolvedValue({
+    chatId: "chat_group_123",
+    messageId: "msg_group_setup_123",
+  });
   vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockReset();
   vi.mocked(memberRoutingStore.demoteHostedMemberLinqGroupChatBindingsTx).mockResolvedValue({
     mailboxConsumedAt: null,
@@ -5356,6 +5362,7 @@ describe("Linq group chat auto-provision", () => {
     });
     expect(plan.desiredSideEffects.map(({ payload }) => payload.template))
       .toEqual(["group_setup"]);
+    expect(plan.nextRequiredPendingGroupSetupCandidateId).toBeNull();
     expect(
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -7055,6 +7062,7 @@ describe("Linq group chat auto-provision", () => {
       preparedPendingGroupSetup:
         acceptedAdmission.preparedPendingGroupSetup,
       prisma: prisma as never,
+      requiredPendingGroupSetupCandidateId: "hpgs_recovered_group",
     });
 
     expect(recoveryPlan.response).toMatchObject({
@@ -7692,6 +7700,163 @@ describe("Linq group chat auto-provision", () => {
     ).toHaveBeenNthCalledWith(2, expect.objectContaining({
       fallbackOwnerMemberId: senderCore.id,
       requiredPendingSetupCandidateId: setupId,
+    }));
+    expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("releases a consumed replacement-line pin before an already-allowed first-contact replan", async () => {
+    vi.stubEnv(
+      "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE",
+      "enforce",
+    );
+    clearHostedOnboardingEnvCache();
+    const prisma = createStatefulThreadRoutePrisma();
+    prisma.seedActiveManagedLinqLine("+15550000000");
+    vi.mocked(prismaModule.getPrisma).mockReturnValue(prisma as never);
+    vi.mocked(linqModule.verifyAndParseHostedLinqWebhookRequest)
+      .mockReturnValue(buildLinqMessageReceivedEvent({}) as never);
+    mockSenderLookup(null);
+
+    const recoveredOwnerMemberId = "member_recovered_owner";
+    const recoveredOwnerPhone = "+15552223333";
+    const recoveredOwnerPhoneLookupKey =
+      requireTestPhoneLookupKey(recoveredOwnerPhone);
+    prisma.hostedMemberIdentity.findMany.mockImplementation(async (input: {
+      where: { phoneLookupKey: { in: string[] } };
+    }) => input.where.phoneLookupKey.in.includes(recoveredOwnerPhoneLookupKey)
+      ? [{ memberId: recoveredOwnerMemberId }]
+      : []);
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockResolvedValue({
+      handles: [
+        { handle: "+15550000000", isMe: true, status: "active" },
+        { handle: "+15551112222", isMe: false, status: "active" },
+        { handle: recoveredOwnerPhone, isMe: false, status: "active" },
+      ],
+      isGroup: true,
+    });
+
+    Object.assign(prisma, {
+      hostedLinqFirstContactAdmissionBudget: {
+        create: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue([{ eventId: "evt_prior_allow" }]),
+      },
+      hostedLinqFirstContactAdmissionDecision: {
+        createMany: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([{
+          confidence: 0.9,
+          decision: "allow",
+          eventId: "evt_prior_allow",
+          source: "model",
+        }]),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    });
+    Object.assign(prisma.hostedLinqDelivery, {
+      createMany: vi.fn().mockResolvedValue({ count: 1 }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    });
+
+    const setupId = "hpgs_consumed_before_admission_replan";
+    const setupLineLookupKey = requireTestPhoneLookupKey("+15553334444");
+    let preparationCount = 0;
+    pendingGroupSetupMocks.prepareHostedPendingGroupSetupForParticipants
+      .mockImplementation(async (input: Parameters<
+        typeof pendingGroupSetupMocks.prepareHostedPendingGroupSetupForParticipants
+      >[0]) => {
+        preparationCount += 1;
+        const base = {
+          incomingRecipientPhoneLookupKeys:
+            input.incomingRecipientPhoneLookupKeys,
+          occurredAt: input.occurredAt,
+          participantMemberIds: input.participantMemberIds,
+          recoveredRecipientPhoneLookupKey:
+            input.recoveredRecipientPhoneLookupKey,
+          senderMemberId: input.senderMemberId ?? null,
+          threadId: input.threadId,
+        };
+        if (preparationCount > 1) {
+          return {
+            ...base,
+            candidateRows: [],
+            candidates: [],
+            selected: null,
+            selectedPayload: null,
+          };
+        }
+        const row = {
+          armedAt: new Date("2026-06-24T11:30:00.000Z"),
+          expiresAt: new Date("2026-06-24T12:30:00.000Z"),
+          id: setupId,
+          ownerMemberId: recoveredOwnerMemberId,
+          payloadEncrypted: "sealed:test-malformed-setup",
+          recipientPhoneLookupKey: setupLineLookupKey,
+        };
+        return {
+          ...base,
+          candidateRows: [row],
+          candidates: [{
+            ...row,
+            originalLineManaged: true,
+            originalRecipientPhone: "+15553334444",
+            originalRecipientPhoneLookupKeys: [setupLineLookupKey],
+            recoveryAuthority: "accepted" as const,
+            routing: {
+              linqRecipientPhoneEncrypted: "sealed:test-home-line",
+              linqRecipientPhoneLookupKey: setupLineLookupKey,
+              memberId: recoveredOwnerMemberId,
+            },
+            runtimeAccessAllowed: true,
+          }],
+          selected: {
+            admissionKind: "replacement_line" as const,
+            candidateId: setupId,
+            reason: "only_candidate" as const,
+          },
+          selectedPayload: {
+            candidateId: setupId,
+            kind: "ready" as const,
+            preparedClaim: {
+              id: setupId,
+              ownerMemberId: recoveredOwnerMemberId,
+              payloadEncrypted: "sealed:test-malformed-setup",
+              payloadRootKeyId: null,
+              recipientPhoneLookupKey: setupLineLookupKey,
+            },
+          },
+        };
+      });
+    preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx
+      .mockResolvedValueOnce({
+        kind: "owner_unavailable",
+        pendingSetupResolution: "invalid_payload",
+      })
+      .mockResolvedValueOnce({
+        kind: "owner_unavailable",
+        pendingSetupResolution: "no_candidates",
+      });
+
+    const response = await handleHostedOnboardingLinqWebhook({
+      rawBody: "{}",
+      signature: null,
+      timestamp: null,
+    });
+
+    expect(response).toMatchObject({
+      ok: true,
+      reason: "sent-group-setup",
+    });
+    expect(preparationCount).toBe(2);
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      requiredPendingSetupCandidateId: setupId,
+    }));
+    expect(
+      preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
+    ).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      requiredPendingSetupCandidateId: null,
     }));
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
