@@ -101,44 +101,7 @@ describe("ChangelogPage", () => {
       "daily-nutrition-cards",
       "single-source-wearable-disconnect",
     ];
-    const publishedItemsById = new Map(
-      listPublishedChangelogItems().map((item) => [item.id, item]),
-    );
-    const owningEditionIds = [
-      ...new Set(
-        itemIds.map((itemId) => {
-          const item = publishedItemsById.get(itemId);
-          if (!item) {
-            throw new TypeError(`Missing changelog test item: ${itemId}`);
-          }
-          return item.editionId;
-        }),
-      ),
-    ];
-    const pageMarkupByEditionId = new Map(
-      await Promise.all(
-        owningEditionIds.map(async (editionId) => [
-          editionId,
-          renderToStaticMarkup(
-            await ChangelogPage({
-              searchParams: Promise.resolve({ edition: editionId }),
-            }),
-          ),
-        ] as const),
-      ),
-    );
-    const markup = itemIds
-      .map((itemId) => {
-        const editionId = publishedItemsById.get(itemId)?.editionId;
-        const pageMarkup = editionId
-          ? pageMarkupByEditionId.get(editionId)
-          : undefined;
-        if (!pageMarkup) {
-          throw new TypeError(`Missing changelog test page for: ${itemId}`);
-        }
-        return extractChangelogItemMarkup(pageMarkup, itemId);
-      })
-      .join("\n");
+    const markup = await renderChangelogItems(itemIds);
 
     expect(markup).not.toContain("Open model settings");
     expect(markup).toContain("Ask about today&#x27;s conditions");
@@ -194,18 +157,30 @@ describe("ChangelogPage", () => {
   });
 
   it("renders explanatory visuals for the major new features", async () => {
-    const [latestPage, previousPage, olderPage] = await Promise.all([
-      ChangelogPage({ searchParams: Promise.resolve({}) }),
-      ChangelogPage({
-        searchParams: Promise.resolve({ edition: "2026-07-29" }),
-      }),
-      ChangelogPage({
-        searchParams: Promise.resolve({ edition: "2026-07-26" }),
-      }),
+    const markup = await renderChangelogItems([
+      "family-usage-top-ups",
+      "usage-top-ups",
+      "generated-contact-card-avatar",
+      "contact-card-after-invite-signup",
+      "group-contact-card-reshare",
+      "overnight-imessage-reminders",
+      "group-funding-one-recovery-owner",
+      "post-onboarding-choice-point",
+      "group-sponsorship-moments",
+      "generated-media-private-path",
+      "group-funding-speaks-in-messages",
+      "live-workout-logging",
+      "biomarker-reference-bands",
+      "turn-local-browser-progress",
+      "clearer-health-source-handoffs",
+      "scheduled-tools-follow-the-route",
+      "feedback-reproduction-guidance",
+      "support-escalation-issue-summary",
+      "runtime-replacement-continuity",
+      "paused-member-retention-cleanup",
+      "daily-nutrition-card-delivery",
+      "maintenance-without-global-pause",
     ]);
-    const markup = [latestPage, previousPage, olderPage]
-      .map((page) => renderToStaticMarkup(page))
-      .join("\n");
 
     expect(markup).toContain("Add usage");
     expect(markup).toContain("Add to Contacts");
@@ -389,4 +364,46 @@ function extractChangelogItemMarkup(markup: string, itemId: string): string {
     throw new TypeError(`Missing rendered changelog item: ${itemId}`);
   }
   return markup.slice(start, end + "</article>".length);
+}
+
+async function renderChangelogItems(itemIds: readonly string[]): Promise<string> {
+  const publishedItemsById = new Map(
+    listPublishedChangelogItems().map((item) => [item.id, item]),
+  );
+  const owningEditionIds = [
+    ...new Set(
+      itemIds.map((itemId) => {
+        const item = publishedItemsById.get(itemId);
+        if (!item) {
+          throw new TypeError(`Missing changelog test item: ${itemId}`);
+        }
+        return item.editionId;
+      }),
+    ),
+  ];
+  const pageMarkupByEditionId = new Map(
+    await Promise.all(
+      owningEditionIds.map(async (editionId) => [
+        editionId,
+        renderToStaticMarkup(
+          await ChangelogPage({
+            searchParams: Promise.resolve({ edition: editionId }),
+          }),
+        ),
+      ] as const),
+    ),
+  );
+
+  return itemIds
+    .map((itemId) => {
+      const editionId = publishedItemsById.get(itemId)?.editionId;
+      const pageMarkup = editionId
+        ? pageMarkupByEditionId.get(editionId)
+        : undefined;
+      if (!pageMarkup) {
+        throw new TypeError(`Missing changelog test page for: ${itemId}`);
+      }
+      return extractChangelogItemMarkup(pageMarkup, itemId);
+    })
+    .join("\n");
 }
