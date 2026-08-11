@@ -24,7 +24,7 @@ const TINTS: Record<
     eyebrow: "text-[#8a6428]",
     panel:
       "bg-[linear-gradient(135deg,#f3e8d0_0%,#ead7af_55%,#dec390_100%)]",
-    bubble: "bg-[#b27a1e]",
+    bubble: "bg-[#8a5d17]",
     glow: "shadow-[0_30px_80px_-35px_rgba(138,100,40,0.45)]",
   },
   bronze: {

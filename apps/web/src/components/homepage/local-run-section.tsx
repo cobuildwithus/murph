@@ -9,7 +9,7 @@ export function LocalRunSection({
   return (
     <section className="bg-[#ede3d0] px-5 pb-16 pt-10 sm:px-10 sm:pb-20 sm:pt-12 lg:px-16 lg:pb-24 lg:pt-14">
       <div className="mx-auto max-w-[1080px]">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#736a58]">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-[#655d4f]">
           Optional · Open source
         </span>
         <h2 className="mt-4 max-w-[18ch] font-serif text-[clamp(1.75rem,3vw,2.5rem)] font-semibold leading-[1.08] tracking-[-0.03em] text-[#2d3436]">
@@ -26,7 +26,7 @@ export function LocalRunSection({
             <span className="size-2.5 rounded-full bg-[#d27d6a]" />
             <span className="size-2.5 rounded-full bg-[#d4b87a]" />
             <span className="size-2.5 rounded-full bg-[#7a8c6e]" />
-            <span className="ml-4 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f5f0e8]/35">
+            <span className="ml-4 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f5f0e8]/60">
               terminal
             </span>
             <InstallCopyButton value={installCommand} />
@@ -34,7 +34,7 @@ export function LocalRunSection({
 
           <div className="space-y-5 px-5 py-6 font-mono text-[0.8125rem] leading-[1.85] sm:px-7 sm:py-7">
             <div>
-              <p className="text-[#f5f0e8]/35">
+              <p className="text-[#f5f0e8]/60">
                 # Install Murph and launch setup
               </p>
               <p className="mt-2 break-all text-[#f5f0e8]">
@@ -46,7 +46,7 @@ export function LocalRunSection({
             </div>
 
             <div className="border-t border-white/8 pt-5">
-              <p className="text-[#f5f0e8]/35"># Start chatting</p>
+              <p className="text-[#f5f0e8]/60"># Start chatting</p>
               <p className="mt-2 break-all text-[#f5f0e8]">
                 <span className="select-none text-[#d4b87a]" aria-hidden="true">
                   {"$ "}
