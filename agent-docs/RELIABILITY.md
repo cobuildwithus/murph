@@ -431,8 +431,12 @@ Last verified: 2026-08-10
   another member or invite, paid capacity, direct paid conversion, or any
   inconsistent billing shape wins and leaves the group intact. An unbound
   Checkout claim becomes removable only after the existing 24-hour stale-claim
-  boundary; delayed Checkout creation must expire its newly created Session
-  when the later bind finds that the claim or group no longer exists.
+  boundary. A delayed duplicate binder first retrieves the exact Session and
+  preserves or applies any subscription already accepted by the group; it may
+  expire an open Session, but may destructively close a completed Session only
+  after the owner boundary proves the original group no longer exists. The
+  explicit use-invite response is idempotent after cleanup commits, so response
+  loss returns the already-validated invite without recreating billing state.
 - Stripe receipts poison after the normal attempt cap when a failure remains
   permanent, regardless of whether the owning billing transaction already
   committed. Concrete Stripe/Prisma/network failures remain retryable, and a

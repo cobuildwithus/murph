@@ -9,10 +9,10 @@ export interface HostedSubscriptionCheckoutTerminalState {
   subscriptionId: string | null;
 }
 
-export async function retrieveAndExpireHostedSubscriptionCheckout(input: {
+export async function retrieveAndExpireHostedSubscriptionCheckoutSession(input: {
   sessionId: string;
   stripe: Stripe;
-}): Promise<HostedSubscriptionCheckoutTerminalState> {
+}): Promise<Stripe.Checkout.Session | null> {
   let session;
   try {
     session = await withHostedStripeFailureLog(
@@ -21,7 +21,7 @@ export async function retrieveAndExpireHostedSubscriptionCheckout(input: {
     );
   } catch (error) {
     if (isStripeResourceMissingError(error)) {
-      return absentHostedSubscriptionCheckout();
+      return null;
     }
     throw error;
   }
@@ -37,7 +37,7 @@ export async function retrieveAndExpireHostedSubscriptionCheckout(input: {
         );
       } catch (retrieveError) {
         if (isStripeResourceMissingError(retrieveError)) {
-          return absentHostedSubscriptionCheckout();
+          return null;
         }
         throw retrieveError;
       }
@@ -59,9 +59,21 @@ export async function retrieveAndExpireHostedSubscriptionCheckout(input: {
     throw new TypeError("Stripe subscription Checkout did not reach a terminal state.");
   }
 
+  return session;
+}
+
+export async function retrieveAndExpireHostedSubscriptionCheckout(input: {
+  sessionId: string;
+  stripe: Stripe;
+}): Promise<HostedSubscriptionCheckoutTerminalState> {
+  const session = await retrieveAndExpireHostedSubscriptionCheckoutSession(input);
+  if (!session) {
+    return absentHostedSubscriptionCheckout();
+  }
+
   return {
     customerId: coerceStripeObjectId(session.customer),
-    status: session.status,
+    status: session.status === "complete" ? "complete" : "expired",
     subscriptionId: coerceStripeSubscriptionId(session.subscription),
   };
 }

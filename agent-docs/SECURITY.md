@@ -346,7 +346,12 @@ Last verified: 2026-08-10
   recovery route must enforce the normal app session, same-origin mutation
   check, and suspension fence. Stripe retrieval and expiry happen before the
   transaction; the locked transaction then revalidates the exact group and
-  claim so completion, replacement, or new authority fails closed.
+  claim so completion, replacement, or new authority fails closed. A stale
+  duplicate binder must preserve an exact subscription already accepted by
+  that group and may close a completed Session only after the locked owner
+  boundary proves the original group is absent. Repeating a completed explicit
+  recovery may return only the already-validated internal invite path and must
+  perform no group creation, Checkout, provider call, or deletion.
 - Group sponsorship separates funding authority from permission to speak into
   the room. A valid current funding locator may identify only the frozen group
   beneficiary. Alias, note, or running-bit content is accepted only from the

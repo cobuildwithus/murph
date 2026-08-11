@@ -146,6 +146,7 @@ import {
   closeUnboundHostedSubscriptionCheckout,
   isStripeResourceMissingError,
   retrieveAndExpireHostedSubscriptionCheckout,
+  retrieveAndExpireHostedSubscriptionCheckoutSession,
 } from "./subscription-checkout-lifecycle";
 import {
   buildHostedFamilyInviteRecoveryUrl,
@@ -2603,8 +2604,11 @@ async function createOrResumeHostedFamilyBillingCheckout(
         isHostedOnboardingError(error)
         && error.code === "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE"
       ) {
-        await closeUnboundHostedSubscriptionCheckout({
+        await reconcileOrCloseHostedFamilyCheckoutAfterLostBind({
+          attemptId: checkoutInput.checkoutAttemptId,
           deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+          group: checkoutInput.group,
+          prisma,
           sessionId: checkoutSession.id,
           stripe,
         });
@@ -2612,8 +2616,11 @@ async function createOrResumeHostedFamilyBillingCheckout(
       throw error;
     }
     if (!checkoutOwned) {
-      await closeUnboundHostedSubscriptionCheckout({
+      await reconcileOrCloseHostedFamilyCheckoutAfterLostBind({
+        attemptId: checkoutInput.checkoutAttemptId,
         deleteSessionCustomer: checkoutInput.stripeCustomerId === null,
+        group: checkoutInput.group,
+        prisma,
         sessionId: checkoutSession.id,
         stripe,
       });
@@ -3709,6 +3716,91 @@ async function bindHostedFamilyCheckoutSessionTx(input: {
     });
   }
   return true;
+}
+
+/**
+ * A failed late bind does not prove that its idempotent Session is orphaned:
+ * another request may have bound and completed the same Session already.
+ * Reach provider terminal state first, then serialize on the original owner
+ * and preserve or reconcile exact durable billing authority. Destructive
+ * cleanup remains allowed only when the original group no longer exists.
+ */
+async function reconcileOrCloseHostedFamilyCheckoutAfterLostBind(input: {
+  attemptId: string;
+  deleteSessionCustomer: boolean;
+  group: Pick<HostedAccountGroupAccessSnapshot, "id" | "ownerMemberId">;
+  prisma: PrismaClient;
+  sessionId: string;
+  stripe: ReturnType<typeof requireHostedStripeApi>;
+}): Promise<void> {
+  const session = await retrieveAndExpireHostedSubscriptionCheckoutSession({
+    sessionId: input.sessionId,
+    stripe: input.stripe,
+  });
+  if (!session || session.status === "expired") {
+    return;
+  }
+
+  const subscriptionId = coerceStripeSubscriptionId(session.subscription);
+  if (!subscriptionId) {
+    throw new TypeError(
+      "Completed Stripe Family Checkout is missing its subscription.",
+    );
+  }
+
+  const disposition = await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.group.ownerMemberId);
+    const group = await tx.hostedAccountGroup.findUnique({
+      select: {
+        id: true,
+        ownerMemberId: true,
+      },
+      where: { id: input.group.id },
+    });
+    if (!group) {
+      return "orphaned" as const;
+    }
+    if (group.ownerMemberId !== input.group.ownerMemberId) {
+      return "ambiguous" as const;
+    }
+
+    const billingRef = await readHostedAccountGroupStripeBillingRef({
+      groupId: group.id,
+      prisma: tx,
+    });
+    if (billingRef?.stripeSubscriptionId === subscriptionId) {
+      return "preserved" as const;
+    }
+    if (
+      billingRef?.checkoutAttemptId === input.attemptId
+      && (
+        !billingRef.stripeCheckoutSessionId
+        || billingRef.stripeCheckoutSessionId === session.id
+      )
+    ) {
+      await applyHostedFamilyStripeCheckoutCompletedTx({
+        dispatchContext: {},
+        session,
+        tx,
+      });
+      const reconciledBillingRef = await readHostedAccountGroupStripeBillingRef({
+        groupId: group.id,
+        prisma: tx,
+      });
+      if (reconciledBillingRef?.stripeSubscriptionId === subscriptionId) {
+        return "preserved" as const;
+      }
+    }
+    return "ambiguous" as const;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  if (disposition === "orphaned") {
+    await closeUnboundHostedSubscriptionCheckout({
+      deleteSessionCustomer: input.deleteSessionCustomer,
+      sessionId: session.id,
+      stripe: input.stripe,
+    });
+  }
 }
 
 export function readHostedFamilyCheckoutSessionIdFromUrl(

@@ -34,6 +34,7 @@ export function HostedFamilyStartButton(props: {
   familyInviteReturnPath?: string | null;
   label: string;
   ownershipConfirmation?: boolean;
+  returnDirectlyToInvite?: boolean;
   resolveCheckoutForInvite?: boolean;
   trialConversionConfirmation?: Omit<HostedFamilyCheckoutConfirmation, "description"> & {
     description: string;
@@ -202,6 +203,13 @@ export function HostedFamilyStartButton(props: {
                 onClick={() => {
                   if (props.resolveCheckoutForInvite) {
                     void resolveCheckoutForInvite();
+                    return;
+                  }
+                  if (
+                    props.returnDirectlyToInvite
+                    && props.familyInviteReturnPath
+                  ) {
+                    window.location.assign(props.familyInviteReturnPath);
                     return;
                   }
                   setConfirmationOpen(false);

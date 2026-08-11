@@ -1713,7 +1713,11 @@ claims the invite and writes the destination membership before deleting the
 exact inert draft in the same transaction. An open Checkout must first be
 retrieved and expired outside the transaction; completion, replacement, or any
 new billing or group authority wins the locked revalidation and preserves the
-group.
+group. An idempotent duplicate Session response that binds late is reconciled
+against the exact durable group subscription before cleanup; completed provider
+authority is destructively closed only when the original group is proven
+absent. If cleanup committed but its response was lost, the explicit recovery
+request returns the same validated first-party invite without recreating state.
 
 Direct saved-card funding remains inside that same one-time
 usage-credit branch. Reconciliation accepts only the exact PaymentIntent

@@ -6270,6 +6270,155 @@ describe("hosted Family plan", () => {
     expect(checkoutExpire).not.toHaveBeenCalled();
   });
 
+  it("preserves a completed subscription when a duplicate provider response binds late", async () => {
+    const group = {
+      billingStatus: HostedBillingStatus.not_started,
+      id: "hbag_family",
+      ownerMemberId: "member_owner",
+      suspendedAt: null,
+    };
+    const tx = createTxMock({ billedSeatCount: null, group });
+    let billingRefState: ReturnType<typeof createBillingRefMock> | null = null;
+    tx.hostedAccountGroupBillingRef.findUnique.mockImplementation(
+      async () => billingRefState,
+    );
+    tx.hostedAccountGroupBillingRef.upsert.mockImplementation(async ({ create }) => {
+      billingRefState = createBillingRefMock({
+        billedSeatCount: null,
+        checkoutAttemptId: create.checkoutAttemptId,
+        checkoutCreatedAt: create.checkoutCreatedAt,
+        checkoutSeatCount: create.checkoutSeatCount,
+        currentBillingPhase: null,
+        currentBillingPlanCode: "launch_family_monthly",
+        group,
+        stripeCheckoutSessionIdEncrypted: null,
+        stripeCustomerIdEncrypted: null,
+        stripeSubscriptionIdEncrypted: null,
+        stripeSubscriptionItemIdEncrypted: null,
+      });
+      return billingRefState;
+    });
+    tx.hostedAccountGroupBillingRef.updateMany.mockImplementation(async ({ where }) => ({
+      count: billingRefState?.checkoutAttemptId === where.checkoutAttemptId
+        ? 1
+        : 0,
+    }));
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    let signalFirstCreate: (() => void) | undefined;
+    const firstCreateStarted = new Promise<void>((resolve) => {
+      signalFirstCreate = resolve;
+    });
+    let releaseFirstCreate: (() => void) | undefined;
+    const firstCreateRelease = new Promise<void>((resolve) => {
+      releaseFirstCreate = resolve;
+    });
+    let createCount = 0;
+    let checkoutAttemptId: string | null = null;
+    const checkoutCreate = vi.fn().mockImplementation(async (params) => {
+      checkoutAttemptId = String(params.metadata?.checkoutAttemptId ?? "");
+      const session = makeFamilyStripeCheckoutSession({
+        checkoutAttemptId,
+        sessionId: "cs_test_familyDuplicateBind123",
+        status: "open",
+        subscriptionId: null,
+        url: "https://checkout.stripe.com/c/pay/cs_test_familyDuplicateBind123",
+      });
+      const callIndex = createCount;
+      createCount += 1;
+      if (callIndex === 0) {
+        signalFirstCreate?.();
+        await firstCreateRelease;
+      }
+      return session;
+    });
+    const checkoutRetrieve = vi.fn().mockImplementation(async () =>
+      makeFamilyStripeCheckoutSession({
+        checkoutAttemptId,
+        sessionId: "cs_test_familyDuplicateBind123",
+        status: "complete",
+        subscriptionId: "sub_family_duplicate_bind",
+        url: null,
+      })
+    );
+    const checkoutExpire = vi.fn();
+    const subscriptionRetrieve = vi.fn();
+    const subscriptionCancel = vi.fn();
+    const customerDelete = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: {
+        sessions: {
+          create: checkoutCreate,
+          expire: checkoutExpire,
+          retrieve: checkoutRetrieve,
+        },
+      },
+      customers: {
+        del: customerDelete,
+      },
+      subscriptions: {
+        cancel: subscriptionCancel,
+        retrieve: subscriptionRetrieve,
+      },
+    });
+
+    const firstRequest = createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    });
+    await firstCreateStarted;
+
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id,
+      ownerMemberId: group.ownerMemberId,
+      prisma: prisma as never,
+      seatCount: 2,
+    })).resolves.toEqual({
+      alreadyActive: false,
+      url:
+        "https://local.withmurph.ai:3443/checkout/family/cs_test_familyDuplicateBind123",
+    });
+
+    billingRefState = createBillingRefMock({
+      billedSeatCount: 2,
+      checkoutAttemptId: null,
+      checkoutCreatedAt: null,
+      checkoutSeatCount: null,
+      group: {
+        ...group,
+        billingStatus: HostedBillingStatus.active,
+      },
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeCustomerIdEncrypted: "encrypted:cus_family",
+      stripeSubscriptionIdEncrypted: "encrypted:sub_family_duplicate_bind",
+      stripeSubscriptionItemIdEncrypted: "encrypted:si_family_duplicate_bind",
+    });
+    releaseFirstCreate?.();
+
+    await expect(firstRequest).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE",
+    });
+
+    expect(checkoutCreate).toHaveBeenCalledTimes(2);
+    expect(checkoutCreate.mock.calls[0]?.[1]).toEqual(
+      checkoutCreate.mock.calls[1]?.[1],
+    );
+    expect(checkoutRetrieve).toHaveBeenCalledOnce();
+    expect(checkoutExpire).not.toHaveBeenCalled();
+    expect(subscriptionRetrieve).not.toHaveBeenCalled();
+    expect(subscriptionCancel).not.toHaveBeenCalled();
+    expect(customerDelete).not.toHaveBeenCalled();
+    expect(billingRefState).toMatchObject({
+      checkoutAttemptId: null,
+      stripeSubscriptionIdEncrypted: "encrypted:sub_family_duplicate_bind",
+    });
+  });
+
   it("expires a Family Checkout session when account deletion wins the owner fence", async () => {
     const group = {
       billingStatus: HostedBillingStatus.not_started,

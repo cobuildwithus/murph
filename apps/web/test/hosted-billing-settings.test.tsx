@@ -1464,6 +1464,99 @@ describe("HostedBillingSettings", () => {
     }
   });
 
+  test("returns directly to the preserved invite after cleanup and refresh", async () => {
+    const familyInviteReturnPath = "/family/accept/invite_return_target";
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecoveryState: null,
+        familyInviteReturnPath,
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const startButton = findButtonByText(
+        rendered.window.document,
+        "Start your own Family plan",
+        rendered.window,
+      );
+      await act(async () => {
+        startButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const useInviteButton = findButtonByText(
+        rendered.window.document,
+        "I'll use an invite",
+        rendered.window,
+      );
+      await act(async () => {
+        useInviteButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.deepEqual(rendered.assign.mock.calls, [[familyInviteReturnPath]]);
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("does not bypass a preserved Family draft when using an invite", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(createElement(
+      HostedBillingSettings,
+      {
+        authenticated: true,
+        canStartFamily: true,
+        currentBillingPlanCode: "launch_monthly",
+        familyDraftRecoveryState: "not_abandonable",
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+        familyState: "none",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+      },
+    ));
+
+    try {
+      const continueButton = findButtonByText(
+        rendered.window.document,
+        "Continue your Family setup",
+        rendered.window,
+      );
+      await act(async () => {
+        continueButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+      const useInviteButton = findButtonByText(
+        rendered.window.document,
+        "I'll use an invite",
+        rendered.window,
+      );
+      await act(async () => {
+        useInviteButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+      });
+
+      assert.equal(rendered.assign.mock.calls.length, 0);
+      assert.equal(mocks.requestHostedOnboardingJson.mock.calls.length, 0);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
   test("routes a current Max member through the canonical Family owner", async () => {
     mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
       alreadyActive: false,

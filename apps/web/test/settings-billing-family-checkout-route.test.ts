@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
+  findHostedAccountGroupByOwner: vi.fn(),
   getPrisma: vi.fn(),
   readHostedFamilyDraftRecoveryStateForOwner: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
@@ -43,7 +44,7 @@ beforeEach(async () => {
   mocks.getPrisma.mockReturnValue({
     $transaction: vi.fn((callback) => callback({ label: "tx" })),
     hostedAccountGroup: {
-      findUnique: vi.fn().mockResolvedValue({ id: "hbag_family" }),
+      findUnique: mocks.findHostedAccountGroupByOwner,
     },
   });
   mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
@@ -57,6 +58,7 @@ beforeEach(async () => {
     id: "hbag_family",
     ownerMemberId: "member_owner",
   });
+  mocks.findHostedAccountGroupByOwner.mockResolvedValue({ id: "hbag_family" });
   mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
     "checkout_starting",
   );
@@ -256,19 +258,14 @@ test("does not create Checkout when the invite recovery state changed", async ()
   expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
 });
 
-test("does not recreate a draft when the starting Checkout disappears", async () => {
-  const transaction = vi.fn((callback) => callback({ label: "tx" }));
-  mocks.getPrisma.mockReturnValueOnce({
-    $transaction: transaction,
-    hostedAccountGroup: {
-      findUnique: vi.fn().mockResolvedValue(null),
-    },
-  });
+test("returns the exact invite when prior cleanup committed before its response", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValueOnce(null);
   const response = await billingFamilyCheckoutRoute.POST(
     new Request("https://join.example.test/api/settings/billing/family/checkout", {
       body: JSON.stringify({
         abandonForInvite: true,
-        familyInviteReturnPath: "/family/accept/invite_return_target",
+        familyInviteReturnPath,
       }),
       headers: {
         "content-type": "application/json",
@@ -278,8 +275,39 @@ test("does not recreate a draft when the starting Checkout disappears", async ()
     }),
   );
 
-  expect(response.status).toBe(409);
-  expect(transaction).not.toHaveBeenCalled();
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyActive: false,
+    url: familyInviteReturnPath,
+  });
+  expect(mocks.findHostedAccountGroupByOwner).not.toHaveBeenCalled();
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not recreate a draft when the starting Checkout disappears", async () => {
+  const familyInviteReturnPath = "/family/accept/invite_return_target";
+  mocks.findHostedAccountGroupByOwner.mockResolvedValueOnce(null);
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath,
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toEqual({
+    alreadyActive: false,
+    url: familyInviteReturnPath,
+  });
   expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
   expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
   expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();

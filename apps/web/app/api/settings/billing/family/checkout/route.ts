@@ -46,6 +46,12 @@ export const POST = withJsonError(async (request: Request) => {
       ownerMemberId: auth.member.id,
       prisma,
     });
+    if (recoveryState === null) {
+      return jsonOk({
+        alreadyActive: false,
+        url: familyInviteReturnPath,
+      });
+    }
     if (recoveryState !== "checkout_starting") {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_DRAFT_CHANGED",
@@ -67,6 +73,12 @@ export const POST = withJsonError(async (request: Request) => {
           tx,
         }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   if (!group) {
+    if (abandonForInvite) {
+      return jsonOk({
+        alreadyActive: false,
+        url: familyInviteReturnPath,
+      });
+    }
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_DRAFT_CHANGED",
       httpStatus: 409,
