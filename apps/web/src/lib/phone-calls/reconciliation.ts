@@ -7,7 +7,13 @@ import {
   isHostedPhoneCallProviderCleanupPending,
   isHostedPhoneCallReadyForProviderReconciliation,
 } from "./authority";
+import {
+  finalizePreparedRetellCallResult,
+} from "./result";
 import { createRetellPhoneCallRuntime } from "./retell-runtime";
+import {
+  prepareRetellCallResult,
+} from "./retell-result-lifecycle";
 import type {
   HostedPhoneCallProviderUsage,
   PhoneCallRuntime,
@@ -48,6 +54,7 @@ export interface HostedPhoneCallReconciliationStore {
 }
 
 export async function processHostedPhoneCallRecoveryById(input: {
+  finalizeResult?: typeof finalizePreparedRetellCallResult;
   phoneCallId: string;
   prisma?: HostedPhoneCallReconciliationStore;
   runtime?: PhoneCallRuntime;
@@ -55,6 +62,7 @@ export async function processHostedPhoneCallRecoveryById(input: {
 }): Promise<"complete" | "missing" | "pending"> {
   const store = input.prisma ?? resolveHostedPhoneCallReconciliationStore();
   const runtime = input.runtime ?? createRetellPhoneCallRuntime();
+  const finalizeResult = input.finalizeResult ?? finalizePreparedRetellCallResult;
   let call = await waitForAbortableOperation(input.signal, () =>
     store.hostedPhoneCall.findUnique({
       where: { id: input.phoneCallId },
@@ -142,6 +150,27 @@ export async function processHostedPhoneCallRecoveryById(input: {
     } catch {
       input.signal.throwIfAborted();
       return "pending";
+    }
+    if (resolution.terminalTransfer) {
+      const prepared = prepareRetellCallResult({
+        call: {
+          call_id: resolution.terminalTransfer.providerCallId,
+          data_storage_setting: "basic_attributes_only",
+          disconnection_reason: "call_transfer",
+          end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
+          transfer_end_timestamp: resolution.terminalTransfer.endedAt.toISOString(),
+        },
+        event: "transfer_ended",
+      });
+      try {
+        await waitForAbortableOperation(input.signal, () =>
+          finalizeResult(prepared, {
+            abortSignal: input.signal,
+          }));
+      } catch {
+        input.signal.throwIfAborted();
+        return "pending";
+      }
     }
     return "complete";
   }
