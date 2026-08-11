@@ -23,7 +23,10 @@ Signed terminal callbacks also record Retell's provider-reported aggregate call
 cost in the web-owned included-usage ledger. A `call_transfer` observation stays
 pending until `transfer_ended` so the immutable usage row includes transfer-leg
 cost. The pre-armed reconciliation workflow retrieves terminal usage when the
-callbacks do not arrive.
+callbacks do not arrive. When that authenticated retrieval proves a transfer
+ended but the result callback was lost, the same workflow also finalizes the
+generic unknown post-handoff result through the existing result and mailbox
+path before it completes.
 For local development, `RETELL_WEBHOOK_PUBLIC_BASE_URL` may point individual created calls at
 the local public tunnel without changing the published agent or workspace webhook configuration.
 

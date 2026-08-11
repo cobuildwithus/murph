@@ -22,6 +22,9 @@ import {
   hostedOnboardingError,
 } from "../hosted-onboarding/errors";
 import {
+  signalHostedMailboxAppendRuntime,
+} from "../hosted-orchestration/signal-runtime";
+import {
   isHostedThreadContainerNotificationDestination,
   requireHostedAssistantNotificationDestination,
   type HostedAssistantNotificationDestination,
@@ -38,6 +41,9 @@ import {
   readRetellCallEndAt,
   type RetellCallPayload,
 } from "./retell-payloads";
+import type {
+  PreparedRetellCallResult,
+} from "./retell-result-lifecycle";
 import { isHostedPhoneCallProviderCleanupPending } from "./authority";
 import {
   readRetellWebhookCallTarget,
@@ -261,6 +267,31 @@ export async function handleRetellCallAnalyzed(input: {
       requiresTransferFollowUp: input.requiresTransferFollowUp === true,
       result,
     });
+  });
+}
+
+export async function finalizePreparedRetellCallResult(
+  prepared: PreparedRetellCallResult,
+  options: {
+    abortSignal?: AbortSignal;
+    prisma?: HostedPhoneCallWebhookStore;
+    signalRuntime?: typeof signalHostedMailboxAppendRuntime;
+  } = {},
+): Promise<void> {
+  const result = await handleRetellCallAnalyzed({
+    call: prepared.call,
+    ...(prepared.requiresTransferFollowUp
+      ? { requiresTransferFollowUp: true }
+      : {}),
+    ...(options.prisma ? { prisma: options.prisma } : {}),
+  });
+  if (!result.notificationMailboxItemId) {
+    return;
+  }
+  await (options.signalRuntime ?? signalHostedMailboxAppendRuntime)({
+    abortSignal: options.abortSignal,
+    expectedUserId: result.notificationUserId,
+    mailboxItemId: result.notificationMailboxItemId,
   });
 }
 

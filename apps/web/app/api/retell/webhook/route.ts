@@ -5,15 +5,13 @@ import {
 } from "@/src/lib/phone-calls/retell-payloads";
 import {
   prepareRetellCallResult,
-  type PreparedRetellCallResult,
 } from "@/src/lib/phone-calls/retell-result-lifecycle";
 import {
-  handleRetellCallAnalyzed,
+  finalizePreparedRetellCallResult,
   handleRetellCallEnded,
 } from "@/src/lib/phone-calls/result";
 import { accountRetellPhoneCallUsage } from "@/src/lib/phone-calls/usage";
 import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
-import { signalHostedMailboxAppendRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
 
 const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
@@ -43,7 +41,7 @@ export const POST = withJsonError(async (request: Request) => {
       await settleRetellWebhookBranches([
         () => accountRetellPhoneCallUsage({ call: payload.call }),
         ...(resultCall
-          ? [() => handleRetellResult(resultCall)]
+          ? [() => finalizePreparedRetellCallResult(resultCall)]
           : []),
       ]);
       break;
@@ -55,7 +53,7 @@ export const POST = withJsonError(async (request: Request) => {
       });
       await settleRetellWebhookBranches([
         () => accountRetellPhoneCallUsage({ call: payload.call }),
-        () => handleRetellResult(resultCall),
+        () => finalizePreparedRetellCallResult(resultCall),
       ]);
       break;
     }
@@ -63,24 +61,6 @@ export const POST = withJsonError(async (request: Request) => {
 
   return new Response(null, { status: 204 });
 });
-
-async function handleRetellResult(
-  prepared: PreparedRetellCallResult,
-): Promise<void> {
-  const result = await handleRetellCallAnalyzed({
-    call: prepared.call,
-    ...(prepared.requiresTransferFollowUp
-      ? { requiresTransferFollowUp: true }
-      : {}),
-  });
-  if (!result.notificationMailboxItemId) {
-    return;
-  }
-  await signalHostedMailboxAppendRuntime({
-    expectedUserId: result.notificationUserId,
-    mailboxItemId: result.notificationMailboxItemId,
-  });
-}
 
 async function settleRetellWebhookBranches(
   branches: ReadonlyArray<() => Promise<unknown>>,

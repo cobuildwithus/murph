@@ -26,6 +26,7 @@ import {
 import {
   buildPhoneCallResultNotificationInstructions,
   buildPhoneCallResultNotificationWake,
+  finalizePreparedRetellCallResult,
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
   mapRetellCallAnalysis,
@@ -169,6 +170,7 @@ describe("Retell phone-call runtime", () => {
   it("retrieves terminal usage and waits for a transferred call's final cost", async () => {
     vi.stubEnv("RETELL_API_KEY", "retell-api-key");
     let transferEnded = false;
+    let dataStorageSetting = "basic_attributes_only";
     const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
       call_cost: {
         combined_cost: transferEnded ? 18.75 : 12,
@@ -178,6 +180,7 @@ describe("Retell phone-call runtime", () => {
       },
       call_id: "retell_call_123",
       call_status: "ended",
+      data_storage_setting: dataStorageSetting,
       disconnection_reason: "call_transfer",
       duration_ms: 60_000,
       end_timestamp: 1_782_386_400_000,
@@ -201,12 +204,21 @@ describe("Retell phone-call runtime", () => {
     transferEnded = true;
     await expect(runtime.resolveTerminalUsage("retell_call_123")).resolves.toEqual({
       state: "ready",
+      terminalTransfer: {
+        endedAt: new Date(1_782_408_600_000),
+        providerCallId: "retell_call_123",
+      },
       usage: {
         combinedCostUsdMicros: 187_500,
         occurredAt: new Date(1_782_386_340_000),
         providerCallId: "retell_call_123",
       },
     });
+
+    dataStorageSetting = "everything";
+    await expect(runtime.resolveTerminalUsage("retell_call_123")).rejects.toThrow(
+      "Retell terminal transfer must use basic_attributes_only storage.",
+    );
   });
 
   it("does not send a scripted opening line to Retell", async () => {
@@ -830,6 +842,49 @@ describe("Retell phone-call result handling", () => {
     expect(wake.notification.instructions).not.toContain(
       "you may skip sending a message",
     );
+  });
+
+  it("signals the runtime only after a prepared result appends its mailbox item", async () => {
+    const store = createWebhookStore({
+      call: buildHostedPhoneCall({ id: "hpc_finalize" }),
+    });
+    const signalRuntime = vi.fn(async () => ({
+      signalAccepted: true as const,
+      workflowId: "hosted-user-runtime:member_123",
+    }));
+    const prepared = {
+      call: {
+        call_analysis: {
+          custom_analysis_data: {
+            outcome: "needs_user",
+            result: "The post-handoff outcome is unknown.",
+          },
+        },
+        call_id: "retell_call_123",
+        data_storage_setting: "basic_attributes_only",
+      },
+      requiresTransferFollowUp: true,
+    } as const;
+
+    await finalizePreparedRetellCallResult(prepared, {
+      prisma: store.prisma,
+      signalRuntime,
+    });
+
+    expect(store.appendResultNotificationTransferRequirements).toEqual([true]);
+    expect(signalRuntime).toHaveBeenCalledWith({
+      abortSignal: undefined,
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_hpc_finalize",
+    });
+
+    store.deleteCurrentCall();
+    signalRuntime.mockClear();
+    await finalizePreparedRetellCallResult(prepared, {
+      prisma: store.prisma,
+      signalRuntime,
+    });
+    expect(signalRuntime).not.toHaveBeenCalled();
   });
 
   it("carries non-direct group route authority into the result notification wake", () => {
