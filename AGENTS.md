@@ -81,6 +81,7 @@ Always read these before repo code/docs/test/config work:
 ## Workflow Defaults
 
 - Apply `agent-docs/operations/agent-workflow-routing.md` § Agent Work Contract for outcomes, evidence, action authority, tool use, progress updates, validation, and stopping.
+- For every edit-authorized repository task, follow `agent-docs/operations/agent-workflow-routing.md` § Developer Friction Logging and `.agents/skills/frog/SKILL.md`; inspect existing Frog entries before a workaround, log qualifying new repository friction, and commit each created entry with the task.
 - Use `agent-docs/operations/agent-workflow-routing.md` to classify task type, plan needs, audit requirements, verification, and commit path.
 - Preserve unrelated working-tree edits in the current checkout. Do not overwrite, discard, or revert work you did not make.
 - `apply_patch` targets the current session checkout, not the last shell `workdir`. When editing a separate worktree, use absolute paths in patch headers or verify the target checkout before patching.
