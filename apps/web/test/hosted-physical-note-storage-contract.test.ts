@@ -67,6 +67,12 @@ describe("HostedPhysicalNote storage contract", () => {
     expect(migration).toContain("'service_unavailable'");
     expect(migration).toContain("'request_invalid'");
     expect(migration).toContain("'unknown'");
+    expect(migration).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_physical_note_member_id_status_failure_reason_created_at_idx"',
+    );
+    expect(migration).toContain(
+      'ON "hosted_physical_note"("member_id", "status", "failure_reason", "created_at")',
+    );
     expect(migration).not.toMatch(/message|address_line|artwork_url/iu);
   });
 });

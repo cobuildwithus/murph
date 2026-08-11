@@ -112,11 +112,16 @@ durable reservation with no matching provider attempt.
 For a definite rejection, Web maps only Lob's allowlisted structured error code
 to the bounded failure reason and persists it before responding. Lob's
 human-readable message is untrusted, may contain address details, and never
-enters durable state or assistant context. Replays return the same safe reason;
-legacy failed rows without one use `unknown`. The assistant tells the person
-whether to check the address, regenerate the artwork, or wait for Murph to fix
-its printing setup or request. It never guesses from an unknown reason or
-retries an ambiguous outcome.
+enters durable state or assistant context. Replays return the same safe reason.
+A pre-migration failed row without one remains ambiguous because old Web also
+terminalized HTTP 408. Before replaying it or admitting another note for that
+member, Web waits through the existing 23-hour provider window and uses the
+existing exact-metadata lookup. Proven absence persists `unknown`; proven
+acceptance restores the same row without another send or an unsupported legacy
+charge; a recent or indeterminate result stays pending. The assistant tells the
+person whether to check the address, regenerate the artwork, or wait for Murph
+to fix its printing setup or request. It never guesses from an unknown reason
+or retries an ambiguous outcome.
 
 For paid notes, `starting` rows from the current allowance period reserve their
 already-frozen provider cost under the same member lock used by allowance
@@ -209,5 +214,6 @@ unchanged.
 Then deploy Cloudflare and the runner bundle with `container_rollout=immediate`
 and require the managed-container smoke to prove the exact new runner-bundle
 fingerprint. Verify one synthetic rejection category, one HTTP 408 ambiguity,
-and one accepted test-mode note after both sides converge. Roll back Cloudflare
-before Web so the old 408 classifier never meets the new recovery behavior.
+one legacy-null resolution, and one accepted test-mode note after both sides
+converge. Roll back Cloudflare before Web so the old 408 classifier never meets
+the new recovery behavior.

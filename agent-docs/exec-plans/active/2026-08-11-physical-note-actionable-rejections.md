@@ -9,9 +9,10 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 ## Proven production symptom
 
 - One explicit physical-note request reached the Web owner, created exactly one
-  durable reservation, and received a definite provider rejection before any
-  provider letter id existed.
-- The failed row released its complimentary claim as designed.
+  durable reservation, and entered the old terminal-failure path before any
+  provider letter id existed. The old classifier included HTTP 408, so stored
+  state cannot prove that the provider effect did not start.
+- The failed row released its complimentary claim under that old classifier.
 - The Lob adapter discarded the structured 4xx error body, the durable row kept
   no safe failure reason, and the assistant reduced the result to a generic
   non-actionable rejection.
@@ -30,6 +31,9 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - The assistant gives reason-specific next steps, states that nothing was sent,
   and never invites an automatic retry after an ambiguous outcome.
 - HTTP outcomes that may be ambiguous do not release the one-effect reservation.
+- Pre-migration failed rows without a reason remain pending until the existing
+  Lob metadata lookup proves acceptance or absence, and block a later provider
+  effect while indeterminate.
 - Existing accepted, pending, permission, unavailable, and usage behavior stays
   unchanged.
 
@@ -41,8 +45,17 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Parse only Lob's bounded allowlisted error code. Never propagate or persist its
   freeform message.
 - Add one nullable column to `hosted_physical_note` so a definite rejection has
-  the same answer on the original call and every replay. Existing failed rows
-  remain compatible with a null reason and use the unknown recovery path.
+  the same answer on the original call and every replay. Null on an existing
+  failed row is the legacy-ambiguity marker, not an unknown definite rejection.
+- Before replay or a later send for the same member, resolve at most one legacy
+  row through the existing Lob lookup after 23 hours. Proven absence persists
+  `unknown`, proven acceptance restores the same row without an unsupported
+  historical charge, and indeterminate evidence stays pending. Do not add a
+  queue, another state owner, or a reconciliation lifecycle.
+- Cover the member-scoped legacy lookup with an index on member, status, reason,
+  and creation time so physical-note history does not create a table-scan hot
+  path. The request performs one bounded row lookup and at most one serial
+  provider lookup; it never fans out by history cardinality.
 - Deploy the additive migration and current Web producer first so the HTTP 408
   ambiguity fix precedes the new recovery behavior. An old strict runner rejects
   a categorized response and fails closed to pending without retry. Then deploy
@@ -67,11 +80,11 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
 - Lob adapter tests cover every public reason category, malformed/unknown
   payloads, and 408/5xx ambiguity without retaining provider text.
 - Web service tests prove persistence, replay parity, complimentary release only
-  for definite rejection, and legacy null compatibility.
+  for definite rejection, and legacy accepted/absent/indeterminate recovery.
 - Assistant tool tests prove each member-facing recovery path and preserve the
   pending no-retry instruction.
 - Focused Hosted Execution, Web, Assistant Engine, and Cloudflare tests pass:
-  6, 85, 15, and 5 tests respectively. Prisma validation and generation pass,
+  6, 87, 15, and 5 tests respectively. Prisma validation and generation pass,
   as do all four affected package/app typechecks. The opt-in real-model journey
   compiles and selected the exact test locally, but its paid execution is
   blocked when the provider credential is absent; deterministic owner tests
@@ -121,3 +134,9 @@ the existing one-effect, replay, privacy, and complimentary-claim guarantees.
   runner fails categorized responses closed to pending, then converge the new
   runner. Add mixed-version and integrated 408 proof without a compatibility
   schema, queue, reconciliation owner, or rollout state.
+- Round 6 found that producer-first deployment did not address failed/null rows
+  already created by the old HTTP 408 classifier. Production has one such row
+  and cannot prove definite rejection from stored state. Treat null as legacy
+  ambiguity, block a later provider effect, and reuse the existing 23-hour Lob
+  metadata lookup for accepted/absent/indeterminate resolution. This preserves
+  the same row and owners without a queue, new state, or repair lifecycle.

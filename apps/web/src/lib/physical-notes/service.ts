@@ -117,6 +117,16 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
     apiKey: config.apiKey,
     fromAddressId: config.fromAddressId,
   });
+  const legacyResponse = await resolveLegacyFailedPhysicalNote({
+    currentRequestKey: input.requestKey,
+    memberId: input.memberId,
+    prisma,
+    runtime,
+    signal: input.signal,
+  });
+  if (legacyResponse) {
+    return legacyResponse;
+  }
   await resolveStaleComplimentaryPhysicalNote({
     memberId: input.memberId,
     prisma,
@@ -311,11 +321,70 @@ async function resolveHostedPhysicalNoteReplay(input: {
     return toResponse(accepted, "accepted");
   }
   if (input.row.status === "failed") {
-    return toResponse(input.row, "failed");
+    return input.row.failureReason === null
+      ? null
+      : toResponse(input.row, "failed");
   }
   return Date.now() - input.row.createdAt.getTime() >= REPLAY_WINDOW_MS
     ? toResponse(input.row, "pending")
     : null;
+}
+
+async function resolveLegacyFailedPhysicalNote(input: {
+  currentRequestKey: string;
+  memberId: string;
+  prisma: PrismaClient;
+  runtime: LobPhysicalNoteRuntime;
+  signal?: AbortSignal;
+}): Promise<HostedPhysicalNoteSendResponse | null> {
+  const legacy = await findLegacyFailedPhysicalNote(input);
+  if (!legacy) return null;
+
+  if (Date.now() - legacy.createdAt.getTime() < REPLAY_WINDOW_MS) {
+    return toResponse(legacy, "pending");
+  }
+  const providerResult = await input.runtime.findLetterByNoteId({
+    noteId: legacy.id,
+    signal: input.signal,
+  });
+  if (providerResult.kind === "indeterminate") {
+    return toResponse(legacy, "pending");
+  }
+  if (providerResult.kind === "accepted") {
+    const accepted = await finalizeLegacyPhysicalNoteAcceptance({
+      acceptedAt: new Date(),
+      memberId: input.memberId,
+      noteId: legacy.id,
+      prisma: input.prisma,
+      providerLetterId: providerResult.providerLetterId,
+    });
+    return toResponse(accepted, "accepted");
+  }
+
+  const failed = await markLegacyPhysicalNoteAbsent({
+    memberId: input.memberId,
+    noteId: legacy.id,
+    prisma: input.prisma,
+  });
+  if (legacy.requestKey === input.currentRequestKey) {
+    return toResponse(failed, "failed");
+  }
+  const remaining = await findLegacyFailedPhysicalNote(input);
+  return remaining ? toResponse(remaining, "pending") : null;
+}
+
+async function findLegacyFailedPhysicalNote(input: {
+  memberId: string;
+  prisma: PrismaClient;
+}): Promise<HostedPhysicalNote | null> {
+  return await input.prisma.hostedPhysicalNote.findFirst({
+    orderBy: { createdAt: "asc" },
+    where: {
+      failureReason: null,
+      memberId: input.memberId,
+      status: "failed",
+    },
+  });
 }
 
 async function resolveStaleComplimentaryPhysicalNote(input: {
@@ -358,6 +427,57 @@ async function resolveStaleComplimentaryPhysicalNote(input: {
       prisma: input.prisma,
     });
   }
+}
+
+async function finalizeLegacyPhysicalNoteAcceptance(input: {
+  acceptedAt: Date;
+  memberId: string;
+  noteId: string;
+  prisma: PrismaClient;
+  providerLetterId: string;
+}): Promise<HostedPhysicalNote> {
+  return await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    const currentComplimentary = await tx.hostedPhysicalNote.findFirst({
+      select: { id: true },
+      where: {
+        complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE,
+        memberId: input.memberId,
+      },
+    });
+    await tx.hostedPhysicalNote.updateMany({
+      data: {
+        acceptedAt: input.acceptedAt,
+        ...(currentComplimentary
+          ? {}
+          : { complimentaryOfferCode: COMPLIMENTARY_OFFER_CODE }),
+        failureReason: null,
+        providerLetterId: input.providerLetterId,
+        status: "accepted",
+      },
+      where: {
+        failureReason: null,
+        id: input.noteId,
+        memberId: input.memberId,
+        providerLetterId: null,
+        status: "failed",
+      },
+    });
+    const note = await tx.hostedPhysicalNote.findUniqueOrThrow({
+      where: { id: input.noteId },
+    });
+    if (
+      note.memberId !== input.memberId
+      || note.status !== "accepted"
+      || note.providerLetterId !== input.providerLetterId
+      || note.acceptedAt === null
+    ) {
+      throw new Error("Legacy physical-note acceptance invariant failed.");
+    }
+    // The old failure transition erased whether this reservation was free or
+    // paid. Do not create a charge from missing historical billing evidence.
+    return note;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 async function finalizeHostedPhysicalNoteAcceptance(input: {
@@ -453,6 +573,37 @@ async function markHostedPhysicalNoteFailed(input: {
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
+async function markLegacyPhysicalNoteAbsent(input: {
+  memberId: string;
+  noteId: string;
+  prisma: PrismaClient;
+}): Promise<HostedPhysicalNote> {
+  return await input.prisma.$transaction(async (tx) => {
+    await lockHostedMemberRow(tx, input.memberId);
+    await tx.hostedPhysicalNote.updateMany({
+      data: { failureReason: "unknown" },
+      where: {
+        failureReason: null,
+        id: input.noteId,
+        memberId: input.memberId,
+        providerLetterId: null,
+        status: "failed",
+      },
+    });
+    const note = await tx.hostedPhysicalNote.findUniqueOrThrow({
+      where: { id: input.noteId },
+    });
+    if (
+      note.memberId !== input.memberId
+      || note.status !== "failed"
+      || note.failureReason === null
+    ) {
+      throw new Error("Legacy physical-note absence invariant failed.");
+    }
+    return note;
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
 function buildPhysicalNoteFingerprint(input: {
   artworkSha256: string;
   originAssistantInputId: string;
@@ -487,12 +638,14 @@ function toResponse(
   >,
   status: HostedPhysicalNoteSendResponse["status"],
 ): HostedPhysicalNoteSendResponse {
+  const failureReason = status === "failed" ? note.failureReason : null;
+  if (status === "failed" && failureReason === null) {
+    throw new Error("Legacy physical-note outcome remains unresolved.");
+  }
   return {
     complimentary: note.complimentaryOfferCode !== null,
     costUsdMicros: note.providerCostUsdMicros.toString(),
-    ...(status === "failed"
-      ? { failureReason: note.failureReason ?? "unknown" }
-      : {}),
+    ...(failureReason ? { failureReason } : {}),
     physicalNoteId: note.id,
     status,
   };

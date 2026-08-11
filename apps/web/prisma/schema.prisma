@@ -926,6 +926,7 @@ model HostedPhysicalNote {
 
   @@unique([memberId, requestKey])
   @@unique([memberId, complimentaryOfferCode])
+  @@index([memberId, status, failureReason, createdAt])
   @@map("hosted_physical_note")
 }
 
