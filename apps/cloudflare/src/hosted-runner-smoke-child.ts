@@ -1415,6 +1415,12 @@ const mutationDeniedCount = mutationResults.filter(
 const preloadCount = fs.readFileSync(input.preloadMarkerPath, "utf8").length;
 process.stdout.write(JSON.stringify({
   memberWorkspaceAutomationMutationDeniedCount: mutationDeniedCount,
+  memberWorkspaceAutomationReadDiagnostics: readResults.map((result) => ({
+    status: result.status,
+    signal: result.signal,
+    stdout: String(result.stdout).slice(0, 512),
+    stderr: String(result.stderr).slice(0, 512),
+  })),
   memberWorkspaceAutomationReadProofCount: readProofCount,
   memberWorkspacePreloadBypassDenied:
     mutationDeniedCount === input.mutationArgs.length
@@ -1459,8 +1465,11 @@ function parseCodexMemberWorkspacePermissionProof(
     readProofCount <
       HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_AUTOMATION_READ_PROOF_COUNT
   ) {
+    const diagnostics = JSON.stringify(
+      record.memberWorkspaceAutomationReadDiagnostics ?? null,
+    ).slice(0, 2_048);
     throw new Error(
-      "Codex member-workspace permission proof did not preserve automation reads.",
+      `Codex member-workspace permission proof did not preserve automation reads. count=${readProofCount} diagnostics=${diagnostics}`,
     );
   }
   for (const field of [
