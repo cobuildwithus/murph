@@ -376,8 +376,8 @@ export interface HostedExecutionDeviceSyncRuntimeSnapshotCapabilities {
 }
 
 export interface HostedExecutionDeviceSyncRuntimeSnapshotCursor {
+  createdAt: string;
   id: string;
-  updatedAt: string;
 }
 
 export interface HostedExecutionDeviceSyncRuntimeConnectionSeed {
@@ -937,8 +937,8 @@ function parseHostedExecutionDeviceSyncRuntimeSnapshotCursor(
 ): HostedExecutionDeviceSyncRuntimeSnapshotCursor {
   const record = requireObject(value, label);
   return {
+    createdAt: requireIsoTimestamp(record.createdAt, `${label}.createdAt`),
     id: requireString(record.id, `${label}.id`),
-    updatedAt: requireIsoTimestamp(record.updatedAt, `${label}.updatedAt`),
   };
 }
 

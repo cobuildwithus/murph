@@ -1341,6 +1341,12 @@ describe("device sync companion routes", () => {
         status: "active",
         userId: "member_1",
       });
+      expect(mocks.listBoundedConnectionSourcesForConnections).toHaveBeenCalledWith({
+        connectionIds: ["dsc_1"],
+        excludeDisconnected: false,
+        limitPerConnection: 32,
+        sourceProviderSlugs: ["health_connect"],
+      });
     });
 
     it("invalidates Health Connect receipts older than a disconnected source", async () => {
@@ -1546,7 +1552,7 @@ describe("device sync companion routes", () => {
         connectionIds: [],
         excludeDisconnected: false,
         limitPerConnection: 32,
-        sourceProviderSlugs: null,
+        sourceProviderSlugs: ["health_connect"],
       });
       expect(mocks.listConnectionSources).not.toHaveBeenCalled();
       expect(mocks.listRecentConnectionWebhookSignals).not.toHaveBeenCalled();

@@ -61,6 +61,11 @@ import { requireHostedRuntimeDeviceSyncStore } from "./device-sync-service.ts";
 import {
   HOSTED_DEVICE_SYNC_DIRTY_PENDING_FETCH_LIMIT,
 } from "./hosted-device-sync-limits.ts";
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./hosted-runtime/device-sync-snapshot-pagination.ts";
+
+export { fetchCompleteHostedDeviceSyncRuntimeSnapshot };
 
 export interface HostedDeviceSyncRuntimeSyncState {
   hostedToLocalAccountIds: Map<string, string>;
@@ -125,131 +130,6 @@ type HostedDirtyDeviceSyncStateSkipReason =
   | "reauthorization_required";
 type HostedTerminalDeviceSyncStatus = "disconnected" | "reauthorization_required";
 
-export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
-  deviceSyncPort: HostedRuntimeDeviceSyncPort;
-  signal?: AbortSignal | null;
-}): Promise<HostedDeviceSyncRuntimeSnapshotResponse> {
-  const connections: HostedDeviceSyncRuntimeSnapshotResponse["connections"] = [];
-  const connectionIds = new Set<string>();
-  const seenCursors = new Set<string>();
-  let cursor: NonNullable<Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0]>["cursor"] = null;
-  let firstPage: HostedDeviceSyncRuntimeSnapshotResponse | null = null;
-  let providerConfigs: HostedDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
-
-  for (;;) {
-    const isFirstPage = firstPage === null;
-    const remaining = HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT
-      - connections.length;
-    if (remaining <= 0) {
-      throw new TypeError(
-        `Hosted device-sync credential authority exceeds the ${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound.`,
-      );
-    }
-    const requestedPageLimit = Math.min(
-      remaining,
-      HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
-    );
-    const page = await input.deviceSyncPort.fetchSnapshot({
-      ...(cursor ? { cursor } : {}),
-      includeCredentialMaterial: true,
-      // A reader-first rollout must still hydrate the legacy Web producer,
-      // whose omitted limit means "return the complete snapshot" and whose
-      // response has no nextCursor field. Once Web emits cursor presence, all
-      // following pages carry an explicit protocol limit.
-      ...(!isFirstPage ? { limit: requestedPageLimit } : {}),
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    const initialPage: HostedDeviceSyncRuntimeSnapshotResponse = firstPage ?? page;
-    firstPage = initialPage;
-    if (page.userId !== initialPage.userId) {
-      throw new TypeError("Hosted device-sync snapshot pages changed member authority.");
-    }
-    if (
-      JSON.stringify(page.capabilities ?? {})
-      !== JSON.stringify(initialPage.capabilities ?? {})
-    ) {
-      throw new TypeError("Hosted device-sync snapshot pages changed runtime capabilities.");
-    }
-    const isLegacyFirstPage = isFirstPage && page.nextCursor === undefined;
-    const admittedPageLimit = isLegacyFirstPage
-      ? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT
-      : requestedPageLimit;
-    if (page.connections.length > admittedPageLimit) {
-      throw new TypeError(
-        isLegacyFirstPage
-          ? `Hosted device-sync credential authority exceeds the ${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound.`
-          : `Hosted device-sync snapshot page exceeds the ${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT}-connection page bound.`,
-      );
-    }
-    for (const connection of page.connections) {
-      if (connectionIds.has(connection.connection.id)) {
-        throw new TypeError("Hosted device-sync snapshot pagination repeated a connection.");
-      }
-      connectionIds.add(connection.connection.id);
-      connections.push(connection);
-    }
-    providerConfigs = mergeHostedRuntimeProviderConfigs(
-      providerConfigs,
-      page.providerConfigs,
-    );
-
-    if (!isFirstPage && page.nextCursor === undefined) {
-      throw new TypeError(
-        "Hosted device-sync snapshot omitted its continuation cursor after pagination began.",
-      );
-    }
-    const nextCursor = page.nextCursor ?? null;
-    if (!nextCursor) {
-      const {
-        providerConfigs: _firstPageProviderConfigs,
-        ...firstPageWithoutProviderConfigs
-      } = initialPage;
-      return {
-        ...firstPageWithoutProviderConfigs,
-        connections,
-        ...(initialPage.nextCursor === undefined ? {} : { nextCursor: null }),
-        ...(providerConfigs && Object.keys(providerConfigs).length > 0
-          ? { providerConfigs }
-          : {}),
-      };
-    }
-    if (page.connections.length === 0) {
-      throw new TypeError("Hosted device-sync snapshot pagination returned an empty continuing page.");
-    }
-    if (connections.length >= HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT) {
-      throw new TypeError(
-        `Hosted device-sync credential authority exceeds the ${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound.`,
-      );
-    }
-    const cursorKey = `${nextCursor.updatedAt}\n${nextCursor.id}`;
-    if (seenCursors.has(cursorKey)) {
-      throw new TypeError("Hosted device-sync snapshot pagination repeated a cursor.");
-    }
-    seenCursors.add(cursorKey);
-    cursor = nextCursor;
-  }
-}
-
-function mergeHostedRuntimeProviderConfigs(
-  current: HostedDeviceSyncRuntimeSnapshotResponse["providerConfigs"],
-  next: HostedDeviceSyncRuntimeSnapshotResponse["providerConfigs"],
-): HostedDeviceSyncRuntimeSnapshotResponse["providerConfigs"] {
-  if (!next) {
-    return current;
-  }
-  const merged: Record<string, unknown> = { ...(current ?? {}) };
-  for (const [provider, config] of Object.entries(next)) {
-    const existing = merged[provider];
-    if (existing && JSON.stringify(existing) !== JSON.stringify(config)) {
-      throw new TypeError(
-        `Hosted device-sync snapshot pages disagree on ${provider} application authority.`,
-      );
-    }
-    merged[provider] = config;
-  }
-  return merged as HostedDeviceSyncRuntimeSnapshotResponse["providerConfigs"];
-}
-
 export async function syncHostedDeviceSyncControlPlaneState(input: {
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   secret: string;
@@ -270,6 +150,7 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   const snapshot = input.snapshot === undefined
     ? await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
         deviceSyncPort: client,
+        includeCredentialMaterial: true,
         signal: input.signal ?? null,
       })
     : input.snapshot;

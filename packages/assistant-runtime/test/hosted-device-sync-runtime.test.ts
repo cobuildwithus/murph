@@ -565,8 +565,8 @@ function clearAccountCredentialForTesting(service: DeviceSyncService, accountId:
 describe("hosted device-sync runtime", () => {
   test("credential hydration follows stable bounded cursors sequentially", async () => {
     const firstCursor = {
+      createdAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - 31_000).toISOString(),
       id: "hosted_conn_031",
-      updatedAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - 31_000).toISOString(),
     };
     const pages = [
       buildRuntimeSnapshotPage({
@@ -592,6 +592,7 @@ describe("hosted device-sync runtime", () => {
 
     const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
       deviceSyncPort,
+      includeCredentialMaterial: true,
     });
 
     assert.equal(snapshot.connections.length, 34);
@@ -620,9 +621,9 @@ describe("hosted device-sync runtime", () => {
       const page = buildRuntimeSnapshotPage({
         count,
         nextCursor: {
-          id: `cursor_${pageIndex}`,
-          updatedAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - startIndex * 1_000)
+          createdAt: new Date(Date.parse("2026-04-07T12:00:00.000Z") - startIndex * 1_000)
             .toISOString(),
+          id: `cursor_${pageIndex}`,
         },
         startIndex,
       });
@@ -640,7 +641,10 @@ describe("hosted device-sync runtime", () => {
     } satisfies HostedRuntimeDeviceSyncPort;
 
     await assert.rejects(
-      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({ deviceSyncPort }),
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort,
+        includeCredentialMaterial: true,
+      }),
       new RegExp(
         `${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound`,
         "u",
@@ -669,6 +673,7 @@ describe("hosted device-sync runtime", () => {
 
     const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
       deviceSyncPort: legacyPort,
+      includeCredentialMaterial: true,
     });
 
     assert.equal(snapshot.connections.length, 34);
@@ -691,7 +696,10 @@ describe("hosted device-sync runtime", () => {
     } satisfies HostedRuntimeDeviceSyncPort;
 
     await assert.rejects(
-      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({ deviceSyncPort: legacyPort }),
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: legacyPort,
+        includeCredentialMaterial: true,
+      }),
       new RegExp(
         `${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound`,
         "u",
@@ -699,10 +707,10 @@ describe("hosted device-sync runtime", () => {
     );
   });
 
-  test("credential hydration rejects missing cursors after pagination and member changes", async () => {
+  test("credential hydration rejects missing, repeated, and cross-member cursors", async () => {
     const firstCursor = {
+      createdAt: "2026-04-07T12:00:00.000Z",
       id: "hosted_conn_000",
-      updatedAt: "2026-04-07T12:00:00.000Z",
     };
     const cursorPages = [
       buildRuntimeSnapshotPage({ count: 1, nextCursor: firstCursor, startIndex: 0 }),
@@ -718,13 +726,16 @@ describe("hosted device-sync runtime", () => {
     } satisfies HostedRuntimeDeviceSyncPort;
 
     await assert.rejects(
-      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({ deviceSyncPort: missingCursorPort }),
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: missingCursorPort,
+        includeCredentialMaterial: true,
+      }),
       /omitted its continuation cursor after pagination began/u,
     );
 
     const cursor = {
+      createdAt: "2026-04-07T12:00:00.000Z",
       id: "hosted_conn_000",
-      updatedAt: "2026-04-07T12:00:00.000Z",
     };
     const memberPages = [
       buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 0 }),
@@ -745,8 +756,32 @@ describe("hosted device-sync runtime", () => {
     } satisfies HostedRuntimeDeviceSyncPort;
 
     await assert.rejects(
-      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({ deviceSyncPort: memberPort }),
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: memberPort,
+        includeCredentialMaterial: true,
+      }),
       /changed member authority/u,
+    );
+
+    const repeatedCursorPages = [
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 0 }),
+      buildRuntimeSnapshotPage({ count: 1, nextCursor: cursor, startIndex: 1 }),
+    ];
+    const repeatedCursorPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      applyUpdates: vi.fn(),
+      createConnectLink: vi.fn(),
+      fetchSnapshot: vi.fn(async (
+        _request: Parameters<HostedRuntimeDeviceSyncPort["fetchSnapshot"]>[0],
+      ) => repeatedCursorPages.shift()!),
+    } satisfies HostedRuntimeDeviceSyncPort;
+
+    await assert.rejects(
+      () => fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+        deviceSyncPort: repeatedCursorPort,
+        includeCredentialMaterial: true,
+      }),
+      /repeated a cursor/u,
     );
   });
 

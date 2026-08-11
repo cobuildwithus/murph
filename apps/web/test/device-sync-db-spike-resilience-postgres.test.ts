@@ -11,6 +11,7 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
 }));
 
 import { readHostedDeviceSyncRuntimeState } from "@/src/lib/device-sync/hosted-runtime-authority";
+import { readCompanionDeviceSyncStatus } from "@/src/lib/device-sync/companion";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import { handleHostedDeviceSyncWebhookAccepted } from "@/src/lib/device-sync/wake-service";
 import { readHostedHealthDataConsentState } from "@/src/lib/legal/consent";
@@ -155,7 +156,7 @@ describe.skipIf(!runPostgresProof)(
         });
 
         const operationTimings: PrismaOperationTiming[] = [];
-        const { snapshotResults, webhookResults } = await runWithPrismaOperationTimings(
+        const { companionStatus, snapshotResults, webhookResults } = await runWithPrismaOperationTimings(
           operationTimings,
           async () => {
             // Wall clock is intentionally compressed: all receipts enter the
@@ -231,13 +232,24 @@ describe.skipIf(!runPostgresProof)(
                 foregroundLatenciesMs.push(performance.now() - startedAt);
               },
             );
+            const companionStatusPromise = readCompanionDeviceSyncStatus({
+              memberId,
+              sourceProviderSlug: "garmin",
+              store,
+            });
 
-            const [completedWebhooks, completedSnapshots] = await Promise.all([
+            const [
+              completedWebhooks,
+              completedSnapshots,
+              completedCompanionStatus,
+            ] = await Promise.all([
               Promise.all(webhookPromises),
               Promise.all(snapshotPromises),
+              companionStatusPromise,
               Promise.all(foregroundPromises),
             ]);
             return {
+              companionStatus: completedCompanionStatus,
               snapshotResults: completedSnapshots,
               webhookResults: completedWebhooks,
             };
@@ -247,6 +259,9 @@ describe.skipIf(!runPostgresProof)(
 
         expect(webhookResults).toHaveLength(INCIDENT_WEBHOOK_RECEIPTS);
         expect(snapshotResults).toHaveLength(INCIDENT_SNAPSHOT_READS);
+        expect(companionStatus).toHaveProperty("lastDataReceivedAt");
+        expect(companionStatus.observedAt).toEqual(expect.any(String));
+        expect(companionStatus.resources).toEqual(expect.any(Object));
         expect(limiter.maxActive()).toBe(REPLAY_WEBHOOK_CONCURRENCY);
         expect(perSecondCounts).toHaveLength(INCIDENT_WINDOW_SECONDS);
         expect(perSecondCounts.reduce((sum, count) => sum + count, 0)).toBe(
@@ -298,7 +313,7 @@ describe.skipIf(!runPostgresProof)(
         expect(foregroundLatenciesMs).toHaveLength(REPLAY_FOREGROUND_READS);
         expect(operationCounts.get("DeviceConnection.findFirst") ?? 0).toBe(0);
         expect(operationCounts.get("DeviceConnection.findMany") ?? 0).toBe(
-          INCIDENT_SNAPSHOT_READS,
+          INCIDENT_SNAPSHOT_READS + 1,
         );
         expect(operationCounts.get("DeviceConnection.findUnique") ?? 0).toBeGreaterThanOrEqual(
           INCIDENT_WEBHOOK_RECEIPTS,
@@ -317,15 +332,25 @@ describe.skipIf(!runPostgresProof)(
           INCIDENT_WEBHOOK_RECEIPTS,
         );
         expect(operationCounts.get("$queryRaw") ?? 0).toBeGreaterThanOrEqual(
-          INCIDENT_SNAPSHOT_READS,
+          INCIDENT_SNAPSHOT_READS + 1,
         );
-        expect(boundedSnapshotSourceRead).toHaveBeenCalledTimes(INCIDENT_SNAPSHOT_READS);
-        for (const [sourceInput] of boundedSnapshotSourceRead.mock.calls) {
+        expect(boundedSnapshotSourceRead).toHaveBeenCalledTimes(INCIDENT_SNAPSHOT_READS + 1);
+        const snapshotSourceInputs = boundedSnapshotSourceRead.mock.calls
+          .map(([sourceInput]) => sourceInput)
+          .filter((sourceInput) => sourceInput.sourceProviderSlugs === null);
+        expect(snapshotSourceInputs).toHaveLength(INCIDENT_SNAPSHOT_READS);
+        for (const sourceInput of snapshotSourceInputs) {
           expect(sourceInput).toMatchObject({
             connectionIds: [connectionId],
             limitPerConnection: 32,
           });
         }
+        expect(boundedSnapshotSourceRead).toHaveBeenCalledWith({
+          connectionIds: [connectionId],
+          excludeDisconnected: false,
+          limitPerConnection: 32,
+          sourceProviderSlugs: ["garmin"],
+        });
         expect(operationCounts.get("HostedMember.findUnique") ?? 0).toBe(
           REPLAY_FOREGROUND_READS,
         );
@@ -380,6 +405,287 @@ describe.skipIf(!runPostgresProof)(
         controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
       }
     }, 180_000);
+
+    it("keeps the immutable runtime cursor complete when a page-two row receives a webhook", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(
+          databaseUrl,
+          `murph_device_sync_cursor_${suffix}`,
+        ),
+        poolMax: 4,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const memberId = `hbm_device_sync_cursor_${suffix}`;
+      const createdAt = new Date("2026-08-10T20:00:00.000Z");
+      const connectionIds = Array.from(
+        { length: 33 },
+        (_, index) => `dsc_device_sync_cursor_${suffix}_${String(index).padStart(2, "0")}`,
+      );
+
+      controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+        store,
+      });
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceConnection.createMany({
+          data: connectionIds.map((id, index) => ({
+            connectedAt: new Date(createdAt.getTime() - index * 1_000),
+            createdAt: new Date(createdAt.getTime() - index * 1_000),
+            credentialKind: "none",
+            credentialMetadataJson: {},
+            id,
+            metadataJson: {},
+            provider: "junction",
+            providerAccountBlindIndex: `blind_device_sync_cursor_${suffix}_${index}`,
+            scopesJson: [],
+            setupPhase: "source_confirmed",
+            status: "active",
+            userId: memberId,
+          })),
+        });
+
+        const firstPage = await readHostedDeviceSyncRuntimeState({
+          request: runtimeSnapshotRequest({ memberId }),
+          trustedUserId: memberId,
+        });
+        expect(firstPage.connections).toHaveLength(32);
+        expect(firstPage.nextCursor).not.toBeNull();
+
+        const pageTwoConnectionId = connectionIds.at(-1);
+        if (!pageTwoConnectionId || !firstPage.nextCursor) {
+          throw new Error("Synthetic cursor proof did not produce a second page.");
+        }
+        await store.markWebhookReceived(
+          pageTwoConnectionId,
+          "2026-08-10T21:35:00.000Z",
+        );
+
+        const secondPage = await readHostedDeviceSyncRuntimeState({
+          request: runtimeSnapshotRequest({
+            cursor: firstPage.nextCursor,
+            memberId,
+          }),
+          trustedUserId: memberId,
+        });
+        const observedConnectionIds = [
+          ...firstPage.connections,
+          ...secondPage.connections,
+        ].map((entry) => entry.connection.id);
+
+        expect(secondPage.connections).toHaveLength(1);
+        expect(secondPage.connections[0]?.connection.id).toBe(pageTwoConnectionId);
+        expect(secondPage.nextCursor).toBeNull();
+        expect(new Set(observedConnectionIds).size).toBe(33);
+        expect(observedConnectionIds).toEqual(expect.arrayContaining(connectionIds));
+      } finally {
+        await prisma.deviceConnection.deleteMany({
+          where: { userId: memberId },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
+        controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
+      }
+    }, 60_000);
+
+    it("bounds a 32-connection app-bound runtime snapshot overlapping scoped companion status", async () => {
+      const suffix = randomUUID().replaceAll("-", "");
+      const prisma = createPrismaClient({
+        databaseUrl: withApplicationName(
+          databaseUrl,
+          `murph_device_sync_max_shape_${suffix}`,
+        ),
+        poolMax: 8,
+      });
+      const store = new PrismaDeviceSyncControlPlaneStore({ prisma });
+      const memberId = `hbm_device_sync_max_shape_${suffix}`;
+      const applicationId = `dpa_device_sync_max_shape_${suffix}`;
+      const connectedAt = new Date("2026-08-10T21:00:00.000Z");
+      const appBoundConnectionIds = Array.from(
+        { length: 32 },
+        (_, index) => `dsc_device_sync_app_bound_${suffix}_${String(index).padStart(2, "0")}`,
+      );
+      const companionConnectionIds = Array.from(
+        { length: 32 },
+        (_, index) => `dsc_device_sync_companion_${suffix}_${String(index).padStart(2, "0")}`,
+      );
+      const boundedSourceRead = vi.spyOn(
+        store,
+        "listBoundedConnectionSourcesForConnections",
+      );
+      const statusRead = vi.spyOn(store, "listMemberConnectionStatuses");
+      const signalRead = vi.spyOn(store, "listRecentConnectionWebhookSignals");
+
+      controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
+        store,
+      });
+
+      try {
+        await prisma.hostedMember.create({ data: { id: memberId } });
+        await prisma.deviceProviderApplication.create({
+          data: {
+            configEncrypted: "redacted-proof-does-not-open-config",
+            id: applicationId,
+            memberId,
+            provider: "strava",
+            revision: 1,
+          },
+        });
+        await prisma.deviceConnection.createMany({
+          data: [
+            ...appBoundConnectionIds.map((id, index) => ({
+              connectedAt,
+              createdAt: new Date(connectedAt.getTime() - index * 1_000),
+              credentialKind: "oauth_tokens",
+              credentialMetadataJson: {},
+              id,
+              metadataJson: {},
+              provider: "strava",
+              providerAccountBlindIndex: `blind_device_sync_app_bound_${suffix}_${index}`,
+              providerApplicationId: applicationId,
+              providerApplicationRevision: 1,
+              scopesJson: [],
+              setupPhase: "source_confirmed",
+              status: "active",
+              userId: memberId,
+            })),
+            ...companionConnectionIds.map((id, index) => ({
+              connectedAt,
+              createdAt: new Date(connectedAt.getTime() - index * 1_000),
+              credentialKind: "none",
+              credentialMetadataJson: {},
+              id,
+              metadataJson: {},
+              provider: "junction",
+              providerAccountBlindIndex: `blind_device_sync_companion_${suffix}_${index}`,
+              scopesJson: [],
+              setupPhase: "source_confirmed",
+              status: "active",
+              userId: memberId,
+            })),
+          ],
+        });
+        await prisma.deviceConnectionSource.createMany({
+          data: companionConnectionIds.map((connectionId, index) => ({
+            connectionId,
+            firstSeenAt: connectedAt,
+            id: `dcs_device_sync_max_shape_${suffix}_${String(index).padStart(2, "0")}`,
+            lastSeenAt: connectedAt,
+            resourceAvailabilitySummaryJson: { sleep: true },
+            sourceInstanceKey: `health-connect-${suffix}-${index}`,
+            sourceProviderSlug: "health_connect",
+            status: "connected",
+          })),
+        });
+
+        const operationTimings: PrismaOperationTiming[] = [];
+        const [runtimeSnapshot, companionStatus] = await runWithPrismaOperationTimings(
+          operationTimings,
+          async () => Promise.all([
+            readHostedDeviceSyncRuntimeState({
+              request: runtimeSnapshotRequest({ memberId, provider: "strava" }),
+              trustedUserId: memberId,
+            }),
+            readCompanionDeviceSyncStatus({
+              memberId,
+              sourceProviderSlug: "health_connect",
+              store,
+            }),
+          ]),
+        );
+        const operationCounts = countPrismaOperations(operationTimings);
+
+        expect(runtimeSnapshot.connections).toHaveLength(32);
+        expect(runtimeSnapshot.connections.map((entry) => entry.connection.id)).toEqual(
+          expect.arrayContaining(appBoundConnectionIds),
+        );
+        expect(runtimeSnapshot.nextCursor).toBeNull();
+        expect(companionStatus.resources).toEqual({
+          sleep: { lastReceivedAt: null },
+        });
+        expect(operationCounts.get("DeviceConnection.findMany") ?? 0).toBe(2);
+        expect(operationCounts.get("DeviceProviderApplication.findFirst") ?? 0).toBe(1);
+        expect(operationCounts.get("DeviceSyncSignal.findMany") ?? 0).toBe(1);
+        expect(operationCounts.get("$queryRaw") ?? 0).toBe(2);
+        expect(statusRead).toHaveBeenCalledOnce();
+        expect(signalRead).toHaveBeenCalledOnce();
+        expect(boundedSourceRead).toHaveBeenCalledTimes(2);
+        const scopedSourceInput = boundedSourceRead.mock.calls
+          .map(([sourceInput]) => sourceInput)
+          .find((sourceInput) => sourceInput.sourceProviderSlugs?.[0] === "health_connect");
+        expect(scopedSourceInput).toMatchObject({
+          excludeDisconnected: false,
+          limitPerConnection: 32,
+          sourceProviderSlugs: ["health_connect"],
+        });
+        expect(scopedSourceInput?.connectionIds).toHaveLength(32);
+        expect(new Set(scopedSourceInput?.connectionIds)).toEqual(
+          new Set(companionConnectionIds),
+        );
+
+        const firstConnectionId = companionConnectionIds[0];
+        if (!firstConnectionId) {
+          throw new Error("Synthetic max-shape proof has no first connection.");
+        }
+        await prisma.deviceConnectionSource.createMany({
+          data: Array.from({ length: 33 }, (_, index) => ({
+            connectionId: firstConnectionId,
+            firstSeenAt: connectedAt,
+            id: `dcs_device_sync_unrelated_${suffix}_${String(index).padStart(2, "0")}`,
+            lastSeenAt: connectedAt,
+            resourceAvailabilitySummaryJson: { activity: true },
+            sourceInstanceKey: `unrelated-${suffix}-${index}`,
+            sourceProviderSlug: "unrelated_source",
+            status: "connected",
+          })),
+        });
+
+        await expect(readCompanionDeviceSyncStatus({
+          memberId,
+          sourceProviderSlug: "health_connect",
+          store,
+        })).resolves.toMatchObject({
+          resources: { sleep: { lastReceivedAt: null } },
+        });
+
+        await prisma.deviceConnectionSource.createMany({
+          data: Array.from({ length: 32 }, (_, index) => ({
+            connectionId: firstConnectionId,
+            firstSeenAt: connectedAt,
+            id: `dcs_device_sync_saturated_${suffix}_${String(index).padStart(2, "0")}`,
+            lastSeenAt: connectedAt,
+            resourceAvailabilitySummaryJson: { sleep: true },
+            sourceInstanceKey: `health-connect-extra-${suffix}-${index}`,
+            sourceProviderSlug: "health_connect",
+            status: "connected",
+          })),
+        });
+
+        await expect(readCompanionDeviceSyncStatus({
+          memberId,
+          sourceProviderSlug: "health_connect",
+          store,
+        })).rejects.toMatchObject({
+          code: "CONNECTION_SOURCE_SNAPSHOT_SATURATED",
+          retryable: false,
+        });
+        expect(statusRead).toHaveBeenCalledTimes(3);
+        expect(boundedSourceRead).toHaveBeenCalledTimes(4);
+        expect(signalRead).toHaveBeenCalledTimes(2);
+      } finally {
+        await prisma.deviceConnection.deleteMany({
+          where: { userId: memberId },
+        }).catch(() => undefined);
+        await prisma.hostedMember.deleteMany({
+          where: { id: memberId },
+        }).catch(() => undefined);
+        await prisma.$disconnect();
+        controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReset();
+      }
+    }, 90_000);
   },
 );
 
@@ -512,6 +818,25 @@ function withApplicationName(value: string, applicationName: string): string {
   const parsed = new URL(value);
   parsed.searchParams.set("application_name", applicationName);
   return parsed.toString();
+}
+
+function runtimeSnapshotRequest(input: {
+  cursor?: { createdAt: string; id: string };
+  memberId: string;
+  provider?: string;
+}): Request {
+  return new Request(
+    "https://control.example.test/api/internal/device-sync/runtime/snapshot",
+    {
+      body: JSON.stringify({
+        ...(input.cursor ? { cursor: input.cursor } : {}),
+        includeCredentialMaterial: false,
+        ...(input.provider ? { provider: input.provider } : {}),
+        userId: input.memberId,
+      }),
+      method: "POST",
+    },
+  );
 }
 
 function isClearlyLocalPostgresUrl(value: string): boolean {

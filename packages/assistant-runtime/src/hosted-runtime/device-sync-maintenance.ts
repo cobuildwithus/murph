@@ -1243,6 +1243,7 @@ async function preloadHostedDeviceSyncRuntimeSnapshot(input: {
 
   return fetchCompleteHostedDeviceSyncRuntimeSnapshot({
     deviceSyncPort: input.deviceSyncPort,
+    includeCredentialMaterial: true,
     signal: input.signal,
   });
 }

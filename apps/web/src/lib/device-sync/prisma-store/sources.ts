@@ -85,13 +85,6 @@ export interface MarkHostedDeviceConnectionSourcesDisconnectedInput {
   tx?: HostedPrismaTransactionClient;
 }
 
-export interface ListHostedRuntimeSnapshotConnectionSourcesInput {
-  connectionId: string;
-  limit: number;
-  sourceProviderSlugs: readonly string[];
-  tx?: HostedPrismaTransactionClient;
-}
-
 export interface ListHostedBoundedConnectionSourcesForConnectionsInput {
   connectionIds: readonly string[];
   excludeDisconnected?: boolean;
@@ -306,39 +299,6 @@ export class PrismaHostedConnectionSourceStore {
         { sourceInstanceKey: "asc" },
         { id: "asc" },
       ],
-      ...hostedConnectionSourceRecordArgs,
-    });
-
-    return records.map(mapHostedConnectionSourceRecord);
-  }
-
-  async listRuntimeSnapshotConnectionSources(
-    input: ListHostedRuntimeSnapshotConnectionSourcesInput,
-  ): Promise<HostedDeviceConnectionSource[]> {
-    const prisma = input.tx ?? this.prisma;
-    const sourceProviderSlugs = normalizeSourceProviderSlugList(input.sourceProviderSlugs);
-
-    if (sourceProviderSlugs.length === 0) {
-      return [];
-    }
-
-    const records = await prisma.deviceConnectionSource.findMany({
-      where: {
-        connectionId: requireConnectionId(input.connectionId),
-        sourceProviderSlug: {
-          in: sourceProviderSlugs,
-        },
-        status: {
-          not: "disconnected",
-        },
-      },
-      orderBy: [
-        { lastSeenAt: "desc" },
-        { sourceProviderSlug: "asc" },
-        { sourceInstanceKey: "asc" },
-        { id: "asc" },
-      ],
-      take: requireSourceProjectionLimit(input.limit),
       ...hostedConnectionSourceRecordArgs,
     });
 

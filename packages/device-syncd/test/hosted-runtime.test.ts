@@ -969,8 +969,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         {
           connectionId: null,
           cursor: {
+            createdAt: "2026-04-06T23:58:00+00:00",
             id: "conn_cursor",
-            updatedAt: "2026-04-06T23:58:00+00:00",
           },
           limit: 4,
           provider: "oura",
@@ -980,8 +980,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     ).toEqual({
       connectionId: null,
       cursor: {
+        createdAt: "2026-04-06T23:58:00.000Z",
         id: "conn_cursor",
-        updatedAt: "2026-04-06T23:58:00.000Z",
       },
       includeCredentialMaterial: false,
       limit: 4,
@@ -1044,8 +1044,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         ],
         generatedAt: "2026-04-07T00:00:00.000Z",
         nextCursor: {
+          createdAt: "2026-04-06T23:59:59+00:00",
           id: "conn_123",
-          updatedAt: "2026-04-06T23:59:59+00:00",
         },
         userId: "user_123",
       }),
@@ -1089,8 +1089,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       generatedAt: "2026-04-07T00:00:00.000Z",
       nextCursor: {
+        createdAt: "2026-04-06T23:59:59.000Z",
         id: "conn_123",
-        updatedAt: "2026-04-06T23:59:59.000Z",
       },
       userId: "user_123",
     });
@@ -1125,13 +1125,13 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
         {
           cursor: {
+            createdAt: "not-a-timestamp",
             id: "conn_123",
-            updatedAt: "not-a-timestamp",
           },
         },
         "trusted-user",
       ),
-    ).toThrowError(/snapshot request cursor.updatedAt must be an ISO timestamp/u);
+    ).toThrowError(/snapshot request cursor.createdAt must be an ISO timestamp/u);
   });
 
   it("keeps only the supported internal projection paths", () => {

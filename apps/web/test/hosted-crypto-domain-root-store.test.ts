@@ -2164,6 +2164,102 @@ test("batch private-field sealing unwraps once and preserves member-bound AAD", 
   })).rejects.toThrow();
 });
 
+test("batch secure-box opening drains all work and preserves the first observed failure", async () => {
+  const { decryptMetrics, tx } = await createHostedWebCryptoTransactionFixture();
+  const { provisionActiveHostedDomainRootEnvelopeForUserOnly } = await import(
+    "../src/lib/hosted-crypto/domain-root-store"
+  );
+  const memberId = "member-test-first-observed-batch-failure";
+  const scope = "hosted-address-book-advisory-name:v1";
+  const entries = [
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:first-observed-a",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "First",
+    },
+    {
+      aad: {
+        field: "advisory_name",
+        purpose: "hosted-address-book-advisory-name",
+        rowId: "1:first-observed-b",
+        table: "hosted_address_book_contact",
+      },
+      scope,
+      value: "Second",
+    },
+  ] as const;
+  await provisionActiveHostedDomainRootEnvelopeForUserOnly({
+    domain: "control",
+    prisma: tx.prisma,
+    reason: "test.first-observed-batch-failure",
+    userId: memberId,
+  });
+  const prisma = Object.assign(tx.prisma, {
+    hostedUserCryptoEnvelope: {
+      findMany: createBatchEnvelopeFindMany(tx),
+    },
+  });
+  const sealed = await sealHostedUserSecureBoxStrings({
+    entries,
+    lane: "hosted-member-private-field",
+    prisma,
+    userId: memberId,
+  });
+
+  const firstObservedFailure = new Error("first observed secure-box failure");
+  const laterFailure = new Error("later secure-box failure");
+  let activeOpens = 0;
+  let decryptCalls = 0;
+  let releaseLaterFailure!: () => void;
+  const laterFailureGate = new Promise<void>((resolve) => {
+    releaseLaterFailure = resolve;
+  });
+  vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async () => {
+    decryptCalls += 1;
+    activeOpens += 1;
+    try {
+      if (decryptCalls === 1) {
+        await laterFailureGate;
+        throw laterFailure;
+      }
+      throw firstObservedFailure;
+    } finally {
+      activeOpens -= 1;
+    }
+  });
+
+  let returned = false;
+  const opened = openHostedUserSecureBoxStrings({
+    entries: entries.map((entry, index) => ({
+      aad: entry.aad,
+      scope: entry.scope,
+      userId: memberId,
+      value: sealed[index],
+    })),
+    lane: "hosted-member-private-field",
+    prisma,
+  }).finally(() => {
+    returned = true;
+  });
+
+  await vi.waitFor(() => expect(decryptCalls).toBe(2));
+  await Promise.resolve();
+  expect(returned).toBe(false);
+  expect(activeOpens).toBe(1);
+  releaseLaterFailure();
+  await expect(opened).rejects.toBe(firstObservedFailure);
+  expect(activeOpens).toBe(0);
+  expect(decryptMetrics.activeCount).toBe(0);
+  expect(decryptMetrics.returnedPlaintexts.every((plaintext) =>
+    plaintext.every((byte) => byte === 0)
+  )).toBe(true);
+});
+
 function createEnvelopeReadCountingClient(
   base: HostedCryptoTestTransaction["prisma"],
 ): { client: HostedCryptoTestTransaction["prisma"]; readCount: () => number } {

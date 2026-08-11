@@ -16,12 +16,14 @@ const mocks = vi.hoisted(() => ({
   createHostedDeviceSyncControlPlane: vi.fn(),
   mapHostedConnectionRecord: vi.fn((record: ReturnType<typeof buildHostedRecord>) => ({
     ...record,
+    createdAt: toTestIsoTimestamp(record.createdAt),
     externalAccountId: null,
     updatedAt: toTestIsoTimestamp(record.updatedAt),
   })),
   mapHostedRuntimeRedactedConnectionRecord: vi.fn(
     (record: ReturnType<typeof buildHostedRecord>) => ({
       ...record,
+      createdAt: toTestIsoTimestamp(record.createdAt),
       externalAccountId: null,
       updatedAt: toTestIsoTimestamp(record.updatedAt),
     }),
@@ -72,7 +74,7 @@ function buildHostedRecord(
     accessTokenExpiresAt: string | null;
     accessTokenEncrypted: string | null;
     connectedAt: string;
-    createdAt: string;
+    createdAt: Date | string;
     credentialKind: "oauth_tokens" | "provider_config" | "none";
     credentialMetadata: Record<string, unknown>;
     displayName: string | null;
@@ -150,7 +152,7 @@ function buildPublicConnection(record: ReturnType<typeof buildHostedRecord>) {
   return {
     accessTokenExpiresAt: record.accessTokenExpiresAt ?? null,
     connectedAt: record.connectedAt,
-    createdAt: record.createdAt,
+    createdAt: toTestIsoTimestamp(record.createdAt)!,
     displayName: record.displayName,
     externalAccountId: record.externalAccountId,
     id: record.id,
@@ -290,7 +292,9 @@ function createAuthorityHarness(input: {
     currentStoredAccount = null;
     return currentRecord;
   });
-  const providerApplicationFindFirst = vi.fn(async () => null);
+  const providerApplicationFindFirst = vi.fn(
+    async (): Promise<{ id: string } | null> => null,
+  );
   const tx = {
     deviceConnection: {
       findFirst,
@@ -338,7 +342,6 @@ function createAuthorityHarness(input: {
     listConnectionSourcesForConnections: vi.fn(async (connectionIds: readonly string[]) =>
       connectionSources.filter((source) => connectionIds.includes(source.connectionId))
     ),
-    listRuntimeSnapshotConnectionSources: vi.fn(async () => connectionSources),
     listBoundedConnectionSourcesForConnections: vi.fn(async (sourceInput: {
       connectionIds: readonly string[];
       sourceProviderSlugs?: readonly string[] | null;
@@ -2593,6 +2596,107 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
+  it("resolves one shared app binding once across a 32-connection credential page", async () => {
+    const harness = createAuthorityHarness();
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
+      (_, index) => buildHostedRecord({
+        createdAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
+        id: `conn_app_bound_${String(index + 1).padStart(2, "0")}`,
+        provider: "strava",
+        providerApplicationId: "dpa_shared",
+        providerApplicationRevision: 7,
+      }),
+    );
+    mocks.resolveDeviceProviderApplication.mockResolvedValue({
+      applicationId: "dpa_shared",
+      provider: "strava",
+      providerConfigs: {
+        strava: {
+          clientId: "member-client",
+          clientSecret: "member-secret",
+        },
+      },
+      revision: 7,
+    });
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: true,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledOnce();
+    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledWith({
+      applicationId: "dpa_shared",
+      expectedRevision: 7,
+      memberId: "user_123",
+      prisma: harness.store.prisma,
+      provider: "strava",
+    });
+    expect(harness.readRuntimeConnectionSecretMaterial).toHaveBeenCalledOnce();
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledOnce();
+    expect(response.connections).toHaveLength(32);
+    expect(response.connections.every(
+      (entry) => entry.credential.kind === "oauth_tokens",
+    )).toBe(true);
+    expect(response.providerConfigs).toEqual({
+      strava: {
+        clientId: "member-client",
+        clientSecret: "member-secret",
+      },
+    });
+  });
+
+  it("checks one shared app binding once across a 32-connection redacted page", async () => {
+    const harness = createAuthorityHarness();
+    const records = Array.from(
+      { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT },
+      (_, index) => buildHostedRecord({
+        createdAt: new Date(Date.parse("2026-04-06T12:00:00.000Z") - index * 1_000),
+        id: `conn_app_bound_redacted_${String(index + 1).padStart(2, "0")}`,
+        provider: "strava",
+        providerApplicationId: "dpa_shared",
+        providerApplicationRevision: 7,
+      }),
+    );
+    harness.store.providerApplicationFindFirst.mockResolvedValue({ id: "dpa_shared" });
+    harness.store.prisma.deviceConnection.findMany.mockResolvedValue(records);
+    const { readHostedDeviceSyncRuntimeState } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    const response = await readHostedDeviceSyncRuntimeState({
+      request: new Request("https://example.test/device-sync/runtime/snapshot", {
+        body: JSON.stringify({
+          includeCredentialMaterial: false,
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(harness.store.providerApplicationFindFirst).toHaveBeenCalledOnce();
+    expect(mocks.resolveDeviceProviderApplication).not.toHaveBeenCalled();
+    expect(harness.readRuntimeConnectionSecretMaterial).not.toHaveBeenCalled();
+    expect(harness.store.listBoundedConnectionSourcesForConnections).toHaveBeenCalledOnce();
+    expect(response.connections).toHaveLength(32);
+    expect(response.connections.every(
+      (entry) => entry.credential.kind === "oauth_tokens_redacted",
+    )).toBe(true);
+    expect(response.providerConfigs).toBeUndefined();
+  });
+
   it("does not project client credentials for a non-active app-bound connection", async () => {
     const harness = createAuthorityHarness({
       record: buildHostedRecord({
@@ -2841,7 +2945,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     expect(harness.store.getStoredConnectionAccountForUser).not.toHaveBeenCalled();
     expect(harness.store.getConnectionForUser).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
-    expect(harness.store.listRuntimeSnapshotConnectionSources).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();
     expect(response.connections).toHaveLength(3);
     expect(response.connections.map((connection) => ({
@@ -2850,9 +2953,9 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         (source) => source.sourceProviderSlug,
       ),
     }))).toEqual([
-      { connectionId: "conn_a", sourceProviderSlugs: ["source_1"] },
-      { connectionId: "conn_b", sourceProviderSlugs: ["source_2"] },
       { connectionId: "conn_c", sourceProviderSlugs: ["source_3"] },
+      { connectionId: "conn_b", sourceProviderSlugs: ["source_2"] },
+      { connectionId: "conn_a", sourceProviderSlugs: ["source_1"] },
     ]);
   });
 
@@ -2865,8 +2968,9 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const records = Array.from(
       { length: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1 },
       (_, index) => buildHostedRecord({
+        createdAt: new Date(baseTime - index * 1_000),
         id: `conn_${String(32 - index).padStart(3, "0")}`,
-        updatedAt: new Date(baseTime - Math.max(0, index - 1) * 1_000),
+        updatedAt: new Date(baseTime + index * 1_000),
       }),
     );
     harness.store.prisma.deviceConnection.findMany.mockResolvedValueOnce(records);
@@ -2889,13 +2993,13 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       records.slice(0, 32).map((record) => record.id),
     );
     expect(firstPage.nextCursor).toEqual({
+      createdAt: (records[31]!.createdAt as Date).toISOString(),
       id: records[31]!.id,
-      updatedAt: (records[31]!.updatedAt as Date).toISOString(),
     });
     expect(harness.store.prisma.deviceConnection.findMany).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         take: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT + 1,
         where: expect.objectContaining({
           userId: "user_123",
@@ -2927,10 +3031,10 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         where: expect.objectContaining({
           AND: [{
             OR: [
-              { updatedAt: { lt: new Date(firstPage.nextCursor!.updatedAt) } },
+              { createdAt: { lt: new Date(firstPage.nextCursor!.createdAt) } },
               {
+                createdAt: new Date(firstPage.nextCursor!.createdAt),
                 id: { lt: firstPage.nextCursor!.id },
-                updatedAt: new Date(firstPage.nextCursor!.updatedAt),
               },
             ],
           }],
@@ -3035,7 +3139,6 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       limitPerConnection: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
       sourceProviderSlugs: ["whoop", "whoop_v2", "whoop-v2"],
     });
-    expect(harness.store.listRuntimeSnapshotConnectionSources).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSourcesForConnections).not.toHaveBeenCalled();
     expect(harness.store.listConnectionSources).not.toHaveBeenCalled();
     expect(response.connections[0]?.sources).toEqual([

@@ -322,53 +322,60 @@ export async function openHostedUserSecureBoxStrings(input: {
   );
 
   try {
+    let firstObservedFailure: unknown;
+    let hasObservedFailure = false;
     const settled = await Promise.allSettled(parsedEntries.map(async (parsed) => {
-      if (!parsed) {
-        return null;
-      }
-      const root = rootsByKey.get(createHostedSecureBoxRootReferenceKey({
-        domain,
-        rootKeyId: parsed.envelope.rootKeyId,
-        userId: parsed.entry.userId,
-      }));
-      if (!root) {
-        throw new Error("Hosted secure-box root was not returned by the batch unwrap.");
-      }
-      const rootKey = Uint8Array.from(root.rootKey);
       try {
-        const aad = buildHostedSecureBoxAad({
-          ...parsed.entry.aad,
-          domain,
-          lane: input.lane,
-          scope: parsed.entry.scope,
-          tenant: "murph-hosted",
-          userId: parsed.entry.userId,
-        });
-        const plaintext = await openHostedSecureBox({
-          aad,
-          envelope: parsed.envelope,
-          expectedDomain: domain,
-          expectedLane: input.lane,
-          expectedRootKeyId: parsed.envelope.rootKeyId,
-          expectedScope: parsed.entry.scope,
-          rootKey,
-        });
-        try {
-          return new TextDecoder().decode(plaintext);
-        } finally {
-          plaintext.fill(0);
+        if (!parsed) {
+          return null;
         }
-      } finally {
-        rootKey.fill(0);
+        const root = rootsByKey.get(createHostedSecureBoxRootReferenceKey({
+          domain,
+          rootKeyId: parsed.envelope.rootKeyId,
+          userId: parsed.entry.userId,
+        }));
+        if (!root) {
+          throw new Error("Hosted secure-box root was not returned by the batch unwrap.");
+        }
+        const rootKey = Uint8Array.from(root.rootKey);
+        try {
+          const aad = buildHostedSecureBoxAad({
+            ...parsed.entry.aad,
+            domain,
+            lane: input.lane,
+            scope: parsed.entry.scope,
+            tenant: "murph-hosted",
+            userId: parsed.entry.userId,
+          });
+          const plaintext = await openHostedSecureBox({
+            aad,
+            envelope: parsed.envelope,
+            expectedDomain: domain,
+            expectedLane: input.lane,
+            expectedRootKeyId: parsed.envelope.rootKeyId,
+            expectedScope: parsed.entry.scope,
+            rootKey,
+          });
+          try {
+            return new TextDecoder().decode(plaintext);
+          } finally {
+            plaintext.fill(0);
+          }
+        } finally {
+          rootKey.fill(0);
+        }
+      } catch (error) {
+        if (!hasObservedFailure) {
+          firstObservedFailure = error;
+          hasObservedFailure = true;
+        }
+        throw error;
       }
     }));
-    const failed = settled.find(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    if (failed) {
+    if (hasObservedFailure) {
       // Drain every started open before releasing root ownership or returning
       // an authenticity failure to the caller.
-      throw failed.reason;
+      throw firstObservedFailure;
     }
     return settled.map((result) => {
       if (result.status === "rejected") {

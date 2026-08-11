@@ -578,7 +578,7 @@ export async function readCompanionDeviceSyncStatus(input: {
     connectionIds: connections.map((connection) => connection.id),
     excludeDisconnected: false,
     limitPerConnection: COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
-    sourceProviderSlugs: null,
+    sourceProviderSlugs: sourceProviderSlug === null ? null : [sourceProviderSlug],
   });
   const sourcesByConnectionId = new Map<string, typeof projectedSources>();
   for (const source of projectedSources) {

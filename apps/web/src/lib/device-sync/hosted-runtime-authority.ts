@@ -126,13 +126,13 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     andFilters.push({ id: { in: [] } });
   }
   if (parsed.cursor && !parsed.connectionId) {
-    const cursorUpdatedAt = new Date(parsed.cursor.updatedAt);
+    const cursorCreatedAt = new Date(parsed.cursor.createdAt);
     andFilters.push({
       OR: [
-        { updatedAt: { lt: cursorUpdatedAt } },
+        { createdAt: { lt: cursorCreatedAt } },
         {
+          createdAt: cursorCreatedAt,
           id: { lt: parsed.cursor.id },
-          updatedAt: cursorUpdatedAt,
         },
       ],
     });
@@ -172,7 +172,7 @@ export async function readHostedDeviceSyncRuntimeState(input: {
           }
         : {}),
     },
-    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: pageLimit + 1,
   } satisfies Prisma.DeviceConnectionFindManyArgs;
   const collectedRecords: HostedRuntimeConnectionRecord[] = parsed.includeCredentialMaterial
@@ -259,8 +259,8 @@ export async function readHostedDeviceSyncRuntimeState(input: {
     generatedAt: new Date().toISOString(),
     nextCursor: hasNextPage
       ? {
+          createdAt: records.at(-1)!.createdAt.toISOString(),
           id: records.at(-1)!.id,
-          updatedAt: records.at(-1)!.updatedAt.toISOString(),
         }
       : null,
     ...(Object.keys(providerApplicationRuntime.providerConfigs).length > 0
@@ -752,9 +752,16 @@ async function resolveHostedRuntimeProviderApplications(input: {
     string,
     { connectionIds: string[]; identity: string | null }
   >();
+  const redactedBindingCurrent = new Map<string, boolean>();
+  const resolvedApplications = new Map<
+    string,
+    Awaited<ReturnType<typeof resolveDeviceProviderApplication>> | null
+  >();
 
-  // Resolve sequentially to avoid turning one runtime snapshot into a burst of
-  // secure-box/KMS and database reads. No secret or decryption error is logged.
+  // Resolve distinct bindings sequentially to avoid turning one runtime
+  // snapshot into a burst of secure-box/KMS and database reads. Connections
+  // that share the same exact binding reuse its authority decision. No secret
+  // or decryption error is logged.
   for (const record of input.records) {
     if (record.status !== "active") {
       continue;
@@ -770,64 +777,77 @@ async function resolveHostedRuntimeProviderApplications(input: {
       blockedConnectionIds.add(record.id);
       continue;
     }
+    const bindingKey = `${record.provider}\n${applicationId}\n${revision}`;
 
     if (!input.includeCredentialMaterial) {
-      if (!(await isHostedProviderApplicationBindingCurrent({
-        record,
-        tx: input.prisma,
-        userId: input.userId,
-      }))) {
+      let isCurrent = redactedBindingCurrent.get(bindingKey);
+      if (isCurrent === undefined) {
+        isCurrent = await isHostedProviderApplicationBindingCurrent({
+          record,
+          tx: input.prisma,
+          userId: input.userId,
+        });
+        redactedBindingCurrent.set(bindingKey, isCurrent);
+      }
+      if (!isCurrent) {
         blockedConnectionIds.add(record.id);
       }
       continue;
     }
 
-    try {
-      const application = await resolveDeviceProviderApplication({
-        applicationId,
-        expectedRevision: revision,
-        memberId: input.userId,
-        prisma: input.prisma,
-        provider: record.provider,
-      });
-      const config = application.providerConfigs[application.provider];
-      if (!config) {
-        blockedConnectionIds.add(record.id);
-        continue;
-      }
-
-      const identity = `${application.applicationId}:r${application.revision}`;
-      const existing = providerIdentity.get(application.provider);
-      if (existing?.identity === null) {
-        existing.connectionIds.push(record.id);
-        blockedConnectionIds.add(record.id);
-        continue;
-      }
-      if (existing && existing.identity !== identity) {
-        for (const connectionId of existing.connectionIds) {
-          blockedConnectionIds.add(connectionId);
-        }
-        blockedConnectionIds.add(record.id);
-        providerIdentity.set(application.provider, {
-          connectionIds: [...existing.connectionIds, record.id],
-          identity: null,
+    let application = resolvedApplications.get(bindingKey);
+    if (application === undefined) {
+      try {
+        application = await resolveDeviceProviderApplication({
+          applicationId,
+          expectedRevision: revision,
+          memberId: input.userId,
+          prisma: input.prisma,
+          provider: record.provider,
         });
-        delete providerConfigs[application.provider];
-        continue;
+      } catch (error) {
+        if (!isDeviceProviderApplicationError(error)) {
+          throw error;
+        }
+        application = null;
       }
-
-      providerIdentity.set(application.provider, {
-        connectionIds: [...(existing?.connectionIds ?? []), record.id],
-        identity,
-      });
-      providerConfigs[application.provider] = config as never;
-    } catch (error) {
-      if (isDeviceProviderApplicationError(error)) {
-        blockedConnectionIds.add(record.id);
-        continue;
-      }
-      throw error;
+      resolvedApplications.set(bindingKey, application);
     }
+    if (!application) {
+      blockedConnectionIds.add(record.id);
+      continue;
+    }
+
+    const config = application.providerConfigs[application.provider];
+    if (!config) {
+      blockedConnectionIds.add(record.id);
+      continue;
+    }
+
+    const identity = `${application.applicationId}:r${application.revision}`;
+    const existing = providerIdentity.get(application.provider);
+    if (existing?.identity === null) {
+      existing.connectionIds.push(record.id);
+      blockedConnectionIds.add(record.id);
+      continue;
+    }
+    if (existing && existing.identity !== identity) {
+      for (const connectionId of existing.connectionIds) {
+        blockedConnectionIds.add(connectionId);
+      }
+      providerIdentity.set(application.provider, {
+        connectionIds: [...existing.connectionIds, record.id],
+        identity: null,
+      });
+      delete providerConfigs[application.provider];
+      continue;
+    }
+
+    providerIdentity.set(application.provider, {
+      connectionIds: [...(existing?.connectionIds ?? []), record.id],
+      identity,
+    });
+    providerConfigs[application.provider] = config as never;
   }
 
   return { blockedConnectionIds, providerConfigs };
@@ -1317,9 +1337,8 @@ function sortHostedRuntimeConnectionSnapshots(
   connections: HostedRuntimeConnectionSnapshot[],
 ): HostedRuntimeConnectionSnapshot[] {
   return [...connections].sort((left, right) => {
-    const leftUpdatedAt = left.connection.updatedAt ?? left.connection.createdAt;
-    const rightUpdatedAt = right.connection.updatedAt ?? right.connection.createdAt;
-    return rightUpdatedAt.localeCompare(leftUpdatedAt) || right.connection.id.localeCompare(left.connection.id);
+    return right.connection.createdAt.localeCompare(left.connection.createdAt)
+      || right.connection.id.localeCompare(left.connection.id);
   });
 }
 

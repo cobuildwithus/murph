@@ -317,10 +317,11 @@ path.
 
 The shared `@murphai/device-syncd/hosted-runtime` contract owns the snapshot
 work ceilings. A snapshot page contains at most 32 connections, ordered by
-`updatedAt DESC, id DESC`. Web uses an `(updatedAt, id)` keyset predicate and
-reads at most 33 rows, returning the last emitted row as `nextCursor` only when
-the extra row proves another page exists. Caller limits are advisory below the
-ceiling; larger values cannot increase SQL, source-projection, or decrypt work.
+`createdAt DESC, id DESC`. Web uses an immutable `(createdAt, id)` keyset
+predicate and reads at most 33 rows, returning the last emitted row as
+`nextCursor` only when the extra row proves another page exists. Caller limits
+are advisory below the ceiling; larger values cannot increase SQL,
+source-projection, or decrypt work.
 A `connectionId` lookup remains an exact member-owned lookup rather than a
 collection scan.
 

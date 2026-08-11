@@ -5546,8 +5546,8 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
   it("forwards hosted device-sync snapshot cursors without owning pagination policy", async () => {
     const cursor = {
+      createdAt: "2026-08-11T12:00:00.000Z",
       id: "conn_032",
-      updatedAt: "2026-08-11T12:00:00.000Z",
     };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);

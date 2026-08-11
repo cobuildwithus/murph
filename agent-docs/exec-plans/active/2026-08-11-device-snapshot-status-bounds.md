@@ -31,7 +31,7 @@ companion status must use narrow set reads.
 ```text
 signed runtime snapshot
         |
-        +-- protocol-owned page/cursor and total hydration bound
+        +-- immutable (createdAt, id) page cursor and total hydration bound
         +-- credential-free narrow SQL projection -> opaque connection id
         `-- credential-bearing projection -> set root read -> <=4 KMS unwraps
 
@@ -51,6 +51,13 @@ companion bearer status
 - [x] Apply only the accepted bounded projection, paging, and batch changes.
 - [x] Add deterministic 32-row query, selected-column, KMS, concurrency,
       cursor, isolation, and incident-shape proof.
+- [x] Resolve the preliminary and first full-audit findings: use an immutable
+      cursor, collect every `list_accounts` page, scope companion source SQL,
+      preserve the first observed secure-box failure while draining, dedupe
+      exact application bindings, and remove the displaced per-connection
+      source-projection API.
+- [x] Replay the real 1,641-receipt incident and the maximum admitted
+      app-bound runtime/companion overlap against isolated PostgreSQL.
 - [ ] Run focused tests, direct replay, typecheck, lint, diff, privacy, and
       exact-head completion gates.
 - [ ] Open the PR after the prerequisite guidance PR merges, complete
@@ -67,9 +74,15 @@ companion bearer status
 Local replay evidence: the real PostgreSQL spike harness passed against an
 isolated temporary database with 1,641 durable webhook receipts, the original
 120-second distribution and 31-receipt peak, 20 overlapping snapshot reads, 40
-foreground reads, and a 15-connection client pool. It retained all durable
-work, completed every snapshot through one bounded source-set read, and stayed
-within the configured pool ceiling.
+foreground reads, an overlapping companion status read, and a 15-connection
+client pool. It retained all durable work, completed every snapshot through one
+bounded source-set read, and stayed within the configured pool ceiling. The
+same real-database suite proves that mutating `updatedAt` on the 33rd connection
+cannot make the immutable page cursor omit it, and overlaps one 32-connection
+app-bound runtime snapshot with one 32-connection scoped companion status read.
+That maximum-shape proof performs one application-binding lookup, filters 33
+unrelated source rows in SQL, and fails closed only when the requested source
+itself reaches 33 rows on one connection.
 
 ## Rollout
 

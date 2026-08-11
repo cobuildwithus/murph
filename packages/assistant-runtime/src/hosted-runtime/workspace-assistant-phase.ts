@@ -94,9 +94,6 @@ import {
   listConfiguredDeviceSyncReconnectTargets,
 } from "@murphai/device-syncd/connect-config";
 import {
-  HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
-} from "@murphai/device-syncd/hosted-runtime";
-import {
   type AssistantCurrentDeliveryRoute,
   getAssistantAutomationRouteDeliverabilityIssue,
   normalizeAssistantRouteString,
@@ -104,6 +101,9 @@ import {
   resolveAssistantDeliveryRouteWithCurrentRoute,
 } from "@murphai/operator-config/assistant/current-delivery-route";
 
+import {
+  fetchCompleteHostedDeviceSyncRuntimeSnapshot,
+} from "./device-sync-snapshot-pagination.ts";
 import {
   collectHostedAssistantDeliverySideEffects,
   createHostedAssistantProgressDeliveryDependencies,
@@ -8489,9 +8489,9 @@ function resolveHostedWorkspaceDeviceTool(input: {
       if (request.action === "list_accounts") {
         const provider = normalizeAssistantRouteString(request.provider);
         const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
-        const snapshot = await deviceSyncPort.fetchSnapshot({
+        const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
+          deviceSyncPort,
           includeCredentialMaterial: false,
-          limit: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
           ...(provider ? { provider } : {}),
           signal: context?.signal ?? null,
           ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
