@@ -33,7 +33,7 @@ afterEach(async () => {
 })
 
 describe('murph.generate_image dynamic tool schema', () => {
-  it('requires a request, known preference, or owning flow for richer media', () => {
+  it('keeps modality-specific richer-media eligibility contracts', () => {
     expect(MURPH_GENERATE_IMAGE_TOOL.description).toContain(
       'a known preference supports visual help',
     )
@@ -56,6 +56,15 @@ describe('murph.generate_image dynamic tool schema', () => {
       'explicitly asks for a voice memo and marks voice welcome and privacy-safe',
     )
     expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
+      'current user explicitly requests generated music',
+    )
+    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
+      'an admitted loaded skill or owning flow explicitly authorizes a song for this turn',
+    )
+    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
+      'The active skill owns song eligibility',
+    )
+    expect(MURPH_GENERATE_SONG_TOOL.description).not.toContain(
       'a known preference or the automation instructions mark music welcome and privacy-safe',
     )
   })
