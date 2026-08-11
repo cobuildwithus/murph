@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { deleteMemberOwnedProviderSetupExternalStateForAccountDeletion } from "@/src/lib/device-sync/provider-setup/account-deletion";
 import type { MemberOwnedProviderSetupRegistration } from "@/src/lib/device-sync/provider-setup/registry";
+import { PrismaDeviceProviderSetupStore } from "@/src/lib/device-sync/provider-setup/store";
 import type {
   MemberOwnedProviderApplicationDeleteResult,
   MemberOwnedProviderSetupRecord,
@@ -90,6 +91,71 @@ function adapterFactory(adapter: ReturnType<typeof createAdapter>) {
 }
 
 describe("member-owned provider setup account deletion", () => {
+  it("deletes setup-only state without acquiring a provider browser", async () => {
+    const store = new MemoryDeletionStore();
+    store.setup = buildSetup({
+      browserRunId: "hcr_setup_owned",
+      providerApplicationId: null,
+      providerApplicationRevision: null,
+      providerSubmissionAt: null,
+      status: "pending",
+    });
+    const adapter = createAdapter();
+    const factory = adapterFactory(adapter);
+
+    await expect(deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
+      adapterFactory: factory,
+      memberId: "member_synthetic",
+      prisma: PRISMA_NOT_USED,
+      store,
+    })).resolves.toBeUndefined();
+
+    expect(factory).not.toHaveBeenCalled();
+    expect(adapter.ensureBrowserRun).not.toHaveBeenCalled();
+    expect(adapter.deleteOwnedApplication).not.toHaveBeenCalled();
+    expect(store.statuses).toEqual(["deleted"]);
+    expect(store.setup).toMatchObject({
+      active: true,
+      browserRunId: "hcr_setup_owned",
+      providerApplicationId: null,
+      providerApplicationRevision: null,
+      providerSubmissionAt: null,
+      status: "deleted",
+    });
+  });
+
+  it("inspects a submission-fenced setup even before application binding", async () => {
+    const store = new MemoryDeletionStore();
+    store.setup = buildSetup({
+      providerApplicationId: null,
+      providerApplicationRevision: null,
+      providerSubmissionAt: new Date("2026-08-11T12:01:00.000Z"),
+      status: "inspection_required",
+    });
+    const adapter = createAdapter();
+    const factory = adapterFactory(adapter);
+
+    await deleteMemberOwnedProviderSetupExternalStateForAccountDeletion({
+      adapterFactory: factory,
+      memberId: "member_synthetic",
+      prisma: PRISMA_NOT_USED,
+      store,
+    });
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(adapter.ensureBrowserRun).toHaveBeenCalledWith({
+      expectedRunId: null,
+      memberId: "member_synthetic",
+      setupId: "dps_synthetic",
+    });
+    expect(adapter.deleteOwnedApplication).toHaveBeenCalledWith({
+      memberId: "member_synthetic",
+      runId: "hcr_setup_owned",
+      setupId: "dps_synthetic",
+    });
+    expect(store.setup.status).toBe("deleted");
+  });
+
   it.each(["deleted", "missing", "unrelated_application"] as const)(
     "finishes exact, absent, or unrelated-safe dashboard result %s",
     async (kind) => {
@@ -213,6 +279,75 @@ describe("member-owned provider setup account deletion", () => {
     });
   });
 });
+
+describe("member-owned provider setup store bounds", () => {
+  it("loads only active setups in stable provider order", async () => {
+    const findMany = vi.fn(async (input: object) => {
+      void input;
+      return [buildSetup()];
+    });
+    const store = new PrismaDeviceProviderSetupStore(createPrismaStoreStub({
+      deviceProviderSetup: { findMany },
+    }));
+
+    await expect(store.listMemberSetups("member_synthetic")).resolves.toHaveLength(1);
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ provider: "asc" }, { createdAt: "asc" }],
+      where: {
+        active: true,
+        memberId: "member_synthetic",
+      },
+    }));
+  });
+
+  it("reads at most two active connections to distinguish exact from conflict", async () => {
+    const findMany = vi.fn(async (input: object) => {
+      void input;
+      return [{
+        id: "dc_synthetic",
+        providerApplicationId: "dpa_synthetic",
+        providerApplicationRevision: 2,
+      }];
+    });
+    const store = new PrismaDeviceProviderSetupStore(createPrismaStoreStub({
+      deviceConnection: { findMany },
+    }));
+
+    await expect(store.readConnectionDisposition(buildSetup())).resolves.toEqual({
+      binding: {
+        applicationId: "dpa_synthetic",
+        provider: "strava",
+        revision: 2,
+      },
+      connectionId: "dc_synthetic",
+      kind: "exact",
+    });
+
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: { connectedAt: "desc" },
+      take: 2,
+      where: {
+        provider: "strava",
+        status: { not: "disconnected" },
+        userId: "member_synthetic",
+      },
+    }));
+  });
+});
+
+function createPrismaStoreStub(
+  delegates: Readonly<Record<string, object>>,
+): PrismaClient {
+  const prisma = Object.create(null) as PrismaClient;
+  for (const [name, delegate] of Object.entries(delegates)) {
+    Object.defineProperty(prisma, name, {
+      configurable: true,
+      value: delegate,
+    });
+  }
+  return prisma;
+}
 
 function buildSetup(
   overrides: Partial<MemberOwnedProviderSetupRecord> = {},

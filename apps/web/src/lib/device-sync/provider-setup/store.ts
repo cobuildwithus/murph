@@ -223,6 +223,7 @@ export class PrismaDeviceProviderSetupStore {
         providerApplicationId: true,
         providerApplicationRevision: true,
       },
+      take: 2,
       where: {
         provider: setup.provider,
         status: { not: "disconnected" },
@@ -319,7 +320,10 @@ export class PrismaDeviceProviderSetupStore {
     const rows = await this.prisma.deviceProviderSetup.findMany({
       orderBy: [{ provider: "asc" }, { createdAt: "asc" }],
       select: DEVICE_PROVIDER_SETUP_SELECT,
-      where: { memberId },
+      where: {
+        active: true,
+        memberId,
+      },
     });
     return rows.map(mapSetup);
   }

@@ -40,6 +40,21 @@ export async function deleteMemberOwnedProviderSetupExternalStateForAccountDelet
     .filter((setup) => setup.active && setup.status !== "deleted");
 
   for (const setup of setups) {
+    // Before submission or binding, no provider application can exist. The
+    // ordinary computer-use cleanup still owns any setup browser run.
+    if (
+      setup.providerApplicationId === null
+      && setup.providerApplicationRevision === null
+      && setup.providerSubmissionAt === null
+    ) {
+      await transitionDeletionState(store, setup, {
+        completedAt: new Date(),
+        lastErrorCode: null,
+        status: "deleted",
+      });
+      continue;
+    }
+
     const registration = requireMemberOwnedProviderSetupRegistration(
       setup.provider,
     );
