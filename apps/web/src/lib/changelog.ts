@@ -68,7 +68,7 @@ const RAW_CHANGELOG_EDITIONS = [
     title:
       "Generated group photos, Starter access, patterns, reliable referrals, reminders, cards, voices, and web search",
     summary:
-      "Murph can now reuse an image it made as a group photo after an explicit request, Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, referral celebrations stay with their intended conversation, reminders keep the local time you asked for, completed workout rows stay clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Murph can now reuse a visible image it made as a group photo after an explicit request. Starter usage lasts until used; patterns compare repeated actions with next-day sleep and recovery; referral celebrations stay in the intended conversation; reminders preserve local time; workout rows stay clear; voice memos use your selected voice; and managed OpenAI web search reaches current information.",
     items: [
       {
         id: "generated-image-group-photo",
