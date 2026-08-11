@@ -35,6 +35,8 @@ describe('assistant proactive follow-through', () => {
     )
     expect(direct).toContain('stop asking about a topic')
     expect(direct).toContain('preserve unrelated support')
+    expect(direct).toContain('exact durable support boundary')
+    expect(direct).toContain('existing canonical memory or preference surface')
     expect(direct).toContain('pause the weekly managed goal-support check too')
     expect(group).not.toContain('Direct proactive follow-through:')
   })
@@ -67,6 +69,10 @@ describe('assistant proactive follow-through', () => {
     expect(seed?.instructions).toContain('meal notes or photos')
     expect(seed?.instructions).toContain('later clear yes')
     expect(seed?.instructions).toContain('stop that topic')
+    expect(seed?.instructions).toContain('durable support boundaries')
+    expect(seed?.instructions).toContain(
+      'no-proactive-support boundary vetoes its matching topic',
+    )
     expect(seed?.instructions).toContain(
       'Missing, sparse, stale, misclassified, messy, or contradictory data is unknown',
     )
