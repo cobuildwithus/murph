@@ -1736,7 +1736,10 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("does not append another device-sync wake for level webhooks while dirty work is already pending", async () => {
-    mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
+    mocks.upsertDirtyConnection.mockResolvedValueOnce({
+      dirty: buildDirtyConnectionRecord(),
+      shouldRequestWake: false,
+    });
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         method: "POST",
@@ -1747,7 +1750,8 @@ describe("hosted device-sync wakes", () => {
       accepted: true,
     });
 
-    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
@@ -4209,6 +4213,9 @@ describe("hosted device-sync wakes", () => {
       resources: [
         {
           count: 1,
+          eventToProviderSendBucket: null,
+          firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
+          providerSendToWebhookMs: null,
           jobKind: "reconcile",
           payload: {
             windowStart: "2026-03-19T00:00:00.000Z",
@@ -4906,8 +4913,11 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
   });
 
-  it("does not rewrite dirty state when a level-triggered hint is already pending inside acceptance", async () => {
-    mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
+  it("merges timing into pending dirty state without appending another wake", async () => {
+    mocks.upsertDirtyConnection.mockResolvedValueOnce({
+      dirty: buildDirtyConnectionRecord(),
+      shouldRequestWake: false,
+    });
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -4926,14 +4936,17 @@ describe("hosted device-sync wakes", () => {
 
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith("oura", "trace_123", "claim-token", mocks.prismaTx);
-    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
   });
 
   it("coalesces level-triggered webhooks after committed dirty state exists", async () => {
-    mocks.hasPendingDirtyConnection.mockResolvedValueOnce(true);
+    mocks.upsertDirtyConnection.mockResolvedValueOnce({
+      dirty: buildDirtyConnectionRecord(),
+      shouldRequestWake: false,
+    });
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -4951,7 +4964,7 @@ describe("hosted device-sync wakes", () => {
     });
 
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
   });
@@ -5118,9 +5131,14 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("does not duplicate mailbox wakes when later level webhooks coalesce behind the dirty row", async () => {
-    mocks.hasPendingDirtyConnection
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+    let dirtyRevision = 0n;
+    mocks.upsertDirtyConnection.mockImplementation(async () => {
+      dirtyRevision += 1n;
+      return {
+        dirty: buildDirtyConnectionRecord({ dirtyRevision }),
+        shouldRequestWake: dirtyRevision === 1n,
+      };
+    });
 
     for (let index = 0; index < 2; index += 1) {
       const controlPlane = createHostedDeviceSyncPublicIngressService(
@@ -5140,7 +5158,7 @@ describe("hosted device-sync wakes", () => {
       });
     }
 
-    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(2);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
@@ -5229,8 +5247,8 @@ describe("hosted device-sync wakes", () => {
     }
 
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
-    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
-    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(1);
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(2_500);
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2_500);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(1);
   });
@@ -5428,6 +5446,7 @@ describe("hosted device-sync wakes", () => {
               },
             ],
             occurredAt: "2026-03-26T11:59:00.000Z",
+            providerSentAt: "2026-03-26T11:59:30.000Z",
             payload: {
               Authorization: "Bearer provider-secret-token",
               nested: [
@@ -5492,6 +5511,9 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventToProviderSendBucket: "under_5_minutes",
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
+        providerSendToWebhookMs: 30_000,
         jobKind: "reconcile",
         payload: {
           windowStart: "2026-03-19T00:00:00.000Z",
@@ -5608,6 +5630,9 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventToProviderSendBucket: null,
+        firstWebhookReceivedAt: "2026-05-26T12:00:00.000Z",
+        providerSendToWebhookMs: null,
         jobKind: "resource",
         payload: {
           eventType: "daily.data.steps.created",
@@ -5924,6 +5949,9 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventToProviderSendBucket: null,
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
+        providerSendToWebhookMs: null,
         jobKind: "resource",
         payload: {
           eventType: "workout.updated",
@@ -5939,6 +5967,9 @@ describe("hosted device-sync wakes", () => {
       },
       {
         count: 1,
+        eventToProviderSendBucket: null,
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
+        providerSendToWebhookMs: null,
         jobKind: "delete",
         payload: {
           eventType: "workout.deleted",
@@ -6071,6 +6102,9 @@ describe("hosted device-sync wakes", () => {
     expect(dirtyResources).toEqual([
       {
         count: 1,
+        eventToProviderSendBucket: null,
+        firstWebhookReceivedAt: "2026-03-26T12:00:00.000Z",
+        providerSendToWebhookMs: null,
         jobKind: "delete",
         payload: {
           dataType: "session",

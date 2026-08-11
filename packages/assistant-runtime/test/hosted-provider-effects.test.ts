@@ -397,6 +397,7 @@ describe("hosted provider effects", () => {
       fetchImplementation: fetchMock as typeof fetch,
     })).resolves.toEqual({
       providerMessageEffects: [{
+        carriesIntentMedia: true,
         message: "hello\n\nDead bug setup",
         providerMessageId: "recovered-message",
       }],
@@ -867,6 +868,7 @@ describe("hosted provider effects", () => {
       fetchImplementation,
     })).resolves.toEqual({
       providerMessageEffects: [{
+        carriesIntentMedia: true,
         message: "hello\n\nDead bug setup",
         providerMessageId: "recovered-message",
       }],

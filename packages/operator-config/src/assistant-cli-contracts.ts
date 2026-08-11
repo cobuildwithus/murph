@@ -786,6 +786,7 @@ const assistantChannelCleanupMessageSchema = z
 
 export const assistantProviderMessageEffectSchema = z
   .object({
+    carriesIntentMedia: z.literal(true).optional(),
     providerMessageId: z.string().min(1),
     message: z.string().min(1).nullable(),
   })

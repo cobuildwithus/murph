@@ -16,6 +16,7 @@ import {
   sanitizeAssistantDeliveryErrorForPersistence,
   sanitizeAssistantOutboxIntentForPersistence,
 } from '../redaction.js'
+import { readDeliveredProviderMessageEffects } from '../channels/helpers.js'
 import { reconcileAssistantCronDeliveryIntent } from '../cron/delivery-reconciliation.js'
 import { repairAssistantOutboxReceiptForIntent } from './receipt-repair.js'
 import {
@@ -775,6 +776,9 @@ function readLinqPartialDeliveryFromError(input: {
   if (!providerMessageIds || !target || !targetKind) {
     return null
   }
+  const providerMessageEffects = (
+    readDeliveredProviderMessageEffects(context) ?? []
+  ).filter((effect) => providerMessageIds.includes(effect.providerMessageId))
 
   return assistantChannelDeliverySchema.parse({
     channel: 'linq',
@@ -782,6 +786,9 @@ function readLinqPartialDeliveryFromError(input: {
     messageLength: input.sending.message.length,
     providerMessageId: providerMessageIds.at(-1) ?? null,
     providerMessageIds,
+    ...(providerMessageEffects.length > 0
+      ? { providerMessageEffects }
+      : {}),
     providerThreadId:
       readNonEmptyString(errorRecord?.providerThreadId) ??
       readNonEmptyString(context?.providerThreadId) ??
@@ -967,6 +974,7 @@ function sameAssistantDeliveryProviderMessageEffects(
     normalizedLeft.every((effect, index) => {
       const other = normalizedRight[index]
       return other !== undefined &&
+        effect.carriesIntentMedia === other.carriesIntentMedia &&
         effect.providerMessageId === other.providerMessageId &&
         effect.message === other.message
     })
