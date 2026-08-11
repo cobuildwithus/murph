@@ -1,6 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-import { isUniqueViolation } from "./prisma-errors";
+import type { PrismaClient } from "@prisma/client";
 
 export class PrismaHostedBrowserAssertionNonceStore {
   readonly prisma: PrismaClient;
@@ -17,34 +15,33 @@ export class PrismaHostedBrowserAssertionNonceStore {
     now: string;
     expiresAt: string;
   }): Promise<boolean> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.deviceBrowserAssertionNonce.deleteMany({
-        where: {
-          expiresAt: {
-            lte: new Date(input.now),
-          },
-        },
-      });
+    // Keep the volatile clock read in RETURNING so it runs only for an insert
+    // that succeeds after any unique-conflict wait; a late row is a tombstone.
+    const rows = await this.prisma.$queryRaw<Array<{ admitted: boolean }>>`
+      INSERT INTO "device_browser_assertion_nonce" AS browser_nonce (
+        "nonce_hash",
+        "user_id",
+        "method",
+        "path",
+        "created_at",
+        "expires_at"
+      )
+      VALUES (
+        ${input.nonceHash},
+        ${input.userId},
+        ${input.method},
+        ${input.path},
+        ${input.now}::timestamptz AT TIME ZONE 'UTC',
+        ${input.expiresAt}::timestamptz AT TIME ZONE 'UTC'
+      )
+      ON CONFLICT ("nonce_hash") DO NOTHING
+      RETURNING
+        browser_nonce."expires_at" > date_trunc(
+          'milliseconds',
+          clock_timestamp() AT TIME ZONE 'UTC'
+        ) AS "admitted"
+    `;
 
-      try {
-        await tx.deviceBrowserAssertionNonce.create({
-          data: {
-            nonceHash: input.nonceHash,
-            userId: input.userId,
-            method: input.method,
-            path: input.path,
-            createdAt: new Date(input.now),
-            expiresAt: new Date(input.expiresAt),
-          },
-        });
-        return true;
-      } catch (error) {
-        if (isUniqueViolation(error)) {
-          return false;
-        }
-
-        throw error;
-      }
-    });
+    return rows[0]?.admitted === true;
   }
 }

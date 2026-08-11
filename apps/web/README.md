@@ -1208,6 +1208,15 @@ The signed assertion must include hosted user claims plus:
 
 Each assertion nonce is consumed once so replayed assertions fail even if the
 user tuple is unchanged.
+The assertion uses integer-second `exp` claims and the shared 60-second skew
+policy, so it remains admissible through the millisecond before
+`(exp + 61) * 1000` and is first invalid exactly at that instant. New nonce
+rows persist that first-invalid horizon, while request admission performs one
+primary-key insert and treats only the exact nonce conflict as replay. The
+bounded hourly hosted-retention owner deletes only rows whose stored
+`expiresAt <= now - 61 seconds`; this retains legacy raw-`exp` rows through the
+full acceptance window and deliberately retains new-format rows for an
+additional 61 seconds.
 There is no unauthenticated development-user fallback; local development must
 exercise the same signed assertion contract.
 
