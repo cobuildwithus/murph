@@ -132,9 +132,20 @@ export function createAssistantGroupEmailOutboxTool(input: {
         authority: prepared.authority,
         groupId: prepared.groupId,
       })
+      const acceptedDeliveryIdempotencyKeys = [
+        deliveryIdempotencyKey,
+        [
+          'group-email-effect',
+          prepared.authority.automationId,
+          prepared.authority.occurrenceAt,
+          prepared.groupId,
+        ].join(':'),
+      ]
       const intents = await listAssistantOutboxIntents(input.vault)
       const currentIntents = intents.filter(
-        (intent) => intent.deliveryIdempotencyKey === deliveryIdempotencyKey,
+        (intent) => acceptedDeliveryIdempotencyKeys.includes(
+          intent.deliveryIdempotencyKey ?? '',
+        ),
       )
       const parentIntents = currentIntents
         .filter(isGroupEmailParentIntent)
@@ -186,10 +197,10 @@ export async function findAssistantGroupEmailParentIntent(input: {
   vault: string
 }): Promise<AssistantOutboxIntent | null> {
   const deliveryIdempotencyPrefixes = [
+    // Bounded reader for parents already accepted under the generic prefix.
+    // Keep it until those parents and their recipient children have drained.
+    `group-email-effect:${input.authority.automationId}:${input.authority.occurrenceAt}:`,
     buildGroupEmailDeliveryIdempotencyPrefix(input.authority),
-    // Bounded legacy reader for parent intents accepted before the generic
-    // effect key shipped. New writes never emit this prefix.
-    `group-newsletter:${input.authority.automationId}:${input.authority.occurrenceAt}:`,
   ]
   const parentIntents = (await listAssistantOutboxIntents(input.vault))
     .filter((intent) =>
@@ -215,7 +226,10 @@ function buildGroupEmailDeliveryIdempotencyKey(input: {
 function buildGroupEmailDeliveryIdempotencyPrefix(
   authority: HostedRuntimeGroupEmailScheduledAuthority,
 ): string {
-  return `group-email-effect:${authority.automationId}:${authority.occurrenceAt}:`
+  // The pre-generic runner searches only this prefix. Keep the durable
+  // occurrence identity rollback-readable until current runner/Worker
+  // artifacts are the enforced floor and compatibility-window work drains.
+  return `group-newsletter:${authority.automationId}:${authority.occurrenceAt}:`
 }
 
 function groupEmailAccepted(

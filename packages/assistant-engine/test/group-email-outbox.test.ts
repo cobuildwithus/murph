@@ -5,9 +5,14 @@ import type {
   HostedRuntimeGroupEmailEffectResponse,
 } from '@murphai/hosted-execution/runtime-control'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { serializeHostedEmailThreadTarget } from '@murphai/runtime-state'
 
-import { createAssistantGroupEmailOutboxTool } from '../src/assistant/group-email-outbox.ts'
 import {
+  createAssistantGroupEmailOutboxTool,
+  findAssistantGroupEmailParentIntent,
+} from '../src/assistant/group-email-outbox.ts'
+import {
+  createAssistantOutboxIntent,
   listAssistantOutboxIntents,
   saveAssistantOutboxIntent,
 } from '../src/assistant/outbox.ts'
@@ -25,7 +30,7 @@ const OUTBOX_AUTOMATION_AUTHORITY = {
 }
 const AUTHORIZATION_PROOF = 'a'.repeat(64)
 const DELIVERY_KEY =
-  'group-email-effect:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
+  'group-newsletter:automation_newsletter:2026-07-12T13:00:00.000Z:group_123'
 const tempRoots: string[] = []
 
 afterEach(async () => {
@@ -114,6 +119,9 @@ describe('group email durable outbox capability', () => {
       newsletterAuthorizationProof: AUTHORIZATION_PROOF,
       status: 'pending',
     })
+    expect(findPreGenericNewsletterParent(intents)?.intentId).toBe(
+      intents[0]?.intentId,
+    )
     expect(recordPendingDeliveryIntentId).toHaveBeenCalledWith(
       intents[0]?.intentId,
     )
@@ -149,6 +157,46 @@ describe('group email durable outbox capability', () => {
     expect(intents).toHaveLength(1)
     expect(firstPendingIntent).toHaveBeenCalledWith(intents[0]?.intentId)
     expect(retryPendingIntent).toHaveBeenCalledWith(intents[0]?.intentId)
+  })
+
+  it('recovers a parent already accepted under the generic occurrence prefix', async () => {
+    const vault = await createVault('group-email-outbox-generic-parent-read-')
+    const recordPendingDeliveryIntentId = vi.fn()
+    const parent = await createAssistantOutboxIntent({
+      channel: 'email',
+      deliveryIdempotencyKey:
+        'group-email-effect:automation_newsletter:2026-07-12T13:00:00.000Z:group_123',
+      explicitTarget: serializeHostedEmailThreadTarget({
+        groupId: 'group_123',
+        subject: 'Weekly',
+        targetKind: 'group',
+      }),
+      groupEmailAuthorizationProof: AUTHORIZATION_PROOF,
+      message: 'Weekly',
+      sessionId: 'session_generic_parent',
+      threadIsDirect: false,
+      turnId: 'turn_generic_parent',
+      vault,
+    })
+
+    await expect(findAssistantGroupEmailParentIntent({
+      authority: AUTHORITY,
+      vault,
+    })).resolves.toMatchObject({ intentId: parent.intentId })
+
+    const retryTool = createTool({
+      recordPendingDeliveryIntentId,
+      request: vi.fn(async () => preparationResponse()),
+      turnId: 'turn_generic_parent_retry',
+      vault,
+    })
+    await prepare(retryTool)
+    await expect(send(retryTool)).resolves.toMatchObject({
+      action: 'send_email',
+      result: { status: 'accepted' },
+    })
+    expect(await listAssistantOutboxIntents(vault)).toHaveLength(1)
+    expect(recordPendingDeliveryIntentId).toHaveBeenCalledWith(parent.intentId)
   })
 
   it('returns terminal sent as soon as Web has durably planned recipient fanout', async () => {
@@ -241,6 +289,16 @@ function createTool(input: {
     turnId: input.turnId,
     vault: input.vault,
   })
+}
+
+function findPreGenericNewsletterParent(
+  intents: Awaited<ReturnType<typeof listAssistantOutboxIntents>>,
+) {
+  const prefix =
+    `group-newsletter:${AUTHORITY.automationId}:${AUTHORITY.occurrenceAt}:`
+  return intents.find((intent) =>
+    intent.deliveryIdempotencyKey?.startsWith(prefix)
+  )
 }
 
 function preparationResponse(input?: {

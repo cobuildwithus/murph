@@ -340,8 +340,7 @@ async function readProtectedGroupEmailOccurrencePrefixes(
     record.state.pendingOccurrenceAt
       ? [
           `group-email-effect:${record.jobId}:${record.state.pendingOccurrenceAt}:`,
-          // Bounded legacy protection for effects accepted before the generic
-          // group-email idempotency key shipped.
+          // Rollback-window writers retain this legacy serialized prefix.
           `group-newsletter:${record.jobId}:${record.state.pendingOccurrenceAt}:`,
         ]
       : []

@@ -179,9 +179,12 @@ the parent sent. Each child uses the existing retry and terminal lifecycle.
 Cron records an accepted parent in its ordinary pending-delivery field and
 settles the occurrence from the parent state without another model turn. A
 restart between parent acceptance and the cron write recovers that same parent
-from the occurrence key. New writes use the `group-email-effect:` key. Bounded
-readers recognize the former `group-newsletter:` key and former proof field
-only so already-accepted effects can drain; no new write emits them.
+from the occurrence key. During the rollback window, new writes retain the
+legacy `group-newsletter:` serialized key so both old and current cron recovery
+find the same parent. Current readers also recognize `group-email-effect:` keys
+already accepted before that compatibility correction. The runtime action,
+effect type, and owner remain generic; only the bounded durable representation
+uses the legacy prefix.
 
 Preparation or send unavailability before parent acceptance keeps the normal
 automation occurrence retryable. A send result of `accepted` means durable
@@ -264,11 +267,16 @@ an already-accepted parent still fails closed if it reaches the old Web parser.
 Durable outbox JSON and the runner-to-Worker request likewise retain the legacy
 proof field on their rollback-facing representations while current code
 normalizes it to the generic internal name.
+New parent effects also retain the legacy occurrence-key prefix during this
+window so old cron recovery discovers the accepted parent instead of composing
+a second edition; current recovery continues to read either prefix.
 Until the generic Web receiver is established and recorded as the hard rollback
 floor, roll Cloudflare/runner back before rolling Web back. Remove the legacy
 proof representations only after production deployment evidence proves that no
 old runner, Worker, or Web artifact is addressable and every outbox intent
-written during the compatibility window has drained.
+written during the compatibility window has drained. Remove the legacy
+occurrence-key writer at that same floor, after both legacy- and generic-prefix
+parents and their children have drained.
 
 After rollout, prove one current-chat occurrence and one group-email
 prepare/send occurrence. Confirm the model receives no addresses or grant
