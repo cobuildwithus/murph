@@ -48,7 +48,7 @@ The legacy `workout edit` full-structure replacement remains available only for 
 
 ## Starting a workout
 
-1. Resolve the requested saved format when the member named one. If there is no reusable plan, start a clearly requested empty session and add only the exercises and set counts the member actually specified.
+1. Resolve the requested saved format when the member named one. If there is no reusable plan, start a clearly requested empty session and preserve every distinct exercise the member named, including closely related variations; never collapse one variation into another or silently omit an item. Use exactly a stated set count. When an exercise has no stated count, create one unlogged targetless placeholder as the next log slot, not as a claimed plan or completed set.
 2. Ensure no second private live workout is plausible. Reuse the clearly active event or ask one narrow question rather than creating a duplicate.
 3. Run `vault-cli workout start`, passing `--routine` when using a saved format. The command must preserve plan ownership in the format and start every planned set as an unlogged placeholder containing only canonical event coordinates and actual-state fields.
 4. Treat the returned canonical event as the verified start result. Read the format separately before presenting planned targets.
@@ -85,23 +85,23 @@ An exact replay for the same exercise and set coordinate converges on that coord
 - “The next set was 8 reps” may target the clearly current exercise. If two exercises are plausible, ask one narrow disambiguating question.
 - Never infer weight, repetitions, effort, assistance, completion, rest, or failure from a plan, prior workout, elapsed time, or a reminder.
 - Treat member-defined shorthand as ambiguous until explained. Once defined as spotted repetitions, persist a plain set note such as `note=final rep spotted` or `note=final 2 reps spotted`; do not reinterpret it as assisted-load data.
-- Persist every qualitative annotation on that set's canonical `note`. Never leave meaningful notation only in conversation text, an exercise-level summary, or the card snapshot.
+- Persist every qualitative annotation on that exact set's canonical `note`. Never leave meaningful notation only in conversation text, an exercise-level summary, or the card snapshot.
 - If no active workout exists, do not treat an isolated “8 reps” message as authorization to invent one.
 
 ## Finishing
 
 Run `vault-cli workout finish --workout-id <evt_id>` only after an explicit finish. The returned event must contain the verified `endedAt` and final elapsed duration. Do not fabricate missing set values or copy targets into the event.
 
-For the completed presentation, every planned set without a corresponding actual result becomes `skipped` rather than disappearing. That is an explicit card status derived from the ended event plus the format; it is not invented actual performance.
+For the completed presentation, every planned set without a corresponding actual result becomes `skipped` rather than disappearing. A canonical targetless log slot that remains empty when the session ends also becomes `skipped` with `target=null`; that preserves the verified session structure without turning the slot into evidence of a plan or actual performance.
 
 ## Building a structured workout card
 
 Use `murph.attach_response_card` with `kind="compact_table"` and structured `workout` detail in a private direct conversation when a verified live or just-finished workout is the primary answer.
 
-Build it from two canonical sources:
+Build it from the verified canonical workout event and, when present, its verified workout format:
 
-- `target`: the matching planned set from the verified workout format;
-- `actual`: the matching completed set from the verified canonical workout event.
+- `target`: the matching planned set from the verified format, otherwise `null`;
+- `actual` and targetless log-slot coordinates: the verified canonical event.
 
 Do not add `rowHeader`, `columns`, or `rows` to a structured workout card. Text, provider-layout, and native-envelope consumers derive progress directly from `workout.exercises`. Map each planned set in `workout.exercises` to:
 
@@ -109,7 +109,7 @@ Do not add `rowHeader`, `columns`, or `rows` to a structured workout card. Text,
 - `completed`: a corresponding actual result exists;
 - `skipped`: no corresponding actual result and the workout has ended.
 
-If the event contains additional actual sets beyond the format, include them as completed sets with `target=null`. Preserve canonical exercise and set order. Keep the card within its exercise, set, text, and encoded URL limits; use a compact table or readable text when the full workout cannot fit.
+Also include every canonical event set with no matching format set. Use `target=null`; mark it `completed` when an actual result exists, `pending` while the workout is live and the slot is empty, or `skipped` after the workout ends and the slot remains empty. An empty targetless slot is a verified logging coordinate, not evidence of a planned set. Preserve canonical exercise and set order. Keep the card within its exercise, set, text, and encoded URL limits; use a compact table or readable text when the full workout cannot fit.
 
 The outer card remains `compact_table` V1. Set `workout` to:
 
@@ -147,7 +147,8 @@ Set `tracking` to `{ "kind": "workout", "entityId": "<exact evt id>", "snapshotA
 
 ## Card refresh behavior
 
-- Send one structured workout card when the workout starts and the planned session is useful.
+- After successfully starting or resuming one canonical live workout, use one verified structured workout card as the complete response on a supported private card route. Do not send a text-only start acknowledgement or wait for a separate card request.
+- Fall back to truthful ordinary text only when the card tool is unavailable, the canonical event cannot be verified, any claimed planned targets cannot be verified from their matching format, the card would not completely answer the turn, or the bounded card contract cannot represent the workout.
 - After an accepted explicit card command, send the refreshed card as the response; do not also repeat the full workout in prose.
 - For ordinary free-form logging, prefer concise text until a meaningful milestone, an explicit table request, or Finish.
 - Do not send proactive cards without an existing authorized reminder or automation.
