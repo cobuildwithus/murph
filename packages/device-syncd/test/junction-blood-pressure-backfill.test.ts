@@ -1478,6 +1478,44 @@ test("retryable post-fetch failures preserve raw evidence and replay the anchore
   }
 });
 
+test("an empty successful segment retries when its post-fetch source reread fails", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({ bloodPressureRecords: [], requests });
+  const original = createScheduledBloodPressureJob(provider);
+  const failure = deviceSyncError({
+    code: "HOSTED_DEVICE_SYNC_SOURCE_STATE_UNAVAILABLE",
+    httpStatus: 503,
+    message: "Temporary hosted device-sync source-state failure.",
+    retryable: true,
+  });
+  let sourceStateReads = 0;
+
+  await assert.rejects(
+    () => requireValue(provider.jobExecutor).executeJob(
+      createJobContext({
+        listConnectionSources: async () => {
+          sourceStateReads += 1;
+          if (sourceStateReads <= 2) {
+            return [];
+          }
+          throw failure;
+        },
+      }),
+      toJobRecord(original, 44),
+    ),
+    (error: unknown) =>
+      isDeviceSyncError(error)
+      && error.code === failure.code
+      && error.retryable === true,
+  );
+
+  assert.equal(sourceStateReads, 3);
+  assert.equal(
+    requests.filter((request) => request.resource === "blood_pressure").length,
+    1,
+  );
+});
+
 test("nonretryable post-fetch failures keep ordinary failure semantics", async () => {
   for (const boundary of ["source-state", "canonical-import"] as const) {
     const provider = createProvider({
