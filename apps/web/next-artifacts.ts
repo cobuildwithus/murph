@@ -14,6 +14,12 @@ const hostedWebSmokeDefaultAppSessionHmacKey = Buffer.alloc(32, 8).toString("bas
 const hostedWebSmokeDefaultEncryptionKeyVersion = "v1";
 const hostedWebSmokeDefaultPrivyAppId = "cm_app_smoke_placeholder1";
 
+export function isHostedWebSmokeArtifactMode(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return environment[hostedWebDistModeEnvVarName] === hostedWebSmokeDistMode;
+}
+
 export function createHostedWebSmokeEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
@@ -53,7 +59,7 @@ export function resolveHostedWebDistDir(
   phase: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  const useSmokeDistDir = environment[hostedWebDistModeEnvVarName] === hostedWebSmokeDistMode;
+  const useSmokeDistDir = isHostedWebSmokeArtifactMode(environment);
   if (phase !== PHASE_DEVELOPMENT_SERVER && !useSmokeDistDir) {
     return HOSTED_WEB_BUILD_DIST_DIR;
   }

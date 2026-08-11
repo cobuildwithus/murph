@@ -30,6 +30,12 @@ describe("hosted usage status transaction reads", () => {
       hostedAiUsage: {
         findFirst: () => queryGuard.run(async () => null),
       },
+      hostedUsageCreditEntry: {
+        aggregate: () => queryGuard.run(async () => ({
+          _sum: { amountUsdMicros: -9_000_000n },
+        })),
+        findFirst: () => queryGuard.run(async () => null),
+      },
       hostedMember: {
         findUnique: () => queryGuard.run(async () => ({
           billingStatus: "active",
@@ -41,11 +47,11 @@ describe("hosted usage status transaction reads", () => {
       },
       hostedMemberBillingRef: {
         findUnique: () => queryGuard.run(async () => ({
-          currentBillingPhase: "trial",
-          currentBillingPlanCode: "launch_monthly",
-          currentCheckoutOffer: "pulse_trial_7d",
-          stripeCustomerLookupKey: "customer_lookup",
-          stripeSubscriptionLookupKey: "subscription_lookup",
+          currentBillingPhase: null,
+          currentBillingPlanCode: null,
+          currentCheckoutOffer: null,
+          stripeCustomerLookupKey: null,
+          stripeSubscriptionLookupKey: null,
         })),
       },
     };
@@ -70,7 +76,7 @@ describe("hosted usage status transaction reads", () => {
 function buildTrialDecision(): HostedAiUsageGateDecisionWithSource {
   return {
     allowed: true,
-    allowanceSource: "direct_trial",
+    allowanceSource: "direct_starter",
     billingPlanCode: "launch_monthly",
     limitUsdMicros: 10_000_000n,
     memberId: "member_usage_transaction",
@@ -80,7 +86,7 @@ function buildTrialDecision(): HostedAiUsageGateDecisionWithSource {
     remainingUsdMicros: 1_000_000n,
     spentUsdMicros: 9_000_000n,
     usageCreditBalanceUsdMicros: 0n,
-    usageCreditLedgerVersion: 0n,
+    usageCreditLedgerVersion: 1n,
   };
 }
 

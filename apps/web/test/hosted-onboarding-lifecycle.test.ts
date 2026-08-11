@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveHostedOnboardingStage,
   deriveHostedPostVerificationStage,
+  hasHostedRecoverableBilling,
 } from "@/src/lib/hosted-onboarding/lifecycle";
 
 const NOW = new Date("2026-07-23T12:00:00.000Z");
@@ -65,5 +66,33 @@ describe("hosted onboarding lifecycle", () => {
         suspendedAt: null,
       }), billingStatus).toBe("checkout");
     }
+  });
+
+  it.each([
+    HostedBillingStatus.paused,
+    HostedBillingStatus.past_due,
+    HostedBillingStatus.canceled,
+    HostedBillingStatus.unpaid,
+  ])("classifies %s as existing-billing recovery", (billingStatus) => {
+    expect(hasHostedRecoverableBilling({ billingStatus })).toBe(true);
+  });
+
+  it("uses subscription ownership to distinguish incomplete recovery from acquisition", () => {
+    expect(hasHostedRecoverableBilling({
+      billingStatus: HostedBillingStatus.incomplete,
+      hasExistingSubscription: true,
+    })).toBe(true);
+    expect(hasHostedRecoverableBilling({
+      billingStatus: HostedBillingStatus.incomplete,
+      hasExistingSubscription: false,
+    })).toBe(false);
+    expect(hasHostedRecoverableBilling({
+      billingStatus: HostedBillingStatus.not_started,
+      hasExistingSubscription: false,
+    })).toBe(false);
+    expect(hasHostedRecoverableBilling({
+      billingStatus: HostedBillingStatus.active,
+      hasExistingSubscription: true,
+    })).toBe(false);
   });
 });

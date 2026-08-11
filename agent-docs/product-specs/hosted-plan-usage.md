@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-09
+Last verified: 2026-08-10
 Status: Implemented current-state contract
 
 ## Goal
@@ -71,7 +71,7 @@ The available projection keeps these access states distinct:
 
 | Access | Display plan | Period | Thresholded recommendation |
 | --- | --- | --- | --- |
-| Direct trial | Pulse Trial | Trial | Continue with Group when eligible, otherwise Pulse |
+| Direct starter | Starter | Lifetime | Start Core when eligible, otherwise Pulse |
 | Direct paid Group | Group | Monthly | Upgrade to Pulse |
 | Direct paid Pulse | Pulse | Monthly | Add usage when configured and eligible |
 | Direct paid Edge | Edge | Monthly | Add usage when configured and eligible |
@@ -86,8 +86,9 @@ usage is not moved between periods later.
 
 Synthetic group-thread allowance is not personal plan usage. It returns the
 unavailable reason `group_not_supported` before exposing personal usage facts.
-Inactive hosted access and a trial awaiting conversion also return explicit
-unavailable states.
+Inactive hosted access returns an explicit unavailable state. Starter access is
+available or exhausted solely from its lifetime credit balance; account age and
+historical trial timestamps are not availability inputs.
 
 Every newly created Linq or Telegram group thread starts with a persisted $7.50
 included-usage limit. This is prospective: existing group-thread rows keep
@@ -153,9 +154,8 @@ remaining.
 
 `apps/web` may return `recommendedAction` only when all available usage is
 exhausted, the forecast projects exhaustion, or at least 80% of overall
-available usage is used. Trial access may recommend continuing with Group at
-trial end when current membership makes that plan eligible; otherwise it may
-recommend **Start Pulse now**. Paid Group may recommend Pulse. An eligible
+available usage is used. Starter access may recommend beginning the current eligible paid plan. Paid
+Group may recommend Pulse. An eligible
 direct paid Pulse or Edge member may receive **Add usage**, which opens the
 authenticated fixed-pack Settings dialog. Group does not expose personal
 top-ups. Plan changes remain on the plan card. Family and group contexts do not
@@ -195,30 +195,29 @@ An explicit request in a private conversation to manage billing, or to perform
 a Family account change outside `murph.family_plan`'s status, checkout, invite,
 and member-usage navigation rules, may receive the canonical
 `/settings#subscription` handoff
-after `murph.plan_usage` returns `active`, `exhausted`, or
-`trial_conversion_pending`. This is neutral browser navigation, not a projected
+after `murph.plan_usage` returns `active` or `exhausted`. This is neutral
+browser navigation, not a projected
 billing action or recommendation. The assistant must say that no billing or
 Family change happened. It must not provide the private management handoff for
 `group_not_supported` or `hosted_access_inactive`, or offer it proactively.
 
 ### Private Conversation Actions
 
-`murph.subscription` is a narrow mutation surface for:
+`murph.subscription` exposes one signed `change_plan` action to the model. It
+supports:
 
-- keeping an active Pulse trial scheduled to continue as Pulse;
-- ending the trial and starting Pulse now;
-- scheduling an eligible active trial to continue as Group;
+- a Starter member beginning an eligible paid direct plan through ordinary
+  Stripe Checkout;
 - immediately upgrading Group to Pulse or Edge, or Pulse to Edge; and
-- scheduling Pulse or Edge to change to an eligible lower direct plan at
+- scheduling paid Pulse or Edge to change to an eligible lower direct plan at
   renewal.
 
 These are member-directed actions, not extensions of the read projection's
-`recommendedAction`. A recommendation is never consent. Before `change_plan`,
-the assistant needs a current `subscriptionActionQuote` whose target and timing
-match the proposed choice, states the returned exact-price label, and then gets
-explicit confirmation. When that quote is absent, the assistant does not guess
-and uses the neutral Settings handoff. The legacy Pulse actions remain bounded
-compatibility entrypoints.
+`recommendedAction`. A recommendation is never consent. The assistant needs a
+current `subscriptionActionQuote` whose target and timing match the proposed
+choice, states the returned exact-price label, and then gets explicit
+confirmation. When that quote is absent, the assistant does not guess and uses
+the neutral Settings handoff.
 
 The tool is available only in a private personal conversation with current
 eligible accepted member input. Assistant policy permits a call only after the
@@ -232,64 +231,24 @@ removed with the mailbox row under existing retention. The backend does not
 claim to prove the meaning of the message. Family and group contexts are
 outside this surface.
 
-Continuing an active trial with a configured default payment method is already
-represented by the existing Stripe subscription. Nothing is needed right now:
-the choice requires no charge, subscription update, payment link, or
-unsolicited explanation. A configured method does not guarantee that a future
-renewal will succeed. If the payment method is missing, web may return a Stripe
-Customer Portal payment-method-update URL. A paused-trial state race remains
-recoverable only through a fresh start-now choice in the existing Pulse
-activation service rather than through the old continue-at-trial-end claim or a
-second resume path. Assistant policy treats an already ended or
-conversion-pending trial as a start-now choice, discloses the current terms,
-and asks for explicit confirmation instead of presenting it as non-charging
-continuation.
-
-After a signed-in member completes a payment-method-update link returned by
-private-chat `continue_pulse` or `start_pulse_now`, the authenticated browser
-return recovers that exact claimed action. The
-short-lived signed return contains no member identifier, and the resulting
-HttpOnly claim is bound to the current member, app session, and action.
-`start_pulse_now` discloses that paid billing begins now and requires fresh
-confirmation. An active `continue_pulse` return performs a mutation-free state
-check and shows a receipt that the existing trial remains scheduled to
-continue. If the trial reconciled to paid before the browser return, the same
-read-only path shows the active paid plan without contacting Stripe. If Stripe
-has already paused the trial, the old continue claim fails closed, keeps its
-explanation visible until dismissal, and ordinary Settings requires a fresh
-start-now confirmation before any resume or immediate invoice. Dismissing,
-canceling, copying to another member, and expired, tampered, or marker-only
-returns remain inert. The browser never upgrades a continue-at-trial-end choice
-into an immediate start. Each continuation POST carries the server-rendered
-action as compare-only metadata; the route rejects any mismatch with the
-member/session/action-bound cookie before billing dispatch and still derives
-the operation only from that cookie. Successful responses leave the bounded
-cookie untouched so an older in-flight response cannot clear a newer return
-from another tab. The public marker removal keeps completed or dismissed
-returns inert, and the existing short expiry bounds any surviving claim.
-
-Starting Pulse now uses the existing start-paid-Pulse service. Upgrading to
-Edge uses the existing plan-change admission service, which validates the
+For quote timing `now`, Web creates an ordinary checkout for the exact quoted
+plan. For `immediate`, the existing plan-change admission service validates the
 current member, billing owner, exact Customer and Subscription, one licensed
 monthly Subscription Item, target Price, and absence of a schedule or pending
 update before creating a Customer Portal `subscription_update_confirm` deep
-link. Stripe then owns the exact proration, payment collection, payment-method
-recovery, and required authentication. Its successful redirect returns to
-Settings, where a bounded status surface waits for the webhook-owned Postgres
-projection instead of claiming entitlement from the redirect itself. The
-allowlisted success target or cancellation marker stays in the Settings query
-so a Stripe link opened outside the member's signed-in browser can show the
-existing neutral sign-in handoff and resume the exact return URL afterward.
-An authenticated cancellation removes that marker and returns quietly to the
-Subscription section. Unknown, repeated, and Group values do not receive this
-auth-resume behavior. The
-return hint is presentation-only, but while it differs from the authoritative
-projection Settings suppresses every plan-changing control, including usage and
-model upsells, so the member cannot start the same commercial change again.
-Once the projection matches, normal plan controls resume and the return hint is
-removed. The
-assistant sends the Portal URL only after the member's explicit choice. A
-no-action result carries no URL.
+link. For `at_period_end`, the existing switch service creates the narrow
+Stripe-owned schedule. Stripe owns exact proration, payment collection,
+payment-method recovery, required authentication, and the future phase. Its
+successful redirect returns to Settings, where a bounded status surface waits
+for the webhook-owned Postgres projection instead of claiming entitlement from
+the redirect itself.
+
+The hosted-execution wire decoder temporarily accepts the retired
+`continue_pulse`, `start_pulse_now`, and `upgrade_edge` action names from already
+deployed runtimes. They are not advertised to the model, do not restore trial
+semantics, and delegate to the same quoted checkout/upgrade owners. Remove that
+reader compatibility only after every preceding runtime is drained and cannot
+be rolled back.
 
 The retired Stripe hosted-AI meter is not part of current allowance accounting
 or billing. A dry-run-first operator migration removes only explicitly marked
@@ -302,7 +261,7 @@ fallback.
 
 The assistant may discuss plan and usage options before a choice, but the first
 assistant-initiated commercial mention is one short, reply-oriented question
-with no link. A trial off-ramp may naturally ask “should we part ways?”; this is
+with no link. A starter exhaustion off-ramp may naturally ask “should we part ways?”; this is
 optional language, not a fixed script or pressure tactic. If a trusted manual
 check finds no action is needed and the member did not ask about billing, the
 assistant says nothing unless trusted low-usage context calls for the generic,
@@ -319,9 +278,8 @@ Sol; name a model only if they ask. Never switch models automatically.
 The web-owned allowance gate is the single model-work admission owner. It
 combines current included capacity with the compact usage-credit
 projection. When both reach zero, subsequent assistant or eligible system work
-is denied with `ai_usage_limit_exceeded`; inactive, suspended, malformed or
-expired trial entitlement, and existing abuse controls remain separate
-fail-closed reasons. The read-only plan-usage projection presents that combined
+is denied with `ai_usage_limit_exceeded`; inactive, suspended, or malformed entitlement and existing abuse controls
+remain separate fail-closed reasons. The read-only plan-usage projection presents that combined
 capacity as one overall available-usage view; it remains a projection and must
 not be treated as the gate result.
 
@@ -435,8 +393,9 @@ The low-usage skill may use the trusted bit for one manual private
 `murph.plan_usage` check. It follows the current Web-owned state rather than
 inventing a billing menu:
 
-- a direct Pulse Trial may offer help starting Pulse now only from the current
-  thresholded recommendation, with the existing quote and confirmation rules;
+- a direct Starter member may offer help starting the current eligible paid
+  plan only from the current thresholded recommendation, with the existing
+  quote and confirmation rules;
 - a direct paid Pulse or Edge plan may offer the authorized one-time Add usage
   handoff, while Edge is discussed as a recurring Pulse alternative only after
   the member asks and a current quote exists;
@@ -593,6 +552,23 @@ unimplemented.
 
 ## Deployment
 
+The non-expiring Starter contract was a strict Web/runtime schema hard cut. The
+production rollout is complete: compatible Web and Cloudflare code from the
+same current public `main` deployed without intentionally pausing Render or
+hosted execution, managed-container and live-model smoke proved the runner, and
+the post-deploy contract-migration workflow applied the migration after its
+declared drain.
+
+Do not remove `HOSTED_EXECUTION_CONTROL_URL` for a future plan-usage rollout.
+It is shared by runtime starts, privacy actions, export, media, and account
+deletion, so removing it would disable unrelated operations rather than provide
+a route-scoped pause. The current rollback floor is forward-only: repair or
+redeploy a compatible current Web/runner pair; the prior Web or runner is not a
+resumable target against the migrated ledger.
+
+The canonical remaining cleanup and retirement procedure lives in
+`agent-docs/product-specs/starter-usage.md`.
+
 For the capacity-epoch change, deploy the assistant runtime that timestamps
 every provider operation at its own request start, then wait for work accepted
 by the previous runtime to drain. Apply the additive usage-period and
@@ -639,6 +615,6 @@ schema-compatible pair if rollback is required.
 
 Existing billing mechanics remain in:
 
-- `agent-docs/product-specs/pulse-trial-start-paid-pulse.md`
+- `agent-docs/product-specs/starter-usage.md`
 - `agent-docs/product-specs/hosted-plan-downgrades.md`
 - `agent-docs/product-specs/hosted-family-plan.md`

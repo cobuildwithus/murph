@@ -25,6 +25,7 @@ import {
 import { ModelProviderSecuritySection } from "@/src/components/security/model-provider-security-section";
 import { HostedAssistantModelSettings } from "@/src/components/settings/hosted-assistant-model-settings";
 import { Separator } from "@/src/components/ui/separator";
+import { isMurphAndroidAppEnabled } from "@murphai/hosted-execution/env";
 import {
   HOSTED_PUBLIC_REFERRAL_REWARDS,
 } from "@/src/lib/hosted-growth/referral-program";
@@ -57,7 +58,6 @@ import { HomeOnboardingStepsStudy } from "./home-onboarding-steps-study";
 import { HomepageAuthWarmRuntimeStudy } from "./homepage-auth-warm-runtime-study";
 import { JoinFamilyBillingRecoveryStudy } from "./join-family-billing-recovery-study";
 import { PersonaOnboardingStudy } from "./persona-onboarding-study";
-import { PulseTrialBillingContinuationStudy } from "./pulse-trial-billing-continuation-study";
 import { SettingsAuthRequiredStudy } from "./settings-auth-required-study";
 import { SettingsCustomInferenceStudy } from "./settings-custom-inference-study";
 import { SignupReferralFlowStudy } from "./signup-referral-study";
@@ -497,7 +497,9 @@ export function SectionsContent() {
       <Separator />
 
       <StudySection title="Connect source actions and disconnect lifecycle">
-        <ConnectSourceCardStudy />
+        <ConnectSourceCardStudy
+          androidAppAvailable={isMurphAndroidAppEnabled(process.env)}
+        />
       </StudySection>
 
       <Separator />
@@ -538,13 +540,7 @@ export function SectionsContent() {
 
       <Separator />
 
-      <StudySection title="Pulse billing return confirmation">
-        <PulseTrialBillingContinuationStudy />
-      </StudySection>
-
-      <Separator />
-
-      <StudySection title="Subscription recovery, trial-to-Family confirmation, Max plan comparison, sponsored billing, and exact usage status">
+      <StudySection title="Subscription recovery, Family billing confirmation, Max plan comparison, sponsored billing, and exact usage status">
         <GroupMemberPlanStudy />
       </StudySection>
 

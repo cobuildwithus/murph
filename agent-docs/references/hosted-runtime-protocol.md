@@ -264,6 +264,18 @@ other OpenAI search method or path, validates the signed OpenAI provider
 credential against the active user and runner, strips caller and runtime
 authority headers, and injects the Worker-owned OpenAI credential only after
 authorization succeeds.
+The pinned Codex release has a test-only, version-bound route-disposition
+inventory whose authoritative review input is the upstream
+`codex-rs/codex-api/src` tree. Required Linux CI resolves the version-derived
+OpenAI tag and verifies its exact commit and source-tree object, so stale
+provenance cannot pass after a pin change. Offline tests scan the installed
+native artifact for conservative `/v1/**` plus separated provider-relative
+candidates, require every discovered candidate to be explicitly classified,
+corroborate enabled source-owned Codex paths, and run a real App Server
+web-search turn through the production Worker interceptor. The inventory never
+generates or widens the Worker policy: a new source identity or binary candidate
+fails closed until its origin, method, transport, hosted reachability, and
+production policy are reviewed.
 Runtime-controlled delivery/control provider integrations such as Linq and
 Telegram still use provider-egress token proof when exact runtime
 authority headers are absent. There is no tokenless active-user-fence provider
@@ -630,6 +642,19 @@ returned by that mailbox execution. Its persisted `sending` transition precedes
 provider entry, replay observes the same intent, and an older generic
 notification or unrelated pending delivery cannot hitchhike. Fresh conversation
 input continues to preempt this pass.
+
+A legacy usage-referral notification can be authority-less even after Web has
+repaired its producer, because the local system mailbox may already have
+persisted the old wake and advanced the import watermark. The bounded Web scan
+therefore re-signals only the existing pointer. Immediately before system-
+mailbox execution, the runtime recognizes only the exact direct-Linq explicit
+referral identity and asks the existing signed external-route authority owner
+to reassert its frozen member, channel, directness, and target. An authorized
+candidate gains proof only in the in-memory wake and then uses the ordinary
+audience guard and provider-entry recheck. The exact non-retryable unauthorized code records a terminal no-send for the same pending item so the contiguous handled-through
+sequence can advance; missing transport, timeout, and other retryable failures
+leave that item ordered and pending. No payload mutation, replacement item,
+cursor rewind, or fallback route exists.
 
 The group runtime returns only the request id and schema-checked bounded answer
 through the signed completion control path. Web reloads the request, rechecks
@@ -2294,6 +2319,14 @@ refresh sweeps just because a workspace has no replica yet. Foreground work may
 schedule refresh as ordinary runtime work, but workspace snapshot checkpoints
 write only the workspace snapshot ref; they do not publish browser-vault
 replicas.
+The browser refresh control identity is stable for one workspace version.
+Repeated browser polls reuse the durable mailbox row and do not signal Temporal
+again. A later workspace checkpoint creates the next refresh identity. The
+existing scheduled mailbox handoff sweep re-signals an unconsumed browser
+refresh row when its first Temporal signal failed. If a workspace checkpoint
+creates another browser-only wake before the requested refresh finishes, the
+runtime finishes or terminally defers that refresh before it imports the later
+request. Conversation and other foreground work still preempt refresh work.
 Browser-vault replica writes require the active runtime write fence and publish
 the latest replica ref separately, without changing the workspace checkpoint
 version. Web and Worker/runner deploy skew stays fail-soft: Web may serve a

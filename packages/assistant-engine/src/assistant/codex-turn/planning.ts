@@ -1,5 +1,6 @@
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
+import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
 import {
   resolveAssistantEffectiveStyle,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
@@ -765,6 +766,9 @@ export async function resolveAssistantRouteTurnPlan(input: {
     }
 
     return buildAssistantSystemPromptWithCacheMetadata({
+      assistantAndroidAppAvailable: isMurphAndroidAppEnabled(
+        input.sharedPlan.cliAccess.env,
+      ),
       assistantCliContract: options.assistantCliContract,
       assistantContextSnapshotPrompt,
       assistantDynamicContextPrompts: assistantDynamicContextPrompts,
