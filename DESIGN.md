@@ -502,10 +502,10 @@ otherwise use `Anonymous`. Label each row only as
 maximums, dates, payer identity, payment status, or automatic-refill history.
 Signed-out visitors and non-participants never see the supporter list. Keep the
 list absent when there is nothing to recognize. Stream it beneath the complete
-primary action with a null fallback and bounded abortable read so recognition
-cannot delay funding, management, cancellation, or recovery. Render its real
-component with synthetic states in both the components catalog and this
-section study.
+primary action in its own best-effort Suspense boundary with a null fallback so
+recognition cannot delay funding, management, cancellation, or recovery. Render
+its real component with synthetic states in both the components catalog and
+this section study.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
 and $20 as visually prominent monthly maximums. On desktop, use the shared

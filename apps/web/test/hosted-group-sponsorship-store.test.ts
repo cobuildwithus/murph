@@ -111,6 +111,32 @@ describe("hosted group sponsorship store", () => {
     })).toThrow(/short plain text/u);
   });
 
+  it("keeps base requests accepted and makes current-to-base skew explicit", () => {
+    const baseDraft = {
+      publicAlias: "Base client alias",
+      runningBitRequest: null,
+      sponsorMessage: null,
+    };
+    const currentDraft = {
+      ...baseDraft,
+      publicAliasRecognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+    };
+    const baseAllowedKeys = new Set([
+      "creativeRequest",
+      "publicAlias",
+      "runningBitRequest",
+      "sponsorMessage",
+    ]);
+
+    expect(parseHostedGroupSponsorshipDraft(baseDraft)).toEqual(baseDraft);
+    expect(digestHostedGroupSponsorshipDraft(currentDraft)).toBe(
+      digestHostedGroupSponsorshipDraft(baseDraft),
+    );
+    expect(Object.keys(currentDraft).filter(
+      (key) => !baseAllowedKeys.has(key),
+    )).toEqual(["publicAliasRecognition"]);
+  });
+
   it("projects the live sponsor and recent one-time contributions from explicit public aliases", async () => {
     const authorizationFindFirst = vi.fn(async () => ({
       id: "hgsa_abcdefghijklmnop",
@@ -125,12 +151,12 @@ describe("hosted group sponsorship store", () => {
     const momentFindMany = vi.fn(async () => [
       {
         creatorMemberId: "member_monthly",
-        publicAliasEncrypted: sealRecognizedAlias("The Group Historian"),
+        publicAliasEncrypted: sealTestValue("The Group Historian"),
         purchaseId: "hucp_monthlysponsor1",
       },
       {
         creatorMemberId: "member_one_time",
-        publicAliasEncrypted: sealRecognizedAlias("Night Shift"),
+        publicAliasEncrypted: sealTestValue("Night Shift"),
         purchaseId: "hucp_onetimecontrib1",
       },
     ]);
@@ -203,6 +229,8 @@ describe("hosted group sponsorship store", () => {
       },
       where: {
         beneficiaryMemberId: "member_group_runtime",
+        fundingPageAliasConsent:
+          HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
         fundingPageAliasPublishedAt: { not: null },
         publicAliasEncrypted: { not: null },
         purchaseId: {
@@ -222,11 +250,7 @@ describe("hosted group sponsorship store", () => {
         findFirst: vi.fn(async () => null),
       },
       hostedGroupSponsorshipMoment: {
-        findMany: vi.fn(async () => [{
-          creatorMemberId: "member_one_time",
-          publicAliasEncrypted: sealTestValue("Legacy creative alias"),
-          purchaseId: "hucp_onetimecontrib1",
-        }]),
+        findMany: vi.fn(async () => []),
       },
       hostedUsageCreditPurchase: {
         findFirst: vi.fn(),
@@ -330,11 +354,16 @@ describe("hosted group sponsorship store", () => {
     expect(harness.row).toMatchObject({
       beneficiaryMemberId: "member_group_runtime",
       creatorMemberId: "member_sponsor",
+      fundingPageAliasConsent:
+        HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
       purchaseId: "purchase_123",
       sponsorMessageEncrypted: null,
     });
     expect(harness.row.configurationDigest).not.toContain("Group Historian");
     expect(harness.row.publicAliasEncrypted).not.toContain("Group Historian");
+    expect(openTestValue(harness.row.publicAliasEncrypted)).toBe(
+      draft.publicAlias,
+    );
     expect(harness.row.creativeRequestEncrypted).toMatch(/^sealed:/u);
     expect(harness.row.creativeRequestEncrypted).not.toContain("ensemble");
 
@@ -367,6 +396,8 @@ describe("hosted group sponsorship store", () => {
     expect(harness.row).toMatchObject({
       activatedAt: PAID_AT,
       expiresAt: new Date("2026-07-28T12:00:00.000Z"),
+      fundingPageAliasConsent:
+        HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
       fundingPageAliasPublishedAt: PAID_AT,
     });
 
@@ -474,6 +505,7 @@ describe("hosted group sponsorship store", () => {
 
     expect(harness.row.creativeRequestEncrypted).toMatch(/^sealed:/u);
     expect(harness.row.sponsorMessageEncrypted).toBeNull();
+    expect(harness.row.fundingPageAliasConsent).toBeNull();
     await expect(assertHostedGroupSponsorshipRequestMatchesTx({
       draft: legacyDraft,
       purchaseId: "purchase_old_client",
@@ -640,8 +672,68 @@ describe("hosted group sponsorship store", () => {
 
     expect(harness.row).toMatchObject({
       activatedAt: PAID_AT,
+      fundingPageAliasConsent:
+        HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
       fundingPageAliasPublishedAt: null,
     });
+  });
+
+  it("keeps recognized alias storage legacy-readable and publishes on current replay", async () => {
+    const harness = createHarness();
+    const draft = {
+      publicAlias: "Rollback-safe sponsor",
+      publicAliasRecognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
+      runningBitRequest: null,
+      sponsorMessage: null,
+    };
+    await createHostedGroupSponsorshipMomentTx({
+      authorizedDraft: draft,
+      beneficiaryMemberId: "member_group_runtime",
+      creatorMemberId: "member_sponsor",
+      offerCode: "usage_5_usd",
+      purchaseId: "purchase_materialized_by_base_web",
+      tx: harness.prisma as never,
+    });
+
+    const storedAlias = openTestValue(harness.row.publicAliasEncrypted);
+    expect(storedAlias).toBe(draft.publicAlias);
+    expect([...storedAlias].length).toBeLessThanOrEqual(80);
+
+    harness.row.activatedAt = PAID_AT;
+    harness.row.fundingPageAliasPublishedAt = null;
+    await expect(readHostedGroupSponsorshipDraftForCreator({
+      creatorMemberId: "member_sponsor",
+      prisma: harness.prisma as never,
+      purchaseId: "purchase_materialized_by_base_web",
+    })).resolves.toEqual(draft);
+    await expect(assertHostedGroupSponsorshipRequestMatchesTx({
+      draft: {
+        publicAlias: draft.publicAlias,
+        runningBitRequest: draft.runningBitRequest,
+        sponsorMessage: draft.sponsorMessage,
+      },
+      purchaseId: "purchase_materialized_by_base_web",
+      tx: harness.prisma as never,
+    })).resolves.toBeUndefined();
+
+    await activateHostedGroupSponsorshipMomentTx({
+      activatedAt: PAID_AT,
+      customContentAuthorized: true,
+      offerCode: "usage_5_usd",
+      purchaseId: "purchase_materialized_by_base_web",
+      tx: harness.prisma as never,
+    });
+    expect(harness.row.fundingPageAliasPublishedAt).toBe(PAID_AT);
+
+    await activateHostedGroupSponsorshipMomentTx({
+      activatedAt: PAID_AT,
+      customContentAuthorized: true,
+      offerCode: "usage_5_usd",
+      purchaseId: "purchase_materialized_by_base_web",
+      tx: harness.prisma as never,
+    });
+    expect(harness.prisma.hostedGroupSponsorshipMoment.updateMany)
+      .toHaveBeenCalledTimes(1);
   });
 });
 
@@ -649,12 +741,13 @@ function sealTestValue(value: string): string {
   return `sealed:${Buffer.from(value, "utf8").toString("base64url")}`;
 }
 
-function sealRecognizedAlias(value: string): string {
-  return sealTestValue(JSON.stringify({
-    publicAlias: value,
-    recognition: HOSTED_GROUP_FUNDING_RECOGNITION_CONSENT,
-    schema: "murph.group-sponsorship-public-alias.v1",
-  }));
+function openTestValue(value: unknown): string {
+  if (typeof value !== "string" || !value.startsWith("sealed:")) {
+    throw new TypeError("Expected a sealed test value.");
+  }
+  return Buffer.from(value.slice("sealed:".length), "base64url").toString(
+    "utf8",
+  );
 }
 
 function createHarness(input: { participantAuthorized?: boolean } = {}) {
@@ -684,8 +777,20 @@ function createHarness(input: { participantAuthorized?: boolean } = {}) {
           )
         : state.row;
     }),
-    updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
-      if (state.row.activatedAt) {
+    updateMany: vi.fn(async ({ data, where }: {
+      data: Record<string, unknown>;
+      where: Record<string, unknown>;
+    }) => {
+      if (where.activatedAt === null && state.row.activatedAt !== null) {
+        return { count: 0 };
+      }
+      if (where.activatedAt && state.row.activatedAt === null) {
+        return { count: 0 };
+      }
+      if (
+        where.fundingPageAliasPublishedAt === null &&
+        state.row.fundingPageAliasPublishedAt !== null
+      ) {
         return { count: 0 };
       }
       Object.assign(state.row, data);

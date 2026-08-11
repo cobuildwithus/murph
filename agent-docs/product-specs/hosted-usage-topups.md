@@ -203,8 +203,10 @@ not a financial status or balance. It freezes an HMAC-bound request
 configuration and, only for a current owner or active participant, may encrypt
 an optional public alias, optional creative request, and temporary running-bit
 request using the hosted member secure-box owner. A new public alias is stored
-in a versioned encrypted envelope with the exact funding-page recognition
-consent; legacy plaintext-shaped encrypted aliases carry no such consent.
+in the existing bounded encrypted plain-text shape so preceding Web can still
+recover and materialize the purchase. One separate nullable metadata field
+records the exact funding-page recognition consent; legacy rows carry no such
+consent.
 
 A creative request is absent by default, so funding alone is quiet in the room.
 The bounded formats are `message`, `poem`, and `song`. Every request may include
@@ -228,7 +230,7 @@ The alias field itself is optional recognition consent: the collection copy
 names signed-in group members as the audience and bounds visibility to an active
 monthly sponsorship or the 20 most recent contributions; blank means
 `Anonymous`. The server retains an alias-only draft only with that exact
-versioned consent. Legacy aliases can still support their originally disclosed
+consent marker. Legacy aliases can still support their originally disclosed
 creative or running-bit use but never gain funding-page consent. No expired
 private copy is read or exposed.
 
@@ -246,17 +248,21 @@ status. Signed-out visitors and non-participants receive no supporter
 projection. Alias decryption is best effort and degrades to `Anonymous` without
 blocking funding. The complete funding, management, cancellation, and recovery
 controls stream first; supporter recognition renders in a separate Suspense
-boundary with a null fallback and a two-second abortable database/crypto budget.
+boundary with a null fallback. Its two-second abort signal is checked between
+database stages and is forwarded to the secure-box batch; Prisma does not cancel
+an in-flight query, so this is not a wall-clock database deadline. The primary
+funding and recovery controls never await this optional boundary.
 
 The funding-page read reuses the page's participant-authority result, then adds
 at most four set-based database calls: sponsorship authorization and 20-row
 one-time history in parallel, an optional activation purchase, and one moment
 batch for at most 21 purchase IDs. Peak added database concurrency is two. The
-secure-box owner reads envelope metadata in one batch and performs at most 21
+secure-box owner opens alias ciphertexts in one batch and performs at most 21
 root unwraps with its existing concurrency cap of four; there are no per-row
 database reads, provider calls, or transactions. The optional read is outside
-the page's blocking data fanout and aborts with an empty recognition state when
-its budget expires.
+the page's blocking data fanout. Once its signal is observed, later database
+stages stop and secure-box work aborts; an already-started Prisma query may
+still finish in the background without delaying the primary controls.
 
 Verified Stripe reconciliation remains the only activation authority. After a
 fulfilled group purchase, Web idempotently:
@@ -1391,6 +1397,25 @@ one. Disable new sponsorship intake before rollback and keep the compatible Web
 reader and reconciler deployed. Rolling below that floor requires proof that no
 group contribution can still be materialized or retried; otherwise
 forward-fix.
+
+Funding-page recognition does not add another ciphertext-format rollback floor.
+Apply `20260811160000_add_group_sponsorship_funding_alias_publication` before
+promoting the recognition-aware Web artifact. The migration adds only nullable
+consent and publication metadata, and the encrypted alias remains the same
+bounded plain-text payload understood by preceding Web. Consent metadata is
+also excluded from the legacy configuration digest, so base recovery of a
+current-created consented row matches without changing its stored consent; a
+base-created row cannot gain consent on retry. A base client sent to current Web
+is accepted, but without the new consent field its alias remains Anonymous on
+the funding page. A surviving current client sent to base Web is rejected by
+the base strict request parser before Stripe; rollback must disable new
+sponsorship intake and force a page reload before routing sponsorship requests
+to base Web. Current-created pending moments remain recoverable and
+materializable by base Web. Base settlement cannot stamp the new publication
+metadata, so recognition remains Anonymous until a later compatible verified
+settlement replay rechecks authority and idempotently stamps the original
+activation time. Purchased credit, creative materialization, notifications,
+and funding recovery do not depend on that optional publication marker.
 
 ## Verification
 

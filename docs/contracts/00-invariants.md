@@ -532,9 +532,10 @@ it has been explicitly elevated to a cross-cutting invariant.
   the assistant/room sponsorship projection reveals only sponsored versus
   unsponsored. For a signed-in active group participant, the funding page may
   separately recognize the current activation and at most 20 recent fulfilled
-  one-time moments only by a versioned funding-page-consented alias that was
-  marked publishable by the existing verified-settlement participant-authority
-  check, or as Anonymous, plus the coarse monthly versus one-time kind.
+  one-time moments only by an alias with exact funding-page consent metadata
+  that was marked publishable by the existing verified-settlement
+  participant-authority check, or as Anonymous, plus the coarse monthly versus
+  one-time kind.
   Historical aliases, pending or incompletely materialized moments, and moments
   settled after the creator lost authority remain Anonymous. That alias is not payer identity;
   the page projection contains no payer record, amount, monthly cap, balance,
