@@ -28,6 +28,9 @@ Last verified: 2026-08-10
 | `MURPH_SAFE_E2E_PRODUCT_REF=... MURPH_SAFE_E2E_PRODUCT_NAME=... MURPH_SAFE_E2E_QUERY=... MURPH_SAFE_E2E_EXPECTED_TEST_ID=... pnpm --dir apps/web exec playwright test e2e/murph-safe-production-seam.spec.ts` | Opt-in rendered production-seam proof against an explicitly seeded local labels database. It uses the real POST search route, validates the public detail contract and exact selected-record test id, renders the server detail at phone and desktop widths, and checks detail overflow. `MURPH_SAFE_E2E_EXCLUDED_TEST_ID` can prove that a same-canonical sibling observation is absent. | Murph Safe public search route, shared service, labels SQL, contract, and server-rendered detail page |
 | `MURPH_IMESSAGE_ENROLLMENT_TEST_DB_URL="$LOCAL_POSTGRES_URL" pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/imessage-mini-app-account-deletion.db.test.ts --no-coverage` | Opt-in real-PostgreSQL proof for bounded Messages credential rotation and enrollment versus account deletion against an isolated, migrated local test database. The URL guard permits only loopback or local socket targets; the ordinary hosted-web workspace excludes `*.db.test.ts`, and the focused config additionally skips this suite when the dedicated variable is absent. | Repeated enrollment rotates one Messages-owned row while invalidating prior bearers and preserving ordinary sessions, including stale-generation self-revocation, re-enrollment after revocation and expiry, plus both deletion-first and enrollment-first serialization orders with final absence of the member and its device-agent session |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/prisma-database-retry-postgres.test.ts` | Opt-in real-PostgreSQL proof that the shared Prisma client returns visible local saturation as backpressure and retries only ambiguous failures that did no work. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A contended transaction-start timeout is not retried and never invokes its callback, a real pool-checkout timeout on an ordinary non-transaction write is not retried and persists no row, and a transaction that opened and then expired raises the same `P2028` code without being replayed |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-dirty-reconnect-retention-postgres.test.ts` | Opt-in real-PostgreSQL proof for dirty-payload credential authority across canonical same-account replacement. Run after migrations. | Actual Web-store admission persists one credential-independent and one credential-scoped row; canonical reconnect retains only the independent row; hydration returns that exact payload; and ordinary acknowledgement drains it without replaying the retired credential-scoped work. |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-dirty-reconnect-consent-postgres.test.ts` | Opt-in real-PostgreSQL proof for mixed-version dirty-payload classification versus health-data consent withdrawal. Run after migrations. | Withdrawal-first ordering blocks reconnect on the member row and then rejects without decrypting or classifying the nullable payload; reconnect-first ordering holds the same member fence through legacy classification, makes withdrawal wait, and then permits revocation to commit normally. |
+| `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-dirty-reconnect-ack-postgres.test.ts` | Opt-in real-PostgreSQL proof for mixed-version reconnect classification versus dirty-payload acknowledgement. Run after migrations. | Acknowledgement-first makes reconnect wait on the dirty marker before legacy decryption; reconnect-first retains the marker through classification while acknowledgement waits; both schedules complete without a marker/payload deadlock and leave the replacement active with processed work drained. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/device-sync-db-spike-resilience-postgres.test.ts` | Opt-in real-PostgreSQL replay for the 2026-08-10 device-sync database spike. The suite rejects non-loopback database URLs and requires the current migrations. | Exactly 1,641 synthetic webhook receipts retain their original 120-second distribution and 31-receipt peak while a compressed 31-wide admission lane overlaps 20 runtime snapshots and 40 foreground reads. The proof caps the application pool at 15, samples PostgreSQL sessions, asserts the narrow connection/source query bounds, preserves live source admission, completes every trace and signal, advances the receipt timestamp monotonically, and drains dirty state without production data. |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/initial-onboarding-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for initial-onboarding rollout compatibility and first-writer-wins serialization. The suite rejects non-loopback database URLs and runs after migrations. | The exact migration SQL backfills existing rows, its temporary default completes a legacy omitted-column insert, the current explicit-null insert stays pending, and independent Web-save/iOS-skip Prisma transactions serialize in both controlled winner orderings without loser preference overwrite |
 | `DATABASE_URL="$LOCAL_POSTGRES_URL" MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run --config apps/web/vitest.workspace.ts --no-coverage apps/web/test/hosted-execution-usage-postgres-concurrency.test.ts` | Opt-in real-PostgreSQL proof for deterministic hosted usage replay. The suite rejects non-loopback database URLs and runs in the hosted E2E PostgreSQL job after migrations. | A first writer holds an uncommitted deterministic usage row while an exact concurrent replay waits; both transactions complete after release and the ledger retains one immutable row |
@@ -520,6 +523,18 @@ supported provider credential.
   Its `MURPH_HOSTED_LOCAL_RESEND_API_BASE_URL` override is accepted only as a
   plain-HTTP loopback origin while hosted-local E2E isolation is explicitly
   active; production deployments must leave both test-only settings unset.
+- `apps/web/test/hosted-runtime-progress-alert-monitor-postgres.test.ts` is an
+  opt-in local-PostgreSQL proof for the companion 15-minute durable mailbox
+  progress detector. It exercises the real paginated SQL together with exact
+  personal and thread-container AI authority, including current-participant
+  access and inactive, stale, removed, suspended, or consent-revoked
+  exclusions. It also proves usage-denial suppression and restart chronology
+  across staging, provider, delivery, and mailbox-consumption evidence, plus
+  the 20,000 eligible-row cap after exclusions. The hosted-local
+  foreground-priority leg drives this monitor through authenticated cron HTTP
+  and the same isolated Resend stub, proving paced lost-ack retry,
+  identifier-free aggregation, active-incident coalescing, recovery/rearm, and
+  independence from the latency monitor.
 - `apps/web/test/hosted-mailbox-usage-denial-postgres.test.ts` is an opt-in
   local-PostgreSQL proof that the usage-denial write marks only the observed
   conversation sequence window with database-owned chronology and leaves a
@@ -710,15 +725,22 @@ keep the one-second presentation-only deadline and late-result rejection.
 
 - Assistant Ask has focused contract, parser, Web authority/idempotency,
   assistant-tool policy, runtime mailbox routing, detached-process lifecycle,
-  one-time current-sender identity/route/disclosure coverage, and Cloudflare
-  runner-image confinement coverage. The production-like Linux
+  one-time current-sender group-disclosure coverage, private-current-sender
+  admission/completion/replay coverage, and Cloudflare runner-image confinement
+  coverage. The private path proves exact accepted-message attribution,
+  personal-runtime targeting, same-channel `direct-member` routing, queue-only
+  exact-text notification, absence of group-route authority, and retry
+  non-redirection. Provider-entry coverage binds the original private Assistant
+  Ask expiry, exact reviewed-text digest, same personal member, and current
+  same-channel direct route, then proves expiry, revocation, text mismatch, or
+  route drift fails terminally without group fallback. The production-like Linux
   proof must show committed group reads succeed while writes, `.runtime/**`,
   `.codex/**`, environment files, other roots, inherited shell secrets, and tool network are
   denied, and it must show child failure or cancellation cannot interrupt the
   resident foreground App Server. Routine CI uses scripted provider responses;
   it does not send a real private-to-group ask, an accepted-input
-  grant-bound group-to-member ask, one-time current-sender self-disclosure, or
-  a scheduled same-turn ask/replay
+  grant-bound group-to-member ask, one-time current-sender self-disclosure,
+  private-current-sender continuation, or a scheduled same-turn ask/replay
   through deployed Web, Temporal, Cloudflare, a live model provider, and the
   applicable messaging or no-delivery destination.
 
