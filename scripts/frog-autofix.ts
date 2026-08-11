@@ -17,22 +17,27 @@ import {
 import { homedir, platform, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   FROG_AUTOFIX_BRANCH_PREFIX,
+  FROG_AUTOFIX_FINAL_RESPONSE_PATH,
   FROG_AUTOFIX_INTERVAL_SECONDS,
   FROG_AUTOFIX_LAUNCH_LABEL,
+  FROG_AUTOFIX_READY_PATH,
   FROG_AUTOFIX_REPOSITORY,
+  FROG_AUTOFIX_SPECIALIST_RESPONSE_PATH,
   FROG_AUTOFIX_WORKER_TIMEOUT_MS,
   buildCodexWorkerArguments,
   eligibleFrogIssues,
   isTrustedFrogIssue,
   normalizeGitHubRepository,
   parseEventLog,
+  parseReadyManifest,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
   renderWorkerPrompt,
   runWithCleanup,
+  reviewEvidenceIsValid,
   safeFailureMessage,
   superviseOwnedWorker,
   terminalWorkerSucceeded,
@@ -42,9 +47,11 @@ import {
 } from "./frog-autofix-lib.ts";
 import {
   branchHasMergedPullRequest,
+  branchOpenPullRequest,
   resolveWorkerMode,
   type RecoveryCommandAdapter,
 } from "./frog-autofix-recovery.ts";
+import { validateAndFinalizeReadyRepair } from "./frog-autofix-finalize.ts";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
@@ -75,6 +82,34 @@ interface RunLockRecord {
 interface CommandResult {
   status: number;
   stdout: string;
+}
+
+const COMMAND_TIMEOUT_MS = 10 * 60 * 1_000;
+const COMMAND_KILL_MARGIN_MS = 15_000;
+let invocationDeadline = Number.POSITIVE_INFINITY;
+
+function beginInvocation(command: string | undefined) {
+  const duration = command === "run"
+    ? FROG_AUTOFIX_WORKER_TIMEOUT_MS
+    : command === "install"
+      ? 30 * 60 * 1_000
+      : COMMAND_TIMEOUT_MS;
+  invocationDeadline = Date.now() + duration;
+}
+
+function remainingInvocationMs(): number {
+  const remaining = Math.floor(invocationDeadline - Date.now());
+  if (!Number.isFinite(remaining)) return COMMAND_TIMEOUT_MS;
+  if (remaining <= 0) throw new Error("Frog autofix invocation deadline expired");
+  return remaining;
+}
+
+function boundedRuntimeMs(maximumMs: number, terminationMarginMs: number): number {
+  const remaining = remainingInvocationMs();
+  if (remaining <= terminationMarginMs) {
+    throw new Error("Frog autofix lacks time to reap an owned process group");
+  }
+  return Math.min(maximumMs, remaining - terminationMarginMs);
 }
 
 interface LockDependencies {
@@ -114,19 +149,44 @@ const runCommand = (
   args: string[],
   cwd = repoRoot,
 ): CommandResult => {
-  const result = spawnSync(command, args, {
+  const timeoutMs = boundedRuntimeMs(COMMAND_TIMEOUT_MS, COMMAND_KILL_MARGIN_MS);
+  const result = spawnSync(process.execPath, [
+    path.join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+    path.join(repoRoot, "scripts", "frog-autofix-command.ts"),
+    String(timeoutMs),
     cwd,
+    "--",
+    command,
+    ...args,
+  ], {
+    cwd: repoRoot,
     encoding: "utf8",
     env: safeToolEnvironment(),
     maxBuffer: 16 * 1024 * 1024,
+    timeout: timeoutMs + COMMAND_KILL_MARGIN_MS,
   });
   if (result.error) {
     throw new Error(`${command} could not start`);
   }
-  return {
-    status: result.status ?? 1,
-    stdout: result.stdout,
-  };
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(result.stdout);
+  } catch {
+    throw new Error(`${command} returned an invalid command envelope`);
+  }
+  const candidate = envelope as CommandResult & { timedOut?: unknown };
+  if (
+    !envelope
+    || typeof envelope !== "object"
+    || Array.isArray(envelope)
+    || !Number.isSafeInteger(candidate.status)
+    || typeof candidate.stdout !== "string"
+    || typeof candidate.timedOut !== "boolean"
+  ) {
+    throw new Error(`${command} returned an invalid command envelope`);
+  }
+  if (candidate.timedOut) throw new Error(`${command} exceeded its bounded runtime`);
+  return { status: candidate.status, stdout: candidate.stdout };
 };
 
 const requireCommand = (
@@ -381,10 +441,7 @@ function ensureWorkerTooling(worktree: string) {
 
 function currentProcessStartToken(pid: number): string | null {
   if (platform() !== "darwin") return null;
-  const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-    encoding: "utf8",
-    env: safeToolEnvironment(),
-  });
+  const result = runCommand("ps", ["-o", "lstart=", "-p", String(pid)]);
   if (result.status !== 0) return null;
   const token = result.stdout.trim().replace(/\s+/gu, " ");
   return token || null;
@@ -784,7 +841,7 @@ async function runWorker(
   return await superviseOwnedWorker(
     child,
     onStart,
-    FROG_AUTOFIX_WORKER_TIMEOUT_MS,
+    boundedRuntimeMs(FROG_AUTOFIX_WORKER_TIMEOUT_MS, 31_000),
     30_000,
   );
 }
@@ -805,6 +862,177 @@ function issueIsClosed(root: string, issueNumber: number): boolean {
     ],
     root,
   ) === "CLOSED";
+}
+
+function readBoundedRegularFile(
+  worktree: string,
+  relativePath: string,
+  maximumBytes: number,
+): string {
+  const target = path.resolve(worktree, relativePath);
+  const relative = path.relative(worktree, target);
+  if (
+    !relative
+    || path.isAbsolute(relative)
+    || relative.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error("worker evidence path escapes its worktree");
+  }
+  const state = lstatSync(target);
+  if (!state.isFile() || state.isSymbolicLink() || state.size > maximumBytes) {
+    throw new Error("worker evidence is not a bounded regular file");
+  }
+  return readFileSync(target, "utf8");
+}
+
+function sha256(content: string): string {
+  return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+interface RequiredCheckRecord {
+  bucket: string;
+  name: string;
+  state: string;
+  workflow: string;
+}
+
+function requiredPullRequestChecksPass(root: string, pullRequest: number): boolean {
+  const raw = requireCommand(
+    "gh",
+    [
+      "pr",
+      "checks",
+      String(pullRequest),
+      "--repo",
+      FROG_AUTOFIX_REPOSITORY,
+      "--required",
+      "--json",
+      "bucket,name,state,workflow",
+    ],
+    root,
+  );
+  const value: unknown = JSON.parse(raw);
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const check = entry as Partial<RequiredCheckRecord>;
+    return check.bucket === "pass"
+      && typeof check.name === "string"
+      && Boolean(check.name)
+      && typeof check.state === "string"
+      && Boolean(check.state)
+      && typeof check.workflow === "string"
+      && Boolean(check.workflow);
+  });
+}
+
+function validateReadyRepair(
+  primary: string,
+  worktree: string,
+  branch: string,
+  issueNumber: number,
+) {
+  validateAndFinalizeReadyRepair({ branch, issueNumber }, {
+    closeIssue: (identity) => requireCommand(
+      "gh",
+      [
+        "issue",
+        "close",
+        String(issueNumber),
+        "--repo",
+        FROG_AUTOFIX_REPOSITORY,
+        "--comment",
+        `Closed after verified merge of PR #${identity.pullRequest}.`,
+      ],
+      primary,
+    ),
+    currentPullRequest: () => {
+      const current = branchOpenPullRequest(
+        primary,
+        branch,
+        issueNumber,
+        recoveryCommands,
+      );
+      return current
+        ? { head: current.headRefOid, pullRequest: current.number }
+        : null;
+    },
+    issueIsClosed: () => issueIsClosed(primary, issueNumber),
+    loadManifest: () => parseReadyManifest(
+      readBoundedRegularFile(worktree, FROG_AUTOFIX_READY_PATH, 4 * 1024),
+      issueNumber,
+      branch,
+    ),
+    localHead: () => requireCommand("git", ["rev-parse", "HEAD"], worktree),
+    merge: (identity) => requireCommand(
+      "gh",
+      [
+        "pr",
+        "merge",
+        String(identity.pullRequest),
+        "--repo",
+        FROG_AUTOFIX_REPOSITORY,
+        "--squash",
+        "--match-head-commit",
+        identity.head,
+      ],
+      primary,
+    ),
+    mergeTreePasses: () => runCommand(
+      "git",
+      [
+        "merge-tree",
+        "--write-tree",
+        "--quiet",
+        "origin/main",
+        `refs/heads/${branch}`,
+      ],
+      primary,
+    ).status === 0,
+    pullRequestIsMerged: () => branchHasMergedPullRequest(
+      primary,
+      branch,
+      issueNumber,
+      recoveryCommands,
+    ),
+    refreshAndVerifyIssue: () => {
+      fetchMain(primary);
+      verifyExactIssue(primary, issueNumber);
+    },
+    requiredChecksPass: (identity) => requiredPullRequestChecksPass(
+      primary,
+      identity.pullRequest,
+    ),
+    reviewEvidencePasses: (kind, reviewedHead) => {
+      const responsePath = kind === "specialist"
+        ? FROG_AUTOFIX_SPECIALIST_RESPONSE_PATH
+        : FROG_AUTOFIX_FINAL_RESPONSE_PATH;
+      const response = readBoundedRegularFile(worktree, responsePath, 1024 * 1024);
+      const modelVerification = readBoundedRegularFile(
+        worktree,
+        `${responsePath}.model-verification.json`,
+        16 * 1024,
+      );
+      return reviewEvidenceIsValid({
+        expectedHash: sha256(response),
+        head: reviewedHead,
+        issueNumber,
+        kind,
+        modelVerification,
+        response,
+      });
+    },
+    specialistHeadIsAncestor: (specialistHead, finalHead) => runCommand(
+      "git",
+      ["merge-base", "--is-ancestor", specialistHead, finalHead],
+      worktree,
+    ).status === 0,
+    worktreeIsClean: () => !requireCommand(
+      "git",
+      ["status", "--porcelain"],
+      worktree,
+    ),
+  });
 }
 
 function retireMergedWorktree(
@@ -874,6 +1102,7 @@ async function runOnce() {
     mkdirSync(transientRoot, { mode: 0o700, recursive: true });
     const transient = mkdtempSync(path.join(transientRoot, "run-"));
     let cleanupOwnedByWorkerLifecycle = false;
+    let workerSucceeded = false;
     try {
       const template = readFileSync(
         path.join(primary, "scripts", "frog-autofix-worker.md"),
@@ -907,12 +1136,21 @@ async function runOnce() {
         recordEvent("worker_timed_out", issue.number, result.status);
       } else if (result.status !== 0) {
         recordEvent("worker_failed", issue.number, result.status);
+      } else {
+        workerSucceeded = true;
       }
     } finally {
       if (!cleanupOwnedByWorkerLifecycle && existsSync(transient)) {
         safeRemoveTransientDirectory(transientRoot, transient);
       }
     }
+
+    if (!workerSucceeded) {
+      recordEvent("worker_incomplete", issue.number);
+      process.exitCode = 1;
+      return;
+    }
+    validateReadyRepair(primary, worktree, branch, issue.number);
 
     const issueClosed = issueIsClosed(primary, issue.number);
     const pullRequestMerged = branchHasMergedPullRequest(
@@ -949,6 +1187,7 @@ function parseInstallCodexHome(args: string[]): string | undefined {
 
 async function main() {
   const [command, ...args] = process.argv.slice(2);
+  beginInvocation(command);
   switch (command) {
     case "install":
       install(parseInstallCodexHome(args));

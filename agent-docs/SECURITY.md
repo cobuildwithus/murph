@@ -1029,28 +1029,38 @@ Last verified: 2026-08-11
   worker prompt. Titles, bodies, comments, links, repository content,
   ReviewGPT prose, and attachments remain untrusted evidence and cannot
   override user or repository instructions.
+  GitHub CLI's GraphQL issue projection represents this App actor as
+  `app/murph-frog-reconciliation`; the workflow's REST-style bot-login setting
+  uses a different `[bot]` representation and is not the local admission field.
 - Parent-selected recovery mode is derived from exact clean branch ancestry,
   deterministic PR ownership, head identity, state, and closing relationship.
   Only a fresh branch can authorize the implementation ReviewGPT request;
-  resume and close-only prompts omit that command entirely. Ambiguous or
-  multiply-owned state grants no worker mode.
+  resume omits that command entirely. A merged PR with an open or reopened
+  issue, ambiguous state, or multiply-owned state grants no worker mode and no
+  automatic issue closure.
 - In fresh `implement` mode, ReviewGPT must return exactly one latest-response
   patch or diff attachment. The worker rejects parent traversal, absolute
   paths, binaries, unrelated scope, credentials, direct identifiers, private
   evidence, and generated artifacts before applying it. An absent or rejected
   patch is terminal for that run; Codex does not invent a replacement
   implementation. Recovery modes cannot request a second implementation patch.
-- Automatic merge authority is narrower than change authority. It requires the
-  routed ReviewGPT PASS outcomes, green required checks on the exact head, a
-  clean current-base proof, and an ordinary GitHub merge. The worker never uses
-  admin merge, self-approval, ruleset bypass, branch-protection mutation, or
-  skipped/missing gate reinterpretation. Issue closure requires a verified
-  merged PR.
+- Automatic merge authority is narrower than change authority. The model
+  worker may only leave a bounded ignored readiness manifest and exact
+  CLI-generated ReviewGPT response/model evidence. The non-model parent checks
+  those files, clean head identity, specialist ancestry, the exact open PR,
+  nonempty green required checks, and a clean current-base merge. It then
+  re-fetches and revalidates App author, open state, label, exactly one committed
+  binding, PR head, and checks immediately before an ordinary
+  `--match-head-commit` squash merge. The worker never merges or closes, and
+  neither owner uses admin merge, self-approval, ruleset bypass,
+  branch-protection mutation, or skipped/missing gate reinterpretation. The
+  parent closes only the issue attached to the merge it just verified.
 - Durable local files use owner-only permissions and contain only home-relative
   locators, process identity, issue numbers, timestamps, event names, and exit
   status. Worker prompts, transcripts, command output, and downloaded patches
   stay in one owner-only transient directory and are removed after the exact
-  child process group exits.
+  child process group disappears. Every external command gets its own exact
+  supervised group and is bounded by the same absolute invocation deadline.
 
 ## Scheduled assistant action authority
 

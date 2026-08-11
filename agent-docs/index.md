@@ -8,9 +8,10 @@ This index is the table of contents for the current canonical docs in this repos
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
-ReviewGPT-authored implementation patches, ordinary protected PR merges,
-GitHub-owned implement/resume/close-only recovery state, a serialized two-hour
-LaunchAgent, and bounded metadata-only local state. Its ownership and proof are
+ReviewGPT-authored implementation patches, parent-revalidated ordinary
+protected PR merges, GitHub-owned implement/resume recovery state with no
+historical close-only path, one absolute process-group-bounded invocation,
+a serialized two-hour LaunchAgent, and bounded metadata-only local state. Its ownership and proof are
 jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and

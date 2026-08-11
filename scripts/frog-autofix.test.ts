@@ -10,6 +10,7 @@ import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 
@@ -17,6 +18,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   FROG_AUTOFIX_BOT,
+  FROG_AUTOFIX_READY_PATH,
   FROG_AUTOFIX_INTERVAL_SECONDS,
   buildCodexWorkerArguments,
   classifyWorkerMode,
@@ -24,10 +26,12 @@ import {
   isTrustedFrogIssue,
   normalizeGitHubRepository,
   parseEventLog,
+  parseReadyManifest,
   renderInstalledLauncher,
   renderLaunchAgentPlist,
   renderWorkerPrompt,
   runWithCleanup,
+  reviewEvidenceIsValid,
   safeFailureMessage,
   superviseOwnedWorker,
   terminalWorkerSucceeded,
@@ -37,6 +41,12 @@ import {
   branchHasMergedPullRequest,
   resolveWorkerMode,
 } from "./frog-autofix-recovery.ts";
+import {
+  finalizeReadyRepair,
+  validateAndFinalizeReadyRepair,
+  type ReadyRepairDependencies,
+  type ReadyRepairFinalizationDependencies,
+} from "./frog-autofix-finalize.ts";
 
 const trustedIssue = (number: number) => ({
   author: { login: FROG_AUTOFIX_BOT },
@@ -80,6 +90,63 @@ describe("Frog autofix guards", () => {
     expect(eligibleFrogIssues(issues, bindings).map((issue) => issue.number))
       .toEqual([9, 12]);
     expect(eligibleFrogIssues([trustedIssue(1)], new Map())).toEqual([]);
+  });
+
+  it("uses the production GitHub GraphQL App author representation exactly", () => {
+    expect(isTrustedFrogIssue({
+      author: { login: "app/murph-frog-reconciliation" },
+      labels: [{ name: "enhancement" }],
+      number: 42,
+      state: "OPEN",
+    })).toBe(true);
+    expect(isTrustedFrogIssue({
+      author: { login: "murph-frog-reconciliation[bot]" },
+      labels: [{ name: "enhancement" }],
+      number: 42,
+      state: "OPEN",
+    })).toBe(false);
+  });
+
+  it("accepts only exact readiness and verified ReviewGPT evidence", () => {
+    const branch = "agent/frog-autofix-42";
+    const head = "a".repeat(40);
+    const specialistHead = "b".repeat(40);
+    const manifest = JSON.stringify({
+      branch,
+      head,
+      issue: 42,
+      pullRequest: 99,
+      schemaVersion: 1,
+      specialistHead,
+    });
+    expect(parseReadyManifest(manifest, 42, branch)).toMatchObject({ head });
+    expect(() => parseReadyManifest(manifest, 43, branch)).toThrow();
+    expect(FROG_AUTOFIX_READY_PATH).toBe("audit-packages/frog-autofix-ready.json");
+
+    const response = `Issue #42\nReviewed ${head.slice(0, 12)}\nROUND_OUTCOME: PASS\nREVIEW_COMPLETE\n`;
+    const hash = createHash("sha256").update(response).digest("hex");
+    const modelVerification = JSON.stringify({
+      requestedModel: "gpt-5.6-sol",
+      responseModelSlug: "gpt-5-6-pro",
+      responseSha256: hash,
+      schemaVersion: 1,
+    });
+    expect(reviewEvidenceIsValid({
+      expectedHash: hash,
+      head,
+      issueNumber: 42,
+      kind: "final",
+      modelVerification,
+      response,
+    })).toBe(true);
+    expect(reviewEvidenceIsValid({
+      expectedHash: "0".repeat(64),
+      head,
+      issueNumber: 42,
+      kind: "final",
+      modelVerification,
+      response,
+    })).toBe(false);
   });
 
   it("uses the production discovery path for parsing, bounds, and selection", () => {
@@ -188,12 +255,9 @@ describe("Frog autofix guards", () => {
     const resume = renderWorkerPrompt(template, 42, "resume");
     expect(resume).toContain("resume mode");
     expect(resume).not.toContain("pnpm review:gpt --connector github");
-    const closeIssue = renderWorkerPrompt(template, 42, "close-issue");
-    expect(closeIssue).toContain("close-issue mode");
-    expect(closeIssue).not.toContain("pnpm review:gpt --connector github");
   });
 
-  it("classifies only unambiguous fresh, resumable, and close-only states", () => {
+  it("classifies only unambiguous fresh and resumable states", () => {
     expect(classifyWorkerMode([], 0)).toBe("implement");
     expect(classifyWorkerMode([], 1)).toBe("resume");
     expect(classifyWorkerMode([{
@@ -207,7 +271,7 @@ describe("Frog autofix guards", () => {
       headIsAncestorOfLocal: true,
       headMatchesLocal: true,
       state: "MERGED",
-    }], 2)).toBe("close-issue");
+    }], 2)).toBeNull();
     expect(classifyWorkerMode([{
       closesIssue: false,
       headIsAncestorOfLocal: true,
@@ -301,12 +365,12 @@ describe("Frog autofix guards", () => {
       pullRequest: { body: "Fixes #42", state: "OPEN" },
       remoteBranch: true,
     })).toBe("resume");
-    expect(runScenario({
+    expect(() => runScenario({
       ahead: 1,
       localHead: implementationHead,
       pullRequest: { body: "Fixes #42", state: "MERGED" },
       remoteBranch: true,
-    })).toBe("close-issue");
+    })).toThrow("recovery state is ambiguous");
   });
 
   it("requires one exact merged branch head and closing relationship", () => {
@@ -345,6 +409,125 @@ describe("Frog autofix guards", () => {
       42,
       commands(mergedHead, "Related to #42"),
     )).toBe(false);
+  });
+
+  it("keeps merge and issue closure in a revalidated non-model parent", () => {
+    const identity = {
+      branch: "agent/frog-autofix-42",
+      head: "a".repeat(40),
+      issueNumber: 42,
+      pullRequest: 99,
+    };
+    const events: string[] = [];
+    let closed = false;
+    const dependencies: ReadyRepairFinalizationDependencies = {
+      closeIssue: () => {
+        events.push("close");
+        closed = true;
+      },
+      currentPullRequest: () => {
+        events.push("pr");
+        return { head: identity.head, pullRequest: identity.pullRequest };
+      },
+      issueIsClosed: () => closed,
+      merge: () => events.push("merge"),
+      mergeTreePasses: () => {
+        events.push("merge-tree");
+        return true;
+      },
+      pullRequestIsMerged: () => true,
+      refreshAndVerifyIssue: () => events.push("verify-issue"),
+      requiredChecksPass: () => {
+        events.push("checks");
+        return true;
+      },
+    };
+
+    finalizeReadyRepair(identity, dependencies);
+    expect(events).toEqual([
+      "pr",
+      "checks",
+      "verify-issue",
+      "pr",
+      "checks",
+      "merge-tree",
+      "verify-issue",
+      "pr",
+      "checks",
+      "merge",
+      "close",
+    ]);
+  });
+
+  it("fails closed before merge when live authority, head, checks, or mergeability drift", () => {
+    const identity = {
+      branch: "agent/frog-autofix-42",
+      head: "a".repeat(40),
+      issueNumber: 42,
+      pullRequest: 99,
+    };
+    for (const failure of ["authority", "head", "checks", "merge-tree"] as const) {
+      let mergeCalls = 0;
+      let verificationCalls = 0;
+      const dependencies: ReadyRepairFinalizationDependencies = {
+        closeIssue: () => undefined,
+        currentPullRequest: () => failure === "head"
+          ? { head: "b".repeat(40), pullRequest: 99 }
+          : { head: identity.head, pullRequest: identity.pullRequest },
+        issueIsClosed: () => false,
+        merge: () => {
+          mergeCalls += 1;
+        },
+        mergeTreePasses: () => failure !== "merge-tree",
+        pullRequestIsMerged: () => false,
+        refreshAndVerifyIssue: () => {
+          verificationCalls += 1;
+          if (failure === "authority") throw new Error("revoked Frog authority");
+        },
+        requiredChecksPass: () => failure !== "checks",
+      };
+      expect(() => finalizeReadyRepair(identity, dependencies)).toThrow();
+      expect(mergeCalls).toBe(0);
+      if (failure === "authority") expect(verificationCalls).toBe(1);
+    }
+  });
+
+  it("does not reach merge when readiness head, ancestry, or review evidence is stale", () => {
+    const branch = "agent/frog-autofix-42";
+    const head = "a".repeat(40);
+    const specialistHead = "b".repeat(40);
+    for (const failure of ["head", "ancestry", "specialist", "final"] as const) {
+      let mergeCalls = 0;
+      const dependencies: ReadyRepairDependencies = {
+        closeIssue: () => undefined,
+        currentPullRequest: () => ({ head, pullRequest: 99 }),
+        issueIsClosed: () => true,
+        loadManifest: () => ({
+          branch,
+          head,
+          issue: 42,
+          pullRequest: 99,
+          schemaVersion: 1,
+          specialistHead,
+        }),
+        localHead: () => failure === "head" ? "c".repeat(40) : head,
+        merge: () => {
+          mergeCalls += 1;
+        },
+        mergeTreePasses: () => true,
+        pullRequestIsMerged: () => true,
+        refreshAndVerifyIssue: () => undefined,
+        requiredChecksPass: () => true,
+        reviewEvidencePasses: (kind) => kind !== failure,
+        specialistHeadIsAncestor: () => failure !== "ancestry",
+        worktreeIsClean: () => true,
+      };
+      expect(() => validateAndFinalizeReadyRepair(
+        { branch, issueNumber: 42 },
+        dependencies,
+      )).toThrow();
+      expect(mergeCalls).toBe(0);
+    }
   });
 
   it("redacts local identifiers from unexpected failure text", () => {
@@ -466,6 +649,7 @@ describe("Frog autofix guards", () => {
     const timers: Array<{ callback: () => void; cleared: boolean }> = [];
     const signals: Array<[number, string]> = [];
     const started: number[] = [];
+    let groupState: "alive" | "dead" = "alive";
     const resultPromise = superviseOwnedWorker(child, (pid) => started.push(pid), 100, 10, {
       clearTimer: (timer) => {
         (timer as { cleared: boolean }).cleared = true;
@@ -475,6 +659,7 @@ describe("Frog autofix guards", () => {
         timers.push(timer);
         return timer;
       },
+      processGroupState: () => groupState,
       signalProcessGroup: (pid, signal) => signals.push([pid, signal]),
     });
     expect(started).toEqual([42]);
@@ -483,8 +668,16 @@ describe("Frog autofix guards", () => {
     timers[1]?.callback();
     expect(signals).toEqual([[-42, "SIGTERM"], [-42, "SIGKILL"]]);
     (child as unknown as EventEmitter).emit("exit", 143);
+    let settled = false;
+    void resultPromise.finally(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    groupState = "dead";
+    timers.find((timer, index) => index > 1 && !timer.cleared)?.callback();
     await expect(resultPromise).resolves.toEqual({ status: 143, timedOut: true });
-    expect(timers.every((timer) => timer.cleared)).toBe(true);
+    expect(timers.slice(0, 2).every((timer) => timer.cleared)).toBe(true);
   });
 
   it("handles ordinary and graceful-timeout worker exits without a forced signal", async () => {
@@ -504,6 +697,7 @@ describe("Frog autofix guards", () => {
         timers.push(timer);
         return timer;
       },
+      processGroupState: () => "dead" as const,
       signalProcessGroup: (pid: number, signal: "SIGKILL" | "SIGTERM") => {
         signals.push([pid, signal]);
       },
@@ -517,12 +711,48 @@ describe("Frog autofix guards", () => {
 
     const graceful = new FakeChild(8) as unknown as ChildProcess;
     const gracefulResult = superviseOwnedWorker(graceful, () => undefined, 100, 10, dependencies);
-    timers.at(-1)?.callback();
+    timers[1]?.callback();
     expect(signals).toEqual([[-8, "SIGTERM"]]);
     (graceful as unknown as EventEmitter).emit("exit", 143);
     await expect(gracefulResult).resolves.toEqual({ status: 143, timedOut: true });
     expect(signals).toEqual([[-8, "SIGTERM"]]);
     expect(timers.at(-1)?.cleared).toBe(true);
+  });
+
+  it("bounds a real leader-first command until its exact process group disappears", () => {
+    const descendant = [
+      "process.on('SIGTERM',()=>{});",
+      "setInterval(()=>{},1000);",
+    ].join("");
+    const leader = [
+      "const{spawn}=require('node:child_process');",
+      `const child=spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'ignore'});`,
+      "process.stdout.write(String(child.pid));",
+      "process.on('SIGTERM',()=>process.exit(0));",
+      "setInterval(()=>{},1000);",
+    ].join("");
+    const result = spawnSync(process.execPath, [
+      path.join(repositoryRoot, "node_modules", "tsx", "dist", "cli.mjs"),
+      path.join(repositoryRoot, "scripts", "frog-autofix-command.ts"),
+      "150",
+      repositoryRoot,
+      "--",
+      process.execPath,
+      "-e",
+      leader,
+    ], { encoding: "utf8", timeout: 5_000 });
+    expect(result.error).toBeUndefined();
+    const envelope = JSON.parse(result.stdout) as {
+      status: number;
+      stdout: string;
+      timedOut: boolean;
+    };
+    expect(envelope.timedOut).toBe(true);
+    const descendantPid = Number(envelope.stdout);
+    expect(Number.isSafeInteger(descendantPid)).toBe(true);
+    expect(() => process.kill(descendantPid, 0)).toThrow(
+      expect.objectContaining({ code: "ESRCH" }),
+    );
   });
 
   it("waits for exact child termination when lock identity recording fails", async () => {
@@ -533,6 +763,7 @@ describe("Frog autofix guards", () => {
     const timers: Array<{ callback: () => void; cleared: boolean }> = [];
     const signals: Array<[number, string]> = [];
     const startError = new Error("worker identity unavailable");
+    let groupState: "alive" | "dead" = "alive";
     const resultPromise = superviseOwnedWorker(child, () => {
       throw startError;
     }, 100, 10, {
@@ -544,6 +775,7 @@ describe("Frog autofix guards", () => {
         timers.push(timer);
         return timer;
       },
+      processGroupState: () => groupState,
       signalProcessGroup: (pid, signal) => signals.push([pid, signal]),
     });
     expect(signals).toEqual([[-42, "SIGTERM"]]);
@@ -553,9 +785,11 @@ describe("Frog autofix guards", () => {
     }).catch(() => undefined);
     await Promise.resolve();
     expect(settled).toBe(false);
-    timers.at(-1)?.callback();
+    timers[1]?.callback();
     expect(signals).toEqual([[-42, "SIGTERM"], [-42, "SIGKILL"]]);
     (child as unknown as EventEmitter).emit("exit", 137);
+    groupState = "dead";
+    timers.find((timer, index) => index > 1 && !timer.cleared)?.callback();
     await expect(resultPromise).rejects.toBe(startError);
     expect(settled).toBe(true);
   });

@@ -8,6 +8,11 @@ export const FROG_AUTOFIX_BRANCH_PREFIX = "agent/frog-autofix-";
 export const FROG_AUTOFIX_LAUNCH_LABEL = "ai.withmurph.frog-autofix";
 export const FROG_AUTOFIX_INTERVAL_SECONDS = 7_200;
 export const FROG_AUTOFIX_WORKER_TIMEOUT_MS = 4 * 60 * 60 * 1_000;
+export const FROG_AUTOFIX_READY_PATH = "audit-packages/frog-autofix-ready.json";
+export const FROG_AUTOFIX_SPECIALIST_RESPONSE_PATH =
+  "audit-packages/frog-autofix-specialists.md";
+export const FROG_AUTOFIX_FINAL_RESPONSE_PATH =
+  "audit-packages/frog-autofix-final.md";
 
 export interface FrogIssue {
   author: { login: string } | null;
@@ -16,13 +21,29 @@ export interface FrogIssue {
   state: string;
 }
 
-export type FrogAutofixWorkerMode = "close-issue" | "implement" | "resume";
+export type FrogAutofixWorkerMode = "implement" | "resume";
 
 export interface BranchPullRequestState {
   closesIssue: boolean;
   headIsAncestorOfLocal: boolean;
   headMatchesLocal: boolean;
   state: "CLOSED" | "MERGED" | "OPEN";
+}
+
+export interface FrogAutofixReadyManifest {
+  branch: string;
+  head: string;
+  issue: number;
+  pullRequest: number;
+  schemaVersion: 1;
+  specialistHead: string;
+}
+
+interface ReviewModelVerification {
+  requestedModel: string;
+  responseModelSlug: string;
+  responseSha256: string;
+  schemaVersion: number;
 }
 
 export type EventName =
@@ -90,11 +111,6 @@ export function classifyWorkerMode(
   if (pullRequests.length > 1) return null;
   const pullRequest = pullRequests[0];
   if (!pullRequest) return aheadCommitCount === 0 ? "implement" : "resume";
-  if (pullRequest.state === "MERGED") {
-    return pullRequest.headMatchesLocal && pullRequest.closesIssue
-      ? "close-issue"
-      : null;
-  }
   if (pullRequest.state === "OPEN") {
     return pullRequest.headMatchesLocal || pullRequest.headIsAncestorOfLocal
       ? "resume"
@@ -145,16 +161,6 @@ exec "$HOME/$repo_relative/scripts/frog-autofix" run
 }
 
 function workerModeInstructions(mode: FrogAutofixWorkerMode): string {
-  if (mode === "close-issue") {
-    return `The parent selected **close-issue mode** from an exact deterministic
-branch and merged-PR match. Re-query GitHub and require exactly one merged PR
-from the issue branch, an exact closing-keyword relationship to this issue, and
-the local branch head equal to the merged PR head. If the issue is still open,
-close only this issue with a concise reference to that merged PR. Do not request
-an implementation patch, edit files, commit, push, open another PR, or enter the
-normal implementation lane. Stop after verifying the PR is merged and the issue
-is closed. Any mismatch fails closed.`;
-  }
   if (mode === "resume") {
     return `The parent selected **resume mode** because the deterministic branch
 already has an implementation commit or an open PR. Re-query GitHub and inspect
@@ -231,8 +237,100 @@ export function renderWorkerPrompt(
     .replace("{{MODE_WORKFLOW}}", workerModeInstructions(mode));
 }
 
+export function parseReadyManifest(
+  raw: string,
+  issueNumber: number,
+  branch: string,
+): FrogAutofixReadyManifest {
+  const value: unknown = JSON.parse(raw);
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("worker readiness manifest is invalid");
+  }
+  const manifest = value as Partial<FrogAutofixReadyManifest>
+    & Record<string, unknown>;
+  if (
+    Object.keys(manifest).some(
+      (key) => ![
+        "branch",
+        "head",
+        "issue",
+        "pullRequest",
+        "schemaVersion",
+        "specialistHead",
+      ].includes(key),
+    )
+    || manifest.schemaVersion !== 1
+    || manifest.issue !== issueNumber
+    || manifest.branch !== branch
+    || !Number.isSafeInteger(manifest.pullRequest)
+    || Number(manifest.pullRequest) <= 0
+    || typeof manifest.head !== "string"
+    || !/^[0-9a-f]{40}$/u.test(manifest.head)
+    || typeof manifest.specialistHead !== "string"
+    || !/^[0-9a-f]{40}$/u.test(manifest.specialistHead)
+  ) {
+    throw new Error("worker readiness manifest is invalid");
+  }
+  return manifest as FrogAutofixReadyManifest;
+}
+
+function parseModelVerification(raw: string): ReviewModelVerification | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const verification = value as Partial<ReviewModelVerification>;
+  if (
+    verification.schemaVersion !== 1
+    || verification.requestedModel !== "gpt-5.6-sol"
+    || verification.responseModelSlug !== "gpt-5-6-pro"
+    || typeof verification.responseSha256 !== "string"
+    || !/^[0-9a-f]{64}$/u.test(verification.responseSha256)
+  ) {
+    return null;
+  }
+  return verification as ReviewModelVerification;
+}
+
+function exactLineCount(content: string, line: string): number {
+  return content.split(/\r?\n/u).filter((candidate) => candidate.trim() === line).length;
+}
+
+export function reviewEvidenceIsValid(options: {
+  expectedHash: string;
+  head: string;
+  issueNumber: number;
+  kind: "final" | "specialist";
+  modelVerification: string;
+  response: string;
+}): boolean {
+  const verification = parseModelVerification(options.modelVerification);
+  if (!verification || verification.responseSha256 !== options.expectedHash) return false;
+  if (!options.response.includes(`#${options.issueNumber}`)) return false;
+  if (!options.response.includes(options.head.slice(0, 12))) return false;
+  if (options.kind === "final") {
+    return exactLineCount(options.response, "ROUND_OUTCOME: PASS") === 1
+      && exactLineCount(options.response, "REVIEW_COMPLETE") === 1
+      && exactLineCount(options.response, "ROUND_OUTCOME: FINDINGS") === 0
+      && exactLineCount(options.response, "ROUND_OUTCOME: INVALID") === 0;
+  }
+  const outcomes = [
+    "SPECIALIST_OUTCOME: PASS",
+    "SPECIALIST_OUTCOME: FINDINGS",
+  ].reduce((count, line) => count + exactLineCount(options.response, line), 0);
+  return outcomes === 1
+    && exactLineCount(options.response, "SPECIALIST_REVIEW_COMPLETE") === 1
+    && exactLineCount(options.response, "SPECIALIST_OUTCOME: INVALID") === 0;
+}
+
 export interface WorkerSupervisorDependencies {
   clearTimer: (timer: unknown) => void;
+  processGroupState: (
+    processGroupId: number,
+  ) => "alive" | "dead" | "unknown";
   setTimer: (callback: () => void, delayMs: number) => unknown;
   signalProcessGroup: (
     processGroupId: number,
@@ -242,6 +340,14 @@ export interface WorkerSupervisorDependencies {
 
 const defaultWorkerSupervisorDependencies: WorkerSupervisorDependencies = {
   clearTimer: (timer) => clearTimeout(timer as NodeJS.Timeout),
+  processGroupState: (processGroupId) => {
+    try {
+      process.kill(processGroupId, 0);
+      return "alive";
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ESRCH" ? "dead" : "unknown";
+    }
+  },
   setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
   signalProcessGroup: (processGroupId, signal) => process.kill(processGroupId, signal),
 };
@@ -251,47 +357,102 @@ export async function superviseOwnedWorker(
   onStart: (pid: number) => void,
   timeoutMs: number,
   killGraceMs: number,
-  dependencies: WorkerSupervisorDependencies = defaultWorkerSupervisorDependencies,
+  dependencyOverrides: Partial<WorkerSupervisorDependencies> = {},
 ): Promise<{ status: number; timedOut: boolean }> {
+  const dependencies = {
+    ...defaultWorkerSupervisorDependencies,
+    ...dependencyOverrides,
+  };
   return await new Promise((resolve, reject) => {
+    const processGroupId = child.pid ? -child.pid : null;
+    let exitCode: number | null = null;
+    let killTimer: unknown;
+    let leaderExited = false;
+    let pollTimer: unknown;
+    let settled = false;
     let startFailed = false;
     let startFailure: unknown;
+    let terminationRequested = false;
     let timedOut = false;
-    let killTimer: unknown;
-    const timeout = dependencies.setTimer(() => {
-      if (!child.pid) return;
-      timedOut = true;
-      try {
-        dependencies.signalProcessGroup(-child.pid, "SIGTERM");
-      } catch {
-        return;
-      }
-      killTimer = dependencies.setTimer(() => {
-        try {
-          if (child.pid) dependencies.signalProcessGroup(-child.pid, "SIGKILL");
-        } catch {
-          // The exact worker process group already exited.
-        }
-      }, killGraceMs);
-    }, timeoutMs);
 
-    child.once("error", (error) => {
+    const clearOwnedTimers = () => {
       dependencies.clearTimer(timeout);
       if (killTimer) dependencies.clearTimer(killTimer);
-      reject(error);
-    });
-    child.once("exit", (code) => {
-      dependencies.clearTimer(timeout);
-      if (killTimer) dependencies.clearTimer(killTimer);
+      if (pollTimer) dependencies.clearTimer(pollTimer);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearOwnedTimers();
       if (startFailed) {
         reject(startFailure);
         return;
       }
-      resolve({ status: code ?? 1, timedOut });
+      resolve({ status: exitCode ?? 1, timedOut });
+    };
+    const schedulePoll = () => {
+      if (settled || pollTimer) return;
+      pollTimer = dependencies.setTimer(() => {
+        pollTimer = undefined;
+        checkForCompletion();
+      }, 100);
+    };
+    const requestTermination = (timeoutTriggered: boolean) => {
+      if (settled || terminationRequested || processGroupId === null) return;
+      terminationRequested = true;
+      if (timeoutTriggered) timedOut = true;
+      try {
+        dependencies.signalProcessGroup(processGroupId, "SIGTERM");
+      } catch {
+        // Completion polling proves whether the exact group is already gone.
+      }
+      killTimer = dependencies.setTimer(() => {
+        try {
+          dependencies.signalProcessGroup(processGroupId, "SIGKILL");
+        } catch {
+          // Completion polling proves whether the exact group is already gone.
+        }
+        checkForCompletion();
+      }, killGraceMs);
+      schedulePoll();
+    };
+    const checkForCompletion = () => {
+      if (settled || processGroupId === null) return;
+      const groupState = dependencies.processGroupState(processGroupId);
+      if (leaderExited && groupState === "dead") {
+        finish();
+        return;
+      }
+      if (leaderExited && !terminationRequested) {
+        timedOut = true;
+        requestTermination(false);
+      }
+      schedulePoll();
+    };
+    const timeout = dependencies.setTimer(() => {
+      requestTermination(true);
+    }, timeoutMs);
+
+    child.once("error", (error) => {
+      if (processGroupId === null) {
+        clearOwnedTimers();
+        reject(error);
+        return;
+      }
+      leaderExited = true;
+      exitCode = 1;
+      startFailed = true;
+      startFailure = error;
+      checkForCompletion();
+    });
+    child.once("exit", (code) => {
+      leaderExited = true;
+      exitCode = code;
+      checkForCompletion();
     });
 
-    if (!child.pid) {
-      dependencies.clearTimer(timeout);
+    if (!child.pid || processGroupId === null) {
+      clearOwnedTimers();
       reject(new Error("worker process did not expose an identity"));
       return;
     }
@@ -300,21 +461,7 @@ export async function superviseOwnedWorker(
     } catch (error) {
       startFailed = true;
       startFailure = error;
-      dependencies.clearTimer(timeout);
-      try {
-        dependencies.signalProcessGroup(-child.pid, "SIGTERM");
-      } catch {
-        // The exact worker process group already exited.
-        reject(error);
-        return;
-      }
-      killTimer = dependencies.setTimer(() => {
-        try {
-          if (child.pid) dependencies.signalProcessGroup(-child.pid, "SIGKILL");
-        } catch {
-          // The exact worker process group already exited.
-        }
-      }, killGraceMs);
+      requestTermination(false);
     }
   });
 }

@@ -15,13 +15,28 @@ export interface RecoveryCommandAdapter {
   run: (command: string, args: string[], cwd: string) => CommandResult;
 }
 
-interface BranchPullRequestRecord {
+export interface BranchPullRequestRecord {
   baseRefName: string;
   body: string;
   headRefName: string;
   headRefOid: string;
   number: number;
   state: "CLOSED" | "MERGED" | "OPEN";
+}
+
+export function branchOpenPullRequest(
+  root: string,
+  branch: string,
+  issueNumber: number,
+  commands: RecoveryCommandAdapter,
+): BranchPullRequestRecord | null {
+  const pullRequests = branchPullRequests(root, branch, commands);
+  if (
+    pullRequests.length !== 1
+    || pullRequests[0]?.state !== "OPEN"
+    || !issueClosingKeywordPresent(pullRequests[0].body, issueNumber)
+  ) return null;
+  return pullRequests[0];
 }
 
 function issueClosingKeywordPresent(body: string, issueNumber: number): boolean {

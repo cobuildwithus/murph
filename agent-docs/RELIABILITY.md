@@ -154,17 +154,25 @@ Last verified: 2026-08-11
   the exact detached worker process identity, so an orphaned still-live child
   also blocks a replacement run after a launcher crash.
 - Before the worker starts, the parent classifies exact clean state as fresh
-  implementation, resumable implementation/PR, or merged-PR issue closure.
-  Resumable and close-only runs cannot reacquire or reapply an implementation
-  patch. Multiple PRs, a closed-unmerged PR, branch divergence, a mismatched
-  merged head or closing relationship, and dirty state fail closed rather than
-  guessing a continuation point.
-- The worker process group has a four-hour outer deadline. The runner sends
-  `SIGTERM`, then a bounded `SIGKILL` only to the exact detached process group it
-  created and still owns. ReviewGPT and CI instructions impose their own
+  implementation or resumable implementation/open PR. Resumable runs cannot
+  reacquire or reapply an implementation patch. A merged PR paired with an open
+  or reopened issue, multiple PRs, a closed-unmerged PR, branch divergence, a
+  mismatched head or closing relationship, and dirty state fail closed rather
+  than guessing a continuation point or closing historical state.
+- The complete invocation, including parent Git, GitHub, package-manager, and
+  launchctl commands, has one absolute four-hour deadline for a repair run.
+  Every external command and the worker run in an exact detached process group.
+  The runner sends `SIGTERM`, then a bounded `SIGKILL` only to a group it created
+  and still owns, and retains cleanup/lock ownership until the group—not merely
+  its leader—disappears. ReviewGPT and CI instructions impose their own
   three-hour waits. Timeout, browser unavailability, missing patch, dirty or
   ambiguous worktree state, red CI, blocked merge, and failed issue closure all
   leave recoverable GitHub/worktree state for a later pass.
+- A successful worker only prepares a clean committed branch, open PR, and
+  ignored readiness/review evidence. The parent validates that evidence and
+  revalidates live issue authority, PR head, required checks, and current-base
+  mergeability before the ordinary head-matched merge and immediate issue
+  closure.
 - A successful pass verifies both a merged PR for the deterministic branch and
   the closed issue before attempting ordinary worktree retirement. Retirement
   still uses `scripts/retire-worktree` and silently preserves the checkout when

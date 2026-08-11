@@ -3,7 +3,7 @@
 You are the single autonomous repair worker for
 `cobuildwithus/murph#{{ISSUE_NUMBER}}`. Work this issue through a real outcome
 in the current dedicated worktree, but fail closed at every trust, review, CI,
-and merge boundary.
+and readiness boundary. The non-model parent alone owns merge and issue closure.
 
 ## Trust preflight
 
@@ -31,14 +31,14 @@ Before editing:
 
 ## Complete the normal Murph lane
 
-This section applies only to `implement` and `resume` modes. After applying a
-valid ReviewGPT patch in `implement` mode, or after verifying the existing
-implementation state in `resume` mode:
+After applying a valid ReviewGPT patch in `implement` mode, or after verifying
+the existing implementation state in `resume` mode:
 
 1. Inspect the resulting diff, preserve unrelated work, create or update the
    required active plan, and run the smallest focused regression proof plus
-   routed typecheck and direct runtime proof. Remove all temporary ReviewGPT and
-   worker artifacts before committing.
+   routed typecheck and direct runtime proof. Remove implementation-thread and
+   other temporary artifacts before committing; the two ignored response files
+   named below remain only long enough for parent validation.
 2. Finish the task through the repository commit wrapper, push the exact branch,
    and open or update one PR whose body follows the completion workflow and
    contains `Fixes #{{ISSUE_NUMBER}}`. Do not include issue text, local paths,
@@ -47,20 +47,30 @@ implementation state in `resume` mode:
    routed, the independent final `pr-review` loop on exact pushed heads. Apply
    only verified in-scope findings, rerun affected proof, and require the exact
    PASS markers specified by the repo. The implementation thread is not a
-   substitute for either review gate.
+   substitute for either review gate. The latest substantive specialist response
+   must be captured at `audit-packages/frog-autofix-specialists.md`; the final
+   exact-head PASS response must be captured at
+   `audit-packages/frog-autofix-final.md`. Preserve each CLI-generated adjacent
+   `.model-verification.json` file. Do not author or alter any response or model
+   verification file yourself. Each response must explicitly identify issue
+   `#{{ISSUE_NUMBER}}` and at least the first 12 characters of the exact head it
+   reviewed so the parent can bind prose, model evidence, and code state.
 4. Wait no more than three hours for required GitHub checks on the exact PR
    head. Diagnose and repair only failures caused by this patch. Never disable a
    test, loosen a guard, alter branch protection, use `--admin`, bypass a
    ruleset, approve your own PR, or merge with pending, skipped-required, stale,
    cancelled, neutral, or red checks.
-5. When ReviewGPT gates pass, required exact-head checks are green, and the
-   current-base merge proof is clean, perform the repository's ordinary squash
-   merge. If GitHub requires a current base, use the documented merge queue or
-   one bounded normal base update and let required CI gate that head. Do not
-   enter a moving-base loop.
-6. Verify the PR is merged. The `Fixes` keyword should close the issue; if the
-   issue remains open after the verified merge, close exactly
-   `#{{ISSUE_NUMBER}}` as completed with a concise reference to the merged PR.
-   Never close it before merge. Finish only after GitHub reports both the PR
-   merged and the issue closed. Otherwise leave recoverable branch/PR state for
-   the next scheduled run and report the blocker without bypassing it.
+5. Do not merge, enable auto-merge, enqueue a merge, close the issue, or call a
+   merge/close command. Re-fetch the open PR and confirm its exact head equals
+   the clean local branch and the last final ReviewGPT PASS head. Record the
+   exact full head used by the preliminary pass; it may be an ancestor of the
+   final head when accepted specialist findings were fixed.
+6. As the final action, write exactly one ignored
+   `audit-packages/frog-autofix-ready.json` object with only these fields:
+   `schemaVersion: 1`, `issue: {{ISSUE_NUMBER}}`, the exact deterministic
+   `branch`, numeric `pullRequest`, full final `head`, and full
+   `specialistHead`. Do not include paths, review prose, issue content, or other
+   metadata. Exit successfully only after the clean branch, open PR, response
+   files, model-verification files, and readiness object all exist. The parent
+   will independently validate live authority, review evidence, checks, and
+   current-base mergeability immediately before any irreversible effect.

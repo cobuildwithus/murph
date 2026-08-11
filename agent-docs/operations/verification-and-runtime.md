@@ -608,7 +608,9 @@ The local Frog autofix entrypoint uses `scripts/frog-autofix scan` for a
 non-repairing live admission proof. The command may fetch `origin/main` and
 query public issue metadata, but it must not create durable autofix state or a
 worktree, start Codex, edit GitHub state, or print issue titles/bodies. Focused
-implementation proof is:
+implementation proof includes the real leader-first descendant timeout, strict
+readiness evidence, revoked-authority/head/check/conflict rejection, and
+historical merged-PR reopen refusal:
 
 ```sh
 pnpm exec vitest run scripts/frog-autofix.test.ts \

@@ -19,23 +19,29 @@ only issue datum placed in the parent worker prompt. Issue content remains
 untrusted evidence. A deterministic branch owns one sanctioned worktree, so a
 later run can recover an incomplete PR without a second task database.
 
-Recovery is a three-way parent classification, not a prompt guess. `implement`
+Recovery is a two-way parent classification, not a prompt guess. `implement`
 requires the current clean default-branch head with no implementation or PR;
-`resume` requires an existing deterministic implementation commit or open PR;
-and `close-issue` requires the exact merged PR head plus its issue-closing
-relationship. Only `implement` may request a fresh ReviewGPT implementation
-patch. Ambiguous or divergent state has no recovery mode.
+`resume` requires an existing deterministic implementation commit or open PR.
+A merged PR paired with an open or reopened issue is intentionally ambiguous
+and receives no recovery mode or automatic close. Only `implement` may request
+a fresh ReviewGPT implementation patch. Other ambiguous or divergent state has
+no recovery mode.
 
 One ephemeral Codex worker in `implement` mode must ask a fresh ReviewGPT Pro
 thread to author a downloadable patch before implementation. Missing,
 ambiguous, stale, unsafe, or prose-only output ends the run; Codex cannot
-silently substitute its own patch. Resume and close-only workers do not repeat
-that implementation request.
+silently substitute its own patch. Resume workers do not repeat that
+implementation request.
 After application, the ordinary Murph plan, focused proof, preliminary
 ReviewGPT, final ReviewGPT when routed, PR metadata, required exact-head CI, and
-current-base proof remain mandatory. Only a normal non-admin merge may precede
-issue closure. The worker has no branch-protection, ruleset, GitHub Actions, or
-Frog App bypass authority.
+current-base proof remain mandatory. The worker stops with bounded ignored
+readiness and exact ReviewGPT evidence; the non-model parent revalidates the
+live App-author/label/binding authority, open PR head, required checks, and
+current-base merge immediately before an ordinary head-matched squash merge.
+Only that newly verified merge may precede parent-owned issue closure. Every
+parent command and the worker share one four-hour invocation deadline and run
+in an exact supervised process group. The worker has no branch-protection,
+ruleset, GitHub Actions, or Frog App bypass authority.
 
 ## Accepted-Message Targeting
 
