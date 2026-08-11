@@ -29,6 +29,7 @@ import {
   hostedOnboardingError,
   isHostedOnboardingError,
 } from "./errors";
+import { parseHostedFamilyInviteCode } from "./app-routes";
 import {
   appendHostedFamilyChatNotificationTx,
   buildHostedFamilyInviteAcceptedNotification,
@@ -60,6 +61,7 @@ import {
 
 export type HostedOnboardingTelegramWebhookResponse = {
   duplicate?: boolean;
+  familyInviteCode?: string;
   ignored?: boolean;
   ok: true;
   reason?: string;
@@ -101,7 +103,7 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       text: telegramMessage.text ?? null,
     }) !== null;
     let familyInviteNotAccepted = false;
-    let familyDraftCheckoutConflict = false;
+    let familyDraftCheckoutConflictInviteCode: string | null = null;
     let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
     let familyActivationWake: HostedWebhookWakeHandoff | null = null;
     try {
@@ -128,7 +130,18 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         isHostedOnboardingError(error)
         && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
       ) {
-        familyDraftCheckoutConflict = true;
+        const inviteCode = parseHostedFamilyInviteCode(error.details?.inviteCode);
+        if (!inviteCode) {
+          throw hostedOnboardingError({
+            cause: error,
+            code: "HOSTED_FAMILY_DRAFT_RECOVERY_INVITE_MISSING",
+            httpStatus: 500,
+            message:
+              "Family invite recovery could not preserve the accepted invite identity.",
+            retryable: true,
+          });
+        }
+        familyDraftCheckoutConflictInviteCode = inviteCode;
       } else if (!isExpectedHostedTelegramFamilyInviteAcceptanceMiss(error)) {
         throw error;
       } else {
@@ -169,10 +182,11 @@ export async function planHostedOnboardingTelegramWebhook(input: {
       };
     }
 
-    if (familyDraftCheckoutConflict) {
+    if (familyDraftCheckoutConflictInviteCode) {
       return {
         desiredSideEffects: [],
         response: {
+          familyInviteCode: familyDraftCheckoutConflictInviteCode,
           ignored: true,
           ok: true,
           reason: "family-invite-draft-recovery-required",

@@ -6332,6 +6332,7 @@ export function buildHostedFamilyDraftCheckoutConflictReplyText(input: {
 function buildHostedFamilyDraftConflictError(inviteCode: string) {
   return hostedOnboardingError({
     code: HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE,
+    details: { inviteCode },
     httpStatus: 409,
     message: buildHostedFamilyDraftCheckoutConflictReplyText({ inviteCode }),
   });

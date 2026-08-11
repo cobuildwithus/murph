@@ -183,8 +183,9 @@ describe("hosted onboarding Telegram webhook route", () => {
     });
   });
 
-  it("replies to a Family draft conflict in the initiating Telegram message", async () => {
+  it("uses the planner's resolved invite when the raw Telegram start token is stale", async () => {
     mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValueOnce({
+      familyInviteCode: "current_username_invite",
       ignored: true,
       ok: true,
       reason: "family-invite-draft-recovery-required",
@@ -202,7 +203,7 @@ describe("hosted onboarding Telegram webhook route", () => {
           is_bot: false,
         },
         message_id: 18,
-        text: "/start family_route_recovery",
+        text: "/start family_revoked_explicit_invite",
       },
       update_id: 124,
     });
@@ -218,19 +219,21 @@ describe("hosted onboarding Telegram webhook route", () => {
     );
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toMatchObject({
+    const responseBody = await response.json();
+    expect(responseBody).toMatchObject({
       ignored: false,
       ok: true,
       reason: "visible-secondary-reply:family-invite-draft-recovery-required",
     });
     expect(mocks.sendHostedTelegramTextMessage).toHaveBeenCalledWith({
       message: expect.stringContaining(
-        "familyInviteReturn=%2Ffamily%2Faccept%2Froute_recovery",
+        "familyInviteReturn=%2Ffamily%2Faccept%2Fcurrent_username_invite",
       ),
       replyToMessageId: 18,
       signal: expect.any(AbortSignal),
       target: expect.objectContaining({ chatId: "42" }),
     });
+    expect(responseBody).not.toHaveProperty("familyInviteCode");
   });
 
   it("rejects invalid Telegram secrets before reading the request body", async () => {

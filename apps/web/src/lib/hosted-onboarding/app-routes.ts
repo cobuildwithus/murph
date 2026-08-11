@@ -8,11 +8,11 @@ export const HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE =
   "HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE";
 export const HOSTED_FAMILY_INVITE_RETURN_PARAM = "familyInviteReturn";
 
-const HOSTED_FAMILY_INVITE_RETURN_PATH_PATTERN =
-  /^\/family\/accept\/[A-Za-z0-9_-]+$/u;
+const HOSTED_FAMILY_INVITE_CODE_PATTERN = /^[A-Za-z0-9_-]+$/u;
+const HOSTED_FAMILY_INVITE_ACCEPT_PATH_PREFIX = "/family/accept/";
 
 export function buildHostedFamilyInviteAcceptancePath(inviteCode: string): string {
-  return `/family/accept/${encodeURIComponent(inviteCode)}`;
+  return `${HOSTED_FAMILY_INVITE_ACCEPT_PATH_PREFIX}${encodeURIComponent(inviteCode)}`;
 }
 
 export function buildHostedFamilyInviteRecoveryPath(inviteCode: string): string {
@@ -30,9 +30,23 @@ export function buildHostedFamilyInviteRecoveryUrl(inviteCode: string): string {
   ).toString();
 }
 
-export function parseHostedFamilyInviteReturnPath(value: unknown): string | null {
+export function parseHostedFamilyInviteCode(value: unknown): string | null {
   return typeof value === "string"
-    && HOSTED_FAMILY_INVITE_RETURN_PATH_PATTERN.test(value)
+    && HOSTED_FAMILY_INVITE_CODE_PATTERN.test(value)
+    ? value
+    : null;
+}
+
+export function parseHostedFamilyInviteReturnPath(value: unknown): string | null {
+  if (
+    typeof value !== "string"
+    || !value.startsWith(HOSTED_FAMILY_INVITE_ACCEPT_PATH_PREFIX)
+  ) {
+    return null;
+  }
+  return parseHostedFamilyInviteCode(
+    value.slice(HOSTED_FAMILY_INVITE_ACCEPT_PATH_PREFIX.length),
+  )
     ? value
     : null;
 }

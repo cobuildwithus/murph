@@ -98,6 +98,7 @@ import {
   createHostedTelegramUsernameLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  parseHostedFamilyInviteCode,
   parseHostedFamilyInviteReturnPath,
 } from "@/src/lib/hosted-onboarding/app-routes";
 import {
@@ -209,6 +210,15 @@ type FamilyPlanTxMock = Prisma.TransactionClient & {
 };
 
 describe("hosted Family plan", () => {
+  it("accepts only a canonical Family invite code", () => {
+    expect(parseHostedFamilyInviteCode("invite_return-target_123")).toBe(
+      "invite_return-target_123",
+    );
+    expect(parseHostedFamilyInviteCode("/family/accept/invite_123")).toBeNull();
+    expect(parseHostedFamilyInviteCode("invite 123")).toBeNull();
+    expect(parseHostedFamilyInviteCode(123)).toBeNull();
+  });
+
   it("accepts only an exact local Family invite as a recovery return path", () => {
     expect(parseHostedFamilyInviteReturnPath(
       "/family/accept/invite_return_target",
@@ -3916,6 +3926,7 @@ describe("hosted Family plan", () => {
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE",
+      details: { inviteCode: "invite_phone" },
       message: expect.stringContaining(
         "familyInviteReturn=%2Ffamily%2Faccept%2Finvite_phone",
       ),

@@ -1739,7 +1739,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
   });
 
-  it("queues an actionable recovery reply when an unfinished owner Checkout blocks a Telegram invite", async () => {
+  it("preserves a username-bound invite selected after a stale Telegram token hits a draft conflict", async () => {
     mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
     const acceptedMemberId = "member_telegram_family_draft";
     const invite = {
@@ -1784,6 +1784,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         },
         role: "owner",
       });
+    const staleInvite = {
+      ...invite,
+      expiresAt: new Date("2026-06-18T11:00:00.000Z"),
+      id: "invite_revoked_telegram_draft_recovery",
+      inviteCode: "revoked_telegram_draft_recovery",
+      status: "revoked",
+    };
     const routingRecord = {
       linqChatIdEncrypted: null,
       linqChatLookupKey: null,
@@ -1849,7 +1856,11 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       },
       hostedAccountGroupInvite: {
         count: vi.fn().mockResolvedValue(0),
-        findUnique: vi.fn().mockResolvedValue(invite),
+        findMany: vi.fn().mockResolvedValue([{ inviteCode: invite.inviteCode }]),
+        findUnique: vi.fn()
+          .mockResolvedValueOnce(staleInvite)
+          .mockResolvedValueOnce(staleInvite)
+          .mockResolvedValueOnce(invite),
         updateMany: hostedAccountGroupInviteUpdateMany,
       },
       hostedAccountGroupMembership: {
@@ -1906,12 +1917,13 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
             username: "invitee_user",
           },
           message_id: 5,
-          text: "/start family_invite_telegram_draft_recovery",
+          text: "/start family_revoked_telegram_draft_recovery",
         },
         update_id: 334,
       }),
       secretToken: "telegram-secret",
     })).resolves.toMatchObject({
+      familyInviteCode: "invite_telegram_draft_recovery",
       ignored: true,
       ok: true,
       reason: "family-invite-draft-recovery-required",

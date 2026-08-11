@@ -11,8 +11,6 @@ import { sha256Hex } from "../primitives";
 import { isHostedOnboardingError } from "./errors";
 import {
   buildHostedFamilyDraftCheckoutConflictReplyText,
-  parseHostedFamilyInviteStartToken,
-  resolveHostedFamilyInviteCodeFromTelegramStartFallback,
 } from "./family-plan";
 import { lookupHostedMemberIdentityByPhoneNumber } from "./hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "./hosted-member-routing-store";
@@ -62,11 +60,8 @@ export type HostedVisibleSecondaryLinqDependencies = {
 };
 
 export type HostedVisibleSecondaryTelegramDependencies = {
-  getPrisma: typeof getPrisma;
   parseHostedTelegramWebhookUpdate: typeof parseHostedTelegramWebhookUpdate;
   requireHostedOnboardingPublicBaseUrl: typeof requireHostedOnboardingPublicBaseUrl;
-  resolveHostedFamilyInviteCodeFromTelegramStartFallback:
-    typeof resolveHostedFamilyInviteCodeFromTelegramStartFallback;
   sendHostedTelegramTextMessage: typeof sendHostedTelegramTextMessage;
   summarizeHostedTelegramWebhook: typeof summarizeHostedTelegramWebhook;
 };
@@ -83,10 +78,8 @@ const defaultLinqDependencies: HostedVisibleSecondaryLinqDependencies = {
 };
 
 const defaultTelegramDependencies: HostedVisibleSecondaryTelegramDependencies = {
-  getPrisma,
   parseHostedTelegramWebhookUpdate,
   requireHostedOnboardingPublicBaseUrl,
-  resolveHostedFamilyInviteCodeFromTelegramStartFallback,
   sendHostedTelegramTextMessage,
   summarizeHostedTelegramWebhook,
 };
@@ -281,9 +274,10 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
 ): HostedOnboardingTelegramWebhookHandler {
   return async (input) => {
     const response = await handler(input);
-    const reason = response.reason ?? "";
+    const { familyInviteCode, ...publicResponse } = response;
+    const reason = publicResponse.reason ?? "";
     if (!response.ignored || !HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS.has(reason)) {
-      return response;
+      return publicResponse;
     }
 
     // The wrapped handler verified the secret before returning. This second
@@ -292,27 +286,12 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
     const message = extractTelegramMessage(update);
     const summary = await dependencies.summarizeHostedTelegramWebhook(update);
     if (!message || !summary) {
-      return response;
+      return publicResponse;
     }
 
     const signupUrl = reason === "unlinked-telegram"
       ? buildHostedSignupUrl(dependencies.requireHostedOnboardingPublicBaseUrl())
       : null;
-    let familyInviteCode = reason === "family-invite-draft-recovery-required"
-      ? parseHostedFamilyInviteStartToken(message.text)
-      : null;
-    if (
-      reason === "family-invite-draft-recovery-required"
-      && !familyInviteCode
-    ) {
-      familyInviteCode =
-        await dependencies.resolveHostedFamilyInviteCodeFromTelegramStartFallback({
-          now: new Date(summary.occurredAt),
-          prisma: input.prisma ?? dependencies.getPrisma(),
-          telegramUsername: summary.senderTelegramUsername,
-          text: message.text,
-        });
-    }
     const reply = resolveHostedTelegramVisibleSecondaryReply({
       familyInviteCode,
       isDirect: summary.isDirect,
@@ -320,7 +299,7 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
       signupUrl,
     });
     if (!reply) {
-      return response;
+      return publicResponse;
     }
 
     await dependencies.sendHostedTelegramTextMessage({
@@ -330,7 +309,7 @@ export function withHostedVisibleSecondaryTelegramOutcomes(
       ...(input.signal ? { signal: input.signal } : {}),
     });
 
-    return buildVisibleSecondaryResponse(response, reason);
+    return buildVisibleSecondaryResponse(publicResponse, reason);
   };
 }
 
