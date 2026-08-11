@@ -42,6 +42,7 @@ import { Spinner } from "@/src/components/ui/spinner";
 import type {
   HostedInferenceConnectionView,
 } from "@/src/lib/hosted-inference/types";
+import { cn } from "@/src/lib/utils";
 
 import {
   ASSISTANT_MODEL_CHOICE_CARD_CLASSES,
@@ -765,9 +766,11 @@ function HostedAssistantModelSettingsForm(
                 <ChoiceCard
                   artwork={<AssistantModelArtwork variant={option.artwork} />}
                   badge={badge}
-                  className={
-                    ASSISTANT_MODEL_CHOICE_CARD_CLASSES[option.artwork]
-                  }
+                  className={cn(
+                    ASSISTANT_MODEL_CHOICE_CARD_CLASSES[option.artwork],
+                    unavailable
+                      && "[&_[data-slot=field-content]]:!opacity-100",
+                  )}
                   description={option.description}
                   disabled={controlsDisabled || unavailable}
                   id={`assistant-model-${option.model}`}

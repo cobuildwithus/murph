@@ -144,6 +144,11 @@ test("eligible Pulse members discover the Edge upgrade from the disabled Sol car
   assert.match(markup, />Sol</);
   assert.doesNotMatch(markup, /Sol requires an active Edge plan\./);
   assert.match(markup, /High usage · Edge required/);
+  assert.match(markup, /!opacity-100/);
+  assert.match(
+    markup,
+    /aria-describedby="assistant-model-gpt-5\.6-sol-description assistant-model-gpt-5\.6-sol-meta"/,
+  );
   assert.match(markup, />Upgrade to Edge<\/button>/);
   assert.match(markup, /role="radio"/);
   assert.match(markup, /Save change/);
