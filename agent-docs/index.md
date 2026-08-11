@@ -7,6 +7,11 @@ Last verified: 2026-08-11
 This index is the table of contents for the current canonical docs in this repository.
 It intentionally lists live architecture, product, verification, and package-boundary docs only.
 
+The lower-level hosted browser assertion first-invalid boundary, single-use
+nonce persisted horizon, mixed-version cleanup safety, and opt-in PostgreSQL
+concurrency proof are jointly specified by `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, and `agent-docs/references/testing-ci-map.md`.
+
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
 protected PR merges, GitHub-owned implement/resume recovery state with no
