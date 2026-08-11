@@ -1,5 +1,11 @@
 import path from 'node:path'
-import { rawImportManifestSchema } from '@murphai/contracts'
+import {
+  bodyMeasurementEntrySchema,
+  eventSourceSchema,
+  measurementEntrySchema,
+  rawImportManifestSchema,
+  type MeasurementEntry,
+} from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   loadQueryRuntime,
@@ -7,7 +13,12 @@ import {
   type QueryRecord,
 } from '../commands/query-record-command-helpers.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
+import {
+  isoTimestampSchema,
+  localDateSchema,
+  pathSchema,
+  slugSchema,
+} from '@murphai/operator-config/vault-cli-contracts'
 import {
   asListEnvelope,
   readRawImportManifest,
@@ -18,9 +29,17 @@ import {
   relativePathEntries,
   relativePathStrings,
 } from './vault-usecase-helpers.js'
+import {
+  normalizeMetricSlug,
+} from './measurement.js'
 
 const DEFAULT_LIST_LIMIT = 50
 const TRACKED_MEASUREMENT_EVENT_KINDS = ['measurement', 'body_measurement'] as const
+const MEASUREMENT_ENTRY_RECORD_KINDS = [
+  ...TRACKED_MEASUREMENT_EVENT_KINDS,
+  'observation',
+] as const
+const measurementEntryRecordKindSchema = z.enum(MEASUREMENT_ENTRY_RECORD_KINDS)
 
 type TrackedMeasurementEventKind = (typeof TRACKED_MEASUREMENT_EVENT_KINDS)[number]
 
@@ -36,6 +55,27 @@ export const measurementImportManifestResultSchema = z.object({
   kind: z.enum(TRACKED_MEASUREMENT_EVENT_KINDS),
   manifestFile: pathSchema,
   manifest: rawImportManifestSchema,
+})
+
+export const measurementEntryListItemSchema = measurementEntrySchema.extend({
+  eventId: measurementLookupSchema,
+  recordKind: measurementEntryRecordKindSchema,
+  measurementIndex: z.number().int().nonnegative().nullable(),
+  occurredAt: isoTimestampSchema,
+  source: eventSourceSchema.nullable(),
+})
+
+export const measurementEntryListResultSchema = z.object({
+  vault: pathSchema,
+  filters: z.object({
+    metric: z.array(slugSchema).min(1),
+    from: localDateSchema.optional(),
+    to: localDateSchema.optional(),
+    limit: z.number().int().positive().max(DEFAULT_LIST_LIMIT * 4),
+  }),
+  items: z.array(measurementEntryListItemSchema),
+  count: z.number().int().nonnegative(),
+  nextCursor: z.null(),
 })
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -125,6 +165,143 @@ export async function listMeasurementRecords(input: {
     to: input.to,
     limit,
   }, items)
+}
+
+export async function listMeasurementEntries(input: {
+  vault: string
+  metrics: readonly string[]
+  from?: string
+  to?: string
+  limit?: number
+}) {
+  const query = await loadQueryRuntime('measurement entry query reads')
+  const metrics = [
+    ...new Set(
+      input.metrics.map((metric, index) =>
+        normalizeMetricSlug(metric, `metric[${index}]`),
+      ),
+    ),
+  ]
+  if (metrics.length === 0) {
+    throw new VaultCliError(
+      'invalid_option',
+      'measurement entry list requires at least one metric filter.',
+    )
+  }
+  const metricIdentitySet = new Set(metrics.map(query.resolveMetricInputKey))
+  const limit =
+    typeof input.limit === 'number' && Number.isFinite(input.limit)
+      ? Math.max(1, Math.min(DEFAULT_LIST_LIMIT * 4, Math.round(input.limit)))
+      : DEFAULT_LIST_LIMIT
+  const [readModel, observationEntries] = await Promise.all([
+    query.readVault(input.vault),
+    query.listCanonicalObservationMetricEntries(input.vault, {
+      from: input.from,
+      metrics,
+      to: input.to,
+      limit: null,
+    }),
+  ])
+  const measurementItems = query
+    .listEntities(readModel, {
+      families: ['event'],
+      kinds: [...TRACKED_MEASUREMENT_EVENT_KINDS],
+      from: input.from,
+      to: input.to,
+    })
+    .flatMap((record: QueryRecord) => {
+      if (!record.occurredAt) {
+        return []
+      }
+
+      const parsedRecordKind = measurementEntryRecordKindSchema.safeParse(record.kind)
+      if (!parsedRecordKind.success) {
+        throw new VaultCliError(
+          'invalid_payload',
+          `Event "${record.entityId}" is not a supported scalar measurement record.`,
+        )
+      }
+      const recordKind = parsedRecordKind.data
+      const occurredAt = record.occurredAt
+      const parsedSource = eventSourceSchema.safeParse(record.attributes.source)
+      const rawEntries = Array.isArray(record.attributes.measurements)
+        ? record.attributes.measurements
+        : []
+      return rawEntries.flatMap((rawEntry, entryIndex) => {
+        let entry: MeasurementEntry
+        if (recordKind === 'body_measurement') {
+          const parsedEntry = bodyMeasurementEntrySchema.safeParse(rawEntry)
+          if (!parsedEntry.success) {
+            throw new VaultCliError(
+              'invalid_payload',
+              `Measurement "${record.entityId}" entry ${entryIndex} is not a valid canonical body-measurement entry.`,
+            )
+          }
+          entry = {
+            metric: normalizeMetricSlug(parsedEntry.data.type),
+            value: parsedEntry.data.value,
+            unit: parsedEntry.data.unit,
+            ...(parsedEntry.data.note ? { note: parsedEntry.data.note } : {}),
+          }
+        } else {
+          const parsedEntry = measurementEntrySchema.safeParse(rawEntry)
+          if (!parsedEntry.success) {
+            throw new VaultCliError(
+              'invalid_payload',
+              `Measurement "${record.entityId}" entry ${entryIndex} is not a valid canonical measurement entry.`,
+            )
+          }
+          entry = parsedEntry.data
+        }
+        if (!metricIdentitySet.has(query.resolveMetricInputKey(entry.metric))) {
+          return []
+        }
+
+        return [{
+          eventId: record.entityId,
+          recordKind,
+          measurementIndex: entryIndex,
+          occurredAt,
+          source: parsedSource.success ? parsedSource.data : null,
+          ...entry,
+        }]
+      })
+    })
+  const observationItems = observationEntries.map((entry) => {
+    const parsedSource = eventSourceSchema.safeParse(entry.source)
+    return {
+      eventId: entry.eventId,
+      recordKind: 'observation' as const,
+      measurementIndex: null,
+      occurredAt: entry.occurredAt,
+      source: parsedSource.success ? parsedSource.data : null,
+      metric: entry.metric,
+      value: entry.value,
+      unit: entry.unit,
+    }
+  })
+  const items = [...measurementItems, ...observationItems]
+    .sort((left, right) => {
+      const occurredAtOrder = Date.parse(right.occurredAt) - Date.parse(left.occurredAt)
+      if (occurredAtOrder !== 0) {
+        return occurredAtOrder
+      }
+
+      const eventOrder = left.eventId.localeCompare(right.eventId)
+      return eventOrder !== 0
+        ? eventOrder
+        : (left.measurementIndex ?? -1) - (right.measurementIndex ?? -1)
+    })
+    .slice(0, limit)
+
+  return measurementEntryListResultSchema.parse(
+    asListEnvelope(input.vault, {
+      metric: metrics,
+      from: input.from,
+      to: input.to,
+      limit,
+    }, items),
+  )
 }
 
 export async function showMeasurementManifest(vault: string, lookup: string) {

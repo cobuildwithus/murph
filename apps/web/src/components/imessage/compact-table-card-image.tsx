@@ -259,7 +259,24 @@ function WorkoutExerciseRow({
             }}
           />
         ) : null}
-        {resolved ? "✓" : ""}
+        {resolved ? (
+          <svg
+            aria-hidden="true"
+            data-exercise-checkmark="true"
+            width={18}
+            height={18}
+            viewBox="0 0 18 18"
+          >
+            <path
+              d="M3.5 9.5 7.25 13 14.5 5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={3}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        ) : null}
       </div>
       <div
         style={{

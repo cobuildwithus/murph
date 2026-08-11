@@ -60,8 +60,10 @@ This ownership rule is required because the managed browser lanes keep
 background response-polling timers reliable and ReviewGPT pins only the owned
 capture page lifecycle active, then releases emulated focus before retaining or
 closing that target. The Murph lanes use balanced background mode so Chromium
-can still deprioritize unrelated renderers and occluded windows; use the fully
-unthrottled fallback only for a browser version with a proven capture stall.
+can still deprioritize unrelated renderers and occluded windows. Balanced mode
+passes none of Chromium's background-timer, occluded-window, or renderer
+backgrounding opt-out flags; use the fully unthrottled fallback only for a
+browser version with a proven capture stall.
 Leaving completed waited targets open still accumulates active renderers across
 rounds even when ordinary browser history and site data have been cleared.
 
@@ -337,12 +339,15 @@ the current user explicitly asks for it.
    audit. Later delta rounds reuse the current conversation and pass its most
    recent full-snapshot head as `REVIEW_GPT_CONTEXT_ANCHOR_HEAD`.
 
-   The repo wrapper chooses one usable ReviewGPT browser lane per run:
-   `Eragon.app` on CDP port `9448`, `Phlebas.app` on `9442`,
-   `Hercules.app` on `9444`, or `Mountain.app` on `9450`, always with profile `Default` and
+   The repo wrapper runs the current installed Brave binary with one usable
+   ReviewGPT browser lane per run: Eragon on CDP port `9448`, Phlebas on `9442`,
+   Hercules on `9444`, or Mountain on `9450`, always with profile `Default` and
    `app_connector=current` so review context comes from the guarded ZIP and
    not a ChatGPT connector. ReviewGPT attaches that snapshot as
    `codebase.zip`; Repomix is disabled by default and is not part of this flow.
+   Each lane's user-data directory and CDP port preserve its authentication and
+   process isolation; ignored copied app bundles are not browser-version
+   authority.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
    through four lanes and defaults to four. A local
@@ -544,9 +549,11 @@ the current user explicitly asks for it.
 
 ## Base-Update-Only Exception
 
-If a round has already reached zero accepted findings and the PR later needs to
-be updated only because the base branch moved, do not start another ReviewGPT
-round just for that base update.
+If a round has already reached zero accepted findings, do not update the PR
+branch merely to chase a moving base before handoff. Keep the reviewed head,
+require its normal CI, and prove current-base mergeability with
+`git merge-tree --write-tree`. A clean merge-tree plus green required CI on the
+PR-authored head is sufficient preparation.
 
 This exception applies when the post-review change is only a normal merge or
 rebase of the PR base branch, including bounded manual conflict resolution that
@@ -558,9 +565,12 @@ contract, fix a review finding, or include feature work or unrelated
 behavior/test/config/doc edits. Conflict count is orientation only and does not
 decide eligibility.
 
-Record the conflict paths and the preservation reason in the PR handoff, run
-focused verification for the affected surfaces, and require PR CI green on the
-new head. Do not rerun ReviewGPT solely for that update. If any resolution
+When an authorized merge is blocked by strict up-to-date checks, use the merge
+queue when available or perform one normal base update at the merge boundary.
+Record any conflict paths and preservation reasons, run focused verification
+for affected surfaces, and let required PR CI gate the new head. Merge promptly
+when it clears instead of starting a repeated pre-merge refresh loop. Do not
+rerun ReviewGPT solely for that update. If any resolution
 authors behavior not already represented by the reviewed PR or current base,
 materially changes the implemented contract, includes another branch-authored
 change, or cannot be confidently classified as mechanical, use the ordinary

@@ -41,6 +41,9 @@ const mocks = vi.hoisted(() => {
     prismaTx: {
       __tx: true,
       $queryRaw: vi.fn(),
+      deviceConnection: {
+        findUnique: vi.fn(),
+      },
       deviceSyncDirtyPayload: {
         count: vi.fn(),
       },
@@ -217,6 +220,19 @@ function buildHostedConnection(
     status: "active" as const,
     updatedAt: "2026-03-26T12:00:00.000Z",
     ...overrides,
+  };
+}
+
+function buildWebhookAdmissionRecord(
+  overrides: Parameters<typeof buildHostedConnection>[0] = {},
+) {
+  const connection = buildHostedConnection(overrides);
+  return {
+    connectedAt: new Date(connection.connectedAt),
+    provider: connection.provider,
+    setupPhase: connection.setupPhase,
+    status: connection.status,
+    userId: "user-123",
   };
 }
 
@@ -440,6 +456,8 @@ describe("hosted device-sync wakes", () => {
       callback(mocks.prismaTx),
     );
     mocks.prismaTx.$queryRaw.mockResolvedValue([{ acquired: true }]);
+    mocks.prismaTx.deviceConnection.findUnique.mockReset();
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(buildWebhookAdmissionRecord());
     mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(0);
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
@@ -1307,6 +1325,7 @@ describe("hosted device-sync wakes", () => {
       "trace_123",
       "claim-token",
     );
+    expect(mocks.getConnectionOwnerId).toHaveBeenCalledTimes(1);
     expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
@@ -1314,7 +1333,9 @@ describe("hosted device-sync wakes", () => {
 
   it("preserves the sole Junction source on webhook receipt signals", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
 
     await handleHostedDeviceSyncWebhookAccepted({
       account: {
@@ -1324,6 +1345,7 @@ describe("hosted device-sync wakes", () => {
       },
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
       store: new PrismaDeviceSyncControlPlaneStore({
         prisma: getPrisma(),
       }),
@@ -1361,7 +1383,9 @@ describe("hosted device-sync wakes", () => {
 
   it("omits source attribution for a data-less historical completion", async () => {
     const connection = buildHostedConnection({ provider: "junction" });
-    mocks.getConnectionForUser.mockResolvedValue(connection);
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
 
     await handleHostedDeviceSyncWebhookAccepted({
       account: {
@@ -1371,6 +1395,7 @@ describe("hosted device-sync wakes", () => {
       },
       claimToken: "claim-token",
       now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
       store: new PrismaDeviceSyncControlPlaneStore({
         prisma: getPrisma(),
       }),
@@ -3885,9 +3910,11 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("terminally supersedes webhook work when reconnect replaces its observed epoch before dirty-state commit", async () => {
-    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
-      connectedAt: "2026-03-26T12:05:00.000Z",
-    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({
+        connectedAt: "2026-03-26T12:05:00.000Z",
+      }),
+    );
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -3912,10 +3939,59 @@ describe("hosted device-sync wakes", () => {
       expect.any(Function),
       { memberRowLockTimeoutMs: 5_000 },
     );
-    expect(mocks.getConnectionForUser).toHaveBeenCalledWith(
+    expect(mocks.getConnectionOwnerId).toHaveBeenCalledTimes(1);
+    expect(mocks.getConnectionForUser).not.toHaveBeenCalled();
+    expect(mocks.prismaTx.deviceConnection.findUnique).toHaveBeenCalledWith({
+      where: {
+        id: "dsc_123",
+      },
+      select: {
+        connectedAt: true,
+        provider: true,
+        setupPhase: true,
+        status: true,
+        userId: true,
+      },
+    });
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "oura",
+      "trace_123",
+      "claim-token",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+  });
+
+  it("terminally supersedes webhook work when the locked connection owner differs from the pre-lock owner", async () => {
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce({
+      ...buildWebhookAdmissionRecord(),
+      userId: "user-456",
+    });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/webhooks/oura", {
+        body: JSON.stringify({
+          event: "sleep.updated",
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+        method: "POST",
+      }),
+    );
+
+    await expect(controlPlane.handleWebhook("oura")).resolves.toMatchObject({
+      accepted: true,
+    });
+
+    expect(mocks.getConnectionOwnerId).toHaveBeenCalledTimes(1);
+    expect(mocks.withHealthDataAdmissionLock).toHaveBeenCalledWith(
       "user-123",
       "dsc_123",
-      mocks.prismaTx,
+      expect.any(Function),
+      { memberRowLockTimeoutMs: 5_000 },
     );
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
       "oura",
@@ -3930,10 +4006,12 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("retries webhook work when setup becomes pending before dirty-state commit", async () => {
-    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
-      setupExpiresAt: "2026-03-26T12:15:00.000Z",
-      setupPhase: "pending_link",
-    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({
+        setupExpiresAt: "2026-03-26T12:15:00.000Z",
+        setupPhase: "pending_link",
+      }),
+    );
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {
         body: JSON.stringify({
@@ -3960,10 +4038,12 @@ describe("hosted device-sync wakes", () => {
   });
 
   it("retries source-attributed webhook work when the target disconnects before dirty-state commit", async () => {
-    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
-      provider: "junction",
-      setupPhase: "source_confirmed",
-    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({
+        provider: "junction",
+        setupPhase: "source_confirmed",
+      }),
+    );
     mocks.listConnectionSources.mockResolvedValueOnce([{
       connectionId: "dsc_123",
       sourceProviderSlug: "fitbit",
@@ -3982,6 +4062,7 @@ describe("hosted device-sync wakes", () => {
         },
         claimToken: "claim-token",
         now: "2026-03-26T12:00:00.000Z",
+        ownerId: "user-123",
         store,
         traceId: "trace_123",
         webhook: {
@@ -5105,9 +5186,9 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
-      provider: "junction",
-    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
@@ -5212,9 +5293,9 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
-      provider: "junction",
-    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
@@ -5318,9 +5399,9 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
-      provider: "junction",
-    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "junction" }),
+    );
     mocks.getConnectionOwnerId.mockResolvedValueOnce("user-123");
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/junction", {
@@ -5409,9 +5490,9 @@ describe("hosted device-sync wakes", () => {
       }),
       startConnection: vi.fn(),
     }));
-    mocks.getConnectionForUser.mockResolvedValueOnce(buildHostedConnection({
-      provider: "whoop",
-    }));
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
+      buildWebhookAdmissionRecord({ provider: "whoop" }),
+    );
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/whoop", {
         body: JSON.stringify({
@@ -5502,6 +5583,8 @@ describe("hosted device-sync wakes", () => {
       retryable: true,
     });
 
+    expect(mocks.getConnectionOwnerId).toHaveBeenCalledTimes(1);
+    expect(mocks.prismaTx.deviceConnection.findUnique).not.toHaveBeenCalled();
     expect(consoleWarn).toHaveBeenCalledWith(
       "Rejecting hosted device-sync webhook without an owner mapping.",
       expect.objectContaining({

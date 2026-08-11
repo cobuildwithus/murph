@@ -44,8 +44,11 @@ import {
 
 const MURPH_IOS_APP_STORE_URL =
   "https://apps.apple.com/us/app/murph-ai/id6786145859";
+const MURPH_ANDROID_PLAY_STORE_URL =
+  "https://play.google.com/store/apps/details?id=ai.withmurph.app";
 
 export interface AssistantSystemPromptInput {
+  assistantAndroidAppAvailable?: boolean;
   assistantCliContract: string | null;
   assistantContextSnapshotPrompt?: string | null;
   assistantDynamicContextPrompts?: readonly string[] | null;
@@ -279,7 +282,8 @@ export function buildAssistantSystemPromptLayers(
 ): AssistantSystemPromptLayers {
   const conversationScope = input.conversationScope ?? "direct";
   const staticCacheableCorePrompt = buildStaticCacheableCorePrompt(
-    conversationScope
+    conversationScope,
+    input.assistantAndroidAppAvailable === true,
   );
   const stableRouteCapabilityPrompt = renderAssistantToolNameAliases(
     buildStableRouteCapabilityPrompt(input),
@@ -314,7 +318,8 @@ export function buildAssistantSystemPromptLayers(
 }
 
 function buildStaticCacheableCorePrompt(
-  conversationScope: AssistantConversationScope = "direct"
+  conversationScope: AssistantConversationScope = "direct",
+  androidAppAvailable = false,
 ): string {
   if (conversationScope === "unverified-external") {
     return `You are Murph, a personal health assistant, but this external audience has not been authoritatively classified as private or group.
@@ -341,7 +346,7 @@ Answer the current message using only its contents and public, non-account infor
     buildAssistantHealthReasoningText(),
     buildAssistantChronicSupportText(),
     buildAssistantHealthCommonsCoreGuidanceText(),
-    buildAssistantToolTruthfulnessText()
+    buildAssistantToolTruthfulnessText(androidAppAvailable)
   );
 }
 
@@ -370,7 +375,9 @@ function buildStableRouteCapabilityPrompt(
       : null,
     buildAssistantIosAppDownloadGuidanceText(conversationScope),
     conversationScope === "direct"
-      ? buildAssistantAppleHealthRelayGuidanceText()
+      ? buildAssistantHealthRelayGuidanceText(
+          input.assistantAndroidAppAvailable === true,
+        )
       : null,
     conversationScope === "direct"
       ? buildAssistantVaultNavigationText({
@@ -567,7 +574,7 @@ function buildAssistantStyleSettingsGuidanceText(input: {
     groupConversation
       ? "- For an explicit current-room request, use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room; a saved model starts on the next turn. Provider and reasoning controls remain unavailable in a group. Never switch the room model automatically."
       : "- Use `murph.assistant_configuration` for explicit user-requested model, core-reply provider, or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
-    "- Read each tool schema; never guess voice, model, provider, or reasoning ids; never use a same-turn voice demo as activation proof.",
+    "- Read tool schemas; never guess ids. Voice memos keep the running-turn voice unless this user names another; same-turn demos do not activate it.",
     groupConversation
       ? "- Never send a personal Settings URL as a way to configure this room. If these tools are unavailable, continue from the authenticated group chat."
       : "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, provider, or reasoning changes; only mention these fallbacks when asked.",
@@ -1424,7 +1431,7 @@ function buildAssistantHostedDeviceConnectGuidanceText(input: {
     return null;
   }
 
-  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source that is neither in this list nor named in the Apple Health relay section, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
+  return `- Hosted wearable connection links are available for ${providerList}. When offering examples, mention about six supported choices from this list, not the full provider list. Do not add generic consumer-health app examples or proactively name unsupported sources as caveats. If the user asks for a wearable/source that is neither in this list nor named in the health data relay section, say it is not supported yet and suggest a listed source or text-only notes for now. Use \`murph.device\` to list accounts, create a real connection link, or queue reconciliation. Send only a returned \`connectUrl\`; never fabricate a URL or ask for provider credentials. When sending that connection URL to the user, put it on its own final line with no text after it, especially for messaging channels such as iMessage.`;
 }
 
 function buildAssistantIosAppDownloadGuidanceText(
@@ -1442,8 +1449,10 @@ function buildAssistantIosAppDownloadGuidanceText(
 - In user-facing messages, put the URL alone on the final line with no text after it.`;
 }
 
-function buildAssistantAppleHealthRelayGuidanceText(): string {
-  return `Apple Health relay:
+function buildAssistantHealthRelayGuidanceText(
+  androidAppAvailable: boolean,
+): string {
+  const appleHealthRelayGuidance = `Apple Health relay:
 - Apple Health works now in the Murph iPhone app. For Apple Watch, WHOOP, Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, or supported Huawei Health relay setup, open Murph, sign in, and connect Apple Health.
 - WHOOP limits third-party access. Direct sync omits steps; Apple Health may relay them. Do not infer/request missing steps.
 - WHOOP: More > App Settings > Integrations > Apple Health > Connect > Turn On All (or chosen categories) > Allow; then connect Apple Health in Murph.
@@ -1452,11 +1461,27 @@ function buildAssistantAppleHealthRelayGuidanceText(): string {
 - Xiaomi/Mi Fitness, RingConn, COROS, and Suunto: enable Apple Health sharing in the vendor app, then connect Apple Health in Murph. Murph receives only categories the app writes; do not claim direct cloud access, proprietary scores, or full history.
 - Huawei Health: Apple Health sharing varies by device, region, and app version. Guide the user only through options they can see; never promise unsupported categories.
 - Apple Health relay paths have no direct cloud access or guaranteed history backfill.
-- For any relay setup named above, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the App Store URL last.`;
+- For any Apple Health relay setup named above, use one brief \`murph.generate_voice_memo\` when available; keep text minimal and put the App Store URL last.`;
+  const androidHealthRelayGuidance = androidAppAvailable
+    ? `Android Health Connect relay:
+- Android Health Connect works in the Murph Android app. Canonical Google Play listing: ${MURPH_ANDROID_PLAY_STORE_URL}.
+- Mobvoi/TicWatch: sync through Mobvoi Health or Google Fit, then connect Health Connect in Murph.
+- Health Connect relays have no direct cloud access or guaranteed history backfill.`
+    : null;
+
+  return joinPromptSections(
+    appleHealthRelayGuidance,
+    androidHealthRelayGuidance,
+  );
 }
 
-function buildAssistantToolTruthfulnessText(): string {
-  return `Claim only runtime-proven actions. Never invent invite/share/auth/wearable URLs; only ${MURPH_PRODUCT_ORIGIN} and ${MURPH_IOS_APP_STORE_URL} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
+function buildAssistantToolTruthfulnessText(
+  androidAppAvailable: boolean,
+): string {
+  const proofFreePublicUrls = androidAppAvailable
+    ? `${MURPH_PRODUCT_ORIGIN} and both canonical app-store URLs`
+    : `${MURPH_PRODUCT_ORIGIN} and the canonical iOS App Store URL`;
+  return `Claim only runtime-proven actions. Never invent invite/share/auth/wearable URLs; only ${proofFreePublicUrls} are proof-free. Never call Apple Health unsupported/disabled/coming soon; put message URLs alone last.`;
 }
 
 function buildAssistantGroupToolTruthfulnessText(): string {
