@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, personality, reminders, cards, voices, and web search",
+      "Starter access, patterns, personality, reliable referrals, reminders, cards, voices, and web search",
     summary:
-      "Starter usage remains available until it is used, patterns compare repeated actions with next-day sleep and recovery, Murph's personality is editable in Settings or chat, reminders keep the local time you asked for, workout cards keep completed rows clear, ordinary voice memos keep your selected voice, and managed OpenAI web search can reach current information again.",
+      "Starter usage remains until it is used; Patterns compares repeated actions with next-day sleep and recovery; personality is editable in Settings or chat; referral celebrations stay with their intended conversation; reminders keep requested local time; completed workout rows stay clear; voice memos keep the selected voice; and managed OpenAI web search reaches current information again.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -123,6 +123,18 @@ const RAW_CHANGELOG_EDITIONS = [
           href: "/settings",
           label: "Edit Murph's personality",
         },
+      },
+      {
+        id: "referral-notification-route-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Referral celebrations stay in the right conversation",
+        summary:
+          "Referral reward celebrations now stay attached to their intended direct conversation, and an interrupted one can safely resume without leaving later work waiting behind it.",
+        details:
+          "Murph resumes the already-pending celebration itself and rechecks the original direct conversation before any new response work. It never switches to a newer route; if the original conversation is no longer authorized, that celebration ends without sending so later notifications can continue.",
+        relevanceTags: ["referrals", "messaging", "reliability", "privacy"],
+        sourcePullRequests: [1592],
       },
       {
         id: "reminders-keep-requested-timezone",

@@ -60,7 +60,7 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, personality, reminders, cards, voices, and web search",
+      "Starter access, patterns, personality, reliable referrals, reminders, cards, voices, and web search",
     );
     expect(markup).toContain("Managed OpenAI web search works again");
     expect(markup).toContain("Completed workout rows keep their checkmark");

@@ -332,6 +332,16 @@ describe("changelog registry", () => {
     expect(items.get("personality-settings-and-chat")?.details).toContain(
       "changes only that room's Murph",
     );
+    expect(items.get("referral-notification-route-recovery")).toMatchObject({
+      sourcePullRequests: [1592],
+      summary: expect.stringContaining("intended direct conversation"),
+      details: expect.stringContaining(
+        "ends without sending so later notifications can continue",
+      ),
+    });
+    expect(
+      items.get("referral-notification-route-recovery")?.tryIt,
+    ).toBeUndefined();
     expect(items.get("group-sleep-challenges-use-fresh-data")).toMatchObject({
       sourcePullRequests: [1565, 1593],
       summary: expect.stringContaining("explicit manual corrections"),
@@ -549,6 +559,7 @@ describe("changelog registry", () => {
           "non-expiring-starter-access",
           "personal-patterns",
           "personality-settings-and-chat",
+          "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
           "web-search-restored",
