@@ -79,7 +79,7 @@ const RAW_CHANGELOG_EDITIONS = [
         details:
           "The page keeps the card details opaque and leaves the shared link unchanged. Ordinary homepage links stay unaffected, while Messages continues to own the interactive card.",
         relevanceTags: ["imessage", "cards", "iphone", "recovery"],
-        sourcePullRequests: [],
+        sourcePullRequests: [1630],
       },
     ],
   },

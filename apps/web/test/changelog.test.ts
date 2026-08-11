@@ -314,6 +314,7 @@ describe("changelog registry", () => {
     expect(items.get("workout-card-status-rendering")?.tryIt).toBeUndefined();
     expect(items.get("shared-card-app-handoff")).toMatchObject({
       details: expect.stringContaining("keeps the card details opaque"),
+      sourcePullRequests: [1630],
       summary: expect.stringContaining("return to the card in Messages"),
     });
     expect(items.get("shared-card-app-handoff")?.tryIt).toBeUndefined();
