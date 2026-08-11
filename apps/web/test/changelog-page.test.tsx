@@ -60,7 +60,10 @@ describe("ChangelogPage", () => {
     );
 
     expect(markup).toContain(
-      "Starter access, patterns, reliable referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
+      "Starter access, patterns, Family recovery, referrals, reminders, cards, voices, search, pages, and reports",
+    );
+    expect(markup).toContain(
+      "Family invites recover from unfinished setup",
     );
     expect(markup).toContain("Response cards stay compact in Messages");
     expect(markup).toContain("Managed OpenAI web search works again");

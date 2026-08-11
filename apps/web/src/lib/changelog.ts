@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, reliable referrals, reminders, cards, voices, search, lighter pages, and clearer reports",
+      "Starter access, patterns, Family recovery, referrals, reminders, cards, voices, search, pages, and reports",
     summary:
-      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, referral celebrations stay in the intended conversation, reminders keep local time, workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, the homepage starts lighter, and private Environment reports show their shape while loading.",
+      "Starter usage waits until used, patterns compare actions with next-day sleep and recovery, unfinished Family setup no longer blocks an invite, referrals stay in the right conversation, reminders keep local time, message cards and voices stay consistent, web search reaches current information, the homepage starts lighter, and Environment reports show their shape while loading.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -106,6 +106,22 @@ const RAW_CHANGELOG_EDITIONS = [
         tryIt: {
           href: "/patterns",
           label: "View your patterns",
+        },
+      },
+      {
+        id: "family-invite-draft-recovery",
+        kind: "improvement",
+        priority: 4,
+        title: "Family invites recover from unfinished setup",
+        summary:
+          "A never-paid Family setup no longer traps a later invite, and Settings now clearly separates starting a plan you pay for from joining with someone else's invite.",
+        details:
+          "Murph removes only an inert owner-only draft as part of successful invite acceptance. If a Checkout is still live, Settings explains the conflict and can expire and abandon that exact unpaid setup before the member retries the invite.",
+        relevanceTags: ["family", "billing", "invites", "settings", "reliability"],
+        sourcePullRequests: [1628],
+        tryIt: {
+          href: "/settings#subscription",
+          label: "Review Family setup",
         },
       },
       {

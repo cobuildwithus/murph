@@ -574,6 +574,7 @@ describe("changelog registry", () => {
         itemIds: [
           "non-expiring-starter-access",
           "personal-patterns",
+          "family-invite-draft-recovery",
           "referral-notification-route-recovery",
           "reminders-keep-requested-timezone",
           "voice-memos-use-your-voice",
