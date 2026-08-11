@@ -1775,8 +1775,16 @@ same-version conflict backstop.
 After taking that token, refresh compares the locked row with the exact
 pre-transaction ciphertext before demotion, mailbox work, or route decryption.
 If the route changes after preparation, Web rolls back and performs at most one
-fresh prepare-before-transaction attempt. Matching valid ciphertext opens from
-the request-scoped root cache with local AES work; absent or structurally corrupt
+fresh prepare-before-transaction attempt. Consumed Linq group-reaction staging
+uses the same authority boundary outside the planner: it reads the exact
+canonical route and active container access, unwraps the selected container's
+active mailbox ingress root before `BEGIN`, then locks chat ownership, the route
+row, and ingress-root authority while rechecking the exact route fields, access,
+and `rootKeyId`. A route or root change gets at most one fresh preparation
+attempt; a preparation/provider/KMS failure opens no transaction. The ordinary
+consumed-mailbox append then reuses the scoped root for local sealing, and its
+runtime signal remains post-commit. Matching valid ciphertext opens from the
+request-scoped root cache with local AES work; absent or structurally corrupt
 ciphertext keeps the existing owning-ingress repair path without speculative
 KMS. Thread-container creation therefore does not use the legacy all-domain
 provisioning bridge or perform domain-root provisioning, delivery-route sealing,
@@ -2389,31 +2397,30 @@ rather than a message or instruction, and uses the same path for normal and
 captureless turns. Duplicate events do not restage context, and any failed or
 raced mailbox append rolls consumption back.
 
-Hosted Linq group reactions share that one-shot context boundary. A unique,
-verified reaction for an active account-bound group route is checked against
-the live roster and exact reacted-to message, then appends one actor-attributed
-entry to the same encrypted transient buffer on that route. The legacy physical
-column name remains reaction-specific, but its logical owner is the bounded
-group-event buffer. It holds the newest ten entries in insertion order; older
-entries fall off without creating a separately processed queue. Reaction
-entries keep the canonical active roster handle, action/type, and bounded
-target text, but no provider identifier, URL, or attachment metadata.
-Participant entries keep only the normalized handle, change action, and
-optional unverified owner label. Address-book replacement or deletion takes the
-same owner-member lock as label staging and clears pending encrypted group-event
-buffers for that owner's routes before committing. A staged label therefore
-cannot survive Stop, permission-loss cleanup, or replacement; the existing
-anonymous addition bit remains independent. Clearing may also discard pending
-optional reaction context, which is already lossy and creates no work owner.
-Corrupt context fails open, authority rotation clears it, and a failed or raced
-mailbox append rolls consumption back. Append decrypt and reseal share one
-500 ms deadline, and consume decrypt has the same bound, so optional crypto
-cannot inherit the general KMS deadline while holding locks.
-When raising the consumed hint beyond the legacy 512-character contract, deploy
-the hosted runner bundle before the web producer so every parser accepts the
-new 5,129-character maximum before web can emit it. Once web has written the
-new array shape, forward-fix web rather than rolling it back until those
-transient slots have been consumed or cleared.
+Hosted Linq group reactions no longer share that transient participant-context
+boundary. A unique, verified reaction for an active account-bound group route
+is encoded as one ordinary conversation mailbox item and marked consumed in
+the same transaction. It is therefore durable replayable input context, but
+never a reply candidate or a separate queue. The signed event supplies the
+actor, operation, reaction value, exact target message id, and optional part
+index; staging does not re-read a mutable provider roster, target message, or
+target text. The mailbox event id provides idempotent replay, and the runtime
+signal is sent only after commit. Append or signal failure fails the webhook so
+the provider retry can replay the same evidence.
+
+Before that reaction transaction opens, Web unwraps and request-scopes the
+exact active ingress root for the routed container, retains only its root-key
+identity as prepared authority, and wipes the caller's plaintext-key copy. A
+preparation or provider/KMS failure opens no transaction. The append transaction
+takes the canonical Linq chat/route locks, revalidates the prepared route, then
+locks and compares the current active ingress root with the prepared root-key
+identity before it writes. A route or root change rolls back that attempt and
+allows at most one fresh prepare-before-transaction attempt; another mismatch
+fails the webhook for a provider retry. Mailbox encryption inside the
+transaction can consequently use only the matching request-scoped root and
+performs no first-time provider/KMS unwrap. This exact-root contract belongs to
+the Linq reaction append path; it does not assert that every generic mailbox
+producer prewarms its root.
 
 One case is actionable immediately: an affirmative added reaction from the
 active participant is adapted into the existing `message.received` planner
