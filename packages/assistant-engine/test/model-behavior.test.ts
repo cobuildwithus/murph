@@ -3107,7 +3107,10 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation, `action: list` to recover persisted owners for this conversation, and `action: patch` to change one.',
     )
     expect(prompt).toContain(
-      'Use `createOnly: true` without an automation id or slug when a new payload-idempotent opaque owner must not replace any existing record; exact payload replay recovers that owner, while distinct payloads in one accepted input create distinct owners.',
+      'For appointment ownership, use `createOnly: true` plus `createOnlyEffectKey: appointment-reminder:<ordinal>` without an automation id or slug.',
+    )
+    expect(prompt).toContain(
+      'reuse it across regenerated copy, tag order, or timestamp spelling, and use distinct ordinals for distinct appointments even when reminder times match',
     )
     expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
@@ -3153,7 +3156,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).not.toContain('inspect saved local self-targets')
   })
 
-  it('advertises collision-safe create-only owners on privileged local routes', () => {
+  it('discloses unavailable replay-safe appointment ownership on privileged local routes', () => {
     const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
       conversationScope: 'direct',
       hostedRuntime: false,
@@ -3163,9 +3166,10 @@ describe('assistant conversation scope', () => {
       'Scheduled assistant automation commands are available directly through `vault-cli automation ...`',
     )
     expect(prompt).toContain(
-      'Use `--create-only` without `--id` or `--slug` when a new payload-idempotent opaque owner must not replace an existing record; exact payload replay recovers the original owner.',
+      'This local route has no trusted accepted-input authority for automatic appointment ownership; do not claim a default appointment reminder was created here.',
     )
     expect(prompt).not.toContain('Use `createOnly: true`')
+    expect(prompt).not.toContain('`--create-only`')
   })
 
   it('does not advertise hosted automation when the turn lacks its typed tool', () => {

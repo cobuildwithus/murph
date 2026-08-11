@@ -289,6 +289,8 @@ describe("markdown document primitives", () => {
     const created = await upsertAutomation({
       vaultRoot,
       createOnly: true,
+      createOnlyEffectKey: "appointment-reminder:1",
+      createOnlyReplayKey: "accepted-input-appointment-collision",
       ...createAutomationPayload({
         instructions: "Send the second appointment reminder.",
         schedule: { at: "2026-08-12T13:00:00.000Z", kind: "at" },
@@ -311,6 +313,8 @@ describe("markdown document primitives", () => {
     await expect(upsertAutomation({
       vaultRoot,
       createOnly: true,
+      createOnlyEffectKey: "appointment-reminder:2",
+      createOnlyReplayKey: "accepted-input-appointment-collision",
       ...createAutomationPayload({
         automationId: existing.record.automationId,
         instructions: "This collision must not replace the first reminder.",
@@ -328,21 +332,60 @@ describe("markdown document primitives", () => {
 
   it("creates distinct trusted effects and replays each without another write", async () => {
     const vaultRoot = await makeVaultRoot();
+    const basePayload = createAutomationPayload({
+      instructions: "Send the Midtown appointment reminder.",
+      schedule: { at: "2026-08-12T00:00:00.000Z", kind: "at" as const },
+      slug: undefined,
+      tags: ["appointment-reminder", "care-reminder"],
+      title: "Midtown appointment on August 12 at 9:30 AM",
+    });
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      ...basePayload,
+    })).rejects.toThrow(
+      "Create-only automation ownership requires trusted replay scope and a stable effect key.",
+    );
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      createOnlyEffectKey: "appointment:1",
+      createOnlyReplayKey: "accepted-input-appointment-1",
+      ...basePayload,
+    })).rejects.toThrow(
+      "createOnlyEffectKey must be appointment-reminder:<one-based source ordinal>.",
+    );
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnlyEffectKey: "appointment-reminder:1",
+      createOnlyReplayKey: "accepted-input-appointment-1",
+      ...basePayload,
+    })).rejects.toThrow(
+      "Create-only automation identity fields require createOnly=true.",
+    );
+    await expect(listAutomations({ vaultRoot })).resolves.toEqual({
+      count: 0,
+      items: [],
+    });
+
     const request = {
       vaultRoot,
       createOnly: true,
+      createOnlyEffectKey: "appointment-reminder:1",
       createOnlyReplayKey: "accepted-input-appointment-1",
-      ...createAutomationPayload({
-        instructions: "Send the Midtown appointment reminder.",
-        schedule: { at: "2026-08-12T00:00:00.000Z", kind: "at" as const },
-        slug: undefined,
-        tags: ["appointment-reminder"],
-        title: "Midtown appointment on August 12 at 9:30 AM",
-      }),
+      ...basePayload,
     };
 
     const created = await upsertAutomation(request);
-    const replayed = await upsertAutomation(request);
+    const replayed = await upsertAutomation({
+      ...request,
+      instructions: "Use different harmless wording for the same reminder.",
+      schedule: { at: "2026-08-11T20:00:00-04:00", kind: "at" },
+      summary: "Regenerated Midtown reminder copy",
+      tags: ["care-reminder", "appointment-reminder"],
+      title: "Regenerated Midtown appointment title",
+    });
 
     expect(created.created).toBe(true);
     expect(replayed).toEqual({
@@ -353,13 +396,21 @@ describe("markdown document primitives", () => {
 
     const secondRequest = {
       ...request,
+      createOnlyEffectKey: "appointment-reminder:2",
       instructions: "Send the Lakeside appointment reminder.",
-      schedule: { at: "2026-08-14T12:00:00.000Z", kind: "at" as const },
-      summary: "Lakeside appointment on August 14 at 3 PM",
-      title: "Lakeside appointment on August 14 at 3 PM",
+      schedule: request.schedule,
+      summary: "Lakeside appointment on August 12 at 11 AM",
+      title: "Lakeside appointment on August 12 at 11 AM",
     };
     const secondCreated = await upsertAutomation(secondRequest);
-    const secondReplayed = await upsertAutomation(secondRequest);
+    const secondReplayed = await upsertAutomation({
+      ...secondRequest,
+      instructions: "Regenerated copy for the same Lakeside effect.",
+      schedule: { at: "2026-08-11T20:00:00-04:00", kind: "at" },
+      summary: "Regenerated Lakeside reminder copy",
+      tags: ["care-reminder", "appointment-reminder"],
+      title: "Regenerated Lakeside appointment title",
+    });
 
     expect(secondCreated.created).toBe(true);
     expect(secondCreated.record.automationId).not.toBe(created.record.automationId);

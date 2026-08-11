@@ -151,7 +151,6 @@ export const automationSaveResultSchema = z.object({
   lookupId: z.string().min(1),
   path: pathSchema,
   created: z.boolean(),
-  replayed: z.boolean().optional(),
 });
 
 export const automationScaffoldResultSchema = z.object({
@@ -612,10 +611,6 @@ const automationSaveOptionSchemas = {
     .min(1)
     .optional()
     .describe("Optional existing automation id whose full definition will be replaced."),
-  createOnly: z
-    .boolean()
-    .optional()
-    .describe("Create or replay one payload-idempotent opaque owner and refuse selected ids or slugs."),
   ...automationSharedOptionSchemas,
   instructions: z
     .string()
@@ -692,15 +687,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     output: automationSaveResultSchema,
     async run(context) {
       assertAutomationCliMutationAllowed();
-      if (
-        context.options.createOnly === true
-        && (context.options.id !== undefined || context.options.slug !== undefined)
-      ) {
-        throw new VaultCliError(
-          "invalid_option",
-          "--create-only cannot be combined with --id or --slug.",
-        );
-      }
       const now = new Date().toISOString();
       const route = buildAutomationRouteFromOptions({
         channel: context.options.channel,
@@ -753,7 +739,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       });
       const result = await upsertAutomation({
         ...input,
-        ...(context.options.createOnly === true ? { createOnly: true } : {}),
         vaultRoot: context.options.vault,
       });
 
@@ -763,9 +748,6 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         lookupId: result.record.slug,
         path: result.record.relativePath,
         created: result.created,
-        ...(context.options.createOnly === true
-          ? { replayed: result.created === false }
-          : {}),
       };
     },
   });

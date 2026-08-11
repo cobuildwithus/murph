@@ -1580,6 +1580,12 @@ function createHostedAssistantAutomationTool(input: {
             "Create-only saves require trusted accepted-input replay authority.",
           );
         }
+        if (request.createOnly === true && !request.createOnlyEffectKey) {
+          throw new VaultCliError(
+            "invalid_option",
+            "Create-only saves require a stable appointment effect key.",
+          );
+        }
         const result = await upsertAutomation({
           ...(request.activeUntil === undefined
             ? {}
@@ -1590,7 +1596,10 @@ function createHostedAssistantAutomationTool(input: {
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
           ...(request.createOnly === true ? { createOnly: true } : {}),
-          ...(context?.createOnlyReplayKey
+          ...(request.createOnlyEffectKey
+            ? { createOnlyEffectKey: request.createOnlyEffectKey }
+            : {}),
+          ...(request.createOnly === true && context?.createOnlyReplayKey
             ? { createOnlyReplayKey: context.createOnlyReplayKey }
             : {}),
           instructions: stripHostedAssistantAvailabilityConflictBlock(

@@ -5030,10 +5030,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           const appointmentReminderRequest = {
             action: "save" as const,
             createOnly: true as const,
+            createOnlyEffectKey: "appointment-reminder:1",
             instructions: "Send the Midtown appointment reminder.",
             schedule: { at: "2099-08-12T00:00:00.000Z", kind: "at" as const },
             summary: "Midtown appointment on August 12 at 9:30 AM",
-            tags: ["appointment-reminder"],
+            tags: ["appointment-reminder", "care-reminder"],
             title: "Midtown appointment on August 12 at 9:30 AM",
           };
           const appointmentReminder =
@@ -5051,7 +5052,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             replayed: false,
           }));
           await expect(executionContext.hosted?.automationTool?.request(
-            appointmentReminderRequest,
+            {
+              ...appointmentReminderRequest,
+              instructions: "Regenerated copy for the Midtown reminder.",
+              schedule: {
+                at: "2099-08-11T20:00:00-04:00",
+                kind: "at",
+              },
+              summary: "Regenerated Midtown reminder copy",
+              tags: ["care-reminder", "appointment-reminder"],
+              title: "Regenerated Midtown appointment title",
+            },
             { createOnlyReplayKey: "linq-accepted-input-appointment" },
           )).resolves.toEqual(expect.objectContaining({
             automationId: appointmentReminder.automationId,
@@ -5062,11 +5073,12 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           const secondAppointmentReminderRequest = {
             action: "save" as const,
             createOnly: true as const,
+            createOnlyEffectKey: "appointment-reminder:2",
             instructions: "Send the Alpha appointment reminder.",
-            schedule: { at: "2099-08-20T12:00:00.000Z", kind: "at" as const },
-            summary: "Alpha appointment on August 20 at 9 AM",
+            schedule: appointmentReminderRequest.schedule,
+            summary: "Alpha appointment on August 12 at 11 AM",
             tags: ["appointment-reminder"],
-            title: "Alpha appointment on August 20 at 9 AM",
+            title: "Alpha appointment on August 12 at 11 AM",
           };
           const secondAppointmentReminder =
             await executionContext.hosted?.automationTool?.request(
@@ -5141,6 +5153,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             await executionContext.hosted?.automationTool?.request({
               action: "save",
               createOnly: true,
+              createOnlyEffectKey: `appointment-reminder:${index + 3}`,
               instructions: `Send the ${title} reminder.`,
               schedule: {
                 at: `2099-08-${String(21 + index).padStart(2, "0")}T12:00:00.000Z`,
@@ -5164,6 +5177,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           await expect(executionContext.hosted?.automationTool?.request({
             action: "save",
             createOnly: true,
+            createOnlyEffectKey: "appointment-reminder:7",
             instructions: "Try to select an opaque owner from the model.",
             schedule: { at: "2099-08-12T01:00:00.000Z", kind: "at" },
             slug: "model-selected-opaque-owner",
@@ -5320,6 +5334,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             await executionContext.hosted?.automationTool?.request({
               action: "save",
               createOnly: true,
+              createOnlyEffectKey: "appointment-reminder:1",
               instructions: "Send the Downtown appointment reminder.",
               schedule: { at: "2099-08-12T13:00:00.000Z", kind: "at" },
               summary: "Downtown appointment on August 12 at 2 PM",

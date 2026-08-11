@@ -1249,10 +1249,6 @@
                           "type": "string",
                           "minLength": 1
                         },
-                        "createOnly": {
-                          "description": "Create or replay one payload-idempotent opaque owner and refuse selected ids or slugs.",
-                          "type": "boolean"
-                        },
                         "activeUntil": {
                           "description": "Exclusive automation end timestamp, including a one-shot retry deadline.",
                           "type": "string",

@@ -170,6 +170,7 @@ export type AssistantHostedAutomationToolRequest =
       automationId?: string
       continuityPolicy?: AutomationContinuityPolicy
       createOnly?: true
+      createOnlyEffectKey?: string
       instructions: string
       schedule: AutomationSchedule
       slug?: string

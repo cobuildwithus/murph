@@ -81,6 +81,45 @@ This redesign replaces both compensating modes in the prior correction: the
 accepted-input-only hosted id and the random local id. It adds no durable owner,
 secondary index, or lifecycle.
 
+## Review retrospective — round 3
+
+ReviewGPT found that the round-2 payload fingerprint still represented the
+assistant's generated write arguments rather than the appointment effect.
+Equivalent timestamps, tag order, or harmless title, summary, and instruction
+changes could therefore create a second owner after result loss.
+
+The requirement-level decisions are:
+
+- The smallest hosted appointment-effect identity is the trusted accepted input
+  plus the appointment's one-based ordinal in that input's visible appointment
+  order. No reminder schedule, timestamp spelling, tag, status, title, summary,
+  instruction, route, or other mutable write field participates.
+- The canonical model-facing discriminator is the strict token
+  `appointment-reminder:<ordinal>`. The host supplies accepted-input authority;
+  core derives id and lookup slug only from the tuple of schema, trusted scope,
+  and discriminator.
+- Two appointments in one input, including two whose reminders share a delivery
+  instant, remain distinct by their source order. Regeneration must reuse that
+  source order even if tool-call order or presentation copy changes.
+- The privileged-local automatic appointment path is removed. That route has no
+  trusted accepted-input authority, and inventing a local source owner or
+  accepting a model-generated global key would repeat the same identity defect.
+  The typed local create-only option introduced only to support that promise is
+  removed with it.
+- Required proof changes mutable copy, tag ordering, and equivalent timestamp
+  spelling across hosted replay; creates two same-delivery-time appointments
+  with distinct ordinals; verifies independent reschedule/cancellation; and
+  verifies the local route truthfully performs no automatic reminder write.
+
+This direction continues to use the existing automation record and registry
+lock. It deletes the unsupported parallel route and adds no index, queue,
+reconciliation loop, state machine, or durable identity owner.
+
+The implemented correction follows that decision: hosted create-only saves now
+require the strict source-ordinal discriminator, core derives both opaque owner
+keys only from that discriminator plus trusted replay scope, and the local CLI
+create-only option and appointment promise are deleted.
+
 ## Tasks
 
 1. [x] Add canonical create-only ownership and hosted current-conversation list.
@@ -103,8 +142,10 @@ secondary index, or lifecycle.
 Completed focused proof:
 
 - All four affected package typechecks pass.
-- Core: 782 tests pass.
-- Assistant Engine: 91 focused tests pass; 58 credential-gated real App Server
-  cases are registered and skipped without the live provider credential.
-- CLI: 87 focused tests pass.
-- Assistant Runtime: the scoped hosted-automation integration case passes.
+- Core: 25 focused automation tests pass.
+- Assistant Engine: 196 focused policy, tool, planning, and skill tests pass;
+  credential-gated real App Server cases remain registered and skipped without
+  the live provider credential.
+- CLI: 86 focused automation and generated-contract tests pass.
+- Assistant Runtime: the scoped hosted-automation integration case passes, with
+  the remaining 279 cases intentionally excluded by the focused filter.

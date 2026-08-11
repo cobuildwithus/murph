@@ -1778,7 +1778,6 @@ test('automation save and edit schemas expose typed automation fields and a sepa
   assert.equal('input' in saveSchema.options.properties, false)
   for (const field of [
     'id',
-    'createOnly',
     'slug',
     'status',
     'summary',

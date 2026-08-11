@@ -75,6 +75,12 @@ describe('assistant appointment reminder policy', () => {
       'include the ordinary tag `appointment-reminder`',
     )
     expect(normalizedSkill).toContain(
+      'set `createOnlyEffectKey` to `appointment-reminder:<ordinal>`',
+    )
+    expect(normalizedSkill).toContain(
+      "one-based from the appointment's order in the accepted input",
+    )
+    expect(normalizedSkill).toContain(
       'either `created: true`, or `created: false` with `replayed: true`',
     )
     expect(normalizedSkill).toContain(
@@ -84,11 +90,12 @@ describe('assistant appointment reminder policy', () => {
       'repeat the same bounded query once without `exactTag`',
     )
     expect(normalizedSkill).toContain(
-      "the shared automation guidance's typed create-only path",
+      'no reminder was created because replay-safe appointment ownership is unavailable',
     )
     expect(normalizedSkill).toContain(
-      'distinct appointment payloads in one accepted input receive distinct owners',
+      'Distinct appointments in one input use distinct ordinals',
     )
+    expect(normalizedSkill).not.toContain('`--create-only`')
     expect(normalizedSkill).toContain(
       'patch that exact owner with the replacement one-shot schedule, current privacy-safe title or summary, and `status: "active"`',
     )

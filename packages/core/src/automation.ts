@@ -144,6 +144,7 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  createOnlyEffectKey?: string;
   createOnlyReplayKey?: string;
   now?: Date;
   vaultRoot: string;
@@ -1584,8 +1585,20 @@ async function upsertAutomationWithLatestRegistry(
 ): Promise<UpsertAutomationResult> {
   const suppliedId = normalizeId(input.automationId, "automationId", "automation");
   const title = normalizeAutomationTitle(input.title);
+  if (
+    input.createOnly !== true
+    && (
+      input.createOnlyEffectKey !== undefined
+      || input.createOnlyReplayKey !== undefined
+    )
+  ) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "Create-only automation identity fields require createOnly=true.",
+    );
+  }
   const createOnlyReplayIdentity = input.createOnly === true
-    ? resolveAutomationCreateOnlyReplayIdentity({ input, title })
+    ? resolveAutomationCreateOnlyReplayIdentity(input)
     : null;
   const normalizedId = createOnlyReplayIdentity?.automationId
     ?? suppliedId;
@@ -1728,46 +1741,41 @@ async function upsertAutomationWithLatestRegistry(
   };
 }
 
-function resolveAutomationCreateOnlyReplayIdentity(input: {
-  input: UpsertAutomationInput;
-  title: string;
-}): { automationId: string; slug: string } {
+function resolveAutomationCreateOnlyReplayIdentity(
+  input: UpsertAutomationInput,
+): { automationId: string; slug: string } {
   const replayKey = optionalString(
-    input.input.createOnlyReplayKey,
+    input.createOnlyReplayKey,
     "createOnlyReplayKey",
     256,
   );
-  if (input.input.automationId !== undefined || input.input.slug !== undefined) {
+  const effectKey = optionalString(
+    input.createOnlyEffectKey,
+    "createOnlyEffectKey",
+    128,
+  );
+  if (!replayKey || !effectKey) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "Create-only automation ownership requires trusted replay scope and a stable effect key.",
+    );
+  }
+  if (!/^appointment-reminder:[1-9][0-9]*$/u.test(effectKey)) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "createOnlyEffectKey must be appointment-reminder:<one-based source ordinal>.",
+    );
+  }
+  if (input.automationId !== undefined || input.slug !== undefined) {
     throw new VaultError(
       "VAULT_INVALID_INPUT",
       "Create-only automation ownership cannot specify an id or slug.",
     );
   }
-  const schedule = normalizeAutomationSchedule(input.input.schedule);
-  const fingerprint = JSON.stringify({
-    activeUntil: normalizeAutomationActiveUntil(input.input.activeUntil),
-    assistantTargetOverride: normalizeAutomationAssistantTargetOverride(
-      input.input.assistantTargetOverride,
-    ),
-    continuityPolicy: normalizeAutomationContinuityPolicy(
-      input.input.continuityPolicy,
-    ),
-    instructions: normalizeAutomationAvailabilityForSchedule({
-      instructions: normalizeAutomationInstructions(input.input.instructions),
-      scheduleKind: schedule.kind,
-    }),
-    route: normalizeAutomationRoute(input.input.route),
-    schedule,
-    status: normalizeAutomationStatus(input.input.status),
-    summary: normalizeAutomationSummary(input.input.summary),
-    supportKind: normalizeAutomationSupportKind(input.input.supportKind),
-    tags: normalizeAutomationTags(input.input.tags),
-    title: input.title,
-  });
   const effectIdentity = JSON.stringify({
-    fingerprint,
-    replayKey: replayKey ?? null,
-    schema: "murph.automation-create-effect.v2",
+    effectKey,
+    replayKey,
+    schema: "murph.automation-create-effect.v3",
   });
   return {
     automationId: deterministicContractId(
@@ -1781,7 +1789,7 @@ function resolveAutomationCreateOnlyReplayIdentity(input: {
         "automation",
         JSON.stringify({
           effectIdentity,
-          schema: "murph.automation-create-lookup.v2",
+          schema: "murph.automation-create-lookup.v3",
         }),
       ),
     ),

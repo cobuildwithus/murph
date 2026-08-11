@@ -50,7 +50,7 @@ describe('hosted domain dynamic tools', () => {
       'list returns only records whose persisted route belongs to this conversation and never returns route fields',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Use createOnly=true with no automationId or slug',
+      'use createOnly=true and createOnlyEffectKey=appointment-reminder:<one-based ordinal',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'query narrows only those scoped records',
@@ -119,6 +119,28 @@ describe('hosted domain dynamic tools', () => {
         title: 'Family weekly health newsletter',
       },
     })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      instructions: 'Missing the stable effect discriminator.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      title: 'Invalid create-only reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      createOnlyEffectKey: 'appointment-reminder:1',
+      instructions: 'Effect discriminator without create-only ownership.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      title: 'Invalid ordinary reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      createOnlyEffectKey: 'appointment:1',
+      instructions: 'Uses a noncanonical effect discriminator.',
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
+      title: 'Invalid create-only reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
     expect(readToolRequest('automation', {
       action: 'save_newsletter',
       delivery: 'group_email',
@@ -207,6 +229,7 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('automation', {
       action: 'save',
       createOnly: true,
+      createOnlyEffectKey: 'appointment-reminder:1',
       instructions: 'Send one private appointment reminder.',
       schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       tags: ['appointment-reminder'],
@@ -216,6 +239,7 @@ describe('hosted domain dynamic tools', () => {
       request: {
         action: 'save',
         createOnly: true,
+        createOnlyEffectKey: 'appointment-reminder:1',
         instructions: 'Send one private appointment reminder.',
         schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
         tags: ['appointment-reminder'],
@@ -225,6 +249,7 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('automation', {
       action: 'save',
       createOnly: true,
+      createOnlyEffectKey: 'appointment-reminder:1',
       instructions: 'Try to choose a create-only owner.',
       schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       slug: 'model-selected-owner',
@@ -509,6 +534,7 @@ describe('hosted domain dynamic tools', () => {
     const request = readToolRequest('automation', {
       action: 'save',
       createOnly: true,
+      createOnlyEffectKey: 'appointment-reminder:1',
       instructions: 'Send the Midtown appointment reminder.',
       schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       tags: ['appointment-reminder'],
@@ -537,21 +563,34 @@ describe('hosted domain dynamic tools', () => {
       progressDelivery: null,
       request,
     })
+    const regeneratedRequest = readToolRequest('automation', {
+      action: 'save',
+      createOnly: true,
+      createOnlyEffectKey: 'appointment-reminder:1',
+      instructions: 'Regenerated copy for the Midtown reminder.',
+      schedule: { at: '2026-08-11T20:00:00-04:00', kind: 'at' },
+      tags: ['care-reminder', 'appointment-reminder'],
+      title: 'Regenerated Midtown appointment title',
+    })
+    if (!regeneratedRequest) {
+      throw new Error('Expected a regenerated create-only automation request.')
+    }
     await executeMurphDynamicToolRequest({
       env: {},
       fetchImpl: fetch,
       hostedToolContext,
       nextUsageOrdinal: () => 0,
       progressDelivery: null,
-      request,
+      request: regeneratedRequest,
     })
     const distinctRequest = readToolRequest('automation', {
       action: 'save',
       createOnly: true,
+      createOnlyEffectKey: 'appointment-reminder:2',
       instructions: 'Send the Lakeside appointment reminder.',
-      schedule: { at: '2026-08-14T12:00:00.000Z', kind: 'at' },
+      schedule: { at: '2026-08-12T00:00:00.000Z', kind: 'at' },
       tags: ['appointment-reminder'],
-      title: 'Lakeside appointment on August 14 at 3 PM',
+      title: 'Lakeside appointment on August 12 at 3 PM',
     })
     if (!distinctRequest) {
       throw new Error('Expected a second create-only automation request.')
@@ -575,6 +614,15 @@ describe('hosted domain dynamic tools', () => {
     expect(distinctContext?.createOnlyReplayKey).toBe(
       firstContext?.createOnlyReplayKey,
     )
+    expect(automationRequest.mock.calls[0]?.[0]).toMatchObject({
+      createOnlyEffectKey: 'appointment-reminder:1',
+    })
+    expect(automationRequest.mock.calls[1]?.[0]).toMatchObject({
+      createOnlyEffectKey: 'appointment-reminder:1',
+    })
+    expect(automationRequest.mock.calls[2]?.[0]).toMatchObject({
+      createOnlyEffectKey: 'appointment-reminder:2',
+    })
   })
 
   it('executes support-series reconciliation through the injected port', async () => {

@@ -4757,6 +4757,7 @@ describeRealCodex('real Codex appointment reminder e2e', () => {
           action: 'save',
           continuityPolicy: 'preserve',
           createOnly: true,
+          createOnlyEffectKey: 'appointment-reminder:1',
           schedule: {
             at: '2026-08-12T00:00:00.000Z',
             kind: 'at',
