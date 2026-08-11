@@ -10,12 +10,14 @@ const mocks = vi.hoisted(() => {
   const state = {
     completeWebhookTrace: vi.fn(),
     createDeviceSyncPublicIngress: vi.fn(),
+    createHostedDeviceSyncRegistryWithProviderConfigs: vi.fn(),
     createSdkSignInSession: vi.fn(),
     createSignal: vi.fn(),
     ensureSdkConnection: vi.fn(),
     ensureWebhookSubscriptions: vi.fn(),
     appendHostedMailboxEnvelope: vi.fn(),
     getConnectionForUser: vi.fn(),
+    getConnectionRecordForUser: vi.fn(),
     getConnectionOwnerId: vi.fn(),
     hasPendingDirtyConnection: vi.fn(),
     inspectCompanionHrvNightReceipt: vi.fn(),
@@ -27,15 +29,22 @@ const mocks = vi.hoisted(() => {
     markConnectionSourcesDisconnected: vi.fn(),
     markDirtyConnectionProcessed: vi.fn(),
     persistStoredConnectionTokenBundle: vi.fn(),
+    readOAuthStateProviderApplicationBinding: vi.fn(),
+    resolveDeviceProviderApplication: vi.fn(),
+    resolveDeviceProviderApplicationForConnection: vi.fn(),
+    revokeStravaDeviceSyncAccess: vi.fn(),
     readHostedDeviceSyncEnvironment: vi.fn(),
     registryGet: vi.fn(),
     registryList: vi.fn(),
+    scopedRegistryGet: vi.fn(),
+    scopedRegistryList: vi.fn(),
     resumeSdkSignInSession: vi.fn(),
     sha256Hex: vi.fn<(value: string) => string>(() => "a".repeat(64)),
     syncDurableConnectionState: vi.fn(),
     getDirtyConnection: vi.fn(),
     upsertDirtyConnection: vi.fn(),
     upsertConnectionSource: vi.fn(),
+    upsertConnectionWithProviderApplication: vi.fn(),
     withConnectionMutationLock: vi.fn(),
     withHealthDataAdmissionLock: vi.fn(),
     prismaTx: {
@@ -88,6 +97,10 @@ vi.mock("@murphai/device-syncd/public-ingress", async () => {
     isDeviceSyncError: actual.isDeviceSyncError,
   };
 });
+
+vi.mock("@murphai/device-syncd/providers/strava", () => ({
+  revokeStravaDeviceSyncAccess: mocks.revokeStravaDeviceSyncAccess,
+}));
 
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: vi.fn(() => mocks.prisma),
@@ -230,6 +243,8 @@ function buildWebhookAdmissionRecord(
   return {
     connectedAt: new Date(connection.connectedAt),
     provider: connection.provider,
+    providerApplicationId: null,
+    providerApplicationRevision: null,
     setupPhase: connection.setupPhase,
     status: connection.status,
     userId: "user-123",
@@ -365,14 +380,29 @@ vi.mock("@/src/lib/device-sync/providers", () => ({
     get: mocks.registryGet,
     list: mocks.registryList,
   })),
+  createHostedDeviceSyncRegistryWithProviderConfigs:
+    mocks.createHostedDeviceSyncRegistryWithProviderConfigs,
   requireHostedDeviceSyncProvider: vi.fn(),
 }));
+
+vi.mock("@/src/lib/device-sync/provider-applications", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/src/lib/device-sync/provider-applications")
+  >("@/src/lib/device-sync/provider-applications");
+  return {
+    ...actual,
+    resolveDeviceProviderApplication: mocks.resolveDeviceProviderApplication,
+    resolveDeviceProviderApplicationForConnection:
+      mocks.resolveDeviceProviderApplicationForConnection,
+  };
+});
 
 vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   PrismaDeviceSyncControlPlaneStore: class PrismaDeviceSyncControlPlaneStore {
     completeWebhookTrace = mocks.completeWebhookTrace;
     createSignal = mocks.createSignal;
     getConnectionForUser = mocks.getConnectionForUser;
+    getConnectionRecordForUser = mocks.getConnectionRecordForUser;
     getConnectionOwnerId = mocks.getConnectionOwnerId;
     hasPendingDirtyConnection = mocks.hasPendingDirtyConnection;
     inspectCompanionHrvNightReceipt = mocks.inspectCompanionHrvNightReceipt;
@@ -384,9 +414,12 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
     markConnectionSourcesDisconnected = mocks.markConnectionSourcesDisconnected;
     markDirtyConnectionProcessed = mocks.markDirtyConnectionProcessed;
     persistStoredConnectionTokenBundle = mocks.persistStoredConnectionTokenBundle;
+    readOAuthStateProviderApplicationBinding = mocks.readOAuthStateProviderApplicationBinding;
     syncDurableConnectionState = mocks.syncDurableConnectionState;
     upsertDirtyConnection = mocks.upsertDirtyConnection;
     upsertConnectionSource = mocks.upsertConnectionSource;
+    upsertConnectionWithProviderApplication =
+      mocks.upsertConnectionWithProviderApplication;
     withConnectionMutationLock = mocks.withConnectionMutationLock;
     withHealthDataAdmissionLock = mocks.withHealthDataAdmissionLock;
     prisma = mocks.prisma;
@@ -417,6 +450,7 @@ vi.mock("@/src/lib/device-sync/shared", () => ({
 import {
   HostedDeviceSyncControlPlane,
 } from "@/src/lib/device-sync/control-plane";
+import { DeviceProviderApplicationError } from "@/src/lib/device-sync/provider-applications";
 import {
   createHostedDeviceSyncPublicIngressService,
 } from "@/src/lib/device-sync/public-ingress-service";
@@ -449,16 +483,45 @@ describe("hosted device-sync wakes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getConnectionForUser.mockReset();
+    mocks.getConnectionRecordForUser.mockReset();
+    mocks.readOAuthStateProviderApplicationBinding.mockReset();
+    mocks.resolveDeviceProviderApplication.mockReset();
+    mocks.resolveDeviceProviderApplicationForConnection.mockReset();
+    mocks.revokeStravaDeviceSyncAccess.mockReset();
+    mocks.revokeStravaDeviceSyncAccess.mockResolvedValue(undefined);
     mocks.upsertConnectionSource.mockReset();
     mocks.readHostedDeviceSyncEnvironment.mockImplementation(() => createHostedEnv());
+    mocks.createHostedDeviceSyncRegistryWithProviderConfigs.mockImplementation(() => ({
+      get: mocks.scopedRegistryGet,
+      list: mocks.scopedRegistryList,
+    }));
     mocks.ensureWebhookSubscriptions.mockResolvedValue(undefined);
     mocks.prisma.$transaction.mockImplementation(async (callback: (tx: typeof mocks.prismaTx) => Promise<unknown>) =>
       callback(mocks.prismaTx),
     );
+    mocks.readOAuthStateProviderApplicationBinding.mockResolvedValue(null);
+    mocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue(null);
     mocks.prismaTx.$queryRaw.mockResolvedValue([{ acquired: true }]);
     mocks.prismaTx.deviceConnection.findUnique.mockReset();
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(buildWebhookAdmissionRecord());
     mocks.prismaTx.deviceSyncDirtyPayload.count.mockResolvedValue(0);
+    mocks.getConnectionRecordForUser.mockImplementation(async (
+      userId: string,
+      connectionId: string,
+      tx: unknown,
+    ) => {
+      const current = await mocks.getConnectionForUser(userId, connectionId, tx);
+      return current
+        ? {
+            ...current,
+            connectedAt: new Date(current.connectedAt),
+            createdAt: new Date(current.createdAt),
+            providerApplicationId: null,
+            providerApplicationRevision: null,
+            updatedAt: new Date(current.updatedAt),
+          }
+        : null;
+    });
     mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
       hooks?: {
         onConnectionEstablished?: (value: unknown) => Promise<void> | void;
@@ -2740,6 +2803,185 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("revokes a member-owned connection with its exact application registry", async () => {
+    const activeConnection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    const storedConnection = buildStoredConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    const providerConfigs = {
+      strava: {
+        clientId: "member-client",
+        clientSecret: "member-secret",
+      },
+    };
+    const revokeAccess = vi.fn(async () => {});
+    mocks.resolveDeviceProviderApplicationForConnection.mockResolvedValue({
+      applicationId: "dpa_strava",
+      provider: "strava",
+      providerConfigs,
+      revision: 4,
+    });
+    mocks.scopedRegistryGet.mockReturnValue({
+      connectionHandler: { revokeAccess },
+    });
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(storedConnection)
+      .mockResolvedValueOnce(storedConnection);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect",
+      ),
+    );
+
+    await expect(
+      controlPlane.disconnectConnection(
+        "user-123",
+        buildPublicConnectionId("dsc_123"),
+      ),
+    ).resolves.toMatchObject({
+      connection: {
+        provider: "strava",
+        status: "disconnected",
+      },
+    });
+
+    expect(mocks.resolveDeviceProviderApplicationForConnection).toHaveBeenCalledWith({
+      connectionId: "dsc_123",
+      memberId: "user-123",
+      prisma: mocks.prisma,
+    });
+    expect(mocks.createHostedDeviceSyncRegistryWithProviderConfigs).toHaveBeenCalledWith({
+      providerConfigs,
+    });
+    expect(mocks.scopedRegistryGet).toHaveBeenCalledWith("strava");
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(revokeAccess).toHaveBeenCalledWith(storedConnection);
+  });
+
+  it("uses stored Strava authority to disconnect and purge when private credentials require repair", async () => {
+    const activeConnection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    const storedConnection = buildStoredConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_INVALID",
+        "Private provider application credentials are invalid.",
+      ),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(storedConnection)
+      .mockResolvedValueOnce(storedConnection);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect",
+      ),
+    );
+
+    await expect(controlPlane.disconnectConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    )).resolves.toMatchObject({
+      connection: {
+        provider: "strava",
+        status: "disconnected",
+      },
+    });
+
+    expect(mocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedConnection);
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).toHaveBeenCalledWith({
+      clearRefreshLease: true,
+      connectionId: "dsc_123",
+      externalAccountId: storedConnection.externalAccountId,
+      provider: "strava",
+      tokenBundle: null,
+      tx: mocks.prismaTx,
+    });
+  });
+
+  it("propagates transient private-application failures before disconnect mutation", async () => {
+    const transientError = Object.assign(new Error("KMS unavailable"), {
+      name: "KmsUnavailableError",
+    });
+    const activeConnection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(transientError);
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/settings/device-sync/connections/dsc_123/disconnect",
+      ),
+    );
+
+    await expect(controlPlane.disconnectConnection(
+      "user-123",
+      buildPublicConnectionId("dsc_123"),
+    )).rejects.toBe(transientError);
+
+    expect(mocks.revokeStravaDeviceSyncAccess).not.toHaveBeenCalled();
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("finishes consent-withdrawal disconnect when private Strava credentials require repair", async () => {
+    const activeConnection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    const storedConnection = buildStoredConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.prisma.hostedConsentGrant.findUnique.mockResolvedValue({
+      scope: "launch.health-data",
+      status: "revoked",
+    });
+    mocks.resolveDeviceProviderApplicationForConnection.mockRejectedValue(
+      new DeviceProviderApplicationError(
+        "DEVICE_PROVIDER_APPLICATION_INVALID",
+        "Private provider application credentials are invalid.",
+      ),
+    );
+    mocks.listConnectionsForUser.mockResolvedValue([activeConnection]);
+    mocks.getConnectionForUser
+      .mockResolvedValueOnce(activeConnection)
+      .mockResolvedValueOnce(buildDisconnectingConnection(activeConnection));
+    mocks.getStoredConnectionAccountForUser
+      .mockResolvedValueOnce(storedConnection)
+      .mockResolvedValueOnce(storedConnection);
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/legal/health-data-consent"),
+    );
+
+    await expect(controlPlane.disconnectAllConnections("user-123")).resolves.toEqual({
+      attemptedCount: 1,
+      disconnectedCount: 1,
+      failedCount: 0,
+    });
+
+    expect(mocks.revokeStravaDeviceSyncAccess).toHaveBeenCalledWith(storedConnection);
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+  });
+
   it("preserves established Junction siblings and blocks a new source until target cleanup succeeds", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/connect-sources/garmin/start", {
@@ -3404,6 +3646,110 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("keeps member-owned OAuth start and callback on the exact application revision", async () => {
+    const binding = {
+      applicationId: "dpa_strava",
+      provider: "strava" as const,
+      revision: 4,
+    };
+    const providerConfigs = {
+      strava: {
+        clientId: "member-client",
+        clientSecret: "member-secret",
+      },
+    };
+    mocks.readOAuthStateProviderApplicationBinding.mockResolvedValue(binding);
+    mocks.resolveDeviceProviderApplication.mockResolvedValue({
+      ...binding,
+      providerConfigs,
+    });
+    mocks.scopedRegistryGet.mockReturnValue({ provider: "strava" });
+    mocks.upsertConnectionWithProviderApplication.mockResolvedValue({
+      account: buildHostedConnection({
+        displayName: "Strava",
+        id: "dsc_strava",
+        provider: "strava",
+      }),
+      previousAccount: null,
+    });
+    mocks.createDeviceSyncPublicIngress.mockImplementation((input: {
+      registry: { get: (provider: string) => unknown };
+      store: {
+        upsertConnection: (value: {
+          externalAccountId: string;
+          provider: string;
+        }) => Promise<unknown>;
+      };
+    }) => ({
+      describeProviders: vi.fn(() => []),
+      handleOAuthCallback: vi.fn(async () => {
+        input.registry.get("strava");
+        await input.store.upsertConnection({
+          externalAccountId: "strava-account",
+          provider: "strava",
+        });
+        return { connection: { id: "dsc_strava" } };
+      }),
+      startConnection: vi.fn(async () => {
+        input.registry.get("strava");
+        return { redirectUrl: "https://strava.example.test/oauth" };
+      }),
+    }));
+    const controlPlane = createHostedDeviceSyncPublicIngressService(
+      new Request(
+        "https://control.example.test/api/device-sync/oauth/strava/callback?code=abc&state=state_app",
+      ),
+    );
+
+    await controlPlane.startConnectionWithProviderApplication(
+      "user-123",
+      binding,
+      null,
+    );
+    await controlPlane.handleOAuthCallback("strava", {
+      expectedOwnerId: "user-123",
+    });
+
+    expect(mocks.readOAuthStateProviderApplicationBinding).toHaveBeenCalledWith({
+      expectedOwnerId: "user-123",
+      expectedProvider: "strava",
+      now: expect.any(String),
+      state: "state_app",
+    });
+    expect(mocks.resolveDeviceProviderApplication).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveDeviceProviderApplication).toHaveBeenNthCalledWith(1, {
+      applicationId: "dpa_strava",
+      expectedRevision: 4,
+      memberId: "user-123",
+      prisma: mocks.prisma,
+      provider: "strava",
+    });
+    expect(mocks.resolveDeviceProviderApplication).toHaveBeenNthCalledWith(2, {
+      applicationId: "dpa_strava",
+      expectedRevision: 4,
+      memberId: "user-123",
+      prisma: mocks.prisma,
+      provider: "strava",
+    });
+    expect(mocks.createHostedDeviceSyncRegistryWithProviderConfigs).toHaveBeenCalledTimes(2);
+    expect(mocks.createHostedDeviceSyncRegistryWithProviderConfigs).toHaveBeenNthCalledWith(1, {
+      providerConfigs,
+    });
+    expect(mocks.createHostedDeviceSyncRegistryWithProviderConfigs).toHaveBeenNthCalledWith(2, {
+      providerConfigs,
+    });
+    expect(mocks.upsertConnectionWithProviderApplication).toHaveBeenCalledWith(
+      {
+        externalAccountId: "strava-account",
+        provider: "strava",
+      },
+      binding,
+    );
+    expect(mocks.scopedRegistryGet).toHaveBeenCalledTimes(2);
+    expect(mocks.registryGet).not.toHaveBeenCalled();
+    expect(mocks.ensureWebhookSubscriptions).not.toHaveBeenCalled();
+  });
+
   it("namespaces provider initial-job dedupe keys by connection epoch", async () => {
     const firstConnectedAt = "2026-03-26T12:00:00.000Z";
     const secondConnectedAt = "2026-03-26T12:01:00.000Z";
@@ -3909,6 +4255,56 @@ describe("hosted device-sync wakes", () => {
     });
   });
 
+  it("terminally rejects a shared webhook after its connection is rebound to a private application", async () => {
+    const connection = buildHostedConnection({
+      displayName: "Strava",
+      provider: "strava",
+    });
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce({
+      ...buildWebhookAdmissionRecord({
+        provider: "strava",
+      }),
+      providerApplicationId: "dpa_private_strava",
+      providerApplicationRevision: 2,
+    });
+
+    await handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: connection.connectedAt,
+        id: connection.id,
+        provider: connection.provider,
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      store: new PrismaDeviceSyncControlPlaneStore({
+        prisma: getPrisma(),
+      }),
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "athlete.deauthorized",
+        jobs: [{ kind: "account_disconnect" }],
+        occurredAt: "2026-03-26T11:59:00.000Z",
+      },
+    });
+
+    expect(mocks.getConnectionRecordForUser).not.toHaveBeenCalled();
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(
+      "strava",
+      "trace_123",
+      "claim-token",
+      mocks.prismaTx,
+    );
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.createSignal).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    expect(mocks.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+    expect(mocks.revokeStravaDeviceSyncAccess).not.toHaveBeenCalled();
+  });
+
   it("terminally supersedes webhook work when reconnect replaces its observed epoch before dirty-state commit", async () => {
     mocks.prismaTx.deviceConnection.findUnique.mockResolvedValueOnce(
       buildWebhookAdmissionRecord({
@@ -3948,6 +4344,8 @@ describe("hosted device-sync wakes", () => {
       select: {
         connectedAt: true,
         provider: true,
+        providerApplicationId: true,
+        providerApplicationRevision: true,
         setupPhase: true,
         status: true,
         userId: true,
@@ -4140,6 +4538,9 @@ describe("hosted device-sync wakes", () => {
         windowStart: null,
       }],
     }));
+    expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
+    );
     const stagedPayload = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources?.[0]?.payload;
     const staged = stagedPayload?.companionObservationJson;
     expect(staged).toEqual(expect.any(String));
@@ -5310,6 +5711,14 @@ describe("hosted device-sync wakes", () => {
       accepted: true,
     });
 
+    const dirtyResources = mocks.upsertDirtyConnection.mock.calls[0]?.[0]?.resources;
+
+    expect(mocks.upsertDirtyConnection).toHaveBeenCalledWith(expect.objectContaining({
+      resources: dirtyResources,
+    }));
+    expect(mocks.withHealthDataAdmissionLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.upsertDirtyConnection.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledTimes(1);
     expect(mocks.createSignal).toHaveBeenCalledTimes(1);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledWith(

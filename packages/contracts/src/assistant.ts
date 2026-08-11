@@ -40,6 +40,15 @@ export const nutritionCardGoalStatusValues = [
 export type NutritionCardGoalStatus =
   (typeof nutritionCardGoalStatusValues)[number];
 
+export const nutritionCardGoalStatusLabels = {
+  far_over_target: "far over target",
+  far_under_target: "far under target",
+  on_target: "on target",
+  over_target: "over target",
+  unavailable: "status unavailable",
+  under_target: "under target",
+} as const satisfies Record<NutritionCardGoalStatus, string>;
+
 export type NutritionCardMetric = {
   total: number | null;
   mealCount: number;

@@ -14,7 +14,7 @@ const SYNTHETIC_WORKOUT_CARD: Extract<
   kind: "compact_table",
   version: 1,
   title: "Push day",
-  subtitle: "4 of 6 sets complete",
+  subtitle: null,
   footer: "Tap an exercise to log or correct a set.",
   workout: {
     version: 1,
@@ -67,8 +67,8 @@ export function ImessageCompactTableCardStudy() {
         </h3>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
           The image fallback mirrors the native workout summary and the shared
-          generic table. Provider captions keep the complete values available
-          when the raster cannot load.
+          generic table. Provider chrome stays concise; the complete semantic
+          fallback remains available as text.
         </p>
       </div>
       <div className="hidden flex-col gap-8 sm:flex">
@@ -76,8 +76,8 @@ export function ImessageCompactTableCardStudy() {
         <ScaledCompactTableCard card={SYNTHETIC_TABLE_CARD} scale={0.62} />
       </div>
       <div className="flex flex-col gap-5 sm:hidden">
-        <ScaledCompactTableCard card={SYNTHETIC_WORKOUT_CARD} scale={0.285} />
-        <ScaledCompactTableCard card={SYNTHETIC_TABLE_CARD} scale={0.285} />
+        <ScaledCompactTableCard card={SYNTHETIC_WORKOUT_CARD} scale={0.25} />
+        <ScaledCompactTableCard card={SYNTHETIC_TABLE_CARD} scale={0.25} />
       </div>
     </div>
   );
