@@ -337,6 +337,18 @@ describe("changelog registry", () => {
         prompt: "Remind me every day at 9 PM Central to wind down.",
       },
     });
+    expect(items.get("personality-settings-and-chat")).toMatchObject({
+      sourcePullRequests: [1589],
+      summary: expect.stringContaining("main and optional supporting personality"),
+      details: expect.stringContaining("same saved personality"),
+      tryIt: {
+        href: "/settings",
+        label: "Edit Murph's personality",
+      },
+    });
+    expect(items.get("personality-settings-and-chat")?.details).toContain(
+      "changes only that room's Murph",
+    );
     expect(items.get("cleaner-workout-cards-in-messages")).toMatchObject({
       sourcePullRequests: [1588],
       summary: expect.stringContaining("nutrition goal direction"),

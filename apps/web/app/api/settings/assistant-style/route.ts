@@ -95,7 +95,6 @@ function projectWebVisiblePersonality(
   }
   return projected;
 }
-
 function parseAssistantStyleRequestBody(
   body: Record<string, unknown>,
 ): HostedMemberAssistantPreferencesUpdate {

@@ -45,6 +45,15 @@ describe('assistant personalization tool', () => {
     expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
       'a one-reply formatting request does not persist',
     )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'Persona changes require current accepted user input',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'both mainPersona and supportingPersona',
+    )
+    expect(MURPH_PERSONALIZATION_TOOL.description).toContain(
+      'scheduled automation occurrences may update tone and voice but never personas',
+    )
     expect(JSON.stringify(MURPH_PERSONALIZATION_TOOL.inputSchema)).not.toContain(
       'memberId',
     )
@@ -56,6 +65,8 @@ describe('assistant personalization tool', () => {
       params: {
         arguments: {
           action: 'update',
+          mainPersona: 'scientist',
+          supportingPersona: 'classic',
           tone: 'formal',
           voice: 'upbeat',
         },
@@ -68,6 +79,8 @@ describe('assistant personalization tool', () => {
       kind: 'personalization',
       request: {
         action: 'update',
+        mainPersona: 'scientist',
+        supportingPersona: 'classic',
         tone: 'formal',
         voice: 'upbeat',
       },
@@ -81,11 +94,13 @@ describe('assistant personalization tool', () => {
       request: vi.fn(async () => ({
         action: 'update' as const,
         result: {
+          mainPersona: 'scientist' as const,
           model: 'gpt-5.6-terra' as const,
           modelChangeAppliesNextRun: false as const,
           modelUpdated: false as const,
           solAvailable: true,
           status: 'saved' as const,
+          supportingPersona: 'classic' as const,
           tone: 'formal' as const,
           voice: 'upbeat' as const,
         },
@@ -118,6 +133,8 @@ describe('assistant personalization tool', () => {
     expect(personalizationTool.request).toHaveBeenCalledWith(
       {
         action: 'update',
+        mainPersona: 'scientist',
+        supportingPersona: 'classic',
         tone: 'formal',
         voice: 'upbeat',
       },
@@ -128,6 +145,9 @@ describe('assistant personalization tool', () => {
     )
     expect(result.rpcResult.success).toBe(true)
     expect(result.rpcResult.contentItems[0]?.text).toContain('"status":"saved"')
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '"mainPersona":"scientist"',
+    )
   })
 
   it('fails closed when an update has no provider-accepted input authority', async () => {
@@ -182,6 +202,31 @@ describe('assistant personalization tool', () => {
       method: 'item/tool/call',
       params: {
         arguments: { action: 'update' },
+        namespace: 'murph',
+        tool: 'personalization',
+      },
+    })?.kind).toBe('invalid-personalization-arguments')
+
+    expect(readTestMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          action: 'update',
+          mainPersona: 'scientist',
+        },
+        namespace: 'murph',
+        tool: 'personalization',
+      },
+    })?.kind).toBe('invalid-personalization-arguments')
+
+    expect(readTestMurphDynamicToolRequest({
+      method: 'item/tool/call',
+      params: {
+        arguments: {
+          action: 'update',
+          mainPersona: 'scientist',
+          supportingPersona: 'scientist',
+        },
         namespace: 'murph',
         tool: 'personalization',
       },
