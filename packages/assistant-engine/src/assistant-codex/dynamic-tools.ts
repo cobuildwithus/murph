@@ -3915,12 +3915,15 @@ async function executeGroupTool(input: {
       }))
     }
 
-    if (
-      input.request.avatar.source === 'image_ref' &&
-      input.request.avatar.imageRef.startsWith('raw/captures/')
-    ) {
+    const avatarSourceRefs = input.request.avatar.source === 'image_ref'
+      ? [input.request.avatar.imageRef]
+      : input.request.avatar.args.referenceImageRefs ?? []
+    const captureSourceRefs = new Set(
+      avatarSourceRefs.filter((imageRef) => imageRef.startsWith('raw/captures/')),
+    )
+    for (const imageRef of captureSourceRefs) {
       const delivered = await input.hostedToolContext
-        ?.verifyGeneratedImageDelivery?.(input.request.avatar.imageRef)
+        ?.verifyGeneratedImageDelivery?.(imageRef)
       if (delivered === false) {
         return toolTextResult(
           false,

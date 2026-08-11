@@ -4742,6 +4742,183 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
+  it("requires visible generated references before generating a group avatar", async () => {
+    const vaultRoot = await mkdtemp(join(
+      tmpdir(),
+      "assistant-codex-group-avatar-generated-reference-",
+    ));
+    const generatedRef = "raw/captures/2026/08/generated-reference/avatar.png";
+    const ordinaryRef = "raw/captures/2026/08/ordinary-reference/avatar.png";
+    const sessionId = "session_generated_avatar_reference";
+    const completionTurnId = "turn_generated_avatar_reference_completion";
+    const deliveryTurnId = "turn_generated_avatar_reference_delivery";
+    const media = {
+      alt: "Generated avatar reference",
+      contentType: "image/png",
+      filename: "avatar.png",
+      kind: "vault_image",
+      ref: generatedRef,
+      sha256: "c".repeat(64),
+      sizeBytes: 68,
+      source: "gpt-image-2",
+    } as const;
+    try {
+      await initializeVault({ vaultRoot });
+      const imageBytes = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+        "base64",
+      );
+      for (const imageRef of [generatedRef, ordinaryRef]) {
+        await mkdir(dirname(join(vaultRoot, imageRef)), { recursive: true });
+        await writeFile(join(vaultRoot, imageRef), imageBytes);
+      }
+      await appendAssistantTranscriptEntries(vaultRoot, sessionId, [{
+        kind: "status",
+        text: buildAssistantGeneratedImageDeliveryTranscriptMarkerText({
+          contentType: media.contentType,
+          deliveryContextOrdinal: 0,
+          ref: media.ref,
+          sha256: media.sha256,
+          sizeBytes: media.sizeBytes,
+          turnId: completionTurnId,
+        }),
+      }]);
+      const intent = await createAssistantOutboxIntent({
+        channel: "linq",
+        explicitTarget: "thread-generated-avatar-reference",
+        media: [media],
+        message: "Generated avatar reference",
+        sessionId,
+        threadId: "thread-generated-avatar-reference",
+        threadIsDirect: false,
+        turnId: deliveryTurnId,
+        vault: vaultRoot,
+      });
+      const groupRequest = vi.fn<GroupToolRequest>(async (request) =>
+        request.action === "preflight_set_chat_avatar"
+          ? {
+              action: "preflight_set_chat_avatar",
+              result: { status: "ok" },
+            }
+          : {
+              action: "set_chat_avatar",
+              result: { status: "requested" },
+            });
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse({
+          data: [{ b64_json: Buffer.from(webpBytes).toString("base64") }],
+          usage: {
+            input_tokens: 4,
+            output_tokens: 6,
+            total_tokens: 10,
+          },
+        }));
+      const privateImageUrlPublish = vi.fn<
+        AssistantHostedPrivateImageUrlPublisher["publishPrivateImageUrl"]
+      >(async () => ({
+        expiresAt: "2033-05-18T03:33:20.000Z",
+        url: SIGNED_PRIVATE_IMAGE_URL,
+      }));
+      let requestOrdinal = 0;
+      const run = async (referenceImageRefs: string[]) => {
+        const currentRequestOrdinal = requestOrdinal++;
+        const request = readMurphDynamicToolRequest(groupToolCall({
+          action: "set_chat_avatar",
+          alt: "Our generated avatar",
+          avatarSource: "generate",
+          prompt: "A clean square badge based on these references",
+          referenceImageRefs,
+        }, {
+          callId: `call_generated_avatar_reference_${currentRequestOrdinal}`,
+          id: 300 + currentRequestOrdinal,
+        }));
+        if (!request || request.kind !== "group") {
+          throw new Error("Expected group request.");
+        }
+        return await executeMurphDynamicToolRequest({
+          env: { OPENAI_API_KEY: "openai-test-key" },
+          fetchImpl,
+          hostedToolContext: createGroupHostedToolContext({
+            groupRequest,
+            privateImageUrlPublish,
+            verifyGeneratedImageDelivery: async (requestedRef) =>
+              resolveAssistantGeneratedImageDelivery({
+                imageRef: requestedRef,
+                intents: await listAssistantOutboxIntents(vaultRoot),
+                sessionId,
+                transcriptEntries: await listAssistantTranscriptEntries(
+                  vaultRoot,
+                  sessionId,
+                ),
+              }),
+          }),
+          nextUsageOrdinal: () => 1,
+          progressDelivery: null,
+          request,
+          vaultRoot,
+        });
+      };
+
+      const hiddenResult = await run([generatedRef]);
+      expect(hiddenResult.rpcResult).toEqual({
+        contentItems: [{
+          text: "generated image must be visible before it can become the group avatar",
+          type: "inputText",
+        }],
+        success: false,
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(privateImageUrlPublish).not.toHaveBeenCalled();
+      expect(groupRequest).toHaveBeenCalledExactlyOnceWith({
+        action: "preflight_set_chat_avatar",
+      });
+
+      const mixedResult = await run([ordinaryRef, generatedRef]);
+      expect(mixedResult.rpcResult.success).toBe(false);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      expect(privateImageUrlPublish).not.toHaveBeenCalled();
+      expect(groupRequest).toHaveBeenCalledTimes(2);
+
+      const sentAt = "2026-08-10T12:00:00.000Z";
+      await saveAssistantOutboxIntent(vaultRoot, {
+        ...intent,
+        delivery: {
+          channel: "linq",
+          idempotencyKey: "generated-avatar-reference-delivery",
+          messageLength: intent.message.length,
+          providerMessageEffects: [{
+            carriesIntentMedia: true,
+            message: intent.message,
+            providerMessageId: "linq-message-generated-avatar-reference",
+          }],
+          providerMessageId: "linq-message-generated-avatar-reference",
+          providerMessageIds: ["linq-message-generated-avatar-reference"],
+          providerThreadId: "thread-generated-avatar-reference",
+          sentAt,
+          target: "thread-generated-avatar-reference",
+          targetKind: "thread",
+        },
+        sentAt,
+        status: "sent",
+        updatedAt: sentAt,
+      });
+
+      const deliveredResult = await run([generatedRef]);
+      expect(deliveredResult.rpcResult.success).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(privateImageUrlPublish).toHaveBeenCalledOnce();
+      expect(groupRequest).toHaveBeenCalledTimes(4);
+
+      const ordinaryResult = await run([ordinaryRef]);
+      expect(ordinaryResult.rpcResult.success).toBe(true);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(privateImageUrlPublish).toHaveBeenCalledTimes(2);
+      expect(groupRequest).toHaveBeenCalledTimes(6);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("shows bounded provider diagnostics for a rejected group avatar update", async () => {
     const vaultRoot = await mkdtemp(join(tmpdir(), "assistant-codex-group-avatar-"));
     try {

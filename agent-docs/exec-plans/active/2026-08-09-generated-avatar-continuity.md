@@ -1,6 +1,6 @@
 # Generated image avatar continuity
 
-Status: active — valid round 11 finding remediated; round 12 exact-head review and CI pending
+Status: active — valid round 12 finding remediated; round 13 exact-head review and CI pending
 Created: 2026-08-09
 Updated: 2026-08-10
 
@@ -622,3 +622,29 @@ Updated: 2026-08-10
   absence of a SQL/application-database migration and the round-12 review
   package declares all four existing rendered changelog screenshots. Round 12
   must review the fresh pushed full patch while exact-head CI runs concurrently.
+- Valid substantive round 12 reviewed exact pushed head `0da0e52b6bcf` with
+  ReviewGPT 0.5.124. The wrapper verified requested `gpt-5.6-sol`, response
+  `gpt-5-6-pro`, and response SHA-256
+  `7318e2e8e82c086ed7544c3e9283a19d99602889ab98c3bf77d0b0b9aecf6254`.
+  Its one accepted review-induced finding showed that direct `image_ref`
+  avatar reuse passed the visible-first guard while the sibling generated-
+  avatar route could consume unseen generated `referenceImageRefs` before
+  generation, private publication, and group mutation.
+- The required repeated-mechanism retrospective was recorded before source
+  remediation. The correction keeps the existing pre-publication group-tool
+  owner and delivery verifier: it derives candidate refs from either avatar
+  mode, deduplicates `raw/captures/**` refs, and rejects the complete operation
+  if any existing verifier result is false. No new queue, verifier, state owner,
+  authority source, lifecycle, database, or compatibility path was added.
+- The production-shaped regression first failed because the request reached
+  image generation instead of returning the visible-first result. It now proves
+  that an unseen generated ref blocks the image provider, private publisher,
+  and group mutation; a mixed set fails closed; accepted physical delivery
+  enables the same generated reference; and an ordinary capture remains
+  eligible. The full group-tool file passes 100 tests, and five adjacent
+  generation/authority files pass 149 tests. Assistant Engine typecheck and 58
+  runner bundle-policy tests pass. Fresh full assembly passes at an
+  8,693,269-byte Vault CLI total, 1,599,840-byte runner entry,
+  7,734,484-byte static boot closure, and 9,626,336-byte runner total without a
+  ratchet change. Round 13 must review the fresh pushed full patch while
+  exact-head CI runs concurrently.
