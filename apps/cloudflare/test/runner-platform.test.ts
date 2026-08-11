@@ -5163,6 +5163,44 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("does not synthesize a canonical Linq route from a legacy Web response", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({
+        ok: true,
+        targetOverride: {
+          conversationThreadId: "hid_legacy_chat",
+          target: "chat_legacy",
+          targetKind: "thread",
+        },
+        threadIsDirect: true,
+      }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      })
+    );
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({
+      HOSTED_WEB_BASE_URL: "https://web.example.test",
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning,
+      webControlBaseUrl: "https://web.example.test",
+    });
+    const assertLinqRecentInboundEngagement =
+      platform.effectsPort.assertLinqRecentInboundEngagement;
+    if (!assertLinqRecentInboundEngagement) {
+      throw new Error("Expected hosted Linq egress authority assertion effect.");
+    }
+
+    await expect(assertLinqRecentInboundEngagement({
+      authorityCheckOnly: true,
+      target: "chat_legacy",
+      targetKind: "thread",
+    })).resolves.toEqual({});
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("strictly parses typed Linq health blocks from web-control", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({

@@ -73,7 +73,7 @@ Success means:
 - Focused Assistant Runtime callback, channel, workspace phase, entrypoint,
   and runner tests pass: 933 tests.
 - Full Assistant Runtime package coverage passes: 2,163 tests with 4 skipped.
-- Focused Cloudflare parser/platform tests pass: 150 tests.
+- Focused Cloudflare parser/platform tests pass: 151 tests.
 - Focused changelog registry and archive tests pass: 41 tests.
 - Hosted-execution, Web, Assistant Runtime, and Cloudflare typechecks pass.
 - The Docker-backed hosted-local scheduled-card scenario built every runtime
@@ -86,6 +86,13 @@ Success means:
   canonical `thread` comparison on approved vault-file delivery plus two stale
   integration mocks. The semantic comparison is corrected, the two failing
   files pass (12 tests), and the full package coverage rerun passes.
+- Preliminary ReviewGPT accepted the product purpose and found two evidence
+  gaps. Canonical-route protocol absence now has focused Cloudflare parser and
+  Assistant Runtime fail-closed tests (151 and 243 tests pass respectively),
+  with no capability, provider, fallback-persistence, or outcome side effect.
+  The production-faithful scheduled-card scenario remains blocked because no
+  Docker-compatible engine is installed; the PR does not claim unchanged
+  foreground latency without the requested same-environment benchmark.
 - Pending: push the corrected candidate, rerun required CI, complete the
   preliminary completion-specialists pass and the required next final ReviewGPT
   round, and resolve every accepted finding before completion.

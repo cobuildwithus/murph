@@ -10028,6 +10028,50 @@ describe("hosted runtime callbacks", () => {
     expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
   });
 
+  it("fails closed before capability or provider access when Web lacks the canonical-route protocol", async () => {
+    const assertRecentInbound = vi.fn(async () => ({}));
+    const persistAppCardTextFallback = vi.fn(async () => undefined);
+    const providerFetch = vi.fn<typeof fetch>();
+    const recordDeliveryOutcome = vi.fn(async () => undefined);
+    const dependencies = createHostedAssistantProgressDeliveryDependencies({
+      effectsPort: createHostedRuntimeEffectsPortStub({
+        assertLinqRecentInboundEngagement: assertRecentInbound,
+        recordLinqDeliveryOutcome: recordDeliveryOutcome,
+      }),
+      forwardedEnv: {
+        LINQ_API_BASE_URL: "https://api.linq.example/api/partner/v3",
+        LINQ_API_TOKEN: "linq-actual-runtime-token",
+      },
+      providerFetch,
+    });
+
+    await expect(dependencies.sendLinq!({
+      card: HOSTED_LINQ_RESPONSE_CARD,
+      idempotencyKey: "assistant-outbox:legacy-web-card",
+      message: "Private nutrition summary",
+      persistAppCardTextFallback,
+      target: "linq_chat_legacy",
+      targetKind: "thread",
+      threadIsDirect: true,
+    })).rejects.toMatchObject({
+      code: "ASSISTANT_LINQ_RESOLVED_ROUTE_PROTOCOL_UNAVAILABLE",
+    });
+
+    expect(assertRecentInbound).toHaveBeenCalledOnce();
+    expect(assertRecentInbound).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityCheckOnly: true,
+        target: "linq_chat_legacy",
+        targetKind: "thread",
+      }),
+      { signal: null },
+    );
+    expect(providerFetch).not.toHaveBeenCalled();
+    expect(mocks.sendLinqMessage).not.toHaveBeenCalled();
+    expect(persistAppCardTextFallback).not.toHaveBeenCalled();
+    expect(recordDeliveryOutcome).not.toHaveBeenCalled();
+  });
+
   it("blocks changed Linq health at provider entry before any provider message request", async () => {
     const effect = createEffect({
       bindingDeliveryTarget: "linq_chat_123",
