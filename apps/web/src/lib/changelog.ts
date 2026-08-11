@@ -66,9 +66,9 @@ const RAW_CHANGELOG_EDITIONS = [
     id: "2026-08-10",
     publishedOn: "2026-08-10",
     title:
-      "Starter access, patterns, wearable recovery, reliable referrals, reminders, cards, voices, and web search",
+      "Starter access, patterns, wearable recovery, referrals, reminders, cards, voices, web search, and a lighter homepage",
     summary:
-      "Starter usage remains available until used, patterns compare repeated actions with next-day sleep and recovery, wearable sync can recover safely, referral celebrations stay with the intended conversation, reminders keep requested local time, and workout rows, voice memos, and web search are steadier.",
+      "Starter usage waits until it is used, patterns compare actions with next-day sleep and recovery, wearable sync can recover safely, referral celebrations stay with the intended conversation, reminders keep local time, completed workout rows stay clear, voice memos keep the selected voice, managed web search reaches current information, and the public homepage starts with less to download.",
     items: [
       {
         id: "non-expiring-starter-access",
@@ -201,6 +201,22 @@ const RAW_CHANGELOG_EDITIONS = [
         relevanceTags: ["workouts", "imessage", "cards", "reliability"],
         sourcePullRequests: [1599],
       },
+      {
+        id: "lighter-accessible-homepage",
+        kind: "improvement",
+        priority: 3,
+        title: "The homepage starts lighter",
+        summary:
+          "The public homepage now uses compact avatar images while continuing to prepare secure sign-in automatically in the background.",
+        details:
+          "Cold sign-in still opens immediately, announces its loading state, keeps keyboard focus when the form arrives, and retries a temporary loading failure. Text contrast is also clearer across the updated sections.",
+        relevanceTags: ["homepage", "performance", "accessibility", "sign-in"],
+        sourcePullRequests: [1573],
+        tryIt: {
+          href: "/",
+          label: "Visit the homepage",
+        },
+      },
     ],
   },
   {
@@ -208,7 +224,7 @@ const RAW_CHANGELOG_EDITIONS = [
     publishedOn: "2026-08-09",
     title: "Referrals, Max, and a more capable Murph",
     summary:
-      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, clearer connection paths, and stronger conversation recovery all landed together.",
+      "A public referral home, the Max plan, personalized contact cards, live workout logging, safer Family setup, private group follow-ups, clearer connection paths, and stronger conversation recovery all landed together.",
     items: [
       {
         id: "group-sleep-challenges-use-fresh-data",
@@ -300,6 +316,18 @@ const RAW_CHANGELOG_EDITIONS = [
           prompt:
             "Start a live workout called Upper Body and help me log each set as I go.",
         },
+      },
+      {
+        id: "private-group-follow-up",
+        kind: "feature",
+        priority: 4,
+        title: "Continue a group question privately",
+        summary:
+          "Ask Murph in a group to continue with you privately, and your personal Murph can send the answer only to your verified direct chat on the same channel.",
+        details:
+          "Murph uses the exact group message author and checks the direct chat before personal work begins. If no eligible direct chat is available, Murph asks you to open one on that channel and retry.",
+        relevanceTags: ["groups", "messaging", "privacy", "assistant"],
+        sourcePullRequests: [1481],
       },
       {
         id: "clearer-health-source-handoffs",

@@ -209,6 +209,8 @@ import type {
   HostedImageGenerationController,
 } from "./hosted-runtime/image-generation.ts";
 import {
+  findNextHostedSystemMailboxQueueItem,
+  readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
 import {
@@ -578,6 +580,39 @@ async function createHostedForegroundMailboxPrefetch(input: {
   });
 }
 
+const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
+  "assistant.notification.requested:phone-call-result:",
+  "assistant.notification.requested:usage-referral-reward:",
+  "aask_done_",
+] as const;
+
+function isHostedPreCheckpointExternalCompletionDedupeKey(
+  dedupeKey: string,
+): boolean {
+  return HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES.some(
+    (prefix) => dedupeKey.startsWith(prefix),
+  );
+}
+
+async function hasHostedPreCheckpointLocalExternalCompletion(input: {
+  now: string;
+  vaultRoot: string;
+}): Promise<boolean> {
+  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  return findNextHostedSystemMailboxQueueItem({
+    allowedRouteActions: ["dispatch-assistant-notification"],
+    now: input.now,
+    state: {
+      pending: state.pending.filter((item) =>
+        item.wake.kind === "assistant.notification.requested"
+        && isHostedPreCheckpointExternalCompletionDedupeKey(
+          item.mailboxDedupeKey,
+        )
+      ),
+    },
+  }) !== null;
+}
+
 async function inspectHostedPreCheckpointSystemMailboxPrefetch(
   prefetch: HostedMailboxPrefixPrefetch,
 ): Promise<{
@@ -601,13 +636,8 @@ async function inspectHostedPreCheckpointSystemMailboxPrefetch(
           || item.kind === "assistant.ask.completed"
           || (
             item.kind === "assistant.notification.requested"
-            && (
-              item.dedupeKey.startsWith(
-                "assistant.notification.requested:phone-call-result:",
-              )
-              || item.dedupeKey.startsWith(
-                "assistant.notification.requested:usage-referral-reward:",
-              )
+            && isHostedPreCheckpointExternalCompletionDedupeKey(
+              item.dedupeKey,
             )
           )
         )
@@ -1258,6 +1288,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       input.request.budget?.maxMailboxItems,
     );
     const mailboxBudgetExhausted = () => mailboxBudget.exhausted;
+    let preCheckpointExternalCompletionImported = false;
     let deviceSyncMessagingReturnTarget: HostedRuntimeDeviceSyncMessagingReturnTarget | null =
       null;
     const createMailboxImportContext = (
@@ -1291,6 +1322,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         && (outcome.status === "imported" || outcome.status === "skipped")
       ) {
         detachedAssistantAskController?.kick();
+      }
+      if (
+        outcome.status === "imported"
+        && item.item.kind === "assistant.notification.requested"
+        && isHostedPreCheckpointExternalCompletionDedupeKey(
+          item.item.dedupeKey,
+        )
+      ) {
+        preCheckpointExternalCompletionImported = true;
       }
     };
     const importMailboxItem: HostedWorkspaceRunnerInput["importItem"] = (item, context) =>
@@ -3856,12 +3896,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               invocationLocalAssistantInputBatch,
             );
         }
-        const shouldRunConversationAssistant = shouldContinue() && (
-          input.runAssistantWithoutMailboxWork === true
-          || hostedAssistantInputBatchHasWork(
+        const preCheckpointSystemPrefetch =
+          input.systemMailboxAdmission === "pre_checkpoint_safe"
+          && runtimeStateDirtyBeforeMailboxImport
+            ? await inspectHostedPreCheckpointSystemMailboxPrefetch(
+                initialMailboxPrefetch,
+              )
+            : null;
+        const hasForegroundConversationWork =
+          hostedAssistantInputBatchHasWork(
             invocationLocalAssistantInputBatch,
           )
-          || hostedMailboxImportHasForegroundConversationWork(conversationImport)
+          || hostedMailboxImportHasForegroundConversationWork(
+            conversationImport,
+          );
+        const shouldRunLocalPreCheckpointSystemWork =
+          input.systemMailboxAdmission === "pre_checkpoint_safe"
+          && !hasForegroundConversationWork
+          && await hasHostedPreCheckpointLocalExternalCompletion({
+            now: baseRunnerInput.now?.() ?? new Date().toISOString(),
+            vaultRoot: restored.vaultRoot,
+          });
+        const shouldRunConversationAssistant = shouldContinue() && (
+          input.runAssistantWithoutMailboxWork === true
+          || hasForegroundConversationWork
+          || shouldRunLocalPreCheckpointSystemWork
         );
         if (!shouldContinue()) {
           await finishMailboxImportWithoutAssistant(conversationImport);
@@ -3870,6 +3929,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         if (shouldRunConversationAssistant) {
           try {
             await runForegroundPassAfterMailboxImport({
+              ...(shouldRunLocalPreCheckpointSystemWork
+                ? { foregroundCausalOnly: true }
+                : {}),
               initialAssistantInputBatch:
                 invocationLocalAssistantInputBatch,
               initialMailboxImport: conversationImport,
@@ -3887,13 +3949,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           }
           return true;
         }
-        const preCheckpointSystemPrefetch =
-          input.systemMailboxAdmission === "pre_checkpoint_safe"
-          && runtimeStateDirtyBeforeMailboxImport
-            ? await inspectHostedPreCheckpointSystemMailboxPrefetch(
-                initialMailboxPrefetch,
-              )
-            : null;
         const shouldImportSystemMailbox = input.systemMailboxAdmission === "all"
           || preCheckpointSystemPrefetch?.containsOnlySafeSystemWakes === true;
         if (!shouldImportSystemMailbox) {
@@ -4145,6 +4200,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             continue;
           }
           checkpointWakeLatencySeed ??= queuedWakeLatencySeed;
+        }
+        if (preCheckpointExternalCompletionImported) {
+          preCheckpointExternalCompletionImported = false;
+          if (
+            await hasHostedPreCheckpointLocalExternalCompletion({
+              now: baseRunnerInput.now?.() ?? new Date().toISOString(),
+              vaultRoot: restored.vaultRoot,
+            })
+            && await runPreCheckpointConversationWake(null)
+          ) {
+            continue;
+          }
         }
         const hotProjectedAssistantWake = resolveHotProjectedAssistantWake();
         if (
