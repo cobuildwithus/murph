@@ -47,6 +47,9 @@ Updated: 2026-08-11
 7. [x] Make fallback cardinality and catalog image provenance exact after the
    preliminary specialist review.
 8. [ ] Complete the final ReviewGPT, CI, commit, and PR gates.
+9. [x] Keep routine meaning channel-neutral, move timing consistency to agent
+   guidance, and document channel-native presentation across Telegram and
+   iMessage without adding a shared renderer or delivery layer.
 
 ## Decisions
 
@@ -66,6 +69,10 @@ Updated: 2026-08-11
   position in the returned catalog array.
 - Offer the routine-card tool only on private Telegram. Linq/iMessage keeps the
   existing catalog response-media path for visual movement guidance.
+- Treat timing as model-authored presentation. Prompt the agent to compare the
+  stated duration with the visible routine instead of adding runtime arithmetic.
+- Review useful structured UI across both Telegram and iMessage. Reuse meaning,
+  not provider UI; each channel keeps its own cards, media, and delivery owner.
 
 ## Verification
 

@@ -1460,7 +1460,10 @@ describe('assistant skill assets', () => {
       '`murph.attach_exercise_routine_card`',
     )
     expect(compactCatalog).toContain(
-      '`totalSeconds` must equal their sum.',
+      'do not pad a short plan to sound more substantial.',
+    )
+    expect(compactCatalog).toContain(
+      'Use the strongest presentation supported by the current channel.',
     )
     expect(compactCatalog).toContain(
       'If any movement being taught is likely unfamiliar or uncommon, attach at least one useful returned catalog image and normally two in the same response.',

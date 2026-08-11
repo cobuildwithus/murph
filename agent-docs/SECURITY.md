@@ -628,7 +628,8 @@ Last verified: 2026-08-10
   carries tracking, identity, canonical references, credentials, tokens, or
   write authority. V1-V5 presentation envelopes may also reach the bounded
   queryless
-  `/imessage/card/v1/:payload.png` route for Linq's static fallback. That path is
+  `/imessage/card/v1/:payload.png` route for Linq's static fallback and the
+  Telegram daily-nutrition Rich Message visual. That path is
   immutable message content, not an authenticated card API: strict parsing runs
   before bundled asset reads, the renderer performs no database or remote read,
   writes no application log or analytics event, and returns private

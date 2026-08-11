@@ -1669,17 +1669,20 @@ The frozen V1 snapshot contains bounded localized labels, concrete cues, honest
 per-exercise and transition timing, and only catalog-backed public exercise
 image URLs with their alt text and provenance. Image provenance uses the
 returned catalog item ID plus the image's one-based position in the returned
-array, so it is stable and directly constructible from `exercise show`. The
-total duration must equal the sum of those parts. Telegram projects any response-card kind into one Bot
-API rich message. Routine cards use a table, collapsed exercise details, and a
+array, so it is stable and directly constructible from `exercise show`. Timing
+remains model-authored presentation. Shared agent guidance requires the stated
+total to match the visible work without adding a second runtime truth owner.
+Telegram projects any response-card kind into one Bot API rich message. Routine
+cards use a table, collapsed exercise details, and a
 slideshow when catalog images exist. A definitive pre-acceptance rich-message
 rejection falls back to the deterministic card text, which must fit one 4,096-
 character Telegram message before rich provider entry. Timeout, transport, and
 retryable failures never start a second send because Telegram acceptance is
 then ambiguous. Linq keeps its existing native nutrition and compact-table
-cards; exercise routines use the deterministic text fallback there. The card
-still cannot coexist with response media, and no new queue, persisted state
-owner, callback action, or mutable message state exists.
+cards. New Linq/iMessage exercise turns use the existing response-media path;
+the deterministic routine text remains only compatibility behavior for retained
+card state. The card still cannot coexist with response media, and no new queue,
+persisted state owner, callback action, or mutable message state exists.
 
 Assistant image media has an explicit public/private type boundary. `image`
 contains an intentionally public fetchable URL, while `vault_image` contains a
@@ -2822,7 +2825,9 @@ provider static layout whose `image_url` carries the exact same authority-free
 envelope in the bounded queryless `/imessage/card/v1/:payload.png` path. The
 stateless Web renderer accepts only strict V1-V4 presentation envelopes, reads
 no database or remote service, logs no card values, and returns private
-no-store/no-index headers. This is a narrow presentation exception to the
+no-store/no-index headers. Linq uses that image as its static card fallback;
+Telegram daily-nutrition Rich Messages reuse the same image inside their native
+table-and-details presentation. This is a narrow presentation exception to the
 fixed-URL rule: either URL may contain the same bounded health-related values
 visible in the immutable private-direct message, but never a member identity,
 canonical record reference, credential, tracking reference, or other authority.

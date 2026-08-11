@@ -164,19 +164,6 @@ export const exerciseRoutineResponseCardV1Schema: z.ZodType<
   })
   .strict()
   .superRefine((card, context) => {
-    const exerciseSeconds = card.exercises.reduce(
-      (total, exercise) => total + exercise.estimatedSeconds,
-      0,
-    );
-    if (exerciseSeconds + card.transitionSeconds !== card.totalSeconds) {
-      context.addIssue({
-        code: "custom",
-        message:
-          "totalSeconds must equal exercise time plus transitionSeconds.",
-        path: ["totalSeconds"],
-      });
-    }
-
     const imageCount = card.exercises.reduce(
       (total, exercise) => total + exercise.images.length,
       0,

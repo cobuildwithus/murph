@@ -320,7 +320,7 @@ describe('assistant response cards', () => {
     }
   })
 
-  it('requires honest routine timing and renders one accessible rich message', () => {
+  it('keeps routine timing model-authored and renders one accessible rich message', () => {
     expect(exerciseRoutineResponseCardJsonSchema).toMatchObject({
       additionalProperties: false,
       properties: {
@@ -331,10 +331,10 @@ describe('assistant response cards', () => {
       },
     })
     expect(assistantResponseCardSchema.parse(ROUTINE_CARD)).toEqual(ROUTINE_CARD)
-    expect(() => assistantResponseCardSchema.parse({
+    expect(assistantResponseCardSchema.parse({
       ...ROUTINE_CARD,
       totalSeconds: 480,
-    })).toThrow('totalSeconds must equal exercise time plus transitionSeconds')
+    })).toMatchObject({ totalSeconds: 480 })
 
     expect(renderAssistantResponseCardText(ROUTINE_CARD)).toContain(
       'Doorway stretch <easy> — 8 repetitions (45s)',
@@ -354,6 +354,9 @@ describe('assistant response cards', () => {
 
   it('preserves nutrition goals in the Telegram rich projection', () => {
     const richMessage = buildTelegramRichMessage(COMPLETE_CARD_V2)
+    expect(richMessage.html).toContain(
+      `<figure><img src="${buildLinqIMessageAppCardImageUrl(COMPLETE_CARD_V2)}"/></figure>`,
+    )
     expect(richMessage.html).toContain('<details><summary>Goals</summary>')
     expect(richMessage.html).toContain('calories goal 2,100 cal, under target')
     expect(richMessage.html).toContain('<table bordered striped>')
