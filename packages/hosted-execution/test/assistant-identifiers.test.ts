@@ -4,6 +4,7 @@ import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 
 import {
   createHostedAssistantConversationIdentifierBlind,
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
   createHostedExecutionReviewedAssistantAskCompletionDeliveryKey,
   createHostedMailboxAssistantInputId,
   createHostedMailboxAssistantInputIdFromBlindedIdentity,
@@ -22,6 +23,12 @@ describe("hosted Assistant Ask delivery identifiers", () => {
     )).toBe(
       "reviewed-assistant-ask-completion:aef61e90376a8d9f43a6bc329711d11b20c66c8ea5a5b4af",
     );
+  });
+
+  it("preserves the private Assistant Ask completion delivery key byte-for-byte", () => {
+    expect(createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+      " aask_done_exact_vector ",
+    )).toBe("assistant-ask-private:aask_done_exact_vector");
   });
 });
 
