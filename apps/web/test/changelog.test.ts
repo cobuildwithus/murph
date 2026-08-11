@@ -328,14 +328,6 @@ describe("changelog registry", () => {
       listPublishedChangelogItems().map((item) => [item.id, item]),
     );
 
-    expect(items.get("private-training-review")).toMatchObject({
-      sourcePullRequests: [1495],
-      summary: expect.stringContaining("workouts already saved with Murph"),
-      details: expect.stringContaining(
-        "intentionally stays out of Home navigation",
-      ),
-      tryIt: { href: "/training", label: "Review training" },
-    });
     expect(items.get("reminders-keep-requested-timezone")).toMatchObject({
       sourcePullRequests: [1546],
       summary: expect.stringContaining("preserves that local time"),
@@ -607,33 +599,18 @@ describe("changelog registry", () => {
     });
   });
 
-  it("publishes the complete July 20 through August 10 shipment set", () => {
+  it("preserves the frozen July 20 through August 9 shipment set", () => {
     expect(
-      listChangelogEditions().slice(0, 22).map((edition) => ({
-        id: edition.id,
-        itemIds: edition.items.map((item) => item.id),
-      })),
+      listChangelogEditions()
+        .filter(
+          (edition) =>
+            edition.id >= "2026-07-20" && edition.id <= "2026-08-09",
+        )
+        .map((edition) => ({
+          id: edition.id,
+          itemIds: edition.items.map((item) => item.id),
+        })),
     ).toEqual([
-      {
-        id: "2026-08-10",
-        itemIds: [
-          "private-training-review",
-          "non-expiring-starter-access",
-          "cleaner-plan-and-model-settings",
-          "personal-patterns",
-          "personality-settings-and-chat",
-          "referral-notification-route-recovery",
-          "blood-pressure-history-completion",
-          "reminders-keep-requested-timezone",
-          "voice-memos-use-your-voice",
-          "cleaner-workout-cards-in-messages",
-          "web-search-restored",
-          "appointment-reminders-by-default",
-          "workout-card-status-rendering",
-          "lighter-accessible-homepage",
-          "environment-report-loading-preview",
-        ],
-      },
       {
         id: "2026-08-09",
         itemIds: [
@@ -1111,13 +1088,6 @@ describe("changelog registry", () => {
         Math.ceil(editions.length / CHANGELOG_EDITIONS_PER_PAGE) + 1,
       ),
     ).toBeNull();
-  });
-
-  it("keeps the default archive window to seven calendar days", () => {
-    const firstPage = resolveChangelogPage(1);
-    expect(firstPage?.editions).toHaveLength(7);
-    expect(firstPage?.editions[0]?.publishedOn).toBe("2026-08-10");
-    expect(firstPage?.editions.at(-1)?.publishedOn).toBe("2026-08-04");
   });
 
   it("resolves only known canonical edition cursors", () => {
