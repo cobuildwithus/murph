@@ -2,9 +2,11 @@ import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { readRawBodyBuffer } from "@/src/lib/http";
 import {
   retellWebhookPayloadSchema,
-  type RetellCallPayload,
 } from "@/src/lib/phone-calls/retell-payloads";
-import { prepareRetellCallResult } from "@/src/lib/phone-calls/retell-result-lifecycle";
+import {
+  prepareRetellCallResult,
+  type PreparedRetellCallResult,
+} from "@/src/lib/phone-calls/retell-result-lifecycle";
 import {
   handleRetellCallAnalyzed,
   handleRetellCallEnded,
@@ -62,8 +64,15 @@ export const POST = withJsonError(async (request: Request) => {
   return new Response(null, { status: 204 });
 });
 
-async function handleRetellResult(call: RetellCallPayload): Promise<void> {
-  const result = await handleRetellCallAnalyzed({ call });
+async function handleRetellResult(
+  prepared: PreparedRetellCallResult,
+): Promise<void> {
+  const result = await handleRetellCallAnalyzed({
+    call: prepared.call,
+    ...(prepared.requiresTransferFollowUp
+      ? { requiresTransferFollowUp: true }
+      : {}),
+  });
   if (!result.notificationMailboxItemId) {
     return;
   }

@@ -40,7 +40,10 @@ describe("Retell phone-call result lifecycle", () => {
     expect(prepareRetellCallResult({
       call,
       event: "call_analyzed",
-    })).toBe(call);
+    })).toEqual({
+      call,
+      requiresTransferFollowUp: false,
+    });
   });
 
   it("keeps a cancelled transfer on ordinary call analysis", () => {
@@ -58,7 +61,10 @@ describe("Retell phone-call result lifecycle", () => {
     expect(prepareRetellCallResult({
       call,
       event: "call_analyzed",
-    })).toBe(call);
+    })).toEqual({
+      call,
+      requiresTransferFollowUp: false,
+    });
   });
 
   it("defers successful-transfer analysis until the human leg ends", () => {
@@ -86,12 +92,13 @@ describe("Retell phone-call result lifecycle", () => {
       event: "transfer_ended",
     });
 
-    expect(result.call_analysis?.custom_analysis_data).toMatchObject({
-      follow_up: expect.stringContaining("Ask the user what happened after the handoff"),
+    expect(result.requiresTransferFollowUp).toBe(true);
+    expect(result.call.call_analysis?.custom_analysis_data).toMatchObject({
+      follow_up: null,
       outcome: "needs_user",
       result: expect.stringContaining("post-handoff outcome is unknown"),
     });
-    expect(result.call_analysis?.custom_analysis_data?.result).not.toContain(
+    expect(result.call.call_analysis?.custom_analysis_data?.result).not.toContain(
       "Before the handoff",
     );
   });
@@ -110,7 +117,7 @@ describe("Retell phone-call result lifecycle", () => {
       event: "transfer_ended",
     });
 
-    expect(result.call_analysis?.custom_analysis_data?.result).not.toContain(
+    expect(result.call.call_analysis?.custom_analysis_data?.result).not.toContain(
       "Before the handoff",
     );
   });
@@ -132,23 +139,23 @@ describe("Retell phone-call result lifecycle", () => {
       event: "transfer_ended",
     });
 
-    expect(result.call_analysis?.custom_analysis_data).toMatchObject({
-      follow_up: expect.stringContaining("Ask the user what happened after the handoff"),
+    expect(result.call.call_analysis?.custom_analysis_data).toMatchObject({
+      follow_up: null,
       outcome: "needs_user",
       result: expect.stringContaining(
         "Murph successfully connected the user to the call recipient",
       ),
     });
-    expect(result.call_analysis?.custom_analysis_data?.result).toContain(
+    expect(result.call.call_analysis?.custom_analysis_data?.result).toContain(
       "Before the handoff, the automated call reported: A Monday morning option was available",
     );
-    expect(result.call_analysis?.custom_analysis_data?.follow_up).not.toContain(
-      "Approval was needed before proceeding",
-    );
+    expect(result.requiresTransferFollowUp).toBe(true);
 
-    const mapped = mapRetellCallAnalysis(result);
+    const mapped = mapRetellCallAnalysis(result.call);
     const instructions = buildPhoneCallResultNotificationInstructions({
       brief: BRIEF,
+      requireSend: true,
+      requiresTransferFollowUp: result.requiresTransferFollowUp,
       result: mapped,
     });
     expect(mapped).toMatchObject({
@@ -159,6 +166,10 @@ describe("Retell phone-call result lifecycle", () => {
       "Before the handoff, the automated call reported: A Monday morning option was available",
     );
     expect(instructions).toContain("Ask the user what happened after the handoff");
+    expect(instructions.indexOf("Ask the user what happened after the handoff")).toBeLessThan(
+      instructions.indexOf("Untrusted call result data JSON:"),
+    );
+    expect(instructions).not.toContain("After the user confirms");
     expect(instructions).toContain(
       "Murph successfully connected the user to the call recipient",
     );
@@ -182,7 +193,7 @@ describe("Retell phone-call result lifecycle", () => {
       },
       event: "transfer_ended",
     });
-    const mapped = mapRetellCallAnalysis(result);
+    const mapped = mapRetellCallAnalysis(result.call);
 
     expect(mapped.summary.length).toBeLessThanOrEqual(2_000);
     expect(mapped.summary.endsWith(" [truncated]")).toBe(true);
@@ -204,11 +215,12 @@ describe("Retell phone-call result lifecycle", () => {
       event: "call_analyzed",
     });
 
-    expect(result?.call_analysis?.custom_analysis_data).toMatchObject({
+    expect(result?.requiresTransferFollowUp).toBe(true);
+    expect(result?.call.call_analysis?.custom_analysis_data).toMatchObject({
       outcome: "needs_user",
       result: expect.stringContaining("post-handoff outcome is unknown"),
     });
-    expect(result?.call_analysis?.custom_analysis_data?.result).toContain(
+    expect(result?.call.call_analysis?.custom_analysis_data?.result).toContain(
       "Before the handoff, the automated call reported:",
     );
   });

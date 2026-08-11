@@ -242,7 +242,7 @@ describe("Retell ask_murph route", () => {
       call: expect.objectContaining({
         call_analysis: expect.objectContaining({
           custom_analysis_data: expect.objectContaining({
-            follow_up: expect.stringContaining("Ask the user what happened after the handoff"),
+            follow_up: null,
             outcome: "needs_user",
             result: expect.stringContaining("post-handoff outcome is unknown"),
           }),
@@ -250,6 +250,7 @@ describe("Retell ask_murph route", () => {
         call_id: "retell_call_123",
         transfer_end_timestamp: 1_782_408_600_000,
       }),
+      requiresTransferFollowUp: true,
     });
     expect(mocks.handleRetellCallEnded).toHaveBeenCalledTimes(1);
     expect(mocks.handleRetellCallAnalyzed).toHaveBeenCalledTimes(2);
@@ -311,7 +312,7 @@ describe("Retell ask_murph route", () => {
       call: expect.objectContaining({
         call_analysis: expect.objectContaining({
           custom_analysis_data: expect.objectContaining({
-            follow_up: expect.stringContaining("Ask the user what happened after the handoff"),
+            follow_up: null,
             outcome: "needs_user",
             result: expect.stringContaining(
               "Murph successfully connected the user to the call recipient",
@@ -319,6 +320,7 @@ describe("Retell ask_murph route", () => {
           }),
         }),
       }),
+      requiresTransferFollowUp: true,
     });
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
   });

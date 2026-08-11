@@ -8,10 +8,13 @@ const TRANSFERRED_CALL_SUMMARY =
   "Murph successfully connected the user to the call recipient and then left the conversation. Murph cannot observe what the user and recipient agreed after the handoff, so the final post-handoff outcome is unknown.";
 const TRANSFERRED_CALL_CONTEXT_PREFIX =
   " Before the handoff, the automated call reported: ";
-const TRANSFERRED_CALL_FOLLOW_UP =
-  "Ask the user what happened after the handoff and whether the call goal was completed. Do not claim it was or was not completed. After the user confirms the details, offer a relevant next step such as a reminder when useful.";
 
 type RetellResultWebhookEvent = "call_analyzed" | "transfer_ended";
+
+export interface PreparedRetellCallResult {
+  call: RetellCallPayload;
+  requiresTransferFollowUp: boolean;
+}
 
 /**
  * Returns the provider payload that may safely finalize Murph's call result.
@@ -21,18 +24,21 @@ type RetellResultWebhookEvent = "call_analyzed" | "transfer_ended";
 export function prepareRetellCallResult(input: {
   call: RetellCallPayload;
   event: "transfer_ended";
-}): RetellCallPayload;
+}): PreparedRetellCallResult;
 export function prepareRetellCallResult(input: {
   call: RetellCallPayload;
   event: "call_analyzed";
-}): RetellCallPayload | null;
+}): PreparedRetellCallResult | null;
 export function prepareRetellCallResult(input: {
   call: RetellCallPayload;
   event: RetellResultWebhookEvent;
-}): RetellCallPayload | null {
+}): PreparedRetellCallResult | null {
   if (input.event === "call_analyzed") {
     if (!isRetellTransferredCall(input.call)) {
-      return input.call;
+      return {
+        call: input.call,
+        requiresTransferFollowUp: false,
+      };
     }
     if (!readRetellTransferEndAt(input.call)) {
       return null;
@@ -40,16 +46,19 @@ export function prepareRetellCallResult(input: {
   }
 
   return {
-    ...input.call,
-    call_analysis: {
-      ...(input.call.call_analysis ?? {}),
-      custom_analysis_data: {
-        ...(input.call.call_analysis?.custom_analysis_data ?? {}),
-        follow_up: TRANSFERRED_CALL_FOLLOW_UP,
-        outcome: "needs_user",
-        result: buildTransferredCallSummary(input.call),
+    call: {
+      ...input.call,
+      call_analysis: {
+        ...(input.call.call_analysis ?? {}),
+        custom_analysis_data: {
+          ...(input.call.call_analysis?.custom_analysis_data ?? {}),
+          follow_up: null,
+          outcome: "needs_user",
+          result: buildTransferredCallSummary(input.call),
+        },
       },
     },
+    requiresTransferFollowUp: true,
   };
 }
 
