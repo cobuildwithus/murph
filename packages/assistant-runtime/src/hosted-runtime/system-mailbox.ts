@@ -551,7 +551,10 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       recorded: recordResult.recorded,
     };
   } catch (error) {
-    if (input.signal?.aborted) {
+    if (
+      input.signal?.aborted
+      && isHostedDeviceSyncDirtyPostCheckpointRecord(input.item.postCheckpointRecord)
+    ) {
       throw input.signal.reason instanceof Error ? input.signal.reason : error;
     }
     const normalized = normalizeHostedSystemMailboxError(error);
@@ -573,6 +576,13 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       recorded: 0,
     };
   }
+}
+
+function isHostedDeviceSyncDirtyPostCheckpointRecord(
+  record: HostedSystemMailboxPostCheckpointRecord,
+): boolean {
+  return record.kind === "device-sync.dirty-processed"
+    || record.kind === "device-sync.dirty-processed-batch";
 }
 
 export async function readHostedSystemMailboxCheckpointRollbackState(input: {
