@@ -5047,14 +5047,30 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             instructions: "Replace the group newsletter with free-form instructions.",
             schedule: { expression: "0 13 * * 1", kind: "cron" },
             title: "Family weekly health newsletter",
-          })).resolves.toMatchObject({ action: "save", created: false });
+          })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
           await expect(executionContext.hosted?.automationTool?.request({
+            action: "save",
+            instructions: "Replace the group newsletter by slug.",
+            schedule: { expression: "0 13 * * 1", kind: "cron" },
+            slug: "group-health-newsletter",
+            title: "Family weekly health newsletter",
+          })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+          const rescheduledNewsletter = await executionContext.hosted?.automationTool?.request({
             action: "patch",
+            expectedUpdatedAt: newsletter.updatedAt,
             lookup: "group-health-newsletter",
             schedule: { expression: "0 14 * * 1", kind: "cron" },
-          })).resolves.toMatchObject({ action: "patch", routeBinding: "preserved" });
+          });
+          expect(rescheduledNewsletter).toMatchObject({
+            action: "patch",
+            routeBinding: "preserved",
+          });
+          if (!rescheduledNewsletter || rescheduledNewsletter.action !== "patch") {
+            throw new Error("Expected rescheduled group newsletter.");
+          }
           await expect(executionContext.hosted?.automationTool?.request({
             action: "patch",
+            expectedUpdatedAt: rescheduledNewsletter.updatedAt,
             lookup: "group-health-newsletter",
             status: "paused",
           })).resolves.toEqual(expect.objectContaining({
@@ -5151,13 +5167,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             action: "read_shared",
             projectionScopes: [{ projectionKind: "steps-days.v0" }],
           });
-          return await executionContext.hosted?.automationTool?.request({
-            action: "save",
-            continuityPolicy: "fresh",
-            instructions: "Read and follow the group-newsletter skill before every execution.",
-            schedule: { expression: "0 13 * * 1", kind: "cron" },
+          const current = await showAutomation({
             slug: "group-health-newsletter",
-            title: "Family weekly health newsletter",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected current group newsletter.");
+          }
+          return await executionContext.hosted?.automationTool?.request({
+            action: "patch",
+            expectedUpdatedAt: current.updatedAt,
+            lookup: "group-health-newsletter",
+            retargetToCurrentConversation: true,
+            title: "Telegram group health newsletter",
           });
         },
         turnEnvironment: null,
@@ -5168,11 +5190,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         projectionScopes: [{ projectionKind: "steps-days.v0" }],
       });
       expect(telegramResult).toEqual(expect.objectContaining({
-        action: "save",
+        action: "patch",
         created: false,
         lookupId: "group-health-newsletter",
         routeBinding: "current_conversation",
-        status: "active",
+        status: "paused",
       }));
       expect(groupRequestMock).toHaveBeenCalledWith({
         action: "read_shared",
@@ -5222,7 +5244,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           threadIsDirect: false,
         }),
         instructions: expect.stringContaining("group-newsletter skill"),
-        status: "active",
+        status: "paused",
       }));
       await expect(showAutomation({
         slug: "stale-group-check-in",
@@ -5302,7 +5324,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         turnEnvironment: null,
       });
 
-      await expect(requestAutomation({
+      const nextWorkout = await requestAutomation({
         action: "save",
         instructions: "Ask how the next workout felt.",
         schedule: {
@@ -5313,7 +5335,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
         slug: "next-workout-check-in",
         title: "Next workout check-in",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (nextWorkout.action !== "save") {
+        throw new Error("Expected next-workout save result.");
+      }
+      expect(nextWorkout).toEqual(expect.objectContaining({
         effectiveTimeZone: null,
         nextOccurrenceAt: null,
         schedule: {
@@ -5327,6 +5353,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: nextWorkout.updatedAt,
         instructions: "Ask briefly how the next workout felt.",
         lookup: "next-workout-check-in",
       })).resolves.toEqual(expect.objectContaining({
@@ -5336,7 +5363,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const dailyEveningReminder = await requestAutomation({
         action: "save",
         instructions: "Send the daily evening reminder.",
         schedule: {
@@ -5347,13 +5374,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "daily-evening-reminder",
         status: "paused",
         title: "Daily evening reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyEveningReminder.action !== "save") {
+        throw new Error("Expected daily reminder save result.");
+      }
+      expect(dailyEveningReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: null,
         status: "paused",
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const oneTimeEveningReminder = await requestAutomation({
         action: "save",
         instructions: "Send the one-time evening reminder.",
         schedule: {
@@ -5363,13 +5394,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "one-time-evening-reminder",
         status: "paused",
         title: "One-time evening reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (oneTimeEveningReminder.action !== "save") {
+        throw new Error("Expected one-time reminder save result.");
+      }
+      expect(oneTimeEveningReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: null,
         status: "paused",
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const finiteOneTimeReminder = await requestAutomation({
         action: "save",
         activeUntil: "2026-08-01T12:45:00.000Z",
         instructions: "Send the finite one-time reminder.",
@@ -5380,13 +5415,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         slug: "finite-one-time-reminder",
         status: "paused",
         title: "Finite one-time reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (finiteOneTimeReminder.action !== "save") {
+        throw new Error("Expected finite reminder save result.");
+      }
+      expect(finiteOneTimeReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: null,
         status: "paused",
         timingVerified: true,
       }));
 
-      await expect(requestAutomation({
+      const recurringIntervalReminder = await requestAutomation({
         action: "save",
         instructions: "Send the recurring interval reminder.",
         schedule: {
@@ -5395,7 +5434,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
         slug: "recurring-interval-reminder",
         title: "Recurring interval reminder",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (recurringIntervalReminder.action !== "save") {
+        throw new Error("Expected recurring reminder save result.");
+      }
+      expect(recurringIntervalReminder).toEqual(expect.objectContaining({
         nextOccurrenceAt: "2026-08-02T12:00:00.000Z",
         status: "active",
         timingVerified: true,
@@ -5404,6 +5447,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: finiteOneTimeReminder.updatedAt,
         lookup: "finite-one-time-reminder",
         status: "active",
       })).resolves.toEqual(expect.objectContaining({
@@ -5415,6 +5459,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       vi.setSystemTime(new Date("2026-08-10T00:27:19.000Z"));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: recurringIntervalReminder.updatedAt,
         instructions: "Send the revised recurring interval reminder.",
         lookup: "recurring-interval-reminder",
       })).resolves.toEqual(expect.objectContaining({
@@ -5428,6 +5473,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }));
       await expect(requestAutomation({
         action: "patch",
+        expectedUpdatedAt: oneTimeEveningReminder.updatedAt,
         lookup: "one-time-evening-reminder",
         status: "active",
       })).resolves.toEqual(expect.objectContaining({
@@ -5439,11 +5485,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         status: "active",
         timingVerified: true,
       }));
-      await expect(requestAutomation({
+      const dailyReactivated = await requestAutomation({
         action: "patch",
+        expectedUpdatedAt: dailyEveningReminder.updatedAt,
         lookup: "daily-evening-reminder",
         status: "active",
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyReactivated.action !== "patch") {
+        throw new Error("Expected daily reminder patch result.");
+      }
+      expect(dailyReactivated).toEqual(expect.objectContaining({
         effectiveTimeZone: "America/Chicago",
         nextOccurrenceAt: "2026-08-10T02:00:00.000Z",
         timingVerified: true,
@@ -5456,15 +5507,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       });
 
       vi.setSystemTime(new Date("2026-08-10T00:28:19.000Z"));
-      await expect(requestAutomation({
+      const dailyRevised = await requestAutomation({
         action: "patch",
+        expectedUpdatedAt: dailyReactivated.updatedAt,
         lookup: "daily-evening-reminder",
         schedule: {
           kind: "dailyLocal",
           localTime: "22:00",
           timeZone: "America/Chicago",
         },
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyRevised.action !== "patch") {
+        throw new Error("Expected daily revised patch result.");
+      }
+      expect(dailyRevised).toEqual(expect.objectContaining({
         nextOccurrenceAt: "2026-08-10T03:00:00.000Z",
         schedule: {
           kind: "dailyLocal",
@@ -5484,14 +5540,19 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         timeZone: "America/New_York",
         vaultTimeZoneVerified: false,
       });
-      await expect(requestAutomation({
+      const dailyPreservedTimeZone = await requestAutomation({
         action: "patch",
+        expectedUpdatedAt: dailyRevised.updatedAt,
         lookup: "daily-evening-reminder",
         schedule: {
           kind: "dailyLocal",
           localTime: "23:00",
         },
-      })).resolves.toEqual(expect.objectContaining({
+      });
+      if (dailyPreservedTimeZone.action !== "patch") {
+        throw new Error("Expected daily preserved-timezone patch result.");
+      }
+      expect(dailyPreservedTimeZone).toEqual(expect.objectContaining({
         action: "patch",
         effectiveTimeZone: "America/Chicago",
         nextOccurrenceAt: "2026-08-10T04:00:00.000Z",
@@ -5506,6 +5567,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await expect(requestAutomation({
         action: "patch",
         activeUntil: "2026-08-10T02:30:00.000Z",
+        expectedUpdatedAt: dailyPreservedTimeZone.updatedAt,
         lookup: "daily-evening-reminder",
       })).resolves.toEqual(expect.objectContaining({
         action: "patch",
@@ -5746,8 +5808,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
             if (!automationTool) {
               throw new Error("Expected scoped hosted automation tool.");
             }
+            const current = await showAutomation({
+              slug: "existing-reminder",
+              vaultRoot,
+            });
+            if (!current) {
+              throw new Error("Expected existing reminder.");
+            }
             return await automationTool.request({
               action: "patch",
+              expectedUpdatedAt: current.updatedAt,
               lookup: "existing-reminder",
               retargetToCurrentConversation,
               title: retargetToCurrentConversation
@@ -5801,8 +5871,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
+          const current = await showAutomation({
+            slug: "existing-reminder",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected existing reminder.");
+          }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: current.updatedAt,
             lookup: "existing-reminder",
             schedule: { at: "2026-08-01T13:00:00.000Z", kind: "at" },
           });
@@ -5829,8 +5907,16 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           if (!automationTool) {
             throw new Error("Expected scoped hosted automation tool.");
           }
+          const current = await showAutomation({
+            slug: "existing-reminder",
+            vaultRoot,
+          });
+          if (!current) {
+            throw new Error("Expected existing reminder.");
+          }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: current.updatedAt,
             instructions: `${availabilityBase.replace(
               "Availability conflict policy: skip-when-busy",
               "Availability conflict policy: fixed",
@@ -6038,6 +6124,9 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         routeBinding: "current_conversation",
         status: "active",
       }));
+      if (saved.action !== "save") {
+        throw new Error("Expected first-read save result.");
+      }
       await expect(showAutomation({
         slug: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
         vaultRoot,
@@ -6059,6 +6148,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           }
           return await automationTool.request({
             action: "patch",
+            expectedUpdatedAt: saved.updatedAt,
             lookup: MURPH_ONBOARDING_FIRST_PERSONAL_READ_AUTOMATION_SLUG,
             status: "archived",
           });

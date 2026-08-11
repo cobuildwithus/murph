@@ -670,6 +670,7 @@ text(JSON.stringify(result));
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-06T21:00:00.000Z',
             }
           },
         },
@@ -1577,6 +1578,7 @@ if (!tool) {
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
         },
@@ -1662,6 +1664,7 @@ if (!tool) {
           input: `
 const result = await tools.murph__automation({
   action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
   lookup: "evening-reminder",
   schedule: { kind: "dailyLocal", localTime: "22:00" },
 });
@@ -1699,6 +1702,7 @@ text(JSON.stringify(result));
               },
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
         },
@@ -1715,6 +1719,7 @@ text(JSON.stringify(result));
 
     expect(automationRequests).toEqual([{
       action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'evening-reminder',
       schedule: { kind: 'dailyLocal', localTime: '22:00' },
     }])
@@ -1725,6 +1730,96 @@ text(JSON.stringify(result));
     expect(toolOutputs).toContain('2026-08-11T03:00:00.000Z')
     expect(result.finalMessage).toBe(
       'Updated your evening reminder to 10 PM Central.',
+    )
+  })
+
+  it('resolves a group one-shot local time before saving and exposes verified readback', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: AssistantHostedAutomationToolRequest[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "save",
+  instructions: "Send the group a short reminder.",
+  schedule: {
+    kind: "at",
+    localAt: {
+      date: "2031-02-14",
+      time: "23:20",
+      timeZone: "Pacific/Honolulu",
+    },
+  },
+  title: "Group one-shot reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'The group reminder is saved for the verified local time.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('group', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            if (request.action !== 'save') {
+              throw new Error('Expected an automation save request.')
+            }
+            automationRequests.push(request)
+            return {
+              action: 'save',
+              automationId: 'automation-group-one-shot',
+              created: true,
+              effectiveTimeZone: 'Pacific/Honolulu',
+              lookupId: 'group-one-shot-reminder',
+              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              routeBinding: 'current_conversation',
+              schedule: {
+                at: '2031-02-15T09:20:00.000Z',
+                kind: 'at',
+              },
+              status: 'active',
+              timingVerified: true,
+              updatedAt: '2031-02-14T12:00:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Save a one-time reminder for this authenticated group.',
+    })
+
+    expect(automationRequests).toEqual([{
+      action: 'save',
+      instructions: 'Send the group a short reminder.',
+      schedule: {
+        at: '2031-02-15T09:20:00.000Z',
+        kind: 'at',
+      },
+      title: 'Group one-shot reminder',
+    }])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"nextOccurrenceAt":"2031-02-15T09:20:00.000Z"')
+    expect(result.finalMessage).toBe(
+      'The group reminder is saved for the verified local time.',
     )
   })
 
@@ -1739,6 +1834,7 @@ text(JSON.stringify(result));
           input: `
 const result = await tools.murph__automation({
   action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
   lookup: "one-time-evening-reminder",
   status: "active",
 });
@@ -1777,6 +1873,7 @@ text(JSON.stringify(result));
               },
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
         },
@@ -1793,6 +1890,7 @@ text(JSON.stringify(result));
 
     expect(automationRequests).toEqual([{
       action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'one-time-evening-reminder',
       status: 'active',
     }])
@@ -1817,6 +1915,7 @@ text(JSON.stringify(result));
           input: `
 const result = await tools.murph__automation({
   action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
   instructions: "Send the revised daily interval reminder.",
   lookup: "daily-interval-reminder",
 });
@@ -1851,6 +1950,7 @@ text(JSON.stringify(result));
               schedule: { everyMs: 86_400_000, kind: 'every' },
               status: 'active',
               timingVerified: false,
+              updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
         },
@@ -1937,6 +2037,7 @@ if (!tool) {
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
         },
@@ -4647,6 +4748,7 @@ text(result.output);
               schedule: request.schedule,
               status: 'active',
               timingVerified: true,
+              updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
         },

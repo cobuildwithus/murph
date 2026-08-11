@@ -5147,6 +5147,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-07-28T03:00:00.000Z',
                 }
               },
             },
@@ -5248,6 +5249,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: false,
+                  updatedAt: '2026-08-10T00:00:00.000Z',
                 }
               },
             },
@@ -5357,6 +5359,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
             },
@@ -5454,6 +5457,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   },
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
             },
@@ -5539,6 +5543,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: { everyMs: 86_400_000, kind: 'every' },
                   status: 'active',
                   timingVerified: false,
+                  updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
             },
@@ -5623,6 +5628,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-08-08T12:00:00.000Z',
                 }
               },
             },
@@ -5723,6 +5729,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   schedule: request.schedule,
                   status: 'active',
                   timingVerified: true,
+                  updatedAt: '2026-07-29T12:00:00.000Z',
                 } as const
               },
             },

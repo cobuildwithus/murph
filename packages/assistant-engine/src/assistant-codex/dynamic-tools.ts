@@ -1839,8 +1839,27 @@ export async function executeMurphDynamicToolRequest(input: {
   }
 
   switch (input.request.kind) {
-    case 'invalid-automation-arguments':
-      return toolTextResult(false, 'invalid automation arguments')
+    case 'invalid-automation-arguments': {
+      switch (input.request.safeFailureCode) {
+        case 'local_at_gap':
+          return toolTextResult(
+            false,
+            'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
+          )
+        case 'local_at_fold':
+          return toolTextResult(
+            false,
+            'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
+          )
+        case 'local_at_invalid_timezone':
+          return toolTextResult(
+            false,
+            'the reminder timezone is invalid; ask for or infer a valid IANA timezone before retrying',
+          )
+        default:
+          return toolTextResult(false, 'invalid automation arguments')
+      }
+    }
     case 'invalid-device-arguments':
       return toolTextResult(false, 'invalid device arguments')
     case 'invalid-labs-arguments':

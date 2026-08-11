@@ -3183,6 +3183,24 @@ describe('assistant conversation scope', () => {
       'Use `murph.automation` with `action: save` to create an ordinary automation and `action: patch` to change one.',
     )
     expect(prompt).toContain(
+      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.date`, `schedule.localAt.time`, and `schedule.localAt.timeZone`',
+    )
+    expect(prompt).toContain(
+      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+    )
+    expect(prompt).toContain(
+      'Resolve words such as today, tonight, and tomorrow against the named timezone current calendar date, not the conversation or system date.',
+    )
+    expect(prompt).toContain(
+      'Before making any relative-date claim about an existing automation, inspect the stored automation and answer from its authoritative schedule and verified next occurrence without mutating it',
+    )
+    expect(prompt).toContain(
+      'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
+    )
+    expect(prompt).toContain(
+      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
+    )
+    expect(prompt).toContain(
       'when the user names a timezone, keep the requested clock time and pass its IANA name as `schedule.timeZone`',
     )
     expect(prompt).toContain(
@@ -3224,6 +3242,40 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('do not target another route')
     expect(prompt).not.toContain('vault-cli automation')
     expect(prompt).not.toContain('inspect saved local self-targets')
+  })
+
+  it('keeps trusted local one-shot timing available in authenticated group chat', () => {
+    const prompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      assistantHostedAutomationAvailable: true,
+      channel: 'linq',
+      conversationScope: 'group',
+      hostedRuntime: true,
+    }))
+
+    expect(prompt).toContain(
+      'Scheduled automation changes for this group room are available through `murph.automation`.',
+    )
+    expect(prompt).toContain(
+      'For every model-authored one-shot local wall-clock request, pass `schedule.kind: at` with `schedule.localAt.date`, `schedule.localAt.time`, and `schedule.localAt.timeZone`',
+    )
+    expect(prompt).toContain(
+      'Generic save is create-only; if an automation already exists, inspect it and use a versioned patch.',
+    )
+    expect(prompt).toContain(
+      'Resolve words such as today, tonight, and tomorrow against the named timezone current calendar date, not the conversation or system date.',
+    )
+    expect(prompt).toContain(
+      'Before making any relative-date claim about an existing automation, inspect the stored automation and answer from its authoritative schedule and verified next occurrence without mutating it',
+    )
+    expect(prompt).toContain(
+      'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
+    )
+    expect(prompt).toContain(
+      'A save always binds to the trusted current group room.',
+    )
+    expect(prompt).toContain(
+      'Never use saved personal/self targets in this group vault.',
+    )
   })
 
   it('does not advertise hosted automation when the turn lacks its typed tool', () => {

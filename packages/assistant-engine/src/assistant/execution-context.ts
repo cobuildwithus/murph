@@ -184,6 +184,7 @@ export type AssistantHostedAutomationToolRequest =
       activeUntil?: string | null
       assistantTargetOverride?: AutomationAssistantTargetOverride | null
       continuityPolicy?: AutomationContinuityPolicy
+      expectedUpdatedAt: string
       instructions?: string
       lookup: string
       retargetToCurrentConversation?: boolean
@@ -214,6 +215,7 @@ export type AssistantHostedAutomationToolResponse =
       schedule: AutomationSchedule
       status: AutomationStatus
       timingVerified: boolean
+      updatedAt: string
     }
   | {
       action: 'reconcile'

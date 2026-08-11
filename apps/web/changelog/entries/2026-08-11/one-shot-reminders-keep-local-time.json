@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-11",
+  "order": 400,
+  "item": {
+    "id": "one-shot-reminders-keep-local-time",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "One-time reminders keep local time",
+    "summary": "When you ask for a one-time reminder in a named timezone, Murph now resolves that local date and time before saving it.",
+    "details": "Murph confirms the stored schedule and next deliverable occurrence before reporting or changing it. Nonexistent or ambiguous clock times are clarified instead of guessed.",
+    "relevanceTags": ["reminders", "automations", "timezones", "reliability"],
+    "sourcePullRequests": [1653]
+  }
+}

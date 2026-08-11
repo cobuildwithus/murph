@@ -33,10 +33,22 @@ describe('hosted domain dynamic tools', () => {
       'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'pass schedule.kind=at with schedule.localAt.date, schedule.localAt.time, and schedule.localAt.timeZone',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'raw exact ISO schedule.at is not accepted on generic save or patch',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'Generic save is create-only',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'pass expectedUpdatedAt from that readback',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'On patch, a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
+      'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
     )
   })
 
@@ -47,6 +59,7 @@ describe('hosted domain dynamic tools', () => {
     ])
     for (const forbidden of [
       'argv',
+      'automationId',
       'channel',
       'command',
       'credential',
@@ -88,6 +101,138 @@ describe('hosted domain dynamic tools', () => {
     })
 
     expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the one-shot reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2031-02-14',
+          time: '23:20',
+          timeZone: 'Pacific/Honolulu',
+        },
+      },
+      title: 'One-shot reminder',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'save',
+        instructions: 'Send the one-shot reminder.',
+        schedule: {
+          at: '2031-02-15T09:20:00.000Z',
+          kind: 'at',
+        },
+        title: 'One-shot reminder',
+      },
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send an untrusted exact reminder.',
+      schedule: {
+        at: '2031-02-15T09:20:00.000Z',
+        kind: 'at',
+      },
+      title: 'Untrusted exact reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2031-02-14T12:00:00.000Z',
+      lookup: 'synthetic-reminder',
+      schedule: {
+        at: '2031-02-15T09:20:00.000Z',
+        kind: 'at',
+      },
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      automationId: 'model-selected-id',
+      instructions: 'Replace an existing reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '09:00' },
+      title: 'Replacement reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the nonexistent one-shot reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'DST gap reminder',
+    })).toMatchObject({
+      kind: 'invalid-automation-arguments',
+      safeFailureCode: 'local_at_gap',
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the ambiguous one-shot reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-11-01',
+          time: '01:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'DST fold reminder',
+    })).toMatchObject({
+      kind: 'invalid-automation-arguments',
+      safeFailureCode: 'local_at_fold',
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the timezone-safe one-shot reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2031-02-14',
+          time: '08:00',
+          timeZone: 'Not/A_Timezone',
+        },
+      },
+      title: 'Invalid timezone reminder',
+    })).toMatchObject({
+      kind: 'invalid-automation-arguments',
+      safeFailureCode: 'local_at_invalid_timezone',
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the earlier one-shot reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-11-01',
+          fold: 'earlier',
+          time: '01:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Earlier DST fold reminder',
+    })).toMatchObject({
+      kind: 'automation',
+      request: { schedule: { at: '2026-11-01T05:30:00.000Z', kind: 'at' } },
+    })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send the later one-shot reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-11-01',
+          fold: 'later',
+          time: '01:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Later DST fold reminder',
+    })).toMatchObject({
+      kind: 'automation',
+      request: { schedule: { at: '2026-11-01T06:30:00.000Z', kind: 'at' } },
+    })
+
+    expect(readToolRequest('automation', {
       action: 'reconcile',
       desiredAutomationIds: ['automation-1'],
       supportSeriesId: 'habit:sleep-wind-down',
@@ -101,6 +246,7 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(readToolRequest('automation', {
       action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'evening-wind-down',
       retargetToCurrentConversation: true,
       status: 'active',
@@ -108,14 +254,21 @@ describe('hosted domain dynamic tools', () => {
       kind: 'automation',
       request: {
         action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
         lookup: 'evening-wind-down',
         retargetToCurrentConversation: true,
         status: 'active',
       },
     })
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      lookup: 'evening-wind-down',
+      status: 'archived',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
 
     expect(readToolRequest('automation', {
       action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'evening-wind-down',
     })).toMatchObject({ kind: 'invalid-automation-arguments' })
     expect(readToolRequest('automation', {
@@ -129,6 +282,7 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('automation', {
       action: 'patch',
       command: 'vault-cli automation patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
       lookup: 'evening-wind-down',
       token: 'not-allowed',
     })).toMatchObject({ kind: 'invalid-automation-arguments' })
@@ -172,6 +326,7 @@ describe('hosted domain dynamic tools', () => {
         },
         status: 'paused' as const,
         timingVerified: true,
+        updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
     const request = readToolRequest('automation', {
@@ -225,6 +380,7 @@ describe('hosted domain dynamic tools', () => {
       },
       status: 'paused',
       timingVerified: true,
+      updatedAt: '2026-08-10T00:00:00.000Z',
     })
 
     const mismatchedTool = {
@@ -243,6 +399,7 @@ describe('hosted domain dynamic tools', () => {
         },
         status: 'active' as const,
         timingVerified: true,
+        updatedAt: '2026-08-10T00:01:00.000Z',
       })),
     }
     const mismatched = await executeMurphDynamicToolRequest({
@@ -264,6 +421,70 @@ describe('hosted domain dynamic tools', () => {
       request,
     })
     expect(unavailable.rpcResult).toMatchObject({ success: false })
+  })
+
+  it('returns safe recovery instructions for local-time and write-conflict failures', async () => {
+    const gapRequest = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send a reminder.',
+      schedule: {
+        kind: 'at',
+        localAt: {
+          date: '2026-03-08',
+          time: '02:30',
+          timeZone: 'America/New_York',
+        },
+      },
+      title: 'Gap reminder',
+    })
+    if (!gapRequest) {
+      throw new Error('Expected an invalid gap request.')
+    }
+    const gapResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({}),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: gapRequest,
+    })
+    expect(gapResult.rpcResult).toMatchObject({ success: false })
+    expect(gapResult.rpcResult.contentItems[0]?.text).toContain(
+      'ask for another local time',
+    )
+
+    const conflict = Object.assign(new Error('private conflict detail'), {
+      code: 'VAULT_AUTOMATION_CONFLICT',
+    })
+    const automationTool = {
+      request: vi.fn(async () => {
+        throw conflict
+      }),
+    }
+    const patchRequest = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2031-02-14T12:00:00.000Z',
+      lookup: 'synthetic-reminder',
+      title: 'Updated synthetic reminder',
+    })
+    if (!patchRequest) {
+      throw new Error('Expected a patch request.')
+    }
+    const conflictResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: patchRequest,
+    })
+    expect(conflictResult.rpcResult).toMatchObject({ success: false })
+    expect(conflictResult.rpcResult.contentItems[0]?.text).toContain(
+      'inspect it again and decide from the current stored schedule',
+    )
+    expect(conflictResult.rpcResult.contentItems[0]?.text).not.toContain(
+      'private conflict detail',
+    )
   })
 
   it('executes support-series reconciliation through the injected port', async () => {

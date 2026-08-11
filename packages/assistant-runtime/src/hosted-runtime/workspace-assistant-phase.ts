@@ -1506,6 +1506,7 @@ function createHostedAssistantAutomationTool(input: {
             : { assistantTargetOverride: request.assistantTargetOverride }),
           ...(request.automationId ? { automationId: request.automationId } : {}),
           continuityPolicy: request.continuityPolicy ?? "preserve",
+          createOnly: true,
           instructions: stripHostedAssistantAvailabilityConflictBlock(
             request.instructions,
           ),
@@ -1567,6 +1568,7 @@ function createHostedAssistantAutomationTool(input: {
         ...(request.continuityPolicy === undefined
           ? {}
           : { continuityPolicy: request.continuityPolicy }),
+        expectedUpdatedAt: request.expectedUpdatedAt,
         ...(request.instructions === undefined
           ? {}
           : {
@@ -1736,6 +1738,7 @@ async function buildHostedAutomationToolResponse(input: {
     schedule,
     status: input.result.record.status,
     timingVerified,
+    updatedAt: input.result.record.updatedAt,
   };
 }
 

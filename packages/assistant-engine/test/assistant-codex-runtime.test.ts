@@ -15114,6 +15114,7 @@ describe('assistant codex runtime', () => {
         },
         status: 'paused' as const,
         timingVerified: true,
+        updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
 

@@ -3,9 +3,15 @@ import * as z from '@murphai/contracts/zod-runtime'
 import {
   automationActiveUntilSchema,
   automationContinuityPolicyValues,
-  automationScheduleSchema,
+  automationScheduleCronSchema,
+  automationScheduleDailyLocalSchema,
+  automationScheduleDeviceActivitySchema,
+  automationScheduleEverySchema,
   automationStatusValues,
   automationSupportKindValues,
+  formatTimeZoneDateTimeParts,
+  normalizeIanaTimeZone,
+  type AutomationSchedule,
 } from '@murphai/contracts'
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
@@ -40,6 +46,7 @@ const automationSlugSchema = z
 const automationTitleSchema = z.string().trim().min(1).max(160)
 const automationInstructionsSchema = z.string().trim().min(1).max(50_000)
 const automationSummarySchema = z.string().trim().min(1).max(4_000)
+const automationUpdatedAtSchema = z.string().datetime({ offset: true })
 const automationTagsSchema = z
   .array(z.string().trim().min(1).max(80))
   .max(32)
@@ -84,16 +91,78 @@ const hostedAutomationAssistantTargetOverrideSchema = z
     'Turn-scoped automation model and reasoning selection. It never changes the conversation default; later replies return to the saved conversation model with this automation message retained in shared history.',
   )
 
+const automationLocalAtDatePattern = /^\d{4}-\d{2}-\d{2}$/u
+const automationLocalAtTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/u
+const automationLocalAtFoldValues = ['earlier', 'later'] as const
+
+type AutomationLocalAtFailureCode =
+  | 'local_at_fold'
+  | 'local_at_gap'
+  | 'local_at_invalid_timezone'
+
+class AutomationLocalAtResolutionError extends Error {
+  readonly code: AutomationLocalAtFailureCode
+
+  constructor(code: AutomationLocalAtFailureCode, message: string) {
+    super(message)
+    this.code = code
+    this.name = 'AutomationLocalAtResolutionError'
+  }
+}
+
+const automationOneShotLocalAtSchema = z
+  .object({
+    date: z
+      .string()
+      .regex(automationLocalAtDatePattern, 'Expected a YYYY-MM-DD calendar date.'),
+    time: z
+      .string()
+      .regex(automationLocalAtTimePattern, 'Expected a 24-hour HH:MM wall-clock time.'),
+    timeZone: z.string().min(1).max(128),
+    fold: z.enum(automationLocalAtFoldValues).optional(),
+  })
+  .strict()
+
+const automationLocalAtScheduleSchema = z
+  .object({
+    kind: z.literal('at'),
+    localAt: automationOneShotLocalAtSchema.describe(
+      'User-authored one-shot local wall-clock time with the resolved calendar date, 24-hour time, and IANA timezone.',
+    ),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    try {
+      resolveOneShotLocalAt(value.localAt)
+    } catch (error) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'schedule.localAt could not be resolved.',
+        path: ['localAt'],
+      })
+    }
+  })
+
+const automationDynamicToolScheduleSchema = z.union([
+  automationScheduleEverySchema,
+  automationScheduleCronSchema,
+  automationScheduleDailyLocalSchema,
+  automationScheduleDeviceActivitySchema,
+  automationLocalAtScheduleSchema,
+])
+
 const saveAutomationArgumentsSchema = z.object({
   action: z.literal('save'),
   activeUntil: automationActiveUntilSchema.nullable().optional(),
   assistantTargetOverride: hostedAutomationAssistantTargetOverrideSchema
     .nullable()
     .optional(),
-  automationId: automationIdentifierSchema.optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
   instructions: automationInstructionsSchema,
-  schedule: automationScheduleSchema,
+  schedule: automationDynamicToolScheduleSchema,
   slug: automationSlugSchema.optional(),
   status: z.enum(automationStatusValues).optional(),
   summary: automationSummarySchema.nullable().optional(),
@@ -114,10 +183,13 @@ const patchAutomationArgumentsSchema = z.object({
     .nullable()
     .optional(),
   continuityPolicy: z.enum(automationContinuityPolicyValues).optional(),
+  expectedUpdatedAt: automationUpdatedAtSchema.describe(
+    'Required current automation updatedAt value from the most recent readback before changing an existing automation.',
+  ),
   instructions: automationInstructionsSchema.optional(),
   lookup: automationIdentifierSchema,
   retargetToCurrentConversation: z.literal(true).optional(),
-  schedule: automationScheduleSchema.optional(),
+  schedule: automationDynamicToolScheduleSchema.optional(),
   slug: automationSlugSchema.optional(),
   status: z.enum(automationStatusValues).optional(),
   summary: automationSummarySchema.nullable().optional(),
@@ -193,7 +265,7 @@ export const MURPH_AUTOMATION_TOOL = {
   name: 'automation',
   deferLoading: true,
   description:
-    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone; do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule and status. For an active deviceActivity schedule, confirm the persisted event trigger directly: a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, verify any user-facing timing confirmation against timingVerified, schedule, effectiveTimeZone, and nextOccurrenceAt from the tool result; a verified null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
+    'Create, update, or reconcile durable Murph automations for the current authenticated conversation. Generic save is create-only; inspect and use a versioned patch for every existing automation. For every model-authored one-shot, pass schedule.kind=at with schedule.localAt.date, schedule.localAt.time, and schedule.localAt.timeZone; raw exact ISO schedule.at is not accepted on generic save or patch. Resolve words such as today, tonight, and tomorrow against the named timezone current calendar date, not the conversation or system date. If localAt is nonexistent because of a daylight-saving gap, ask for another time. If it is ambiguous because of a daylight-saving fold, ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold. Recurring cron and dailyLocal values are wall-clock fields: when the user names a timezone, preserve the requested clock time and pass its IANA name in schedule.timeZone; never convert that clock time to UTC inside the cron or localTime field. On save, omit schedule.timeZone only when the recurrence should follow the vault timezone. On patch, inspect the current stored automation first and pass expectedUpdatedAt from that readback; if the automation changed, inspect it again and decide from the new stored state; a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone, so do not ask the user to repeat it or guess it from current conversation context. After save or patch, inspect the stored schedule, status, updatedAt, timingVerified, effectiveTimeZone, and nextOccurrenceAt from this result. For an active deviceActivity schedule, confirm the persisted event trigger directly: a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted; do not invent a time or offer timing recovery. For time-based schedules, verify any user-facing timing confirmation against timingVerified, schedule, effectiveTimeZone, and nextOccurrenceAt from the tool result; a verified null nextOccurrenceAt means no later deliverable occurrence, not a retry or cutoff wake. For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it. For ordinary save or patch, choose assistantTargetOverride deliberately: use Luna for self-contained cues and reminders with all needed context in the instructions and no reads or tools; use Terra for bounded contextual judgment or a few targeted reads; inherit the conversation-selected model for broad conversation history, research, complex or sensitive reasoning, or whenever that model materially matters. On save, omit assistantTargetOverride to inherit. On patch, assistantTargetOverride replaces the whole stored override: omit the field only to preserve it, use null to return to conversation inheritance, or send the complete replacement. Explicit model selections use high reasoning for Luna and low for Terra or Sol at execution unless reasoningEffort is supplied. The override applies only to the automation turn; a later reply returns to the saved conversation model with the automation message retained through compatible provider-thread continuity or committed history replay. save_onboarding_first_personal_read creates the fixed code-owned private first-read one-shot for the answered-onboarding completion turn; it accepts no prompt, timing, model, route, or other fields. Generic save cannot replace it, the fixed slug is reserved, and generic patch may only archive the existing record when the member cancels. save binds an ordinary automation to this conversation and accepts no route fields. patch preserves the stored route unless retargetToCurrentConversation=true is explicit. reconcile archives members of one supportSeriesId that are absent from desiredAutomationIds. Use patch status to pause, reactivate, or archive. Never pass credentials, delivery targets, filesystem paths, reserved system tags, model-provider ids, or generic commands.',
   inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
 } as const
 
@@ -205,6 +277,7 @@ export type AutomationDynamicToolRequest =
     }
   | {
       kind: 'invalid-automation-arguments'
+      safeFailureCode?: AutomationLocalAtFailureCode
       validationDigest: SafeToolCallValidationDigest
     }
 
@@ -222,8 +295,8 @@ export function readAutomationDynamicToolRequest(input: {
       'action',
       'activeUntil',
       'assistantTargetOverride',
-      'automationId',
       'continuityPolicy',
+      'expectedUpdatedAt',
       'instructions',
       'lookup',
       'retargetToCurrentConversation',
@@ -241,21 +314,203 @@ export function readAutomationDynamicToolRequest(input: {
     value: input.arguments,
   })
 
+  const safeFailureCode = parsed.ok
+    ? null
+    : readAutomationLocalAtFailureCode(input.arguments)
+
   return parsed.ok
     ? {
         kind: 'automation',
         ...(parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
           ? { onboardingFirstReadCompletionRequested: true as const }
           : {}),
-        request:
-          parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
-            ? buildOnboardingFirstPersonalReadAutomationSaveRequest()
-            : parsed.args,
+        request: resolveAutomationDynamicToolRequest(parsed.args),
       }
     : {
         kind: 'invalid-automation-arguments',
+        ...(safeFailureCode === null
+          ? {}
+          : { safeFailureCode }),
         validationDigest: parsed.validationDigest,
       }
+}
+
+function readAutomationLocalAtFailureCode(
+  value: unknown,
+): AutomationLocalAtFailureCode | null {
+  if (!isUnknownRecord(value)) {
+    return null
+  }
+  if (value.action !== 'save' && value.action !== 'patch') {
+    return null
+  }
+  if (!isUnknownRecord(value.schedule) || value.schedule.kind !== 'at') {
+    return null
+  }
+  const parsed = automationOneShotLocalAtSchema.safeParse(value.schedule.localAt)
+  if (!parsed.success) {
+    return null
+  }
+  try {
+    resolveOneShotLocalAt(parsed.data)
+    return null
+  } catch (error) {
+    return error instanceof AutomationLocalAtResolutionError
+      ? error.code
+      : null
+  }
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function resolveAutomationDynamicToolRequest(
+  args: z.infer<typeof automationArgumentsSchema>,
+): AssistantHostedAutomationToolRequest {
+  if (args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION) {
+    return buildOnboardingFirstPersonalReadAutomationSaveRequest()
+  }
+  if (args.action === 'save') {
+    return {
+      ...args,
+      schedule: resolveDynamicAutomationSchedule(args.schedule),
+    }
+  }
+  if (args.action === 'patch') {
+    const { schedule, ...rest } = args
+    return {
+      ...rest,
+      ...(schedule === undefined
+        ? {}
+        : { schedule: resolveDynamicAutomationSchedule(schedule) }),
+    }
+  }
+  return args
+}
+
+function resolveDynamicAutomationSchedule(
+  schedule: z.infer<typeof automationDynamicToolScheduleSchema>,
+): AutomationSchedule {
+  if ('localAt' in schedule) {
+    return {
+      at: resolveOneShotLocalAt(schedule.localAt),
+      kind: 'at',
+    }
+  }
+  return schedule
+}
+
+function resolveOneShotLocalAt(
+  localAt: z.infer<typeof automationOneShotLocalAtSchema>,
+): string {
+  const timeZone = normalizeIanaTimeZone(localAt.timeZone)
+  if (!timeZone) {
+    throw new AutomationLocalAtResolutionError(
+      'local_at_invalid_timezone',
+      'schedule.localAt.timeZone must be a valid IANA timezone.',
+    )
+  }
+
+  const date = parseLocalAtDate(localAt.date)
+  const time = parseLocalAtTime(localAt.time)
+  const localAsUtcMs = Date.UTC(
+    date.year,
+    date.month - 1,
+    date.day,
+    time.hour,
+    time.minute,
+    0,
+    0,
+  )
+  const matches = [...collectOneShotLocalAtOffsets(timeZone, localAsUtcMs)]
+    .map((offsetMs) => localAsUtcMs - offsetMs)
+    .filter((candidateMs) => {
+      const parts = formatTimeZoneDateTimeParts(candidateMs, timeZone)
+      return parts.year === date.year
+        && parts.month === date.month
+        && parts.day === date.day
+        && parts.hour === time.hour
+        && parts.minute === time.minute
+        && parts.second === 0
+    })
+  const uniqueMatches = [...new Set(matches)].sort((left, right) => left - right)
+  if (uniqueMatches.length === 0) {
+    throw new AutomationLocalAtResolutionError(
+      'local_at_gap',
+      'schedule.localAt does not exist in that timezone because of a daylight-saving gap.',
+    )
+  }
+  if (uniqueMatches.length > 1) {
+    if (localAt.fold === undefined) {
+      throw new AutomationLocalAtResolutionError(
+        'local_at_fold',
+        'schedule.localAt is ambiguous in that timezone because of a daylight-saving fold; choose the earlier or later occurrence.',
+      )
+    }
+    const selected = localAt.fold === 'earlier'
+      ? uniqueMatches[0]
+      : uniqueMatches.at(-1)
+    return new Date(selected ?? Number.NaN).toISOString()
+  }
+  return new Date(uniqueMatches[0] ?? Number.NaN).toISOString()
+}
+
+function collectOneShotLocalAtOffsets(
+  timeZone: string,
+  localAsUtcMs: number,
+): Set<number> {
+  const offsets = new Set<number>()
+  const dayMs = 24 * 60 * 60 * 1_000
+  for (const deltaMs of [-2 * dayMs, -dayMs, 0, dayMs, 2 * dayMs]) {
+    const instantMs = localAsUtcMs + deltaMs
+    const projected = formatTimeZoneDateTimeParts(instantMs, timeZone)
+    const projectedAsUtcMs = Date.UTC(
+      projected.year,
+      projected.month - 1,
+      projected.day,
+      projected.hour,
+      projected.minute,
+      projected.second,
+    )
+    offsets.add(projectedAsUtcMs - instantMs)
+  }
+  return offsets
+}
+
+function parseLocalAtDate(
+  value: string,
+): { day: number; month: number; year: number } {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value)
+  if (!match) {
+    throw new Error('schedule.localAt.date must use YYYY-MM-DD format.')
+  }
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (year < 100) {
+    throw new Error('schedule.localAt.date must be a valid calendar date.')
+  }
+  const roundTrip = new Date(Date.UTC(year, month - 1, day))
+  if (
+    roundTrip.getUTCFullYear() !== year
+    || roundTrip.getUTCMonth() + 1 !== month
+    || roundTrip.getUTCDate() !== day
+  ) {
+    throw new Error('schedule.localAt.date must be a valid calendar date.')
+  }
+  return { day, month, year }
+}
+
+function parseLocalAtTime(value: string): { hour: number; minute: number } {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/u.exec(value)
+  if (!match) {
+    throw new Error('schedule.localAt.time must use HH:MM format.')
+  }
+  return {
+    hour: Number(match[1]),
+    minute: Number(match[2]),
+  }
 }
 
 export async function executeAutomationDynamicTool(input: {
@@ -297,9 +552,21 @@ export async function executeAutomationDynamicTool(input: {
     return text
       ? automationTextResult(true, text)
       : automationTextResult(false, 'automation result is too large')
-  } catch {
+  } catch (error) {
+    if (isAutomationConflictError(error)) {
+      return automationTextResult(
+        false,
+        'automation changed since the last readback; inspect it again and decide from the current stored schedule before retrying',
+      )
+    }
     return automationTextResult(false, 'automation operation is unavailable')
   }
+}
+
+function isAutomationConflictError(
+  error: unknown,
+): error is { code: 'VAULT_AUTOMATION_CONFLICT' } {
+  return isUnknownRecord(error) && error.code === 'VAULT_AUTOMATION_CONFLICT'
 }
 
 function serializeAutomationToolResponse(
@@ -330,6 +597,7 @@ function serializeAutomationToolResponse(
         schedule: response.schedule,
         status: response.status,
         timingVerified: response.timingVerified,
+        updatedAt: response.updatedAt,
       }
       break
   }
