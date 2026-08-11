@@ -3288,7 +3288,10 @@ describe('assistant Codex turn planning', () => {
       phoneCalls: { start: vi.fn() },
       subscriptionTool: { request: vi.fn() },
     }
-    const plan = await resolveAssistantRouteTurnPlan({
+    const groupPlanInput: Omit<
+      Parameters<typeof resolveAssistantRouteTurnPlan>[0],
+      'preferenceContext'
+    > = {
       acceptedInputItems: [{ id: 'group-phone-request', source: 'manual' }],
       executionContext: {
         hosted: {
@@ -3304,16 +3307,6 @@ describe('assistant Codex turn planning', () => {
         ...createMessageInput(),
         channel: 'linq',
         deliverResponse: true,
-      },
-      preferenceContext: {
-        assistantPersona: 'navy-seal',
-        assistantPersonality: {
-          detail: 7,
-          humor: 9,
-          push: 8,
-        },
-        assistantTone: 'casual',
-        assistantVoice: 'warm',
       },
       profile: {
         promptProfile: 'conversation',
@@ -3332,6 +3325,17 @@ describe('assistant Codex turn planning', () => {
         threadId: 'group-thread',
         threadIsDirect: false,
       }),
+    }
+    const plan = await resolveAssistantRouteTurnPlan({
+      ...groupPlanInput,
+      preferenceContext: {
+        assistantPersona: 'scientist-with-classic',
+        assistantPersonality: {
+          humor: 9,
+        },
+        assistantTone: 'casual',
+        assistantVoice: 'warm',
+      },
     })
 
     expect(plan.developerInstructions).toContain('Conversation scope: hosted group chat.')
@@ -3340,22 +3344,22 @@ describe('assistant Codex turn planning', () => {
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
     expect(plan.developerInstructions).not.toContain('/settings?voice=true')
     expect(plan.developerInstructions).toContain(
-      'Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room',
+      "This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged",
     )
     expect(plan.developerInstructions).toContain(
       'Assistant personality preferences for this group room:',
     )
     expect(plan.developerInstructions).toContain('Humor 9/10')
-    expect(plan.developerInstructions).toContain('Push 8/10')
-    expect(plan.developerInstructions).toContain('Detail 7/10')
-    expect(plan.developerInstructions).not.toContain(
-      'Be direct, disciplined, and accountable.',
+    expect(plan.developerInstructions).toContain('Push 4/10')
+    expect(plan.developerInstructions).toContain('Detail 9/10')
+    expect(plan.developerInstructions).toContain(
+      'Lead with rigorous curiosity and calibrated evidence, while keeping the explanation warm, balanced, and easy to use.',
     )
     expect(plan.developerInstructions).toContain(
       'Casual is a persistent user-facing writing invariant',
     )
     expect(plan.developerInstructions).toContain(
-      'never read or change any participant\'s private Murph settings',
+      'never read or change a participant\'s private Murph settings',
     )
     expect(plan.developerInstructions).toContain(
       'select Luna, Terra, or Sol for the room',
@@ -3371,6 +3375,21 @@ describe('assistant Codex turn planning', () => {
     )
     expect(plan.assistantPreferredElevenLabsVoiceId).toBe(
       resolveAssistantVoiceOptionElevenLabsVoiceId('warm'),
+    )
+    const personaDefaultPlan = await resolveAssistantRouteTurnPlan({
+      ...groupPlanInput,
+      preferenceContext: {
+        assistantPersona: 'hype-coach',
+        assistantPersonality: null,
+        assistantTone: null,
+        assistantVoice: null,
+      },
+    })
+    expect(personaDefaultPlan.developerInstructions).toContain(
+      'Casual is a persistent user-facing writing invariant',
+    )
+    expect(personaDefaultPlan.assistantPreferredElevenLabsVoiceId).toBe(
+      resolveAssistantVoiceOptionElevenLabsVoiceId('football-announcer'),
     )
     expect(plan.developerInstructions).not.toContain('Hosted wearable connection links are available')
     expect(plan.developerInstructions).toContain(

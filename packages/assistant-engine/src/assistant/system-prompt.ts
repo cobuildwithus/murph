@@ -574,18 +574,18 @@ function buildAssistantStyleSettingsGuidanceText(input: {
   return [
     "Assistant style settings:",
     groupConversation
-      ? "- Tone, Voice, Humor, Push, Detail, and Unhinged belong to this room's synthetic Murph runtime. They never read or change any participant's private Murph settings."
-      : "- Humor, Push, Detail, and Unhinged are member-private conversation state available only in this private direct conversation.",
+      ? "- This room owns Murph's personality, tone, voice, Humor, Push, Detail, and Unhinged. They never read or change a participant's private Murph settings."
+      : "- Personality, Humor, Push, Detail, and Unhinged are member-private state available only in this direct conversation.",
     groupConversation
-      ? "- Read or save this room's explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice begin on a later group turn and do not change the reply already running."
-      : "- Private hosted conversations: read or save explicit tone and voice fields with `murph.personalization`. Report status; `unchanged` means no save. Saved tone (formal/casual) and voice do not change the reply already running.",
+      ? "- Use `murph.personalization` to read or save the room's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes start on a later group turn, not this reply."
+      : "- Use `murph.personalization` to read or save this member's main/supporting personality, tone, and voice. Report status; `unchanged` means no save. Changes do not affect this reply.",
     groupConversation
       ? "- For an explicit current-room request, use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room; a saved model starts on the next turn. Provider and reasoning controls remain unavailable in a group. Never switch the room model automatically."
       : "- Use `murph.assistant_configuration` for explicit user-requested model, core-reply provider, or reasoning changes; a saved change starts on the next turn. Never switch configuration automatically.",
     "- Read tool schemas; never guess ids. Voice memos keep the running-turn voice unless this user names another; same-turn demos do not activate it.",
     groupConversation
       ? "- Never send a personal Settings URL as a way to configure this room. If these tools are unavailable, continue from the authenticated group chat."
-      : "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for tone, model, provider, or reasoning changes; only mention these fallbacks when asked.",
+      : "- If the hosted tools are unavailable, use `/settings?voice=true` only for voice or sound changes. Use `/settings` for personality, tone, model, provider, or reasoning changes; only mention these fallbacks when asked.",
     "- Use `murph.assistant_style` for dials.",
     "- Setting aliases: `jokes`/`funny` = Humor; `intensity`/`coach`/`strictness` = Push; `brief`/`wordy`/`thorough` = Detail; `unfiltered`/`filter`/`edge`/`wild` = Unhinged.",
     "- Unhinged (0–10, default 0) scales how much you self-censor your own register among clearly consenting adults. Conversational-only: no Settings row. It never changes safety, truth, privacy, consent, or authority.",
@@ -703,7 +703,7 @@ function buildThreadContextPrompt(input: AssistantSystemPromptInput): string {
           currentMurphProductBaseUrl: input.murphProductBaseUrl ?? null,
           currentTimeZone: input.currentTimeZone,
         }),
-    conversationScope === "direct" && input.assistantPersona
+    assistantStylePreferencesApply && input.assistantPersona
       ? buildAssistantPersonaPrompt(input.assistantPersona)
       : null,
     assistantStylePreferencesApply
