@@ -66,6 +66,7 @@ import {
   fetchVercelRowsByChunks,
   nextVercelSampleDuration,
   parseReviewGptTerminalBlock,
+  parseStripeEventList,
   renderLaunchdPlistTemplate,
   renderVerificationSandboxConfig,
   shouldContinueVercelPagination,
@@ -207,6 +208,54 @@ describe("production-watch snapshot contract", () => {
     expect(shouldContinueVercelPagination(0, true)).toBe(false);
     expect(shouldContinueVercelPagination(100, true)).toBe(true);
     expect(shouldContinueVercelPagination(100, false)).toBe(false);
+  });
+
+  it.each([undefined, "true", 1])(
+    "rejects malformed Vercel continuation metadata on a non-empty page: %s",
+    async (hasMoreRows) => {
+      await withMockedFetch(async () => new Response(JSON.stringify({
+        rows: [{}],
+        ...(hasMoreRows === undefined ? {} : { hasMoreRows }),
+      }), { status: 200 }), async () => {
+        await expect(fetchVercelRows(testVercelAccess(), testVercelWindow()))
+          .rejects.toMatchObject({ code: "EBADMSG" });
+      });
+    },
+  );
+
+  it("allows an empty Vercel page to terminate despite stale continuation metadata", async () => {
+    await withMockedFetch(async () => new Response(JSON.stringify({
+      rows: [],
+      hasMoreRows: "true",
+    }), { status: 200 }), async () => {
+      await expect(fetchVercelRows(testVercelAccess(), testVercelWindow()))
+        .resolves.toEqual([]);
+    });
+  });
+
+  it.each([
+    {},
+    { has_more: "false" },
+    { has_more: 0 },
+  ])("rejects malformed Stripe continuation metadata: %j", (continuation) => {
+    expect(() => parseStripeEventList(JSON.stringify({
+      object: "list",
+      data: [],
+      ...continuation,
+    }))).toThrow("stripe_event_list_invalid");
+  });
+
+  it("rejects an oversized or non-list Stripe response", () => {
+    expect(() => parseStripeEventList(JSON.stringify({
+      object: "list",
+      data: Array.from({ length: 101 }, () => ({})),
+      has_more: false,
+    }))).toThrow("stripe_event_list_invalid");
+    expect(() => parseStripeEventList(JSON.stringify({
+      object: "event",
+      data: [],
+      has_more: false,
+    }))).toThrow("stripe_event_list_invalid");
   });
 
   it("partitions Vercel detail coverage into contiguous bounded windows", () => {
@@ -374,6 +423,63 @@ describe("production-watch snapshot contract", () => {
     expect(settledAt - failureDetectedAt!).toBeGreaterThanOrEqual(700);
   });
 
+  it("settles resistant same-group descendants for both subprocess wrappers", async () => {
+    const runtimeRoot = makeTempRoot();
+    const descendantPath = path.join(runtimeRoot, "resistant-descendant.cjs");
+    const wrapperPath = path.join(runtimeRoot, "wrapper.cjs");
+    writeFileSync(descendantPath, [
+      "const { appendFileSync, writeFileSync } = require('node:fs');",
+      "writeFileSync(process.env.TEST_DESCENDANT_PID, String(process.pid));",
+      "appendFileSync(process.env.TEST_DESCENDANT_EVENTS, 'started\\n');",
+      "process.on('SIGTERM', () => appendFileSync(process.env.TEST_DESCENDANT_EVENTS, 'terminated\\n'));",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    writeFileSync(wrapperPath, [
+      "const { spawn } = require('node:child_process');",
+      "spawn(process.execPath, [process.env.TEST_DESCENDANT_PATH], { stdio: 'ignore' });",
+      "process.on('SIGTERM', () => process.exit(0));",
+      "process.stdin.resume();",
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"), { mode: 0o600 });
+    const capturedPidPath = path.join(runtimeRoot, "captured.pid");
+    const capturedEventsPath = path.join(runtimeRoot, "captured.events");
+    const codexPidPath = path.join(runtimeRoot, "codex.pid");
+    const codexEventsPath = path.join(runtimeRoot, "codex.events");
+    const childEnv = (pidPath: string, eventsPath: string): NodeJS.ProcessEnv => ({
+      ...process.env,
+      TEST_DESCENDANT_PATH: descendantPath,
+      TEST_DESCENDANT_PID: pidPath,
+      TEST_DESCENDANT_EVENTS: eventsPath,
+    });
+
+    const [captured, codex] = await Promise.all([
+      spawnCaptured(process.execPath, [wrapperPath], {
+        timeoutMs: 150,
+        outputLimitBytes: 1_024,
+        env: childEnv(capturedPidPath, capturedEventsPath),
+      }),
+      spawnCodexJsonChild(process.execPath, [wrapperPath], {
+        stdin: "",
+        timeoutMs: 150,
+        outputLimitBytes: 1_024,
+        env: childEnv(codexPidPath, codexEventsPath),
+      }),
+    ]);
+
+    expect(captured.timedOut).toBe(true);
+    expect(codex.timedOut).toBe(true);
+    for (const [pidPath, eventsPath] of [
+      [capturedPidPath, capturedEventsPath],
+      [codexPidPath, codexEventsPath],
+    ]) {
+      expect(readFileSync(eventsPath, "utf8")).toBe("started\nterminated\n");
+      const descendantPid = Number(readFileSync(pidPath, "utf8"));
+      expect(() => process.kill(descendantPid, 0)).toThrow(/ESRCH/u);
+    }
+  });
+
   it("aborts and settles the sibling Stripe process after an output-limit failure", async () => {
     const runtimeRoot = makeTempRoot();
     const binRoot = path.join(runtimeRoot, "bin");
@@ -400,6 +506,16 @@ describe("production-watch snapshot contract", () => {
     const previousMarker = process.env.TEST_STRIPE_MARKER;
     process.env.PATH = `${binRoot}:${previousPath ?? ""}`;
     process.env.TEST_STRIPE_MARKER = markerPath;
+    const controller = new AbortController();
+    const laterAbort = setInterval(() => {
+      if (
+        !controller.signal.aborted
+        && existsSync(markerPath)
+        && readFileSync(markerPath, "utf8").includes("oversized-terminated\n")
+      ) {
+        controller.abort(new Error("later_parent_abort"));
+      }
+    }, 10);
     const startedAt = Date.now();
     try {
       const end = new Date("2026-08-10T20:10:00.000Z");
@@ -407,8 +523,10 @@ describe("production-watch snapshot contract", () => {
         previousStart: new Date("2026-08-10T20:00:00.000Z"),
         currentStart: new Date("2026-08-10T20:05:00.000Z"),
         end,
+        signal: controller.signal,
       })).rejects.toMatchObject({ code: "EFBIG" });
     } finally {
+      clearInterval(laterAbort);
       if (previousPath === undefined) delete process.env.PATH;
       else process.env.PATH = previousPath;
       if (previousMarker === undefined) delete process.env.TEST_STRIPE_MARKER;
@@ -420,6 +538,7 @@ describe("production-watch snapshot contract", () => {
     expect(events).toContain("oversized-terminated\n");
     expect(events).toContain("sibling-terminated\n");
     expect(events).toContain("sibling-failed\n");
+    expect(controller.signal.aborted).toBe(true);
     expect(elapsedMs).toBeGreaterThanOrEqual(900);
     expect(elapsedMs).toBeLessThan(2_500);
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -3140,6 +3259,36 @@ describe("production-watch static safety contracts", () => {
     },
   );
 
+  it("preflights the exact Codex home and profile used by the scheduler", () => {
+    const runtimeRoot = makeTempRoot();
+    const fakeHome = path.join(runtimeRoot, "scheduler-home");
+    const helperRoot = path.join(fakeHome, ".local", "bin");
+    mkdirSync(helperRoot, { recursive: true });
+    const helperPath = path.join(helperRoot, "murph-prod-psql-ro");
+    writeFileSync(helperPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    chmodSync(helperPath, 0o755);
+    const codexEnv = installFakeCodex(runtimeRoot);
+    const codexPath = codexEnv.MURPH_PROD_WATCH_CODEX_BIN!;
+    writeFakeCodexExecutable(codexPath, {
+      codexHomeBasename: "alternate-codex-home",
+      profile: "alternate-profile",
+    });
+
+    const result = runProdWatch(
+      ["scheduler", "preflight"],
+      runtimeRoot,
+      {
+        ...codexEnv,
+        HOME: fakeHome,
+        CODEX_HOME: path.join(fakeHome, "alternate-codex-home"),
+        MURPH_PROD_WATCH_CODEX_PROFILE: "alternate-profile",
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("scheduler_codex_unavailable");
+  });
+
   it("keeps the database query read-only and excludes private event fields", () => {
     const sql = readFileSync(path.join(repoRoot, "scripts", "prod-watch", "collect-v1.sql"), "utf8");
     const runtimeIssueDomain = readFileSync(
@@ -3951,9 +4100,18 @@ function installFakeCodex(runtimeRoot: string): Record<string, string> {
   };
 }
 
-function writeFakeCodexExecutable(targetPath: string): void {
+function writeFakeCodexExecutable(
+  targetPath: string,
+  requiredRuntime?: { codexHomeBasename: string; profile: string },
+): void {
   writeFileSync(targetPath, [
     "#!/bin/sh",
+    ...(requiredRuntime === undefined ? [] : [
+      "resolved_profile=\"${MURPH_PROD_WATCH_CODEX_PROFILE:-}\"",
+      "previous=''",
+      "for value in \"$@\"; do if [ \"$previous\" = \"--profile\" ]; then resolved_profile=\"$value\"; fi; previous=\"$value\"; done",
+      `if [ "\${CODEX_HOME##*/}" != "${requiredRuntime.codexHomeBasename}" ] || [ "$resolved_profile" != "${requiredRuntime.profile}" ]; then exit 42; fi`,
+    ]),
     "if [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'codex-cli 0.144.4'; exit 0; fi",
     "if [ \"$1\" = \"exec\" ] && [ \"$2\" = \"--help\" ]; then exit 0; fi",
     "case \" $* \" in",

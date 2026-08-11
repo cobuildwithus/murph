@@ -134,6 +134,8 @@ const SCHEDULER_INTERVAL_MS = 300_000;
 const LAUNCHD_LABEL = "com.murph.prod-watch";
 const LAUNCHD_MANAGED_MARKER = "murph-prod-watch-managed:v1";
 const SCHEDULER_SYSTEM_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] as const;
+const SCHEDULER_CODEX_HOME_BASENAME = ".codex-5";
+const SCHEDULER_CODEX_PROFILE = "prod-watch";
 const CODEX_PROFILE_ENV = "MURPH_PROD_WATCH_CODEX_PROFILE";
 const CODEX_BIN_ENV = "MURPH_PROD_WATCH_CODEX_BIN";
 const CODEX_SHA256_ENV = "MURPH_PROD_WATCH_CODEX_SHA256";
@@ -2322,9 +2324,17 @@ async function collectProviderEvidenceWithCodex(input: {
   end: Date;
   timeoutMs: number;
   signal?: AbortSignal;
+  codexRuntime?: {
+    executable: string;
+    profile: string;
+    env: NodeJS.ProcessEnv;
+  };
 }): Promise<ProviderEvidenceEnvelope> {
   throwIfAborted(input.signal);
-  const deterministic = await collectDeterministicProviderEvidence(input);
+  const deterministic = await collectDeterministicProviderEvidence({
+    ...input,
+    env: input.codexRuntime?.env,
+  });
   throwIfAborted(input.signal);
   const tempRoot = await createPrivateTempDirectory("provider");
   try {
@@ -2334,10 +2344,10 @@ async function collectProviderEvidenceWithCodex(input: {
     await handle.close();
     await chmod(providerPath, 0o600);
     throwIfAborted(input.signal);
-    const profile = requireCodexProfile();
-    const codex = await resolveTrustedCodexExecutable();
+    const profile = input.codexRuntime?.profile ?? requireCodexProfile();
+    const codex = input.codexRuntime?.executable ?? await resolveTrustedCodexExecutable();
     throwIfAborted(input.signal);
-    const childEnv = buildIsolatedCodexChildEnv(tempRoot);
+    const childEnv = buildIsolatedCodexChildEnv(tempRoot, input.codexRuntime?.env);
     const mcpConfigArgs = cloudflareOnlyMcpConfigArgs();
     const schemaPath = path.join(
       repoRoot,
@@ -2452,18 +2462,25 @@ function buildProviderEvidencePrompt(input: {
   ].join("\n");
 }
 
-function buildIsolatedCodexChildEnv(privateHome: string): NodeJS.ProcessEnv {
+function buildIsolatedCodexChildEnv(
+  privateHome: string,
+  sourceEnv?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const inherited = sourceEnv ?? process.env;
   const env: NodeJS.ProcessEnv = {
-    PATH: SCHEDULER_SYSTEM_PATHS.join(":"),
+    PATH: sourceEnv?.PATH ?? SCHEDULER_SYSTEM_PATHS.join(":"),
     HOME: privateHome,
     CI: "1",
     LANG: "C.UTF-8",
     LC_ALL: "C.UTF-8",
     NO_COLOR: "1",
   };
-  const codexHome = process.env.CODEX_HOME;
+  const codexHome = inherited.CODEX_HOME;
   if (codexHome !== undefined) {
     env.CODEX_HOME = codexHome;
+  }
+  if (inherited[CODEX_PROFILE_ENV] !== undefined) {
+    env[CODEX_PROFILE_ENV] = inherited[CODEX_PROFILE_ENV];
   }
   if (testOverrides !== undefined) {
     env.TEST_PROVIDER_FIXTURE = testOverrides.providerFixture;
@@ -2478,6 +2495,7 @@ async function collectDeterministicProviderEvidence(input: {
   currentStart: Date;
   end: Date;
   signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
 }): Promise<{ sources: AdapterEvidence[]; failures: CollectorFailure[] }> {
   throwIfAborted(input.signal);
   const testFixture = testOverrides?.providerFixture;
@@ -2525,8 +2543,9 @@ export async function collectVercelEvidence(input: {
   currentStart: Date;
   end: Date;
   signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
 }): Promise<AdapterEvidence> {
-  const access = await createVercelApiAccess(input.signal);
+  const access = await createVercelApiAccess(input.signal, input.env);
   const { detailPages, previousSample, currentSample } = await collectVercelRowsForEvidence(access, input);
   const records = deduplicateVercelRows(detailPages.flat());
   const currentSummary = summarizeVercelWindow(records, input.currentStart, input.end);
@@ -2680,6 +2699,7 @@ export async function collectStripeEvidence(input: {
   currentStart: Date;
   end: Date;
   signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
 }): Promise<AdapterEvidence> {
   const createdGte = Math.floor(input.previousStart.getTime() / 1_000);
   throwIfAborted(input.signal);
@@ -2705,6 +2725,7 @@ export async function collectStripeEvidence(input: {
         timeoutMs: DEFAULT_ADAPTER_TIMEOUT_MS,
         signal: branchController.signal,
         outputLimitBytes: 4 * MAX_SUBPROCESS_OUTPUT_BYTES,
+        env: input.env,
         onFailureDetected: publishFailure,
       });
       assertProviderCommandSucceeded("stripe", result);
@@ -2725,10 +2746,10 @@ export async function collectStripeEvidence(input: {
         "events", "list", "--live", "--delivery-success=false", "--limit", String(STRIPE_EVENT_LIMIT), "-d", `created[gte]=${createdGte}`,
       ]),
     ] as const);
-    throwIfAborted(input.signal);
     if (hasPrimaryFailure) {
       throw primaryFailure;
     }
+    throwIfAborted(input.signal);
     const [allSettled, failedDeliverySettled] = settled;
     if (allSettled.status !== "fulfilled") {
       throw allSettled.reason;
@@ -2803,8 +2824,11 @@ export interface VercelApiAccess {
   projectId: string;
 }
 
-async function createVercelApiAccess(signal?: AbortSignal): Promise<VercelApiAccess> {
-  const token = await readVercelCliToken();
+async function createVercelApiAccess(
+  signal?: AbortSignal,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<VercelApiAccess> {
+  const token = await readVercelCliToken(env);
   const teams = await fetchVercelJson("https://api.vercel.com/v2/teams?limit=100", token, signal);
   const teamList = typeof teams === "object" && teams !== null && !Array.isArray(teams)
     ? (teams as Record<string, unknown>).teams
@@ -2833,12 +2857,12 @@ async function createVercelApiAccess(signal?: AbortSignal): Promise<VercelApiAcc
   return { token, teamId, projectId };
 }
 
-async function readVercelCliToken(): Promise<string> {
+async function readVercelCliToken(env: NodeJS.ProcessEnv = process.env): Promise<string> {
   const candidates = [
     path.join(os.homedir(), "Library", "Application Support", "com.vercel.cli", "auth.json"),
-    ...(process.env.XDG_DATA_HOME === undefined
+    ...(env.XDG_DATA_HOME === undefined
       ? []
-      : [path.join(process.env.XDG_DATA_HOME, "com.vercel.cli", "auth.json")]),
+      : [path.join(env.XDG_DATA_HOME, "com.vercel.cli", "auth.json")]),
     path.join(os.homedir(), ".local", "share", "com.vercel.cli", "auth.json"),
     path.join(os.homedir(), ".config", "com.vercel.cli", "auth.json"),
   ];
@@ -2929,6 +2953,9 @@ export async function fetchVercelRows(
     }
     const object = parsed as Record<string, unknown>;
     if (!Array.isArray(object.rows)) {
+      throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
+    }
+    if (object.rows.length > 0 && typeof object.hasMoreRows !== "boolean") {
       throw Object.assign(new Error("vercel_logs_response_invalid"), { code: "EBADMSG" });
     }
     if (object.rows.length > rowBudget - rows.length) {
@@ -3274,18 +3301,24 @@ function summarizeVercelWindow(records: Array<Record<string, unknown>>, start: D
   };
 }
 
-function parseStripeEventList(raw: string): { data: Array<Record<string, unknown>>; hasMore: boolean } {
+export function parseStripeEventList(raw: string): { data: Array<Record<string, unknown>>; hasMore: boolean } {
   const parsed = JSON.parse(raw) as unknown;
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw Object.assign(new Error("stripe_event_list_invalid"), { code: "EBADMSG" });
   }
   const object = parsed as Record<string, unknown>;
-  if (!Array.isArray(object.data) || object.data.some((entry) => typeof entry !== "object" || entry === null || Array.isArray(entry))) {
+  if (
+    object.object !== "list"
+    || !Array.isArray(object.data)
+    || object.data.length > STRIPE_EVENT_LIMIT
+    || object.data.some((entry) => typeof entry !== "object" || entry === null || Array.isArray(entry))
+    || typeof object.has_more !== "boolean"
+  ) {
     throw Object.assign(new Error("stripe_event_list_invalid"), { code: "EBADMSG" });
   }
   return {
     data: object.data as Array<Record<string, unknown>>,
-    hasMore: object.has_more === true,
+    hasMore: object.has_more,
   };
 }
 
@@ -3636,7 +3669,7 @@ export async function spawnCaptured(
     let timedOut = false;
     let settled = false;
     let terminationStarted = false;
-    let forceKillTimer: NodeJS.Timeout | undefined;
+    let terminationPromise: Promise<void> | undefined;
     let pendingError: unknown;
     let failureNotified = false;
     const notifyFailure = (error: unknown) => {
@@ -3672,9 +3705,7 @@ export async function spawnCaptured(
         return;
       }
       terminationStarted = true;
-      killProcessTree(child.pid, "SIGTERM");
-      forceKillTimer = setTimeout(() => killProcessTree(child.pid, "SIGKILL"), 1_000);
-      forceKillTimer.unref();
+      terminationPromise = terminateOwnedProcessGroup(child.pid);
     };
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -3690,9 +3721,6 @@ export async function spawnCaptured(
     options.signal?.addEventListener("abort", onAbort, { once: true });
     const cleanup = () => {
       clearTimeout(timeout);
-      if (forceKillTimer !== undefined) {
-        clearTimeout(forceKillTimer);
-      }
       options.signal?.removeEventListener("abort", onAbort);
     };
     child.on("error", fail);
@@ -3722,17 +3750,20 @@ export async function spawnCaptured(
     child.stderr?.on("data", (chunk: string) => {
       stderr = appendWithinByteLimit(stderr, chunk, 64 * 1_024);
     });
-    child.on("exit", (status, signal) => {
-      if (pendingError !== undefined) {
-        fail(pendingError);
-        return;
-      }
-      finish({
-        status: status ?? (signal === undefined || signal === null ? 1 : 128),
-        stdout,
-        stderr,
-        timedOut,
-      });
+    child.on("close", (status, signal) => {
+      void (async () => {
+        await terminationPromise;
+        if (pendingError !== undefined) {
+          fail(pendingError);
+          return;
+        }
+        finish({
+          status: status ?? (signal === undefined || signal === null ? 1 : 128),
+          stdout,
+          stderr,
+          timedOut,
+        });
+      })().catch(fail);
     });
     if (options.stdin !== undefined) {
       child.stdin?.end(options.stdin);
@@ -3780,7 +3811,7 @@ export async function spawnCodexJsonChild(
     let outputTooLarge = false;
     let settled = false;
     let terminationStarted = false;
-    let forceKillTimer: NodeJS.Timeout | undefined;
+    let terminationPromise: Promise<void> | undefined;
     let pendingError: unknown;
     let stdoutBytes = 0;
     let lineRemainder = "";
@@ -3806,9 +3837,7 @@ export async function spawnCodexJsonChild(
         return;
       }
       terminationStarted = true;
-      killProcessTree(child.pid, "SIGTERM");
-      forceKillTimer = setTimeout(() => killProcessTree(child.pid, "SIGKILL"), 1_000);
-      forceKillTimer.unref();
+      terminationPromise = terminateOwnedProcessGroup(child.pid);
     };
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -3823,9 +3852,6 @@ export async function spawnCodexJsonChild(
     options.signal?.addEventListener("abort", onAbort, { once: true });
     const cleanup = () => {
       clearTimeout(timeout);
-      if (forceKillTimer !== undefined) {
-        clearTimeout(forceKillTimer);
-      }
       options.signal?.removeEventListener("abort", onAbort);
     };
     child.on("error", fail);
@@ -3854,15 +3880,18 @@ export async function spawnCodexJsonChild(
         updateCodexJsonSummary(summary, line);
       }
     });
-    child.on("exit", (status, signal) => {
-      if (lineRemainder.length > 0) {
-        updateCodexJsonSummary(summary, lineRemainder);
-      }
-      if (pendingError !== undefined) {
-        fail(pendingError);
-        return;
-      }
-      finish(status ?? (signal === undefined || signal === null ? 1 : 128));
+    child.on("close", (status, signal) => {
+      void (async () => {
+        await terminationPromise;
+        if (lineRemainder.length > 0) {
+          updateCodexJsonSummary(summary, lineRemainder);
+        }
+        if (pendingError !== undefined) {
+          fail(pendingError);
+          return;
+        }
+        finish(status ?? (signal === undefined || signal === null ? 1 : 128));
+      })().catch(fail);
     });
     child.stdin?.end(options.stdin);
   });
@@ -3923,6 +3952,37 @@ function killProcessTree(pid: number | undefined, signal: NodeJS.Signals): void 
       // A failed best-effort kill is handled by the outer deadline.
     }
   }
+}
+
+async function terminateOwnedProcessGroup(pid: number | undefined): Promise<void> {
+  if (pid === undefined) {
+    return;
+  }
+  killProcessTree(pid, "SIGTERM");
+  const gracefulDeadline = Date.now() + 1_000;
+  while (isOwnedProcessGroupRunning(pid) && Date.now() < gracefulDeadline) {
+    await waitForProcessSettlementPoll();
+  }
+  if (!isOwnedProcessGroupRunning(pid)) {
+    return;
+  }
+  killProcessTree(pid, "SIGKILL");
+  while (isOwnedProcessGroupRunning(pid)) {
+    await waitForProcessSettlementPoll();
+  }
+}
+
+function isOwnedProcessGroupRunning(pid: number): boolean {
+  try {
+    process.kill(process.platform === "win32" ? pid : -pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function waitForProcessSettlementPoll(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 25));
 }
 
 function parseCommonOptions(
@@ -4182,6 +4242,8 @@ export function renderLaunchdPlistTemplate(
     .replaceAll("__NODE_EXECUTABLE__", xmlEscape(portableNodeExecutable))
     .replaceAll("__CODEX_EXECUTABLE__", xmlEscape(portableCodexExecutable))
     .replaceAll("__CODEX_SHA256__", xmlEscape(codexSha256))
+    .replaceAll("__CODEX_HOME_BASENAME__", xmlEscape(SCHEDULER_CODEX_HOME_BASENAME))
+    .replaceAll("__CODEX_PROFILE__", xmlEscape(SCHEDULER_CODEX_PROFILE))
     .replaceAll("__RUNTIME_HOME_RELATIVE__", xmlEscape(relativeRuntimePath.split(path.sep).join("/")))
     .replaceAll("__APPROVED_HEAD__", xmlEscape(approvedHead))
     .replaceAll("__SCHEDULER_PATH__", xmlEscape(schedulerShellPath()));
@@ -4308,21 +4370,26 @@ interface ApprovedCodexRuntime {
 }
 
 async function verifySchedulerPreflight(): Promise<ApprovedCodexRuntime> {
-  await verifySchedulerExecutableChain(repoRoot, process.execPath, os.homedir());
-  return await verifyCodexPreflight();
+  const homeDirectory = os.homedir();
+  await verifySchedulerExecutableChain(repoRoot, process.execPath, homeDirectory);
+  return await verifyCodexPreflight(homeDirectory);
 }
 
-async function verifyCodexPreflight(): Promise<ApprovedCodexRuntime> {
+async function verifyCodexPreflight(homeDirectory: string): Promise<ApprovedCodexRuntime> {
   const codex = await resolveTrustedCodexExecutable();
-  requireCodexProfile();
+  const profile = assertCodexProfile(SCHEDULER_CODEX_PROFILE);
+  const sha256 = await sha256File(codex);
+  const env = buildSchedulerCodexEnvironment(homeDirectory, codex, sha256);
   const [help, version] = await Promise.all([
     spawnCaptured(codex, ["exec", "--help"], {
       timeoutMs: 10_000,
       outputLimitBytes: 128 * 1_024,
+      env,
     }),
     spawnCaptured(codex, ["--version"], {
       timeoutMs: 10_000,
       outputLimitBytes: 4 * 1_024,
+      env,
     }),
   ]);
   if (
@@ -4339,6 +4406,7 @@ async function verifyCodexPreflight(): Promise<ApprovedCodexRuntime> {
     currentStart: new Date(Date.now() - 15 * 60 * 1_000),
     end: new Date(Date.now() - DEFAULT_SETTLING_DELAY_SECONDS * 1_000),
     timeoutMs: DEFAULT_PROVIDER_CHILD_TIMEOUT_MS,
+    codexRuntime: { executable: codex, profile, env },
   });
   const providerSources = new Set(provider.sources.map((source) => source.source));
   for (const source of ["vercel", "cloudflare", "stripe"] as const) {
@@ -4352,7 +4420,26 @@ async function verifyCodexPreflight(): Promise<ApprovedCodexRuntime> {
   if (provider.failures.length > 0) {
     throw new Error("scheduler_provider_coverage_unavailable");
   }
-  return { executable: codex, sha256: await sha256File(codex) };
+  return { executable: codex, sha256 };
+}
+
+function buildSchedulerCodexEnvironment(
+  homeDirectory: string,
+  codexExecutable: string,
+  codexSha256: string,
+): NodeJS.ProcessEnv {
+  return {
+    PATH: schedulerExecutableDirectories(homeDirectory).join(":"),
+    HOME: homeDirectory,
+    CODEX_HOME: path.join(homeDirectory, SCHEDULER_CODEX_HOME_BASENAME),
+    [CODEX_PROFILE_ENV]: SCHEDULER_CODEX_PROFILE,
+    [CODEX_BIN_ENV]: codexExecutable,
+    [CODEX_SHA256_ENV]: codexSha256,
+    CI: "1",
+    LANG: "C.UTF-8",
+    LC_ALL: "C.UTF-8",
+    NO_COLOR: "1",
+  };
 }
 
 async function verifyGhPreflight(): Promise<void> {
@@ -4391,7 +4478,10 @@ async function resolveTrustedReviewGptExecutable(): Promise<string> {
 }
 
 function requireCodexProfile(): string {
-  const profile = process.env[CODEX_PROFILE_ENV];
+  return assertCodexProfile(process.env[CODEX_PROFILE_ENV]);
+}
+
+function assertCodexProfile(profile: string | undefined): string {
   if (profile === undefined || profile.length === 0) {
     throw new Error("codex_profile_unconfigured");
   }
