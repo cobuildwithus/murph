@@ -2350,6 +2350,7 @@ async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
 }
 
 export async function createHostedFamilyBillingCheckout(input: {
+  allowDirectPaidUpgrade?: boolean;
   confirmedTrialConversion?: unknown;
   familyInviteReturnPath?: unknown;
   groupId: string;
@@ -2378,6 +2379,7 @@ export async function createHostedFamilyBillingCheckout(input: {
 
 async function createOrResumeHostedFamilyBillingCheckout(
   input: {
+    allowDirectPaidUpgrade?: boolean;
     confirmedTrialConversion?: unknown;
     familyInviteReturnPath?: unknown;
     groupId: string;
@@ -2418,7 +2420,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
       };
     }
     await assertHostedFamilyOwnerCanStartBillingTx({
-      allowDirectPaidOwner: true,
+      allowDirectPaidOwner: input.allowDirectPaidUpgrade !== false,
       groupId: group.id,
       ownerMemberId: group.ownerMemberId,
       tx,
@@ -2435,11 +2437,13 @@ async function createOrResumeHostedFamilyBillingCheckout(
         message: "Family billing is still syncing. Try again after payment is confirmed.",
       });
     }
-    const directPaidUpgrade = await readHostedFamilyDirectPaidUpgradeInputTx({
-      group,
-      seatCount,
-      tx,
-    });
+    const directPaidUpgrade = input.allowDirectPaidUpgrade === false
+      ? null
+      : await readHostedFamilyDirectPaidUpgradeInputTx({
+          group,
+          seatCount,
+          tx,
+        });
     if (directPaidUpgrade) {
       if (
         directPaidUpgrade.currentBillingPhase === "trial"

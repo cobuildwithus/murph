@@ -6449,6 +6449,9 @@ describe("hosted Family plan", () => {
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
     tx.hostedMember.findUnique.mockResolvedValue({
+      billingRef: {
+        stripeSubscriptionIdEncrypted: "encrypted:sub_direct",
+      },
       billingStatus: HostedBillingStatus.active,
       suspendedAt: null,
     });
@@ -6498,6 +6501,20 @@ describe("hosted Family plan", () => {
         update: subscriptionUpdate,
       },
     });
+    await expect(createHostedFamilyBillingCheckout({
+      allowDirectPaidUpgrade: false,
+      groupId: "hbag_family",
+      ownerMemberId: "member_owner",
+      prisma: prisma as never,
+      seatCount: 2,
+    })).rejects.toMatchObject({
+      code: "HOSTED_FAMILY_DIRECT_PAID_TRANSFER_REQUIRED",
+      httpStatus: 409,
+    });
+    expect(checkoutCreate).not.toHaveBeenCalled();
+    expect(subscriptionRetrieve).not.toHaveBeenCalled();
+    expect(subscriptionUpdate).not.toHaveBeenCalled();
+
     const result = await createHostedFamilyBillingCheckout({
       groupId: "hbag_family",
       ownerMemberId: "member_owner",

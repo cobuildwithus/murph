@@ -5,6 +5,7 @@ import {
   abandonHostedFamilyDraftForOwner,
   createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx,
+  readHostedFamilyDraftRecoveryStateForOwner,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import { jsonOk, readOptionalJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
@@ -39,6 +40,20 @@ export const POST = withJsonError(async (request: Request) => {
       message: "Family invite return path is required for invite recovery.",
     });
   }
+  if (body.abandonForInvite === true) {
+    const recoveryState = await readHostedFamilyDraftRecoveryStateForOwner({
+      ownerMemberId: auth.member.id,
+      prisma,
+    });
+    if (recoveryState !== "checkout_starting") {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_DRAFT_CHANGED",
+        httpStatus: 409,
+        message: "Family setup changed before invite recovery started. Refresh and try again.",
+        retryable: true,
+      });
+    }
+  }
 
   const group = await prisma.$transaction((tx) =>
     ensureHostedAccountGroupForOwnerTx({
@@ -47,6 +62,7 @@ export const POST = withJsonError(async (request: Request) => {
     }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   const checkout = await createHostedFamilyBillingCheckout({
+    allowDirectPaidUpgrade: body.abandonForInvite !== true,
     confirmedTrialConversion: body.confirmedTrialConversion,
     familyInviteReturnPath,
     groupId: group.id,

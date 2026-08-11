@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createHostedFamilyBillingCheckout: vi.fn(),
   ensureHostedAccountGroupForOwnerTx: vi.fn(),
   getPrisma: vi.fn(),
+  readHostedFamilyDraftRecoveryStateForOwner: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
 }));
 
@@ -27,6 +28,8 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   abandonHostedFamilyDraftForOwner: mocks.abandonHostedFamilyDraftForOwner,
   createHostedFamilyBillingCheckout: mocks.createHostedFamilyBillingCheckout,
   ensureHostedAccountGroupForOwnerTx: mocks.ensureHostedAccountGroupForOwnerTx,
+  readHostedFamilyDraftRecoveryStateForOwner:
+    mocks.readHostedFamilyDraftRecoveryStateForOwner,
 }));
 
 type BillingFamilyCheckoutRouteModule =
@@ -51,6 +54,9 @@ beforeEach(async () => {
     id: "hbag_family",
     ownerMemberId: "member_owner",
   });
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValue(
+    "checkout_starting",
+  );
   mocks.createHostedFamilyBillingCheckout.mockResolvedValue({
     alreadyActive: false,
     url: "https://checkout.stripe.test/family",
@@ -82,6 +88,7 @@ test("starts Family checkout for the authenticated hosted owner", async () => {
     },
   });
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+    allowDirectPaidUpgrade: true,
     confirmedTrialConversion: undefined,
     familyInviteReturnPath: null,
     groupId: "hbag_family",
@@ -105,6 +112,7 @@ test("forwards an explicit seat count and trial-conversion confirmation", async 
 
   expect(response.status).toBe(200);
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith({
+    allowDirectPaidUpgrade: true,
     confirmedTrialConversion: true,
     familyInviteReturnPath: null,
     groupId: "hbag_family",
@@ -129,7 +137,10 @@ test("forwards one exact Family invite return", async () => {
 
   expect(response.status).toBe(200);
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
-    expect.objectContaining({ familyInviteReturnPath }),
+    expect.objectContaining({
+      allowDirectPaidUpgrade: true,
+      familyInviteReturnPath,
+    }),
   );
 });
 
@@ -155,8 +166,15 @@ test("resolves a starting Checkout and abandons it before returning to the invit
     url: familyInviteReturnPath,
   });
   expect(mocks.createHostedFamilyBillingCheckout).toHaveBeenCalledWith(
-    expect.objectContaining({ familyInviteReturnPath }),
+    expect.objectContaining({
+      allowDirectPaidUpgrade: false,
+      familyInviteReturnPath,
+    }),
   );
+  expect(mocks.readHostedFamilyDraftRecoveryStateForOwner).toHaveBeenCalledWith({
+    ownerMemberId: "member_owner",
+    prisma: expect.any(Object),
+  });
   expect(mocks.abandonHostedFamilyDraftForOwner).toHaveBeenCalledWith({
     ownerMemberId: "member_owner",
     prisma: expect.any(Object),
@@ -206,6 +224,30 @@ test("does not abandon when Checkout becomes active during invite recovery", asy
   );
 
   expect(response.status).toBe(409);
+  expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
+});
+
+test("does not create Checkout when the invite recovery state changed", async () => {
+  mocks.readHostedFamilyDraftRecoveryStateForOwner.mockResolvedValueOnce(
+    "not_abandonable",
+  );
+  const response = await billingFamilyCheckoutRoute.POST(
+    new Request("https://join.example.test/api/settings/billing/family/checkout", {
+      body: JSON.stringify({
+        abandonForInvite: true,
+        familyInviteReturnPath: "/family/accept/invite_return_target",
+      }),
+      headers: {
+        "content-type": "application/json",
+        origin: "https://join.example.test",
+      },
+      method: "POST",
+    }),
+  );
+
+  expect(response.status).toBe(409);
+  expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
+  expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
   expect(mocks.abandonHostedFamilyDraftForOwner).not.toHaveBeenCalled();
 });
 
